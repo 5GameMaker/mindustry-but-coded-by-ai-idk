@@ -1,0 +1,8 @@
+﻿[package]
+name = "mindustry-ios"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+mindustry-core = { path = "../core" }

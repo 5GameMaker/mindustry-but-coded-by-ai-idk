@@ -1,0 +1,24 @@
+﻿pub mod ai;
+pub mod r#async;
+pub mod audio;
+pub mod client_launcher;
+pub mod content;
+pub mod core;
+pub mod ctype;
+pub mod editor;
+pub mod entities;
+pub mod game;
+pub mod graphics;
+pub mod input;
+pub mod io;
+pub mod logic;
+pub mod maps;
+pub mod modsys;
+pub mod net;
+pub mod service;
+pub mod r#type;
+pub mod ui;
+pub mod vars;
+pub mod world;
+
+pub const UPSTREAM_BASELINE: &str = "mindustry-upstream-v157.4";

@@ -1,0 +1,377 @@
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Administration {
+    pub banned_ips: Vec<String>,
+    pub whitelist: Vec<String>,
+    pub subnet_bans: Vec<String>,
+    pub dos_blacklist: HashSet<String>,
+    pub kicked_ips: HashMap<String, i64>,
+    pub banned_names: Vec<String>,
+    pub player_info: HashMap<String, PlayerInfo>,
+    pub configs: Vec<Config>,
+}
+
+impl Default for Administration {
+    fn default() -> Self {
+        Self {
+            banned_ips: Vec::new(),
+            whitelist: Vec::new(),
+            subnet_bans: Vec::new(),
+            dos_blacklist: HashSet::new(),
+            kicked_ips: HashMap::new(),
+            banned_names: Vec::new(),
+            player_info: HashMap::new(),
+            configs: Config::defaults(),
+        }
+    }
+}
+
+impl Administration {
+    pub fn blacklist_dos(&mut self, address: impl Into<String>) {
+        self.dos_blacklist.insert(address.into());
+    }
+
+    pub fn unblacklist_dos(&mut self, address: &str) {
+        self.dos_blacklist.remove(address);
+    }
+
+    pub fn is_dos_blacklisted(&self, address: &str) -> bool {
+        self.dos_blacklist.contains(address)
+    }
+
+    pub fn add_subnet_ban(&mut self, ip_prefix: impl Into<String>) {
+        self.subnet_bans.push(ip_prefix.into());
+    }
+
+    pub fn is_subnet_banned(&self, ip: &str) -> bool {
+        self.subnet_bans.iter().any(|prefix| ip.starts_with(prefix))
+    }
+
+    pub fn handle_kicked(
+        &mut self,
+        uuid: impl Into<String>,
+        ip: impl Into<String>,
+        until_millis: i64,
+    ) {
+        let uuid = uuid.into();
+        let ip = ip.into();
+        self.kicked_ips
+            .entry(ip)
+            .and_modify(|existing| *existing = (*existing).max(until_millis))
+            .or_insert(until_millis);
+        let info = self.get_or_create_info(uuid);
+        info.times_kicked += 1;
+        info.last_kicked = info.last_kicked.max(until_millis);
+    }
+
+    pub fn update_player_joined(
+        &mut self,
+        id: impl Into<String>,
+        ip: impl Into<String>,
+        name: impl Into<String>,
+    ) {
+        let id = id.into();
+        let ip = ip.into();
+        let name = name.into();
+        let info = self.get_or_create_info(id);
+        info.last_name = name.clone();
+        info.last_ip = ip.clone();
+        info.times_joined += 1;
+        push_unique(&mut info.names, name);
+        push_unique(&mut info.ips, ip);
+    }
+
+    pub fn ban_player_ip(&mut self, ip: impl Into<String>) -> bool {
+        let ip = ip.into();
+        if self.banned_ips.contains(&ip) {
+            return false;
+        }
+        for info in self.player_info.values_mut() {
+            if info.ips.contains(&ip) {
+                info.banned = true;
+            }
+        }
+        self.banned_ips.push(ip);
+        true
+    }
+
+    pub fn ban_player_id(&mut self, id: impl Into<String>) -> bool {
+        let info = self.get_or_create_info(id.into());
+        if info.banned {
+            return false;
+        }
+        info.banned = true;
+        true
+    }
+
+    pub fn is_ip_banned(&self, ip: &str) -> bool {
+        self.banned_ips.iter().any(|banned| banned == ip) || self.is_subnet_banned(ip)
+    }
+
+    pub fn is_id_banned(&self, id: &str) -> bool {
+        self.player_info
+            .get(id)
+            .map(|info| info.banned)
+            .unwrap_or(false)
+    }
+
+    pub fn get_or_create_info(&mut self, id: String) -> &mut PlayerInfo {
+        self.player_info
+            .entry(id.clone())
+            .or_insert_with(|| PlayerInfo::new(id))
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Config {
+    pub name: String,
+    pub key: String,
+    pub description: String,
+    pub default_value: ConfigValue,
+}
+
+impl Config {
+    pub fn new(name: &str, description: &str, default_value: ConfigValue) -> Self {
+        Self {
+            name: name.into(),
+            key: name.into(),
+            description: description.into(),
+            default_value,
+        }
+    }
+
+    pub fn with_key(name: &str, description: &str, default_value: ConfigValue, key: &str) -> Self {
+        Self {
+            name: name.into(),
+            key: key.into(),
+            description: description.into(),
+            default_value,
+        }
+    }
+
+    pub fn defaults() -> Vec<Self> {
+        vec![
+            Self::with_key(
+                "name",
+                "The server name as displayed on clients.",
+                ConfigValue::String("Server".into()),
+                "servername",
+            ),
+            Self::new(
+                "desc",
+                "The server description, displayed under the name. Max 100 characters.",
+                ConfigValue::String("off".into()),
+            ),
+            Self::new(
+                "port",
+                "The port to host on.",
+                ConfigValue::Number(crate::mindustry::vars::DEFAULT_PORT as i32),
+            ),
+            Self::new(
+                "autoUpdate",
+                "Whether to auto-update and exit when a new bleeding-edge update arrives.",
+                ConfigValue::Bool(false),
+            ),
+            Self::new(
+                "showConnectMessages",
+                "Whether to display connect/disconnect messages.",
+                ConfigValue::Bool(true),
+            ),
+            Self::new(
+                "enableVotekick",
+                "Whether votekick is enabled.",
+                ConfigValue::Bool(true),
+            ),
+            Self::new(
+                "startCommands",
+                "Commands run at startup. This should be a comma-separated list.",
+                ConfigValue::String(String::new()),
+            ),
+            Self::new(
+                "logging",
+                "Whether to log everything to files.",
+                ConfigValue::Bool(true),
+            ),
+            Self::new(
+                "strict",
+                "Whether strict mode is on.",
+                ConfigValue::Bool(true),
+            ),
+            Self::new(
+                "antiSpam",
+                "Whether spammers are automatically kicked and rate-limited.",
+                ConfigValue::Bool(true),
+            ),
+            Self::with_key(
+                "allowCustomClients",
+                "Whether custom clients are allowed to connect.",
+                ConfigValue::Bool(false),
+                "allow-custom",
+            ),
+            Self::new(
+                "whitelist",
+                "Whether the whitelist is used.",
+                ConfigValue::Bool(false),
+            ),
+            Self::new(
+                "motd",
+                "The message displayed to people on connection.",
+                ConfigValue::String("off".into()),
+            ),
+            Self::new(
+                "autosave",
+                "Whether the periodically save the map when playing.",
+                ConfigValue::Bool(false),
+            ),
+            Self::new(
+                "snapshotInterval",
+                "Client entity snapshot interval in ms.",
+                ConfigValue::Number(200),
+            ),
+            Self::new(
+                "roundExtraTime",
+                "Time before loading a new map after gameover, in seconds.",
+                ConfigValue::Number(12),
+            ),
+            Self::new(
+                "logCommands",
+                "Whether player commands should be logged.",
+                ConfigValue::Bool(true),
+            ),
+        ]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigValue {
+    String(String),
+    Bool(bool),
+    Number(i32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerInfo {
+    pub id: String,
+    pub last_name: String,
+    pub last_ip: String,
+    pub ips: Vec<String>,
+    pub names: Vec<String>,
+    pub admin_usid: Option<String>,
+    pub times_kicked: i32,
+    pub times_joined: i32,
+    pub banned: bool,
+    pub admin: bool,
+    pub last_kicked: i64,
+    pub last_message_time: i64,
+    pub last_sync_time: i64,
+    pub last_sent_message: Option<String>,
+    pub message_infractions: i32,
+}
+
+impl PlayerInfo {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            last_name: "<unknown>".into(),
+            last_ip: "<unknown>".into(),
+            ips: Vec::new(),
+            names: Vec::new(),
+            admin_usid: None,
+            times_kicked: 0,
+            times_joined: 0,
+            banned: false,
+            admin: false,
+            last_kicked: 0,
+            last_message_time: 0,
+            last_sync_time: 0,
+            last_sent_message: None,
+            message_infractions: 0,
+        }
+    }
+}
+
+pub type ActionFilter = Box<dyn Fn(&PlayerAction) -> bool + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerAction {
+    pub player: Option<String>,
+    pub action_type: ActionType,
+    pub tile: Option<i32>,
+    pub block: Option<String>,
+    pub rotation: i32,
+    pub config: Option<String>,
+    pub item: Option<String>,
+    pub item_amount: i32,
+    pub unit: Option<String>,
+    pub payload: Option<String>,
+    pub plans: Option<Vec<i32>>,
+    pub unit_ids: Option<Vec<i32>>,
+    pub building_positions: Option<Vec<i32>>,
+    pub ping_text: Option<String>,
+    pub ping_x: f32,
+    pub ping_y: f32,
+}
+
+impl PlayerAction {
+    pub fn new(player: Option<String>, action_type: ActionType) -> Self {
+        Self {
+            player,
+            action_type,
+            tile: None,
+            block: None,
+            rotation: 0,
+            config: None,
+            item: None,
+            item_amount: 0,
+            unit: None,
+            payload: None,
+            plans: None,
+            unit_ids: None,
+            building_positions: None,
+            ping_text: None,
+            ping_x: 0.0,
+            ping_y: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActionType {
+    BreakBlock,
+    PlaceBlock,
+    Rotate,
+    Configure,
+    WithdrawItem,
+    DepositItem,
+    Control,
+    BuildSelect,
+    Command,
+    RemovePlanned,
+    CommandUnits,
+    CommandBuilding,
+    Respawn,
+    PickupBlock,
+    DropPayload,
+    PingLocation,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ban_ip_also_marks_matching_player_info() {
+        let mut admin = Administration::default();
+        admin.update_player_joined("uuid", "1.2.3.4", "name");
+        assert!(admin.ban_player_ip("1.2.3.4"));
+        assert!(admin.is_ip_banned("1.2.3.4"));
+        assert!(admin.is_id_banned("uuid"));
+    }
+}

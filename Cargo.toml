@@ -1,0 +1,31 @@
+﻿[workspace]
+members = [
+    "core",
+    "server",
+    "desktop",
+    "android",
+    "ios",
+    "annotations",
+    "tools",
+    "tests",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-only"
+version = "0.1.0"
+
+[workspace.dependencies]
+base64 = "0.22"
+crc32fast = "1.4"
+flate2 = "1.0"
+lz4_flex = "0.11"
+thiserror = "1.0"
+
+[profile.dev]
+debug = true
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

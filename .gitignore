@@ -1,0 +1,7 @@
+﻿target/
+**/target/
+target-codex/
+target-codex*/
+Cargo.lock
+.DS_Store
+*.log

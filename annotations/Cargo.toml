@@ -1,0 +1,10 @@
+﻿[package]
+name = "mindustry-annotations"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]

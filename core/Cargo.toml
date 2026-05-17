@@ -1,0 +1,12 @@
+﻿[package]
+name = "mindustry-core"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+base64.workspace = true
+crc32fast.workspace = true
+flate2.workspace = true
+lz4_flex.workspace = true
+thiserror.workspace = true

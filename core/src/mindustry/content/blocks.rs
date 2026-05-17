@@ -1,0 +1,3197 @@
+use std::collections::BTreeMap;
+
+use crate::mindustry::{
+    ctype::ContentId,
+    r#type::{Item, Liquid},
+    world::{
+        blocks::environment::{
+            FloorData, OreBlockData, PropData, PropKind, SeaBushData, StaticTreeData,
+            StaticWallData, TallBlockData, TreeBlockData,
+        },
+        meta::Env,
+        Block, BlockId, CacheLayer,
+    },
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CraftingBlockKind {
+    GenericCrafter,
+    AttributeCrafter,
+    Separator,
+    HeatCrafter,
+    HeatProducer,
+    HeatConductor,
+    Incinerator,
+    ItemIncinerator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemAmount {
+    pub item: ContentId,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidAmount {
+    pub liquid: ContentId,
+    pub amount: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CraftingBlockData {
+    pub base: Block,
+    pub kind: CraftingBlockKind,
+    pub craft_time: f32,
+    pub craft_effect: String,
+    pub update_effect: String,
+    pub output_item: Option<ItemAmount>,
+    pub output_liquid: Option<LiquidAmount>,
+    pub output_liquids: Vec<LiquidAmount>,
+    pub liquid_output_directions: Vec<i32>,
+    pub results: Vec<ItemAmount>,
+    pub consume_items: Vec<ItemAmount>,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub consume_power: f32,
+    pub research_cost: Vec<ItemAmount>,
+    pub boost_scale: f32,
+    pub outputs_liquid: bool,
+    pub rotate: bool,
+    pub rotate_draw: bool,
+    pub invert_flip: bool,
+    pub region_rotated1: i32,
+    pub fog_radius: f32,
+    pub light_liquid: Option<ContentId>,
+    pub research_cost_multiplier: f32,
+    pub heat_requirement: f32,
+    pub heat_output: f32,
+    pub warmup_rate: f32,
+    pub max_efficiency: f32,
+    pub split_heat: bool,
+    pub always_unlocked: bool,
+    pub all_database_tabs: bool,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+    pub drawer: String,
+}
+
+impl CraftingBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: CraftingBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.destructible = true;
+        base.update = true;
+        Self {
+            base,
+            kind,
+            craft_time: 80.0,
+            craft_effect: "none".into(),
+            update_effect: "none".into(),
+            output_item: None,
+            output_liquid: None,
+            output_liquids: Vec::new(),
+            liquid_output_directions: Vec::new(),
+            results: Vec::new(),
+            consume_items: Vec::new(),
+            consume_liquids: Vec::new(),
+            consume_power: 0.0,
+            research_cost: Vec::new(),
+            boost_scale: 0.0,
+            outputs_liquid: false,
+            rotate: true,
+            rotate_draw: true,
+            invert_flip: false,
+            region_rotated1: 0,
+            fog_radius: 0.0,
+            light_liquid: None,
+            research_cost_multiplier: 1.0,
+            heat_requirement: 0.0,
+            heat_output: 0.0,
+            warmup_rate: 0.0,
+            max_efficiency: 0.0,
+            split_heat: false,
+            always_unlocked: false,
+            all_database_tabs: false,
+            ambient_sound: "none".into(),
+            ambient_sound_volume: 0.0,
+            drawer: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockDef {
+    Plain(Block),
+    Floor(FloorData),
+    StaticWall(StaticWallData),
+    StaticTree(StaticTreeData),
+    TreeBlock(TreeBlockData),
+    TallBlock(TallBlockData),
+    Prop(PropData),
+    Ore(OreBlockData),
+    Crafting(CraftingBlockData),
+}
+
+impl BlockDef {
+    pub fn base(&self) -> &Block {
+        match self {
+            Self::Plain(block) => block,
+            Self::Floor(floor) => &floor.base,
+            Self::StaticWall(wall) => &wall.base,
+            Self::StaticTree(tree) => &tree.wall.base,
+            Self::TreeBlock(tree) => &tree.base,
+            Self::TallBlock(tall) => &tall.base,
+            Self::Prop(prop) => &prop.base,
+            Self::Ore(ore) => &ore.floor.base,
+            Self::Crafting(crafting) => &crafting.base,
+        }
+    }
+
+    pub fn as_floor(&self) -> Option<&FloorData> {
+        match self {
+            Self::Floor(floor) => Some(floor),
+            Self::Ore(ore) => Some(&ore.floor),
+            _ => None,
+        }
+    }
+
+    pub fn as_floor_mut(&mut self) -> Option<&mut FloorData> {
+        match self {
+            Self::Floor(floor) => Some(floor),
+            Self::Ore(ore) => Some(&mut ore.floor),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BlockRegistry {
+    blocks: Vec<BlockDef>,
+    by_name: BTreeMap<String, BlockId>,
+}
+
+impl BlockRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &BlockDef> {
+        self.blocks.iter()
+    }
+
+    pub fn get(&self, id: BlockId) -> Option<&BlockDef> {
+        usize::try_from(id)
+            .ok()
+            .and_then(|index| self.blocks.get(index))
+    }
+
+    pub fn get_mut(&mut self, id: BlockId) -> Option<&mut BlockDef> {
+        usize::try_from(id)
+            .ok()
+            .and_then(|index| self.blocks.get_mut(index))
+    }
+
+    pub fn get_by_name(&self, name: &str) -> Option<&BlockDef> {
+        self.id_by_name(name).and_then(|id| self.get(id))
+    }
+
+    pub fn get_floor_by_name(&self, name: &str) -> Option<&FloorData> {
+        self.get_by_name(name).and_then(BlockDef::as_floor)
+    }
+
+    pub fn get_crafting_by_name(&self, name: &str) -> Option<&CraftingBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Crafting(crafting) => Some(crafting),
+            _ => None,
+        }
+    }
+
+    pub fn id_by_name(&self, name: &str) -> Option<BlockId> {
+        self.by_name.get(name).copied()
+    }
+
+    pub fn register_plain(&mut self, name: impl Into<String>) -> BlockId {
+        let id = self.next_id();
+        self.insert(BlockDef::Plain(Block::new(id, name)))
+    }
+
+    pub fn register_floor(
+        &mut self,
+        name: impl Into<String>,
+        configure: impl FnOnce(&mut FloorData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut floor = FloorData::new(id, name);
+        configure(&mut floor);
+        self.insert(BlockDef::Floor(floor))
+    }
+
+    pub fn register_static_wall(
+        &mut self,
+        name: impl Into<String>,
+        configure: impl FnOnce(&mut StaticWallData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut wall = StaticWallData::new(id, name);
+        configure(&mut wall);
+        self.insert(BlockDef::StaticWall(wall))
+    }
+
+    pub fn register_static_tree(
+        &mut self,
+        name: impl Into<String>,
+        configure: impl FnOnce(&mut StaticTreeData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut tree = StaticTreeData::new(id, name);
+        configure(&mut tree);
+        self.insert(BlockDef::StaticTree(tree))
+    }
+
+    pub fn register_tree_block(
+        &mut self,
+        name: impl Into<String>,
+        configure: impl FnOnce(&mut TreeBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut tree = TreeBlockData::new(id, name);
+        configure(&mut tree);
+        self.insert(BlockDef::TreeBlock(tree))
+    }
+
+    pub fn register_tall_block(
+        &mut self,
+        name: impl Into<String>,
+        configure: impl FnOnce(&mut TallBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut tall = TallBlockData::new(id, name);
+        configure(&mut tall);
+        self.insert(BlockDef::TallBlock(tall))
+    }
+
+    pub fn register_prop(
+        &mut self,
+        name: impl Into<String>,
+        kind: PropKind,
+        configure: impl FnOnce(&mut PropData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut prop = PropData::with_kind(id, name, kind);
+        configure(&mut prop);
+        self.insert(BlockDef::Prop(prop))
+    }
+
+    pub fn register_ore(
+        &mut self,
+        ore: &Item,
+        configure: impl FnOnce(&mut OreBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = OreBlockData::new(id, ore);
+        configure(&mut block);
+        self.insert(BlockDef::Ore(block))
+    }
+
+    pub fn register_named_ore(
+        &mut self,
+        name: impl Into<String>,
+        ore: &Item,
+        configure: impl FnOnce(&mut OreBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = OreBlockData::with_name(id, name, ore);
+        configure(&mut block);
+        self.insert(BlockDef::Ore(block))
+    }
+
+    pub fn register_crafting(
+        &mut self,
+        name: impl Into<String>,
+        kind: CraftingBlockKind,
+        configure: impl FnOnce(&mut CraftingBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = CraftingBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Crafting(block))
+    }
+
+    pub fn set_floor_wall_by_name(
+        &mut self,
+        floor_name: &str,
+        wall_name: &str,
+    ) -> Result<(), String> {
+        let wall_id = self
+            .id_by_name(wall_name)
+            .ok_or_else(|| format!("missing wall block: {wall_name}"))?;
+        let floor_id = self
+            .id_by_name(floor_name)
+            .ok_or_else(|| format!("missing floor block: {floor_name}"))?;
+        let floor = self
+            .get_mut(floor_id)
+            .and_then(BlockDef::as_floor_mut)
+            .ok_or_else(|| format!("block is not a floor: {floor_name}"))?;
+        floor.wall = wall_id;
+        Ok(())
+    }
+
+    pub fn set_floor_decoration_by_name(
+        &mut self,
+        floor_name: &str,
+        decoration_name: &str,
+    ) -> Result<(), String> {
+        let decoration_id = self
+            .id_by_name(decoration_name)
+            .ok_or_else(|| format!("missing decoration block: {decoration_name}"))?;
+        let floor_id = self
+            .id_by_name(floor_name)
+            .ok_or_else(|| format!("missing floor block: {floor_name}"))?;
+        let floor = self
+            .get_mut(floor_id)
+            .and_then(BlockDef::as_floor_mut)
+            .ok_or_else(|| format!("block is not a floor: {floor_name}"))?;
+        floor.decoration = decoration_id;
+        Ok(())
+    }
+
+    pub fn finalize_floor_links(&mut self) {
+        let floors: Vec<(BlockId, String, BlockId, BlockId)> = self
+            .blocks
+            .iter()
+            .filter_map(|block| {
+                let floor = block.as_floor()?;
+                Some((
+                    floor.base.id,
+                    floor.base.name.clone(),
+                    floor.wall,
+                    floor.decoration,
+                ))
+            })
+            .collect();
+
+        for (id, name, current_wall, current_decoration) in floors {
+            let wall = if current_wall != 0 {
+                Some(current_wall)
+            } else {
+                self.resolve_floor_wall_id(&name)
+            };
+            let decoration = if current_decoration != 0 {
+                Some(current_decoration)
+            } else {
+                self.id_by_name(&format!("{name}-boulder"))
+            };
+
+            if let Some(floor) = self.get_mut(id).and_then(BlockDef::as_floor_mut) {
+                floor.init_links(wall, decoration);
+            }
+        }
+    }
+
+    fn resolve_floor_wall_id(&self, floor_name: &str) -> Option<BlockId> {
+        self.id_by_name(&format!("{floor_name}-wall")).or_else(|| {
+            let fallback = floor_name.replace("darksand", "dune");
+            (fallback != floor_name)
+                .then(|| self.id_by_name(&format!("{fallback}-wall")))
+                .flatten()
+        })
+    }
+
+    fn next_id(&self) -> BlockId {
+        self.blocks
+            .len()
+            .try_into()
+            .expect("block registry overflowed ContentId")
+    }
+
+    fn insert(&mut self, block: BlockDef) -> BlockId {
+        let id = block.base().id;
+        let name = block.base().name.clone();
+        assert_eq!(
+            id as usize,
+            self.blocks.len(),
+            "block ids must follow registration order"
+        );
+        assert!(
+            self.by_name.insert(name.clone(), id).is_none(),
+            "duplicate block name: {name}"
+        );
+        self.blocks.push(block);
+        id
+    }
+}
+
+pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
+    let mut registry = BlockRegistry::new();
+
+    // Java Blocks.load() starts with AirBlock("air"). Keeping id 0 stable is
+    // important because floors fall back to air when no wall/decoration exists.
+    registry.register_plain("air");
+
+    register_environment_base(&mut registry, liquids);
+    register_environment_walls(&mut registry);
+    register_environment_trees_and_tall_blocks(&mut registry);
+    register_environment_props(&mut registry);
+    apply_environment_wall_links(&mut registry);
+    apply_environment_decoration_links(&mut registry);
+    apply_environment_item_drops(&mut registry, items);
+    register_ores(&mut registry, items);
+    register_crafting_blocks(&mut registry, items, liquids);
+
+    registry.finalize_floor_links();
+    registry
+}
+
+fn register_environment_base(registry: &mut BlockRegistry, liquids: &[Liquid]) {
+    let water = liquid_id(liquids, "water");
+    let oil = liquid_id(liquids, "oil");
+    let slag_liquid = liquid_id(liquids, "slag");
+    let cryofluid_liquid = liquid_id(liquids, "cryofluid");
+    let arkycite_liquid = liquid_id(liquids, "arkycite");
+
+    registry.register_floor("deep-water", |floor| {
+        floor.speed_multiplier = 0.2;
+        floor.base.variants = 0;
+        floor.liquid_drop = water;
+        floor.liquid_multiplier = 1.5;
+        floor.is_liquid = true;
+        floor.status = "wet".into();
+        floor.status_duration = 120.0;
+        floor.drown_time = 200.0;
+        floor.base.cache_layer = CacheLayer::Water;
+        floor.base.albedo = 0.9;
+        floor.supports_overlay = true;
+    });
+    registry.register_floor("shallow-water", |floor| {
+        floor.speed_multiplier = 0.5;
+        floor.base.variants = 0;
+        floor.status = "wet".into();
+        floor.status_duration = 90.0;
+        floor.liquid_drop = water;
+        floor.is_liquid = true;
+        floor.base.cache_layer = CacheLayer::Water;
+        floor.base.albedo = 0.9;
+        floor.supports_overlay = true;
+    });
+    registry.register_floor("tainted-water", |floor| {
+        floor.speed_multiplier = 0.5;
+        floor.base.variants = 0;
+        floor.is_liquid = true;
+        floor.liquid_drop = water;
+        floor.base.cache_layer = CacheLayer::Water;
+        floor.base.albedo = 0.9;
+        floor.supports_overlay = true;
+        floor.status = "wet".into();
+        floor.status_duration = 90.0;
+    });
+    registry.register_floor("deep-tainted-water", |floor| {
+        floor.speed_multiplier = 0.18;
+        floor.base.variants = 0;
+        floor.is_liquid = true;
+        floor.liquid_drop = water;
+        floor.liquid_multiplier = 1.5;
+        floor.base.cache_layer = CacheLayer::Water;
+        floor.base.albedo = 0.9;
+        floor.supports_overlay = true;
+        floor.status = "wet".into();
+        floor.status_duration = 140.0;
+        floor.drown_time = 200.0;
+    });
+    registry.register_floor("darksand-tainted-water", |floor| {
+        floor.speed_multiplier = 0.75;
+        floor.is_liquid = true;
+        floor.liquid_drop = water;
+        floor.base.cache_layer = CacheLayer::Water;
+        floor.base.albedo = 0.9;
+        floor.status = "wet".into();
+        floor.status_duration = 60.0;
+        floor.supports_overlay = true;
+        floor.shallow = true;
+    });
+    registry.register_floor("sand-water", |floor| {
+        floor.speed_multiplier = 0.8;
+        floor.is_liquid = true;
+        floor.liquid_drop = water;
+        floor.base.cache_layer = CacheLayer::Water;
+        floor.base.albedo = 0.9;
+        floor.status = "wet".into();
+        floor.status_duration = 50.0;
+        floor.supports_overlay = true;
+        floor.shallow = true;
+    });
+    registry.register_floor("darksand-water", |floor| {
+        floor.speed_multiplier = 0.8;
+        floor.is_liquid = true;
+        floor.liquid_drop = water;
+        floor.base.cache_layer = CacheLayer::Water;
+        floor.base.albedo = 0.9;
+        floor.status = "wet".into();
+        floor.status_duration = 50.0;
+        floor.supports_overlay = true;
+        floor.shallow = true;
+    });
+    registry.register_floor("tar", |floor| {
+        floor.drown_time = 230.0;
+        floor.status = "tarred".into();
+        floor.status_duration = 240.0;
+        floor.speed_multiplier = 0.19;
+        floor.base.variants = 0;
+        floor.liquid_drop = oil;
+        floor.is_liquid = true;
+        floor.base.cache_layer = CacheLayer::Tar;
+        floor.base.obstructs_light = true;
+    });
+    registry.register_floor("pooled-cryofluid", |floor| {
+        floor.supports_overlay = true;
+        floor.overlay_alpha = 0.35;
+        floor.drown_time = 150.0;
+        floor.status = "freezing".into();
+        floor.status_duration = 240.0;
+        floor.speed_multiplier = 0.5;
+        floor.base.variants = 0;
+        floor.liquid_drop = cryofluid_liquid;
+        floor.liquid_multiplier = 0.5;
+        floor.is_liquid = true;
+        floor.base.cache_layer = CacheLayer::Cryofluid;
+        floor.base.emit_light = true;
+        floor.base.light_radius = 25.0;
+        floor.base.light_color_rgba = 0x00ffffff;
+        floor.base.obstructs_light = true;
+        floor.force_draw_light = true;
+    });
+    registry.register_floor("molten-slag", |floor| {
+        floor.drown_time = 230.0;
+        floor.status = "melting".into();
+        floor.status_duration = 240.0;
+        floor.speed_multiplier = 0.19;
+        floor.base.variants = 0;
+        floor.liquid_drop = slag_liquid;
+        floor.is_liquid = true;
+        floor.base.cache_layer = CacheLayer::Slag;
+        floor.base.emit_light = true;
+        floor.base.light_radius = 40.0;
+        floor.base.light_color_rgba = 0xffa50061;
+        floor.base.obstructs_light = true;
+        floor.force_draw_light = true;
+    });
+    registry.register_floor("space", |floor| {
+        floor.base.cache_layer = CacheLayer::Space;
+        floor.base.placeable_on = false;
+        floor.base.solid = true;
+        floor.base.variants = 0;
+        floor.can_shadow = false;
+        floor.draw_edge_out = false;
+    });
+    registry.register_floor("empty", |floor| {
+        floor.base.variants = 0;
+        floor.can_shadow = false;
+        floor.base.placeable_on = false;
+        floor.base.solid = true;
+        floor.draw_edge_out = false;
+    });
+
+    let stone = registry.register_floor("stone", |_| {});
+    registry.register_floor("crater-stone", |floor| {
+        floor.base.variants = 3;
+        floor.blend_group = stone;
+    });
+    registry.register_floor("char", |floor| {
+        floor.blend_group = stone;
+    });
+    registry.register_floor("basalt", |_| {});
+    let basalt = registry
+        .id_by_name("basalt")
+        .expect("basalt just registered");
+    registry.register_floor("hotrock", |floor| {
+        floor.blend_group = basalt;
+        floor.base.emit_light = true;
+        floor.base.light_radius = 30.0;
+        floor.base.light_color_rgba = 0xffa50026;
+    });
+    registry.register_floor("magmarock", |floor| {
+        floor.blend_group = basalt;
+        floor.base.emit_light = true;
+        floor.base.light_radius = 50.0;
+        floor.base.light_color_rgba = 0xffa5004d;
+    });
+    registry.register_floor("sand-floor", |_| {});
+    registry.register_floor("darksand", |_| {});
+    registry.register_floor("dirt", |_| {});
+    registry.register_floor("mud", |floor| {
+        floor.speed_multiplier = 0.6;
+        floor.base.variants = 3;
+        floor.status = "muddy".into();
+        floor.status_duration = 30.0;
+        floor.base.cache_layer = CacheLayer::Mud;
+        floor.walk_sound = "stepMud".into();
+        floor.walk_sound_volume = 0.08;
+        floor.walk_sound_pitch_min = 0.4;
+        floor.walk_sound_pitch_max = 0.5;
+    });
+    registry.register_floor("dacite", |_| {});
+    registry.register_floor("rhyolite", |_| {});
+    let rhyolite = registry
+        .id_by_name("rhyolite")
+        .expect("rhyolite just registered");
+    registry.register_floor("rhyolite-crater", |floor| {
+        floor.blend_group = rhyolite;
+    });
+    registry.register_floor("rough-rhyolite", |floor| {
+        floor.base.variants = 3;
+    });
+    registry.register_floor("regolith", |_| {});
+    registry.register_floor("yellow-stone", |_| {});
+    registry.register_floor("carbon-stone", |floor| {
+        floor.base.variants = 4;
+    });
+    registry.register_floor("ferric-stone", |_| {});
+    let ferric_stone = registry
+        .id_by_name("ferric-stone")
+        .expect("ferric-stone just registered");
+    registry.register_floor("ferric-craters", |floor| {
+        floor.base.variants = 3;
+        floor.blend_group = ferric_stone;
+    });
+    registry.register_floor("beryllic-stone", |floor| {
+        floor.base.variants = 4;
+    });
+    registry.register_floor("crystalline-stone", |floor| {
+        floor.base.variants = 5;
+    });
+    registry.register_floor("crystal-floor", |floor| {
+        floor.base.variants = 4;
+    });
+    registry.register_floor("yellow-stone-plates", |floor| {
+        floor.base.variants = 3;
+    });
+    registry.register_floor("red-stone", |floor| {
+        floor.base.variants = 4;
+    });
+    registry.register_floor("dense-red-stone", |floor| {
+        floor.base.variants = 4;
+    });
+    registry.register_floor("red-ice", |floor| {
+        floor.drag_multiplier = 0.4;
+        floor.speed_multiplier = 0.9;
+    });
+    registry.register_floor("arkycite-floor", |floor| {
+        floor.speed_multiplier = 0.3;
+        floor.base.variants = 0;
+        floor.liquid_drop = arkycite_liquid;
+        floor.is_liquid = true;
+        floor.drown_time = 200.0;
+        floor.base.cache_layer = CacheLayer::Arkycite;
+        floor.base.albedo = 0.9;
+        floor.base.obstructs_light = true;
+    });
+    registry.register_floor("arkyic-stone", |floor| {
+        floor.base.variants = 3;
+    });
+    registry.register_floor("redmat", |_| {});
+    registry.register_floor("bluemat", |_| {});
+    registry.register_floor("snow", |_| {});
+    registry.register_floor("ice", |floor| {
+        floor.drag_multiplier = 0.35;
+        floor.speed_multiplier = 0.9;
+    });
+    registry.register_floor("shale", |floor| {
+        floor.base.variants = 3;
+        floor.ore_default = false;
+    });
+    registry.register_floor("moss", |floor| {
+        floor.base.variants = 3;
+    });
+    registry.register_floor("grass", |floor| {
+        floor.base.variants = 3;
+    });
+    registry.register_floor("core-zone", |floor| {
+        floor.base.variants = 0;
+        floor.allow_core_placement = true;
+    });
+    registry.register_floor("salt", |floor| {
+        floor.base.variants = 0;
+    });
+    registry.register_floor("ice-snow", |floor| {
+        floor.drag_multiplier = 0.6;
+        floor.base.variants = 3;
+    });
+    registry.register_floor("spore-moss", |floor| {
+        floor.base.variants = 3;
+    });
+
+    registry.register_floor("metal-floor", |floor| {
+        floor.base.variants = 0;
+    });
+    registry.register_floor("metal-floor-damaged", |floor| {
+        floor.base.variants = 3;
+    });
+    for floor_name in [
+        "metal-floor-2",
+        "metal-floor-3",
+        "metal-floor-4",
+        "metal-floor-5",
+        "dark-panel-1",
+        "dark-panel-2",
+        "dark-panel-3",
+        "dark-panel-4",
+        "dark-panel-5",
+        "dark-panel-6",
+    ] {
+        registry.register_floor(floor_name, |floor| {
+            floor.base.variants = 0;
+        });
+    }
+
+    for floor_name in [
+        "metal-tiles-1",
+        "metal-tiles-2",
+        "metal-tiles-3",
+        "metal-tiles-4",
+        "metal-tiles-5",
+        "metal-tiles-9",
+        "metal-tiles-10",
+    ] {
+        registry.register_floor(floor_name, configure_metal_tiles_floor);
+    }
+    registry.register_floor("metal-tiles-6", |floor| {
+        configure_metal_tiles_floor(floor);
+        floor.base.emit_light = true;
+        floor.base.light_radius = 30.0;
+        // Team.crux.color.cpy().a(0.3f) in Java. Keep the alpha-bearing
+        // serialized color shell stable until Team palette data is migrated.
+        floor.base.light_color_rgba = 0xff00004d;
+    });
+    registry.register_floor("metal-tiles-7", |floor| {
+        configure_metal_tiles_floor(floor);
+        floor.autotile_mid_variants = 9;
+    });
+    registry.register_floor("metal-tiles-8", |floor| {
+        configure_metal_tiles_floor(floor);
+        floor.autotile_mid_variants = 2;
+    });
+    registry.register_floor("metal-tiles-11", |floor| {
+        configure_metal_tiles_floor(floor);
+        floor.autotile_variants = 3;
+    });
+    registry.register_floor("metal-tiles-12", |floor| {
+        configure_metal_tiles_floor(floor);
+        floor.autotile_variants = 4;
+        floor.base.emit_light = true;
+        floor.base.light_radius = 30.0;
+        // Team.crux.color.cpy().a(0.3f) in Java.
+        floor.base.light_color_rgba = 0xff00004d;
+    });
+    registry.register_floor("metal-tiles-13", |floor| {
+        configure_metal_tiles_floor(floor);
+        floor.autotile_mid_variants = 6;
+    });
+    registry.register_floor("pebbles", configure_overlay_floor);
+    registry.register_floor("tendrils", configure_overlay_floor);
+}
+
+fn register_environment_walls(registry: &mut BlockRegistry) {
+    registry.register_static_wall("stone-wall", |_| {});
+    registry.register_static_wall("spore-wall", |_| {});
+    registry.register_static_wall("ice-wall", |wall| {
+        wall.base.albedo = 0.6;
+    });
+    registry.register_static_wall("dirt-wall", |_| {});
+    registry.register_static_wall("dacite-wall", |_| {});
+    registry.register_static_wall("dune-wall", |_| {});
+    registry.register_static_wall("regolith-wall", |_| {});
+    registry.register_static_wall("yellow-stone-wall", |_| {});
+    registry.register_static_wall("rhyolite-wall", |_| {});
+    registry.register_static_wall("carbon-wall", |_| {});
+    registry.register_static_wall("ferric-stone-wall", |_| {});
+    registry.register_static_wall("beryllic-stone-wall", |_| {});
+    registry.register_static_wall("arkyic-wall", |wall| {
+        wall.base.variants = 3;
+    });
+    registry.register_static_wall("crystalline-stone-wall", |wall| {
+        wall.base.variants = 4;
+    });
+    registry.register_static_wall("red-ice-wall", |_| {});
+    registry.register_static_wall("red-stone-wall", |_| {});
+    registry.register_static_wall("snow-wall", |_| {});
+    registry.register_static_wall("sand-wall", |_| {});
+    registry.register_static_wall("shrubs", |_| {});
+    registry.register_static_wall("shale-wall", |_| {});
+    registry.register_static_wall("salt-wall", |_| {});
+    registry.register_static_wall("dark-metal", |_| {});
+    registry.register_static_wall("metal-wall-1", |wall| {
+        wall.autotile = true;
+    });
+    registry.register_static_wall("metal-wall-2", |wall| {
+        wall.autotile = true;
+        wall.autotile_mid_variants = 2;
+    });
+    registry.register_static_wall("metal-wall-3", |wall| {
+        wall.autotile = true;
+    });
+    registry.register_static_wall("graphitic-wall", |_| {});
+}
+
+fn configure_metal_tiles_floor(floor: &mut FloorData) {
+    floor.autotile = true;
+    floor.draw_edge_out = false;
+    floor.draw_edge_in = false;
+}
+
+fn configure_overlay_floor(floor: &mut FloorData) {
+    floor.overlay_floor = true;
+    floor.base.use_color = false;
+}
+
+fn register_environment_trees_and_tall_blocks(registry: &mut BlockRegistry) {
+    registry.register_static_tree("red-diamond-wall", |tree| {
+        tree.wall.base.variants = 3;
+    });
+    registry.register_static_tree("spore-pine", |_| {});
+    registry.register_static_tree("snow-pine", |_| {});
+    registry.register_static_tree("pine", |_| {});
+    registry.register_tree_block("white-tree-dead", |_| {});
+    registry.register_tree_block("white-tree", |_| {});
+
+    registry.register_tall_block("crystal-cluster", |tall| {
+        tall.base.variants = 3;
+        tall.base.clip_size = 128.0;
+        tall.base.derive_layout_fields();
+    });
+    registry.register_tall_block("vibrant-crystal-cluster", |tall| {
+        tall.base.variants = 3;
+        tall.base.clip_size = 128.0;
+        tall.base.derive_layout_fields();
+    });
+    registry.register_tall_block("crystal-blocks", |tall| {
+        tall.base.variants = 3;
+        tall.base.clip_size = 128.0;
+        tall.base.derive_layout_fields();
+        tall.shadow_alpha = 0.5;
+        tall.shadow_offset = -2.5;
+    });
+    registry.register_tall_block("crystal-orbs", |tall| {
+        tall.base.variants = 3;
+        tall.base.clip_size = 128.0;
+        tall.base.derive_layout_fields();
+        tall.shadow_alpha = 0.5;
+        tall.shadow_offset = -2.5;
+    });
+}
+
+fn register_environment_props(registry: &mut BlockRegistry) {
+    registry.register_prop("spore-cluster", PropKind::Prop, |prop| {
+        prop.base.variants = 3;
+        prop.base.break_sound = "plantBreak".into();
+        prop.base.obstructs_light = false;
+    });
+    registry.register_prop("redweed", PropKind::Seaweed, |prop| {
+        prop.base.variants = 3;
+    });
+    registry.register_prop("pur-bush", PropKind::SeaBush, |_| {});
+    registry.register_prop("yellowcoral", PropKind::SeaBush, |prop| {
+        prop.sea_bush = Some(SeaBushData {
+            lobes_min: 2,
+            lobes_max: 3,
+            mag_min: 2.0,
+            mag_max: 8.0,
+            origin: 0.3,
+            spread: 40.0,
+            scl_min: 60.0,
+            scl_max: 100.0,
+            ..SeaBushData::default()
+        });
+    });
+
+    registry.register_prop("boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("snow-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("shale-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("sand-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("basalt-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("dacite-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("carbon-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("ferric-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("beryllic-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("yellow-stone-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("arkyic-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 3;
+        prop.base.custom_shadow = true;
+        prop.base.obstructs_light = false;
+    });
+    registry.register_prop("crystalline-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 2;
+    });
+    registry.register_prop("red-ice-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 3;
+    });
+    registry.register_prop("rhyolite-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 3;
+    });
+    registry.register_prop("red-stone-boulder", PropKind::Prop, |prop| {
+        prop.base.variants = 4;
+    });
+}
+
+fn apply_environment_wall_links(registry: &mut BlockRegistry) {
+    for floor in ["tainted-water", "deep-tainted-water", "spore-moss"] {
+        registry
+            .set_floor_wall_by_name(floor, "spore-wall")
+            .expect("minimal spore wall links must resolve");
+    }
+    registry
+        .set_floor_wall_by_name("ice-snow", "ice-wall")
+        .expect("minimal ice wall links must resolve");
+    registry
+        .set_floor_wall_by_name("dirt", "dirt-wall")
+        .expect("minimal dirt wall links must resolve");
+    registry
+        .set_floor_wall_by_name("snow", "snow-wall")
+        .expect("minimal snow wall links must resolve");
+    registry
+        .set_floor_wall_by_name("shale", "shale-wall")
+        .expect("minimal shale wall links must resolve");
+    registry
+        .set_floor_wall_by_name("salt", "salt-wall")
+        .expect("minimal salt wall links must resolve");
+    registry
+        .set_floor_wall_by_name("moss", "spore-pine")
+        .expect("spore pine wall link must resolve");
+    for floor in [
+        "hotrock",
+        "magmarock",
+        "basalt",
+        "darksand-water",
+        "darksand-tainted-water",
+    ] {
+        registry
+            .set_floor_wall_by_name(floor, "dune-wall")
+            .expect("minimal dune wall links must resolve");
+    }
+    for floor in ["sand-water", "deep-water", "shallow-water", "sand-floor"] {
+        registry
+            .set_floor_wall_by_name(floor, "sand-wall")
+            .expect("minimal sand wall links must resolve");
+    }
+    for (floor, wall) in [
+        ("molten-slag", "yellow-stone-wall"),
+        ("yellow-stone-plates", "yellow-stone-wall"),
+        ("rhyolite-crater", "rhyolite-wall"),
+        ("rough-rhyolite", "rhyolite-wall"),
+        ("carbon-stone", "carbon-wall"),
+        ("arkycite-floor", "arkyic-wall"),
+        ("arkyic-stone", "arkyic-wall"),
+        ("crystal-floor", "crystalline-stone-wall"),
+        ("crystalline-stone", "crystalline-stone-wall"),
+        ("dense-red-stone", "red-stone-wall"),
+    ] {
+        registry
+            .set_floor_wall_by_name(floor, wall)
+            .expect("extended environment wall links must resolve");
+    }
+    for floor in [
+        "metal-floor",
+        "metal-floor-damaged",
+        "metal-floor-2",
+        "metal-floor-3",
+        "metal-floor-4",
+        "metal-floor-5",
+        "dark-panel-1",
+        "dark-panel-2",
+        "dark-panel-3",
+        "dark-panel-4",
+        "dark-panel-5",
+        "dark-panel-6",
+    ] {
+        registry
+            .set_floor_wall_by_name(floor, "dark-metal")
+            .expect("minimal dark metal wall links must resolve");
+    }
+}
+
+fn apply_environment_decoration_links(registry: &mut BlockRegistry) {
+    for floor in ["stone", "crater-stone"] {
+        registry
+            .set_floor_decoration_by_name(floor, "boulder")
+            .expect("minimal boulder decoration links must resolve");
+    }
+    for floor in ["snow", "ice", "ice-snow", "salt"] {
+        registry
+            .set_floor_decoration_by_name(floor, "snow-boulder")
+            .expect("minimal snow boulder decoration links must resolve");
+    }
+    registry
+        .set_floor_decoration_by_name("shale", "shale-boulder")
+        .expect("minimal shale boulder decoration link must resolve");
+    registry
+        .set_floor_decoration_by_name("sand-floor", "sand-boulder")
+        .expect("minimal sand boulder decoration link must resolve");
+    for floor in ["basalt", "hotrock", "darksand", "magmarock"] {
+        registry
+            .set_floor_decoration_by_name(floor, "basalt-boulder")
+            .expect("minimal basalt boulder decoration links must resolve");
+    }
+    registry
+        .set_floor_decoration_by_name("dacite", "dacite-boulder")
+        .expect("dacite boulder decoration link must resolve");
+    registry
+        .set_floor_decoration_by_name("carbon-stone", "carbon-boulder")
+        .expect("carbon boulder decoration link must resolve");
+    for floor in ["ferric-stone", "ferric-craters"] {
+        registry
+            .set_floor_decoration_by_name(floor, "ferric-boulder")
+            .expect("ferric boulder decoration links must resolve");
+    }
+    registry
+        .set_floor_decoration_by_name("beryllic-stone", "beryllic-boulder")
+        .expect("beryllic boulder decoration link must resolve");
+    for floor in ["yellow-stone", "regolith", "yellow-stone-plates"] {
+        registry
+            .set_floor_decoration_by_name(floor, "yellow-stone-boulder")
+            .expect("yellow stone boulder decoration links must resolve");
+    }
+    registry
+        .set_floor_decoration_by_name("arkyic-stone", "arkyic-boulder")
+        .expect("arkyic boulder decoration link must resolve");
+    registry
+        .set_floor_decoration_by_name("crystalline-stone", "crystalline-boulder")
+        .expect("crystalline boulder decoration link must resolve");
+    registry
+        .set_floor_decoration_by_name("red-ice", "red-ice-boulder")
+        .expect("red ice boulder decoration link must resolve");
+    for floor in ["rhyolite", "rough-rhyolite"] {
+        registry
+            .set_floor_decoration_by_name(floor, "rhyolite-boulder")
+            .expect("rhyolite boulder decoration links must resolve");
+    }
+    for floor in ["dense-red-stone", "red-stone"] {
+        registry
+            .set_floor_decoration_by_name(floor, "red-stone-boulder")
+            .expect("red stone boulder decoration links must resolve");
+    }
+}
+
+fn apply_environment_item_drops(registry: &mut BlockRegistry, items: &[Item]) {
+    if let Some(sand) = find_item(items, "sand") {
+        let sand_id = sand.base.mappable.base.id;
+        for floor_name in ["sand-floor", "darksand"] {
+            if let Some(id) = registry.id_by_name(floor_name) {
+                if let Some(floor) = registry.get_mut(id).and_then(BlockDef::as_floor_mut) {
+                    floor.base.item_drop = Some(sand_id);
+                }
+            }
+        }
+    }
+    if let Some(graphite) = find_item(items, "graphite") {
+        let graphite_id = graphite.base.mappable.base.id;
+        if let Some(id) = registry.id_by_name("graphitic-wall") {
+            if let Some(block) = registry.get_mut(id) {
+                match block {
+                    BlockDef::StaticWall(wall) => {
+                        wall.base.item_drop = Some(graphite_id);
+                        wall.base.variants = 3;
+                    }
+                    _ => panic!("graphitic-wall should be a static wall"),
+                }
+            }
+        }
+    }
+}
+
+fn register_ores(registry: &mut BlockRegistry, items: &[Item]) {
+    if let Some(copper) = find_item(items, "copper") {
+        registry.register_ore(copper, |ore| {
+            ore.floor.ore_default = true;
+            ore.floor.ore_threshold = 0.81;
+            ore.floor.ore_scale = 23.47619;
+        });
+    }
+    if let Some(lead) = find_item(items, "lead") {
+        registry.register_ore(lead, |ore| {
+            ore.floor.ore_default = true;
+            ore.floor.ore_threshold = 0.828;
+            ore.floor.ore_scale = 23.952381;
+        });
+    }
+    if let Some(scrap) = find_item(items, "scrap") {
+        registry.register_ore(scrap, |_| {});
+    }
+    if let Some(coal) = find_item(items, "coal") {
+        registry.register_ore(coal, |ore| {
+            ore.floor.ore_default = true;
+            ore.floor.ore_threshold = 0.846;
+            ore.floor.ore_scale = 24.428572;
+        });
+    }
+    if let Some(titanium) = find_item(items, "titanium") {
+        registry.register_ore(titanium, |ore| {
+            ore.floor.ore_default = true;
+            ore.floor.ore_threshold = 0.864;
+            ore.floor.ore_scale = 24.904762;
+        });
+    }
+    if let Some(thorium) = find_item(items, "thorium") {
+        registry.register_ore(thorium, |ore| {
+            ore.floor.ore_default = true;
+            ore.floor.ore_threshold = 0.882;
+            ore.floor.ore_scale = 25.380953;
+        });
+        registry.register_named_ore("ore-wall-thorium", thorium, |ore| {
+            ore.floor.wall_ore = true;
+            ore.setup(thorium);
+        });
+    }
+    if let Some(beryllium) = find_item(items, "beryllium") {
+        registry.register_ore(beryllium, |_| {});
+        registry.register_named_ore("ore-wall-beryllium", beryllium, |ore| {
+            ore.floor.wall_ore = true;
+            ore.setup(beryllium);
+        });
+    }
+    if let Some(tungsten) = find_item(items, "tungsten") {
+        registry.register_ore(tungsten, |_| {});
+        registry.register_named_ore("ore-wall-tungsten", tungsten, |ore| {
+            ore.floor.wall_ore = true;
+            ore.setup(tungsten);
+        });
+    }
+    if let Some(graphite) = find_item(items, "graphite") {
+        registry.register_named_ore("ore-wall-graphite", graphite, |ore| {
+            ore.floor.wall_ore = true;
+            ore.setup(graphite);
+        });
+    }
+}
+
+fn item_amount(items: &[Item], name: &str, amount: i32) -> Option<ItemAmount> {
+    Some(ItemAmount {
+        item: find_item(items, name)?.base.mappable.base.id,
+        amount,
+    })
+}
+
+fn liquid_amount(liquids: &[Liquid], name: &str, amount: f32) -> Option<LiquidAmount> {
+    Some(LiquidAmount {
+        liquid: liquid_id(liquids, name)?,
+        amount,
+    })
+}
+
+fn push_item_amount(target: &mut Vec<ItemAmount>, items: &[Item], name: &str, amount: i32) {
+    if let Some(item) = item_amount(items, name, amount) {
+        target.push(item);
+    }
+}
+
+fn push_liquid_amount(target: &mut Vec<LiquidAmount>, liquids: &[Liquid], name: &str, amount: f32) {
+    if let Some(liquid) = liquid_amount(liquids, name, amount) {
+        target.push(liquid);
+    }
+}
+
+fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
+    registry.register_crafting(
+        "graphite-press",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_items = true;
+            craft.base.size = 2;
+            craft.craft_effect = "pulverizeMedium".into();
+            craft.output_item = item_amount(items, "graphite", 1);
+            craft.craft_time = 90.0;
+            if let Some(coal) = item_amount(items, "coal", 2) {
+                craft.consume_items.push(coal);
+            }
+        },
+    );
+
+    registry.register_crafting("multi-press", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_items = true;
+        craft.base.has_liquids = true;
+        craft.base.has_power = true;
+        craft.base.item_capacity = 20;
+        craft.base.size = 3;
+        craft.craft_effect = "pulverizeMedium".into();
+        craft.output_item = item_amount(items, "graphite", 2);
+        craft.craft_time = 30.0;
+        craft.consume_power = 1.8;
+        if let Some(coal) = item_amount(items, "coal", 3) {
+            craft.consume_items.push(coal);
+        }
+        if let Some(water) = liquid_amount(liquids, "water", 0.1) {
+            craft.consume_liquids.push(water);
+        }
+    });
+
+    registry.register_crafting(
+        "silicon-smelter",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_power = true;
+            craft.base.has_liquids = false;
+            craft.base.size = 2;
+            craft.craft_effect = "smeltsmoke".into();
+            craft.output_item = item_amount(items, "silicon", 1);
+            craft.craft_time = 40.0;
+            craft.drawer = "DrawMulti(DrawDefault, DrawFlame(ffef99))".into();
+            craft.ambient_sound = "loopSmelter".into();
+            craft.ambient_sound_volume = 0.07;
+            for (name, amount) in [("coal", 1), ("sand", 2)] {
+                if let Some(item) = item_amount(items, name, amount) {
+                    craft.consume_items.push(item);
+                }
+            }
+            craft.consume_power = 0.50;
+        },
+    );
+
+    registry.register_crafting(
+        "silicon-crucible",
+        CraftingBlockKind::AttributeCrafter,
+        |craft| {
+            craft.base.has_power = true;
+            craft.base.has_liquids = false;
+            craft.base.item_capacity = 30;
+            craft.base.size = 3;
+            craft.craft_effect = "smeltsmoke".into();
+            craft.output_item = item_amount(items, "silicon", 8);
+            craft.craft_time = 90.0;
+            craft.boost_scale = 0.15;
+            craft.drawer = "DrawMulti(DrawDefault, DrawFlame(ffef99))".into();
+            craft.ambient_sound = "loopSmelter".into();
+            craft.ambient_sound_volume = 0.07;
+            for (name, amount) in [("coal", 4), ("sand", 6), ("pyratite", 1)] {
+                if let Some(item) = item_amount(items, name, amount) {
+                    craft.consume_items.push(item);
+                }
+            }
+            craft.consume_power = 4.0;
+        },
+    );
+
+    registry.register_crafting("kiln", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_items = true;
+        craft.base.has_power = true;
+        craft.base.size = 2;
+        craft.craft_effect = "smeltsmoke".into();
+        craft.output_item = item_amount(items, "metaglass", 1);
+        craft.craft_time = 30.0;
+        craft.drawer = "DrawMulti(DrawDefault, DrawFlame(ffc099))".into();
+        craft.ambient_sound = "loopSmelter".into();
+        craft.ambient_sound_volume = 0.07;
+        for (name, amount) in [("lead", 1), ("sand", 1)] {
+            if let Some(item) = item_amount(items, name, amount) {
+                craft.consume_items.push(item);
+            }
+        }
+        craft.consume_power = 0.60;
+    });
+
+    registry.register_crafting(
+        "plastanium-compressor",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_items = true;
+            craft.base.has_liquids = true;
+            craft.base.has_power = true;
+            craft.base.liquid_capacity = 60.0;
+            craft.base.health = 320;
+            craft.base.size = 2;
+            craft.craft_effect = "formsmoke".into();
+            craft.update_effect = "plasticburn".into();
+            craft.output_item = item_amount(items, "plastanium", 1);
+            craft.craft_time = 60.0;
+            craft.drawer = "DrawMulti(DrawDefault, DrawFade)".into();
+            if let Some(oil) = liquid_amount(liquids, "oil", 0.25) {
+                craft.consume_liquids.push(oil);
+            }
+            if let Some(titanium) = item_amount(items, "titanium", 2) {
+                craft.consume_items.push(titanium);
+            }
+            craft.consume_power = 3.0;
+        },
+    );
+
+    registry.register_crafting("phase-weaver", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_power = true;
+        craft.base.item_capacity = 30;
+        craft.base.size = 2;
+        craft.base.env_enabled |= Env::SPACE;
+        craft.craft_effect = "smeltsmoke".into();
+        craft.output_item = item_amount(items, "phase-fabric", 1);
+        craft.craft_time = 120.0;
+        craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawWeave, DrawDefault)".into();
+        craft.ambient_sound = "loopTech".into();
+        craft.ambient_sound_volume = 0.02;
+        for (name, amount) in [("thorium", 4), ("sand", 10)] {
+            if let Some(item) = item_amount(items, name, amount) {
+                craft.consume_items.push(item);
+            }
+        }
+        craft.consume_power = 5.0;
+    });
+
+    registry.register_crafting(
+        "surge-smelter",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_power = true;
+            craft.base.item_capacity = 20;
+            craft.base.size = 3;
+            craft.craft_effect = "smeltsmoke".into();
+            craft.output_item = item_amount(items, "surge-alloy", 1);
+            craft.craft_time = 75.0;
+            craft.drawer = "DrawMulti(DrawDefault, DrawFlame)".into();
+            for (name, amount) in [("copper", 3), ("lead", 4), ("titanium", 2), ("silicon", 3)] {
+                if let Some(item) = item_amount(items, name, amount) {
+                    craft.consume_items.push(item);
+                }
+            }
+            craft.consume_power = 4.0;
+        },
+    );
+
+    registry.register_crafting(
+        "cryofluid-mixer",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_items = true;
+            craft.base.has_liquids = true;
+            craft.base.has_power = true;
+            craft.base.liquid_capacity = 36.0;
+            craft.base.size = 2;
+            craft.base.solid = true;
+            craft.base.env_enabled = Env::ANY;
+            craft.output_liquid = liquid_amount(liquids, "cryofluid", 12.0 / 60.0);
+            craft.craft_time = 120.0;
+            craft.outputs_liquid = true;
+            craft.rotate = false;
+            craft.light_liquid = liquid_id(liquids, "cryofluid");
+            craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(water), DrawLiquidTile(cryofluid), DrawDefault)".into();
+            if let Some(titanium) = item_amount(items, "titanium", 1) {
+                craft.consume_items.push(titanium);
+            }
+            if let Some(water) = liquid_amount(liquids, "water", 12.0 / 60.0) {
+                craft.consume_liquids.push(water);
+            }
+            craft.consume_power = 1.0;
+        },
+    );
+
+    registry.register_crafting(
+        "pyratite-mixer",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_items = true;
+            craft.base.has_power = true;
+            craft.base.size = 2;
+            craft.base.env_enabled |= Env::SPACE;
+            craft.output_item = item_amount(items, "pyratite", 1);
+            craft.ambient_sound = "loopMachineSpin".into();
+            craft.ambient_sound_volume = 0.1;
+            for (name, amount) in [("coal", 1), ("lead", 2), ("sand", 2)] {
+                if let Some(item) = item_amount(items, name, amount) {
+                    craft.consume_items.push(item);
+                }
+            }
+            craft.consume_power = 0.20;
+        },
+    );
+
+    registry.register_crafting("blast-mixer", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_items = true;
+        craft.base.has_power = true;
+        craft.base.size = 2;
+        craft.base.env_enabled |= Env::SPACE;
+        craft.output_item = item_amount(items, "blast-compound", 1);
+        craft.ambient_sound = "loopMachineSpin".into();
+        craft.ambient_sound_volume = 0.12;
+        for (name, amount) in [("pyratite", 1), ("spore-pod", 1)] {
+            if let Some(item) = item_amount(items, name, amount) {
+                craft.consume_items.push(item);
+            }
+        }
+        craft.consume_power = 0.40;
+    });
+
+    registry.register_crafting("melter", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_liquids = true;
+        craft.base.has_power = true;
+        craft.base.health = 200;
+        craft.output_liquid = liquid_amount(liquids, "slag", 12.0 / 60.0);
+        craft.craft_time = 10.0;
+        craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile, DrawDefault)".into();
+        if let Some(scrap) = item_amount(items, "scrap", 1) {
+            craft.consume_items.push(scrap);
+        }
+        craft.consume_power = 1.0;
+    });
+
+    registry.register_crafting("separator", CraftingBlockKind::Separator, |craft| {
+        craft.base.has_power = true;
+        craft.base.size = 2;
+        craft.craft_time = 35.0;
+        for (name, amount) in [("copper", 5), ("lead", 3), ("graphite", 2), ("titanium", 2)] {
+            if let Some(item) = item_amount(items, name, amount) {
+                craft.results.push(item);
+            }
+        }
+        if let Some(slag) = liquid_amount(liquids, "slag", 4.0 / 60.0) {
+            craft.consume_liquids.push(slag);
+        }
+        craft.consume_power = 1.1;
+        craft.drawer =
+            "DrawMulti(DrawRegion(-bottom), DrawLiquidTile, DrawRegion(-spinner), DrawDefault)"
+                .into();
+    });
+
+    registry.register_crafting("disassembler", CraftingBlockKind::Separator, |craft| {
+        craft.base.has_power = true;
+        craft.base.item_capacity = 20;
+        craft.base.size = 3;
+        craft.craft_time = 15.0;
+        for (name, amount) in [
+            ("sand", 2),
+            ("graphite", 1),
+            ("titanium", 1),
+            ("thorium", 1),
+        ] {
+            if let Some(item) = item_amount(items, name, amount) {
+                craft.results.push(item);
+            }
+        }
+        if let Some(scrap) = item_amount(items, "scrap", 1) {
+            craft.consume_items.push(scrap);
+        }
+        if let Some(slag) = liquid_amount(liquids, "slag", 0.12) {
+            craft.consume_liquids.push(slag);
+        }
+        craft.consume_power = 4.0;
+        craft.drawer =
+            "DrawMulti(DrawRegion(-bottom), DrawLiquidTile, DrawRegion(-spinner), DrawDefault)"
+                .into();
+    });
+
+    registry.register_crafting("spore-press", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_liquids = true;
+        craft.base.has_power = true;
+        craft.base.health = 320;
+        craft.base.liquid_capacity = 60.0;
+        craft.base.size = 2;
+        craft.craft_effect = "none".into();
+        craft.output_liquid = liquid_amount(liquids, "oil", 18.0 / 60.0);
+        craft.craft_time = 20.0;
+        craft.drawer = "DrawMulti(DrawPistons, DrawLiquidRegion)".into();
+        if let Some(spore_pod) = item_amount(items, "spore-pod", 1) {
+            craft.consume_items.push(spore_pod);
+        }
+        craft.consume_power = 0.7;
+    });
+
+    registry.register_crafting("pulverizer", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_items = true;
+        craft.base.has_power = true;
+        craft.craft_effect = "pulverize".into();
+        craft.update_effect = "pulverizeSmall".into();
+        craft.output_item = item_amount(items, "sand", 1);
+        craft.craft_time = 40.0;
+        craft.drawer = "DrawMulti(DrawDefault, DrawRegion(-rotator), DrawRegion(-top))".into();
+        craft.ambient_sound = "loopGrind".into();
+        craft.ambient_sound_volume = 0.025;
+        if let Some(scrap) = item_amount(items, "scrap", 1) {
+            craft.consume_items.push(scrap);
+        }
+        craft.consume_power = 0.50;
+    });
+
+    registry.register_crafting(
+        "coal-centrifuge",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_items = true;
+            craft.base.has_liquids = true;
+            craft.base.has_power = true;
+            craft.base.size = 2;
+            craft.rotate_draw = false;
+            craft.craft_effect = "coalSmeltsmoke".into();
+            craft.output_item = item_amount(items, "coal", 1);
+            craft.craft_time = 30.0;
+            if let Some(oil) = liquid_amount(liquids, "oil", 0.1) {
+                craft.consume_liquids.push(oil);
+            }
+            craft.consume_power = 0.7;
+        },
+    );
+
+    registry.register_crafting(
+        "silicon-arc-furnace",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_power = true;
+            craft.base.has_liquids = false;
+            craft.base.item_capacity = 30;
+            craft.base.size = 3;
+            craft.base.env_enabled |= Env::SPACE | Env::UNDERWATER;
+            craft.base.env_disabled = Env::NONE;
+            craft.fog_radius = 3.0;
+            craft.craft_effect = "none".into();
+            craft.output_item = item_amount(items, "silicon", 4);
+            craft.craft_time = 50.0;
+            craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawArcSmelt, DrawDefault)".into();
+            craft.ambient_sound = "loopSmelter".into();
+            craft.ambient_sound_volume = 0.12;
+            for (name, amount) in [("beryllium", 150), ("graphite", 50)] {
+                if let Some(item) = item_amount(items, name, amount) {
+                    craft.research_cost.push(item);
+                }
+            }
+            for (name, amount) in [("graphite", 1), ("sand", 4)] {
+                if let Some(item) = item_amount(items, name, amount) {
+                    craft.consume_items.push(item);
+                }
+            }
+            craft.consume_power = 5.0;
+        },
+    );
+
+    registry.register_crafting(
+        "slag-centrifuge",
+        CraftingBlockKind::GenericCrafter,
+        |craft| {
+            craft.base.has_liquids = true;
+            craft.base.has_power = true;
+            craft.base.liquid_capacity = 80.0;
+            craft.base.size = 3;
+            craft.base.build_visibility =
+                crate::mindustry::world::meta::BuildVisibility::DebugOnly;
+            craft.output_liquid = liquid_amount(liquids, "gallium", 1.0 / 60.0);
+            craft.outputs_liquid = true;
+            craft.craft_time = 120.0;
+            craft.drawer =
+                "DrawMulti(DrawRegion(-bottom), DrawLiquidRegion(slag), DrawGlowRegion*, DrawDefault)"
+                    .into();
+            if let Some(sand) = item_amount(items, "sand", 1) {
+                craft.consume_items.push(sand);
+            }
+            if let Some(slag) = liquid_amount(liquids, "slag", 40.0 / 60.0) {
+                craft.consume_liquids.push(slag);
+            }
+            craft.consume_power = 2.0 / 60.0;
+        },
+    );
+
+    registry.register_crafting("electrolyzer", CraftingBlockKind::GenericCrafter, |craft| {
+        craft.base.has_liquids = true;
+        craft.base.has_power = true;
+        craft.base.group = crate::mindustry::world::meta::BlockGroup::Liquids;
+        craft.base.item_capacity = 0;
+        craft.base.liquid_capacity = 50.0;
+        craft.base.size = 3;
+        craft.craft_time = 10.0;
+        craft.rotate = true;
+        craft.invert_flip = true;
+        craft.region_rotated1 = 3;
+        craft.research_cost_multiplier = 1.2;
+        craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(water), DrawBubbles, DrawRegion, DrawLiquidOutputs, DrawGlowRegion)".into();
+        craft.ambient_sound = "loopElectricHum".into();
+        craft.ambient_sound_volume = 0.08;
+        push_liquid_amount(&mut craft.consume_liquids, liquids, "water", 10.0 / 60.0);
+        push_liquid_amount(&mut craft.output_liquids, liquids, "ozone", 4.0 / 60.0);
+        push_liquid_amount(&mut craft.output_liquids, liquids, "hydrogen", 6.0 / 60.0);
+        craft.liquid_output_directions = vec![1, 3];
+        craft.consume_power = 1.0;
+    });
+
+    registry.register_crafting(
+        "atmospheric-concentrator",
+        CraftingBlockKind::HeatCrafter,
+        |craft| {
+            craft.base.has_liquids = true;
+            craft.base.item_capacity = 0;
+            craft.base.liquid_capacity = 60.0;
+            craft.base.size = 3;
+            craft.research_cost_multiplier = 1.1;
+            craft.heat_requirement = 24.0;
+            craft.max_efficiency = 1.0;
+            craft.output_liquid = liquid_amount(liquids, "nitrogen", 16.0 / 60.0);
+            craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(nitrogen), DrawDefault, DrawHeatInput, DrawParticles)".into();
+            craft.ambient_sound = "loopExtract".into();
+            craft.ambient_sound_volume = 0.06;
+            for (name, amount) in [("silicon", 2000), ("oxide", 900), ("beryllium", 2400)] {
+                push_item_amount(&mut craft.research_cost, items, name, amount);
+            }
+            craft.consume_power = 2.0;
+        },
+    );
+
+    registry.register_crafting(
+        "oxidation-chamber",
+        CraftingBlockKind::HeatProducer,
+        |craft| {
+            craft.base.liquid_capacity = 30.0;
+            craft.base.size = 3;
+            craft.research_cost_multiplier = 1.1;
+            craft.rotate_draw = false;
+            craft.region_rotated1 = 2;
+            craft.craft_time = 120.0;
+            craft.heat_output = 5.0;
+            craft.output_item = item_amount(items, "oxide", 1);
+            craft.drawer =
+                "DrawMulti(DrawRegion(-bottom), DrawLiquidRegion, DrawDefault, DrawHeatOutput)"
+                    .into();
+            craft.ambient_sound = "loopExtract".into();
+            craft.ambient_sound_volume = 0.08;
+            push_liquid_amount(&mut craft.consume_liquids, liquids, "ozone", 2.0 / 60.0);
+            push_item_amount(&mut craft.consume_items, items, "beryllium", 1);
+            craft.consume_power = 0.5;
+        },
+    );
+
+    registry.register_crafting(
+        "electric-heater",
+        CraftingBlockKind::HeatProducer,
+        |craft| {
+            craft.base.item_capacity = 0;
+            craft.base.size = 2;
+            craft.research_cost_multiplier = 4.0;
+            craft.rotate_draw = false;
+            craft.region_rotated1 = 1;
+            craft.heat_output = 3.0;
+            craft.drawer = "DrawMulti(DrawDefault, DrawHeatOutput)".into();
+            craft.ambient_sound = "loopHum".into();
+            craft.consume_power = 100.0 / 60.0;
+        },
+    );
+
+    registry.register_crafting("slag-heater", CraftingBlockKind::HeatProducer, |craft| {
+        craft.base.item_capacity = 0;
+        craft.base.liquid_capacity = 120.0;
+        craft.base.size = 3;
+        craft.research_cost_multiplier = 4.0;
+        craft.rotate_draw = false;
+        craft.region_rotated1 = 1;
+        craft.heat_output = 8.0;
+        craft.drawer =
+            "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(slag), DrawDefault, DrawHeatOutput)"
+                .into();
+        craft.ambient_sound = "loopHum".into();
+        push_liquid_amount(&mut craft.consume_liquids, liquids, "slag", 40.0 / 60.0);
+        for (name, amount) in [("tungsten", 1200), ("oxide", 900), ("beryllium", 2400)] {
+            push_item_amount(&mut craft.research_cost, items, name, amount);
+        }
+    });
+
+    registry.register_crafting("phase-heater", CraftingBlockKind::HeatProducer, |craft| {
+        craft.base.size = 2;
+        craft.heat_output = 15.0;
+        craft.craft_time = 480.0;
+        craft.drawer = "DrawMulti(DrawDefault, DrawHeatOutput)".into();
+        craft.ambient_sound = "loopHum".into();
+        push_item_amount(&mut craft.consume_items, items, "phase-fabric", 1);
+    });
+
+    registry.register_crafting(
+        "heat-redirector",
+        CraftingBlockKind::HeatConductor,
+        |craft| {
+            craft.base.group = crate::mindustry::world::meta::BlockGroup::Heat;
+            craft.base.size = 3;
+            craft.research_cost_multiplier = 10.0;
+            craft.region_rotated1 = 1;
+            craft.drawer = "DrawMulti(DrawDefault, DrawHeatOutput, DrawHeatInput(-heat))".into();
+        },
+    );
+
+    registry.register_crafting(
+        "small-heat-redirector",
+        CraftingBlockKind::HeatConductor,
+        |craft| {
+            craft.base.group = crate::mindustry::world::meta::BlockGroup::Heat;
+            craft.base.size = 2;
+            craft.research_cost_multiplier = 2.0;
+            craft.region_rotated1 = 1;
+            craft.drawer = "DrawMulti(DrawDefault, DrawHeatOutput, DrawHeatInput(-heat))".into();
+        },
+    );
+
+    registry.register_crafting("heat-router", CraftingBlockKind::HeatConductor, |craft| {
+        craft.base.group = crate::mindustry::world::meta::BlockGroup::Heat;
+        craft.base.size = 3;
+        craft.research_cost_multiplier = 10.0;
+        craft.region_rotated1 = 1;
+        craft.split_heat = true;
+        craft.drawer =
+            "DrawMulti(DrawDefault, DrawHeatOutput(-1), DrawHeatOutput, DrawHeatOutput(1), DrawHeatInput(-heat))"
+                .into();
+    });
+
+    registry.register_crafting(
+        "slag-incinerator",
+        CraftingBlockKind::ItemIncinerator,
+        |craft| {
+            craft.base.size = 1;
+            push_liquid_amount(&mut craft.consume_liquids, liquids, "slag", 0.0);
+        },
+    );
+
+    registry.register_crafting(
+        "carbide-crucible",
+        CraftingBlockKind::HeatCrafter,
+        |craft| {
+            craft.base.has_items = true;
+            craft.base.has_power = true;
+            craft.base.item_capacity = 20;
+            craft.base.size = 3;
+            craft.heat_requirement = 40.0;
+            craft.max_efficiency = 1.0;
+            craft.craft_effect = "none".into();
+            craft.output_item = item_amount(items, "carbide", 1);
+            craft.craft_time = 60.0 * 2.25 / 4.0;
+            craft.drawer =
+                "DrawMulti(DrawRegion(-bottom), DrawCrucibleFlame, DrawDefault, DrawHeatInput)"
+                    .into();
+            craft.ambient_sound = "loopSmelter".into();
+            craft.ambient_sound_volume = 0.09;
+            for (name, amount) in [("tungsten", 2), ("graphite", 3)] {
+                push_item_amount(&mut craft.consume_items, items, name, amount);
+            }
+            craft.consume_power = 2.0;
+        },
+    );
+
+    registry.register_crafting("surge-crucible", CraftingBlockKind::HeatCrafter, |craft| {
+        craft.base.item_capacity = 20;
+        craft.base.liquid_capacity = 400.0;
+        craft.base.size = 3;
+        craft.heat_requirement = 40.0;
+        craft.max_efficiency = 1.0;
+        craft.craft_time = 45.0;
+        craft.output_item = item_amount(items, "surge-alloy", 1);
+        craft.craft_effect = "RadialEffect(surgeCruciSmoke,4,90,5)".into();
+        craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawCircles, DrawLiquidRegion(slag), DrawDefault, DrawHeatInput, DrawHeatRegion, DrawHeatRegion(-vents))".into();
+        craft.ambient_sound = "loopSmelter".into();
+        craft.ambient_sound_volume = 0.9;
+        push_item_amount(&mut craft.consume_items, items, "silicon", 3);
+        push_liquid_amount(&mut craft.consume_liquids, liquids, "slag", 160.0 / 60.0);
+        craft.consume_power = 1.5;
+    });
+
+    registry.register_crafting(
+        "cyanogen-synthesizer",
+        CraftingBlockKind::HeatCrafter,
+        |craft| {
+            craft.base.liquid_capacity = 80.0;
+            craft.base.size = 3;
+            craft.heat_requirement = 20.0;
+            craft.max_efficiency = 1.0;
+            craft.output_liquid = liquid_amount(liquids, "cyanogen", 12.0 / 60.0);
+            craft.craft_time = 20.0;
+            craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(cyanogen), DrawParticles, DrawDefault, DrawHeatInput, DrawHeatRegion(-heat-top))".into();
+            craft.ambient_sound = "loopExtract".into();
+            craft.ambient_sound_volume = 0.08;
+            push_liquid_amount(&mut craft.consume_liquids, liquids, "arkycite", 160.0 / 60.0);
+            push_item_amount(&mut craft.consume_items, items, "graphite", 1);
+            craft.consume_power = 2.0;
+        },
+    );
+
+    registry.register_crafting(
+        "phase-synthesizer",
+        CraftingBlockKind::HeatCrafter,
+        |craft| {
+            craft.base.item_capacity = 40;
+            craft.base.liquid_capacity = 40.0;
+            craft.base.size = 3;
+            craft.heat_requirement = 32.0;
+            craft.max_efficiency = 1.0;
+            craft.output_item = item_amount(items, "phase-fabric", 1);
+            craft.craft_time = 30.0;
+            craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawSpikes, DrawMultiWeave, DrawDefault, DrawHeatInput, DrawHeatRegion(-vents))".into();
+            craft.ambient_sound = "loopTech".into();
+            craft.ambient_sound_volume = 0.04;
+            for (name, amount) in [("thorium", 2), ("sand", 6)] {
+                push_item_amount(&mut craft.consume_items, items, name, amount);
+            }
+            push_liquid_amount(&mut craft.consume_liquids, liquids, "ozone", 8.0 / 60.0);
+            craft.consume_power = 8.0;
+        },
+    );
+
+    registry.register_crafting("heat-reactor", CraftingBlockKind::HeatProducer, |craft| {
+        craft.base.build_visibility = crate::mindustry::world::meta::BuildVisibility::DebugOnly;
+        craft.base.item_capacity = 20;
+        craft.base.size = 3;
+        craft.craft_effect = "RadialEffect(heatReactorSmoke,4,90,7)".into();
+        craft.output_item = item_amount(items, "fissile-matter", 1);
+        craft.craft_time = 600.0;
+        push_item_amount(&mut craft.consume_items, items, "thorium", 3);
+        push_liquid_amount(&mut craft.consume_liquids, liquids, "nitrogen", 1.0 / 60.0);
+    });
+
+    registry.register_crafting("heat-source", CraftingBlockKind::HeatProducer, |craft| {
+        craft.base.build_visibility = crate::mindustry::world::meta::BuildVisibility::SandboxOnly;
+        craft.base.item_capacity = 0;
+        craft.base.size = 1;
+        craft.rotate_draw = false;
+        craft.region_rotated1 = 1;
+        craft.heat_output = 1000.0;
+        craft.warmup_rate = 1000.0;
+        craft.always_unlocked = true;
+        craft.all_database_tabs = true;
+        craft.ambient_sound = "none".into();
+        craft.drawer = "DrawMulti(DrawDefault, DrawHeatOutput)".into();
+    });
+}
+
+fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
+    items
+        .iter()
+        .find(|item| item.base.mappable.name.as_str() == name)
+}
+
+fn liquid_id(liquids: &[Liquid], name: &str) -> Option<ContentId> {
+    liquids
+        .iter()
+        .find(|liquid| liquid.base.mappable.name.as_str() == name)
+        .map(|liquid| liquid.base.mappable.base.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mindustry::content::{items, liquids};
+
+    fn load_test_registry() -> (Vec<Item>, Vec<Liquid>, BlockRegistry) {
+        let all_items = items::load();
+        let all_liquids = liquids::load();
+        let registry = load(&all_items, &all_liquids);
+        (all_items, all_liquids, registry)
+    }
+
+    #[test]
+    fn minimal_registry_keeps_air_first_and_names_indexed() {
+        let (_, _, registry) = load_test_registry();
+        assert_eq!(registry.id_by_name("air"), Some(0));
+        assert_eq!(registry.get(0).unwrap().base().name, "air");
+        assert!(registry.id_by_name("stone").is_some());
+        assert!(registry.id_by_name("stone-wall").is_some());
+    }
+
+    #[test]
+    fn floor_links_match_name_lookup_and_manual_overrides() {
+        let (_, _, registry) = load_test_registry();
+        let stone_wall = registry.id_by_name("stone-wall").unwrap();
+        let spore_wall = registry.id_by_name("spore-wall").unwrap();
+        let ice_wall = registry.id_by_name("ice-wall").unwrap();
+        let dune_wall = registry.id_by_name("dune-wall").unwrap();
+        let dirt_wall = registry.id_by_name("dirt-wall").unwrap();
+        let snow_wall = registry.id_by_name("snow-wall").unwrap();
+        let shale_wall = registry.id_by_name("shale-wall").unwrap();
+        let salt_wall = registry.id_by_name("salt-wall").unwrap();
+
+        assert_eq!(
+            registry.get_floor_by_name("stone").unwrap().wall,
+            stone_wall
+        );
+        assert_eq!(
+            registry.get_floor_by_name("spore-moss").unwrap().wall,
+            spore_wall
+        );
+        assert_eq!(
+            registry.get_floor_by_name("ice-snow").unwrap().wall,
+            ice_wall
+        );
+        assert_eq!(registry.get_floor_by_name("dirt").unwrap().wall, dirt_wall);
+        assert_eq!(registry.get_floor_by_name("snow").unwrap().wall, snow_wall);
+        assert_eq!(
+            registry.get_floor_by_name("shale").unwrap().wall,
+            shale_wall
+        );
+        assert_eq!(registry.get_floor_by_name("salt").unwrap().wall, salt_wall);
+        assert_eq!(
+            registry.get_floor_by_name("basalt").unwrap().wall,
+            dune_wall
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("darksand-tainted-water")
+                .unwrap()
+                .wall,
+            dune_wall
+        );
+    }
+
+    #[test]
+    fn metal_and_dark_panel_floors_link_to_dark_metal_wall() {
+        let (_, _, registry) = load_test_registry();
+        let dark_metal = registry.id_by_name("dark-metal").unwrap();
+        assert!(matches!(
+            registry.get(dark_metal).unwrap(),
+            BlockDef::StaticWall(_)
+        ));
+
+        for (floor_name, variants) in [
+            ("metal-floor", 0),
+            ("metal-floor-damaged", 3),
+            ("metal-floor-2", 0),
+            ("metal-floor-3", 0),
+            ("metal-floor-4", 0),
+            ("metal-floor-5", 0),
+            ("dark-panel-1", 0),
+            ("dark-panel-2", 0),
+            ("dark-panel-3", 0),
+            ("dark-panel-4", 0),
+            ("dark-panel-5", 0),
+            ("dark-panel-6", 0),
+        ] {
+            let floor = registry.get_floor_by_name(floor_name).unwrap();
+            assert_eq!(floor.wall, dark_metal, "{floor_name} wall link");
+            assert_eq!(floor.base.variants, variants, "{floor_name} variants");
+        }
+    }
+
+    #[test]
+    fn metal_tiles_and_walls_keep_autotile_light_fields() {
+        let (_, _, registry) = load_test_registry();
+
+        for floor_name in [
+            "metal-tiles-1",
+            "metal-tiles-2",
+            "metal-tiles-3",
+            "metal-tiles-4",
+            "metal-tiles-5",
+            "metal-tiles-6",
+            "metal-tiles-7",
+            "metal-tiles-8",
+            "metal-tiles-9",
+            "metal-tiles-10",
+            "metal-tiles-11",
+            "metal-tiles-12",
+            "metal-tiles-13",
+        ] {
+            let floor = registry.get_floor_by_name(floor_name).unwrap();
+            assert!(floor.autotile, "{floor_name} autotile");
+            assert!(!floor.draw_edge_out, "{floor_name} draw_edge_out");
+            assert!(!floor.draw_edge_in, "{floor_name} draw_edge_in");
+        }
+
+        let tiles6 = registry.get_floor_by_name("metal-tiles-6").unwrap();
+        assert!(tiles6.base.emit_light);
+        assert_eq!(tiles6.base.light_radius, 30.0);
+        assert_eq!(tiles6.base.light_color_rgba, 0xff00004d);
+
+        let tiles12 = registry.get_floor_by_name("metal-tiles-12").unwrap();
+        assert_eq!(tiles12.autotile_variants, 4);
+        assert!(tiles12.base.emit_light);
+        assert_eq!(tiles12.base.light_radius, 30.0);
+        assert_eq!(tiles12.base.light_color_rgba, 0xff00004d);
+
+        assert_eq!(
+            registry
+                .get_floor_by_name("metal-tiles-7")
+                .unwrap()
+                .autotile_mid_variants,
+            9
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("metal-tiles-8")
+                .unwrap()
+                .autotile_mid_variants,
+            2
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("metal-tiles-11")
+                .unwrap()
+                .autotile_variants,
+            3
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("metal-tiles-13")
+                .unwrap()
+                .autotile_mid_variants,
+            6
+        );
+
+        for wall_name in ["metal-wall-1", "metal-wall-2", "metal-wall-3"] {
+            let wall = registry.get_by_name(wall_name).unwrap();
+            let BlockDef::StaticWall(wall) = wall else {
+                panic!("{wall_name} should be a static wall");
+            };
+            assert!(wall.autotile, "{wall_name} autotile");
+        }
+        let BlockDef::StaticWall(metal_wall2) = registry.get_by_name("metal-wall-2").unwrap()
+        else {
+            panic!("metal-wall-2 should be a static wall");
+        };
+        assert_eq!(metal_wall2.autotile_mid_variants, 2);
+    }
+
+    #[test]
+    fn extended_environment_floors_and_walls_keep_upstream_subset() {
+        let (_, all_liquids, registry) = load_test_registry();
+        let arkycite = liquid_id(&all_liquids, "arkycite").unwrap();
+        let basalt = registry.id_by_name("basalt").unwrap();
+        let rhyolite = registry.id_by_name("rhyolite").unwrap();
+        let ferric_stone = registry.id_by_name("ferric-stone").unwrap();
+
+        let hotrock = registry.get_floor_by_name("hotrock").unwrap();
+        assert_eq!(hotrock.blend_group, basalt);
+        assert!(hotrock.base.emit_light);
+        assert_eq!(hotrock.base.light_radius, 30.0);
+
+        let magmarock = registry.get_floor_by_name("magmarock").unwrap();
+        assert_eq!(magmarock.blend_group, basalt);
+        assert!(magmarock.base.emit_light);
+        assert_eq!(magmarock.base.light_radius, 50.0);
+
+        assert_eq!(
+            registry
+                .get_floor_by_name("rhyolite-crater")
+                .unwrap()
+                .blend_group,
+            rhyolite
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("rough-rhyolite")
+                .unwrap()
+                .base
+                .variants,
+            3
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("carbon-stone")
+                .unwrap()
+                .base
+                .variants,
+            4
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("ferric-craters")
+                .unwrap()
+                .blend_group,
+            ferric_stone
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("beryllic-stone")
+                .unwrap()
+                .base
+                .variants,
+            4
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("crystalline-stone")
+                .unwrap()
+                .base
+                .variants,
+            5
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("red-stone")
+                .unwrap()
+                .base
+                .variants,
+            4
+        );
+        let core_zone = registry.get_floor_by_name("core-zone").unwrap();
+        assert_eq!(core_zone.base.variants, 0);
+        assert!(core_zone.allow_core_placement);
+
+        let arkycite_floor = registry.get_floor_by_name("arkycite-floor").unwrap();
+        assert_eq!(arkycite_floor.speed_multiplier, 0.3);
+        assert_eq!(arkycite_floor.base.variants, 0);
+        assert_eq!(arkycite_floor.liquid_drop, Some(arkycite));
+        assert!(arkycite_floor.is_liquid);
+        assert_eq!(arkycite_floor.drown_time, 200.0);
+        assert_eq!(arkycite_floor.base.cache_layer, CacheLayer::Arkycite);
+        assert_eq!(arkycite_floor.base.albedo, 0.9);
+        assert!(arkycite_floor.base.obstructs_light);
+
+        let sand_wall = registry.id_by_name("sand-wall").unwrap();
+        assert_eq!(
+            registry.get_floor_by_name("sand-floor").unwrap().wall,
+            sand_wall
+        );
+        assert_eq!(
+            registry.get_floor_by_name("deep-water").unwrap().wall,
+            sand_wall
+        );
+        assert_eq!(
+            registry.get_floor_by_name("shallow-water").unwrap().wall,
+            sand_wall
+        );
+
+        for (floor_name, wall_name) in [
+            ("dacite", "dacite-wall"),
+            ("regolith", "regolith-wall"),
+            ("yellow-stone", "yellow-stone-wall"),
+            ("molten-slag", "yellow-stone-wall"),
+            ("yellow-stone-plates", "yellow-stone-wall"),
+            ("rhyolite", "rhyolite-wall"),
+            ("rhyolite-crater", "rhyolite-wall"),
+            ("rough-rhyolite", "rhyolite-wall"),
+            ("carbon-stone", "carbon-wall"),
+            ("ferric-stone", "ferric-stone-wall"),
+            ("beryllic-stone", "beryllic-stone-wall"),
+            ("arkycite-floor", "arkyic-wall"),
+            ("arkyic-stone", "arkyic-wall"),
+            ("crystal-floor", "crystalline-stone-wall"),
+            ("crystalline-stone", "crystalline-stone-wall"),
+            ("red-ice", "red-ice-wall"),
+            ("red-stone", "red-stone-wall"),
+            ("dense-red-stone", "red-stone-wall"),
+        ] {
+            assert_eq!(
+                registry.get_floor_by_name(floor_name).unwrap().wall,
+                registry.id_by_name(wall_name).unwrap(),
+                "{floor_name} wall"
+            );
+        }
+
+        let BlockDef::StaticWall(arkyic_wall) = registry.get_by_name("arkyic-wall").unwrap() else {
+            panic!("arkyic-wall should be a static wall");
+        };
+        assert_eq!(arkyic_wall.base.variants, 3);
+        let BlockDef::StaticWall(crystalline_wall) =
+            registry.get_by_name("crystalline-stone-wall").unwrap()
+        else {
+            panic!("crystalline-stone-wall should be a static wall");
+        };
+        assert_eq!(crystalline_wall.base.variants, 4);
+    }
+
+    #[test]
+    fn static_trees_tree_blocks_and_tall_blocks_keep_upstream_subset() {
+        let (_, _, registry) = load_test_registry();
+        let spore_pine = registry.id_by_name("spore-pine").unwrap();
+        assert_eq!(registry.get_floor_by_name("moss").unwrap().wall, spore_pine);
+
+        let BlockDef::StaticTree(red_diamond) = registry.get_by_name("red-diamond-wall").unwrap()
+        else {
+            panic!("red-diamond-wall should be a static tree");
+        };
+        assert_eq!(red_diamond.wall.base.variants, 3);
+        assert_eq!(red_diamond.wall.base.cache_layer, CacheLayer::Walls);
+
+        for name in ["spore-pine", "snow-pine", "pine"] {
+            let BlockDef::StaticTree(tree) = registry.get_by_name(name).unwrap() else {
+                panic!("{name} should be a static tree");
+            };
+            assert_eq!(tree.wall.base.variants, 0, "{name} variants");
+            assert_eq!(tree.wall.base.cache_layer, CacheLayer::Walls);
+        }
+
+        for name in ["white-tree-dead", "white-tree"] {
+            let BlockDef::TreeBlock(tree) = registry.get_by_name(name).unwrap() else {
+                panic!("{name} should be a tree block");
+            };
+            assert!(tree.base.solid);
+            assert_eq!(tree.base.clip_size, 90.0);
+            assert!(tree.base.custom_shadow);
+            assert_eq!(tree.shadow_offset, -4.0);
+        }
+
+        for name in ["crystal-cluster", "vibrant-crystal-cluster"] {
+            let BlockDef::TallBlock(tall) = registry.get_by_name(name).unwrap() else {
+                panic!("{name} should be a tall block");
+            };
+            assert_eq!(tall.base.variants, 3);
+            assert_eq!(tall.base.clip_size, 128.0);
+            assert!(tall.base.solid);
+            assert!(tall.base.custom_shadow);
+            assert_eq!(tall.shadow_alpha, 0.6);
+            assert_eq!(tall.shadow_offset, -3.0);
+        }
+
+        for name in ["crystal-blocks", "crystal-orbs"] {
+            let BlockDef::TallBlock(tall) = registry.get_by_name(name).unwrap() else {
+                panic!("{name} should be a tall block");
+            };
+            assert_eq!(tall.base.variants, 3);
+            assert_eq!(tall.base.clip_size, 128.0);
+            assert_eq!(tall.shadow_alpha, 0.5);
+            assert_eq!(tall.shadow_offset, -2.5);
+        }
+    }
+
+    #[test]
+    fn overlay_floors_and_graphitic_wall_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        for name in ["pebbles", "tendrils"] {
+            let floor = registry.get_floor_by_name(name).unwrap();
+            assert!(floor.overlay_floor, "{name} overlay marker");
+            assert!(!floor.base.use_color, "{name} use_color");
+        }
+
+        let graphite = find_item(&all_items, "graphite").unwrap();
+        let BlockDef::StaticWall(graphitic) = registry.get_by_name("graphitic-wall").unwrap()
+        else {
+            panic!("graphitic-wall should be a static wall");
+        };
+        assert_eq!(
+            graphitic.base.item_drop,
+            Some(graphite.base.mappable.base.id)
+        );
+        assert_eq!(graphitic.base.variants, 3);
+    }
+
+    #[test]
+    fn prop_and_boulder_blocks_keep_decoration_links() {
+        let (_, _, registry) = load_test_registry();
+        let boulder = registry.id_by_name("boulder").unwrap();
+        let snow_boulder = registry.id_by_name("snow-boulder").unwrap();
+        let shale_boulder = registry.id_by_name("shale-boulder").unwrap();
+        let sand_boulder = registry.id_by_name("sand-boulder").unwrap();
+        let basalt_boulder = registry.id_by_name("basalt-boulder").unwrap();
+        let dacite_boulder = registry.id_by_name("dacite-boulder").unwrap();
+        let carbon_boulder = registry.id_by_name("carbon-boulder").unwrap();
+        let ferric_boulder = registry.id_by_name("ferric-boulder").unwrap();
+        let beryllic_boulder = registry.id_by_name("beryllic-boulder").unwrap();
+        let yellow_stone_boulder = registry.id_by_name("yellow-stone-boulder").unwrap();
+        let arkyic_boulder = registry.id_by_name("arkyic-boulder").unwrap();
+        let crystalline_boulder = registry.id_by_name("crystalline-boulder").unwrap();
+        let red_ice_boulder = registry.id_by_name("red-ice-boulder").unwrap();
+        let rhyolite_boulder = registry.id_by_name("rhyolite-boulder").unwrap();
+        let red_stone_boulder = registry.id_by_name("red-stone-boulder").unwrap();
+
+        let BlockDef::Prop(spore_cluster) = registry.get_by_name("spore-cluster").unwrap() else {
+            panic!("spore-cluster should be a prop");
+        };
+        assert_eq!(spore_cluster.base.variants, 3);
+        assert_eq!(spore_cluster.base.break_sound, "plantBreak");
+        assert!(!spore_cluster.base.obstructs_light);
+
+        let BlockDef::Prop(redweed) = registry.get_by_name("redweed").unwrap() else {
+            panic!("redweed should be a prop");
+        };
+        assert_eq!(redweed.kind, PropKind::Seaweed);
+        assert_eq!(redweed.base.variants, 3);
+        assert!(!redweed.base.obstructs_light);
+
+        let BlockDef::Prop(yellowcoral) = registry.get_by_name("yellowcoral").unwrap() else {
+            panic!("yellowcoral should be a prop");
+        };
+        let sea_bush = yellowcoral.sea_bush.as_ref().unwrap();
+        assert_eq!(yellowcoral.kind, PropKind::SeaBush);
+        assert_eq!(sea_bush.lobes_min, 2);
+        assert_eq!(sea_bush.lobes_max, 3);
+        assert_eq!(sea_bush.mag_min, 2.0);
+        assert_eq!(sea_bush.mag_max, 8.0);
+        assert_eq!(sea_bush.origin, 0.3);
+        assert_eq!(sea_bush.spread, 40.0);
+        assert_eq!(sea_bush.scl_min, 60.0);
+        assert_eq!(sea_bush.scl_max, 100.0);
+
+        assert_eq!(
+            registry.get_floor_by_name("stone").unwrap().decoration,
+            boulder
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("crater-stone")
+                .unwrap()
+                .decoration,
+            boulder
+        );
+        for floor_name in ["snow", "ice", "ice-snow", "salt"] {
+            assert_eq!(
+                registry.get_floor_by_name(floor_name).unwrap().decoration,
+                snow_boulder,
+                "{floor_name} decoration"
+            );
+        }
+        assert_eq!(
+            registry.get_floor_by_name("shale").unwrap().decoration,
+            shale_boulder
+        );
+        assert_eq!(
+            registry.get_floor_by_name("sand-floor").unwrap().decoration,
+            sand_boulder
+        );
+        for floor_name in ["basalt", "hotrock", "darksand", "magmarock"] {
+            assert_eq!(
+                registry.get_floor_by_name(floor_name).unwrap().decoration,
+                basalt_boulder,
+                "{floor_name} decoration"
+            );
+        }
+        assert_eq!(
+            registry.get_floor_by_name("dacite").unwrap().decoration,
+            dacite_boulder
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("carbon-stone")
+                .unwrap()
+                .decoration,
+            carbon_boulder
+        );
+        for floor_name in ["ferric-stone", "ferric-craters"] {
+            assert_eq!(
+                registry.get_floor_by_name(floor_name).unwrap().decoration,
+                ferric_boulder,
+                "{floor_name} decoration"
+            );
+        }
+        assert_eq!(
+            registry
+                .get_floor_by_name("beryllic-stone")
+                .unwrap()
+                .decoration,
+            beryllic_boulder
+        );
+        for floor_name in ["yellow-stone", "regolith", "yellow-stone-plates"] {
+            assert_eq!(
+                registry.get_floor_by_name(floor_name).unwrap().decoration,
+                yellow_stone_boulder,
+                "{floor_name} decoration"
+            );
+        }
+        assert_eq!(
+            registry
+                .get_floor_by_name("arkyic-stone")
+                .unwrap()
+                .decoration,
+            arkyic_boulder
+        );
+        let BlockDef::Prop(arkyic) = registry.get_by_name("arkyic-boulder").unwrap() else {
+            panic!("arkyic-boulder should be a prop");
+        };
+        assert_eq!(arkyic.base.variants, 3);
+        assert!(arkyic.base.custom_shadow);
+        assert!(!arkyic.base.obstructs_light);
+
+        assert_eq!(
+            registry
+                .get_floor_by_name("crystalline-stone")
+                .unwrap()
+                .decoration,
+            crystalline_boulder
+        );
+        assert_eq!(
+            registry.get_floor_by_name("red-ice").unwrap().decoration,
+            red_ice_boulder
+        );
+        for floor_name in ["rhyolite", "rough-rhyolite"] {
+            assert_eq!(
+                registry.get_floor_by_name(floor_name).unwrap().decoration,
+                rhyolite_boulder,
+                "{floor_name} decoration"
+            );
+        }
+        for floor_name in ["dense-red-stone", "red-stone"] {
+            assert_eq!(
+                registry.get_floor_by_name(floor_name).unwrap().decoration,
+                red_stone_boulder,
+                "{floor_name} decoration"
+            );
+        }
+    }
+
+    #[test]
+    fn ore_blocks_keep_item_drop_color_and_generation_values() {
+        let (all_items, _, registry) = load_test_registry();
+        let copper = find_item(&all_items, "copper").unwrap();
+        let ore = registry.get_floor_by_name("ore-copper").unwrap();
+        assert_eq!(ore.base.item_drop, Some(copper.base.mappable.base.id));
+        assert_eq!(ore.base.map_color_rgba, copper.color_rgba);
+        assert!(ore.ore_default);
+        assert_eq!(ore.ore_threshold, 0.81);
+        assert_eq!(ore.ore_scale, 23.47619);
+
+        let thorium = find_item(&all_items, "thorium").unwrap();
+        let wall_ore = registry.get_floor_by_name("ore-wall-thorium").unwrap();
+        assert_eq!(wall_ore.base.item_drop, Some(thorium.base.mappable.base.id));
+        assert!(wall_ore.wall_ore);
+        assert_eq!(
+            wall_ore.base.localized_name.as_deref(),
+            Some("thorium wall ore")
+        );
+    }
+
+    #[test]
+    fn early_crafting_blocks_keep_upstream_recipe_and_runtime_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let graphite_press = registry.get_crafting_by_name("graphite-press").unwrap();
+        assert_eq!(graphite_press.kind, CraftingBlockKind::GenericCrafter);
+        assert_eq!(graphite_press.base.size, 2);
+        assert!(graphite_press.base.has_items);
+        assert_eq!(graphite_press.craft_effect, "pulverizeMedium");
+        assert_eq!(graphite_press.craft_time, 90.0);
+        assert_eq!(
+            graphite_press.output_item,
+            Some(ItemAmount {
+                item: item_id("graphite"),
+                amount: 1
+            })
+        );
+        assert_eq!(
+            graphite_press.consume_items,
+            vec![ItemAmount {
+                item: item_id("coal"),
+                amount: 2
+            }]
+        );
+
+        let multi_press = registry.get_crafting_by_name("multi-press").unwrap();
+        assert_eq!(multi_press.base.size, 3);
+        assert_eq!(multi_press.base.item_capacity, 20);
+        assert!(multi_press.base.has_items);
+        assert!(multi_press.base.has_liquids);
+        assert!(multi_press.base.has_power);
+        assert_eq!(multi_press.craft_time, 30.0);
+        assert_eq!(multi_press.consume_power, 1.8);
+        assert_eq!(
+            multi_press.output_item,
+            Some(ItemAmount {
+                item: item_id("graphite"),
+                amount: 2
+            })
+        );
+        assert_eq!(
+            multi_press.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("water"),
+                amount: 0.1
+            }]
+        );
+
+        let silicon = registry.get_crafting_by_name("silicon-smelter").unwrap();
+        assert_eq!(silicon.craft_effect, "smeltsmoke");
+        assert_eq!(silicon.craft_time, 40.0);
+        assert_eq!(silicon.consume_power, 0.50);
+        assert_eq!(silicon.ambient_sound, "loopSmelter");
+        assert_eq!(silicon.ambient_sound_volume, 0.07);
+        assert_eq!(
+            silicon.consume_items,
+            vec![
+                ItemAmount {
+                    item: item_id("coal"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("sand"),
+                    amount: 2
+                }
+            ]
+        );
+
+        let crucible = registry.get_crafting_by_name("silicon-crucible").unwrap();
+        assert_eq!(crucible.kind, CraftingBlockKind::AttributeCrafter);
+        assert_eq!(crucible.base.size, 3);
+        assert_eq!(crucible.base.item_capacity, 30);
+        assert_eq!(crucible.boost_scale, 0.15);
+        assert_eq!(
+            crucible.output_item,
+            Some(ItemAmount {
+                item: item_id("silicon"),
+                amount: 8
+            })
+        );
+
+        let kiln = registry.get_crafting_by_name("kiln").unwrap();
+        assert_eq!(
+            kiln.output_item,
+            Some(ItemAmount {
+                item: item_id("metaglass"),
+                amount: 1
+            })
+        );
+        assert_eq!(kiln.craft_time, 30.0);
+        assert!(kiln.base.has_items);
+        assert!(kiln.base.has_power);
+    }
+
+    #[test]
+    fn liquid_and_space_enabled_crafting_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let plastanium = registry
+            .get_crafting_by_name("plastanium-compressor")
+            .unwrap();
+        assert_eq!(plastanium.base.health, 320);
+        assert_eq!(plastanium.base.liquid_capacity, 60.0);
+        assert_eq!(plastanium.craft_effect, "formsmoke");
+        assert_eq!(plastanium.update_effect, "plasticburn");
+        assert_eq!(plastanium.consume_power, 3.0);
+        assert_eq!(
+            plastanium.output_item,
+            Some(ItemAmount {
+                item: item_id("plastanium"),
+                amount: 1
+            })
+        );
+        assert_eq!(
+            plastanium.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("oil"),
+                amount: 0.25
+            }]
+        );
+
+        let phase = registry.get_crafting_by_name("phase-weaver").unwrap();
+        assert_ne!(phase.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(phase.base.item_capacity, 30);
+        assert_eq!(phase.ambient_sound, "loopTech");
+        assert_eq!(
+            phase.output_item,
+            Some(ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            })
+        );
+
+        let surge = registry.get_crafting_by_name("surge-smelter").unwrap();
+        assert_eq!(surge.base.size, 3);
+        assert_eq!(surge.base.item_capacity, 20);
+        assert_eq!(surge.consume_power, 4.0);
+        assert_eq!(
+            surge.output_item,
+            Some(ItemAmount {
+                item: item_id("surge-alloy"),
+                amount: 1
+            })
+        );
+
+        let cryo = registry.get_crafting_by_name("cryofluid-mixer").unwrap();
+        assert!(cryo.outputs_liquid);
+        assert!(!cryo.rotate);
+        assert!(cryo.base.solid);
+        assert_eq!(cryo.base.env_enabled, Env::ANY);
+        assert_eq!(cryo.base.liquid_capacity, 36.0);
+        assert_eq!(cryo.light_liquid, Some(liquid_id("cryofluid")));
+        assert_eq!(
+            cryo.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("cryofluid"),
+                amount: 12.0 / 60.0
+            })
+        );
+
+        let pyratite = registry.get_crafting_by_name("pyratite-mixer").unwrap();
+        assert_ne!(pyratite.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(pyratite.ambient_sound, "loopMachineSpin");
+        assert_eq!(pyratite.ambient_sound_volume, 0.1);
+        assert_eq!(
+            pyratite.output_item,
+            Some(ItemAmount {
+                item: item_id("pyratite"),
+                amount: 1
+            })
+        );
+    }
+
+    #[test]
+    fn separator_and_remaining_early_crafting_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let blast = registry.get_crafting_by_name("blast-mixer").unwrap();
+        assert_ne!(blast.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(blast.ambient_sound, "loopMachineSpin");
+        assert_eq!(blast.ambient_sound_volume, 0.12);
+        assert_eq!(
+            blast.output_item,
+            Some(ItemAmount {
+                item: item_id("blast-compound"),
+                amount: 1
+            })
+        );
+        assert_eq!(
+            blast.consume_items,
+            vec![
+                ItemAmount {
+                    item: item_id("pyratite"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("spore-pod"),
+                    amount: 1
+                }
+            ]
+        );
+
+        let melter = registry.get_crafting_by_name("melter").unwrap();
+        assert_eq!(melter.base.health, 200);
+        assert_eq!(melter.craft_time, 10.0);
+        assert_eq!(melter.consume_power, 1.0);
+        assert_eq!(
+            melter.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("slag"),
+                amount: 12.0 / 60.0
+            })
+        );
+
+        let separator = registry.get_crafting_by_name("separator").unwrap();
+        assert_eq!(separator.kind, CraftingBlockKind::Separator);
+        assert_eq!(separator.base.size, 2);
+        assert_eq!(separator.craft_time, 35.0);
+        assert_eq!(separator.consume_power, 1.1);
+        assert_eq!(
+            separator.results,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 5
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 3
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 2
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 2
+                }
+            ]
+        );
+
+        let disassembler = registry.get_crafting_by_name("disassembler").unwrap();
+        assert_eq!(disassembler.kind, CraftingBlockKind::Separator);
+        assert_eq!(disassembler.base.size, 3);
+        assert_eq!(disassembler.base.item_capacity, 20);
+        assert_eq!(disassembler.craft_time, 15.0);
+        assert_eq!(disassembler.consume_power, 4.0);
+        assert_eq!(
+            disassembler.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("slag"),
+                amount: 0.12
+            }]
+        );
+
+        let spore = registry.get_crafting_by_name("spore-press").unwrap();
+        assert_eq!(spore.base.health, 320);
+        assert_eq!(spore.base.liquid_capacity, 60.0);
+        assert_eq!(spore.craft_time, 20.0);
+        assert_eq!(spore.consume_power, 0.7);
+        assert_eq!(
+            spore.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("oil"),
+                amount: 18.0 / 60.0
+            })
+        );
+    }
+
+    #[test]
+    fn next_low_risk_crafting_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let pulverizer = registry.get_crafting_by_name("pulverizer").unwrap();
+        assert_eq!(pulverizer.output_item, item_amount(&all_items, "sand", 1));
+        assert_eq!(pulverizer.craft_effect, "pulverize");
+        assert_eq!(pulverizer.update_effect, "pulverizeSmall");
+        assert_eq!(pulverizer.craft_time, 40.0);
+        assert_eq!(pulverizer.ambient_sound, "loopGrind");
+        assert_eq!(pulverizer.ambient_sound_volume, 0.025);
+        assert_eq!(
+            pulverizer.consume_items,
+            vec![ItemAmount {
+                item: item_id("scrap"),
+                amount: 1
+            }]
+        );
+
+        let coal = registry.get_crafting_by_name("coal-centrifuge").unwrap();
+        assert_eq!(coal.base.size, 2);
+        assert!(coal.base.has_items);
+        assert!(coal.base.has_liquids);
+        assert!(coal.base.has_power);
+        assert!(!coal.rotate_draw);
+        assert_eq!(coal.craft_effect, "coalSmeltsmoke");
+        assert_eq!(coal.output_item, item_amount(&all_items, "coal", 1));
+        assert_eq!(
+            coal.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("oil"),
+                amount: 0.1
+            }]
+        );
+
+        let arc = registry
+            .get_crafting_by_name("silicon-arc-furnace")
+            .unwrap();
+        assert_eq!(arc.base.size, 3);
+        assert_eq!(arc.base.item_capacity, 30);
+        assert_eq!(arc.base.env_enabled & Env::SPACE, Env::SPACE);
+        assert_eq!(arc.base.env_enabled & Env::UNDERWATER, Env::UNDERWATER);
+        assert_eq!(arc.base.env_disabled, Env::NONE);
+        assert_eq!(arc.fog_radius, 3.0);
+        assert_eq!(arc.output_item, item_amount(&all_items, "silicon", 4));
+        assert_eq!(
+            arc.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 50
+                }
+            ]
+        );
+
+        let slag = registry.get_crafting_by_name("slag-centrifuge").unwrap();
+        assert_eq!(
+            slag.base.build_visibility,
+            crate::mindustry::world::meta::BuildVisibility::DebugOnly
+        );
+        assert_eq!(slag.base.size, 3);
+        assert_eq!(slag.base.liquid_capacity, 80.0);
+        assert!(slag.outputs_liquid);
+        assert_eq!(slag.craft_time, 120.0);
+        assert_eq!(
+            slag.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("gallium"),
+                amount: 1.0 / 60.0
+            })
+        );
+        assert_eq!(
+            slag.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("slag"),
+                amount: 40.0 / 60.0
+            }]
+        );
+        assert_eq!(slag.consume_power, 2.0 / 60.0);
+    }
+
+    #[test]
+    fn erekir_multi_liquid_and_heat_producer_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let electrolyzer = registry.get_crafting_by_name("electrolyzer").unwrap();
+        assert_eq!(electrolyzer.kind, CraftingBlockKind::GenericCrafter);
+        assert_eq!(
+            electrolyzer.base.group,
+            crate::mindustry::world::meta::BlockGroup::Liquids
+        );
+        assert_eq!(electrolyzer.base.item_capacity, 0);
+        assert_eq!(electrolyzer.base.liquid_capacity, 50.0);
+        assert!(electrolyzer.rotate);
+        assert!(electrolyzer.invert_flip);
+        assert_eq!(electrolyzer.region_rotated1, 3);
+        assert_eq!(electrolyzer.liquid_output_directions, vec![1, 3]);
+        assert_eq!(
+            electrolyzer.output_liquids,
+            vec![
+                LiquidAmount {
+                    liquid: liquid_id("ozone"),
+                    amount: 4.0 / 60.0
+                },
+                LiquidAmount {
+                    liquid: liquid_id("hydrogen"),
+                    amount: 6.0 / 60.0
+                }
+            ]
+        );
+
+        let atmospheric = registry
+            .get_crafting_by_name("atmospheric-concentrator")
+            .unwrap();
+        assert_eq!(atmospheric.kind, CraftingBlockKind::HeatCrafter);
+        assert_eq!(atmospheric.base.size, 3);
+        assert_eq!(atmospheric.base.item_capacity, 0);
+        assert_eq!(atmospheric.base.liquid_capacity, 60.0);
+        assert_eq!(atmospheric.heat_requirement, 24.0);
+        assert_eq!(atmospheric.max_efficiency, 1.0);
+        assert_eq!(
+            atmospheric.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("nitrogen"),
+                amount: 16.0 / 60.0
+            })
+        );
+
+        let oxidation = registry.get_crafting_by_name("oxidation-chamber").unwrap();
+        assert_eq!(oxidation.kind, CraftingBlockKind::HeatProducer);
+        assert!(!oxidation.rotate_draw);
+        assert_eq!(oxidation.region_rotated1, 2);
+        assert_eq!(oxidation.heat_output, 5.0);
+        assert_eq!(oxidation.output_item, item_amount(&all_items, "oxide", 1));
+        assert_eq!(
+            oxidation.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("ozone"),
+                amount: 2.0 / 60.0
+            }]
+        );
+
+        let electric = registry.get_crafting_by_name("electric-heater").unwrap();
+        assert_eq!(electric.kind, CraftingBlockKind::HeatProducer);
+        assert_eq!(electric.base.size, 2);
+        assert_eq!(electric.heat_output, 3.0);
+        assert_eq!(electric.consume_power, 100.0 / 60.0);
+
+        let slag_heater = registry.get_crafting_by_name("slag-heater").unwrap();
+        assert_eq!(slag_heater.base.liquid_capacity, 120.0);
+        assert_eq!(slag_heater.heat_output, 8.0);
+        assert_eq!(
+            slag_heater.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 1200
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 900
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 2400
+                }
+            ]
+        );
+
+        let phase_heater = registry.get_crafting_by_name("phase-heater").unwrap();
+        assert_eq!(phase_heater.heat_output, 15.0);
+        assert_eq!(phase_heater.craft_time, 480.0);
+        assert_eq!(
+            phase_heater.consume_items,
+            vec![ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn heat_chain_blocks_keep_upstream_heat_and_recipe_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        for (name, size, split) in [
+            ("heat-redirector", 3, false),
+            ("small-heat-redirector", 2, false),
+            ("heat-router", 3, true),
+        ] {
+            let heat = registry.get_crafting_by_name(name).unwrap();
+            assert_eq!(heat.kind, CraftingBlockKind::HeatConductor);
+            assert_eq!(
+                heat.base.group,
+                crate::mindustry::world::meta::BlockGroup::Heat
+            );
+            assert_eq!(heat.base.size, size);
+            assert_eq!(heat.region_rotated1, 1);
+            assert_eq!(heat.split_heat, split);
+        }
+
+        let incinerator = registry.get_crafting_by_name("slag-incinerator").unwrap();
+        assert_eq!(incinerator.kind, CraftingBlockKind::ItemIncinerator);
+        assert_eq!(
+            incinerator.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("slag"),
+                amount: 0.0
+            }]
+        );
+
+        let carbide = registry.get_crafting_by_name("carbide-crucible").unwrap();
+        assert_eq!(carbide.kind, CraftingBlockKind::HeatCrafter);
+        assert_eq!(carbide.heat_requirement, 40.0);
+        assert_eq!(carbide.max_efficiency, 1.0);
+        assert_eq!(carbide.output_item, item_amount(&all_items, "carbide", 1));
+        assert_eq!(carbide.craft_time, 60.0 * 2.25 / 4.0);
+
+        let surge = registry.get_crafting_by_name("surge-crucible").unwrap();
+        assert_eq!(surge.kind, CraftingBlockKind::HeatCrafter);
+        assert_eq!(surge.base.liquid_capacity, 400.0);
+        assert_eq!(surge.heat_requirement, 40.0);
+        assert_eq!(surge.craft_time, 45.0);
+        assert_eq!(
+            surge.output_item,
+            Some(ItemAmount {
+                item: item_id("surge-alloy"),
+                amount: 1
+            })
+        );
+        assert_eq!(
+            surge.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("slag"),
+                amount: 160.0 / 60.0
+            }]
+        );
+
+        let cyanogen = registry
+            .get_crafting_by_name("cyanogen-synthesizer")
+            .unwrap();
+        assert_eq!(cyanogen.heat_requirement, 20.0);
+        assert_eq!(cyanogen.craft_time, 20.0);
+        assert_eq!(
+            cyanogen.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("cyanogen"),
+                amount: 12.0 / 60.0
+            })
+        );
+
+        let phase = registry.get_crafting_by_name("phase-synthesizer").unwrap();
+        assert_eq!(phase.heat_requirement, 32.0);
+        assert_eq!(phase.base.item_capacity, 40);
+        assert_eq!(phase.base.liquid_capacity, 40.0);
+        assert_eq!(
+            phase.output_item,
+            Some(ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            })
+        );
+
+        let reactor = registry.get_crafting_by_name("heat-reactor").unwrap();
+        assert_eq!(reactor.kind, CraftingBlockKind::HeatProducer);
+        assert_eq!(
+            reactor.base.build_visibility,
+            crate::mindustry::world::meta::BuildVisibility::DebugOnly
+        );
+        assert_eq!(reactor.craft_time, 600.0);
+        assert_eq!(reactor.base.item_capacity, 20);
+        assert_eq!(
+            reactor.output_item,
+            Some(ItemAmount {
+                item: item_id("fissile-matter"),
+                amount: 1
+            })
+        );
+        assert_eq!(
+            reactor.consume_items,
+            vec![ItemAmount {
+                item: item_id("thorium"),
+                amount: 3
+            }]
+        );
+        assert_eq!(
+            reactor.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("nitrogen"),
+                amount: 1.0 / 60.0
+            }]
+        );
+
+        let source = registry.get_crafting_by_name("heat-source").unwrap();
+        assert_eq!(source.kind, CraftingBlockKind::HeatProducer);
+        assert_eq!(
+            source.base.build_visibility,
+            crate::mindustry::world::meta::BuildVisibility::SandboxOnly
+        );
+        assert_eq!(source.base.item_capacity, 0);
+        assert_eq!(source.base.size, 1);
+        assert!(!source.rotate_draw);
+        assert_eq!(source.region_rotated1, 1);
+        assert_eq!(source.heat_output, 1000.0);
+        assert_eq!(source.warmup_rate, 1000.0);
+        assert!(source.always_unlocked);
+        assert!(source.all_database_tabs);
+    }
+
+    #[test]
+    fn sand_floors_use_sand_item_drop_when_available() {
+        let (all_items, _, registry) = load_test_registry();
+        let sand = find_item(&all_items, "sand").unwrap();
+        let sand_id = sand.base.mappable.base.id;
+
+        assert_eq!(
+            registry
+                .get_floor_by_name("sand-floor")
+                .unwrap()
+                .base
+                .item_drop,
+            Some(sand_id)
+        );
+        assert_eq!(
+            registry
+                .get_floor_by_name("darksand")
+                .unwrap()
+                .base
+                .item_drop,
+            Some(sand_id)
+        );
+    }
+
+    #[test]
+    fn missing_wall_names_fall_back_to_air() {
+        let mut registry = BlockRegistry::new();
+        registry.register_plain("air");
+        registry.register_floor("lonely-floor", |_| {});
+        registry.finalize_floor_links();
+
+        assert_eq!(registry.get_floor_by_name("lonely-floor").unwrap().wall, 0);
+    }
+
+    #[test]
+    fn liquid_and_special_floors_match_upstream_field_subset() {
+        let (_, all_liquids, registry) = load_test_registry();
+        let water = liquid_id(&all_liquids, "water").unwrap();
+        let oil = liquid_id(&all_liquids, "oil").unwrap();
+        let slag = liquid_id(&all_liquids, "slag").unwrap();
+        let cryofluid = liquid_id(&all_liquids, "cryofluid").unwrap();
+
+        let deep = registry.get_floor_by_name("deep-water").unwrap();
+        assert_eq!(deep.speed_multiplier, 0.2);
+        assert_eq!(deep.base.variants, 0);
+        assert_eq!(deep.liquid_drop, Some(water));
+        assert_eq!(deep.liquid_multiplier, 1.5);
+        assert!(deep.is_liquid);
+        assert_eq!(deep.status, "wet");
+        assert_eq!(deep.status_duration, 120.0);
+        assert_eq!(deep.drown_time, 200.0);
+        assert_eq!(deep.base.cache_layer, CacheLayer::Water);
+        assert!(deep.supports_overlay);
+
+        let tar = registry.get_floor_by_name("tar").unwrap();
+        assert_eq!(tar.status, "tarred");
+        assert_eq!(tar.liquid_drop, Some(oil));
+        assert_eq!(tar.base.cache_layer, CacheLayer::Tar);
+        assert!(tar.base.obstructs_light);
+
+        let molten = registry.get_floor_by_name("molten-slag").unwrap();
+        assert_eq!(molten.status, "melting");
+        assert_eq!(molten.liquid_drop, Some(slag));
+        assert_eq!(molten.base.cache_layer, CacheLayer::Slag);
+        assert!(molten.base.emit_light);
+        assert_eq!(molten.base.light_radius, 40.0);
+        assert!(molten.force_draw_light);
+
+        let pooled = registry.get_floor_by_name("pooled-cryofluid").unwrap();
+        assert_eq!(pooled.status, "freezing");
+        assert_eq!(pooled.liquid_drop, Some(cryofluid));
+        assert_eq!(pooled.liquid_multiplier, 0.5);
+        assert_eq!(pooled.overlay_alpha, 0.35);
+        assert_eq!(pooled.base.cache_layer, CacheLayer::Cryofluid);
+        assert!(pooled.base.emit_light);
+    }
+
+    #[test]
+    fn space_empty_and_mud_keep_special_floor_flags() {
+        let (_, _, registry) = load_test_registry();
+
+        let space = registry.get_floor_by_name("space").unwrap();
+        assert_eq!(space.base.cache_layer, CacheLayer::Space);
+        assert!(!space.base.placeable_on);
+        assert!(space.base.solid);
+        assert_eq!(space.base.variants, 0);
+        assert!(!space.can_shadow);
+        assert!(!space.draw_edge_out);
+
+        let empty = registry.get_floor_by_name("empty").unwrap();
+        assert!(!empty.base.placeable_on);
+        assert!(empty.base.solid);
+        assert_eq!(empty.base.variants, 0);
+        assert!(!empty.can_shadow);
+        assert!(!empty.draw_edge_out);
+
+        let mud = registry.get_floor_by_name("mud").unwrap();
+        assert_eq!(mud.speed_multiplier, 0.6);
+        assert_eq!(mud.status, "muddy");
+        assert_eq!(mud.status_duration, 30.0);
+        assert_eq!(mud.base.cache_layer, CacheLayer::Mud);
+        assert_eq!(mud.walk_sound, "stepMud");
+        assert_eq!(mud.walk_sound_volume, 0.08);
+    }
+}
