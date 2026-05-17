@@ -322,6 +322,160 @@ impl ProductionBlockData {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageBlockKind {
+    Storage,
+    Core,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StorageBlockData {
+    pub base: Block,
+    pub kind: StorageBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub research_cost_multipliers: Vec<ItemMultiplier>,
+    pub build_cost_multiplier: f32,
+    pub scaled_health: f32,
+    pub armor: f32,
+    pub core_merge: bool,
+    pub separate_item_capacity: bool,
+    pub allow_resupply: bool,
+    pub outputs_items: bool,
+    pub always_unlocked: bool,
+    pub always_allow_deposit: bool,
+    pub draw_disabled: bool,
+    pub can_overdrive: bool,
+    pub commandable: bool,
+    pub unit_cap_modifier: i32,
+    pub unit_type: String,
+    pub thruster_length: f32,
+    pub thruster_offset: f32,
+    pub is_first_tier: bool,
+    pub allow_spawn: bool,
+    pub requires_core_zone: bool,
+    pub incinerate_non_buildable: bool,
+    pub land_duration: f32,
+    pub land_music: String,
+    pub launch_sound: String,
+    pub land_sound: String,
+    pub launch_sound_volume: f32,
+    pub land_sound_volume: f32,
+    pub launch_effect: String,
+    pub land_zoom_interp: String,
+    pub land_zoom_from: f32,
+    pub land_zoom_to: f32,
+    pub capture_invincibility: f32,
+    pub destroy_sound: String,
+    pub destroy_sound_volume: f32,
+}
+
+impl StorageBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: StorageBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost_multiplier: 1.0,
+            research_cost_multipliers: Vec::new(),
+            build_cost_multiplier: 1.0,
+            scaled_health: -1.0,
+            armor: 0.0,
+            core_merge: true,
+            separate_item_capacity: false,
+            allow_resupply: false,
+            outputs_items: true,
+            always_unlocked: false,
+            always_allow_deposit: false,
+            draw_disabled: true,
+            can_overdrive: true,
+            commandable: false,
+            unit_cap_modifier: 0,
+            unit_type: String::new(),
+            thruster_length: 0.0,
+            thruster_offset: 0.0,
+            is_first_tier: false,
+            allow_spawn: false,
+            requires_core_zone: false,
+            incinerate_non_buildable: false,
+            land_duration: 0.0,
+            land_music: String::new(),
+            launch_sound: String::new(),
+            land_sound: String::new(),
+            launch_sound_volume: 0.0,
+            land_sound_volume: 0.0,
+            launch_effect: String::new(),
+            land_zoom_interp: String::new(),
+            land_zoom_from: 0.0,
+            land_zoom_to: 0.0,
+            capture_invincibility: 0.0,
+            destroy_sound: String::new(),
+            destroy_sound_volume: 0.0,
+        };
+        block.apply_storage_defaults();
+        if matches!(block.kind, StorageBlockKind::Core) {
+            block.apply_core_defaults();
+        }
+        block
+    }
+
+    fn apply_storage_defaults(&mut self) {
+        self.base.has_items = true;
+        self.base.solid = true;
+        self.base.update = false;
+        self.base.sync = true;
+        self.base.destructible = true;
+        self.separate_item_capacity = true;
+        self.base.group = BlockGroup::Transportation;
+        self.base.flags.push(BlockFlag::Storage);
+        self.allow_resupply = true;
+        self.base.env_enabled = Env::ANY;
+        self.outputs_items = false;
+    }
+
+    fn apply_core_defaults(&mut self) {
+        self.base.solid = true;
+        self.base.update = true;
+        self.base.has_items = true;
+        self.always_allow_deposit = true;
+        self.base.priority = 2;
+        self.base.flags.clear();
+        self.base.flags.push(BlockFlag::Core);
+        self.unit_cap_modifier = 10;
+        self.base.sync = false;
+        self.draw_disabled = false;
+        self.can_overdrive = false;
+        self.commandable = true;
+        self.base.env_enabled |= Env::SPACE;
+        self.base.replaceable = false;
+        self.destroy_sound = "explosionCore".into();
+        self.destroy_sound_volume = 1.6;
+        self.thruster_length = 14.0 / 4.0;
+        self.thruster_offset = 0.0;
+        self.allow_spawn = true;
+        self.unit_type = "alpha".into();
+        self.land_duration = 160.0;
+        self.land_music = "land".into();
+        self.launch_sound = "coreLaunch".into();
+        self.land_sound = "coreLand".into();
+        self.launch_sound_volume = 1.0;
+        self.land_sound_volume = 1.0;
+        self.launch_effect = "launch".into();
+        self.land_zoom_interp = "pow3".into();
+        self.land_zoom_from = 0.02;
+        self.land_zoom_to = 4.0;
+        self.capture_invincibility = 60.0 * 15.0;
+    }
+
+    fn finalize(&mut self) {
+        if self.scaled_health >= 0.0 {
+            self.base.health =
+                ((self.base.size * self.base.size) as f32 * self.scaled_health) as i32;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefenseWallKind {
     Wall,
     Door,
@@ -1750,6 +1904,7 @@ pub enum BlockDef {
     Prop(PropData),
     Ore(OreBlockData),
     Production(ProductionBlockData),
+    Storage(StorageBlockData),
     Crafting(CraftingBlockData),
     DefenseWall(DefenseWallData),
     Effect(EffectBlockData),
@@ -1770,6 +1925,7 @@ impl BlockDef {
             Self::Prop(prop) => &prop.base,
             Self::Ore(ore) => &ore.floor.base,
             Self::Production(production) => &production.base,
+            Self::Storage(storage) => &storage.base,
             Self::Crafting(crafting) => &crafting.base,
             Self::DefenseWall(wall) => &wall.base,
             Self::Effect(effect) => &effect.base,
@@ -1849,6 +2005,13 @@ impl BlockRegistry {
     pub fn get_production_by_name(&self, name: &str) -> Option<&ProductionBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Production(production) => Some(production),
+            _ => None,
+        }
+    }
+
+    pub fn get_storage_by_name(&self, name: &str) -> Option<&StorageBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Storage(storage) => Some(storage),
             _ => None,
         }
     }
@@ -2012,6 +2175,20 @@ impl BlockRegistry {
         block.finalize();
         block.base.derive_layout_fields();
         self.insert(BlockDef::Production(block))
+    }
+
+    pub fn register_storage_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: StorageBlockKind,
+        configure: impl FnOnce(&mut StorageBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = StorageBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Storage(block))
     }
 
     pub fn register_defense_wall(
@@ -2198,6 +2375,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     apply_environment_item_drops(&mut registry, items);
     register_ores(&mut registry, items);
     register_production_blocks(&mut registry, items, liquids);
+    register_storage_blocks(&mut registry, items);
     register_crafting_blocks(&mut registry, items, liquids);
     register_defense_walls(&mut registry, items);
     register_effect_blocks(&mut registry, items, liquids);
@@ -3404,6 +3582,188 @@ fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liqu
             );
         },
     );
+}
+
+fn register_storage_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+    registry.register_storage_block("core-shard", StorageBlockKind::Core, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[("copper", 1000), ("lead", 800)],
+        );
+        storage.base.build_visibility = BuildVisibility::CoreZoneOnly;
+        storage.always_unlocked = true;
+        storage.is_first_tier = true;
+        storage.unit_type = "alpha".into();
+        storage.base.health = 1100;
+        storage.base.item_capacity = 4000;
+        storage.base.size = 3;
+        storage.build_cost_multiplier = 2.0;
+        storage.unit_cap_modifier = 8;
+    });
+
+    registry.register_storage_block("core-foundation", StorageBlockKind::Core, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[("copper", 3000), ("lead", 3000), ("silicon", 2000)],
+        );
+        storage.unit_type = "beta".into();
+        storage.base.health = 3500;
+        storage.base.item_capacity = 9000;
+        storage.base.size = 4;
+        storage.thruster_length = 34.0 / 4.0;
+        storage.unit_cap_modifier = 16;
+        storage.research_cost_multiplier = 0.07;
+    });
+
+    registry.register_storage_block("core-nucleus", StorageBlockKind::Core, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[
+                ("copper", 8000),
+                ("lead", 8000),
+                ("silicon", 5000),
+                ("thorium", 4000),
+            ],
+        );
+        storage.unit_type = "gamma".into();
+        storage.base.health = 6000;
+        storage.base.item_capacity = 13000;
+        storage.base.size = 5;
+        storage.thruster_length = 40.0 / 4.0;
+        storage.unit_cap_modifier = 24;
+        storage.research_cost_multiplier = 0.11;
+    });
+
+    registry.register_storage_block("core-bastion", StorageBlockKind::Core, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[("graphite", 1000), ("silicon", 1000), ("beryllium", 800)],
+        );
+        storage.is_first_tier = true;
+        storage.unit_type = "evoke".into();
+        storage.base.health = 4500;
+        storage.base.item_capacity = 2000;
+        storage.base.size = 4;
+        storage.thruster_length = 34.0 / 4.0;
+        storage.armor = 5.0;
+        storage.always_unlocked = true;
+        storage.incinerate_non_buildable = true;
+        storage.requires_core_zone = true;
+        storage.build_cost_multiplier = 0.7;
+        storage.unit_cap_modifier = 15;
+        storage.research_cost_multiplier = 0.07;
+    });
+
+    registry.register_storage_block("core-citadel", StorageBlockKind::Core, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[
+                ("silicon", 4000),
+                ("beryllium", 4000),
+                ("tungsten", 3000),
+                ("oxide", 1000),
+            ],
+        );
+        storage.unit_type = "incite".into();
+        storage.base.health = 16000;
+        storage.base.item_capacity = 3000;
+        storage.base.size = 5;
+        storage.thruster_length = 40.0 / 4.0;
+        storage.armor = 10.0;
+        storage.incinerate_non_buildable = true;
+        storage.build_cost_multiplier = 0.7;
+        storage.requires_core_zone = true;
+        storage.unit_cap_modifier = 15;
+        push_item_multiplier(
+            &mut storage.research_cost_multipliers,
+            items,
+            "silicon",
+            0.5,
+        );
+        storage.research_cost_multiplier = 0.17;
+    });
+
+    registry.register_storage_block("core-acropolis", StorageBlockKind::Core, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[
+                ("beryllium", 6000),
+                ("silicon", 5000),
+                ("tungsten", 5000),
+                ("carbide", 3000),
+                ("oxide", 3000),
+            ],
+        );
+        storage.unit_type = "emanate".into();
+        storage.base.health = 30000;
+        storage.base.item_capacity = 4000;
+        storage.base.size = 6;
+        storage.thruster_length = 48.0 / 4.0;
+        storage.armor = 15.0;
+        storage.incinerate_non_buildable = true;
+        storage.build_cost_multiplier = 0.7;
+        storage.requires_core_zone = true;
+        storage.unit_cap_modifier = 15;
+        push_item_multiplier(
+            &mut storage.research_cost_multipliers,
+            items,
+            "silicon",
+            0.4,
+        );
+        storage.research_cost_multiplier = 0.1;
+    });
+
+    registry.register_storage_block("container", StorageBlockKind::Storage, |storage| {
+        set_requirements(&mut storage.requirements, items, &[("titanium", 100)]);
+        storage.base.size = 2;
+        storage.base.item_capacity = 300;
+        storage.scaled_health = 55.0;
+    });
+
+    registry.register_storage_block("vault", StorageBlockKind::Storage, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[("titanium", 250), ("thorium", 125)],
+        );
+        storage.base.size = 3;
+        storage.base.item_capacity = 1000;
+        storage.scaled_health = 55.0;
+    });
+
+    registry.register_storage_block(
+        "reinforced-container",
+        StorageBlockKind::Storage,
+        |storage| {
+            set_requirements(
+                &mut storage.requirements,
+                items,
+                &[("tungsten", 30), ("graphite", 40)],
+            );
+            storage.base.size = 2;
+            storage.base.item_capacity = 160;
+            storage.scaled_health = 120.0;
+            storage.core_merge = false;
+        },
+    );
+
+    registry.register_storage_block("reinforced-vault", StorageBlockKind::Storage, |storage| {
+        set_requirements(
+            &mut storage.requirements,
+            items,
+            &[("tungsten", 125), ("thorium", 70), ("beryllium", 100)],
+        );
+        storage.base.size = 3;
+        storage.base.item_capacity = 900;
+        storage.scaled_health = 120.0;
+        storage.core_merge = false;
+    });
 }
 
 fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
@@ -7113,6 +7473,243 @@ mod tests {
                 ItemAmount {
                     item: item_id("thorium"),
                     amount: 150
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn storage_cores_and_vaults_keep_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        for name in [
+            "core-shard",
+            "core-foundation",
+            "core-nucleus",
+            "core-bastion",
+            "core-citadel",
+            "core-acropolis",
+        ] {
+            let core = registry.get_storage_by_name(name).unwrap();
+            assert_eq!(core.kind, StorageBlockKind::Core, "{name} kind");
+            assert!(core.base.has_items, "{name} has items");
+            assert!(core.base.solid, "{name} solid");
+            assert!(core.base.update, "{name} update");
+            assert!(core.base.destructible, "{name} destructible");
+            assert!(!core.base.sync, "{name} core item sync is external");
+            assert!(core.always_allow_deposit, "{name} always deposit");
+            assert_eq!(core.base.priority, 2, "{name} target priority");
+            assert_eq!(core.base.flags, vec![BlockFlag::Core], "{name} flags");
+            assert!(core.unit_cap_modifier > 0, "{name} unit cap modifier");
+            assert!(!core.draw_disabled, "{name} disabled overlay");
+            assert!(!core.can_overdrive, "{name} overdrive");
+            assert!(core.commandable, "{name} commandable");
+            assert_ne!(core.base.env_enabled & Env::SPACE, 0, "{name} space");
+            assert!(!core.base.replaceable, "{name} replaceable");
+            assert_eq!(core.destroy_sound, "explosionCore", "{name} destroy sound");
+            assert_eq!(core.destroy_sound_volume, 1.6, "{name} destroy volume");
+            assert!(core.allow_spawn, "{name} allow spawn");
+            assert_eq!(core.land_duration, 160.0, "{name} land duration");
+            assert_eq!(core.land_music, "land", "{name} land music");
+            assert_eq!(core.launch_sound, "coreLaunch", "{name} launch sound");
+            assert_eq!(core.land_sound, "coreLand", "{name} land sound");
+            assert_eq!(core.launch_sound_volume, 1.0, "{name} launch volume");
+            assert_eq!(core.land_sound_volume, 1.0, "{name} land volume");
+            assert_eq!(core.launch_effect, "launch", "{name} launch effect");
+            assert_eq!(core.land_zoom_interp, "pow3", "{name} zoom interp");
+            assert_eq!(core.land_zoom_from, 0.02, "{name} zoom from");
+            assert_eq!(core.land_zoom_to, 4.0, "{name} zoom to");
+            assert_eq!(core.capture_invincibility, 900.0, "{name} iframes");
+            assert!(!core.outputs_items, "{name} outputs items");
+            assert_eq!(core.base.group, BlockGroup::Transportation, "{name} group");
+        }
+
+        let shard = registry.get_storage_by_name("core-shard").unwrap();
+        assert_eq!(shard.base.build_visibility, BuildVisibility::CoreZoneOnly);
+        assert!(shard.always_unlocked);
+        assert!(shard.is_first_tier);
+        assert_eq!(shard.unit_type, "alpha");
+        assert_eq!(shard.base.health, 1100);
+        assert_eq!(shard.base.item_capacity, 4000);
+        assert_eq!(shard.base.size, 3);
+        assert_eq!(shard.build_cost_multiplier, 2.0);
+        assert_eq!(shard.unit_cap_modifier, 8);
+        assert_eq!(
+            shard.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 1000
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 800
+                }
+            ]
+        );
+
+        let foundation = registry.get_storage_by_name("core-foundation").unwrap();
+        assert_eq!(foundation.unit_type, "beta");
+        assert_eq!(foundation.base.health, 3500);
+        assert_eq!(foundation.base.item_capacity, 9000);
+        assert_eq!(foundation.base.size, 4);
+        assert_eq!(foundation.thruster_length, 34.0 / 4.0);
+        assert_eq!(foundation.unit_cap_modifier, 16);
+        assert_eq!(foundation.research_cost_multiplier, 0.07);
+
+        let nucleus = registry.get_storage_by_name("core-nucleus").unwrap();
+        assert_eq!(nucleus.unit_type, "gamma");
+        assert_eq!(nucleus.base.health, 6000);
+        assert_eq!(nucleus.base.item_capacity, 13000);
+        assert_eq!(nucleus.base.size, 5);
+        assert_eq!(nucleus.thruster_length, 40.0 / 4.0);
+        assert_eq!(nucleus.unit_cap_modifier, 24);
+        assert_eq!(nucleus.research_cost_multiplier, 0.11);
+
+        let bastion = registry.get_storage_by_name("core-bastion").unwrap();
+        assert_eq!(bastion.unit_type, "evoke");
+        assert_eq!(bastion.base.health, 4500);
+        assert_eq!(bastion.base.item_capacity, 2000);
+        assert_eq!(bastion.base.size, 4);
+        assert_eq!(bastion.thruster_length, 34.0 / 4.0);
+        assert_eq!(bastion.armor, 5.0);
+        assert!(bastion.always_unlocked);
+        assert!(bastion.is_first_tier);
+        assert!(bastion.incinerate_non_buildable);
+        assert!(bastion.requires_core_zone);
+        assert_eq!(bastion.build_cost_multiplier, 0.7);
+        assert_eq!(bastion.unit_cap_modifier, 15);
+        assert_eq!(bastion.research_cost_multiplier, 0.07);
+
+        let citadel = registry.get_storage_by_name("core-citadel").unwrap();
+        assert_eq!(citadel.unit_type, "incite");
+        assert_eq!(citadel.base.health, 16000);
+        assert_eq!(citadel.base.item_capacity, 3000);
+        assert_eq!(citadel.base.size, 5);
+        assert_eq!(citadel.thruster_length, 40.0 / 4.0);
+        assert_eq!(citadel.armor, 10.0);
+        assert!(citadel.incinerate_non_buildable);
+        assert!(citadel.requires_core_zone);
+        assert_eq!(citadel.build_cost_multiplier, 0.7);
+        assert_eq!(citadel.unit_cap_modifier, 15);
+        assert_eq!(citadel.research_cost_multiplier, 0.17);
+        assert_eq!(
+            citadel.research_cost_multipliers,
+            vec![ItemMultiplier {
+                item: item_id("silicon"),
+                multiplier: 0.5
+            }]
+        );
+
+        let acropolis = registry.get_storage_by_name("core-acropolis").unwrap();
+        assert_eq!(acropolis.unit_type, "emanate");
+        assert_eq!(acropolis.base.health, 30000);
+        assert_eq!(acropolis.base.item_capacity, 4000);
+        assert_eq!(acropolis.base.size, 6);
+        assert_eq!(acropolis.thruster_length, 48.0 / 4.0);
+        assert_eq!(acropolis.armor, 15.0);
+        assert!(acropolis.incinerate_non_buildable);
+        assert!(acropolis.requires_core_zone);
+        assert_eq!(acropolis.build_cost_multiplier, 0.7);
+        assert_eq!(acropolis.unit_cap_modifier, 15);
+        assert_eq!(acropolis.research_cost_multiplier, 0.1);
+        assert_eq!(
+            acropolis.research_cost_multipliers,
+            vec![ItemMultiplier {
+                item: item_id("silicon"),
+                multiplier: 0.4
+            }]
+        );
+
+        let container = registry.get_storage_by_name("container").unwrap();
+        assert_eq!(container.kind, StorageBlockKind::Storage);
+        assert!(container.base.has_items);
+        assert!(container.base.solid);
+        assert!(!container.base.update);
+        assert!(container.base.sync);
+        assert!(container.base.destructible);
+        assert!(container.separate_item_capacity);
+        assert_eq!(container.base.group, BlockGroup::Transportation);
+        assert_eq!(container.base.flags, vec![BlockFlag::Storage]);
+        assert!(container.allow_resupply);
+        assert_eq!(container.base.env_enabled, Env::ANY);
+        assert!(!container.outputs_items);
+        assert!(container.core_merge);
+        assert_eq!(container.base.size, 2);
+        assert_eq!(container.base.item_capacity, 300);
+        assert_eq!(container.scaled_health, 55.0);
+        assert_eq!(container.base.health, 2 * 2 * 55);
+        assert_eq!(
+            container.requirements,
+            vec![ItemAmount {
+                item: item_id("titanium"),
+                amount: 100
+            }]
+        );
+
+        let vault = registry.get_storage_by_name("vault").unwrap();
+        assert!(vault.core_merge);
+        assert_eq!(vault.base.size, 3);
+        assert_eq!(vault.base.item_capacity, 1000);
+        assert_eq!(vault.scaled_health, 55.0);
+        assert_eq!(vault.base.health, 3 * 3 * 55);
+        assert_eq!(
+            vault.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 125
+                }
+            ]
+        );
+
+        let reinforced_container = registry
+            .get_storage_by_name("reinforced-container")
+            .unwrap();
+        assert!(!reinforced_container.core_merge);
+        assert_eq!(reinforced_container.base.size, 2);
+        assert_eq!(reinforced_container.base.item_capacity, 160);
+        assert_eq!(reinforced_container.scaled_health, 120.0);
+        assert_eq!(reinforced_container.base.health, 2 * 2 * 120);
+        assert_eq!(
+            reinforced_container.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 40
+                }
+            ]
+        );
+
+        let reinforced_vault = registry.get_storage_by_name("reinforced-vault").unwrap();
+        assert!(!reinforced_vault.core_merge);
+        assert_eq!(reinforced_vault.base.size, 3);
+        assert_eq!(reinforced_vault.base.item_capacity, 900);
+        assert_eq!(reinforced_vault.scaled_health, 120.0);
+        assert_eq!(reinforced_vault.base.health, 3 * 3 * 120);
+        assert_eq!(
+            reinforced_vault.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 125
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 70
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 100
                 }
             ]
         );
