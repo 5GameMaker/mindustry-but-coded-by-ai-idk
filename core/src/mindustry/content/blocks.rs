@@ -51,6 +51,7 @@ pub enum ProductionBlockKind {
     SolidPump,
     Fracker,
     WallCrafter,
+    BeamDrill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,9 +84,13 @@ pub struct ProductionBlockData {
     pub item_boost_intensity: f32,
     pub has_liquid_booster: bool,
     pub rotate: bool,
+    pub draw_arrow: bool,
     pub ignore_line_rotation: bool,
     pub region_rotated1: i32,
     pub fog_radius: f32,
+    pub range: i32,
+    pub laser_width: f32,
+    pub optional_boost_intensity: f32,
     pub hardness_drill_multiplier: f32,
     pub tier: i32,
     pub drill_time: f32,
@@ -133,9 +138,13 @@ impl ProductionBlockData {
             item_boost_intensity: 0.0,
             has_liquid_booster: false,
             rotate: false,
+            draw_arrow: true,
             ignore_line_rotation: false,
             region_rotated1: 0,
             fog_radius: 0.0,
+            range: 0,
+            laser_width: 0.0,
+            optional_boost_intensity: 0.0,
             hardness_drill_multiplier: 50.0,
             tier: 0,
             drill_time: 300.0,
@@ -202,6 +211,24 @@ impl ProductionBlockData {
                 self.boost_item_use_time = 120.0;
                 self.item_boost_intensity = 1.6;
             }
+            ProductionBlockKind::BeamDrill => {
+                self.base.has_items = true;
+                self.rotate = true;
+                self.base.update = true;
+                self.base.solid = true;
+                self.draw_arrow = false;
+                self.region_rotated1 = 1;
+                self.ignore_line_rotation = true;
+                self.ambient_sound_volume = 0.05;
+                self.ambient_sound = "loopMineBeam".into();
+                self.base.env_enabled |= Env::SPACE;
+                self.base.flags.push(BlockFlag::Drill);
+                self.drill_time = 200.0;
+                self.range = 5;
+                self.tier = 1;
+                self.laser_width = 0.65;
+                self.optional_boost_intensity = 2.5;
+            }
         }
     }
 
@@ -233,7 +260,8 @@ impl ProductionBlockData {
             }
             ProductionBlockKind::SolidPump
             | ProductionBlockKind::Fracker
-            | ProductionBlockKind::WallCrafter => {
+            | ProductionBlockKind::WallCrafter
+            | ProductionBlockKind::BeamDrill => {
                 self.has_liquid_booster =
                     self.consume_liquids.iter().any(|consume| consume.booster);
             }
@@ -3141,6 +3169,77 @@ fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liqu
             push_item_amount(&mut production.consume_item_boosts, items, "graphite", 1);
             production.base.item_capacity = 20;
             production.boost_item_use_time = 60.0 / 0.75;
+        },
+    );
+
+    registry.register_production_block(
+        "plasma-bore",
+        ProductionBlockKind::BeamDrill,
+        |production| {
+            set_requirements(&mut production.requirements, items, &[("beryllium", 40)]);
+            production.consume_power = 0.15;
+            production.drill_time = 160.0;
+            production.tier = 3;
+            production.base.size = 2;
+            production.range = 5;
+            production.fog_radius = 3.0;
+            set_requirements(&mut production.research_cost, items, &[("beryllium", 10)]);
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "hydrogen",
+                0.25 / 60.0,
+                true,
+            );
+        },
+    );
+
+    registry.register_production_block(
+        "large-plasma-bore",
+        ProductionBlockKind::BeamDrill,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[
+                    ("silicon", 100),
+                    ("oxide", 25),
+                    ("beryllium", 100),
+                    ("tungsten", 70),
+                ],
+            );
+            production.consume_power = 0.8;
+            production.drill_time = 100.0;
+            production.tier = 5;
+            production.base.size = 3;
+            production.range = 6;
+            production.fog_radius = 4.0;
+            production.laser_width = 0.7;
+            production.base.item_capacity = 20;
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "hydrogen",
+                0.5 / 60.0,
+                false,
+            );
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "nitrogen",
+                3.0 / 60.0,
+                true,
+            );
+            set_requirements(
+                &mut production.research_cost,
+                items,
+                &[
+                    ("silicon", 1500),
+                    ("oxide", 200),
+                    ("beryllium", 3000),
+                    ("tungsten", 1200),
+                ],
+            );
         },
     );
 }
@@ -6560,6 +6659,138 @@ mod tests {
                 ItemAmount {
                     item: item_id("tungsten"),
                     amount: 50
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn plasma_bores_keep_upstream_beam_drill_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let plasma = registry.get_production_by_name("plasma-bore").unwrap();
+        assert_eq!(plasma.kind, ProductionBlockKind::BeamDrill);
+        assert!(plasma.base.has_items);
+        assert!(plasma.rotate);
+        assert!(plasma.base.update);
+        assert!(plasma.base.solid);
+        assert!(!plasma.draw_arrow);
+        assert_eq!(plasma.region_rotated1, 1);
+        assert!(plasma.ignore_line_rotation);
+        assert_ne!(plasma.base.env_enabled & Env::SPACE, 0);
+        assert!(plasma.base.flags.contains(&BlockFlag::Drill));
+        assert_eq!(plasma.ambient_sound, "loopMineBeam");
+        assert_eq!(plasma.ambient_sound_volume, 0.05);
+        assert_eq!(plasma.optional_boost_intensity, 2.5);
+        assert_eq!(plasma.laser_width, 0.65);
+        assert_eq!(plasma.consume_power, 0.15);
+        assert_eq!(plasma.drill_time, 160.0);
+        assert_eq!(plasma.tier, 3);
+        assert_eq!(plasma.base.size, 2);
+        assert_eq!(plasma.range, 5);
+        assert_eq!(plasma.fog_radius, 3.0);
+        assert!(plasma.has_liquid_booster);
+        assert_eq!(
+            plasma.requirements,
+            vec![ItemAmount {
+                item: item_id("beryllium"),
+                amount: 40
+            }]
+        );
+        assert_eq!(
+            plasma.research_cost,
+            vec![ItemAmount {
+                item: item_id("beryllium"),
+                amount: 10
+            }]
+        );
+        assert_eq!(
+            plasma.consume_liquids,
+            vec![LiquidConsume {
+                liquid: liquid_id("hydrogen"),
+                amount: 0.25 / 60.0,
+                booster: true
+            }]
+        );
+
+        let large = registry
+            .get_production_by_name("large-plasma-bore")
+            .unwrap();
+        assert_eq!(large.kind, ProductionBlockKind::BeamDrill);
+        assert_eq!(large.consume_power, 0.8);
+        assert_eq!(large.drill_time, 100.0);
+        assert_eq!(large.tier, 5);
+        assert_eq!(large.base.size, 3);
+        assert_eq!(large.range, 6);
+        assert_eq!(large.fog_radius, 4.0);
+        assert_eq!(large.laser_width, 0.7);
+        assert_eq!(large.base.item_capacity, 20);
+        assert!(large.has_liquid_booster);
+        assert_eq!(
+            large.consume_liquids,
+            vec![
+                LiquidConsume {
+                    liquid: liquid_id("hydrogen"),
+                    amount: 0.5 / 60.0,
+                    booster: false
+                },
+                LiquidConsume {
+                    liquid: liquid_id("nitrogen"),
+                    amount: 3.0 / 60.0,
+                    booster: true
+                }
+            ]
+        );
+        assert_eq!(
+            large.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 25
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 70
+                }
+            ]
+        );
+        assert_eq!(
+            large.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 1500
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 3000
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 1200
                 }
             ]
         );
