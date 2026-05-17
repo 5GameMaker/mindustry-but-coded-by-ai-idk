@@ -7,9 +7,14 @@ use super::{
         CompleteObjectiveCallPacket, ConnectCallPacket, ConnectPacket, CopyToClipboardCallPacket,
         DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
         HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket,
-        InfoToastCallPacket, KickCallPacket, OpenUriCallPacket, PingResponseCallPacket,
-        PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
-        StreamBegin, StreamChunk, WorldDataBeginCallPacket,
+        InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
+        InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
+        LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
+        OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
+        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
+        SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
+        SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket,
+        TextInputCallPacket2, WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -219,6 +224,22 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::INFO_MESSAGE_CALL_PACKET
             }
+            PacketKind::InfoPopupCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::INFO_POPUP_CALL_PACKET
+            }
+            PacketKind::InfoPopupCallPacket2(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::INFO_POPUP_CALL_PACKET2
+            }
+            PacketKind::InfoPopupReliableCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::INFO_POPUP_RELIABLE_CALL_PACKET
+            }
+            PacketKind::InfoPopupReliableCallPacket2(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::INFO_POPUP_RELIABLE_CALL_PACKET2
+            }
             PacketKind::InfoToastCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::INFO_TOAST_CALL_PACKET
@@ -226,6 +247,26 @@ impl PacketSerializer {
             PacketKind::KickCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::KICK_CALL_PACKET
+            }
+            PacketKind::KickCallPacket2(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::KICK_CALL_PACKET2
+            }
+            PacketKind::LabelCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::LABEL_CALL_PACKET
+            }
+            PacketKind::LabelCallPacket2(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::LABEL_CALL_PACKET2
+            }
+            PacketKind::LabelReliableCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::LABEL_RELIABLE_CALL_PACKET
+            }
+            PacketKind::LabelReliableCallPacket2(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::LABEL_RELIABLE_CALL_PACKET2
             }
             PacketKind::OpenUriCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -246,6 +287,38 @@ impl PacketSerializer {
             PacketKind::RemoveQueueBlockCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::REMOVE_QUEUE_BLOCK_CALL_PACKET
+            }
+            PacketKind::SetCameraPositionCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::SET_CAMERA_POSITION_CALL_PACKET
+            }
+            PacketKind::SetFlagCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::SET_FLAG_CALL_PACKET
+            }
+            PacketKind::SetHudTextCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::SET_HUD_TEXT_CALL_PACKET
+            }
+            PacketKind::SetHudTextReliableCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::SET_HUD_TEXT_RELIABLE_CALL_PACKET
+            }
+            PacketKind::SetMapAreaCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::SET_MAP_AREA_CALL_PACKET
+            }
+            PacketKind::SetRuleCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::SET_RULE_CALL_PACKET
+            }
+            PacketKind::TextInputCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::TEXT_INPUT_CALL_PACKET
+            }
+            PacketKind::TextInputCallPacket2(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::TEXT_INPUT_CALL_PACKET2
             }
             PacketKind::WorldDataBeginCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -358,12 +431,47 @@ impl PacketSerializer {
                     packet_ids::INFO_MESSAGE_CALL_PACKET => Ok(PacketKind::InfoMessageCallPacket(
                         InfoMessageCallPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::INFO_POPUP_CALL_PACKET => Ok(PacketKind::InfoPopupCallPacket(
+                        InfoPopupCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::INFO_POPUP_CALL_PACKET2 => Ok(PacketKind::InfoPopupCallPacket2(
+                        InfoPopupCallPacket2::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::INFO_POPUP_RELIABLE_CALL_PACKET => {
+                        Ok(PacketKind::InfoPopupReliableCallPacket(
+                            InfoPopupReliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::INFO_POPUP_RELIABLE_CALL_PACKET2 => {
+                        Ok(PacketKind::InfoPopupReliableCallPacket2(
+                            InfoPopupReliableCallPacket2::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::INFO_TOAST_CALL_PACKET => Ok(PacketKind::InfoToastCallPacket(
                         InfoToastCallPacket::read_from(&mut cursor)?,
                     )),
                     packet_ids::KICK_CALL_PACKET => Ok(PacketKind::KickCallPacket(
                         KickCallPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::KICK_CALL_PACKET2 => Ok(PacketKind::KickCallPacket2(
+                        KickCallPacket2::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::LABEL_CALL_PACKET => Ok(PacketKind::LabelCallPacket(
+                        LabelCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::LABEL_CALL_PACKET2 => Ok(PacketKind::LabelCallPacket2(
+                        LabelCallPacket2::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::LABEL_RELIABLE_CALL_PACKET => {
+                        Ok(PacketKind::LabelReliableCallPacket(
+                            LabelReliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::LABEL_RELIABLE_CALL_PACKET2 => {
+                        Ok(PacketKind::LabelReliableCallPacket2(
+                            LabelReliableCallPacket2::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::OPEN_URI_CALL_PACKET => Ok(PacketKind::OpenUriCallPacket(
                         OpenUriCallPacket::read_from(&mut cursor)?,
                     )),
@@ -387,6 +495,34 @@ impl PacketSerializer {
                             RemoveQueueBlockCallPacket::read_from(&mut cursor)?,
                         ))
                     }
+                    packet_ids::SET_CAMERA_POSITION_CALL_PACKET => {
+                        Ok(PacketKind::SetCameraPositionCallPacket(
+                            SetCameraPositionCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::SET_FLAG_CALL_PACKET => Ok(PacketKind::SetFlagCallPacket(
+                        SetFlagCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::SET_HUD_TEXT_CALL_PACKET => Ok(PacketKind::SetHudTextCallPacket(
+                        SetHudTextCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::SET_HUD_TEXT_RELIABLE_CALL_PACKET => {
+                        Ok(PacketKind::SetHudTextReliableCallPacket(
+                            SetHudTextReliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::SET_MAP_AREA_CALL_PACKET => Ok(PacketKind::SetMapAreaCallPacket(
+                        SetMapAreaCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::SET_RULE_CALL_PACKET => Ok(PacketKind::SetRuleCallPacket(
+                        SetRuleCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::TEXT_INPUT_CALL_PACKET => Ok(PacketKind::TextInputCallPacket(
+                        TextInputCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::TEXT_INPUT_CALL_PACKET2 => Ok(PacketKind::TextInputCallPacket2(
+                        TextInputCallPacket2::read_from(&mut cursor)?,
+                    )),
                     packet_ids::WORLD_DATA_BEGIN_CALL_PACKET => {
                         Ok(PacketKind::WorldDataBeginCallPacket(
                             WorldDataBeginCallPacket::read_from(&mut cursor)?,
@@ -718,5 +854,223 @@ mod tests {
         let bytes = PacketSerializer::write_packet_kind(&debug).unwrap();
         assert_eq!(bytes[0], packet_ids::DEBUG_STATUS_CLIENT_CALL_PACKET);
         assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), debug);
+
+        let popup = PacketKind::InfoPopupCallPacket(InfoPopupCallPacket {
+            message: Some("popup".into()),
+            duration: 2.5,
+            align: 1,
+            top: 2,
+            left: 3,
+            bottom: 4,
+            right: 5,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&popup).unwrap();
+        assert_eq!(bytes[0], packet_ids::INFO_POPUP_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), popup);
+
+        let popup_with_id = PacketKind::InfoPopupCallPacket2(InfoPopupCallPacket2 {
+            message: None,
+            id: Some("objective".into()),
+            duration: 3.0,
+            align: 6,
+            top: 7,
+            left: 8,
+            bottom: 9,
+            right: 10,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&popup_with_id).unwrap();
+        assert_eq!(bytes[0], packet_ids::INFO_POPUP_CALL_PACKET2);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            popup_with_id
+        );
+
+        let reliable_popup = PacketKind::InfoPopupReliableCallPacket(InfoPopupReliableCallPacket(
+            InfoPopupCallPacket {
+                message: Some("reliable popup".into()),
+                duration: 1.0,
+                align: 11,
+                top: 12,
+                left: 13,
+                bottom: 14,
+                right: 15,
+            },
+        ));
+        let bytes = PacketSerializer::write_packet_kind(&reliable_popup).unwrap();
+        assert_eq!(bytes[0], packet_ids::INFO_POPUP_RELIABLE_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            reliable_popup
+        );
+
+        let reliable_popup_with_id = PacketKind::InfoPopupReliableCallPacket2(
+            InfoPopupReliableCallPacket2(InfoPopupCallPacket2 {
+                message: Some("reliable popup id".into()),
+                id: Some("id".into()),
+                duration: 1.25,
+                align: 16,
+                top: 17,
+                left: 18,
+                bottom: 19,
+                right: 20,
+            }),
+        );
+        let bytes = PacketSerializer::write_packet_kind(&reliable_popup_with_id).unwrap();
+        assert_eq!(bytes[0], packet_ids::INFO_POPUP_RELIABLE_CALL_PACKET2);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            reliable_popup_with_id
+        );
+
+        let kick_string = PacketKind::KickCallPacket(KickCallPacket {
+            reason: "custom".into(),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&kick_string).unwrap();
+        assert_eq!(bytes[0], packet_ids::KICK_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            kick_string
+        );
+
+        let kick_reason = PacketKind::KickCallPacket2(KickCallPacket2 {
+            reason: crate::mindustry::net::KickReason::ServerClose,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&kick_reason).unwrap();
+        assert_eq!(bytes[0], packet_ids::KICK_CALL_PACKET2);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            kick_reason
+        );
+
+        let label = PacketKind::LabelCallPacket(LabelCallPacket {
+            message: Some("label".into()),
+            duration: 1.5,
+            world_x: 10.0,
+            world_y: -2.0,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&label).unwrap();
+        assert_eq!(bytes[0], packet_ids::LABEL_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), label);
+
+        let label_with_id = PacketKind::LabelCallPacket2(LabelCallPacket2 {
+            message: None,
+            id: 42,
+            duration: 2.0,
+            world_x: 4.0,
+            world_y: 5.0,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&label_with_id).unwrap();
+        assert_eq!(bytes[0], packet_ids::LABEL_CALL_PACKET2);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            label_with_id
+        );
+
+        let reliable_label =
+            PacketKind::LabelReliableCallPacket(LabelReliableCallPacket(LabelCallPacket {
+                message: Some("reliable label".into()),
+                duration: 3.0,
+                world_x: 6.0,
+                world_y: 7.0,
+            }));
+        let bytes = PacketSerializer::write_packet_kind(&reliable_label).unwrap();
+        assert_eq!(bytes[0], packet_ids::LABEL_RELIABLE_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            reliable_label
+        );
+
+        let reliable_label_with_id =
+            PacketKind::LabelReliableCallPacket2(LabelReliableCallPacket2(LabelCallPacket2 {
+                message: Some("reliable label id".into()),
+                id: 43,
+                duration: 4.0,
+                world_x: 8.0,
+                world_y: 9.0,
+            }));
+        let bytes = PacketSerializer::write_packet_kind(&reliable_label_with_id).unwrap();
+        assert_eq!(bytes[0], packet_ids::LABEL_RELIABLE_CALL_PACKET2);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            reliable_label_with_id
+        );
+
+        let camera =
+            PacketKind::SetCameraPositionCallPacket(SetCameraPositionCallPacket { x: 1.0, y: 2.0 });
+        let bytes = PacketSerializer::write_packet_kind(&camera).unwrap();
+        assert_eq!(bytes[0], packet_ids::SET_CAMERA_POSITION_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), camera);
+
+        let flag = PacketKind::SetFlagCallPacket(SetFlagCallPacket {
+            flag: "objective".into(),
+            add: true,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&flag).unwrap();
+        assert_eq!(bytes[0], packet_ids::SET_FLAG_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), flag);
+
+        let hud = PacketKind::SetHudTextCallPacket(SetHudTextCallPacket {
+            message: "hud".into(),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&hud).unwrap();
+        assert_eq!(bytes[0], packet_ids::SET_HUD_TEXT_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), hud);
+
+        let reliable_hud = PacketKind::SetHudTextReliableCallPacket(SetHudTextReliableCallPacket(
+            SetHudTextCallPacket {
+                message: "hud reliable".into(),
+            },
+        ));
+        let bytes = PacketSerializer::write_packet_kind(&reliable_hud).unwrap();
+        assert_eq!(bytes[0], packet_ids::SET_HUD_TEXT_RELIABLE_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            reliable_hud
+        );
+
+        let area = PacketKind::SetMapAreaCallPacket(SetMapAreaCallPacket {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&area).unwrap();
+        assert_eq!(bytes[0], packet_ids::SET_MAP_AREA_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), area);
+
+        let rule = PacketKind::SetRuleCallPacket(SetRuleCallPacket {
+            rule: "unitCap".into(),
+            json_data: "{\"value\":42}".into(),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&rule).unwrap();
+        assert_eq!(bytes[0], packet_ids::SET_RULE_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), rule);
+
+        let prompt = PacketKind::TextInputCallPacket(TextInputCallPacket {
+            text_input_id: 1,
+            title: "title".into(),
+            message: "message".into(),
+            text_length: 64,
+            default_text: "default".into(),
+            numeric: false,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&prompt).unwrap();
+        assert_eq!(bytes[0], packet_ids::TEXT_INPUT_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), prompt);
+
+        let prompt2 = PacketKind::TextInputCallPacket2(TextInputCallPacket2 {
+            prompt: TextInputCallPacket {
+                text_input_id: 2,
+                title: "title2".into(),
+                message: "message2".into(),
+                text_length: 32,
+                default_text: String::new(),
+                numeric: true,
+            },
+            allow_empty: true,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&prompt2).unwrap();
+        assert_eq!(bytes[0], packet_ids::TEXT_INPUT_CALL_PACKET2);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), prompt2);
     }
 }

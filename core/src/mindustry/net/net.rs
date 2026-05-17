@@ -6,9 +6,13 @@ use super::packets::{
     ClientPacketUnreliableCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
     ConnectPacket, CopyToClipboardCallPacket, DebugStatusClientCallPacket,
     DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
-    InfoMessageCallPacket, InfoToastCallPacket, KickCallPacket, OpenUriCallPacket,
-    PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
-    RemoveQueueBlockCallPacket, StreamBegin, StreamChunk, WorldDataBeginCallPacket,
+    InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
+    InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
+    LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
+    OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
+    RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
+    SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket,
+    StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -32,13 +36,30 @@ pub enum PacketKind {
     HideFollowUpMenuCallPacket(HideFollowUpMenuCallPacket),
     HideHudTextCallPacket(HideHudTextCallPacket),
     InfoMessageCallPacket(InfoMessageCallPacket),
+    InfoPopupCallPacket(InfoPopupCallPacket),
+    InfoPopupCallPacket2(InfoPopupCallPacket2),
+    InfoPopupReliableCallPacket(InfoPopupReliableCallPacket),
+    InfoPopupReliableCallPacket2(InfoPopupReliableCallPacket2),
     InfoToastCallPacket(InfoToastCallPacket),
     KickCallPacket(KickCallPacket),
+    KickCallPacket2(KickCallPacket2),
+    LabelCallPacket(LabelCallPacket),
+    LabelCallPacket2(LabelCallPacket2),
+    LabelReliableCallPacket(LabelReliableCallPacket),
+    LabelReliableCallPacket2(LabelReliableCallPacket2),
     OpenUriCallPacket(OpenUriCallPacket),
     PingResponseCallPacket(PingResponseCallPacket),
     PlayerDisconnectCallPacket(PlayerDisconnectCallPacket),
     RemoveMarkerCallPacket(RemoveMarkerCallPacket),
     RemoveQueueBlockCallPacket(RemoveQueueBlockCallPacket),
+    SetCameraPositionCallPacket(SetCameraPositionCallPacket),
+    SetFlagCallPacket(SetFlagCallPacket),
+    SetHudTextCallPacket(SetHudTextCallPacket),
+    SetHudTextReliableCallPacket(SetHudTextReliableCallPacket),
+    SetMapAreaCallPacket(SetMapAreaCallPacket),
+    SetRuleCallPacket(SetRuleCallPacket),
+    TextInputCallPacket(TextInputCallPacket),
+    TextInputCallPacket2(TextInputCallPacket2),
     WorldDataBeginCallPacket(WorldDataBeginCallPacket),
     Other {
         id: u8,
@@ -67,16 +88,33 @@ impl PacketKind {
             | PacketKind::HideFollowUpMenuCallPacket(_)
             | PacketKind::HideHudTextCallPacket(_)
             | PacketKind::InfoMessageCallPacket(_)
+            | PacketKind::InfoPopupCallPacket(_)
+            | PacketKind::InfoPopupCallPacket2(_)
+            | PacketKind::InfoPopupReliableCallPacket(_)
+            | PacketKind::InfoPopupReliableCallPacket2(_)
             | PacketKind::InfoToastCallPacket(_)
+            | PacketKind::LabelCallPacket(_)
+            | PacketKind::LabelCallPacket2(_)
+            | PacketKind::LabelReliableCallPacket(_)
+            | PacketKind::LabelReliableCallPacket2(_)
             | PacketKind::OpenUriCallPacket(_)
             | PacketKind::PingResponseCallPacket(_)
             | PacketKind::PlayerDisconnectCallPacket(_)
             | PacketKind::RemoveMarkerCallPacket(_)
             | PacketKind::RemoveQueueBlockCallPacket(_)
+            | PacketKind::SetCameraPositionCallPacket(_)
+            | PacketKind::SetFlagCallPacket(_)
+            | PacketKind::SetHudTextCallPacket(_)
+            | PacketKind::SetHudTextReliableCallPacket(_)
+            | PacketKind::SetMapAreaCallPacket(_)
+            | PacketKind::SetRuleCallPacket(_)
+            | PacketKind::TextInputCallPacket(_)
+            | PacketKind::TextInputCallPacket2(_)
             | PacketKind::WorldDataBeginCallPacket(_) => 1,
             PacketKind::DebugStatusClientCallPacket(_)
             | PacketKind::DebugStatusClientUnreliableCallPacket(_)
-            | PacketKind::KickCallPacket(_) => 2,
+            | PacketKind::KickCallPacket(_)
+            | PacketKind::KickCallPacket2(_) => 2,
             PacketKind::Other { priority, .. } => *priority,
         }
     }
@@ -103,8 +141,25 @@ impl PacketKind {
             | PacketKind::WorldDataBeginCallPacket(_) => true,
             PacketKind::ConnectCallPacket(_)
             | PacketKind::KickCallPacket(_)
+            | PacketKind::KickCallPacket2(_)
             | PacketKind::PingResponseCallPacket(_)
-            | PacketKind::RemoveQueueBlockCallPacket(_) => !server,
+            | PacketKind::RemoveQueueBlockCallPacket(_)
+            | PacketKind::InfoPopupCallPacket(_)
+            | PacketKind::InfoPopupCallPacket2(_)
+            | PacketKind::InfoPopupReliableCallPacket(_)
+            | PacketKind::InfoPopupReliableCallPacket2(_)
+            | PacketKind::LabelCallPacket(_)
+            | PacketKind::LabelCallPacket2(_)
+            | PacketKind::LabelReliableCallPacket(_)
+            | PacketKind::LabelReliableCallPacket2(_)
+            | PacketKind::SetCameraPositionCallPacket(_)
+            | PacketKind::SetFlagCallPacket(_)
+            | PacketKind::SetHudTextCallPacket(_)
+            | PacketKind::SetHudTextReliableCallPacket(_)
+            | PacketKind::SetMapAreaCallPacket(_)
+            | PacketKind::SetRuleCallPacket(_)
+            | PacketKind::TextInputCallPacket(_)
+            | PacketKind::TextInputCallPacket2(_) => !server,
             PacketKind::ClientBinaryPacketReliableCallPacket(_)
             | PacketKind::ClientBinaryPacketUnreliableCallPacket(_)
             | PacketKind::ClientPacketReliableCallPacket(_)
