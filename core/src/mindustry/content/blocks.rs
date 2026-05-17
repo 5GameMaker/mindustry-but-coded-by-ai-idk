@@ -52,6 +52,7 @@ pub enum ProductionBlockKind {
     Fracker,
     WallCrafter,
     BeamDrill,
+    BurstDrill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +102,18 @@ pub struct ProductionBlockData {
     pub drill_effect: String,
     pub drill_effect_rnd: f32,
     pub drill_effect_chance: f32,
+    pub shake: f32,
+    pub speed_curve: String,
+    pub inverted_time: f32,
+    pub arrow_spacing: f32,
+    pub arrow_offset: f32,
+    pub arrows: i32,
+    pub arrow_color: String,
+    pub base_arrow_color: String,
+    pub glow_color_alpha: f32,
+    pub drill_sound: String,
+    pub drill_sound_volume: f32,
+    pub drill_sound_pitch_rand: f32,
     pub rotate_speed: f32,
     pub update_effect: String,
     pub update_effect_chance: f32,
@@ -155,6 +168,18 @@ impl ProductionBlockData {
             drill_effect: "mine".into(),
             drill_effect_rnd: -1.0,
             drill_effect_chance: 0.02,
+            shake: 0.0,
+            speed_curve: String::new(),
+            inverted_time: 0.0,
+            arrow_spacing: 0.0,
+            arrow_offset: 0.0,
+            arrows: 0,
+            arrow_color: String::new(),
+            base_arrow_color: String::new(),
+            glow_color_alpha: 1.0,
+            drill_sound: "none".into(),
+            drill_sound_volume: 0.0,
+            drill_sound_pitch_rand: 0.0,
             rotate_speed: 2.0,
             update_effect: "pulverizeSmall".into(),
             update_effect_chance: 0.02,
@@ -229,6 +254,32 @@ impl ProductionBlockData {
                 self.laser_width = 0.65;
                 self.optional_boost_intensity = 2.5;
             }
+            ProductionBlockKind::BurstDrill => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.group = BlockGroup::Drills;
+                self.base.has_liquids = true;
+                self.base.has_items = true;
+                self.ambient_sound = "drillCharge".into();
+                self.ambient_sound_volume = 0.18;
+                self.base.env_enabled |= Env::SPACE;
+                self.base.flags.push(BlockFlag::Drill);
+                self.hardness_drill_multiplier = 0.0;
+                self.drill_effect_rnd = 0.0;
+                self.drill_effect = "shockwave".into();
+                self.shake = 2.0;
+                self.speed_curve = "pow2In".into();
+                self.inverted_time = 200.0;
+                self.arrow_spacing = 4.0;
+                self.arrow_offset = 0.0;
+                self.arrows = 3;
+                self.arrow_color = "feb380".into();
+                self.base_arrow_color = "6e7080".into();
+                self.glow_color_alpha = 1.0;
+                self.drill_sound = "drillImpact".into();
+                self.drill_sound_volume = 0.6;
+                self.drill_sound_pitch_rand = 0.1;
+            }
         }
     }
 
@@ -261,7 +312,8 @@ impl ProductionBlockData {
             ProductionBlockKind::SolidPump
             | ProductionBlockKind::Fracker
             | ProductionBlockKind::WallCrafter
-            | ProductionBlockKind::BeamDrill => {
+            | ProductionBlockKind::BeamDrill
+            | ProductionBlockKind::BurstDrill => {
                 self.has_liquid_booster =
                     self.consume_liquids.iter().any(|consume| consume.booster);
             }
@@ -2903,6 +2955,13 @@ fn item_amount(items: &[Item], name: &str, amount: i32) -> Option<ItemAmount> {
     })
 }
 
+fn item_multiplier(items: &[Item], name: &str, multiplier: f32) -> Option<ItemMultiplier> {
+    Some(ItemMultiplier {
+        item: find_item(items, name)?.base.mappable.base.id,
+        multiplier,
+    })
+}
+
 fn liquid_amount(liquids: &[Liquid], name: &str, amount: f32) -> Option<LiquidAmount> {
     Some(LiquidAmount {
         liquid: liquid_id(liquids, name)?,
@@ -2926,6 +2985,23 @@ fn liquid_consume(
 fn push_item_amount(target: &mut Vec<ItemAmount>, items: &[Item], name: &str, amount: i32) {
     if let Some(item) = item_amount(items, name, amount) {
         target.push(item);
+    }
+}
+
+fn push_item_multiplier(
+    target: &mut Vec<ItemMultiplier>,
+    items: &[Item],
+    name: &str,
+    multiplier: f32,
+) {
+    if let Some(item) = item_multiplier(items, name, multiplier) {
+        target.push(item);
+    }
+}
+
+fn push_blocked_item(target: &mut Vec<ContentId>, items: &[Item], name: &str) {
+    if let Some(item) = find_item(items, name) {
+        target.push(item.base.mappable.base.id);
     }
 }
 
@@ -3239,6 +3315,92 @@ fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liqu
                     ("beryllium", 3000),
                     ("tungsten", 1200),
                 ],
+            );
+        },
+    );
+
+    registry.register_production_block(
+        "impact-drill",
+        ProductionBlockKind::BurstDrill,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[("silicon", 70), ("beryllium", 90), ("graphite", 60)],
+            );
+            production.drill_time = 60.0 * 12.0;
+            production.base.size = 4;
+            production.base.has_power = true;
+            production.tier = 6;
+            production.drill_effect =
+                "MultiEffect(mineImpact, drillSteam, mineImpactWave(redLight, 40))".into();
+            production.shake = 4.0;
+            production.base.item_capacity = 40;
+            push_blocked_item(&mut production.blocked_items, items, "thorium");
+            production.research_cost_multiplier = 0.5;
+            push_item_multiplier(&mut production.drill_multipliers, items, "beryllium", 2.0);
+            production.liquid_boost_intensity = 1.75;
+            production.fog_radius = 4.0;
+            production.consume_power = 160.0 / 60.0;
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "water",
+                10.0 / 60.0,
+                false,
+            );
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "ozone",
+                3.0 / 60.0,
+                true,
+            );
+        },
+    );
+
+    registry.register_production_block(
+        "eruption-drill",
+        ProductionBlockKind::BurstDrill,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[
+                    ("silicon", 300),
+                    ("oxide", 20),
+                    ("tungsten", 250),
+                    ("thorium", 150),
+                ],
+            );
+            production.drill_time = 281.25;
+            production.base.size = 5;
+            production.base.has_power = true;
+            production.tier = 7;
+            production.drill_effect = "MultiEffect(mineImpact, drillSteam, dynamicSpikes(hydrogen, 30), mineImpactWave(hydrogen, 45))".into();
+            production.shake = 4.0;
+            production.base.item_capacity = 60;
+            production.arrow_offset = 2.0;
+            production.arrow_spacing = 5.0;
+            production.arrows = 2;
+            production.glow_color_alpha = 0.6;
+            production.fog_radius = 5.0;
+            push_item_multiplier(&mut production.drill_multipliers, items, "beryllium", 2.0);
+            production.liquid_boost_intensity = 2.0;
+            production.consume_power = 6.0;
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "hydrogen",
+                4.0 / 60.0,
+                false,
+            );
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "cyanogen",
+                0.75 / 60.0,
+                true,
             );
         },
     );
@@ -6791,6 +6953,166 @@ mod tests {
                 ItemAmount {
                     item: item_id("tungsten"),
                     amount: 1200
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn burst_drills_keep_upstream_burst_drill_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let impact = registry.get_production_by_name("impact-drill").unwrap();
+        assert_eq!(impact.kind, ProductionBlockKind::BurstDrill);
+        assert!(impact.base.update);
+        assert!(impact.base.solid);
+        assert_eq!(impact.base.group, BlockGroup::Drills);
+        assert!(impact.base.has_liquids);
+        assert!(impact.base.has_items);
+        assert_ne!(impact.base.env_enabled & Env::SPACE, 0);
+        assert!(impact.base.flags.contains(&BlockFlag::Drill));
+        assert_eq!(impact.hardness_drill_multiplier, 0.0);
+        assert_eq!(impact.drill_effect_rnd, 0.0);
+        assert_eq!(impact.ambient_sound, "drillCharge");
+        assert_eq!(impact.ambient_sound_volume, 0.18);
+        assert_eq!(impact.speed_curve, "pow2In");
+        assert_eq!(impact.inverted_time, 200.0);
+        assert_eq!(impact.arrow_spacing, 4.0);
+        assert_eq!(impact.arrow_offset, 0.0);
+        assert_eq!(impact.arrows, 3);
+        assert_eq!(impact.arrow_color, "feb380");
+        assert_eq!(impact.base_arrow_color, "6e7080");
+        assert_eq!(impact.glow_color_alpha, 1.0);
+        assert_eq!(impact.drill_sound, "drillImpact");
+        assert_eq!(impact.drill_sound_volume, 0.6);
+        assert_eq!(impact.drill_sound_pitch_rand, 0.1);
+        assert_eq!(impact.drill_time, 720.0);
+        assert_eq!(impact.base.size, 4);
+        assert!(impact.base.has_power);
+        assert_eq!(impact.tier, 6);
+        assert_eq!(
+            impact.drill_effect,
+            "MultiEffect(mineImpact, drillSteam, mineImpactWave(redLight, 40))"
+        );
+        assert_eq!(impact.shake, 4.0);
+        assert_eq!(impact.base.item_capacity, 40);
+        assert_eq!(impact.blocked_items, vec![item_id("thorium")]);
+        assert_eq!(impact.research_cost_multiplier, 0.5);
+        assert_eq!(
+            impact.drill_multipliers,
+            vec![ItemMultiplier {
+                item: item_id("beryllium"),
+                multiplier: 2.0
+            }]
+        );
+        assert_eq!(impact.liquid_boost_intensity, 1.75);
+        assert_eq!(impact.fog_radius, 4.0);
+        assert_eq!(impact.consume_power, 160.0 / 60.0);
+        assert!(impact.has_liquid_booster);
+        assert_eq!(
+            impact.consume_liquids,
+            vec![
+                LiquidConsume {
+                    liquid: liquid_id("water"),
+                    amount: 10.0 / 60.0,
+                    booster: false
+                },
+                LiquidConsume {
+                    liquid: liquid_id("ozone"),
+                    amount: 3.0 / 60.0,
+                    booster: true
+                }
+            ]
+        );
+        assert_eq!(
+            impact.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 70
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 90
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 60
+                }
+            ]
+        );
+
+        let eruption = registry.get_production_by_name("eruption-drill").unwrap();
+        assert_eq!(eruption.kind, ProductionBlockKind::BurstDrill);
+        assert_eq!(eruption.drill_time, 281.25);
+        assert_eq!(eruption.base.size, 5);
+        assert!(eruption.base.has_power);
+        assert_eq!(eruption.tier, 7);
+        assert_eq!(
+            eruption.drill_effect,
+            "MultiEffect(mineImpact, drillSteam, dynamicSpikes(hydrogen, 30), mineImpactWave(hydrogen, 45))"
+        );
+        assert_eq!(eruption.shake, 4.0);
+        assert_eq!(eruption.base.item_capacity, 60);
+        assert_eq!(eruption.arrow_offset, 2.0);
+        assert_eq!(eruption.arrow_spacing, 5.0);
+        assert_eq!(eruption.arrows, 2);
+        assert_eq!(eruption.glow_color_alpha, 0.6);
+        assert_eq!(eruption.fog_radius, 5.0);
+        assert_eq!(
+            eruption.drill_multipliers,
+            vec![ItemMultiplier {
+                item: item_id("beryllium"),
+                multiplier: 2.0
+            }]
+        );
+        assert_eq!(eruption.liquid_boost_intensity, 2.0);
+        assert_eq!(eruption.consume_power, 6.0);
+        assert!(eruption.has_liquid_booster);
+        assert_eq!(
+            eruption.consume_liquids,
+            vec![
+                LiquidConsume {
+                    liquid: liquid_id("hydrogen"),
+                    amount: 4.0 / 60.0,
+                    booster: false
+                },
+                LiquidConsume {
+                    liquid: liquid_id("cyanogen"),
+                    amount: 0.75 / 60.0,
+                    booster: true
+                }
+            ]
+        );
+        assert_eq!(
+            eruption.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 150
                 }
             ]
         );
