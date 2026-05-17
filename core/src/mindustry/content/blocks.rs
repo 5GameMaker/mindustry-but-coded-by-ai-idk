@@ -427,6 +427,9 @@ pub enum DistributionBlockKind {
     OverflowDuct,
     DuctBridge,
     DirectionalUnloader,
+    StackRouter,
+    UnitCargoLoader,
+    UnitCargoUnloadPoint,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -474,6 +477,13 @@ pub struct DistributionBlockData {
     pub buffer_capacity: i32,
     pub recharge: f32,
     pub base_efficiency: f32,
+    pub unit_build_time: f32,
+    pub stale_time_duration: f32,
+    pub poly_stroke: f32,
+    pub poly_radius: f32,
+    pub poly_sides: i32,
+    pub poly_rotate_speed: f32,
+    pub poly_color: String,
     pub reload: f32,
     pub rotate_speed: f32,
     pub translation: f32,
@@ -532,6 +542,13 @@ impl DistributionBlockData {
             buffer_capacity: 0,
             recharge: 0.0,
             base_efficiency: 0.0,
+            unit_build_time: 0.0,
+            stale_time_duration: 0.0,
+            poly_stroke: 0.0,
+            poly_radius: 0.0,
+            poly_sides: 0,
+            poly_rotate_speed: 0.0,
+            poly_color: String::new(),
             reload: 0.0,
             rotate_speed: 0.0,
             translation: 0.0,
@@ -761,6 +778,46 @@ impl DistributionBlockData {
                 self.base.priority = 1;
                 self.speed = 1.0;
                 self.allow_core_unload = false;
+            }
+            DistributionBlockKind::StackRouter => {
+                self.base.group = BlockGroup::Transportation;
+                self.base.update = true;
+                self.base.solid = false;
+                self.base.has_items = true;
+                self.unloadable = false;
+                self.base.item_capacity = 10;
+                self.no_update_disabled = true;
+                self.configurable = true;
+                self.save_config = true;
+                self.rotate = true;
+                self.clear_on_double_tap = true;
+                self.under_bullets = true;
+                self.base.priority = 1;
+                self.base.env_enabled = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
+                self.speed = 5.0;
+            }
+            DistributionBlockKind::UnitCargoLoader => {
+                self.base.solid = true;
+                self.base.update = true;
+                self.base.has_items = true;
+                self.base.item_capacity = 200;
+                self.ambient_sound = "loopUnitBuilding".into();
+                self.unit_build_time = 60.0 * 8.0;
+                self.poly_stroke = 1.8;
+                self.poly_radius = 8.0;
+                self.poly_sides = 6;
+                self.poly_rotate_speed = 1.0;
+                self.poly_color = "accent".into();
+            }
+            DistributionBlockKind::UnitCargoUnloadPoint => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.has_items = true;
+                self.configurable = true;
+                self.save_config = true;
+                self.clear_on_double_tap = true;
+                self.base.flags.push(BlockFlag::UnitCargoUnloadPoint);
+                self.stale_time_duration = 60.0 * 6.0;
             }
         }
     }
@@ -2734,7 +2791,7 @@ fn register_effect_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
     );
 }
 
-fn register_distribution_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids: &[Liquid]) {
+fn register_distribution_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
     registry.register_distribution_block(
         "conveyor",
         DistributionBlockKind::Conveyor,
@@ -3082,6 +3139,76 @@ fn register_distribution_blocks(registry: &mut BlockRegistry, items: &[Item], _l
                 &mut distribution.research_cost,
                 items,
                 &[("surge-alloy", 30), ("tungsten", 80)],
+            );
+        },
+    );
+
+    registry.register_distribution_block(
+        "surge-router",
+        DistributionBlockKind::StackRouter,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("surge-alloy", 5), ("tungsten", 1)],
+            );
+            distribution.base.health = 130;
+            distribution.speed = 6.0;
+            distribution.base.has_power = true;
+            distribution.base.consumes_power = true;
+            distribution.base.conductive_power = true;
+            distribution.base_efficiency = 1.0;
+            distribution.under_bullets = true;
+            distribution.base.solid = false;
+            distribution.consume_power = 3.0 / 60.0;
+        },
+    );
+
+    registry.register_distribution_block(
+        "unit-cargo-loader",
+        DistributionBlockKind::UnitCargoLoader,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("silicon", 80), ("surge-alloy", 50), ("oxide", 20)],
+            );
+            distribution.base.size = 3;
+            distribution.unit_build_time = 60.0 * 8.0;
+            distribution.consume_power = 8.0 / 60.0;
+            distribution.base.has_power = true;
+            distribution.base.has_liquids = true;
+            distribution.base.consumes_power = true;
+            push_liquid_amount(
+                &mut distribution.consume_liquids,
+                liquids,
+                "nitrogen",
+                10.0 / 60.0,
+            );
+            distribution.base.item_capacity = 200;
+            set_requirements(
+                &mut distribution.research_cost,
+                items,
+                &[("silicon", 2500), ("surge-alloy", 20), ("oxide", 30)],
+            );
+        },
+    );
+
+    registry.register_distribution_block(
+        "unit-cargo-unload-point",
+        DistributionBlockKind::UnitCargoUnloadPoint,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("silicon", 60), ("tungsten", 60)],
+            );
+            distribution.base.size = 2;
+            distribution.base.item_capacity = 100;
+            set_requirements(
+                &mut distribution.research_cost,
+                items,
+                &[("silicon", 3000), ("oxide", 20)],
             );
         },
     );
@@ -6639,6 +6766,120 @@ mod tests {
                 ItemAmount {
                     item: item_id("tungsten"),
                     amount: 80
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn surge_router_and_unit_cargo_distribution_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let surge_router = registry.get_distribution_by_name("surge-router").unwrap();
+        assert_eq!(surge_router.kind, DistributionBlockKind::StackRouter);
+        assert_eq!(surge_router.base.health, 130);
+        assert_eq!(surge_router.base.item_capacity, 10);
+        assert_eq!(surge_router.speed, 6.0);
+        assert!(surge_router.base.has_power);
+        assert!(surge_router.base.consumes_power);
+        assert!(surge_router.base.conductive_power);
+        assert_eq!(surge_router.base_efficiency, 1.0);
+        assert!(surge_router.under_bullets);
+        assert!(!surge_router.base.solid);
+        assert_eq!(surge_router.consume_power, 3.0 / 60.0);
+        assert_eq!(
+            surge_router.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 5
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 1
+                }
+            ]
+        );
+
+        let loader = registry
+            .get_distribution_by_name("unit-cargo-loader")
+            .unwrap();
+        assert_eq!(loader.kind, DistributionBlockKind::UnitCargoLoader);
+        assert!(loader.base.solid);
+        assert!(loader.base.update);
+        assert!(loader.base.has_items);
+        assert!(loader.base.has_power);
+        assert!(loader.base.has_liquids);
+        assert_eq!(loader.base.size, 3);
+        assert_eq!(loader.unit_build_time, 60.0 * 8.0);
+        assert_eq!(loader.consume_power, 8.0 / 60.0);
+        assert_eq!(loader.base.item_capacity, 200);
+        assert_eq!(loader.ambient_sound, "loopUnitBuilding");
+        assert_eq!(loader.poly_stroke, 1.8);
+        assert_eq!(loader.poly_radius, 8.0);
+        assert_eq!(loader.poly_sides, 6);
+        assert_eq!(loader.poly_rotate_speed, 1.0);
+        assert_eq!(loader.poly_color, "accent");
+        assert_eq!(
+            loader.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("nitrogen"),
+                amount: 10.0 / 60.0
+            }]
+        );
+        assert_eq!(
+            loader.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 2500
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 30
+                }
+            ]
+        );
+
+        let unload = registry
+            .get_distribution_by_name("unit-cargo-unload-point")
+            .unwrap();
+        assert_eq!(unload.kind, DistributionBlockKind::UnitCargoUnloadPoint);
+        assert!(unload.base.update);
+        assert!(unload.base.solid);
+        assert!(unload.base.has_items);
+        assert!(unload.configurable);
+        assert!(unload.save_config);
+        assert!(unload.clear_on_double_tap);
+        assert!(unload.base.flags.contains(&BlockFlag::UnitCargoUnloadPoint));
+        assert_eq!(unload.stale_time_duration, 60.0 * 6.0);
+        assert_eq!(unload.base.size, 2);
+        assert_eq!(unload.base.item_capacity, 100);
+        assert_eq!(
+            unload.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 3000
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 20
                 }
             ]
         );
