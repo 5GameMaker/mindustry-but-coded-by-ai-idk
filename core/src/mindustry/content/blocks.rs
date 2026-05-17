@@ -1370,11 +1370,19 @@ pub struct CraftingBlockData {
     pub output_liquids: Vec<LiquidAmount>,
     pub liquid_output_directions: Vec<i32>,
     pub results: Vec<ItemAmount>,
+    pub requirements: Vec<ItemAmount>,
     pub consume_items: Vec<ItemAmount>,
     pub consume_liquids: Vec<LiquidAmount>,
     pub consume_power: f32,
     pub research_cost: Vec<ItemAmount>,
     pub boost_scale: f32,
+    pub attribute: String,
+    pub base_efficiency: f32,
+    pub min_efficiency: f32,
+    pub max_boost: f32,
+    pub display_efficiency_scale: f32,
+    pub display_efficiency: bool,
+    pub scale_liquid_consumption: bool,
     pub outputs_liquid: bool,
     pub rotate: bool,
     pub rotate_draw: bool,
@@ -1411,11 +1419,19 @@ impl CraftingBlockData {
             output_liquids: Vec::new(),
             liquid_output_directions: Vec::new(),
             results: Vec::new(),
+            requirements: Vec::new(),
             consume_items: Vec::new(),
             consume_liquids: Vec::new(),
             consume_power: 0.0,
             research_cost: Vec::new(),
             boost_scale: 0.0,
+            attribute: String::new(),
+            base_efficiency: 0.0,
+            min_efficiency: 0.0,
+            max_boost: 0.0,
+            display_efficiency_scale: 1.0,
+            display_efficiency: true,
+            scale_liquid_consumption: false,
             outputs_liquid: false,
             rotate: true,
             rotate_draw: true,
@@ -4796,6 +4812,33 @@ fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquid
         },
     );
 
+    registry.register_crafting("vent-condenser", CraftingBlockKind::AttributeCrafter, |craft| {
+        set_requirements(
+            &mut craft.requirements,
+            items,
+            &[("graphite", 20), ("beryllium", 60)],
+        );
+        craft.attribute = "steam".into();
+        craft.base.group = BlockGroup::Liquids;
+        craft.min_efficiency = 9.0 - 0.0001;
+        craft.base_efficiency = 0.0;
+        craft.display_efficiency = false;
+        craft.craft_effect = "turbinegenerate".into();
+        craft.drawer = "DrawMulti(DrawRegion(-bottom), DrawBlurSpin(-rotator), DrawRegion(-mid), DrawLiquidTile(water), DrawDefault)".into();
+        craft.craft_time = 120.0;
+        craft.base.size = 3;
+        craft.ambient_sound = "loopHum".into();
+        craft.ambient_sound_volume = 0.06;
+        craft.base.has_liquids = true;
+        craft.boost_scale = 1.0 / 9.0;
+        craft.base.item_capacity = 0;
+        craft.output_liquid = liquid_amount(liquids, "water", 30.0 / 60.0);
+        craft.outputs_liquid = true;
+        craft.consume_power = 0.5;
+        craft.base.has_power = true;
+        craft.base.liquid_capacity = 60.0;
+    });
+
     registry.register_crafting(
         "oxidation-chamber",
         CraftingBlockKind::HeatProducer,
@@ -6043,6 +6086,49 @@ mod tests {
                 liquid: liquid_id("nitrogen"),
                 amount: 16.0 / 60.0
             })
+        );
+
+        let vent = registry.get_crafting_by_name("vent-condenser").unwrap();
+        assert_eq!(vent.kind, CraftingBlockKind::AttributeCrafter);
+        assert_eq!(vent.attribute, "steam");
+        assert_eq!(
+            vent.base.group,
+            crate::mindustry::world::meta::BlockGroup::Liquids
+        );
+        assert_eq!(vent.min_efficiency, 9.0 - 0.0001);
+        assert_eq!(vent.base_efficiency, 0.0);
+        assert!(!vent.display_efficiency);
+        assert_eq!(vent.craft_effect, "turbinegenerate");
+        assert_eq!(vent.craft_time, 120.0);
+        assert_eq!(vent.base.size, 3);
+        assert_eq!(vent.ambient_sound, "loopHum");
+        assert_eq!(vent.ambient_sound_volume, 0.06);
+        assert!(vent.base.has_liquids);
+        assert_eq!(vent.boost_scale, 1.0 / 9.0);
+        assert_eq!(vent.base.item_capacity, 0);
+        assert_eq!(
+            vent.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("water"),
+                amount: 30.0 / 60.0
+            })
+        );
+        assert!(vent.outputs_liquid);
+        assert_eq!(vent.consume_power, 0.5);
+        assert!(vent.base.has_power);
+        assert_eq!(vent.base.liquid_capacity, 60.0);
+        assert_eq!(
+            vent.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 60
+                }
+            ]
         );
 
         let oxidation = registry.get_crafting_by_name("oxidation-chamber").unwrap();
