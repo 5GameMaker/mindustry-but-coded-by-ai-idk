@@ -1031,6 +1031,10 @@ pub enum PowerBlockKind {
     ConsumeGenerator,
     ThermalGenerator,
     SolarGenerator,
+    NuclearReactor,
+    ImpactReactor,
+    BeamNode,
+    LongPowerNode,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1047,6 +1051,7 @@ pub struct PowerBlockData {
     pub output_liquid: Option<LiquidAmount>,
     pub power_production: f32,
     pub item_duration: f32,
+    pub item_capacity: i32,
     pub item_duration_multipliers: Vec<ItemAmount>,
     pub max_nodes: i32,
     pub laser_range: f32,
@@ -1070,6 +1075,19 @@ pub struct PowerBlockData {
     pub min_efficiency: f32,
     pub display_efficiency_scale: f32,
     pub display_efficiency: bool,
+    pub health_scaled: f32,
+    pub range: f32,
+    pub fog_radius: f32,
+    pub heating: f32,
+    pub coolant_power: f32,
+    pub heat_output: f32,
+    pub warmup_speed: f32,
+    pub liquid_capacity: f32,
+    pub explosion_radius: i32,
+    pub explosion_damage: i32,
+    pub explosion_min_warmup: f32,
+    pub power_layer: String,
+    pub laser_color2: String,
     pub drawer: String,
 }
 
@@ -1089,6 +1107,7 @@ impl PowerBlockData {
             output_liquid: None,
             power_production: 0.0,
             item_duration: 0.0,
+            item_capacity: 0,
             item_duration_multipliers: Vec::new(),
             max_nodes: 0,
             laser_range: 0.0,
@@ -1112,6 +1131,19 @@ impl PowerBlockData {
             min_efficiency: 0.0,
             display_efficiency_scale: 1.0,
             display_efficiency: true,
+            health_scaled: 0.0,
+            range: 0.0,
+            fog_radius: 0.0,
+            heating: 0.0,
+            coolant_power: 0.0,
+            heat_output: 0.0,
+            warmup_speed: 0.0,
+            liquid_capacity: 0.0,
+            explosion_radius: 0,
+            explosion_damage: 0,
+            explosion_min_warmup: 0.0,
+            power_layer: String::new(),
+            laser_color2: String::new(),
             drawer: String::new(),
         };
         block.apply_kind_defaults();
@@ -1186,12 +1218,80 @@ impl PowerBlockData {
                 self.base.flags.clear();
                 self.base.env_enabled = Env::ANY;
             }
+            PowerBlockKind::NuclearReactor => {
+                self.apply_power_generator_defaults();
+                self.item_capacity = 30;
+                self.base.item_capacity = 30;
+                self.base.liquid_capacity = 30.0;
+                self.base.has_items = true;
+                self.base.has_liquids = true;
+                self.base.flags.clear();
+                self.base.flags.push(BlockFlag::Reactor);
+                self.base.flags.push(BlockFlag::Generator);
+                self.schematic_priority = -5;
+                self.base.env_enabled = Env::ANY;
+                self.item_duration = 120.0;
+                self.heating = 0.01;
+                self.heat_output = 15.0;
+                self.coolant_power = 0.5;
+                self.explosion_radius = 19;
+                self.explosion_damage = 1250 * 4;
+            }
+            PowerBlockKind::ImpactReactor => {
+                self.apply_power_generator_defaults();
+                self.base.has_power = true;
+                self.base.has_liquids = true;
+                self.base.liquid_capacity = 30.0;
+                self.base.has_items = true;
+                self.base.outputs_power = true;
+                self.base.consumes_power = true;
+                self.base.flags.clear();
+                self.base.flags.push(BlockFlag::Reactor);
+                self.base.flags.push(BlockFlag::Generator);
+                self.base.light_radius = 115.0;
+                self.base.emit_light = true;
+                self.base.env_enabled = Env::ANY;
+                self.warmup_speed = 0.001;
+                self.item_duration = 60.0;
+                self.explosion_damage = 1900 * 4;
+                self.explosion_min_warmup = 0.3;
+                self.drawer = "DrawMulti(DrawRegion(-bottom), DrawPlasma, DrawDefault)".into();
+            }
+            PowerBlockKind::BeamNode => {
+                self.apply_power_block_defaults();
+                self.base.consumes_power = false;
+                self.base.outputs_power = false;
+                self.base.env_enabled |= Env::SPACE;
+                self.under_bullets = true;
+                self.base.priority = 1;
+                self.range = 5.0;
+                self.laser_color2 = "ffd9c2".into();
+                self.laser_scale = 0.4;
+            }
+            PowerBlockKind::LongPowerNode => {
+                self.apply_kind_defaults_for_long_power_node();
+            }
         }
     }
 
     fn configurable_defaults(&mut self) {
         // Captures PowerNode's configurable wiring defaults without widening
         // base Block with one-off UI fields yet.
+    }
+
+    fn apply_kind_defaults_for_long_power_node(&mut self) {
+        self.apply_power_block_defaults();
+        self.base.consumes_power = false;
+        self.base.outputs_power = false;
+        self.autolink = true;
+        self.draw_range = false;
+        self.laser_range = 6.0;
+        self.max_nodes = 3;
+        self.laser_scale = 0.25;
+        self.schematic_priority = -10;
+        self.base.env_enabled |= Env::SPACE;
+        self.base.destructible = true;
+        self.base.update = false;
     }
 }
 
@@ -3932,6 +4032,138 @@ fn register_power_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: 
             );
             power.base.size = 3;
             power.power_production = 1.6;
+        },
+    );
+
+    registry.register_power_block("thorium-reactor", PowerBlockKind::NuclearReactor, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[
+                ("lead", 300),
+                ("silicon", 200),
+                ("graphite", 150),
+                ("thorium", 150),
+                ("metaglass", 50),
+            ],
+        );
+        power.ambient_sound = "loopThoriumReactor".into();
+        power.ambient_sound_volume = 0.11;
+        power.base.size = 3;
+        power.base.health = 700;
+        power.item_duration = 360.0;
+        power.power_production = 15.0;
+        power.heating = 0.02;
+        power.coolant_power = 0.5;
+        push_item_amount(&mut power.consume_items, items, "thorium", 1);
+        push_liquid_amount(
+            &mut power.consume_liquids,
+            liquids,
+            "cryofluid",
+            power.heating / power.coolant_power,
+        );
+    });
+
+    registry.register_power_block("impact-reactor", PowerBlockKind::ImpactReactor, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[
+                ("lead", 500),
+                ("silicon", 300),
+                ("graphite", 400),
+                ("thorium", 100),
+                ("surge-alloy", 250),
+                ("metaglass", 250),
+            ],
+        );
+        power.base.size = 4;
+        power.base.health = 900;
+        power.power_production = 130.0;
+        power.item_duration = 140.0;
+        power.ambient_sound = "loopPulse".into();
+        power.ambient_sound_volume = 0.08;
+        power.base.liquid_capacity = 80.0;
+        power.liquid_capacity = 80.0;
+        power.consume_power = 25.0;
+        push_item_amount(&mut power.consume_items, items, "blast-compound", 1);
+        push_liquid_amount(&mut power.consume_liquids, liquids, "cryofluid", 0.25);
+    });
+
+    registry.register_power_block("beam-node", PowerBlockKind::BeamNode, |power| {
+        set_requirements(&mut power.requirements, items, &[("beryllium", 8)]);
+        power.base.consumes_power = true;
+        power.base.outputs_power = true;
+        power.base.health = 90;
+        power.range = 10.0;
+        power.fog_radius = 1.0;
+        set_requirements(&mut power.research_cost, items, &[("beryllium", 5)]);
+        power.crush_fragile = true;
+        power.buffered_power = 1000.0;
+    });
+
+    registry.register_power_block("beam-tower", PowerBlockKind::BeamNode, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[("beryllium", 30), ("oxide", 10), ("silicon", 10)],
+        );
+        power.base.size = 3;
+        power.base.consumes_power = true;
+        power.base.outputs_power = true;
+        power.range = 23.0;
+        power.health_scaled = 90.0;
+        power.fog_radius = 2.0;
+        power.buffered_power = 40000.0;
+    });
+
+    registry.register_power_block("beam-link", PowerBlockKind::LongPowerNode, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[
+                ("beryllium", 250),
+                ("silicon", 250),
+                ("oxide", 150),
+                ("carbide", 75),
+                ("surge-alloy", 75),
+                ("phase-fabric", 75),
+            ],
+        );
+        power.base.size = 3;
+        power.max_nodes = 1;
+        power.laser_range = 500.0;
+        power.power_layer = "Layer.legUnit+2".into();
+        power.autolink = false;
+        power.same_block_connection = true;
+        power.laser_color2 = "ffd9c2".into();
+        power.laser_scale = 0.8;
+        power.health_scaled = 130.0;
+    });
+
+    registry.register_power_block(
+        "turbine-condenser",
+        PowerBlockKind::ThermalGenerator,
+        |power| {
+            set_requirements(&mut power.requirements, items, &[("beryllium", 60)]);
+            power.attribute = "steam".into();
+            power.base.group = BlockGroup::Liquids;
+            power.display_efficiency_scale = 1.0 / 9.0;
+            power.min_efficiency = 9.0 - 0.0001;
+            power.power_production = 3.0 / 9.0;
+            power.display_efficiency = false;
+            power.generate_effect = "turbinegenerate".into();
+            power.effect_chance = 0.04;
+            power.base.size = 3;
+            power.ambient_sound = "loopHum".into();
+            power.ambient_sound_volume = 0.06;
+            power.drawer = "DrawMulti(DrawDefault, DrawBlurSpin(-rotator))".into();
+            power.base.has_liquids = true;
+            power.output_liquid = liquid_amount(liquids, "water", 5.0 / 60.0 / 9.0);
+            power.base.liquid_capacity = 20.0;
+            power.liquid_capacity = 20.0;
+            power.fog_radius = 3.0;
+            set_requirements(&mut power.research_cost, items, &[("beryllium", 15)]);
         },
     );
 }
@@ -7885,6 +8117,136 @@ mod tests {
         assert_eq!(large.base.size, 3);
         assert_eq!(large.power_production, 1.6);
         assert_eq!(large.base.env_enabled, Env::ANY);
+    }
+
+    #[test]
+    fn reactors_and_beam_power_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let thorium = registry.get_power_by_name("thorium-reactor").unwrap();
+        assert_eq!(thorium.kind, PowerBlockKind::NuclearReactor);
+        assert_eq!(thorium.ambient_sound, "loopThoriumReactor");
+        assert_eq!(thorium.ambient_sound_volume, 0.11);
+        assert_eq!(thorium.base.size, 3);
+        assert_eq!(thorium.base.health, 700);
+        assert_eq!(thorium.item_duration, 360.0);
+        assert_eq!(thorium.power_production, 15.0);
+        assert_eq!(thorium.heating, 0.02);
+        assert_eq!(thorium.coolant_power, 0.5);
+        assert!(thorium.base.flags.contains(&BlockFlag::Reactor));
+        assert_eq!(
+            thorium.consume_items,
+            vec![ItemAmount {
+                item: item_id("thorium"),
+                amount: 1
+            }]
+        );
+        assert_eq!(
+            thorium.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cryofluid"),
+                amount: 0.02 / 0.5
+            }]
+        );
+
+        let impact = registry.get_power_by_name("impact-reactor").unwrap();
+        assert_eq!(impact.kind, PowerBlockKind::ImpactReactor);
+        assert_eq!(impact.base.size, 4);
+        assert_eq!(impact.base.health, 900);
+        assert_eq!(impact.power_production, 130.0);
+        assert_eq!(impact.item_duration, 140.0);
+        assert_eq!(impact.ambient_sound, "loopPulse");
+        assert_eq!(impact.ambient_sound_volume, 0.08);
+        assert_eq!(impact.base.liquid_capacity, 80.0);
+        assert_eq!(impact.consume_power, 25.0);
+        assert!(impact.base.consumes_power);
+        assert!(impact.base.outputs_power);
+        assert_eq!(
+            impact.consume_items,
+            vec![ItemAmount {
+                item: item_id("blast-compound"),
+                amount: 1
+            }]
+        );
+        assert_eq!(
+            impact.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cryofluid"),
+                amount: 0.25
+            }]
+        );
+
+        let node = registry.get_power_by_name("beam-node").unwrap();
+        assert_eq!(node.kind, PowerBlockKind::BeamNode);
+        assert!(node.base.consumes_power);
+        assert!(node.base.outputs_power);
+        assert_eq!(node.base.health, 90);
+        assert_eq!(node.range, 10.0);
+        assert_eq!(node.fog_radius, 1.0);
+        assert_eq!(node.buffered_power, 1000.0);
+        assert!(node.crush_fragile);
+        assert_eq!(
+            node.research_cost,
+            vec![ItemAmount {
+                item: item_id("beryllium"),
+                amount: 5
+            }]
+        );
+
+        let tower = registry.get_power_by_name("beam-tower").unwrap();
+        assert_eq!(tower.kind, PowerBlockKind::BeamNode);
+        assert_eq!(tower.base.size, 3);
+        assert!(tower.base.consumes_power);
+        assert!(tower.base.outputs_power);
+        assert_eq!(tower.range, 23.0);
+        assert_eq!(tower.health_scaled, 90.0);
+        assert_eq!(tower.fog_radius, 2.0);
+        assert_eq!(tower.buffered_power, 40000.0);
+
+        let link = registry.get_power_by_name("beam-link").unwrap();
+        assert_eq!(link.kind, PowerBlockKind::LongPowerNode);
+        assert_eq!(link.base.size, 3);
+        assert_eq!(link.max_nodes, 1);
+        assert_eq!(link.laser_range, 500.0);
+        assert_eq!(link.power_layer, "Layer.legUnit+2");
+        assert!(!link.autolink);
+        assert!(link.same_block_connection);
+        assert_eq!(link.laser_color2, "ffd9c2");
+        assert_eq!(link.laser_scale, 0.8);
+        assert_eq!(link.health_scaled, 130.0);
+
+        let turbine = registry.get_power_by_name("turbine-condenser").unwrap();
+        assert_eq!(turbine.kind, PowerBlockKind::ThermalGenerator);
+        assert_eq!(turbine.attribute, "steam");
+        assert_eq!(turbine.base.group, BlockGroup::Liquids);
+        assert_eq!(turbine.display_efficiency_scale, 1.0 / 9.0);
+        assert_eq!(turbine.min_efficiency, 9.0 - 0.0001);
+        assert_eq!(turbine.power_production, 3.0 / 9.0);
+        assert!(!turbine.display_efficiency);
+        assert_eq!(turbine.generate_effect, "turbinegenerate");
+        assert_eq!(turbine.effect_chance, 0.04);
+        assert_eq!(turbine.base.size, 3);
+        assert!(turbine.base.has_liquids);
+        assert_eq!(
+            turbine.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("water"),
+                amount: 5.0 / 60.0 / 9.0
+            })
+        );
+        assert_eq!(turbine.base.liquid_capacity, 20.0);
+        assert_eq!(turbine.fog_radius, 3.0);
     }
 
     #[test]
