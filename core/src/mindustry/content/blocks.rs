@@ -50,6 +50,7 @@ pub enum ProductionBlockKind {
     Drill,
     SolidPump,
     Fracker,
+    WallCrafter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,7 +68,9 @@ pub struct ProductionBlockData {
     pub research_cost_multiplier: f32,
     pub consume_power: f32,
     pub consume_items: Vec<ItemAmount>,
+    pub consume_item_boosts: Vec<ItemAmount>,
     pub consume_liquids: Vec<LiquidConsume>,
+    pub output_item: Option<ContentId>,
     pub outputs_liquid: bool,
     pub result_liquid: Option<ContentId>,
     pub pump_amount: f32,
@@ -76,6 +79,13 @@ pub struct ProductionBlockData {
     pub attribute: String,
     pub base_efficiency: f32,
     pub item_use_time: f32,
+    pub boost_item_use_time: f32,
+    pub item_boost_intensity: f32,
+    pub has_liquid_booster: bool,
+    pub rotate: bool,
+    pub ignore_line_rotation: bool,
+    pub region_rotated1: i32,
+    pub fog_radius: f32,
     pub hardness_drill_multiplier: f32,
     pub tier: i32,
     pub drill_time: f32,
@@ -108,7 +118,9 @@ impl ProductionBlockData {
             research_cost_multiplier: 1.0,
             consume_power: 0.0,
             consume_items: Vec::new(),
+            consume_item_boosts: Vec::new(),
             consume_liquids: Vec::new(),
+            output_item: None,
             outputs_liquid: false,
             result_liquid: None,
             pump_amount: 0.0,
@@ -117,6 +129,13 @@ impl ProductionBlockData {
             attribute: String::new(),
             base_efficiency: 0.0,
             item_use_time: 0.0,
+            boost_item_use_time: 0.0,
+            item_boost_intensity: 0.0,
+            has_liquid_booster: false,
+            rotate: false,
+            ignore_line_rotation: false,
+            region_rotated1: 0,
+            fog_radius: 0.0,
             hardness_drill_multiplier: 50.0,
             tier: 0,
             drill_time: 300.0,
@@ -165,6 +184,24 @@ impl ProductionBlockData {
                 self.ambient_sound_volume = 0.03;
                 self.item_use_time = 100.0;
             }
+            ProductionBlockKind::WallCrafter => {
+                self.base.has_items = true;
+                self.rotate = true;
+                self.base.update = true;
+                self.base.solid = true;
+                self.ignore_line_rotation = true;
+                self.region_rotated1 = 1;
+                self.base.env_enabled |= Env::SPACE;
+                self.base.flags.push(BlockFlag::Drill);
+                self.drill_time = 150.0;
+                self.liquid_boost_intensity = 1.6;
+                self.update_effect = "mineWallSmall".into();
+                self.update_effect_chance = 0.02;
+                self.rotate_speed = 2.0;
+                self.attribute = "sand".into();
+                self.boost_item_use_time = 120.0;
+                self.item_boost_intensity = 1.6;
+            }
         }
     }
 
@@ -194,7 +231,12 @@ impl ProductionBlockData {
                     self.drill_effect_rnd = self.base.size as f32;
                 }
             }
-            ProductionBlockKind::SolidPump | ProductionBlockKind::Fracker => {}
+            ProductionBlockKind::SolidPump
+            | ProductionBlockKind::Fracker
+            | ProductionBlockKind::WallCrafter => {
+                self.has_liquid_booster =
+                    self.consume_liquids.iter().any(|consume| consume.booster);
+            }
         }
     }
 }
@@ -3039,6 +3081,66 @@ fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liqu
                 0.15,
                 false,
             );
+        },
+    );
+
+    registry.register_production_block(
+        "cliff-crusher",
+        ProductionBlockKind::WallCrafter,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[("graphite", 25), ("beryllium", 20)],
+            );
+            production.consume_power = 11.0 / 60.0;
+            production.drill_time = 110.0;
+            production.base.size = 2;
+            production.attribute = "sand".into();
+            production.output_item = item_amount(items, "sand", 1).map(|amount| amount.item);
+            production.fog_radius = 2.0;
+            set_requirements(
+                &mut production.research_cost,
+                items,
+                &[("beryllium", 100), ("graphite", 40)],
+            );
+            production.ambient_sound = "loopDrill".into();
+            production.ambient_sound_volume = 0.04;
+        },
+    );
+
+    registry.register_production_block(
+        "large-cliff-crusher",
+        ProductionBlockKind::WallCrafter,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[
+                    ("silicon", 80),
+                    ("surge-alloy", 15),
+                    ("beryllium", 100),
+                    ("tungsten", 50),
+                ],
+            );
+            production.consume_power = 1.0;
+            production.drill_time = 48.0;
+            production.base.size = 3;
+            production.attribute = "sand".into();
+            production.output_item = item_amount(items, "sand", 1).map(|amount| amount.item);
+            production.fog_radius = 3.0;
+            production.ambient_sound = "loopDrill".into();
+            production.ambient_sound_volume = 0.08;
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "hydrogen",
+                1.0 / 60.0,
+                false,
+            );
+            push_item_amount(&mut production.consume_item_boosts, items, "graphite", 1);
+            production.base.item_capacity = 20;
+            production.boost_item_use_time = 60.0 / 0.75;
         },
     );
 }
@@ -6340,6 +6442,124 @@ mod tests {
                 ItemAmount {
                     item: item_id("silicon"),
                     amount: 75
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn cliff_crushers_keep_upstream_wall_crafter_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+        let sand_id = item_id("sand");
+
+        let cliff = registry.get_production_by_name("cliff-crusher").unwrap();
+        assert_eq!(cliff.kind, ProductionBlockKind::WallCrafter);
+        assert!(cliff.base.has_items);
+        assert!(cliff.rotate);
+        assert!(cliff.base.update);
+        assert!(cliff.base.solid);
+        assert!(cliff.ignore_line_rotation);
+        assert_eq!(cliff.region_rotated1, 1);
+        assert_ne!(cliff.base.env_enabled & Env::SPACE, 0);
+        assert!(cliff.base.flags.contains(&BlockFlag::Drill));
+        assert_eq!(cliff.consume_power, 11.0 / 60.0);
+        assert_eq!(cliff.drill_time, 110.0);
+        assert_eq!(cliff.base.size, 2);
+        assert_eq!(cliff.attribute, "sand");
+        assert_eq!(cliff.output_item, Some(sand_id));
+        assert_eq!(cliff.fog_radius, 2.0);
+        assert_eq!(cliff.ambient_sound, "loopDrill");
+        assert_eq!(cliff.ambient_sound_volume, 0.04);
+        assert_eq!(cliff.liquid_boost_intensity, 1.6);
+        assert_eq!(cliff.item_boost_intensity, 1.6);
+        assert_eq!(cliff.boost_item_use_time, 120.0);
+        assert!(!cliff.has_liquid_booster);
+        assert_eq!(
+            cliff.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 25
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 20
+                }
+            ]
+        );
+        assert_eq!(
+            cliff.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 40
+                }
+            ]
+        );
+
+        let large = registry
+            .get_production_by_name("large-cliff-crusher")
+            .unwrap();
+        assert_eq!(large.kind, ProductionBlockKind::WallCrafter);
+        assert_eq!(large.consume_power, 1.0);
+        assert_eq!(large.drill_time, 48.0);
+        assert_eq!(large.base.size, 3);
+        assert_eq!(large.attribute, "sand");
+        assert_eq!(large.output_item, Some(sand_id));
+        assert_eq!(large.fog_radius, 3.0);
+        assert_eq!(large.ambient_sound, "loopDrill");
+        assert_eq!(large.ambient_sound_volume, 0.08);
+        assert_eq!(large.base.item_capacity, 20);
+        assert_eq!(large.boost_item_use_time, 60.0 / 0.75);
+        assert!(!large.has_liquid_booster);
+        assert_eq!(
+            large.consume_liquids,
+            vec![LiquidConsume {
+                liquid: liquid_id("hydrogen"),
+                amount: 1.0 / 60.0,
+                booster: false
+            }]
+        );
+        assert_eq!(
+            large.consume_item_boosts,
+            vec![ItemAmount {
+                item: item_id("graphite"),
+                amount: 1
+            }]
+        );
+        assert_eq!(
+            large.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 15
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 50
                 }
             ]
         );
