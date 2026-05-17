@@ -48,6 +48,8 @@ pub struct LiquidConsume {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProductionBlockKind {
     Drill,
+    SolidPump,
+    Fracker,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -64,7 +66,16 @@ pub struct ProductionBlockData {
     pub research_cost: Vec<ItemAmount>,
     pub research_cost_multiplier: f32,
     pub consume_power: f32,
+    pub consume_items: Vec<ItemAmount>,
     pub consume_liquids: Vec<LiquidConsume>,
+    pub outputs_liquid: bool,
+    pub result_liquid: Option<ContentId>,
+    pub pump_amount: f32,
+    pub consume_time: f32,
+    pub floating: bool,
+    pub attribute: String,
+    pub base_efficiency: f32,
+    pub item_use_time: f32,
     pub hardness_drill_multiplier: f32,
     pub tier: i32,
     pub drill_time: f32,
@@ -96,7 +107,16 @@ impl ProductionBlockData {
             research_cost: Vec::new(),
             research_cost_multiplier: 1.0,
             consume_power: 0.0,
+            consume_items: Vec::new(),
             consume_liquids: Vec::new(),
+            outputs_liquid: false,
+            result_liquid: None,
+            pump_amount: 0.0,
+            consume_time: 0.0,
+            floating: false,
+            attribute: String::new(),
+            base_efficiency: 0.0,
+            item_use_time: 0.0,
             hardness_drill_multiplier: 50.0,
             tier: 0,
             drill_time: 300.0,
@@ -134,7 +154,37 @@ impl ProductionBlockData {
                 self.ambient_sound = "loopDrill".into();
                 self.ambient_sound_volume = 0.019;
             }
+            ProductionBlockKind::SolidPump => {
+                self.apply_solid_pump_defaults();
+            }
+            ProductionBlockKind::Fracker => {
+                self.apply_solid_pump_defaults();
+                self.base.has_items = true;
+                self.base.env_required |= Env::GROUND_OIL;
+                self.ambient_sound = "loopDrill".into();
+                self.ambient_sound_volume = 0.03;
+                self.item_use_time = 100.0;
+            }
         }
+    }
+
+    fn apply_solid_pump_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.base.has_liquids = true;
+        self.base.has_power = true;
+        self.base.group = BlockGroup::Liquids;
+        self.base.env_enabled = Env::TERRESTRIAL;
+        self.outputs_liquid = true;
+        self.result_liquid = None;
+        self.pump_amount = 0.2;
+        self.consume_time = 60.0 * 5.0;
+        self.warmup_speed = 0.019;
+        self.update_effect = "none".into();
+        self.update_effect_chance = 0.02;
+        self.rotate_speed = 1.0;
+        self.base_efficiency = 1.0;
+        self.floating = true;
     }
 
     fn finalize(&mut self) {
@@ -144,6 +194,7 @@ impl ProductionBlockData {
                     self.drill_effect_rnd = self.base.size as f32;
                 }
             }
+            ProductionBlockKind::SolidPump | ProductionBlockKind::Fracker => {}
         }
     }
 }
@@ -1493,6 +1544,7 @@ pub struct CraftingBlockData {
     pub display_efficiency_scale: f32,
     pub display_efficiency: bool,
     pub scale_liquid_consumption: bool,
+    pub legacy_read_warmup: bool,
     pub outputs_liquid: bool,
     pub rotate: bool,
     pub rotate_draw: bool,
@@ -1542,6 +1594,7 @@ impl CraftingBlockData {
             display_efficiency_scale: 1.0,
             display_efficiency: true,
             scale_liquid_consumption: false,
+            legacy_read_warmup: false,
             outputs_liquid: false,
             rotate: true,
             rotate_draw: true,
@@ -2927,6 +2980,67 @@ fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liqu
         production.consume_power = 3.0;
         push_liquid_consume(&mut production.consume_liquids, liquids, "water", 0.1, true);
     });
+
+    registry.register_production_block(
+        "water-extractor",
+        ProductionBlockKind::SolidPump,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[
+                    ("metaglass", 30),
+                    ("graphite", 30),
+                    ("lead", 30),
+                    ("copper", 30),
+                ],
+            );
+            production.result_liquid = liquid_id(liquids, "water");
+            production.pump_amount = 0.11;
+            production.base.size = 2;
+            production.base.liquid_capacity = 40.0;
+            production.rotate_speed = 1.4;
+            production.attribute = "water".into();
+            production.base.env_required |= Env::GROUND_WATER;
+            production.consume_power = 1.5;
+        },
+    );
+
+    registry.register_production_block(
+        "oil-extractor",
+        ProductionBlockKind::Fracker,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[
+                    ("copper", 150),
+                    ("graphite", 175),
+                    ("lead", 115),
+                    ("thorium", 115),
+                    ("silicon", 75),
+                ],
+            );
+            production.result_liquid = liquid_id(liquids, "oil");
+            production.update_effect = "pulverize".into();
+            production.update_effect_chance = 0.05;
+            production.pump_amount = 0.25;
+            production.base.size = 3;
+            production.base.liquid_capacity = 40.0;
+            production.attribute = "oil".into();
+            production.base_efficiency = 0.0;
+            production.item_use_time = 60.0;
+            push_item_amount(&mut production.consume_items, items, "sand", 1);
+            production.consume_power = 3.0;
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "water",
+                0.15,
+                false,
+            );
+        },
+    );
 }
 
 fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
@@ -5096,6 +5210,36 @@ fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquid
         craft.base.liquid_capacity = 60.0;
     });
 
+    registry.register_crafting("cultivator", CraftingBlockKind::AttributeCrafter, |craft| {
+        set_requirements(
+            &mut craft.requirements,
+            items,
+            &[("copper", 25), ("lead", 25), ("silicon", 10)],
+        );
+        craft.output_item = item_amount(items, "spore-pod", 1);
+        craft.craft_time = 100.0;
+        craft.base.size = 2;
+        craft.base.has_liquids = true;
+        craft.base.has_power = true;
+        craft.base.has_items = true;
+        craft.base.liquid_capacity = 80.0;
+        craft.craft_effect = "none".into();
+        craft.base.env_required |= Env::SPORES;
+        craft.attribute = "spores".into();
+        craft.base_efficiency = 1.0;
+        craft.boost_scale = 1.0;
+        craft.max_boost = 2.0;
+        craft.min_efficiency = -1.0;
+        craft.ambient_sound = "loopCultivator".into();
+        craft.ambient_sound_volume = 0.075;
+        craft.legacy_read_warmup = true;
+        craft.drawer =
+            "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(water), DrawDefault, DrawCultivator, DrawRegion(-top))"
+                .into();
+        craft.consume_power = 80.0 / 60.0;
+        push_liquid_amount(&mut craft.consume_liquids, liquids, "water", 18.0 / 60.0);
+    });
+
     registry.register_crafting(
         "oxidation-chamber",
         CraftingBlockKind::HeatProducer,
@@ -6047,6 +6191,154 @@ mod tests {
                 },
                 ItemAmount {
                     item: item_id("thorium"),
+                    amount: 75
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn extractor_and_cultivator_production_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let water_extractor = registry.get_production_by_name("water-extractor").unwrap();
+        assert_eq!(water_extractor.kind, ProductionBlockKind::SolidPump);
+        assert_eq!(water_extractor.base.group, BlockGroup::Liquids);
+        assert!(water_extractor.base.update);
+        assert!(water_extractor.base.solid);
+        assert!(water_extractor.base.has_liquids);
+        assert!(water_extractor.base.has_power);
+        assert_eq!(water_extractor.base.env_enabled, Env::TERRESTRIAL);
+        assert_ne!(water_extractor.base.env_required & Env::GROUND_WATER, 0);
+        assert_eq!(water_extractor.result_liquid, Some(liquid_id("water")));
+        assert_eq!(water_extractor.pump_amount, 0.11);
+        assert_eq!(water_extractor.base.size, 2);
+        assert_eq!(water_extractor.base.liquid_capacity, 40.0);
+        assert_eq!(water_extractor.rotate_speed, 1.4);
+        assert_eq!(water_extractor.attribute, "water");
+        assert_eq!(water_extractor.base_efficiency, 1.0);
+        assert_eq!(water_extractor.consume_power, 1.5);
+        assert_eq!(
+            water_extractor.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 30
+                }
+            ]
+        );
+
+        let cultivator = registry.get_crafting_by_name("cultivator").unwrap();
+        assert_eq!(cultivator.kind, CraftingBlockKind::AttributeCrafter);
+        assert_eq!(
+            cultivator.output_item,
+            Some(ItemAmount {
+                item: item_id("spore-pod"),
+                amount: 1
+            })
+        );
+        assert_eq!(cultivator.craft_time, 100.0);
+        assert_eq!(cultivator.base.size, 2);
+        assert!(cultivator.base.has_liquids);
+        assert!(cultivator.base.has_power);
+        assert!(cultivator.base.has_items);
+        assert_eq!(cultivator.base.liquid_capacity, 80.0);
+        assert_eq!(cultivator.craft_effect, "none");
+        assert_ne!(cultivator.base.env_required & Env::SPORES, 0);
+        assert_eq!(cultivator.attribute, "spores");
+        assert_eq!(cultivator.base_efficiency, 1.0);
+        assert_eq!(cultivator.boost_scale, 1.0);
+        assert_eq!(cultivator.max_boost, 2.0);
+        assert_eq!(cultivator.min_efficiency, -1.0);
+        assert_eq!(cultivator.ambient_sound, "loopCultivator");
+        assert_eq!(cultivator.ambient_sound_volume, 0.075);
+        assert!(cultivator.legacy_read_warmup);
+        assert_eq!(cultivator.consume_power, 80.0 / 60.0);
+        assert_eq!(
+            cultivator.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("water"),
+                amount: 18.0 / 60.0
+            }]
+        );
+
+        let oil = registry.get_production_by_name("oil-extractor").unwrap();
+        assert_eq!(oil.kind, ProductionBlockKind::Fracker);
+        assert_eq!(oil.result_liquid, Some(liquid_id("oil")));
+        assert_eq!(oil.update_effect, "pulverize");
+        assert_eq!(oil.update_effect_chance, 0.05);
+        assert_eq!(oil.pump_amount, 0.25);
+        assert_eq!(oil.base.size, 3);
+        assert_eq!(oil.base.liquid_capacity, 40.0);
+        assert_eq!(oil.attribute, "oil");
+        assert_eq!(oil.base_efficiency, 0.0);
+        assert_eq!(oil.item_use_time, 60.0);
+        assert!(oil.base.has_items);
+        assert!(oil.base.has_power);
+        assert_eq!(oil.base.env_enabled, Env::TERRESTRIAL);
+        assert_ne!(oil.base.env_required & Env::GROUND_OIL, 0);
+        assert_eq!(oil.ambient_sound, "loopDrill");
+        assert_eq!(oil.ambient_sound_volume, 0.03);
+        assert_eq!(
+            oil.consume_items,
+            vec![ItemAmount {
+                item: item_id("sand"),
+                amount: 1
+            }]
+        );
+        assert_eq!(oil.consume_power, 3.0);
+        assert_eq!(
+            oil.consume_liquids,
+            vec![LiquidConsume {
+                liquid: liquid_id("water"),
+                amount: 0.15,
+                booster: false
+            }]
+        );
+        assert_eq!(
+            oil.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 175
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 115
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 115
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
                     amount: 75
                 }
             ]
