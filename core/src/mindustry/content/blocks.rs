@@ -409,6 +409,271 @@ impl EffectBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DistributionBlockKind {
+    Conveyor,
+    StackConveyor,
+    ArmoredConveyor,
+    Junction,
+    BufferedItemBridge,
+    ItemBridge,
+    Sorter,
+    Router,
+    OverflowGate,
+    Unloader,
+    MassDriver,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DistributionBlockData {
+    pub base: Block,
+    pub kind: DistributionBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub build_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+    pub rotate: bool,
+    pub under_bullets: bool,
+    pub unloadable: bool,
+    pub no_update_disabled: bool,
+    pub configurable: bool,
+    pub save_config: bool,
+    pub clear_on_double_tap: bool,
+    pub instant_transfer: bool,
+    pub can_overdrive: bool,
+    pub no_side_blend: bool,
+    pub output_router: bool,
+    pub crush_fragile: bool,
+    pub allow_core_unload: bool,
+    pub fade_in: bool,
+    pub move_arrows: bool,
+    pub pulse: bool,
+    pub invert: bool,
+    pub speed: f32,
+    pub displayed_speed: f32,
+    pub capacity: i32,
+    pub range: f32,
+    pub transport_time: f32,
+    pub arrow_spacing: f32,
+    pub arrow_offset: f32,
+    pub arrow_period: f32,
+    pub arrow_time_scl: f32,
+    pub bridge_width: f32,
+    pub buffer_capacity: i32,
+    pub recharge: f32,
+    pub base_efficiency: f32,
+    pub reload: f32,
+    pub rotate_speed: f32,
+    pub translation: f32,
+    pub min_distribute: i32,
+    pub knockback: f32,
+    pub bullet_speed: f32,
+    pub bullet_lifetime: f32,
+    pub shoot_sound_volume: f32,
+    pub shake: f32,
+}
+
+impl DistributionBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: DistributionBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            build_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            consume_liquids: Vec::new(),
+            ambient_sound: "none".into(),
+            ambient_sound_volume: 0.0,
+            rotate: false,
+            under_bullets: false,
+            unloadable: true,
+            no_update_disabled: false,
+            configurable: false,
+            save_config: false,
+            clear_on_double_tap: false,
+            instant_transfer: false,
+            can_overdrive: false,
+            no_side_blend: false,
+            output_router: false,
+            crush_fragile: false,
+            allow_core_unload: false,
+            fade_in: false,
+            move_arrows: false,
+            pulse: false,
+            invert: false,
+            speed: 0.0,
+            displayed_speed: 0.0,
+            capacity: 0,
+            range: 0.0,
+            transport_time: 0.0,
+            arrow_spacing: 0.0,
+            arrow_offset: 0.0,
+            arrow_period: 0.0,
+            arrow_time_scl: 0.0,
+            bridge_width: 0.0,
+            buffer_capacity: 0,
+            recharge: 0.0,
+            base_efficiency: 0.0,
+            reload: 0.0,
+            rotate_speed: 0.0,
+            translation: 0.0,
+            min_distribute: 0,
+            knockback: 0.0,
+            bullet_speed: 0.0,
+            bullet_lifetime: 0.0,
+            shoot_sound_volume: 0.0,
+            shake: 0.0,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor => {
+                self.rotate = true;
+                self.base.update = true;
+                self.base.group = BlockGroup::Transportation;
+                self.base.has_items = true;
+                self.base.item_capacity = 3;
+                self.base.priority = 1;
+                self.under_bullets = true;
+                self.ambient_sound = "loopConveyor".into();
+                self.ambient_sound_volume = 0.0022;
+                self.unloadable = false;
+                if self.kind == DistributionBlockKind::ArmoredConveyor {
+                    self.no_side_blend = true;
+                }
+            }
+            DistributionBlockKind::StackConveyor => {
+                self.rotate = true;
+                self.base.update = true;
+                self.base.group = BlockGroup::Transportation;
+                self.base.has_items = true;
+                self.base.item_capacity = 10;
+                self.base.priority = 1;
+                self.under_bullets = true;
+                self.ambient_sound = "loopConveyor".into();
+                self.ambient_sound_volume = 0.004;
+                self.output_router = true;
+                self.recharge = 2.0;
+            }
+            DistributionBlockKind::Junction => {
+                self.base.update = true;
+                self.base.solid = false;
+                self.under_bullets = true;
+                self.base.group = BlockGroup::Transportation;
+                self.unloadable = false;
+                self.no_update_disabled = true;
+                self.speed = 26.0;
+                self.capacity = 6;
+                self.displayed_speed = 13.0;
+            }
+            DistributionBlockKind::ItemBridge | DistributionBlockKind::BufferedItemBridge => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.under_bullets = true;
+                self.base.has_power = true;
+                self.base.item_capacity = 10;
+                self.configurable = true;
+                self.base.has_items = true;
+                self.unloadable = false;
+                self.base.group = BlockGroup::Transportation;
+                self.no_update_disabled = true;
+                self.base.priority = 1;
+                self.fade_in = true;
+                self.move_arrows = true;
+                self.arrow_spacing = 4.0;
+                self.arrow_offset = 2.0;
+                self.arrow_period = 0.4;
+                self.arrow_time_scl = 6.2;
+                self.bridge_width = 6.5;
+                if self.kind == DistributionBlockKind::BufferedItemBridge {
+                    self.base.has_power = false;
+                    self.base.has_items = true;
+                    self.can_overdrive = true;
+                    self.speed = 40.0;
+                    self.buffer_capacity = 50;
+                    self.displayed_speed = 11.0;
+                }
+            }
+            DistributionBlockKind::Sorter => {
+                self.base.update = false;
+                self.base.destructible = true;
+                self.under_bullets = true;
+                self.instant_transfer = true;
+                self.base.group = BlockGroup::Transportation;
+                self.configurable = true;
+                self.unloadable = false;
+                self.save_config = true;
+                self.clear_on_double_tap = true;
+            }
+            DistributionBlockKind::Router => {
+                self.base.solid = false;
+                self.under_bullets = true;
+                self.base.update = true;
+                self.base.has_items = true;
+                self.base.item_capacity = 1;
+                self.base.group = BlockGroup::Transportation;
+                self.unloadable = false;
+                self.no_update_disabled = true;
+                self.speed = 8.0;
+            }
+            DistributionBlockKind::OverflowGate => {
+                self.base.has_items = true;
+                self.under_bullets = true;
+                self.base.update = false;
+                self.base.destructible = true;
+                self.base.group = BlockGroup::Transportation;
+                self.instant_transfer = true;
+                self.unloadable = false;
+                self.can_overdrive = false;
+                self.base.item_capacity = 0;
+                self.speed = 1.0;
+            }
+            DistributionBlockKind::Unloader => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.health = 70;
+                self.base.has_items = true;
+                self.configurable = true;
+                self.save_config = true;
+                self.base.item_capacity = 0;
+                self.no_update_disabled = true;
+                self.clear_on_double_tap = true;
+                self.unloadable = false;
+                self.speed = 1.0;
+                self.allow_core_unload = true;
+            }
+            DistributionBlockKind::MassDriver => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.configurable = true;
+                self.base.has_items = true;
+                self.base.has_power = true;
+                self.base.sync = true;
+                self.base.env_enabled |= Env::SPACE;
+                self.rotate_speed = 5.0;
+                self.translation = 7.0;
+                self.min_distribute = 10;
+                self.knockback = 4.0;
+                self.reload = 100.0;
+                self.bullet_speed = 5.5;
+                self.bullet_lifetime = 200.0;
+                self.shoot_sound_volume = 0.5;
+                self.shake = 3.0;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CraftingBlockData {
     pub base: Block,
@@ -502,6 +767,7 @@ pub enum BlockDef {
     Crafting(CraftingBlockData),
     DefenseWall(DefenseWallData),
     Effect(EffectBlockData),
+    Distribution(DistributionBlockData),
 }
 
 impl BlockDef {
@@ -518,6 +784,7 @@ impl BlockDef {
             Self::Crafting(crafting) => &crafting.base,
             Self::DefenseWall(wall) => &wall.base,
             Self::Effect(effect) => &effect.base,
+            Self::Distribution(distribution) => &distribution.base,
         }
     }
 
@@ -598,6 +865,13 @@ impl BlockRegistry {
     pub fn get_effect_by_name(&self, name: &str) -> Option<&EffectBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Effect(effect) => Some(effect),
+            _ => None,
+        }
+    }
+
+    pub fn get_distribution_by_name(&self, name: &str) -> Option<&DistributionBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Distribution(distribution) => Some(distribution),
             _ => None,
         }
     }
@@ -739,6 +1013,19 @@ impl BlockRegistry {
         self.insert(BlockDef::Effect(block))
     }
 
+    pub fn register_distribution_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: DistributionBlockKind,
+        configure: impl FnOnce(&mut DistributionBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = DistributionBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Distribution(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -861,6 +1148,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_crafting_blocks(&mut registry, items, liquids);
     register_defense_walls(&mut registry, items);
     register_effect_blocks(&mut registry, items, liquids);
+    register_distribution_blocks(&mut registry, items, liquids);
 
     registry.finalize_floor_links();
     registry
@@ -2127,6 +2415,229 @@ fn register_effect_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
             effect.radius = 400.0;
             effect.consume_power = 5.0;
             effect.base.consumes_power = true;
+        },
+    );
+}
+
+fn register_distribution_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids: &[Liquid]) {
+    registry.register_distribution_block(
+        "conveyor",
+        DistributionBlockKind::Conveyor,
+        |distribution| {
+            set_requirements(&mut distribution.requirements, items, &[("copper", 1)]);
+            distribution.base.health = 45;
+            distribution.speed = 0.03;
+            distribution.displayed_speed = 4.2;
+            distribution.build_cost_multiplier = 2.0;
+            set_requirements(&mut distribution.research_cost, items, &[("copper", 5)]);
+        },
+    );
+
+    registry.register_distribution_block(
+        "titanium-conveyor",
+        DistributionBlockKind::Conveyor,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("copper", 1), ("lead", 1), ("titanium", 1)],
+            );
+            distribution.base.health = 65;
+            distribution.speed = 0.08;
+            distribution.displayed_speed = 11.0;
+        },
+    );
+
+    registry.register_distribution_block(
+        "plastanium-conveyor",
+        DistributionBlockKind::StackConveyor,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("plastanium", 1), ("silicon", 1), ("graphite", 1)],
+            );
+            distribution.base.health = 90;
+            distribution.speed = 4.0 / 60.0;
+            distribution.base.item_capacity = 10;
+        },
+    );
+
+    registry.register_distribution_block(
+        "armored-conveyor",
+        DistributionBlockKind::ArmoredConveyor,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("plastanium", 1), ("thorium", 1), ("metaglass", 1)],
+            );
+            distribution.base.health = 280;
+            distribution.speed = 0.08;
+            distribution.displayed_speed = 11.0;
+        },
+    );
+
+    registry.register_distribution_block(
+        "junction",
+        DistributionBlockKind::Junction,
+        |distribution| {
+            set_requirements(&mut distribution.requirements, items, &[("copper", 3)]);
+            distribution.speed = 26.0;
+            distribution.capacity = 6;
+            distribution.base.health = 30;
+            distribution.build_cost_multiplier = 6.0;
+        },
+    );
+
+    registry.register_distribution_block(
+        "bridge-conveyor",
+        DistributionBlockKind::BufferedItemBridge,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("lead", 6), ("copper", 6)],
+            );
+            distribution.fade_in = false;
+            distribution.move_arrows = false;
+            distribution.range = 4.0;
+            distribution.speed = 74.0;
+            distribution.arrow_spacing = 6.0;
+            distribution.buffer_capacity = 14;
+            distribution.crush_fragile = true;
+        },
+    );
+
+    registry.register_distribution_block(
+        "phase-conveyor",
+        DistributionBlockKind::ItemBridge,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[
+                    ("phase-fabric", 5),
+                    ("silicon", 7),
+                    ("lead", 10),
+                    ("graphite", 10),
+                ],
+            );
+            distribution.range = 12.0;
+            distribution.transport_time = 2.0;
+            distribution.arrow_period = 0.9;
+            distribution.arrow_time_scl = 2.75;
+            distribution.base.has_power = true;
+            distribution.pulse = true;
+            distribution.base.env_enabled |= Env::SPACE;
+            distribution.consume_power = 0.30;
+            distribution.base.consumes_power = true;
+        },
+    );
+
+    registry.register_distribution_block("sorter", DistributionBlockKind::Sorter, |distribution| {
+        set_requirements(
+            &mut distribution.requirements,
+            items,
+            &[("lead", 2), ("copper", 2)],
+        );
+        distribution.build_cost_multiplier = 3.0;
+    });
+
+    registry.register_distribution_block(
+        "inverted-sorter",
+        DistributionBlockKind::Sorter,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("lead", 2), ("copper", 2)],
+            );
+            distribution.build_cost_multiplier = 3.0;
+            distribution.invert = true;
+        },
+    );
+
+    registry.register_distribution_block("router", DistributionBlockKind::Router, |distribution| {
+        set_requirements(&mut distribution.requirements, items, &[("copper", 3)]);
+        distribution.build_cost_multiplier = 4.0;
+    });
+
+    registry.register_distribution_block(
+        "distributor",
+        DistributionBlockKind::Router,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("lead", 4), ("copper", 4)],
+            );
+            distribution.build_cost_multiplier = 3.0;
+            distribution.base.size = 2;
+        },
+    );
+
+    registry.register_distribution_block(
+        "overflow-gate",
+        DistributionBlockKind::OverflowGate,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("lead", 2), ("copper", 4)],
+            );
+            distribution.build_cost_multiplier = 3.0;
+        },
+    );
+
+    registry.register_distribution_block(
+        "underflow-gate",
+        DistributionBlockKind::OverflowGate,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("lead", 2), ("copper", 4)],
+            );
+            distribution.build_cost_multiplier = 3.0;
+            distribution.invert = true;
+        },
+    );
+
+    registry.register_distribution_block(
+        "unloader",
+        DistributionBlockKind::Unloader,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("titanium", 25), ("silicon", 30)],
+            );
+            distribution.speed = 60.0 / 11.0;
+            distribution.base.group = BlockGroup::Transportation;
+        },
+    );
+
+    registry.register_distribution_block(
+        "mass-driver",
+        DistributionBlockKind::MassDriver,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[
+                    ("titanium", 125),
+                    ("silicon", 75),
+                    ("lead", 125),
+                    ("thorium", 50),
+                ],
+            );
+            distribution.base.size = 3;
+            distribution.base.item_capacity = 120;
+            distribution.reload = 200.0;
+            distribution.range = 440.0;
+            distribution.consume_power = 1.75;
+            distribution.base.consumes_power = true;
         },
     );
 }
@@ -4900,6 +5411,283 @@ mod tests {
         assert_eq!(large.sides, 24);
         assert_eq!(large.consume_power, 5.0);
         assert!(large.requirements.is_empty());
+    }
+
+    #[test]
+    fn serpulo_conveyors_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let conveyor = registry.get_distribution_by_name("conveyor").unwrap();
+        assert_eq!(conveyor.kind, DistributionBlockKind::Conveyor);
+        assert_eq!(conveyor.base.group, BlockGroup::Transportation);
+        assert!(conveyor.rotate);
+        assert!(conveyor.base.update);
+        assert!(conveyor.base.has_items);
+        assert_eq!(conveyor.base.item_capacity, 3);
+        assert_eq!(conveyor.base.health, 45);
+        assert_eq!(conveyor.speed, 0.03);
+        assert_eq!(conveyor.displayed_speed, 4.2);
+        assert_eq!(conveyor.build_cost_multiplier, 2.0);
+        assert_eq!(conveyor.ambient_sound, "loopConveyor");
+        assert_eq!(conveyor.ambient_sound_volume, 0.0022);
+        assert!(!conveyor.unloadable);
+        assert_eq!(
+            conveyor.requirements,
+            vec![ItemAmount {
+                item: item_id("copper"),
+                amount: 1
+            }]
+        );
+        assert_eq!(
+            conveyor.research_cost,
+            vec![ItemAmount {
+                item: item_id("copper"),
+                amount: 5
+            }]
+        );
+
+        let titanium = registry
+            .get_distribution_by_name("titanium-conveyor")
+            .unwrap();
+        assert_eq!(titanium.kind, DistributionBlockKind::Conveyor);
+        assert_eq!(titanium.base.health, 65);
+        assert_eq!(titanium.speed, 0.08);
+        assert_eq!(titanium.displayed_speed, 11.0);
+        assert_eq!(
+            titanium.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 1
+                }
+            ]
+        );
+
+        let plastanium = registry
+            .get_distribution_by_name("plastanium-conveyor")
+            .unwrap();
+        assert_eq!(plastanium.kind, DistributionBlockKind::StackConveyor);
+        assert_eq!(plastanium.base.health, 90);
+        assert_eq!(plastanium.speed, 4.0 / 60.0);
+        assert_eq!(plastanium.base.item_capacity, 10);
+        assert!(plastanium.output_router);
+        assert_eq!(plastanium.recharge, 2.0);
+        assert_eq!(plastanium.ambient_sound_volume, 0.004);
+        assert_eq!(
+            plastanium.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 1
+                }
+            ]
+        );
+
+        let armored = registry
+            .get_distribution_by_name("armored-conveyor")
+            .unwrap();
+        assert_eq!(armored.kind, DistributionBlockKind::ArmoredConveyor);
+        assert_eq!(armored.base.health, 280);
+        assert_eq!(armored.speed, 0.08);
+        assert_eq!(armored.displayed_speed, 11.0);
+        assert!(armored.no_side_blend);
+    }
+
+    #[test]
+    fn serpulo_bridge_sorter_router_and_gate_blocks_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let junction = registry.get_distribution_by_name("junction").unwrap();
+        assert_eq!(junction.kind, DistributionBlockKind::Junction);
+        assert!(junction.base.update);
+        assert!(!junction.base.solid);
+        assert_eq!(junction.base.health, 30);
+        assert_eq!(junction.speed, 26.0);
+        assert_eq!(junction.capacity, 6);
+        assert_eq!(junction.build_cost_multiplier, 6.0);
+        assert!(junction.no_update_disabled);
+        assert!(!junction.unloadable);
+
+        let bridge = registry
+            .get_distribution_by_name("bridge-conveyor")
+            .unwrap();
+        assert_eq!(bridge.kind, DistributionBlockKind::BufferedItemBridge);
+        assert!(bridge.base.update);
+        assert!(bridge.base.solid);
+        assert!(bridge.base.has_items);
+        assert!(!bridge.base.has_power);
+        assert!(!bridge.fade_in);
+        assert!(!bridge.move_arrows);
+        assert_eq!(bridge.range, 4.0);
+        assert_eq!(bridge.speed, 74.0);
+        assert_eq!(bridge.arrow_spacing, 6.0);
+        assert_eq!(bridge.buffer_capacity, 14);
+        assert!(bridge.crush_fragile);
+        assert!(bridge.can_overdrive);
+        assert_eq!(
+            bridge.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 6
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 6
+                }
+            ]
+        );
+
+        let phase = registry.get_distribution_by_name("phase-conveyor").unwrap();
+        assert_eq!(phase.kind, DistributionBlockKind::ItemBridge);
+        assert_eq!(phase.range, 12.0);
+        assert_eq!(phase.transport_time, 2.0);
+        assert_eq!(phase.arrow_period, 0.9);
+        assert_eq!(phase.arrow_time_scl, 2.75);
+        assert!(phase.base.has_power);
+        assert!(phase.base.consumes_power);
+        assert!(phase.pulse);
+        assert_eq!(phase.consume_power, 0.30);
+        assert_ne!(phase.base.env_enabled & Env::SPACE, 0);
+
+        let sorter = registry.get_distribution_by_name("sorter").unwrap();
+        assert_eq!(sorter.kind, DistributionBlockKind::Sorter);
+        assert!(sorter.instant_transfer);
+        assert!(sorter.configurable);
+        assert!(sorter.save_config);
+        assert!(sorter.clear_on_double_tap);
+        assert!(!sorter.invert);
+        assert_eq!(sorter.build_cost_multiplier, 3.0);
+
+        let inverted = registry
+            .get_distribution_by_name("inverted-sorter")
+            .unwrap();
+        assert_eq!(inverted.kind, DistributionBlockKind::Sorter);
+        assert!(inverted.invert);
+        assert_eq!(inverted.build_cost_multiplier, 3.0);
+
+        let router = registry.get_distribution_by_name("router").unwrap();
+        assert_eq!(router.kind, DistributionBlockKind::Router);
+        assert!(!router.base.solid);
+        assert!(router.base.update);
+        assert!(router.base.has_items);
+        assert_eq!(router.base.item_capacity, 1);
+        assert_eq!(router.speed, 8.0);
+        assert_eq!(router.build_cost_multiplier, 4.0);
+
+        let distributor = registry.get_distribution_by_name("distributor").unwrap();
+        assert_eq!(distributor.kind, DistributionBlockKind::Router);
+        assert_eq!(distributor.base.size, 2);
+        assert_eq!(distributor.build_cost_multiplier, 3.0);
+
+        let overflow = registry.get_distribution_by_name("overflow-gate").unwrap();
+        assert_eq!(overflow.kind, DistributionBlockKind::OverflowGate);
+        assert!(overflow.base.has_items);
+        assert!(overflow.instant_transfer);
+        assert_eq!(overflow.base.item_capacity, 0);
+        assert_eq!(overflow.speed, 1.0);
+        assert!(!overflow.invert);
+
+        let underflow = registry.get_distribution_by_name("underflow-gate").unwrap();
+        assert_eq!(underflow.kind, DistributionBlockKind::OverflowGate);
+        assert!(underflow.invert);
+        assert_eq!(underflow.build_cost_multiplier, 3.0);
+    }
+
+    #[test]
+    fn unloader_and_mass_driver_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let unloader = registry.get_distribution_by_name("unloader").unwrap();
+        assert_eq!(unloader.kind, DistributionBlockKind::Unloader);
+        assert_eq!(unloader.base.group, BlockGroup::Transportation);
+        assert!(unloader.base.update);
+        assert!(unloader.base.solid);
+        assert_eq!(unloader.base.health, 70);
+        assert!(unloader.base.has_items);
+        assert_eq!(unloader.base.item_capacity, 0);
+        assert!(unloader.configurable);
+        assert!(unloader.save_config);
+        assert!(unloader.clear_on_double_tap);
+        assert!(unloader.allow_core_unload);
+        assert_eq!(unloader.speed, 60.0 / 11.0);
+        assert_eq!(
+            unloader.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 25
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 30
+                }
+            ]
+        );
+
+        let driver = registry.get_distribution_by_name("mass-driver").unwrap();
+        assert_eq!(driver.kind, DistributionBlockKind::MassDriver);
+        assert!(driver.base.update);
+        assert!(driver.base.solid);
+        assert!(driver.configurable);
+        assert!(driver.base.has_items);
+        assert!(driver.base.has_power);
+        assert!(driver.base.consumes_power);
+        assert!(driver.base.sync);
+        assert_ne!(driver.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(driver.base.size, 3);
+        assert_eq!(driver.base.item_capacity, 120);
+        assert_eq!(driver.reload, 200.0);
+        assert_eq!(driver.range, 440.0);
+        assert_eq!(driver.consume_power, 1.75);
+        assert_eq!(driver.rotate_speed, 5.0);
+        assert_eq!(driver.translation, 7.0);
+        assert_eq!(driver.min_distribute, 10);
+        assert_eq!(driver.knockback, 4.0);
+        assert_eq!(driver.bullet_speed, 5.5);
+        assert_eq!(driver.bullet_lifetime, 200.0);
+        assert_eq!(driver.shoot_sound_volume, 0.5);
+        assert_eq!(driver.shake, 3.0);
+        assert_eq!(
+            driver.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 125
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 75
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 125
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 50
+                }
+            ]
+        );
     }
 
     #[test]
