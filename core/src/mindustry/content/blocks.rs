@@ -8,7 +8,7 @@ use crate::mindustry::{
             FloorData, OreBlockData, PropData, PropKind, SeaBushData, StaticTreeData,
             StaticWallData, TallBlockData, TreeBlockData,
         },
-        meta::{BlockGroup, Env},
+        meta::{BlockFlag, BlockGroup, Env},
         Block, BlockId, CacheLayer,
     },
 };
@@ -107,6 +107,192 @@ impl DefenseWallData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectBlockKind {
+    MendProjector,
+    OverdriveProjector,
+    ForceProjector,
+    ShockMine,
+    Radar,
+    BuildTurret,
+    RegenProjector,
+    ShockwaveTower,
+    BaseShield,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectBlockData {
+    pub base: Block,
+    pub kind: EffectBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub consume_items: Vec<ItemAmount>,
+    pub boost_items: Vec<ItemAmount>,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+    pub range: f32,
+    pub reload: f32,
+    pub heal_percent: f32,
+    pub phase_boost: f32,
+    pub phase_range_boost: f32,
+    pub use_time: f32,
+    pub speed_boost: f32,
+    pub speed_boost_phase: f32,
+    pub has_boost: bool,
+    pub phase_use_time: f32,
+    pub phase_radius_boost: f32,
+    pub phase_shield_boost: f32,
+    pub radius: f32,
+    pub sides: i32,
+    pub shield_rotation: f32,
+    pub shield_health: f32,
+    pub cooldown_normal: f32,
+    pub cooldown_liquid: f32,
+    pub cooldown_broken_base: f32,
+    pub coolant_consumption: f32,
+    pub consume_coolant: bool,
+    pub damage: f32,
+    pub tile_damage: f32,
+    pub length: i32,
+    pub tendrils: i32,
+    pub shots: i32,
+    pub team_alpha: f32,
+}
+
+impl EffectBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: EffectBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            consume_items: Vec::new(),
+            boost_items: Vec::new(),
+            consume_liquids: Vec::new(),
+            ambient_sound: "none".into(),
+            ambient_sound_volume: 0.0,
+            range: 0.0,
+            reload: 0.0,
+            heal_percent: 0.0,
+            phase_boost: 0.0,
+            phase_range_boost: 0.0,
+            use_time: 0.0,
+            speed_boost: 0.0,
+            speed_boost_phase: 0.0,
+            has_boost: false,
+            phase_use_time: 0.0,
+            phase_radius_boost: 0.0,
+            phase_shield_boost: 0.0,
+            radius: 0.0,
+            sides: 0,
+            shield_rotation: 0.0,
+            shield_health: 0.0,
+            cooldown_normal: 0.0,
+            cooldown_liquid: 0.0,
+            cooldown_broken_base: 0.0,
+            coolant_consumption: 0.0,
+            consume_coolant: false,
+            damage: 0.0,
+            tile_damage: 0.0,
+            length: 0,
+            tendrils: 0,
+            shots: 0,
+            team_alpha: 0.0,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            EffectBlockKind::MendProjector => {
+                self.base.solid = true;
+                self.base.update = true;
+                self.base.group = BlockGroup::Projectors;
+                self.base.has_power = true;
+                self.base.has_items = true;
+                self.base.emit_light = true;
+                self.base.light_radius = 50.0;
+                self.base.env_enabled |= Env::SPACE;
+                self.base.flags.push(BlockFlag::BlockRepair);
+                self.reload = 250.0;
+                self.range = 60.0;
+                self.heal_percent = 12.0;
+                self.phase_boost = 12.0;
+                self.phase_range_boost = 50.0;
+                self.use_time = 400.0;
+            }
+            EffectBlockKind::OverdriveProjector => {
+                self.base.solid = true;
+                self.base.update = true;
+                self.base.group = BlockGroup::Projectors;
+                self.base.has_power = true;
+                self.base.has_items = true;
+                self.base.emit_light = true;
+                self.base.light_radius = 50.0;
+                self.base.env_enabled |= Env::SPACE;
+                self.ambient_sound = "loopCircuit".into();
+                self.ambient_sound_volume = 0.13;
+                self.reload = 60.0;
+                self.range = 80.0;
+                self.speed_boost = 1.5;
+                self.speed_boost_phase = 0.75;
+                self.use_time = 400.0;
+                self.phase_range_boost = 20.0;
+                self.has_boost = true;
+            }
+            EffectBlockKind::ForceProjector => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.group = BlockGroup::Projectors;
+                self.base.has_power = true;
+                self.base.has_liquids = true;
+                self.base.has_items = true;
+                self.base.env_enabled |= Env::SPACE;
+                self.base.flags.push(BlockFlag::Shield);
+                self.ambient_sound = "loopShield".into();
+                self.ambient_sound_volume = 0.1;
+                self.phase_use_time = 350.0;
+                self.phase_radius_boost = 80.0;
+                self.phase_shield_boost = 400.0;
+                self.radius = 101.7;
+                self.sides = 6;
+                self.shield_rotation = 0.0;
+                self.shield_health = 700.0;
+                self.cooldown_normal = 1.75;
+                self.cooldown_liquid = 1.5;
+                self.cooldown_broken_base = 0.35;
+                self.coolant_consumption = 0.1;
+                self.consume_coolant = true;
+            }
+            EffectBlockKind::ShockMine => {
+                self.base.update = false;
+                self.base.destructible = true;
+                self.base.solid = false;
+                self.base.targetable = false;
+                self.reload = 80.0;
+                self.tile_damage = 5.0;
+                self.damage = 13.0;
+                self.length = 10;
+                self.tendrils = 6;
+                self.shots = 6;
+                self.team_alpha = 0.3;
+            }
+            EffectBlockKind::Radar
+            | EffectBlockKind::BuildTurret
+            | EffectBlockKind::RegenProjector
+            | EffectBlockKind::ShockwaveTower
+            | EffectBlockKind::BaseShield => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CraftingBlockData {
     pub base: Block,
@@ -199,6 +385,7 @@ pub enum BlockDef {
     Ore(OreBlockData),
     Crafting(CraftingBlockData),
     DefenseWall(DefenseWallData),
+    Effect(EffectBlockData),
 }
 
 impl BlockDef {
@@ -214,6 +401,7 @@ impl BlockDef {
             Self::Ore(ore) => &ore.floor.base,
             Self::Crafting(crafting) => &crafting.base,
             Self::DefenseWall(wall) => &wall.base,
+            Self::Effect(effect) => &effect.base,
         }
     }
 
@@ -287,6 +475,13 @@ impl BlockRegistry {
     pub fn get_defense_wall_by_name(&self, name: &str) -> Option<&DefenseWallData> {
         match self.get_by_name(name)? {
             BlockDef::DefenseWall(wall) => Some(wall),
+            _ => None,
+        }
+    }
+
+    pub fn get_effect_by_name(&self, name: &str) -> Option<&EffectBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Effect(effect) => Some(effect),
             _ => None,
         }
     }
@@ -415,6 +610,19 @@ impl BlockRegistry {
         self.insert(BlockDef::DefenseWall(wall))
     }
 
+    pub fn register_effect_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: EffectBlockKind,
+        configure: impl FnOnce(&mut EffectBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = EffectBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Effect(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -536,6 +744,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_ores(&mut registry, items);
     register_crafting_blocks(&mut registry, items, liquids);
     register_defense_walls(&mut registry, items);
+    register_effect_blocks(&mut registry, items, liquids);
 
     registry.finalize_floor_links();
     registry
@@ -1558,6 +1767,139 @@ fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
         wall.shield_health = 900.0;
         wall.shield_break_cooldown = 60.0 * 10.0;
         wall.shield_regen_speed = 2.0;
+    });
+}
+
+fn register_effect_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids: &[Liquid]) {
+    registry.register_effect_block("mender", EffectBlockKind::MendProjector, |effect| {
+        set_requirements(
+            &mut effect.requirements,
+            items,
+            &[("lead", 30), ("copper", 25)],
+        );
+        effect.consume_power = 0.3;
+        effect.base.has_power = true;
+        effect.base.consumes_power = true;
+        effect.base.size = 1;
+        effect.reload = 200.0;
+        effect.range = 40.0;
+        effect.heal_percent = 4.0;
+        effect.phase_boost = 4.0;
+        effect.phase_range_boost = 20.0;
+        effect.base.health = 80;
+        push_item_amount(&mut effect.boost_items, items, "silicon", 1);
+    });
+
+    registry.register_effect_block("mend-projector", EffectBlockKind::MendProjector, |effect| {
+        set_requirements(
+            &mut effect.requirements,
+            items,
+            &[
+                ("lead", 100),
+                ("titanium", 25),
+                ("silicon", 40),
+                ("copper", 50),
+            ],
+        );
+        effect.consume_power = 1.5;
+        effect.base.has_power = true;
+        effect.base.consumes_power = true;
+        effect.base.size = 2;
+        effect.reload = 250.0;
+        effect.range = 85.0;
+        effect.heal_percent = 11.0;
+        effect.phase_boost = 15.0;
+        effect.base.health = 80 * 2 * 2;
+        push_item_amount(&mut effect.boost_items, items, "phase-fabric", 1);
+    });
+
+    registry.register_effect_block(
+        "overdrive-projector",
+        EffectBlockKind::OverdriveProjector,
+        |effect| {
+            set_requirements(
+                &mut effect.requirements,
+                items,
+                &[
+                    ("lead", 100),
+                    ("titanium", 75),
+                    ("silicon", 75),
+                    ("plastanium", 30),
+                ],
+            );
+            effect.consume_power = 3.5;
+            effect.base.has_power = true;
+            effect.base.consumes_power = true;
+            effect.base.size = 2;
+            push_item_amount(&mut effect.boost_items, items, "phase-fabric", 1);
+            effect.ambient_sound_volume = 0.08;
+        },
+    );
+
+    registry.register_effect_block(
+        "overdrive-dome",
+        EffectBlockKind::OverdriveProjector,
+        |effect| {
+            set_requirements(
+                &mut effect.requirements,
+                items,
+                &[
+                    ("lead", 200),
+                    ("titanium", 130),
+                    ("silicon", 130),
+                    ("plastanium", 80),
+                    ("surge-alloy", 120),
+                ],
+            );
+            effect.consume_power = 10.0;
+            effect.base.has_power = true;
+            effect.base.consumes_power = true;
+            effect.base.size = 3;
+            effect.range = 200.0;
+            effect.speed_boost = 2.5;
+            effect.use_time = 300.0;
+            effect.ambient_sound_volume = 0.12;
+            effect.has_boost = false;
+            push_item_amount(&mut effect.consume_items, items, "phase-fabric", 1);
+            push_item_amount(&mut effect.consume_items, items, "silicon", 1);
+        },
+    );
+
+    registry.register_effect_block(
+        "force-projector",
+        EffectBlockKind::ForceProjector,
+        |effect| {
+            set_requirements(
+                &mut effect.requirements,
+                items,
+                &[("lead", 100), ("titanium", 75), ("silicon", 125)],
+            );
+            effect.base.size = 3;
+            effect.phase_radius_boost = 80.0;
+            effect.radius = 101.7;
+            effect.shield_health = 750.0;
+            effect.cooldown_normal = 1.5;
+            effect.cooldown_liquid = 1.2;
+            effect.cooldown_broken_base = 0.35;
+            push_item_amount(&mut effect.boost_items, items, "phase-fabric", 1);
+            effect.consume_power = 4.0;
+            effect.base.has_power = true;
+            effect.base.consumes_power = true;
+        },
+    );
+
+    registry.register_effect_block("shock-mine", EffectBlockKind::ShockMine, |effect| {
+        set_requirements(
+            &mut effect.requirements,
+            items,
+            &[("lead", 25), ("silicon", 12)],
+        );
+        effect.base.has_shadow = false;
+        effect.base.health = 50;
+        effect.damage = 25.0;
+        effect.tile_damage = 7.0;
+        effect.length = 10;
+        effect.tendrils = 4;
     });
 }
 
@@ -3790,6 +4132,274 @@ mod tests {
                 },
                 ItemAmount {
                     item: item_id("beryllium"),
+                    amount: 12
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn mend_projectors_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let mender = registry.get_effect_by_name("mender").unwrap();
+        assert_eq!(mender.kind, EffectBlockKind::MendProjector);
+        assert_eq!(mender.base.group, BlockGroup::Projectors);
+        assert!(mender.base.solid);
+        assert!(mender.base.update);
+        assert!(mender.base.has_power);
+        assert!(mender.base.has_items);
+        assert!(mender.base.emit_light);
+        assert!(mender.base.flags.contains(&BlockFlag::BlockRepair));
+        assert_eq!(mender.base.size, 1);
+        assert_eq!(mender.base.health, 80);
+        assert_eq!(mender.consume_power, 0.3);
+        assert_eq!(mender.reload, 200.0);
+        assert_eq!(mender.range, 40.0);
+        assert_eq!(mender.heal_percent, 4.0);
+        assert_eq!(mender.phase_boost, 4.0);
+        assert_eq!(mender.phase_range_boost, 20.0);
+        assert_eq!(
+            mender.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 25
+                }
+            ]
+        );
+        assert_eq!(
+            mender.boost_items,
+            vec![ItemAmount {
+                item: item_id("silicon"),
+                amount: 1
+            }]
+        );
+
+        let projector = registry.get_effect_by_name("mend-projector").unwrap();
+        assert_eq!(projector.kind, EffectBlockKind::MendProjector);
+        assert_eq!(projector.base.size, 2);
+        assert_eq!(projector.base.health, 320);
+        assert_eq!(projector.consume_power, 1.5);
+        assert_eq!(projector.reload, 250.0);
+        assert_eq!(projector.range, 85.0);
+        assert_eq!(projector.heal_percent, 11.0);
+        assert_eq!(projector.phase_boost, 15.0);
+        assert_eq!(
+            projector.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 25
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 50
+                }
+            ]
+        );
+        assert_eq!(
+            projector.boost_items,
+            vec![ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn overdrive_projectors_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let projector = registry.get_effect_by_name("overdrive-projector").unwrap();
+        assert_eq!(projector.kind, EffectBlockKind::OverdriveProjector);
+        assert_eq!(projector.base.group, BlockGroup::Projectors);
+        assert!(projector.base.solid);
+        assert!(projector.base.update);
+        assert!(projector.base.has_power);
+        assert!(projector.base.has_items);
+        assert_eq!(projector.base.size, 2);
+        assert_eq!(projector.consume_power, 3.5);
+        assert_eq!(projector.reload, 60.0);
+        assert_eq!(projector.range, 80.0);
+        assert_eq!(projector.speed_boost, 1.5);
+        assert_eq!(projector.speed_boost_phase, 0.75);
+        assert_eq!(projector.use_time, 400.0);
+        assert_eq!(projector.phase_range_boost, 20.0);
+        assert!(projector.has_boost);
+        assert_eq!(projector.ambient_sound, "loopCircuit");
+        assert_eq!(projector.ambient_sound_volume, 0.08);
+        assert_eq!(
+            projector.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 75
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 75
+                },
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 30
+                }
+            ]
+        );
+        assert_eq!(
+            projector.boost_items,
+            vec![ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            }]
+        );
+
+        let dome = registry.get_effect_by_name("overdrive-dome").unwrap();
+        assert_eq!(dome.kind, EffectBlockKind::OverdriveProjector);
+        assert_eq!(dome.base.size, 3);
+        assert_eq!(dome.consume_power, 10.0);
+        assert_eq!(dome.range, 200.0);
+        assert_eq!(dome.speed_boost, 2.5);
+        assert_eq!(dome.use_time, 300.0);
+        assert_eq!(dome.ambient_sound_volume, 0.12);
+        assert!(!dome.has_boost);
+        assert!(dome.boost_items.is_empty());
+        assert_eq!(
+            dome.consume_items,
+            vec![
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 1
+                }
+            ]
+        );
+        assert_eq!(
+            dome.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 130
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 130
+                },
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 120
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn force_projector_and_shock_mine_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let force = registry.get_effect_by_name("force-projector").unwrap();
+        assert_eq!(force.kind, EffectBlockKind::ForceProjector);
+        assert_eq!(force.base.group, BlockGroup::Projectors);
+        assert!(force.base.solid);
+        assert!(force.base.update);
+        assert!(force.base.has_power);
+        assert!(force.base.has_items);
+        assert!(force.base.has_liquids);
+        assert!(force.base.flags.contains(&BlockFlag::Shield));
+        assert_eq!(force.base.size, 3);
+        assert_eq!(force.consume_power, 4.0);
+        assert_eq!(force.phase_use_time, 350.0);
+        assert_eq!(force.phase_radius_boost, 80.0);
+        assert_eq!(force.phase_shield_boost, 400.0);
+        assert_eq!(force.radius, 101.7);
+        assert_eq!(force.sides, 6);
+        assert_eq!(force.shield_health, 750.0);
+        assert_eq!(force.cooldown_normal, 1.5);
+        assert_eq!(force.cooldown_liquid, 1.2);
+        assert_eq!(force.cooldown_broken_base, 0.35);
+        assert_eq!(force.coolant_consumption, 0.1);
+        assert!(force.consume_coolant);
+        assert_eq!(force.ambient_sound, "loopShield");
+        assert_eq!(force.ambient_sound_volume, 0.1);
+        assert_eq!(
+            force.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 75
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 125
+                }
+            ]
+        );
+        assert_eq!(
+            force.boost_items,
+            vec![ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            }]
+        );
+
+        let mine = registry.get_effect_by_name("shock-mine").unwrap();
+        assert_eq!(mine.kind, EffectBlockKind::ShockMine);
+        assert!(mine.base.destructible);
+        assert!(!mine.base.update);
+        assert!(!mine.base.solid);
+        assert!(!mine.base.targetable);
+        assert!(!mine.base.has_shadow);
+        assert_eq!(mine.base.health, 50);
+        assert_eq!(mine.reload, 80.0);
+        assert_eq!(mine.damage, 25.0);
+        assert_eq!(mine.tile_damage, 7.0);
+        assert_eq!(mine.length, 10);
+        assert_eq!(mine.tendrils, 4);
+        assert_eq!(mine.shots, 6);
+        assert_eq!(mine.team_alpha, 0.3);
+        assert_eq!(
+            mine.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 25
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
                     amount: 12
                 }
             ]
