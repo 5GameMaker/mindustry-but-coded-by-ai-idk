@@ -8,7 +8,7 @@ use crate::mindustry::{
             FloorData, OreBlockData, PropData, PropKind, SeaBushData, StaticTreeData,
             StaticWallData, TallBlockData, TreeBlockData,
         },
-        meta::{BlockFlag, BlockGroup, Env},
+        meta::{BlockFlag, BlockGroup, BuildVisibility, Env},
         Block, BlockId, CacheLayer,
     },
 };
@@ -133,6 +133,8 @@ pub struct EffectBlockData {
     pub consume_liquids: Vec<LiquidAmount>,
     pub ambient_sound: String,
     pub ambient_sound_volume: f32,
+    pub outline_color: String,
+    pub fog_radius: f32,
     pub range: f32,
     pub reload: f32,
     pub heal_percent: f32,
@@ -160,6 +162,31 @@ pub struct EffectBlockData {
     pub tendrils: i32,
     pub shots: i32,
     pub team_alpha: f32,
+    pub discovery_time: f32,
+    pub rotate_speed: f32,
+    pub glow_color: String,
+    pub glow_scl: f32,
+    pub glow_mag: f32,
+    pub build_speed: f32,
+    pub build_beam_offset: f32,
+    pub target_interval: i32,
+    pub elevation: f32,
+    pub optional_multiplier: f32,
+    pub optional_use_time: f32,
+    pub effect_chance: f32,
+    pub base_color: String,
+    pub effect: String,
+    pub drawer: String,
+    pub rotate_draw: bool,
+    pub rebuildable: bool,
+    pub bullet_damage: f32,
+    pub falloff_count: f32,
+    pub shake: f32,
+    pub check_interval: f32,
+    pub cooldown_multiplier: f32,
+    pub shape_rotate_speed: f32,
+    pub shape_radius: f32,
+    pub shape_sides: i32,
 }
 
 impl EffectBlockData {
@@ -177,6 +204,8 @@ impl EffectBlockData {
             consume_liquids: Vec::new(),
             ambient_sound: "none".into(),
             ambient_sound_volume: 0.0,
+            outline_color: String::new(),
+            fog_radius: 0.0,
             range: 0.0,
             reload: 0.0,
             heal_percent: 0.0,
@@ -204,6 +233,31 @@ impl EffectBlockData {
             tendrils: 0,
             shots: 0,
             team_alpha: 0.0,
+            discovery_time: 0.0,
+            rotate_speed: 0.0,
+            glow_color: String::new(),
+            glow_scl: 0.0,
+            glow_mag: 0.0,
+            build_speed: 0.0,
+            build_beam_offset: 0.0,
+            target_interval: 0,
+            elevation: 0.0,
+            optional_multiplier: 0.0,
+            optional_use_time: 0.0,
+            effect_chance: 0.0,
+            base_color: String::new(),
+            effect: String::new(),
+            drawer: String::new(),
+            rotate_draw: true,
+            rebuildable: true,
+            bullet_damage: 0.0,
+            falloff_count: 0.0,
+            shake: 0.0,
+            check_interval: 0.0,
+            cooldown_multiplier: 0.0,
+            shape_rotate_speed: 0.0,
+            shape_radius: 0.0,
+            shape_sides: 0,
         };
         block.apply_kind_defaults();
         block
@@ -284,11 +338,73 @@ impl EffectBlockData {
                 self.shots = 6;
                 self.team_alpha = 0.3;
             }
-            EffectBlockKind::Radar
-            | EffectBlockKind::BuildTurret
-            | EffectBlockKind::RegenProjector
-            | EffectBlockKind::ShockwaveTower
-            | EffectBlockKind::BaseShield => {}
+            EffectBlockKind::Radar => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.flags.push(BlockFlag::HasFogRadius);
+                self.fog_radius = 10.0;
+                self.discovery_time = 60.0 * 10.0;
+                self.rotate_speed = 2.0;
+                self.glow_color = "turretHeat".into();
+                self.glow_scl = 5.0;
+                self.glow_mag = 0.6;
+            }
+            EffectBlockKind::BuildTurret => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.sync = false;
+                self.base.group = BlockGroup::Turrets;
+                self.base.flags.push(BlockFlag::Turret);
+                self.range = 80.0;
+                self.rotate_speed = 10.0;
+                self.build_speed = 1.0;
+                self.build_beam_offset = 5.0;
+                self.target_interval = 15;
+                self.elevation = -1.0;
+            }
+            EffectBlockKind::RegenProjector => {
+                self.base.solid = true;
+                self.base.update = true;
+                self.base.group = BlockGroup::Projectors;
+                self.base.has_power = true;
+                self.base.has_items = true;
+                self.base.emit_light = true;
+                self.base.env_enabled |= Env::SPACE;
+                self.base.flags.push(BlockFlag::BlockRepair);
+                self.ambient_sound = "loopRegen".into();
+                self.ambient_sound_volume = 0.45;
+                self.range = 14.0;
+                self.heal_percent = 12.0 / 60.0;
+                self.optional_multiplier = 2.0;
+                self.optional_use_time = 60.0 * 8.0;
+                self.effect_chance = 0.003;
+                self.base_color = "accent".into();
+                self.effect = "regenParticle".into();
+                self.drawer = "DrawDefault".into();
+                self.rotate_draw = false;
+            }
+            EffectBlockKind::ShockwaveTower => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.range = 110.0;
+                self.reload = 60.0 * 1.5;
+                self.bullet_damage = 160.0;
+                self.falloff_count = 20.0;
+                self.shake = 2.0;
+                self.check_interval = 8.0;
+                self.cooldown_multiplier = 1.0;
+                self.shape_rotate_speed = 1.0;
+                self.shape_radius = 6.0;
+                self.shape_sides = 4;
+            }
+            EffectBlockKind::BaseShield => {
+                self.base.has_power = true;
+                self.base.update = true;
+                self.base.solid = true;
+                self.rebuildable = false;
+                self.radius = 200.0;
+                self.sides = 24;
+            }
         }
     }
 }
@@ -1770,7 +1886,7 @@ fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
     });
 }
 
-fn register_effect_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids: &[Liquid]) {
+fn register_effect_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
     registry.register_effect_block("mender", EffectBlockKind::MendProjector, |effect| {
         set_requirements(
             &mut effect.requirements,
@@ -1901,6 +2017,118 @@ fn register_effect_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids
         effect.length = 10;
         effect.tendrils = 4;
     });
+
+    registry.register_effect_block("radar", EffectBlockKind::Radar, |effect| {
+        set_requirements(
+            &mut effect.requirements,
+            items,
+            &[("silicon", 60), ("graphite", 50), ("beryllium", 10)],
+        );
+        effect.base.build_visibility = BuildVisibility::FogOnly;
+        effect.outline_color = "4a4b53".into();
+        effect.fog_radius = 34.0;
+        set_requirements(
+            &mut effect.research_cost,
+            items,
+            &[("silicon", 70), ("graphite", 70)],
+        );
+        effect.consume_power = 0.6;
+        effect.base.has_power = true;
+        effect.base.consumes_power = true;
+    });
+
+    registry.register_effect_block("build-tower", EffectBlockKind::BuildTurret, |effect| {
+        set_requirements(
+            &mut effect.requirements,
+            items,
+            &[("silicon", 150), ("oxide", 40), ("thorium", 60)],
+        );
+        effect.outline_color = "darkOutline".into();
+        effect.range = 200.0;
+        effect.base.size = 3;
+        effect.build_speed = 1.5;
+        effect.elevation = effect.base.size as f32 / 2.0;
+        effect.consume_power = 3.0;
+        effect.base.has_power = true;
+        effect.base.has_liquids = true;
+        effect.base.consumes_power = true;
+        push_liquid_amount(&mut effect.consume_liquids, liquids, "nitrogen", 3.0 / 60.0);
+    });
+
+    registry.register_effect_block(
+        "regen-projector",
+        EffectBlockKind::RegenProjector,
+        |effect| {
+            set_requirements(
+                &mut effect.requirements,
+                items,
+                &[
+                    ("silicon", 80),
+                    ("tungsten", 60),
+                    ("oxide", 40),
+                    ("beryllium", 80),
+                ],
+            );
+            effect.base.size = 3;
+            effect.range = 28.0;
+            effect.base_color = "regen".into();
+            effect.consume_power = 1.0;
+            effect.base.has_power = true;
+            effect.base.has_liquids = true;
+            effect.base.consumes_power = true;
+            push_liquid_amount(&mut effect.consume_liquids, liquids, "hydrogen", 1.0 / 60.0);
+            push_item_amount(&mut effect.boost_items, items, "phase-fabric", 1);
+            effect.heal_percent = 4.0 / 60.0;
+            effect.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(hydrogen), DrawDefault, DrawGlowRegion(sky), DrawPulseShape(8ca9e8), DrawShape(8ca9e8))".into();
+        },
+    );
+
+    // Blocks.java keeps barrierProjector under `if(false)`, so it must not be
+    // registered here until upstream enables it.
+
+    registry.register_effect_block(
+        "shockwave-tower",
+        EffectBlockKind::ShockwaveTower,
+        |effect| {
+            set_requirements(
+                &mut effect.requirements,
+                items,
+                &[
+                    ("surge-alloy", 50),
+                    ("silicon", 150),
+                    ("oxide", 30),
+                    ("tungsten", 100),
+                ],
+            );
+            effect.base.size = 3;
+            push_liquid_amount(&mut effect.consume_liquids, liquids, "cyanogen", 1.5 / 60.0);
+            effect.consume_power = 100.0 / 60.0;
+            effect.base.has_power = true;
+            effect.base.has_liquids = true;
+            effect.base.consumes_power = true;
+            effect.range = 170.0;
+            effect.reload = 80.0;
+        },
+    );
+
+    registry.register_effect_block("shield-projector", EffectBlockKind::BaseShield, |effect| {
+        effect.base.build_visibility = BuildVisibility::EditorOnly;
+        effect.base.size = 3;
+        effect.consume_power = 5.0;
+        effect.base.consumes_power = true;
+    });
+
+    registry.register_effect_block(
+        "large-shield-projector",
+        EffectBlockKind::BaseShield,
+        |effect| {
+            effect.base.build_visibility = BuildVisibility::EditorOnly;
+            effect.base.size = 4;
+            effect.radius = 400.0;
+            effect.consume_power = 5.0;
+            effect.base.consumes_power = true;
+        },
+    );
 }
 
 fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
@@ -4404,6 +4632,274 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn radar_and_build_tower_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let radar = registry.get_effect_by_name("radar").unwrap();
+        assert_eq!(radar.kind, EffectBlockKind::Radar);
+        assert!(radar.base.update);
+        assert!(radar.base.solid);
+        assert!(radar.base.has_power);
+        assert!(radar.base.consumes_power);
+        assert!(radar.base.flags.contains(&BlockFlag::HasFogRadius));
+        assert_eq!(radar.base.build_visibility, BuildVisibility::FogOnly);
+        assert_eq!(radar.outline_color, "4a4b53");
+        assert_eq!(radar.fog_radius, 34.0);
+        assert_eq!(radar.discovery_time, 60.0 * 10.0);
+        assert_eq!(radar.rotate_speed, 2.0);
+        assert_eq!(radar.glow_color, "turretHeat");
+        assert_eq!(radar.glow_scl, 5.0);
+        assert_eq!(radar.glow_mag, 0.6);
+        assert_eq!(radar.consume_power, 0.6);
+        assert_eq!(
+            radar.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 60
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 10
+                }
+            ]
+        );
+        assert_eq!(
+            radar.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 70
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 70
+                }
+            ]
+        );
+
+        let build_tower = registry.get_effect_by_name("build-tower").unwrap();
+        assert_eq!(build_tower.kind, EffectBlockKind::BuildTurret);
+        assert_eq!(build_tower.base.group, BlockGroup::Turrets);
+        assert!(build_tower.base.update);
+        assert!(build_tower.base.solid);
+        assert!(build_tower.base.has_power);
+        assert!(build_tower.base.has_liquids);
+        assert!(build_tower.base.consumes_power);
+        assert!(build_tower.base.flags.contains(&BlockFlag::Turret));
+        assert_eq!(build_tower.outline_color, "darkOutline");
+        assert_eq!(build_tower.range, 200.0);
+        assert_eq!(build_tower.base.size, 3);
+        assert_eq!(build_tower.build_speed, 1.5);
+        assert_eq!(build_tower.build_beam_offset, 5.0);
+        assert_eq!(build_tower.target_interval, 15);
+        assert_eq!(build_tower.rotate_speed, 10.0);
+        assert_eq!(build_tower.elevation, 1.5);
+        assert_eq!(build_tower.consume_power, 3.0);
+        assert_eq!(
+            build_tower.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 60
+                }
+            ]
+        );
+        assert_eq!(
+            build_tower.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("nitrogen"),
+                amount: 3.0 / 60.0
+            }]
+        );
+    }
+
+    #[test]
+    fn regen_and_shockwave_projectors_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let regen = registry.get_effect_by_name("regen-projector").unwrap();
+        assert_eq!(regen.kind, EffectBlockKind::RegenProjector);
+        assert_eq!(regen.base.group, BlockGroup::Projectors);
+        assert!(regen.base.solid);
+        assert!(regen.base.update);
+        assert!(regen.base.has_power);
+        assert!(regen.base.has_items);
+        assert!(regen.base.has_liquids);
+        assert!(regen.base.emit_light);
+        assert!(regen.base.consumes_power);
+        assert!(regen.base.flags.contains(&BlockFlag::BlockRepair));
+        assert_eq!(regen.base.size, 3);
+        assert_eq!(regen.range, 28.0);
+        assert_eq!(regen.base_color, "regen");
+        assert_eq!(regen.consume_power, 1.0);
+        assert_eq!(regen.heal_percent, 4.0 / 60.0);
+        assert_eq!(regen.optional_multiplier, 2.0);
+        assert_eq!(regen.optional_use_time, 60.0 * 8.0);
+        assert_eq!(regen.effect_chance, 0.003);
+        assert_eq!(regen.ambient_sound, "loopRegen");
+        assert_eq!(regen.ambient_sound_volume, 0.45);
+        assert!(!regen.rotate_draw);
+        assert_eq!(
+            regen.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 60
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 80
+                }
+            ]
+        );
+        assert_eq!(
+            regen.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("hydrogen"),
+                amount: 1.0 / 60.0
+            }]
+        );
+        assert_eq!(
+            regen.boost_items,
+            vec![ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            }]
+        );
+        assert!(regen.drawer.contains("DrawLiquidTile(hydrogen)"));
+
+        assert!(
+            registry.get_effect_by_name("barrier-projector").is_none(),
+            "upstream keeps barrierProjector behind if(false), so it must not be registered"
+        );
+
+        let shockwave = registry.get_effect_by_name("shockwave-tower").unwrap();
+        assert_eq!(shockwave.kind, EffectBlockKind::ShockwaveTower);
+        assert!(shockwave.base.update);
+        assert!(shockwave.base.solid);
+        assert!(shockwave.base.has_power);
+        assert!(shockwave.base.has_liquids);
+        assert_eq!(shockwave.base.size, 3);
+        assert_eq!(shockwave.consume_power, 100.0 / 60.0);
+        assert_eq!(shockwave.range, 170.0);
+        assert_eq!(shockwave.reload, 80.0);
+        assert_eq!(shockwave.bullet_damage, 160.0);
+        assert_eq!(shockwave.falloff_count, 20.0);
+        assert_eq!(shockwave.shake, 2.0);
+        assert_eq!(shockwave.check_interval, 8.0);
+        assert_eq!(shockwave.cooldown_multiplier, 1.0);
+        assert_eq!(shockwave.shape_rotate_speed, 1.0);
+        assert_eq!(shockwave.shape_radius, 6.0);
+        assert_eq!(shockwave.shape_sides, 4);
+        assert_eq!(
+            shockwave.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 100
+                }
+            ]
+        );
+        assert_eq!(
+            shockwave.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cyanogen"),
+                amount: 1.5 / 60.0
+            }]
+        );
+    }
+
+    #[test]
+    fn base_shield_projectors_keep_upstream_subset() {
+        let (_, _, registry) = load_test_registry();
+
+        let shield = registry.get_effect_by_name("shield-projector").unwrap();
+        assert_eq!(shield.kind, EffectBlockKind::BaseShield);
+        assert_eq!(shield.base.build_visibility, BuildVisibility::EditorOnly);
+        assert!(shield.base.has_power);
+        assert!(shield.base.update);
+        assert!(shield.base.solid);
+        assert!(shield.base.consumes_power);
+        assert!(!shield.rebuildable);
+        assert_eq!(shield.base.size, 3);
+        assert_eq!(shield.radius, 200.0);
+        assert_eq!(shield.sides, 24);
+        assert_eq!(shield.consume_power, 5.0);
+        assert!(shield.requirements.is_empty());
+
+        let large = registry
+            .get_effect_by_name("large-shield-projector")
+            .unwrap();
+        assert_eq!(large.kind, EffectBlockKind::BaseShield);
+        assert_eq!(large.base.build_visibility, BuildVisibility::EditorOnly);
+        assert!(large.base.has_power);
+        assert!(large.base.update);
+        assert!(large.base.solid);
+        assert!(large.base.consumes_power);
+        assert!(!large.rebuildable);
+        assert_eq!(large.base.size, 4);
+        assert_eq!(large.radius, 400.0);
+        assert_eq!(large.sides, 24);
+        assert_eq!(large.consume_power, 5.0);
+        assert!(large.requirements.is_empty());
     }
 
     #[test]
