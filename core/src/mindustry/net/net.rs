@@ -5,7 +5,10 @@ use super::packets::{
     ClientBinaryPacketUnreliableCallPacket, ClientPacketReliableCallPacket,
     ClientPacketUnreliableCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
     ConnectPacket, CopyToClipboardCallPacket, DebugStatusClientCallPacket,
-    DebugStatusClientUnreliableCallPacket, StreamBegin, StreamChunk,
+    DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
+    InfoMessageCallPacket, InfoToastCallPacket, KickCallPacket, OpenUriCallPacket,
+    PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
+    RemoveQueueBlockCallPacket, StreamBegin, StreamChunk, WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -26,6 +29,17 @@ pub enum PacketKind {
     CopyToClipboardCallPacket(CopyToClipboardCallPacket),
     DebugStatusClientCallPacket(DebugStatusClientCallPacket),
     DebugStatusClientUnreliableCallPacket(DebugStatusClientUnreliableCallPacket),
+    HideFollowUpMenuCallPacket(HideFollowUpMenuCallPacket),
+    HideHudTextCallPacket(HideHudTextCallPacket),
+    InfoMessageCallPacket(InfoMessageCallPacket),
+    InfoToastCallPacket(InfoToastCallPacket),
+    KickCallPacket(KickCallPacket),
+    OpenUriCallPacket(OpenUriCallPacket),
+    PingResponseCallPacket(PingResponseCallPacket),
+    PlayerDisconnectCallPacket(PlayerDisconnectCallPacket),
+    RemoveMarkerCallPacket(RemoveMarkerCallPacket),
+    RemoveQueueBlockCallPacket(RemoveQueueBlockCallPacket),
+    WorldDataBeginCallPacket(WorldDataBeginCallPacket),
     Other {
         id: u8,
         priority: i32,
@@ -49,9 +63,20 @@ impl PacketKind {
             | PacketKind::ClientPacketUnreliableCallPacket(_)
             | PacketKind::CompleteObjectiveCallPacket(_)
             | PacketKind::ConnectCallPacket(_)
-            | PacketKind::CopyToClipboardCallPacket(_) => 1,
+            | PacketKind::CopyToClipboardCallPacket(_)
+            | PacketKind::HideFollowUpMenuCallPacket(_)
+            | PacketKind::HideHudTextCallPacket(_)
+            | PacketKind::InfoMessageCallPacket(_)
+            | PacketKind::InfoToastCallPacket(_)
+            | PacketKind::OpenUriCallPacket(_)
+            | PacketKind::PingResponseCallPacket(_)
+            | PacketKind::PlayerDisconnectCallPacket(_)
+            | PacketKind::RemoveMarkerCallPacket(_)
+            | PacketKind::RemoveQueueBlockCallPacket(_)
+            | PacketKind::WorldDataBeginCallPacket(_) => 1,
             PacketKind::DebugStatusClientCallPacket(_)
-            | PacketKind::DebugStatusClientUnreliableCallPacket(_) => 2,
+            | PacketKind::DebugStatusClientUnreliableCallPacket(_)
+            | PacketKind::KickCallPacket(_) => 2,
             PacketKind::Other { priority, .. } => *priority,
         }
     }
@@ -67,8 +92,19 @@ impl PacketKind {
             | PacketKind::CompleteObjectiveCallPacket(_)
             | PacketKind::CopyToClipboardCallPacket(_)
             | PacketKind::DebugStatusClientCallPacket(_)
-            | PacketKind::DebugStatusClientUnreliableCallPacket(_) => true,
-            PacketKind::ConnectCallPacket(_) => !server,
+            | PacketKind::DebugStatusClientUnreliableCallPacket(_)
+            | PacketKind::HideFollowUpMenuCallPacket(_)
+            | PacketKind::HideHudTextCallPacket(_)
+            | PacketKind::InfoMessageCallPacket(_)
+            | PacketKind::InfoToastCallPacket(_)
+            | PacketKind::OpenUriCallPacket(_)
+            | PacketKind::PlayerDisconnectCallPacket(_)
+            | PacketKind::RemoveMarkerCallPacket(_)
+            | PacketKind::WorldDataBeginCallPacket(_) => true,
+            PacketKind::ConnectCallPacket(_)
+            | PacketKind::KickCallPacket(_)
+            | PacketKind::PingResponseCallPacket(_)
+            | PacketKind::RemoveQueueBlockCallPacket(_) => !server,
             PacketKind::ClientBinaryPacketReliableCallPacket(_)
             | PacketKind::ClientBinaryPacketUnreliableCallPacket(_)
             | PacketKind::ClientPacketReliableCallPacket(_)
