@@ -5,8 +5,11 @@ use super::{
         ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
         ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
         CompleteObjectiveCallPacket, ConnectCallPacket, ConnectPacket, CopyToClipboardCallPacket,
-        DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, StreamBegin,
-        StreamChunk,
+        DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+        HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket,
+        InfoToastCallPacket, KickCallPacket, OpenUriCallPacket, PingResponseCallPacket,
+        PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
+        StreamBegin, StreamChunk, WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -204,6 +207,50 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::DEBUG_STATUS_CLIENT_UNRELIABLE_CALL_PACKET
             }
+            PacketKind::HideFollowUpMenuCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::HIDE_FOLLOW_UP_MENU_CALL_PACKET
+            }
+            PacketKind::HideHudTextCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::HIDE_HUD_TEXT_CALL_PACKET
+            }
+            PacketKind::InfoMessageCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::INFO_MESSAGE_CALL_PACKET
+            }
+            PacketKind::InfoToastCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::INFO_TOAST_CALL_PACKET
+            }
+            PacketKind::KickCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::KICK_CALL_PACKET
+            }
+            PacketKind::OpenUriCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::OPEN_URI_CALL_PACKET
+            }
+            PacketKind::PingResponseCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::PING_RESPONSE_CALL_PACKET
+            }
+            PacketKind::PlayerDisconnectCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::PLAYER_DISCONNECT_CALL_PACKET
+            }
+            PacketKind::RemoveMarkerCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::REMOVE_MARKER_CALL_PACKET
+            }
+            PacketKind::RemoveQueueBlockCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::REMOVE_QUEUE_BLOCK_CALL_PACKET
+            }
+            PacketKind::WorldDataBeginCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::WORLD_DATA_BEGIN_CALL_PACKET
+            }
             PacketKind::Streamable(stream) => {
                 payload.extend_from_slice(&stream.stream);
                 packet_ids::WORLD_STREAM
@@ -298,6 +345,51 @@ impl PacketSerializer {
                     packet_ids::DEBUG_STATUS_CLIENT_UNRELIABLE_CALL_PACKET => {
                         Ok(PacketKind::DebugStatusClientUnreliableCallPacket(
                             DebugStatusClientUnreliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::HIDE_FOLLOW_UP_MENU_CALL_PACKET => {
+                        Ok(PacketKind::HideFollowUpMenuCallPacket(
+                            HideFollowUpMenuCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::HIDE_HUD_TEXT_CALL_PACKET => Ok(PacketKind::HideHudTextCallPacket(
+                        HideHudTextCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::INFO_MESSAGE_CALL_PACKET => Ok(PacketKind::InfoMessageCallPacket(
+                        InfoMessageCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::INFO_TOAST_CALL_PACKET => Ok(PacketKind::InfoToastCallPacket(
+                        InfoToastCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::KICK_CALL_PACKET => Ok(PacketKind::KickCallPacket(
+                        KickCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::OPEN_URI_CALL_PACKET => Ok(PacketKind::OpenUriCallPacket(
+                        OpenUriCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::PING_RESPONSE_CALL_PACKET => {
+                        Ok(PacketKind::PingResponseCallPacket(
+                            PingResponseCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::PLAYER_DISCONNECT_CALL_PACKET => {
+                        Ok(PacketKind::PlayerDisconnectCallPacket(
+                            PlayerDisconnectCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::REMOVE_MARKER_CALL_PACKET => {
+                        Ok(PacketKind::RemoveMarkerCallPacket(
+                            RemoveMarkerCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::REMOVE_QUEUE_BLOCK_CALL_PACKET => {
+                        Ok(PacketKind::RemoveQueueBlockCallPacket(
+                            RemoveQueueBlockCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::WORLD_DATA_BEGIN_CALL_PACKET => {
+                        Ok(PacketKind::WorldDataBeginCallPacket(
+                            WorldDataBeginCallPacket::read_from(&mut cursor)?,
                         ))
                     }
                     other => Err(SerializerError::UnsupportedPacketId(other)),
