@@ -37,19 +37,38 @@ pub struct LiquidAmount {
     pub amount: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefenseWallKind {
+    Wall,
+    Door,
+    AutoDoor,
+    ShieldWall,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefenseWallData {
     pub base: Block,
+    pub kind: DefenseWallKind,
     pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
     pub research_cost_multiplier: f32,
     pub build_cost_multiplier: f32,
     pub armor: f32,
+    pub schematic_priority: i32,
     pub chance_deflect: f32,
     pub flash_hit: bool,
     pub lightning_chance: f32,
     pub lightning_damage: f32,
     pub insulated: bool,
     pub absorb_lasers: bool,
+    pub solidifies: bool,
+    pub consumes_tap: bool,
+    pub team_passable: bool,
+    pub no_update_disabled: bool,
+    pub consume_power: f32,
+    pub shield_health: f32,
+    pub shield_break_cooldown: f32,
+    pub shield_regen_speed: f32,
 }
 
 impl DefenseWallData {
@@ -63,16 +82,27 @@ impl DefenseWallData {
         base.env_enabled = Env::ANY;
         Self {
             base,
+            kind: DefenseWallKind::Wall,
             requirements: Vec::new(),
+            research_cost: Vec::new(),
             research_cost_multiplier: 1.0,
             build_cost_multiplier: 6.0,
             armor: 0.0,
+            schematic_priority: 0,
             chance_deflect: -1.0,
             flash_hit: false,
             lightning_chance: -1.0,
             lightning_damage: 20.0,
             insulated: false,
             absorb_lasers: false,
+            solidifies: false,
+            consumes_tap: false,
+            team_passable: false,
+            no_update_disabled: false,
+            consume_power: 0.0,
+            shield_health: 0.0,
+            shield_break_cooldown: 0.0,
+            shield_regen_speed: 0.0,
         }
     }
 }
@@ -1305,6 +1335,29 @@ fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
         wall.base.health = 110 * WALL_HEALTH_MULTIPLIER * 4;
         wall.base.size = 2;
     });
+    registry.register_defense_wall("plastanium-wall", |wall| {
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("plastanium", 5), ("metaglass", 2)],
+        );
+        wall.base.health = 125 * WALL_HEALTH_MULTIPLIER;
+        wall.insulated = true;
+        wall.absorb_lasers = true;
+        wall.schematic_priority = 10;
+    });
+    registry.register_defense_wall("plastanium-wall-large", |wall| {
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("plastanium", 20), ("metaglass", 8)],
+        );
+        wall.base.health = 125 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.base.size = 2;
+        wall.insulated = true;
+        wall.absorb_lasers = true;
+        wall.schematic_priority = 10;
+    });
     registry.register_defense_wall("thorium-wall", |wall| {
         set_requirements(&mut wall.requirements, items, &[("thorium", 6)]);
         wall.base.health = 200 * WALL_HEALTH_MULTIPLIER;
@@ -1313,6 +1366,55 @@ fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
         set_requirements(&mut wall.requirements, items, &[("thorium", 24)]);
         wall.base.health = 200 * WALL_HEALTH_MULTIPLIER * 4;
         wall.base.size = 2;
+    });
+    registry.register_defense_wall("phase-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("phase-fabric", 6)]);
+        wall.base.health = 150 * WALL_HEALTH_MULTIPLIER;
+        wall.chance_deflect = 10.0;
+        wall.flash_hit = true;
+    });
+    registry.register_defense_wall("phase-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("phase-fabric", 24)]);
+        wall.base.health = 150 * 4 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 2;
+        wall.chance_deflect = 10.0;
+        wall.flash_hit = true;
+    });
+    registry.register_defense_wall("surge-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("surge-alloy", 6)]);
+        wall.base.health = 230 * WALL_HEALTH_MULTIPLIER;
+        wall.lightning_chance = 0.05;
+    });
+    registry.register_defense_wall("surge-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("surge-alloy", 24)]);
+        wall.base.health = 230 * 4 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 2;
+        wall.lightning_chance = 0.05;
+    });
+    registry.register_defense_wall("door", |wall| {
+        wall.kind = DefenseWallKind::Door;
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("titanium", 6), ("silicon", 4)],
+        );
+        wall.base.health = 100 * WALL_HEALTH_MULTIPLIER;
+        wall.base.solid = false;
+        wall.solidifies = true;
+        wall.consumes_tap = true;
+    });
+    registry.register_defense_wall("door-large", |wall| {
+        wall.kind = DefenseWallKind::Door;
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("titanium", 24), ("silicon", 16)],
+        );
+        wall.base.health = 100 * 4 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 2;
+        wall.base.solid = false;
+        wall.solidifies = true;
+        wall.consumes_tap = true;
     });
 
     registry.register_defense_wall("scrap-wall", |wall| {
@@ -1368,6 +1470,55 @@ fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
         wall.build_cost_multiplier = 5.0;
         wall.base.size = 2;
     });
+    registry.register_defense_wall("blast-door", |wall| {
+        wall.kind = DefenseWallKind::AutoDoor;
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("tungsten", 24), ("silicon", 24)],
+        );
+        wall.base.health = 175 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.armor = 14.0;
+        wall.base.size = 2;
+        wall.base.solid = false;
+        wall.solidifies = true;
+        wall.team_passable = true;
+        wall.no_update_disabled = true;
+        wall.base.update = true;
+    });
+    registry.register_defense_wall("reinforced-surge-wall", |wall| {
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("surge-alloy", 6), ("tungsten", 2)],
+        );
+        wall.base.health = 250 * WALL_HEALTH_MULTIPLIER;
+        wall.lightning_chance = 0.05;
+        wall.lightning_damage = 30.0;
+        wall.armor = 20.0;
+        set_requirements(
+            &mut wall.research_cost,
+            items,
+            &[("surge-alloy", 20), ("tungsten", 100)],
+        );
+    });
+    registry.register_defense_wall("reinforced-surge-wall-large", |wall| {
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("surge-alloy", 24), ("tungsten", 8)],
+        );
+        wall.base.health = 250 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.lightning_chance = 0.05;
+        wall.lightning_damage = 30.0;
+        wall.armor = 20.0;
+        wall.base.size = 2;
+        set_requirements(
+            &mut wall.research_cost,
+            items,
+            &[("surge-alloy", 40), ("tungsten", 200)],
+        );
+    });
     registry.register_defense_wall("carbide-wall", |wall| {
         set_requirements(
             &mut wall.requirements,
@@ -1386,6 +1537,27 @@ fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
         wall.base.health = 270 * WALL_HEALTH_MULTIPLIER * 4;
         wall.armor = 16.0;
         wall.base.size = 2;
+    });
+    registry.register_defense_wall("shielded-wall", |wall| {
+        wall.kind = DefenseWallKind::ShieldWall;
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("phase-fabric", 20), ("surge-alloy", 12), ("beryllium", 12)],
+        );
+        wall.consume_power = 3.0 / 60.0;
+        wall.base.outputs_power = false;
+        wall.base.has_power = true;
+        wall.base.consumes_power = true;
+        wall.base.conductive_power = true;
+        wall.chance_deflect = 8.0;
+        wall.base.health = 260 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.armor = 15.0;
+        wall.base.size = 2;
+        wall.base.update = true;
+        wall.shield_health = 900.0;
+        wall.shield_break_cooldown = 60.0 * 10.0;
+        wall.shield_regen_speed = 2.0;
     });
 }
 
@@ -3390,6 +3562,235 @@ mod tests {
                 ItemAmount {
                     item: item_id("carbide"),
                     amount: 24
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn special_defense_walls_keep_upstream_combat_flags() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        for (name, health, size, requirements) in [
+            (
+                "plastanium-wall",
+                500,
+                1,
+                vec![
+                    ItemAmount {
+                        item: item_id("plastanium"),
+                        amount: 5,
+                    },
+                    ItemAmount {
+                        item: item_id("metaglass"),
+                        amount: 2,
+                    },
+                ],
+            ),
+            (
+                "plastanium-wall-large",
+                2000,
+                2,
+                vec![
+                    ItemAmount {
+                        item: item_id("plastanium"),
+                        amount: 20,
+                    },
+                    ItemAmount {
+                        item: item_id("metaglass"),
+                        amount: 8,
+                    },
+                ],
+            ),
+        ] {
+            let wall = registry.get_defense_wall_by_name(name).unwrap();
+            assert_eq!(wall.kind, DefenseWallKind::Wall);
+            assert_eq!(wall.base.health, health);
+            assert_eq!(wall.base.size, size);
+            assert!(wall.insulated);
+            assert!(wall.absorb_lasers);
+            assert_eq!(wall.schematic_priority, 10);
+            assert_eq!(wall.requirements, requirements);
+        }
+
+        for (name, health, size, amount) in
+            [("phase-wall", 600, 1, 6), ("phase-wall-large", 2400, 2, 24)]
+        {
+            let wall = registry.get_defense_wall_by_name(name).unwrap();
+            assert_eq!(wall.base.health, health);
+            assert_eq!(wall.base.size, size);
+            assert_eq!(wall.chance_deflect, 10.0);
+            assert!(wall.flash_hit);
+            assert_eq!(
+                wall.requirements,
+                vec![ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount
+                }]
+            );
+        }
+
+        for (name, health, size, amount) in
+            [("surge-wall", 920, 1, 6), ("surge-wall-large", 3680, 2, 24)]
+        {
+            let wall = registry.get_defense_wall_by_name(name).unwrap();
+            assert_eq!(wall.base.health, health);
+            assert_eq!(wall.base.size, size);
+            assert_eq!(wall.lightning_chance, 0.05);
+            assert_eq!(wall.lightning_damage, 20.0);
+            assert_eq!(
+                wall.requirements,
+                vec![ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount
+                }]
+            );
+        }
+
+        let reinforced = registry
+            .get_defense_wall_by_name("reinforced-surge-wall")
+            .unwrap();
+        assert_eq!(reinforced.base.health, 1000);
+        assert_eq!(reinforced.armor, 20.0);
+        assert_eq!(reinforced.lightning_chance, 0.05);
+        assert_eq!(reinforced.lightning_damage, 30.0);
+        assert_eq!(
+            reinforced.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 6
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 2
+                }
+            ]
+        );
+        assert_eq!(
+            reinforced.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 100
+                }
+            ]
+        );
+
+        let reinforced_large = registry
+            .get_defense_wall_by_name("reinforced-surge-wall-large")
+            .unwrap();
+        assert_eq!(reinforced_large.base.health, 4000);
+        assert_eq!(reinforced_large.base.size, 2);
+        assert_eq!(reinforced_large.armor, 20.0);
+        assert_eq!(reinforced_large.lightning_chance, 0.05);
+        assert_eq!(reinforced_large.lightning_damage, 30.0);
+        assert_eq!(
+            reinforced_large.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 200
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn door_and_shield_defense_walls_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let door = registry.get_defense_wall_by_name("door").unwrap();
+        assert_eq!(door.kind, DefenseWallKind::Door);
+        assert_eq!(door.base.health, 400);
+        assert!(!door.base.solid);
+        assert!(door.solidifies);
+        assert!(door.consumes_tap);
+        assert_eq!(
+            door.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 6
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 4
+                }
+            ]
+        );
+
+        let door_large = registry.get_defense_wall_by_name("door-large").unwrap();
+        assert_eq!(door_large.kind, DefenseWallKind::Door);
+        assert_eq!(door_large.base.health, 1600);
+        assert_eq!(door_large.base.size, 2);
+        assert!(!door_large.base.solid);
+        assert!(door_large.solidifies);
+        assert!(door_large.consumes_tap);
+
+        let blast = registry.get_defense_wall_by_name("blast-door").unwrap();
+        assert_eq!(blast.kind, DefenseWallKind::AutoDoor);
+        assert_eq!(blast.base.health, 2800);
+        assert_eq!(blast.base.size, 2);
+        assert_eq!(blast.armor, 14.0);
+        assert!(blast.base.update);
+        assert!(!blast.base.solid);
+        assert!(blast.solidifies);
+        assert!(blast.team_passable);
+        assert!(blast.no_update_disabled);
+        assert_eq!(
+            blast.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 24
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 24
+                }
+            ]
+        );
+
+        let shield = registry.get_defense_wall_by_name("shielded-wall").unwrap();
+        assert_eq!(shield.kind, DefenseWallKind::ShieldWall);
+        assert_eq!(shield.base.health, 4160);
+        assert_eq!(shield.base.size, 2);
+        assert_eq!(shield.armor, 15.0);
+        assert_eq!(shield.chance_deflect, 8.0);
+        assert!(shield.base.update);
+        assert!(shield.base.has_power);
+        assert!(shield.base.consumes_power);
+        assert!(shield.base.conductive_power);
+        assert!(!shield.base.outputs_power);
+        assert_eq!(shield.consume_power, 3.0 / 60.0);
+        assert_eq!(shield.shield_health, 900.0);
+        assert_eq!(shield.shield_break_cooldown, 60.0 * 10.0);
+        assert_eq!(shield.shield_regen_speed, 2.0);
+        assert_eq!(
+            shield.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 12
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 12
                 }
             ]
         );
