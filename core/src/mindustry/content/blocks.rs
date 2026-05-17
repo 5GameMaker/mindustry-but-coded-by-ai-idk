@@ -422,6 +422,11 @@ pub enum DistributionBlockKind {
     OverflowGate,
     Unloader,
     MassDriver,
+    Duct,
+    DuctRouter,
+    OverflowDuct,
+    DuctBridge,
+    DirectionalUnloader,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -446,6 +451,9 @@ pub struct DistributionBlockData {
     pub instant_transfer: bool,
     pub can_overdrive: bool,
     pub no_side_blend: bool,
+    pub armored: bool,
+    pub is_duct: bool,
+    pub region_rotated1: i32,
     pub output_router: bool,
     pub crush_fragile: bool,
     pub allow_core_unload: bool,
@@ -501,6 +509,9 @@ impl DistributionBlockData {
             instant_transfer: false,
             can_overdrive: false,
             no_side_blend: false,
+            armored: false,
+            is_duct: false,
+            region_rotated1: 0,
             output_router: false,
             crush_fragile: false,
             allow_core_unload: false,
@@ -669,6 +680,87 @@ impl DistributionBlockData {
                 self.bullet_lifetime = 200.0;
                 self.shoot_sound_volume = 0.5;
                 self.shake = 3.0;
+            }
+            DistributionBlockKind::Duct => {
+                self.base.group = BlockGroup::Transportation;
+                self.base.update = true;
+                self.base.solid = false;
+                self.base.has_items = true;
+                self.unloadable = false;
+                self.base.item_capacity = 1;
+                self.no_update_disabled = true;
+                self.under_bullets = true;
+                self.rotate = true;
+                self.no_side_blend = true;
+                self.is_duct = true;
+                self.base.priority = 1;
+                self.base.env_enabled = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
+                self.speed = 5.0;
+            }
+            DistributionBlockKind::DuctRouter => {
+                self.base.group = BlockGroup::Transportation;
+                self.base.update = true;
+                self.base.solid = false;
+                self.base.has_items = true;
+                self.unloadable = false;
+                self.base.item_capacity = 1;
+                self.no_update_disabled = true;
+                self.configurable = true;
+                self.save_config = true;
+                self.rotate = true;
+                self.clear_on_double_tap = true;
+                self.under_bullets = true;
+                self.base.priority = 1;
+                self.base.env_enabled = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
+                self.speed = 5.0;
+            }
+            DistributionBlockKind::OverflowDuct => {
+                self.base.group = BlockGroup::Transportation;
+                self.base.update = true;
+                self.base.solid = false;
+                self.base.has_items = true;
+                self.unloadable = false;
+                self.base.item_capacity = 1;
+                self.no_update_disabled = true;
+                self.rotate = true;
+                self.under_bullets = true;
+                self.base.priority = 1;
+                self.base.env_enabled = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
+                self.region_rotated1 = 1;
+                self.speed = 5.0;
+            }
+            DistributionBlockKind::DuctBridge => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.rotate = true;
+                self.base.group = BlockGroup::Transportation;
+                self.no_update_disabled = true;
+                self.base.priority = 1;
+                self.base.env_enabled = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
+                self.region_rotated1 = 1;
+                self.range = 4.0;
+                self.base.item_capacity = 4;
+                self.base.has_items = true;
+                self.under_bullets = true;
+                self.is_duct = true;
+                self.speed = 5.0;
+            }
+            DistributionBlockKind::DirectionalUnloader => {
+                self.base.group = BlockGroup::Transportation;
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.has_items = true;
+                self.configurable = true;
+                self.save_config = true;
+                self.rotate = true;
+                self.base.item_capacity = 0;
+                self.no_update_disabled = true;
+                self.unloadable = false;
+                self.is_duct = true;
+                self.clear_on_double_tap = true;
+                self.base.priority = 1;
+                self.speed = 1.0;
+                self.allow_core_unload = false;
             }
         }
     }
@@ -2638,6 +2730,136 @@ fn register_distribution_blocks(registry: &mut BlockRegistry, items: &[Item], _l
             distribution.range = 440.0;
             distribution.consume_power = 1.75;
             distribution.base.consumes_power = true;
+        },
+    );
+
+    registry.register_distribution_block("duct", DistributionBlockKind::Duct, |distribution| {
+        set_requirements(&mut distribution.requirements, items, &[("beryllium", 1)]);
+        distribution.base.health = 90;
+        distribution.speed = 4.0;
+        set_requirements(&mut distribution.research_cost, items, &[("beryllium", 5)]);
+    });
+
+    registry.register_distribution_block(
+        "armored-duct",
+        DistributionBlockKind::Duct,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("beryllium", 2), ("tungsten", 1)],
+            );
+            distribution.base.health = 140;
+            distribution.speed = 4.0;
+            distribution.armored = true;
+            set_requirements(
+                &mut distribution.research_cost,
+                items,
+                &[("beryllium", 300), ("tungsten", 100)],
+            );
+        },
+    );
+
+    registry.register_distribution_block(
+        "duct-router",
+        DistributionBlockKind::DuctRouter,
+        |distribution| {
+            set_requirements(&mut distribution.requirements, items, &[("beryllium", 10)]);
+            distribution.base.health = 90;
+            distribution.speed = 4.0;
+            distribution.region_rotated1 = 1;
+            distribution.base.solid = false;
+            set_requirements(&mut distribution.research_cost, items, &[("beryllium", 30)]);
+        },
+    );
+
+    registry.register_distribution_block(
+        "overflow-duct",
+        DistributionBlockKind::OverflowDuct,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("graphite", 8), ("beryllium", 8)],
+            );
+            distribution.base.health = 90;
+            distribution.speed = 4.0;
+            distribution.base.solid = false;
+            distribution.research_cost_multiplier = 1.5;
+        },
+    );
+
+    registry.register_distribution_block(
+        "underflow-duct",
+        DistributionBlockKind::OverflowDuct,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("graphite", 8), ("beryllium", 8)],
+            );
+            distribution.base.health = 90;
+            distribution.speed = 4.0;
+            distribution.base.solid = false;
+            distribution.research_cost_multiplier = 1.5;
+            distribution.invert = true;
+        },
+    );
+
+    registry.register_distribution_block(
+        "duct-bridge",
+        DistributionBlockKind::DuctBridge,
+        |distribution| {
+            set_requirements(&mut distribution.requirements, items, &[("beryllium", 15)]);
+            distribution.base.health = 90;
+            distribution.speed = 4.0;
+            distribution.build_cost_multiplier = 2.0;
+            distribution.research_cost_multiplier = 0.3;
+            distribution.crush_fragile = true;
+        },
+    );
+
+    registry.register_distribution_block(
+        "duct-unloader",
+        DistributionBlockKind::DirectionalUnloader,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("graphite", 20), ("silicon", 20), ("tungsten", 10)],
+            );
+            distribution.base.health = 120;
+            distribution.speed = 4.0;
+            distribution.base.solid = false;
+            distribution.under_bullets = true;
+            distribution.region_rotated1 = 1;
+        },
+    );
+
+    registry.register_distribution_block(
+        "surge-conveyor",
+        DistributionBlockKind::StackConveyor,
+        |distribution| {
+            set_requirements(
+                &mut distribution.requirements,
+                items,
+                &[("surge-alloy", 1), ("tungsten", 1)],
+            );
+            distribution.base.health = 130;
+            distribution.speed = 5.0 / 60.0;
+            distribution.base.item_capacity = 10;
+            distribution.output_router = false;
+            distribution.base.has_power = true;
+            distribution.base.consumes_power = true;
+            distribution.base.conductive_power = true;
+            distribution.under_bullets = true;
+            distribution.base_efficiency = 1.0;
+            distribution.consume_power = 1.0 / 60.0;
+            set_requirements(
+                &mut distribution.research_cost,
+                items,
+                &[("surge-alloy", 30), ("tungsten", 80)],
+            );
         },
     );
 }
@@ -5685,6 +5907,204 @@ mod tests {
                 ItemAmount {
                     item: item_id("thorium"),
                     amount: 50
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn erekir_duct_transport_blocks_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let duct_env = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
+
+        let duct = registry.get_distribution_by_name("duct").unwrap();
+        assert_eq!(duct.kind, DistributionBlockKind::Duct);
+        assert_eq!(duct.base.group, BlockGroup::Transportation);
+        assert!(duct.base.update);
+        assert!(!duct.base.solid);
+        assert!(duct.base.has_items);
+        assert_eq!(duct.base.item_capacity, 1);
+        assert!(duct.rotate);
+        assert!(duct.no_side_blend);
+        assert!(duct.is_duct);
+        assert_eq!(duct.base.env_enabled, duct_env);
+        assert_eq!(duct.base.health, 90);
+        assert_eq!(duct.speed, 4.0);
+        assert_eq!(
+            duct.requirements,
+            vec![ItemAmount {
+                item: item_id("beryllium"),
+                amount: 1
+            }]
+        );
+        assert_eq!(
+            duct.research_cost,
+            vec![ItemAmount {
+                item: item_id("beryllium"),
+                amount: 5
+            }]
+        );
+
+        let armored = registry.get_distribution_by_name("armored-duct").unwrap();
+        assert_eq!(armored.kind, DistributionBlockKind::Duct);
+        assert!(armored.armored);
+        assert_eq!(armored.base.health, 140);
+        assert_eq!(armored.speed, 4.0);
+        assert_eq!(
+            armored.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 2
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 1
+                }
+            ]
+        );
+        assert_eq!(
+            armored.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 100
+                }
+            ]
+        );
+
+        let router = registry.get_distribution_by_name("duct-router").unwrap();
+        assert_eq!(router.kind, DistributionBlockKind::DuctRouter);
+        assert!(router.base.update);
+        assert!(!router.base.solid);
+        assert!(router.base.has_items);
+        assert!(router.configurable);
+        assert!(router.save_config);
+        assert!(router.clear_on_double_tap);
+        assert!(router.rotate);
+        assert_eq!(router.region_rotated1, 1);
+        assert_eq!(router.base.env_enabled, duct_env);
+        assert_eq!(router.base.health, 90);
+        assert_eq!(router.speed, 4.0);
+        assert_eq!(
+            router.research_cost,
+            vec![ItemAmount {
+                item: item_id("beryllium"),
+                amount: 30
+            }]
+        );
+
+        for (name, inverted) in [("overflow-duct", false), ("underflow-duct", true)] {
+            let duct_gate = registry.get_distribution_by_name(name).unwrap();
+            assert_eq!(duct_gate.kind, DistributionBlockKind::OverflowDuct);
+            assert!(duct_gate.base.update);
+            assert!(!duct_gate.base.solid);
+            assert!(duct_gate.base.has_items);
+            assert!(duct_gate.rotate);
+            assert_eq!(duct_gate.region_rotated1, 1);
+            assert_eq!(duct_gate.base.env_enabled, duct_env);
+            assert_eq!(duct_gate.base.health, 90);
+            assert_eq!(duct_gate.speed, 4.0);
+            assert_eq!(duct_gate.research_cost_multiplier, 1.5);
+            assert_eq!(duct_gate.invert, inverted);
+        }
+
+        let bridge = registry.get_distribution_by_name("duct-bridge").unwrap();
+        assert_eq!(bridge.kind, DistributionBlockKind::DuctBridge);
+        assert!(bridge.base.update);
+        assert!(bridge.base.solid);
+        assert!(bridge.rotate);
+        assert!(bridge.base.has_items);
+        assert_eq!(bridge.base.item_capacity, 4);
+        assert!(bridge.is_duct);
+        assert_eq!(bridge.range, 4.0);
+        assert_eq!(bridge.region_rotated1, 1);
+        assert_eq!(bridge.base.env_enabled, duct_env);
+        assert_eq!(bridge.base.health, 90);
+        assert_eq!(bridge.speed, 4.0);
+        assert_eq!(bridge.build_cost_multiplier, 2.0);
+        assert_eq!(bridge.research_cost_multiplier, 0.3);
+        assert!(bridge.crush_fragile);
+
+        let unloader = registry.get_distribution_by_name("duct-unloader").unwrap();
+        assert_eq!(unloader.kind, DistributionBlockKind::DirectionalUnloader);
+        assert_eq!(unloader.base.group, BlockGroup::Transportation);
+        assert!(unloader.base.update);
+        assert!(!unloader.base.solid);
+        assert!(unloader.base.has_items);
+        assert!(unloader.configurable);
+        assert!(unloader.save_config);
+        assert!(unloader.rotate);
+        assert_eq!(unloader.base.item_capacity, 0);
+        assert!(unloader.is_duct);
+        assert!(!unloader.allow_core_unload);
+        assert_eq!(unloader.region_rotated1, 1);
+        assert_eq!(unloader.base.health, 120);
+        assert_eq!(unloader.speed, 4.0);
+        assert_eq!(
+            unloader.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 10
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn surge_conveyor_keeps_upstream_powered_stack_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let surge = registry.get_distribution_by_name("surge-conveyor").unwrap();
+        assert_eq!(surge.kind, DistributionBlockKind::StackConveyor);
+        assert_eq!(surge.base.health, 130);
+        assert_eq!(surge.speed, 5.0 / 60.0);
+        assert_eq!(surge.base.item_capacity, 10);
+        assert!(!surge.output_router);
+        assert!(surge.base.has_power);
+        assert!(surge.base.consumes_power);
+        assert!(surge.base.conductive_power);
+        assert!(surge.under_bullets);
+        assert_eq!(surge.base_efficiency, 1.0);
+        assert_eq!(surge.consume_power, 1.0 / 60.0);
+        assert_eq!(
+            surge.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 1
+                }
+            ]
+        );
+        assert_eq!(
+            surge.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 80
                 }
             ]
         );
