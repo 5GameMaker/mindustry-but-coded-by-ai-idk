@@ -766,6 +766,202 @@ impl DistributionBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiquidBlockKind {
+    Pump,
+    Conduit,
+    ArmoredConduit,
+    LiquidRouter,
+    LiquidJunction,
+    LiquidBridge,
+    DirectionLiquidBridge,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiquidBlockData {
+    pub base: Block,
+    pub kind: LiquidBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub build_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub outputs_liquid: bool,
+    pub floating: bool,
+    pub under_bullets: bool,
+    pub rotate: bool,
+    pub no_update_disabled: bool,
+    pub can_overdrive: bool,
+    pub configurable: bool,
+    pub fade_in: bool,
+    pub move_arrows: bool,
+    pub pulse: bool,
+    pub leaks: bool,
+    pub pad_corners: bool,
+    pub bot_color: String,
+    pub pump_amount: f32,
+    pub consume_time: f32,
+    pub warmup_speed: f32,
+    pub liquid_pressure: f32,
+    pub liquid_padding: f32,
+    pub explosiveness_scale: f32,
+    pub flammability_scale: f32,
+    pub range: f32,
+    pub speed: f32,
+    pub arrow_spacing: f32,
+    pub arrow_offset: f32,
+    pub arrow_period: f32,
+    pub arrow_time_scl: f32,
+    pub bridge_width: f32,
+    pub region_rotated1: i32,
+    pub drawer: String,
+}
+
+impl LiquidBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: LiquidBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            build_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            consume_liquids: Vec::new(),
+            outputs_liquid: false,
+            floating: false,
+            under_bullets: false,
+            rotate: false,
+            no_update_disabled: false,
+            can_overdrive: true,
+            configurable: false,
+            fade_in: false,
+            move_arrows: false,
+            pulse: false,
+            leaks: false,
+            pad_corners: false,
+            bot_color: String::new(),
+            pump_amount: 0.0,
+            consume_time: 0.0,
+            warmup_speed: 0.0,
+            liquid_pressure: 1.0,
+            liquid_padding: 0.0,
+            explosiveness_scale: 1.0,
+            flammability_scale: 1.0,
+            range: 0.0,
+            speed: 0.0,
+            arrow_spacing: 0.0,
+            arrow_offset: 0.0,
+            arrow_period: 0.0,
+            arrow_time_scl: 0.0,
+            bridge_width: 0.0,
+            region_rotated1: 0,
+            drawer: String::new(),
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_liquid_block_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.base.has_liquids = true;
+        self.base.group = BlockGroup::Liquids;
+        self.outputs_liquid = true;
+        self.base.env_enabled |= Env::SPACE | Env::UNDERWATER;
+    }
+
+    fn apply_item_bridge_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.under_bullets = true;
+        self.base.has_power = true;
+        self.base.item_capacity = 10;
+        self.configurable = true;
+        self.no_update_disabled = true;
+        self.base.priority = 1;
+        self.fade_in = true;
+        self.move_arrows = true;
+        self.arrow_spacing = 4.0;
+        self.arrow_offset = 2.0;
+        self.arrow_period = 0.4;
+        self.arrow_time_scl = 6.2;
+        self.bridge_width = 6.5;
+    }
+
+    fn apply_direction_bridge_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.rotate = true;
+        self.base.group = BlockGroup::Transportation;
+        self.no_update_disabled = true;
+        self.base.priority = 1;
+        self.base.env_enabled = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
+        self.region_rotated1 = 1;
+        self.range = 4.0;
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            LiquidBlockKind::Pump => {
+                self.apply_liquid_block_defaults();
+                self.base.group = BlockGroup::Liquids;
+                self.floating = true;
+                self.base.env_enabled = Env::TERRESTRIAL;
+                self.pump_amount = 0.2;
+                self.consume_time = 60.0 * 5.0;
+                self.warmup_speed = 0.019;
+                self.drawer = "DrawMulti(DrawDefault, DrawPumpLiquid)".into();
+            }
+            LiquidBlockKind::Conduit | LiquidBlockKind::ArmoredConduit => {
+                self.apply_liquid_block_defaults();
+                self.rotate = true;
+                self.base.solid = false;
+                self.floating = true;
+                self.under_bullets = true;
+                self.no_update_disabled = true;
+                self.can_overdrive = false;
+                self.base.priority = 1;
+                self.bot_color = "565656".into();
+                self.pad_corners = true;
+                self.leaks = self.kind == LiquidBlockKind::Conduit;
+            }
+            LiquidBlockKind::LiquidRouter => {
+                self.apply_liquid_block_defaults();
+                self.base.solid = true;
+                self.no_update_disabled = true;
+                self.can_overdrive = false;
+                self.floating = true;
+            }
+            LiquidBlockKind::LiquidJunction => {
+                self.apply_liquid_block_defaults();
+                self.floating = true;
+            }
+            LiquidBlockKind::LiquidBridge => {
+                self.apply_item_bridge_defaults();
+                self.base.has_items = false;
+                self.base.has_liquids = true;
+                self.outputs_liquid = true;
+                self.can_overdrive = false;
+                self.base.group = BlockGroup::Liquids;
+                self.base.env_enabled = Env::ANY;
+            }
+            LiquidBlockKind::DirectionLiquidBridge => {
+                self.apply_direction_bridge_defaults();
+                self.outputs_liquid = true;
+                self.base.group = BlockGroup::Liquids;
+                self.can_overdrive = false;
+                self.base.liquid_capacity = 20.0;
+                self.base.has_liquids = true;
+                self.speed = 5.0;
+                self.liquid_padding = 1.0;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CraftingBlockData {
     pub base: Block,
@@ -860,6 +1056,7 @@ pub enum BlockDef {
     DefenseWall(DefenseWallData),
     Effect(EffectBlockData),
     Distribution(DistributionBlockData),
+    Liquid(LiquidBlockData),
 }
 
 impl BlockDef {
@@ -877,6 +1074,7 @@ impl BlockDef {
             Self::DefenseWall(wall) => &wall.base,
             Self::Effect(effect) => &effect.base,
             Self::Distribution(distribution) => &distribution.base,
+            Self::Liquid(liquid) => &liquid.base,
         }
     }
 
@@ -964,6 +1162,13 @@ impl BlockRegistry {
     pub fn get_distribution_by_name(&self, name: &str) -> Option<&DistributionBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Distribution(distribution) => Some(distribution),
+            _ => None,
+        }
+    }
+
+    pub fn get_liquid_by_name(&self, name: &str) -> Option<&LiquidBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Liquid(liquid) => Some(liquid),
             _ => None,
         }
     }
@@ -1118,6 +1323,19 @@ impl BlockRegistry {
         self.insert(BlockDef::Distribution(block))
     }
 
+    pub fn register_liquid_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: LiquidBlockKind,
+        configure: impl FnOnce(&mut LiquidBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = LiquidBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Liquid(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -1241,6 +1459,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_defense_walls(&mut registry, items);
     register_effect_blocks(&mut registry, items, liquids);
     register_distribution_blocks(&mut registry, items, liquids);
+    register_liquid_blocks(&mut registry, items, liquids);
 
     registry.finalize_floor_links();
     registry
@@ -2862,6 +3081,190 @@ fn register_distribution_blocks(registry: &mut BlockRegistry, items: &[Item], _l
             );
         },
     );
+}
+
+fn register_liquid_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids: &[Liquid]) {
+    registry.register_liquid_block("mechanical-pump", LiquidBlockKind::Pump, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[("copper", 15), ("metaglass", 10)],
+        );
+        liquid.pump_amount = 7.0 / 60.0;
+        liquid.base.liquid_capacity = 20.0;
+    });
+
+    registry.register_liquid_block("rotary-pump", LiquidBlockKind::Pump, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[
+                ("copper", 70),
+                ("metaglass", 50),
+                ("silicon", 20),
+                ("titanium", 35),
+            ],
+        );
+        liquid.pump_amount = 0.2;
+        liquid.consume_power = 0.3;
+        liquid.base.consumes_power = true;
+        liquid.base.liquid_capacity = 80.0;
+        liquid.base.has_power = true;
+        liquid.base.size = 2;
+    });
+
+    registry.register_liquid_block("impulse-pump", LiquidBlockKind::Pump, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[
+                ("copper", 80),
+                ("metaglass", 90),
+                ("silicon", 30),
+                ("titanium", 40),
+                ("thorium", 35),
+            ],
+        );
+        liquid.pump_amount = 0.22;
+        liquid.consume_power = 1.3;
+        liquid.base.consumes_power = true;
+        liquid.base.liquid_capacity = 200.0;
+        liquid.base.has_power = true;
+        liquid.base.size = 3;
+    });
+
+    registry.register_liquid_block("conduit", LiquidBlockKind::Conduit, |liquid| {
+        set_requirements(&mut liquid.requirements, items, &[("metaglass", 1)]);
+        liquid.base.liquid_capacity = 20.0;
+        liquid.base.health = 45;
+        liquid.explosiveness_scale = 10.0 / 20.0;
+        liquid.flammability_scale = 10.0 / 20.0;
+    });
+
+    registry.register_liquid_block("pulse-conduit", LiquidBlockKind::Conduit, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[("titanium", 2), ("metaglass", 1)],
+        );
+        liquid.base.liquid_capacity = 40.0;
+        liquid.liquid_pressure = 1.025;
+        liquid.base.health = 90;
+        liquid.explosiveness_scale = 16.0 / 40.0;
+        liquid.flammability_scale = 16.0 / 40.0;
+    });
+
+    registry.register_liquid_block(
+        "plated-conduit",
+        LiquidBlockKind::ArmoredConduit,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("thorium", 2), ("metaglass", 1), ("plastanium", 1)],
+            );
+            liquid.base.liquid_capacity = 50.0;
+            liquid.liquid_pressure = 1.025;
+            liquid.base.health = 220;
+            liquid.explosiveness_scale = 16.0 / 50.0;
+            liquid.flammability_scale = 16.0 / 50.0;
+        },
+    );
+
+    registry.register_liquid_block("liquid-router", LiquidBlockKind::LiquidRouter, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[("graphite", 4), ("metaglass", 2)],
+        );
+        liquid.base.liquid_capacity = 120.0;
+        liquid.under_bullets = true;
+        liquid.base.solid = false;
+        liquid.explosiveness_scale = 20.0 / 120.0;
+        liquid.flammability_scale = 20.0 / 120.0;
+    });
+
+    registry.register_liquid_block(
+        "liquid-container",
+        LiquidBlockKind::LiquidRouter,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("titanium", 10), ("metaglass", 15)],
+            );
+            liquid.base.liquid_capacity = 700.0;
+            liquid.base.size = 2;
+            liquid.base.solid = true;
+        },
+    );
+
+    registry.register_liquid_block("liquid-tank", LiquidBlockKind::LiquidRouter, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[("titanium", 30), ("metaglass", 40)],
+        );
+        liquid.base.size = 3;
+        liquid.base.solid = true;
+        liquid.base.liquid_capacity = 1800.0;
+        liquid.base.health = 500;
+    });
+
+    registry.register_liquid_block(
+        "liquid-junction",
+        LiquidBlockKind::LiquidJunction,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("graphite", 4), ("metaglass", 8)],
+            );
+            liquid.base.solid = false;
+        },
+    );
+
+    registry.register_liquid_block("bridge-conduit", LiquidBlockKind::LiquidBridge, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[("graphite", 4), ("metaglass", 8)],
+        );
+        liquid.floating = true;
+        liquid.fade_in = false;
+        liquid.move_arrows = false;
+        liquid.arrow_spacing = 6.0;
+        liquid.range = 4.0;
+        liquid.base.has_power = false;
+        liquid.base.liquid_capacity = 100.0;
+        liquid.explosiveness_scale = 20.0 / 100.0;
+        liquid.flammability_scale = 20.0 / 100.0;
+    });
+
+    registry.register_liquid_block("phase-conduit", LiquidBlockKind::LiquidBridge, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[
+                ("phase-fabric", 5),
+                ("silicon", 7),
+                ("metaglass", 20),
+                ("titanium", 10),
+            ],
+        );
+        liquid.floating = true;
+        liquid.range = 12.0;
+        liquid.arrow_period = 0.9;
+        liquid.arrow_time_scl = 2.75;
+        liquid.base.has_power = true;
+        liquid.can_overdrive = false;
+        liquid.pulse = true;
+        liquid.explosiveness_scale = 20.0 / 100.0;
+        liquid.flammability_scale = 20.0 / 100.0;
+        liquid.base.liquid_capacity = 100.0;
+        liquid.consume_power = 0.30;
+        liquid.base.consumes_power = true;
+    });
 }
 
 fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
@@ -6105,6 +6508,273 @@ mod tests {
                 ItemAmount {
                     item: item_id("tungsten"),
                     amount: 80
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn serpulo_pumps_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let mechanical = registry.get_liquid_by_name("mechanical-pump").unwrap();
+        assert_eq!(mechanical.kind, LiquidBlockKind::Pump);
+        assert_eq!(mechanical.base.group, BlockGroup::Liquids);
+        assert!(mechanical.base.update);
+        assert!(mechanical.base.solid);
+        assert!(mechanical.base.has_liquids);
+        assert!(mechanical.outputs_liquid);
+        assert!(mechanical.floating);
+        assert_eq!(mechanical.base.env_enabled, Env::TERRESTRIAL);
+        assert_eq!(mechanical.pump_amount, 7.0 / 60.0);
+        assert_eq!(mechanical.base.liquid_capacity, 20.0);
+        assert_eq!(mechanical.consume_time, 60.0 * 5.0);
+        assert_eq!(mechanical.warmup_speed, 0.019);
+        assert_eq!(mechanical.drawer, "DrawMulti(DrawDefault, DrawPumpLiquid)");
+        assert_eq!(
+            mechanical.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 15
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 10
+                }
+            ]
+        );
+
+        let rotary = registry.get_liquid_by_name("rotary-pump").unwrap();
+        assert_eq!(rotary.kind, LiquidBlockKind::Pump);
+        assert_eq!(rotary.pump_amount, 0.2);
+        assert_eq!(rotary.consume_power, 0.3);
+        assert!(rotary.base.has_power);
+        assert!(rotary.base.consumes_power);
+        assert_eq!(rotary.base.liquid_capacity, 80.0);
+        assert_eq!(rotary.base.size, 2);
+
+        let impulse = registry.get_liquid_by_name("impulse-pump").unwrap();
+        assert_eq!(impulse.kind, LiquidBlockKind::Pump);
+        assert_eq!(impulse.pump_amount, 0.22);
+        assert_eq!(impulse.consume_power, 1.3);
+        assert!(impulse.base.has_power);
+        assert_eq!(impulse.base.liquid_capacity, 200.0);
+        assert_eq!(impulse.base.size, 3);
+        assert_eq!(
+            impulse.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 90
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 35
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn serpulo_conduits_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let conduit = registry.get_liquid_by_name("conduit").unwrap();
+        assert_eq!(conduit.kind, LiquidBlockKind::Conduit);
+        assert_eq!(conduit.base.group, BlockGroup::Liquids);
+        assert!(conduit.base.update);
+        assert!(!conduit.base.solid);
+        assert!(conduit.base.has_liquids);
+        assert!(conduit.outputs_liquid);
+        assert!(conduit.rotate);
+        assert!(conduit.floating);
+        assert!(conduit.under_bullets);
+        assert!(conduit.no_update_disabled);
+        assert!(!conduit.can_overdrive);
+        assert!(conduit.leaks);
+        assert!(conduit.pad_corners);
+        assert_eq!(conduit.bot_color, "565656");
+        assert_eq!(conduit.base.liquid_capacity, 20.0);
+        assert_eq!(conduit.base.health, 45);
+        assert_eq!(conduit.explosiveness_scale, 10.0 / 20.0);
+        assert_eq!(conduit.flammability_scale, 10.0 / 20.0);
+        assert_eq!(
+            conduit.requirements,
+            vec![ItemAmount {
+                item: item_id("metaglass"),
+                amount: 1
+            }]
+        );
+
+        let pulse = registry.get_liquid_by_name("pulse-conduit").unwrap();
+        assert_eq!(pulse.kind, LiquidBlockKind::Conduit);
+        assert_eq!(pulse.base.liquid_capacity, 40.0);
+        assert_eq!(pulse.liquid_pressure, 1.025);
+        assert_eq!(pulse.base.health, 90);
+        assert_eq!(pulse.explosiveness_scale, 16.0 / 40.0);
+        assert_eq!(
+            pulse.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 2
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 1
+                }
+            ]
+        );
+
+        let plated = registry.get_liquid_by_name("plated-conduit").unwrap();
+        assert_eq!(plated.kind, LiquidBlockKind::ArmoredConduit);
+        assert!(!plated.leaks);
+        assert_eq!(plated.base.liquid_capacity, 50.0);
+        assert_eq!(plated.liquid_pressure, 1.025);
+        assert_eq!(plated.base.health, 220);
+        assert_eq!(plated.explosiveness_scale, 16.0 / 50.0);
+        assert_eq!(
+            plated.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 2
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 1
+                },
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 1
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn serpulo_liquid_router_junction_and_bridge_blocks_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let router = registry.get_liquid_by_name("liquid-router").unwrap();
+        assert_eq!(router.kind, LiquidBlockKind::LiquidRouter);
+        assert!(router.base.update);
+        assert!(!router.base.solid);
+        assert!(router.base.has_liquids);
+        assert!(router.outputs_liquid);
+        assert!(router.floating);
+        assert!(router.no_update_disabled);
+        assert!(!router.can_overdrive);
+        assert!(router.under_bullets);
+        assert_eq!(router.base.liquid_capacity, 120.0);
+        assert_eq!(router.explosiveness_scale, 20.0 / 120.0);
+        assert_eq!(
+            router.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 4
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 2
+                }
+            ]
+        );
+
+        let container = registry.get_liquid_by_name("liquid-container").unwrap();
+        assert_eq!(container.kind, LiquidBlockKind::LiquidRouter);
+        assert_eq!(container.base.liquid_capacity, 700.0);
+        assert_eq!(container.base.size, 2);
+        assert!(container.base.solid);
+
+        let tank = registry.get_liquid_by_name("liquid-tank").unwrap();
+        assert_eq!(tank.kind, LiquidBlockKind::LiquidRouter);
+        assert_eq!(tank.base.size, 3);
+        assert!(tank.base.solid);
+        assert_eq!(tank.base.liquid_capacity, 1800.0);
+        assert_eq!(tank.base.health, 500);
+
+        let junction = registry.get_liquid_by_name("liquid-junction").unwrap();
+        assert_eq!(junction.kind, LiquidBlockKind::LiquidJunction);
+        assert!(junction.floating);
+        assert!(!junction.base.solid);
+        assert_eq!(
+            junction.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 4
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 8
+                }
+            ]
+        );
+
+        let bridge = registry.get_liquid_by_name("bridge-conduit").unwrap();
+        assert_eq!(bridge.kind, LiquidBlockKind::LiquidBridge);
+        assert!(bridge.base.update);
+        assert!(bridge.base.solid);
+        assert!(!bridge.base.has_items);
+        assert!(bridge.base.has_liquids);
+        assert!(bridge.outputs_liquid);
+        assert!(bridge.floating);
+        assert!(!bridge.fade_in);
+        assert!(!bridge.move_arrows);
+        assert_eq!(bridge.arrow_spacing, 6.0);
+        assert_eq!(bridge.range, 4.0);
+        assert!(!bridge.base.has_power);
+        assert_eq!(bridge.base.liquid_capacity, 100.0);
+        assert_eq!(bridge.explosiveness_scale, 20.0 / 100.0);
+        assert_eq!(bridge.base.env_enabled, Env::ANY);
+
+        let phase = registry.get_liquid_by_name("phase-conduit").unwrap();
+        assert_eq!(phase.kind, LiquidBlockKind::LiquidBridge);
+        assert_eq!(phase.range, 12.0);
+        assert_eq!(phase.arrow_period, 0.9);
+        assert_eq!(phase.arrow_time_scl, 2.75);
+        assert!(phase.base.has_power);
+        assert!(phase.base.consumes_power);
+        assert!(!phase.can_overdrive);
+        assert!(phase.pulse);
+        assert_eq!(phase.base.liquid_capacity, 100.0);
+        assert_eq!(phase.consume_power, 0.30);
+        assert_eq!(
+            phase.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 5
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 7
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 10
                 }
             ]
         );
