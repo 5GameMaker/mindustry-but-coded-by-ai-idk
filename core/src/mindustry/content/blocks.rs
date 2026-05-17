@@ -815,6 +815,8 @@ pub struct LiquidBlockData {
     pub arrow_time_scl: f32,
     pub bridge_width: f32,
     pub region_rotated1: i32,
+    pub junction_replacement: Option<BlockId>,
+    pub rot_bridge_replacement: Option<BlockId>,
     pub drawer: String,
 }
 
@@ -858,6 +860,8 @@ impl LiquidBlockData {
             arrow_time_scl: 0.0,
             bridge_width: 0.0,
             region_rotated1: 0,
+            junction_replacement: None,
+            rot_bridge_replacement: None,
             drawer: String::new(),
         };
         block.apply_kind_defaults();
@@ -3083,7 +3087,7 @@ fn register_distribution_blocks(registry: &mut BlockRegistry, items: &[Item], _l
     );
 }
 
-fn register_liquid_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids: &[Liquid]) {
+fn register_liquid_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
     registry.register_liquid_block("mechanical-pump", LiquidBlockKind::Pump, |liquid| {
         set_requirements(
             &mut liquid.requirements,
@@ -3265,6 +3269,133 @@ fn register_liquid_blocks(registry: &mut BlockRegistry, items: &[Item], _liquids
         liquid.consume_power = 0.30;
         liquid.base.consumes_power = true;
     });
+
+    registry.register_liquid_block("reinforced-pump", LiquidBlockKind::Pump, |liquid| {
+        set_requirements(
+            &mut liquid.requirements,
+            items,
+            &[("beryllium", 40), ("tungsten", 30), ("silicon", 20)],
+        );
+        push_liquid_amount(&mut liquid.consume_liquids, liquids, "hydrogen", 1.5 / 60.0);
+        liquid.base.has_liquids = true;
+        liquid.pump_amount = 80.0 / 60.0 / 4.0;
+        liquid.base.liquid_capacity = 160.0;
+        liquid.base.size = 2;
+    });
+
+    let reinforced_conduit = registry.register_liquid_block(
+        "reinforced-conduit",
+        LiquidBlockKind::ArmoredConduit,
+        |liquid| {
+            set_requirements(&mut liquid.requirements, items, &[("beryllium", 2)]);
+            liquid.bot_color = "darkestMetal".into();
+            liquid.leaks = true;
+            liquid.base.liquid_capacity = 50.0;
+            liquid.liquid_pressure = 1.03;
+            liquid.base.health = 250;
+            liquid.research_cost_multiplier = 3.0;
+            liquid.under_bullets = true;
+            liquid.explosiveness_scale = 20.0 / 50.0;
+            liquid.flammability_scale = 20.0 / 50.0;
+        },
+    );
+
+    let reinforced_junction = registry.register_liquid_block(
+        "reinforced-liquid-junction",
+        LiquidBlockKind::LiquidJunction,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("graphite", 4), ("beryllium", 8)],
+            );
+            liquid.build_cost_multiplier = 3.0;
+            liquid.base.health = 250;
+            liquid.research_cost_multiplier = 1.0;
+            liquid.base.solid = false;
+            liquid.under_bullets = true;
+        },
+    );
+
+    let reinforced_bridge = registry.register_liquid_block(
+        "reinforced-bridge-conduit",
+        LiquidBlockKind::DirectionLiquidBridge,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("graphite", 8), ("beryllium", 20)],
+            );
+            liquid.range = 4.0;
+            liquid.base.has_power = false;
+            liquid.base.liquid_capacity = 120.0;
+            liquid.research_cost_multiplier = 1.0;
+            liquid.under_bullets = true;
+            liquid.base.health = 250;
+            liquid.explosiveness_scale = 20.0 / 120.0;
+            liquid.flammability_scale = 20.0 / 120.0;
+        },
+    );
+
+    if let Some(BlockDef::Liquid(conduit)) = registry.get_mut(reinforced_conduit) {
+        conduit.junction_replacement = Some(reinforced_junction);
+        conduit.rot_bridge_replacement = Some(reinforced_bridge);
+    }
+
+    registry.register_liquid_block(
+        "reinforced-liquid-router",
+        LiquidBlockKind::LiquidRouter,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("graphite", 8), ("beryllium", 4)],
+            );
+            liquid.base.liquid_capacity = 150.0;
+            liquid.liquid_padding = 3.0 / 4.0;
+            liquid.research_cost_multiplier = 3.0;
+            liquid.under_bullets = true;
+            liquid.base.solid = false;
+            liquid.base.health = 250;
+            liquid.explosiveness_scale = 40.0 / 150.0;
+            liquid.flammability_scale = 40.0 / 150.0;
+        },
+    );
+
+    registry.register_liquid_block(
+        "reinforced-liquid-container",
+        LiquidBlockKind::LiquidRouter,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("tungsten", 10), ("beryllium", 16)],
+            );
+            liquid.base.liquid_capacity = 1000.0;
+            liquid.base.size = 2;
+            liquid.liquid_padding = 6.0 / 4.0;
+            liquid.research_cost_multiplier = 4.0;
+            liquid.base.solid = true;
+            liquid.base.health = 400;
+        },
+    );
+
+    registry.register_liquid_block(
+        "reinforced-liquid-tank",
+        LiquidBlockKind::LiquidRouter,
+        |liquid| {
+            set_requirements(
+                &mut liquid.requirements,
+                items,
+                &[("tungsten", 40), ("beryllium", 50)],
+            );
+            liquid.base.size = 3;
+            liquid.base.solid = true;
+            liquid.base.liquid_capacity = 2700.0;
+            liquid.liquid_padding = 2.0;
+            liquid.base.health = 900;
+        },
+    );
 }
 
 fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
@@ -6778,6 +6909,121 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn reinforced_liquid_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let pump = registry.get_liquid_by_name("reinforced-pump").unwrap();
+        assert_eq!(pump.kind, LiquidBlockKind::Pump);
+        assert_eq!(pump.base.size, 2);
+        assert_eq!(pump.pump_amount, 80.0 / 60.0 / 4.0);
+        assert_eq!(pump.base.liquid_capacity, 160.0);
+        assert_eq!(
+            pump.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("hydrogen"),
+                amount: 1.5 / 60.0
+            }]
+        );
+        assert_eq!(
+            pump.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 20
+                }
+            ]
+        );
+
+        let conduit = registry.get_liquid_by_name("reinforced-conduit").unwrap();
+        let junction_id = registry.id_by_name("reinforced-liquid-junction").unwrap();
+        let bridge_id = registry.id_by_name("reinforced-bridge-conduit").unwrap();
+        assert_eq!(conduit.kind, LiquidBlockKind::ArmoredConduit);
+        assert_eq!(conduit.bot_color, "darkestMetal");
+        assert!(conduit.leaks);
+        assert_eq!(conduit.base.liquid_capacity, 50.0);
+        assert_eq!(conduit.liquid_pressure, 1.03);
+        assert_eq!(conduit.base.health, 250);
+        assert_eq!(conduit.research_cost_multiplier, 3.0);
+        assert!(conduit.under_bullets);
+        assert_eq!(conduit.explosiveness_scale, 20.0 / 50.0);
+        assert_eq!(conduit.junction_replacement, Some(junction_id));
+        assert_eq!(conduit.rot_bridge_replacement, Some(bridge_id));
+
+        let junction = registry
+            .get_liquid_by_name("reinforced-liquid-junction")
+            .unwrap();
+        assert_eq!(junction.kind, LiquidBlockKind::LiquidJunction);
+        assert_eq!(junction.build_cost_multiplier, 3.0);
+        assert_eq!(junction.base.health, 250);
+        assert_eq!(junction.research_cost_multiplier, 1.0);
+        assert!(!junction.base.solid);
+        assert!(junction.under_bullets);
+
+        let bridge = registry
+            .get_liquid_by_name("reinforced-bridge-conduit")
+            .unwrap();
+        assert_eq!(bridge.kind, LiquidBlockKind::DirectionLiquidBridge);
+        assert_eq!(bridge.base.group, BlockGroup::Liquids);
+        assert_eq!(bridge.range, 4.0);
+        assert!(!bridge.base.has_power);
+        assert_eq!(bridge.base.liquid_capacity, 120.0);
+        assert_eq!(bridge.research_cost_multiplier, 1.0);
+        assert!(bridge.under_bullets);
+        assert_eq!(bridge.base.health, 250);
+        assert_eq!(bridge.explosiveness_scale, 20.0 / 120.0);
+
+        let router = registry
+            .get_liquid_by_name("reinforced-liquid-router")
+            .unwrap();
+        assert_eq!(router.kind, LiquidBlockKind::LiquidRouter);
+        assert_eq!(router.base.liquid_capacity, 150.0);
+        assert_eq!(router.liquid_padding, 3.0 / 4.0);
+        assert_eq!(router.research_cost_multiplier, 3.0);
+        assert!(router.under_bullets);
+        assert!(!router.base.solid);
+        assert_eq!(router.base.health, 250);
+        assert_eq!(router.explosiveness_scale, 40.0 / 150.0);
+
+        let container = registry
+            .get_liquid_by_name("reinforced-liquid-container")
+            .unwrap();
+        assert_eq!(container.base.liquid_capacity, 1000.0);
+        assert_eq!(container.base.size, 2);
+        assert_eq!(container.liquid_padding, 6.0 / 4.0);
+        assert_eq!(container.research_cost_multiplier, 4.0);
+        assert!(container.base.solid);
+        assert_eq!(container.base.health, 400);
+
+        let tank = registry
+            .get_liquid_by_name("reinforced-liquid-tank")
+            .unwrap();
+        assert_eq!(tank.base.size, 3);
+        assert!(tank.base.solid);
+        assert_eq!(tank.base.liquid_capacity, 2700.0);
+        assert_eq!(tank.liquid_padding, 2.0);
+        assert_eq!(tank.base.health, 900);
     }
 
     #[test]
