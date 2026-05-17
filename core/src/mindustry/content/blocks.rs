@@ -8,7 +8,7 @@ use crate::mindustry::{
             FloorData, OreBlockData, PropData, PropKind, SeaBushData, StaticTreeData,
             StaticWallData, TallBlockData, TreeBlockData,
         },
-        meta::Env,
+        meta::{BlockGroup, Env},
         Block, BlockId, CacheLayer,
     },
 };
@@ -35,6 +35,46 @@ pub struct ItemAmount {
 pub struct LiquidAmount {
     pub liquid: ContentId,
     pub amount: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefenseWallData {
+    pub base: Block,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub build_cost_multiplier: f32,
+    pub armor: f32,
+    pub chance_deflect: f32,
+    pub flash_hit: bool,
+    pub lightning_chance: f32,
+    pub lightning_damage: f32,
+    pub insulated: bool,
+    pub absorb_lasers: bool,
+}
+
+impl DefenseWallData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut base = Block::new(id, name);
+        base.solid = true;
+        base.destructible = true;
+        base.group = BlockGroup::Walls;
+        base.unit_move_breakable = false;
+        base.cache_layer = CacheLayer::Normal;
+        base.env_enabled = Env::ANY;
+        Self {
+            base,
+            requirements: Vec::new(),
+            research_cost_multiplier: 1.0,
+            build_cost_multiplier: 6.0,
+            armor: 0.0,
+            chance_deflect: -1.0,
+            flash_hit: false,
+            lightning_chance: -1.0,
+            lightning_damage: 20.0,
+            insulated: false,
+            absorb_lasers: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -128,6 +168,7 @@ pub enum BlockDef {
     Prop(PropData),
     Ore(OreBlockData),
     Crafting(CraftingBlockData),
+    DefenseWall(DefenseWallData),
 }
 
 impl BlockDef {
@@ -142,6 +183,7 @@ impl BlockDef {
             Self::Prop(prop) => &prop.base,
             Self::Ore(ore) => &ore.floor.base,
             Self::Crafting(crafting) => &crafting.base,
+            Self::DefenseWall(wall) => &wall.base,
         }
     }
 
@@ -208,6 +250,13 @@ impl BlockRegistry {
     pub fn get_crafting_by_name(&self, name: &str) -> Option<&CraftingBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Crafting(crafting) => Some(crafting),
+            _ => None,
+        }
+    }
+
+    pub fn get_defense_wall_by_name(&self, name: &str) -> Option<&DefenseWallData> {
+        match self.get_by_name(name)? {
+            BlockDef::DefenseWall(wall) => Some(wall),
             _ => None,
         }
     }
@@ -322,6 +371,18 @@ impl BlockRegistry {
         configure(&mut block);
         block.base.derive_layout_fields();
         self.insert(BlockDef::Crafting(block))
+    }
+
+    pub fn register_defense_wall(
+        &mut self,
+        name: impl Into<String>,
+        configure: impl FnOnce(&mut DefenseWallData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut wall = DefenseWallData::new(id, name);
+        configure(&mut wall);
+        wall.base.derive_layout_fields();
+        self.insert(BlockDef::DefenseWall(wall))
     }
 
     pub fn set_floor_wall_by_name(
@@ -444,6 +505,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     apply_environment_item_drops(&mut registry, items);
     register_ores(&mut registry, items);
     register_crafting_blocks(&mut registry, items, liquids);
+    register_defense_walls(&mut registry, items);
 
     registry.finalize_floor_links();
     registry
@@ -1212,6 +1274,119 @@ fn push_liquid_amount(target: &mut Vec<LiquidAmount>, liquids: &[Liquid], name: 
     if let Some(liquid) = liquid_amount(liquids, name, amount) {
         target.push(liquid);
     }
+}
+
+fn set_requirements(target: &mut Vec<ItemAmount>, items: &[Item], specs: &[(&str, i32)]) {
+    target.clear();
+    for (name, amount) in specs {
+        push_item_amount(target, items, name, *amount);
+    }
+}
+
+fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
+    const WALL_HEALTH_MULTIPLIER: i32 = 4;
+
+    registry.register_defense_wall("copper-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("copper", 6)]);
+        wall.base.health = 80 * WALL_HEALTH_MULTIPLIER;
+        wall.research_cost_multiplier = 0.1;
+    });
+    registry.register_defense_wall("copper-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("copper", 24)]);
+        wall.base.health = 80 * 4 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 2;
+    });
+    registry.register_defense_wall("titanium-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("titanium", 6)]);
+        wall.base.health = 110 * WALL_HEALTH_MULTIPLIER;
+    });
+    registry.register_defense_wall("titanium-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("titanium", 24)]);
+        wall.base.health = 110 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.base.size = 2;
+    });
+    registry.register_defense_wall("thorium-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("thorium", 6)]);
+        wall.base.health = 200 * WALL_HEALTH_MULTIPLIER;
+    });
+    registry.register_defense_wall("thorium-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("thorium", 24)]);
+        wall.base.health = 200 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.base.size = 2;
+    });
+
+    registry.register_defense_wall("scrap-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("scrap", 6)]);
+        wall.base.health = 60 * WALL_HEALTH_MULTIPLIER;
+        wall.base.variants = 5;
+        wall.build_cost_multiplier = 4.0;
+    });
+    registry.register_defense_wall("scrap-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("scrap", 24)]);
+        wall.base.health = 60 * 4 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 2;
+        wall.base.variants = 4;
+        wall.build_cost_multiplier = 4.0;
+    });
+    registry.register_defense_wall("scrap-wall-huge", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("scrap", 54)]);
+        wall.base.health = 60 * 9 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 3;
+        wall.base.variants = 3;
+        wall.build_cost_multiplier = 4.0;
+    });
+    registry.register_defense_wall("scrap-wall-gigantic", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("scrap", 96)]);
+        wall.base.health = 60 * 16 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 4;
+        wall.build_cost_multiplier = 4.0;
+    });
+
+    registry.register_defense_wall("beryllium-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("beryllium", 6)]);
+        wall.base.health = 130 * WALL_HEALTH_MULTIPLIER;
+        wall.armor = 2.0;
+        wall.build_cost_multiplier = 8.0;
+    });
+    registry.register_defense_wall("beryllium-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("beryllium", 24)]);
+        wall.base.health = 130 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.armor = 2.0;
+        wall.build_cost_multiplier = 5.0;
+        wall.base.size = 2;
+    });
+    registry.register_defense_wall("tungsten-wall", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("tungsten", 6)]);
+        wall.base.health = 180 * WALL_HEALTH_MULTIPLIER;
+        wall.armor = 14.0;
+        wall.build_cost_multiplier = 8.0;
+    });
+    registry.register_defense_wall("tungsten-wall-large", |wall| {
+        set_requirements(&mut wall.requirements, items, &[("tungsten", 24)]);
+        wall.base.health = 180 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.armor = 14.0;
+        wall.build_cost_multiplier = 5.0;
+        wall.base.size = 2;
+    });
+    registry.register_defense_wall("carbide-wall", |wall| {
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("thorium", 6), ("carbide", 6)],
+        );
+        wall.base.health = 270 * WALL_HEALTH_MULTIPLIER;
+        wall.armor = 16.0;
+    });
+    registry.register_defense_wall("carbide-wall-large", |wall| {
+        set_requirements(
+            &mut wall.requirements,
+            items,
+            &[("thorium", 24), ("carbide", 24)],
+        );
+        wall.base.health = 270 * WALL_HEALTH_MULTIPLIER * 4;
+        wall.armor = 16.0;
+        wall.base.size = 2;
+    });
 }
 
 fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
@@ -3088,6 +3263,136 @@ mod tests {
         assert_eq!(source.warmup_rate, 1000.0);
         assert!(source.always_unlocked);
         assert!(source.all_database_tabs);
+    }
+
+    #[test]
+    fn serpulo_basic_defense_walls_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        for (name, item, health, size, amount, research_multiplier) in [
+            ("copper-wall", "copper", 320, 1, 6, 0.1),
+            ("copper-wall-large", "copper", 1280, 2, 24, 1.0),
+            ("titanium-wall", "titanium", 440, 1, 6, 1.0),
+            ("titanium-wall-large", "titanium", 1760, 2, 24, 1.0),
+            ("thorium-wall", "thorium", 800, 1, 6, 1.0),
+            ("thorium-wall-large", "thorium", 3200, 2, 24, 1.0),
+        ] {
+            let wall = registry.get_defense_wall_by_name(name).unwrap();
+            assert_eq!(wall.base.health, health, "{name} health");
+            assert_eq!(wall.base.size, size, "{name} size");
+            assert_eq!(wall.base.group, BlockGroup::Walls, "{name} group");
+            assert_eq!(wall.base.cache_layer, CacheLayer::Normal, "{name} cache");
+            assert!(wall.base.destructible, "{name} destructible");
+            assert!(wall.base.solid, "{name} solid");
+            assert!(!wall.base.unit_move_breakable, "{name} unit move");
+            assert!(
+                !wall.base.is_static(),
+                "{name} should not be static terrain"
+            );
+            assert_eq!(wall.research_cost_multiplier, research_multiplier);
+            assert_eq!(
+                wall.requirements,
+                vec![ItemAmount {
+                    item: item_id(item),
+                    amount
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn scrap_wall_family_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let scrap_id = find_item(&all_items, "scrap")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+
+        for (name, health, size, amount, variants) in [
+            ("scrap-wall", 240, 1, 6, 5),
+            ("scrap-wall-large", 960, 2, 24, 4),
+            ("scrap-wall-huge", 2160, 3, 54, 3),
+            ("scrap-wall-gigantic", 3840, 4, 96, 0),
+        ] {
+            let wall = registry.get_defense_wall_by_name(name).unwrap();
+            assert_eq!(wall.base.health, health, "{name} health");
+            assert_eq!(wall.base.size, size, "{name} size");
+            assert_eq!(wall.base.variants, variants, "{name} variants");
+            assert_eq!(wall.build_cost_multiplier, 4.0, "{name} build cost");
+            assert_eq!(
+                wall.requirements,
+                vec![ItemAmount {
+                    item: scrap_id,
+                    amount
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn erekir_basic_defense_walls_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        for (name, item, health, size, amount, armor, build_cost) in [
+            ("beryllium-wall", "beryllium", 520, 1, 6, 2.0, 8.0),
+            ("beryllium-wall-large", "beryllium", 2080, 2, 24, 2.0, 5.0),
+            ("tungsten-wall", "tungsten", 720, 1, 6, 14.0, 8.0),
+            ("tungsten-wall-large", "tungsten", 2880, 2, 24, 14.0, 5.0),
+        ] {
+            let wall = registry.get_defense_wall_by_name(name).unwrap();
+            assert_eq!(wall.base.health, health, "{name} health");
+            assert_eq!(wall.base.size, size, "{name} size");
+            assert_eq!(wall.armor, armor, "{name} armor");
+            assert_eq!(wall.build_cost_multiplier, build_cost, "{name} build cost");
+            assert_eq!(
+                wall.requirements,
+                vec![ItemAmount {
+                    item: item_id(item),
+                    amount
+                }]
+            );
+        }
+
+        let carbide = registry.get_defense_wall_by_name("carbide-wall").unwrap();
+        assert_eq!(carbide.base.health, 1080);
+        assert_eq!(carbide.armor, 16.0);
+        assert_eq!(
+            carbide.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 6
+                },
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 6
+                }
+            ]
+        );
+
+        let carbide_large = registry
+            .get_defense_wall_by_name("carbide-wall-large")
+            .unwrap();
+        assert_eq!(carbide_large.base.health, 4320);
+        assert_eq!(carbide_large.base.size, 2);
+        assert_eq!(carbide_large.armor, 16.0);
+        assert_eq!(
+            carbide_large.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 24
+                },
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 24
+                }
+            ]
+        );
     }
 
     #[test]
