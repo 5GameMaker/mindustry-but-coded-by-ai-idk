@@ -476,6 +476,341 @@ impl StorageBlockData {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurretBlockKind {
+    ItemTurret,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BulletKind {
+    Generic,
+    Basic,
+    Flak,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BulletSpec {
+    pub kind: BulletKind,
+    pub speed: f32,
+    pub damage: f32,
+    pub width: f32,
+    pub height: f32,
+    pub lifetime: f32,
+    pub ammo_multiplier: f32,
+    pub reload_multiplier: f32,
+    pub range_change: f32,
+    pub extra_range_margin: f32,
+    pub hit_effect: String,
+    pub despawn_effect: String,
+    pub shoot_effect: String,
+    pub hit_color: String,
+    pub back_color: String,
+    pub trail_color: String,
+    pub front_color: String,
+    pub homing_power: f32,
+    pub homing_range: f32,
+    pub trail_length: i32,
+    pub trail_width: f32,
+    pub splash_damage: f32,
+    pub splash_damage_radius: f32,
+    pub frag_bullets: i32,
+    pub frag_bullet: Option<Box<BulletSpec>>,
+    pub collides_ground: bool,
+    pub collides_air: bool,
+    pub collides_tiles: bool,
+    pub shrink_y: f32,
+    pub knockback: f32,
+}
+
+impl BulletSpec {
+    pub fn new(kind: BulletKind, speed: f32, damage: f32) -> Self {
+        Self {
+            kind,
+            speed,
+            damage,
+            width: 0.0,
+            height: 0.0,
+            lifetime: 0.0,
+            ammo_multiplier: 1.0,
+            reload_multiplier: 1.0,
+            range_change: 0.0,
+            extra_range_margin: 0.0,
+            hit_effect: "none".into(),
+            despawn_effect: "none".into(),
+            shoot_effect: "none".into(),
+            hit_color: String::new(),
+            back_color: String::new(),
+            trail_color: String::new(),
+            front_color: String::new(),
+            homing_power: 0.0,
+            homing_range: 0.0,
+            trail_length: 0,
+            trail_width: 0.0,
+            splash_damage: 0.0,
+            splash_damage_radius: 0.0,
+            frag_bullets: 0,
+            frag_bullet: None,
+            collides_ground: true,
+            collides_air: true,
+            collides_tiles: true,
+            shrink_y: 0.0,
+            knockback: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TurretAmmo {
+    pub item: ContentId,
+    pub bullet: BulletSpec,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TurretBlockData {
+    pub base: Block,
+    pub kind: TurretBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub ammo: Vec<TurretAmmo>,
+    pub research_cost_multiplier: f32,
+    pub coolant_amount: f32,
+    pub coolant_multiplier: f32,
+    pub consume_coolant: bool,
+    pub cool_effect: String,
+    pub deposit_cooldown: f32,
+    pub range: f32,
+    pub fog_radius: f32,
+    pub place_overlap_margin: f32,
+    pub place_overlap_range: f32,
+    pub rotate_speed: f32,
+    pub fog_radius_multiplier: f32,
+    pub disable_overlap_check: bool,
+    pub activation_time: f32,
+    pub reload: f32,
+    pub target_interval: f32,
+    pub new_target_interval: f32,
+    pub max_ammo: i32,
+    pub ammo_per_shot: i32,
+    pub consume_ammo_once: bool,
+    pub heat_requirement: f32,
+    pub max_heat_efficiency: f32,
+    pub inaccuracy: f32,
+    pub velocity_rnd: f32,
+    pub scale_lifetime_offset: f32,
+    pub shoot_cone: f32,
+    pub shoot_x: f32,
+    pub shoot_y: f32,
+    pub x_rand: f32,
+    pub draw_min_range: bool,
+    pub tracking_range: f32,
+    pub min_range: f32,
+    pub min_warmup: f32,
+    pub accurate_delay: bool,
+    pub move_while_charging: bool,
+    pub reload_while_charging: bool,
+    pub warmup_maintain_time: f32,
+    pub shoot_pattern: String,
+    pub shoot_shots: i32,
+    pub shoot_first_shot_delay: f32,
+    pub shoot_shot_delay: f32,
+    pub shoot_alternate_spread: f32,
+    pub shoot_alternate_barrels: i32,
+    pub target_air: bool,
+    pub target_ground: bool,
+    pub target_blocks: bool,
+    pub target_healing: bool,
+    pub player_controllable: bool,
+    pub display_ammo_multiplier: bool,
+    pub target_under_blocks: bool,
+    pub always_shooting: bool,
+    pub predict_target: bool,
+    pub heat_color: String,
+    pub shoot_effect: String,
+    pub smoke_effect: String,
+    pub ammo_use_effect: String,
+    pub shoot_sound: String,
+    pub shoot_sound_volume: f32,
+    pub charge_sound: String,
+    pub loop_sound: String,
+    pub loop_sound_volume: f32,
+    pub sound_pitch_min: f32,
+    pub sound_pitch_max: f32,
+    pub ammo_eject_back: f32,
+    pub shoot_warmup_speed: f32,
+    pub linear_warmup: bool,
+    pub recoil: f32,
+    pub recoils: i32,
+    pub recoil_time: f32,
+    pub recoil_pow: f32,
+    pub cooldown_time: f32,
+    pub elevation: f32,
+    pub shake: f32,
+    pub drawer: String,
+    pub liquid_capacity: f32,
+    pub outlined_icon: bool,
+    pub draw_liquid_light: bool,
+    pub rotate: bool,
+    pub quick_rotate: bool,
+    pub draw_arrow: bool,
+    pub ignore_line_rotation: bool,
+    pub rotate_draw_editor: bool,
+    pub visual_rotation_offset: f32,
+    pub region_rotated1: i32,
+    pub region_rotated2: i32,
+    pub scaled_health: f32,
+}
+
+impl TurretBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: TurretBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            ammo: Vec::new(),
+            research_cost_multiplier: 1.0,
+            coolant_amount: 0.0,
+            coolant_multiplier: 5.0,
+            consume_coolant: false,
+            cool_effect: "fuelburn".into(),
+            deposit_cooldown: -1.0,
+            range: 80.0,
+            fog_radius: 0.0,
+            place_overlap_margin: 8.0 * 7.0,
+            place_overlap_range: 0.0,
+            rotate_speed: 5.0,
+            fog_radius_multiplier: 1.0,
+            disable_overlap_check: false,
+            activation_time: 0.0,
+            reload: 10.0,
+            target_interval: 20.0,
+            new_target_interval: -1.0,
+            max_ammo: 30,
+            ammo_per_shot: 1,
+            consume_ammo_once: true,
+            heat_requirement: -1.0,
+            max_heat_efficiency: 3.0,
+            inaccuracy: 0.0,
+            velocity_rnd: 0.0,
+            scale_lifetime_offset: 0.0,
+            shoot_cone: 8.0,
+            shoot_x: 0.0,
+            shoot_y: f32::NEG_INFINITY,
+            x_rand: 0.0,
+            draw_min_range: false,
+            tracking_range: 0.0,
+            min_range: 0.0,
+            min_warmup: 0.0,
+            accurate_delay: true,
+            move_while_charging: true,
+            reload_while_charging: true,
+            warmup_maintain_time: 0.0,
+            shoot_pattern: "ShootPattern".into(),
+            shoot_shots: 1,
+            shoot_first_shot_delay: 0.0,
+            shoot_shot_delay: 0.0,
+            shoot_alternate_spread: 0.0,
+            shoot_alternate_barrels: 1,
+            target_air: true,
+            target_ground: true,
+            target_blocks: true,
+            target_healing: false,
+            player_controllable: true,
+            display_ammo_multiplier: true,
+            target_under_blocks: true,
+            always_shooting: false,
+            predict_target: true,
+            heat_color: "turretHeat".into(),
+            shoot_effect: String::new(),
+            smoke_effect: String::new(),
+            ammo_use_effect: "none".into(),
+            shoot_sound: "shootDuo".into(),
+            shoot_sound_volume: 1.0,
+            charge_sound: "none".into(),
+            loop_sound: "none".into(),
+            loop_sound_volume: 0.5,
+            sound_pitch_min: 0.9,
+            sound_pitch_max: 1.1,
+            ammo_eject_back: 1.0,
+            shoot_warmup_speed: 0.1,
+            linear_warmup: false,
+            recoil: 1.0,
+            recoils: -1,
+            recoil_time: -1.0,
+            recoil_pow: 1.8,
+            cooldown_time: 20.0,
+            elevation: -1.0,
+            shake: 0.0,
+            drawer: "DrawTurret".into(),
+            liquid_capacity: 20.0,
+            outlined_icon: true,
+            draw_liquid_light: false,
+            rotate: true,
+            quick_rotate: false,
+            draw_arrow: false,
+            ignore_line_rotation: true,
+            rotate_draw_editor: false,
+            visual_rotation_offset: -90.0,
+            region_rotated1: 1,
+            region_rotated2: 2,
+            scaled_health: -1.0,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.base.priority = 1;
+        self.base.group = BlockGroup::Turrets;
+        self.base.flags.push(BlockFlag::Turret);
+        self.base.liquid_capacity = self.liquid_capacity;
+        self.base.sync = true;
+
+        match self.kind {
+            TurretBlockKind::ItemTurret => {
+                self.base.has_items = true;
+            }
+        }
+    }
+
+    fn limit_range(&mut self, margin: f32) {
+        for ammo in &mut self.ammo {
+            let real_range = ammo.bullet.range_change + self.range;
+            ammo.bullet.lifetime =
+                (real_range + margin + ammo.bullet.extra_range_margin + 10.0) / ammo.bullet.speed;
+        }
+    }
+
+    fn consume_coolant(&mut self, amount: f32) {
+        self.coolant_amount = amount;
+        self.consume_coolant = true;
+    }
+
+    fn finalize(&mut self) {
+        if self.scaled_health >= 0.0 {
+            self.base.health =
+                ((self.base.size * self.base.size) as f32 * self.scaled_health) as i32;
+        }
+        if matches!(self.kind, TurretBlockKind::ItemTurret) && self.target_ground {
+            for ammo in &self.ammo {
+                self.place_overlap_range = self
+                    .place_overlap_range
+                    .max(self.range + ammo.bullet.range_change + self.place_overlap_margin);
+            }
+        }
+        if !self.disable_overlap_check {
+            self.place_overlap_range = self
+                .place_overlap_range
+                .max(self.range + self.place_overlap_margin);
+        }
+        self.fog_radius = self
+            .fog_radius
+            .max((self.range / TILE_SIZE as f32 * self.fog_radius_multiplier).round());
+        self.base.liquid_capacity = self.liquid_capacity;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefenseWallKind {
     Wall,
     Door,
@@ -1905,6 +2240,7 @@ pub enum BlockDef {
     Ore(OreBlockData),
     Production(ProductionBlockData),
     Storage(StorageBlockData),
+    Turret(TurretBlockData),
     Crafting(CraftingBlockData),
     DefenseWall(DefenseWallData),
     Effect(EffectBlockData),
@@ -1926,6 +2262,7 @@ impl BlockDef {
             Self::Ore(ore) => &ore.floor.base,
             Self::Production(production) => &production.base,
             Self::Storage(storage) => &storage.base,
+            Self::Turret(turret) => &turret.base,
             Self::Crafting(crafting) => &crafting.base,
             Self::DefenseWall(wall) => &wall.base,
             Self::Effect(effect) => &effect.base,
@@ -2012,6 +2349,13 @@ impl BlockRegistry {
     pub fn get_storage_by_name(&self, name: &str) -> Option<&StorageBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Storage(storage) => Some(storage),
+            _ => None,
+        }
+    }
+
+    pub fn get_turret_by_name(&self, name: &str) -> Option<&TurretBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Turret(turret) => Some(turret),
             _ => None,
         }
     }
@@ -2189,6 +2533,20 @@ impl BlockRegistry {
         block.finalize();
         block.base.derive_layout_fields();
         self.insert(BlockDef::Storage(block))
+    }
+
+    pub fn register_turret_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: TurretBlockKind,
+        configure: impl FnOnce(&mut TurretBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = TurretBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Turret(block))
     }
 
     pub fn register_defense_wall(
@@ -2376,6 +2734,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_ores(&mut registry, items);
     register_production_blocks(&mut registry, items, liquids);
     register_storage_blocks(&mut registry, items);
+    register_turret_blocks(&mut registry, items);
     register_crafting_blocks(&mut registry, items, liquids);
     register_defense_walls(&mut registry, items);
     register_effect_blocks(&mut registry, items, liquids);
@@ -3183,6 +3542,15 @@ fn push_blocked_item(target: &mut Vec<ContentId>, items: &[Item], name: &str) {
     }
 }
 
+fn push_turret_ammo(target: &mut Vec<TurretAmmo>, items: &[Item], name: &str, bullet: BulletSpec) {
+    if let Some(item) = find_item(items, name) {
+        target.push(TurretAmmo {
+            item: item.base.mappable.base.id,
+            bullet,
+        });
+    }
+}
+
 fn push_liquid_amount(target: &mut Vec<LiquidAmount>, liquids: &[Liquid], name: &str, amount: f32) {
     if let Some(liquid) = liquid_amount(liquids, name, amount) {
         target.push(liquid);
@@ -3763,6 +4131,162 @@ fn register_storage_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         storage.base.item_capacity = 900;
         storage.scaled_health = 120.0;
         storage.core_merge = false;
+    });
+}
+
+fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+    registry.register_turret_block("duo", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(&mut turret.requirements, items, &[("copper", 35)]);
+
+        let mut copper = BulletSpec::new(BulletKind::Basic, 2.5, 9.0);
+        copper.width = 7.0;
+        copper.height = 9.0;
+        copper.lifetime = 60.0;
+        copper.ammo_multiplier = 2.0;
+        copper.hit_effect = "hitBulletColor".into();
+        copper.despawn_effect = "hitBulletColor".into();
+        copper.hit_color = "copperAmmoBack".into();
+        copper.back_color = "copperAmmoBack".into();
+        copper.trail_color = "copperAmmoBack".into();
+        copper.front_color = "copperAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "copper", copper);
+
+        let mut graphite = BulletSpec::new(BulletKind::Basic, 3.5, 18.0);
+        graphite.width = 9.0;
+        graphite.height = 12.0;
+        graphite.ammo_multiplier = 4.0;
+        graphite.lifetime = 60.0;
+        graphite.reload_multiplier = 0.8;
+        graphite.range_change = 16.0;
+        graphite.hit_effect = "hitBulletColor".into();
+        graphite.despawn_effect = "hitBulletColor".into();
+        graphite.hit_color = "graphiteAmmoBack".into();
+        graphite.back_color = "graphiteAmmoBack".into();
+        graphite.trail_color = "graphiteAmmoBack".into();
+        graphite.front_color = "graphiteAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "graphite", graphite);
+
+        let mut silicon = BulletSpec::new(BulletKind::Basic, 3.0, 12.0);
+        silicon.width = 7.0;
+        silicon.height = 9.0;
+        silicon.homing_power = 0.2;
+        silicon.reload_multiplier = 1.5;
+        silicon.ammo_multiplier = 5.0;
+        silicon.lifetime = 60.0;
+        silicon.trail_length = 5;
+        silicon.trail_width = 1.5;
+        silicon.hit_effect = "hitBulletColor".into();
+        silicon.despawn_effect = "hitBulletColor".into();
+        silicon.hit_color = "siliconAmmoBack".into();
+        silicon.back_color = "siliconAmmoBack".into();
+        silicon.trail_color = "siliconAmmoBack".into();
+        silicon.front_color = "siliconAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "silicon", silicon);
+
+        turret.shoot_pattern = "ShootAlternate".into();
+        turret.shoot_alternate_spread = 3.5;
+        turret.shoot_alternate_barrels = 2;
+        turret.recoils = 2;
+        turret.drawer = "DrawTurret(RegionPart(-barrel-l recoil under moveY=-1.5), RegionPart(-barrel-r recoil under moveY=-1.5))".into();
+        turret.shoot_sound = "shootDuo".into();
+        turret.recoil = 0.5;
+        turret.shoot_y = 3.0;
+        turret.reload = 20.0;
+        turret.range = 160.0;
+        turret.shoot_cone = 15.0;
+        turret.ammo_use_effect = "casing1".into();
+        turret.base.health = 250;
+        turret.inaccuracy = 2.0;
+        turret.rotate_speed = 10.0;
+        turret.consume_coolant(0.1);
+        turret.coolant_multiplier = 10.0;
+        turret.research_cost_multiplier = 0.05;
+        turret.deposit_cooldown = 2.0;
+        turret.limit_range(5.0);
+    });
+
+    registry.register_turret_block("scatter", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("copper", 85), ("lead", 45)],
+        );
+
+        let mut scrap = BulletSpec::new(BulletKind::Flak, 4.0, 3.0);
+        scrap.lifetime = 60.0;
+        scrap.ammo_multiplier = 5.0;
+        scrap.shoot_effect = "shootSmall".into();
+        scrap.reload_multiplier = 0.5;
+        scrap.width = 6.0;
+        scrap.height = 8.0;
+        scrap.hit_effect = "flakExplosion".into();
+        scrap.splash_damage = 22.0 * 1.5;
+        scrap.splash_damage_radius = 24.0;
+        scrap.front_color = "scrapAmmoFront".into();
+        scrap.back_color = "scrapAmmoBack".into();
+        scrap.hit_color = "scrapAmmoBack".into();
+        scrap.despawn_effect = "hitBulletColor".into();
+        push_turret_ammo(&mut turret.ammo, items, "scrap", scrap);
+
+        let mut lead = BulletSpec::new(BulletKind::Flak, 4.2, 3.0);
+        lead.lifetime = 60.0;
+        lead.ammo_multiplier = 4.0;
+        lead.shoot_effect = "shootSmall".into();
+        lead.width = 6.0;
+        lead.height = 8.0;
+        lead.hit_effect = "flakExplosion".into();
+        lead.splash_damage = 27.0 * 1.5;
+        lead.splash_damage_radius = 15.0;
+        push_turret_ammo(&mut turret.ammo, items, "lead", lead);
+
+        let mut frag = BulletSpec::new(BulletKind::Basic, 3.0, 5.0);
+        frag.width = 5.0;
+        frag.height = 12.0;
+        frag.shrink_y = 1.0;
+        frag.lifetime = 20.0;
+        frag.back_color = "glassAmmoBack".into();
+        frag.trail_color = "glassAmmoBack".into();
+        frag.hit_color = "glassAmmoFront".into();
+        frag.front_color = "glassAmmoFront".into();
+        frag.despawn_effect = "none".into();
+        frag.collides_ground = false;
+
+        let mut metaglass = BulletSpec::new(BulletKind::Flak, 4.0, 3.0);
+        metaglass.back_color = "glassAmmoBack".into();
+        metaglass.trail_color = "glassAmmoBack".into();
+        metaglass.hit_color = "glassAmmoFront".into();
+        metaglass.front_color = "glassAmmoFront".into();
+        metaglass.despawn_effect = "hitBulletColor".into();
+        metaglass.lifetime = 60.0;
+        metaglass.ammo_multiplier = 5.0;
+        metaglass.shoot_effect = "shootSmall".into();
+        metaglass.reload_multiplier = 0.8;
+        metaglass.width = 6.0;
+        metaglass.height = 8.0;
+        metaglass.hit_effect = "flakExplosion".into();
+        metaglass.splash_damage = 30.0 * 1.5;
+        metaglass.splash_damage_radius = 20.0;
+        metaglass.frag_bullets = 6;
+        metaglass.frag_bullet = Some(Box::new(frag));
+        push_turret_ammo(&mut turret.ammo, items, "metaglass", metaglass);
+
+        turret.drawer = "DrawTurret(RegionPart(-mid recoil moveY=-1.25))".into();
+        turret.reload = 18.0;
+        turret.range = 220.0;
+        turret.base.size = 2;
+        turret.target_ground = false;
+        turret.shoot_shot_delay = 5.0;
+        turret.shoot_shots = 2;
+        turret.recoil = 1.0;
+        turret.rotate_speed = 15.0;
+        turret.inaccuracy = 17.0;
+        turret.shoot_cone = 35.0;
+        turret.scaled_health = 200.0;
+        turret.shoot_sound = "shootScatter".into();
+        turret.consume_coolant(0.2);
+        turret.research_cost_multiplier = 0.05;
+        turret.deposit_cooldown = 0.5;
+        turret.limit_range(2.0);
     });
 }
 
@@ -7713,6 +8237,178 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn basic_item_turrets_keep_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let duo = registry.get_turret_by_name("duo").unwrap();
+        assert_eq!(duo.kind, TurretBlockKind::ItemTurret);
+        assert!(duo.base.update);
+        assert!(duo.base.solid);
+        assert_eq!(duo.base.priority, 1);
+        assert_eq!(duo.base.group, BlockGroup::Turrets);
+        assert_eq!(duo.base.flags, vec![BlockFlag::Turret]);
+        assert!(duo.base.sync);
+        assert!(duo.base.has_items);
+        assert_eq!(duo.base.liquid_capacity, 20.0);
+        assert!(duo.outlined_icon);
+        assert!(!duo.draw_liquid_light);
+        assert!(duo.rotate);
+        assert!(!duo.quick_rotate);
+        assert!(!duo.draw_arrow);
+        assert!(duo.ignore_line_rotation);
+        assert_eq!(duo.visual_rotation_offset, -90.0);
+        assert_eq!(duo.region_rotated1, 1);
+        assert_eq!(duo.region_rotated2, 2);
+        assert_eq!(duo.range, 160.0);
+        assert_eq!(duo.reload, 20.0);
+        assert_eq!(duo.recoil, 0.5);
+        assert_eq!(duo.recoils, 2);
+        assert_eq!(duo.shoot_y, 3.0);
+        assert_eq!(duo.shoot_cone, 15.0);
+        assert_eq!(duo.inaccuracy, 2.0);
+        assert_eq!(duo.rotate_speed, 10.0);
+        assert_eq!(duo.shoot_sound, "shootDuo");
+        assert_eq!(duo.ammo_use_effect, "casing1");
+        assert_eq!(duo.base.health, 250);
+        assert!(duo.consume_coolant);
+        assert_eq!(duo.coolant_amount, 0.1);
+        assert_eq!(duo.coolant_multiplier, 10.0);
+        assert_eq!(duo.research_cost_multiplier, 0.05);
+        assert_eq!(duo.deposit_cooldown, 2.0);
+        assert_eq!(duo.fog_radius, 20.0);
+        assert_eq!(duo.place_overlap_range, 160.0 + 16.0 + 8.0 * 7.0);
+        assert_eq!(duo.shoot_pattern, "ShootAlternate");
+        assert_eq!(duo.shoot_alternate_spread, 3.5);
+        assert_eq!(duo.shoot_alternate_barrels, 2);
+        assert_eq!(
+            duo.requirements,
+            vec![ItemAmount {
+                item: item_id("copper"),
+                amount: 35
+            }]
+        );
+
+        let copper = &ammo_for(duo, item_id("copper")).bullet;
+        assert_eq!(copper.kind, BulletKind::Basic);
+        assert_eq!(copper.speed, 2.5);
+        assert_eq!(copper.damage, 9.0);
+        assert_eq!(copper.width, 7.0);
+        assert_eq!(copper.height, 9.0);
+        assert_close(copper.lifetime, (160.0 + 5.0 + 10.0) / 2.5);
+        assert_eq!(copper.ammo_multiplier, 2.0);
+        assert_eq!(copper.hit_effect, "hitBulletColor");
+        assert_eq!(copper.despawn_effect, "hitBulletColor");
+        assert_eq!(copper.front_color, "copperAmmoFront");
+        assert_eq!(copper.back_color, "copperAmmoBack");
+
+        let graphite = &ammo_for(duo, item_id("graphite")).bullet;
+        assert_eq!(graphite.damage, 18.0);
+        assert_eq!(graphite.width, 9.0);
+        assert_eq!(graphite.height, 12.0);
+        assert_eq!(graphite.ammo_multiplier, 4.0);
+        assert_eq!(graphite.reload_multiplier, 0.8);
+        assert_eq!(graphite.range_change, 16.0);
+        assert_close(graphite.lifetime, (160.0 + 16.0 + 5.0 + 10.0) / 3.5);
+        assert_eq!(graphite.front_color, "graphiteAmmoFront");
+
+        let silicon = &ammo_for(duo, item_id("silicon")).bullet;
+        assert_eq!(silicon.damage, 12.0);
+        assert_eq!(silicon.homing_power, 0.2);
+        assert_eq!(silicon.reload_multiplier, 1.5);
+        assert_eq!(silicon.ammo_multiplier, 5.0);
+        assert_eq!(silicon.trail_length, 5);
+        assert_eq!(silicon.trail_width, 1.5);
+        assert_close(silicon.lifetime, (160.0 + 5.0 + 10.0) / 3.0);
+        assert_eq!(silicon.front_color, "siliconAmmoFront");
+
+        let scatter = registry.get_turret_by_name("scatter").unwrap();
+        assert_eq!(scatter.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(scatter.reload, 18.0);
+        assert_eq!(scatter.range, 220.0);
+        assert_eq!(scatter.base.size, 2);
+        assert!(!scatter.target_ground);
+        assert!(scatter.target_air);
+        assert_eq!(scatter.shoot_shot_delay, 5.0);
+        assert_eq!(scatter.shoot_shots, 2);
+        assert_eq!(scatter.recoil, 1.0);
+        assert_eq!(scatter.rotate_speed, 15.0);
+        assert_eq!(scatter.inaccuracy, 17.0);
+        assert_eq!(scatter.shoot_cone, 35.0);
+        assert_eq!(scatter.scaled_health, 200.0);
+        assert_eq!(scatter.base.health, 2 * 2 * 200);
+        assert_eq!(scatter.shoot_sound, "shootScatter");
+        assert!(scatter.consume_coolant);
+        assert_eq!(scatter.coolant_amount, 0.2);
+        assert_eq!(scatter.research_cost_multiplier, 0.05);
+        assert_eq!(scatter.deposit_cooldown, 0.5);
+        assert_eq!(scatter.fog_radius, 28.0);
+        assert_eq!(scatter.place_overlap_range, 220.0 + 8.0 * 7.0);
+        assert_eq!(
+            scatter.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 85
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 45
+                }
+            ]
+        );
+
+        let scrap = &ammo_for(scatter, item_id("scrap")).bullet;
+        assert_eq!(scrap.kind, BulletKind::Flak);
+        assert_eq!(scrap.speed, 4.0);
+        assert_eq!(scrap.damage, 3.0);
+        assert_eq!(scrap.ammo_multiplier, 5.0);
+        assert_eq!(scrap.reload_multiplier, 0.5);
+        assert_eq!(scrap.shoot_effect, "shootSmall");
+        assert_eq!(scrap.hit_effect, "flakExplosion");
+        assert_eq!(scrap.splash_damage, 22.0 * 1.5);
+        assert_eq!(scrap.splash_damage_radius, 24.0);
+        assert_close(scrap.lifetime, (220.0 + 2.0 + 10.0) / 4.0);
+        assert_eq!(scrap.front_color, "scrapAmmoFront");
+        assert_eq!(scrap.back_color, "scrapAmmoBack");
+
+        let lead = &ammo_for(scatter, item_id("lead")).bullet;
+        assert_eq!(lead.speed, 4.2);
+        assert_eq!(lead.ammo_multiplier, 4.0);
+        assert_eq!(lead.splash_damage, 27.0 * 1.5);
+        assert_eq!(lead.splash_damage_radius, 15.0);
+        assert_close(lead.lifetime, (220.0 + 2.0 + 10.0) / 4.2);
+
+        let metaglass = &ammo_for(scatter, item_id("metaglass")).bullet;
+        assert_eq!(metaglass.ammo_multiplier, 5.0);
+        assert_eq!(metaglass.reload_multiplier, 0.8);
+        assert_eq!(metaglass.splash_damage, 30.0 * 1.5);
+        assert_eq!(metaglass.splash_damage_radius, 20.0);
+        assert_eq!(metaglass.frag_bullets, 6);
+        assert_close(metaglass.lifetime, (220.0 + 2.0 + 10.0) / 4.0);
+        let frag = metaglass.frag_bullet.as_ref().unwrap();
+        assert_eq!(frag.kind, BulletKind::Basic);
+        assert_eq!(frag.speed, 3.0);
+        assert_eq!(frag.damage, 5.0);
+        assert_eq!(frag.width, 5.0);
+        assert_eq!(frag.height, 12.0);
+        assert_eq!(frag.shrink_y, 1.0);
+        assert_eq!(frag.lifetime, 20.0);
+        assert!(!frag.collides_ground);
+        assert_eq!(frag.front_color, "glassAmmoFront");
+        assert_eq!(frag.back_color, "glassAmmoBack");
     }
 
     #[test]
