@@ -38,6 +38,116 @@ pub struct LiquidAmount {
     pub amount: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidConsume {
+    pub liquid: ContentId,
+    pub amount: f32,
+    pub booster: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductionBlockKind {
+    Drill,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemMultiplier {
+    pub item: ContentId,
+    pub multiplier: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProductionBlockData {
+    pub base: Block,
+    pub kind: ProductionBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub consume_liquids: Vec<LiquidConsume>,
+    pub hardness_drill_multiplier: f32,
+    pub tier: i32,
+    pub drill_time: f32,
+    pub liquid_boost_intensity: f32,
+    pub warmup_speed: f32,
+    pub blocked_items: Vec<ContentId>,
+    pub draw_mine_item: bool,
+    pub drill_effect: String,
+    pub drill_effect_rnd: f32,
+    pub drill_effect_chance: f32,
+    pub rotate_speed: f32,
+    pub update_effect: String,
+    pub update_effect_chance: f32,
+    pub drill_multipliers: Vec<ItemMultiplier>,
+    pub draw_rim: bool,
+    pub draw_spin_sprite: bool,
+    pub heat_color: String,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+}
+
+impl ProductionBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: ProductionBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            consume_liquids: Vec::new(),
+            hardness_drill_multiplier: 50.0,
+            tier: 0,
+            drill_time: 300.0,
+            liquid_boost_intensity: 1.6,
+            warmup_speed: 0.015,
+            blocked_items: Vec::new(),
+            draw_mine_item: true,
+            drill_effect: "mine".into(),
+            drill_effect_rnd: -1.0,
+            drill_effect_chance: 0.02,
+            rotate_speed: 2.0,
+            update_effect: "pulverizeSmall".into(),
+            update_effect_chance: 0.02,
+            drill_multipliers: Vec::new(),
+            draw_rim: false,
+            draw_spin_sprite: true,
+            heat_color: "ff5512".into(),
+            ambient_sound: "none".into(),
+            ambient_sound_volume: 0.0,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            ProductionBlockKind::Drill => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.group = BlockGroup::Drills;
+                self.base.has_liquids = true;
+                self.base.has_items = true;
+                self.base.env_enabled |= Env::SPACE;
+                self.base.flags.push(BlockFlag::Drill);
+                self.ambient_sound = "loopDrill".into();
+                self.ambient_sound_volume = 0.019;
+            }
+        }
+    }
+
+    fn finalize(&mut self) {
+        match self.kind {
+            ProductionBlockKind::Drill => {
+                if self.drill_effect_rnd < 0.0 {
+                    self.drill_effect_rnd = self.base.size as f32;
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefenseWallKind {
     Wall,
@@ -1464,6 +1574,7 @@ pub enum BlockDef {
     TallBlock(TallBlockData),
     Prop(PropData),
     Ore(OreBlockData),
+    Production(ProductionBlockData),
     Crafting(CraftingBlockData),
     DefenseWall(DefenseWallData),
     Effect(EffectBlockData),
@@ -1483,6 +1594,7 @@ impl BlockDef {
             Self::TallBlock(tall) => &tall.base,
             Self::Prop(prop) => &prop.base,
             Self::Ore(ore) => &ore.floor.base,
+            Self::Production(production) => &production.base,
             Self::Crafting(crafting) => &crafting.base,
             Self::DefenseWall(wall) => &wall.base,
             Self::Effect(effect) => &effect.base,
@@ -1555,6 +1667,13 @@ impl BlockRegistry {
     pub fn get_crafting_by_name(&self, name: &str) -> Option<&CraftingBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Crafting(crafting) => Some(crafting),
+            _ => None,
+        }
+    }
+
+    pub fn get_production_by_name(&self, name: &str) -> Option<&ProductionBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Production(production) => Some(production),
             _ => None,
         }
     }
@@ -1704,6 +1823,20 @@ impl BlockRegistry {
         configure(&mut block);
         block.base.derive_layout_fields();
         self.insert(BlockDef::Crafting(block))
+    }
+
+    pub fn register_production_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: ProductionBlockKind,
+        configure: impl FnOnce(&mut ProductionBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = ProductionBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Production(block))
     }
 
     pub fn register_defense_wall(
@@ -1889,6 +2022,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     apply_environment_decoration_links(&mut registry);
     apply_environment_item_drops(&mut registry, items);
     register_ores(&mut registry, items);
+    register_production_blocks(&mut registry, items, liquids);
     register_crafting_blocks(&mut registry, items, liquids);
     register_defense_walls(&mut registry, items);
     register_effect_blocks(&mut registry, items, liquids);
@@ -2653,6 +2787,19 @@ fn liquid_amount(liquids: &[Liquid], name: &str, amount: f32) -> Option<LiquidAm
     })
 }
 
+fn liquid_consume(
+    liquids: &[Liquid],
+    name: &str,
+    amount: f32,
+    booster: bool,
+) -> Option<LiquidConsume> {
+    Some(LiquidConsume {
+        liquid: liquid_id(liquids, name)?,
+        amount,
+        booster,
+    })
+}
+
 fn push_item_amount(target: &mut Vec<ItemAmount>, items: &[Item], name: &str, amount: i32) {
     if let Some(item) = item_amount(items, name, amount) {
         target.push(item);
@@ -2670,6 +2817,116 @@ fn set_requirements(target: &mut Vec<ItemAmount>, items: &[Item], specs: &[(&str
     for (name, amount) in specs {
         push_item_amount(target, items, name, *amount);
     }
+}
+
+fn push_liquid_consume(
+    target: &mut Vec<LiquidConsume>,
+    liquids: &[Liquid],
+    name: &str,
+    amount: f32,
+    booster: bool,
+) {
+    if let Some(liquid) = liquid_consume(liquids, name, amount, booster) {
+        target.push(liquid);
+    }
+}
+
+fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
+    registry.register_production_block(
+        "mechanical-drill",
+        ProductionBlockKind::Drill,
+        |production| {
+            set_requirements(&mut production.requirements, items, &[("copper", 12)]);
+            production.tier = 2;
+            production.drill_time = 600.0;
+            production.base.size = 2;
+            production.base.env_enabled ^= Env::SPACE;
+            set_requirements(&mut production.research_cost, items, &[("copper", 10)]);
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "water",
+                0.05,
+                true,
+            );
+        },
+    );
+
+    registry.register_production_block(
+        "pneumatic-drill",
+        ProductionBlockKind::Drill,
+        |production| {
+            set_requirements(
+                &mut production.requirements,
+                items,
+                &[("copper", 18), ("graphite", 10)],
+            );
+            production.tier = 3;
+            production.drill_time = 400.0;
+            production.base.size = 2;
+            push_liquid_consume(
+                &mut production.consume_liquids,
+                liquids,
+                "water",
+                3.5 / 60.0,
+                true,
+            );
+        },
+    );
+
+    registry.register_production_block("laser-drill", ProductionBlockKind::Drill, |production| {
+        set_requirements(
+            &mut production.requirements,
+            items,
+            &[
+                ("copper", 35),
+                ("graphite", 30),
+                ("silicon", 30),
+                ("titanium", 20),
+            ],
+        );
+        production.drill_time = 280.0;
+        production.base.size = 3;
+        production.base.has_power = true;
+        production.tier = 4;
+        production.update_effect = "pulverizeMedium".into();
+        production.drill_effect = "mineBig".into();
+        production.consume_power = 1.10;
+        push_liquid_consume(
+            &mut production.consume_liquids,
+            liquids,
+            "water",
+            0.08,
+            true,
+        );
+    });
+
+    registry.register_production_block("blast-drill", ProductionBlockKind::Drill, |production| {
+        set_requirements(
+            &mut production.requirements,
+            items,
+            &[
+                ("copper", 65),
+                ("silicon", 60),
+                ("titanium", 50),
+                ("thorium", 75),
+            ],
+        );
+        production.drill_time = 280.0;
+        production.base.size = 4;
+        production.draw_rim = true;
+        production.base.has_power = true;
+        production.tier = 5;
+        production.update_effect = "pulverizeRed".into();
+        production.update_effect_chance = 0.03;
+        production.drill_effect = "mineHuge".into();
+        production.rotate_speed = 6.0;
+        production.warmup_speed = 0.01;
+        production.base.item_capacity = 20;
+        production.liquid_boost_intensity = 1.8;
+        production.consume_power = 3.0;
+        push_liquid_consume(&mut production.consume_liquids, liquids, "water", 0.1, true);
+    });
 }
 
 fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
@@ -5629,6 +5886,170 @@ mod tests {
         assert_eq!(
             wall_ore.base.localized_name.as_deref(),
             Some("thorium wall ore")
+        );
+    }
+
+    #[test]
+    fn serpulo_drills_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+        let water_boost = |amount| LiquidConsume {
+            liquid: liquid_id("water"),
+            amount,
+            booster: true,
+        };
+
+        for name in [
+            "mechanical-drill",
+            "pneumatic-drill",
+            "laser-drill",
+            "blast-drill",
+        ] {
+            let drill = registry.get_production_by_name(name).unwrap();
+            assert_eq!(drill.kind, ProductionBlockKind::Drill, "{name} kind");
+            assert_eq!(drill.base.group, BlockGroup::Drills, "{name} group");
+            assert!(drill.base.update, "{name} update");
+            assert!(drill.base.solid, "{name} solid");
+            assert!(drill.base.has_liquids, "{name} liquids");
+            assert!(drill.base.has_items, "{name} items");
+            assert!(
+                drill.base.flags.contains(&BlockFlag::Drill),
+                "{name} drill flag"
+            );
+            assert_eq!(drill.hardness_drill_multiplier, 50.0, "{name} hardness");
+            assert_eq!(drill.draw_mine_item, true, "{name} draw mine item");
+            assert_eq!(
+                drill.drill_effect_chance, 0.02,
+                "{name} drill effect chance"
+            );
+            assert_eq!(drill.draw_spin_sprite, true, "{name} spin sprite");
+            assert_eq!(drill.heat_color, "ff5512", "{name} heat color");
+            assert_eq!(drill.ambient_sound, "loopDrill", "{name} ambient");
+            assert_eq!(drill.ambient_sound_volume, 0.019, "{name} ambient volume");
+            assert!(drill.consume_liquids.iter().all(|consume| consume.booster));
+        }
+
+        let mechanical = registry.get_production_by_name("mechanical-drill").unwrap();
+        assert_eq!(mechanical.tier, 2);
+        assert_eq!(mechanical.drill_time, 600.0);
+        assert_eq!(mechanical.base.size, 2);
+        assert_eq!(mechanical.drill_effect_rnd, 2.0);
+        assert_eq!(mechanical.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(
+            mechanical.requirements,
+            vec![ItemAmount {
+                item: item_id("copper"),
+                amount: 12
+            }]
+        );
+        assert_eq!(
+            mechanical.research_cost,
+            vec![ItemAmount {
+                item: item_id("copper"),
+                amount: 10
+            }]
+        );
+        assert_eq!(mechanical.consume_liquids, vec![water_boost(0.05)]);
+
+        let pneumatic = registry.get_production_by_name("pneumatic-drill").unwrap();
+        assert_eq!(pneumatic.tier, 3);
+        assert_eq!(pneumatic.drill_time, 400.0);
+        assert_eq!(pneumatic.base.size, 2);
+        assert_eq!(pneumatic.drill_effect_rnd, 2.0);
+        assert_ne!(pneumatic.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(
+            pneumatic.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 18
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 10
+                }
+            ]
+        );
+        assert_eq!(pneumatic.consume_liquids, vec![water_boost(3.5 / 60.0)]);
+
+        let laser = registry.get_production_by_name("laser-drill").unwrap();
+        assert_eq!(laser.tier, 4);
+        assert_eq!(laser.drill_time, 280.0);
+        assert_eq!(laser.base.size, 3);
+        assert_eq!(laser.drill_effect_rnd, 3.0);
+        assert!(laser.base.has_power);
+        assert_eq!(laser.update_effect, "pulverizeMedium");
+        assert_eq!(laser.drill_effect, "mineBig");
+        assert_eq!(laser.consume_power, 1.10);
+        assert_eq!(laser.consume_liquids, vec![water_boost(0.08)]);
+        assert_eq!(
+            laser.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 35
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 20
+                }
+            ]
+        );
+
+        let blast = registry.get_production_by_name("blast-drill").unwrap();
+        assert_eq!(blast.tier, 5);
+        assert_eq!(blast.drill_time, 280.0);
+        assert_eq!(blast.base.size, 4);
+        assert_eq!(blast.drill_effect_rnd, 4.0);
+        assert!(blast.draw_rim);
+        assert!(blast.base.has_power);
+        assert_eq!(blast.update_effect, "pulverizeRed");
+        assert_eq!(blast.update_effect_chance, 0.03);
+        assert_eq!(blast.drill_effect, "mineHuge");
+        assert_eq!(blast.rotate_speed, 6.0);
+        assert_eq!(blast.warmup_speed, 0.01);
+        assert_eq!(blast.base.item_capacity, 20);
+        assert_eq!(blast.liquid_boost_intensity, 1.8);
+        assert_eq!(blast.consume_power, 3.0);
+        assert_eq!(blast.consume_liquids, vec![water_boost(0.1)]);
+        assert_eq!(
+            blast.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 65
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 60
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 75
+                }
+            ]
         );
     }
 
