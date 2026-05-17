@@ -1023,6 +1023,178 @@ impl LiquidBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerBlockKind {
+    PowerNode,
+    PowerDiode,
+    Battery,
+    ConsumeGenerator,
+    ThermalGenerator,
+    SolarGenerator,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PowerBlockData {
+    pub base: Block,
+    pub kind: PowerBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub buffered_power: f32,
+    pub consume_items: Vec<ItemAmount>,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub output_liquid: Option<LiquidAmount>,
+    pub power_production: f32,
+    pub item_duration: f32,
+    pub item_duration_multipliers: Vec<ItemAmount>,
+    pub max_nodes: i32,
+    pub laser_range: f32,
+    pub autolink: bool,
+    pub draw_range: bool,
+    pub same_block_connection: bool,
+    pub laser_scale: f32,
+    pub schematic_priority: i32,
+    pub under_bullets: bool,
+    pub crush_fragile: bool,
+    pub rotate: bool,
+    pub insulated: bool,
+    pub no_update_disabled: bool,
+    pub base_explosiveness: f32,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+    pub generate_effect: String,
+    pub effect_chance: f32,
+    pub floating: bool,
+    pub attribute: String,
+    pub min_efficiency: f32,
+    pub display_efficiency_scale: f32,
+    pub display_efficiency: bool,
+    pub drawer: String,
+}
+
+impl PowerBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: PowerBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            buffered_power: 0.0,
+            consume_items: Vec::new(),
+            consume_liquids: Vec::new(),
+            output_liquid: None,
+            power_production: 0.0,
+            item_duration: 0.0,
+            item_duration_multipliers: Vec::new(),
+            max_nodes: 0,
+            laser_range: 0.0,
+            autolink: false,
+            draw_range: false,
+            same_block_connection: false,
+            laser_scale: 0.0,
+            schematic_priority: 0,
+            under_bullets: false,
+            crush_fragile: false,
+            rotate: false,
+            insulated: false,
+            no_update_disabled: false,
+            base_explosiveness: 0.0,
+            ambient_sound: "none".into(),
+            ambient_sound_volume: 0.0,
+            generate_effect: "none".into(),
+            effect_chance: 0.0,
+            floating: false,
+            attribute: String::new(),
+            min_efficiency: 0.0,
+            display_efficiency_scale: 1.0,
+            display_efficiency: true,
+            drawer: String::new(),
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_power_block_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.base.has_power = true;
+        self.base.group = BlockGroup::Power;
+    }
+
+    fn apply_power_generator_defaults(&mut self) {
+        self.apply_power_block_defaults();
+        self.base.outputs_power = true;
+        self.base.consumes_power = false;
+        self.base.flags.push(BlockFlag::Generator);
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            PowerBlockKind::PowerNode => {
+                self.apply_power_block_defaults();
+                self.configurable_defaults();
+                self.base.consumes_power = false;
+                self.base.outputs_power = false;
+                self.autolink = true;
+                self.draw_range = true;
+                self.laser_range = 6.0;
+                self.max_nodes = 3;
+                self.laser_scale = 0.25;
+                self.schematic_priority = -10;
+                self.base.env_enabled |= Env::SPACE;
+                self.base.destructible = true;
+                self.base.update = false;
+            }
+            PowerBlockKind::PowerDiode => {
+                self.rotate = true;
+                self.base.update = true;
+                self.base.solid = true;
+                self.insulated = true;
+                self.base.group = BlockGroup::Power;
+                self.no_update_disabled = true;
+                self.schematic_priority = 10;
+                self.base.env_enabled |= Env::SPACE;
+            }
+            PowerBlockKind::Battery => {
+                self.apply_power_block_defaults();
+                self.base.outputs_power = true;
+                self.base.consumes_power = true;
+                self.base.flags.push(BlockFlag::Battery);
+                self.base.env_enabled |= Env::SPACE;
+                self.base.destructible = true;
+                self.base.update = false;
+            }
+            PowerBlockKind::ConsumeGenerator => {
+                self.apply_power_generator_defaults();
+                self.item_duration = 120.0;
+                self.effect_chance = 0.01;
+                self.generate_effect = "none".into();
+            }
+            PowerBlockKind::ThermalGenerator => {
+                self.apply_power_generator_defaults();
+                self.no_update_disabled = true;
+                self.generate_effect = "none".into();
+                self.effect_chance = 0.05;
+                self.attribute = "heat".into();
+            }
+            PowerBlockKind::SolarGenerator => {
+                self.apply_power_generator_defaults();
+                self.base.flags.clear();
+                self.base.env_enabled = Env::ANY;
+            }
+        }
+    }
+
+    fn configurable_defaults(&mut self) {
+        // Captures PowerNode's configurable wiring defaults without widening
+        // base Block with one-off UI fields yet.
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CraftingBlockData {
     pub base: Block,
@@ -1118,6 +1290,7 @@ pub enum BlockDef {
     Effect(EffectBlockData),
     Distribution(DistributionBlockData),
     Liquid(LiquidBlockData),
+    Power(PowerBlockData),
 }
 
 impl BlockDef {
@@ -1136,6 +1309,7 @@ impl BlockDef {
             Self::Effect(effect) => &effect.base,
             Self::Distribution(distribution) => &distribution.base,
             Self::Liquid(liquid) => &liquid.base,
+            Self::Power(power) => &power.base,
         }
     }
 
@@ -1230,6 +1404,13 @@ impl BlockRegistry {
     pub fn get_liquid_by_name(&self, name: &str) -> Option<&LiquidBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Liquid(liquid) => Some(liquid),
+            _ => None,
+        }
+    }
+
+    pub fn get_power_by_name(&self, name: &str) -> Option<&PowerBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Power(power) => Some(power),
             _ => None,
         }
     }
@@ -1397,6 +1578,19 @@ impl BlockRegistry {
         self.insert(BlockDef::Liquid(block))
     }
 
+    pub fn register_power_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: PowerBlockKind,
+        configure: impl FnOnce(&mut PowerBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = PowerBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Power(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -1521,6 +1715,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_effect_blocks(&mut registry, items, liquids);
     register_distribution_blocks(&mut registry, items, liquids);
     register_liquid_blocks(&mut registry, items, liquids);
+    register_power_blocks(&mut registry, items, liquids);
 
     registry.finalize_floor_links();
     registry
@@ -3521,6 +3716,222 @@ fn register_liquid_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
             liquid.base.liquid_capacity = 2700.0;
             liquid.liquid_padding = 2.0;
             liquid.base.health = 900;
+        },
+    );
+}
+
+fn register_power_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
+    registry.register_power_block("power-node", PowerBlockKind::PowerNode, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[("copper", 2), ("lead", 6)],
+        );
+        power.max_nodes = 10;
+        power.laser_range = 6.0;
+        power.under_bullets = true;
+        power.crush_fragile = true;
+    });
+
+    registry.register_power_block("power-node-large", PowerBlockKind::PowerNode, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[("titanium", 5), ("lead", 10), ("silicon", 3)],
+        );
+        power.base.size = 2;
+        power.max_nodes = 15;
+        power.laser_range = 15.0;
+    });
+
+    registry.register_power_block("surge-tower", PowerBlockKind::PowerNode, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[
+                ("titanium", 7),
+                ("lead", 10),
+                ("silicon", 15),
+                ("surge-alloy", 15),
+            ],
+        );
+        power.base.size = 2;
+        power.max_nodes = 2;
+        power.laser_range = 40.0;
+        power.schematic_priority = -15;
+    });
+
+    registry.register_power_block("diode", PowerBlockKind::PowerDiode, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[("silicon", 10), ("plastanium", 5), ("metaglass", 10)],
+        );
+    });
+
+    registry.register_power_block("battery", PowerBlockKind::Battery, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[("copper", 5), ("lead", 20)],
+        );
+        power.buffered_power = 4000.0;
+        power.base_explosiveness = 1.0;
+    });
+
+    registry.register_power_block("battery-large", PowerBlockKind::Battery, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[("titanium", 20), ("lead", 50), ("silicon", 30)],
+        );
+        power.base.size = 3;
+        power.buffered_power = 50000.0;
+        power.base_explosiveness = 5.0;
+    });
+
+    registry.register_power_block(
+        "combustion-generator",
+        PowerBlockKind::ConsumeGenerator,
+        |power| {
+            set_requirements(
+                &mut power.requirements,
+                items,
+                &[("copper", 25), ("lead", 15)],
+            );
+            power.power_production = 1.0;
+            power.item_duration = 120.0;
+            power.ambient_sound = "loopSmelter".into();
+            power.ambient_sound_volume = 0.03;
+            power.generate_effect = "generatespark".into();
+            push_item_amount(&mut power.item_duration_multipliers, items, "pyratite", 3);
+            power.drawer = "DrawMulti(DrawDefault, DrawWarmupRegion)".into();
+        },
+    );
+
+    registry.register_power_block(
+        "thermal-generator",
+        PowerBlockKind::ThermalGenerator,
+        |power| {
+            set_requirements(
+                &mut power.requirements,
+                items,
+                &[
+                    ("copper", 40),
+                    ("graphite", 35),
+                    ("lead", 50),
+                    ("silicon", 35),
+                    ("metaglass", 40),
+                ],
+            );
+            power.power_production = 1.8;
+            power.generate_effect = "redgeneratespark".into();
+            power.effect_chance = 0.011;
+            power.base.size = 2;
+            power.floating = true;
+            power.ambient_sound = "loopHum".into();
+            power.ambient_sound_volume = 0.06;
+        },
+    );
+
+    registry.register_power_block("steam-generator", PowerBlockKind::ConsumeGenerator, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[
+                ("copper", 35),
+                ("graphite", 25),
+                ("lead", 40),
+                ("silicon", 30),
+            ],
+        );
+        power.power_production = 5.5;
+        power.item_duration = 90.0;
+        push_liquid_amount(&mut power.consume_liquids, liquids, "water", 0.1);
+        power.base.has_liquids = true;
+        power.base.size = 2;
+        power.generate_effect = "generatespark".into();
+        power.ambient_sound = "loopSmelter".into();
+        power.ambient_sound_volume = 0.06;
+        push_item_amount(&mut power.item_duration_multipliers, items, "pyratite", 3);
+        power.drawer = "DrawMulti(DrawDefault, DrawWarmupRegion, DrawRegion(-turbine,2), DrawRegion(-turbine,-2), DrawRegion(-cap), DrawLiquidRegion)".into();
+    });
+
+    registry.register_power_block(
+        "differential-generator",
+        PowerBlockKind::ConsumeGenerator,
+        |power| {
+            set_requirements(
+                &mut power.requirements,
+                items,
+                &[
+                    ("copper", 70),
+                    ("titanium", 50),
+                    ("lead", 100),
+                    ("silicon", 65),
+                    ("metaglass", 50),
+                ],
+            );
+            power.power_production = 18.0;
+            power.item_duration = 220.0;
+            power.base.has_liquids = true;
+            power.base.has_items = true;
+            power.base.size = 3;
+            power.ambient_sound = "loopDifferential".into();
+            power.generate_effect = "generatespark".into();
+            power.ambient_sound_volume = 0.12;
+            power.drawer = "DrawMulti(DrawDefault, DrawWarmupRegion, DrawLiquidRegion)".into();
+            push_item_amount(&mut power.consume_items, items, "pyratite", 1);
+            push_liquid_amount(&mut power.consume_liquids, liquids, "cryofluid", 0.1);
+        },
+    );
+
+    registry.register_power_block("rtg-generator", PowerBlockKind::ConsumeGenerator, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[
+                ("lead", 100),
+                ("silicon", 75),
+                ("phase-fabric", 25),
+                ("plastanium", 75),
+                ("thorium", 50),
+            ],
+        );
+        power.base.size = 2;
+        power.power_production = 4.5;
+        power.item_duration = 60.0 * 14.0;
+        power.base.env_enabled = Env::ANY;
+        power.generate_effect = "generatespark".into();
+        push_item_amount(
+            &mut power.item_duration_multipliers,
+            items,
+            "phase-fabric",
+            15,
+        );
+        power.drawer = "DrawMulti(DrawDefault, DrawWarmupRegion)".into();
+    });
+
+    registry.register_power_block("solar-panel", PowerBlockKind::SolarGenerator, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[("lead", 10), ("silicon", 8)],
+        );
+        power.power_production = 0.12;
+    });
+
+    registry.register_power_block(
+        "solar-panel-large",
+        PowerBlockKind::SolarGenerator,
+        |power| {
+            set_requirements(
+                &mut power.requirements,
+                items,
+                &[("lead", 60), ("silicon", 70), ("phase-fabric", 15)],
+            );
+            power.base.size = 3;
+            power.power_production = 1.6;
         },
     );
 }
@@ -7265,6 +7676,215 @@ mod tests {
         assert_eq!(tank.base.liquid_capacity, 2700.0);
         assert_eq!(tank.liquid_padding, 2.0);
         assert_eq!(tank.base.health, 900);
+    }
+
+    #[test]
+    fn power_nodes_and_batteries_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let node = registry.get_power_by_name("power-node").unwrap();
+        assert_eq!(node.kind, PowerBlockKind::PowerNode);
+        assert_eq!(node.base.group, BlockGroup::Power);
+        assert!(node.base.has_power);
+        assert!(!node.base.update);
+        assert!(node.base.solid);
+        assert!(!node.base.consumes_power);
+        assert!(!node.base.outputs_power);
+        assert!(node.base.destructible);
+        assert_ne!(node.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(node.max_nodes, 10);
+        assert_eq!(node.laser_range, 6.0);
+        assert_eq!(node.schematic_priority, -10);
+        assert!(node.under_bullets);
+        assert!(node.crush_fragile);
+        assert_eq!(
+            node.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 2
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 6
+                }
+            ]
+        );
+
+        let large = registry.get_power_by_name("power-node-large").unwrap();
+        assert_eq!(large.kind, PowerBlockKind::PowerNode);
+        assert_eq!(large.base.size, 2);
+        assert_eq!(large.max_nodes, 15);
+        assert_eq!(large.laser_range, 15.0);
+
+        let surge = registry.get_power_by_name("surge-tower").unwrap();
+        assert_eq!(surge.kind, PowerBlockKind::PowerNode);
+        assert_eq!(surge.base.size, 2);
+        assert_eq!(surge.max_nodes, 2);
+        assert_eq!(surge.laser_range, 40.0);
+        assert_eq!(surge.schematic_priority, -15);
+
+        let diode = registry.get_power_by_name("diode").unwrap();
+        assert_eq!(diode.kind, PowerBlockKind::PowerDiode);
+        assert_eq!(diode.base.group, BlockGroup::Power);
+        assert!(diode.rotate);
+        assert!(diode.base.update);
+        assert!(diode.base.solid);
+        assert!(diode.insulated);
+        assert!(diode.no_update_disabled);
+        assert_eq!(diode.schematic_priority, 10);
+        assert_ne!(diode.base.env_enabled & Env::SPACE, 0);
+
+        let battery = registry.get_power_by_name("battery").unwrap();
+        assert_eq!(battery.kind, PowerBlockKind::Battery);
+        assert!(battery.base.outputs_power);
+        assert!(battery.base.consumes_power);
+        assert!(!battery.base.update);
+        assert!(battery.base.flags.contains(&BlockFlag::Battery));
+        assert_eq!(battery.buffered_power, 4000.0);
+        assert_eq!(battery.base_explosiveness, 1.0);
+
+        let large_battery = registry.get_power_by_name("battery-large").unwrap();
+        assert_eq!(large_battery.kind, PowerBlockKind::Battery);
+        assert_eq!(large_battery.base.size, 3);
+        assert_eq!(large_battery.buffered_power, 50000.0);
+        assert_eq!(large_battery.base_explosiveness, 5.0);
+    }
+
+    #[test]
+    fn consume_generators_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let combustion = registry.get_power_by_name("combustion-generator").unwrap();
+        assert_eq!(combustion.kind, PowerBlockKind::ConsumeGenerator);
+        assert_eq!(combustion.base.group, BlockGroup::Power);
+        assert!(combustion.base.has_power);
+        assert!(combustion.base.outputs_power);
+        assert!(!combustion.base.consumes_power);
+        assert!(combustion.base.flags.contains(&BlockFlag::Generator));
+        assert_eq!(combustion.power_production, 1.0);
+        assert_eq!(combustion.item_duration, 120.0);
+        assert_eq!(combustion.ambient_sound, "loopSmelter");
+        assert_eq!(combustion.ambient_sound_volume, 0.03);
+        assert_eq!(combustion.generate_effect, "generatespark");
+        assert_eq!(
+            combustion.item_duration_multipliers,
+            vec![ItemAmount {
+                item: item_id("pyratite"),
+                amount: 3
+            }]
+        );
+
+        let steam = registry.get_power_by_name("steam-generator").unwrap();
+        assert_eq!(steam.kind, PowerBlockKind::ConsumeGenerator);
+        assert_eq!(steam.power_production, 5.5);
+        assert_eq!(steam.item_duration, 90.0);
+        assert!(steam.base.has_liquids);
+        assert_eq!(steam.base.size, 2);
+        assert_eq!(steam.ambient_sound, "loopSmelter");
+        assert_eq!(
+            steam.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("water"),
+                amount: 0.1
+            }]
+        );
+
+        let differential = registry
+            .get_power_by_name("differential-generator")
+            .unwrap();
+        assert_eq!(differential.kind, PowerBlockKind::ConsumeGenerator);
+        assert_eq!(differential.power_production, 18.0);
+        assert_eq!(differential.item_duration, 220.0);
+        assert!(differential.base.has_liquids);
+        assert!(differential.base.has_items);
+        assert_eq!(differential.base.size, 3);
+        assert_eq!(differential.ambient_sound, "loopDifferential");
+        assert_eq!(differential.ambient_sound_volume, 0.12);
+        assert_eq!(
+            differential.consume_items,
+            vec![ItemAmount {
+                item: item_id("pyratite"),
+                amount: 1
+            }]
+        );
+        assert_eq!(
+            differential.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cryofluid"),
+                amount: 0.1
+            }]
+        );
+
+        let rtg = registry.get_power_by_name("rtg-generator").unwrap();
+        assert_eq!(rtg.kind, PowerBlockKind::ConsumeGenerator);
+        assert_eq!(rtg.base.size, 2);
+        assert_eq!(rtg.power_production, 4.5);
+        assert_eq!(rtg.item_duration, 60.0 * 14.0);
+        assert_eq!(rtg.base.env_enabled, Env::ANY);
+        assert_eq!(rtg.generate_effect, "generatespark");
+        assert_eq!(
+            rtg.item_duration_multipliers,
+            vec![ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 15
+            }]
+        );
+    }
+
+    #[test]
+    fn thermal_and_solar_generators_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let thermal = registry.get_power_by_name("thermal-generator").unwrap();
+        assert_eq!(thermal.kind, PowerBlockKind::ThermalGenerator);
+        assert_eq!(thermal.power_production, 1.8);
+        assert_eq!(thermal.generate_effect, "redgeneratespark");
+        assert_eq!(thermal.effect_chance, 0.011);
+        assert_eq!(thermal.base.size, 2);
+        assert!(thermal.floating);
+        assert_eq!(thermal.ambient_sound, "loopHum");
+        assert_eq!(thermal.ambient_sound_volume, 0.06);
+        assert!(thermal.no_update_disabled);
+        assert_eq!(thermal.attribute, "heat");
+
+        let solar = registry.get_power_by_name("solar-panel").unwrap();
+        assert_eq!(solar.kind, PowerBlockKind::SolarGenerator);
+        assert_eq!(solar.power_production, 0.12);
+        assert_eq!(solar.base.env_enabled, Env::ANY);
+        assert!(!solar.base.flags.contains(&BlockFlag::Generator));
+        assert_eq!(
+            solar.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 10
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 8
+                }
+            ]
+        );
+
+        let large = registry.get_power_by_name("solar-panel-large").unwrap();
+        assert_eq!(large.kind, PowerBlockKind::SolarGenerator);
+        assert_eq!(large.base.size, 3);
+        assert_eq!(large.power_production, 1.6);
+        assert_eq!(large.base.env_enabled, Env::ANY);
     }
 
     #[test]
