@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     ctype::ContentId,
     r#type::{Item, Liquid},
+    vars::TILE_SIZE,
     world::{
         blocks::environment::{
             FloorData, OreBlockData, PropData, PropKind, SeaBushData, StaticTreeData,
@@ -1035,6 +1036,8 @@ pub enum PowerBlockKind {
     ImpactReactor,
     BeamNode,
     LongPowerNode,
+    VariableReactor,
+    HeaterGenerator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1082,10 +1085,22 @@ pub struct PowerBlockData {
     pub coolant_power: f32,
     pub heat_output: f32,
     pub warmup_speed: f32,
+    pub warmup_rate: f32,
     pub liquid_capacity: f32,
     pub explosion_radius: i32,
     pub explosion_damage: i32,
     pub explosion_min_warmup: f32,
+    pub explosion_puddles: i32,
+    pub explosion_puddle_range: f32,
+    pub explosion_puddle_liquid: Option<ContentId>,
+    pub explosion_puddle_amount: f32,
+    pub max_heat: f32,
+    pub unstable_speed: f32,
+    pub explode_on_full: bool,
+    pub rotate_draw: bool,
+    pub can_overdrive: bool,
+    pub draw_arrow: bool,
+    pub rebuildable: bool,
     pub power_layer: String,
     pub laser_color2: String,
     pub drawer: String,
@@ -1138,10 +1153,22 @@ impl PowerBlockData {
             coolant_power: 0.0,
             heat_output: 0.0,
             warmup_speed: 0.0,
+            warmup_rate: 0.0,
             liquid_capacity: 0.0,
             explosion_radius: 0,
             explosion_damage: 0,
             explosion_min_warmup: 0.0,
+            explosion_puddles: 0,
+            explosion_puddle_range: 0.0,
+            explosion_puddle_liquid: None,
+            explosion_puddle_amount: 0.0,
+            max_heat: 0.0,
+            unstable_speed: 0.0,
+            explode_on_full: false,
+            rotate_draw: true,
+            can_overdrive: true,
+            draw_arrow: false,
+            rebuildable: true,
             power_layer: String::new(),
             laser_color2: String::new(),
             drawer: String::new(),
@@ -1161,7 +1188,13 @@ impl PowerBlockData {
         self.apply_power_block_defaults();
         self.base.outputs_power = true;
         self.base.consumes_power = false;
+        self.base.sync = true;
         self.base.flags.push(BlockFlag::Generator);
+        self.base_explosiveness = 5.0;
+        self.explosion_radius = 12;
+        self.explosion_puddles = 10;
+        self.explosion_puddle_range = TILE_SIZE as f32 * 2.0;
+        self.explosion_puddle_amount = 100.0;
     }
 
     fn apply_kind_defaults(&mut self) {
@@ -1203,6 +1236,7 @@ impl PowerBlockData {
             PowerBlockKind::ConsumeGenerator => {
                 self.apply_power_generator_defaults();
                 self.item_duration = 120.0;
+                self.warmup_speed = 0.05;
                 self.effect_chance = 0.01;
                 self.generate_effect = "none".into();
             }
@@ -1270,6 +1304,35 @@ impl PowerBlockData {
             }
             PowerBlockKind::LongPowerNode => {
                 self.apply_kind_defaults_for_long_power_node();
+            }
+            PowerBlockKind::VariableReactor => {
+                self.apply_power_generator_defaults();
+                self.power_production = 20.0;
+                self.max_heat = 100.0;
+                self.unstable_speed = 1.0 / 60.0 / 3.0;
+                self.warmup_speed = 0.1;
+                self.effect_chance = 0.05;
+                self.generate_effect = "fluxVapor".into();
+                self.explosion_radius = 16;
+                self.explosion_damage = 1500;
+                self.explosion_puddles = 70;
+                self.explosion_puddle_range = TILE_SIZE as f32 * 6.0;
+                self.explosion_puddle_amount = 100.0;
+                self.rebuildable = false;
+            }
+            PowerBlockKind::HeaterGenerator => {
+                self.apply_power_generator_defaults();
+                self.item_duration = 120.0;
+                self.warmup_speed = 0.05;
+                self.effect_chance = 0.01;
+                self.generate_effect = "none".into();
+                self.heat_output = 10.0;
+                self.warmup_rate = 0.15;
+                self.rotate = true;
+                self.rotate_draw = false;
+                self.can_overdrive = false;
+                self.draw_arrow = true;
+                self.drawer = "DrawMulti(DrawDefault, DrawHeatOutput)".into();
             }
         }
     }
@@ -4164,6 +4227,136 @@ fn register_power_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: 
             power.liquid_capacity = 20.0;
             power.fog_radius = 3.0;
             set_requirements(&mut power.research_cost, items, &[("beryllium", 15)]);
+        },
+    );
+
+    registry.register_power_block(
+        "chemical-combustion-chamber",
+        PowerBlockKind::ConsumeGenerator,
+        |power| {
+            set_requirements(
+                &mut power.requirements,
+                items,
+                &[("graphite", 40), ("tungsten", 20), ("oxide", 40), ("silicon", 30)],
+            );
+            power.power_production = 550.0 / 60.0;
+            set_requirements(
+                &mut power.research_cost,
+                items,
+                &[("graphite", 2000), ("tungsten", 1000), ("oxide", 10), ("silicon", 1500)],
+            );
+            push_liquid_amount(&mut power.consume_liquids, liquids, "ozone", 2.0 / 60.0);
+            push_liquid_amount(&mut power.consume_liquids, liquids, "arkycite", 40.0 / 60.0);
+            power.base.has_liquids = true;
+            power.base.size = 3;
+            power.drawer = "DrawMulti(DrawRegion(-bottom), DrawPistons, DrawRegion(-mid), DrawLiquidTile(arkycite), DrawDefault, DrawGlowRegion)".into();
+            power.generate_effect = "none".into();
+            power.base.liquid_capacity = 20.0 * 5.0;
+            power.liquid_capacity = 20.0 * 5.0;
+            power.ambient_sound = "loopSmelter".into();
+            power.ambient_sound_volume = 0.06;
+        },
+    );
+
+    registry.register_power_block(
+        "pyrolysis-generator",
+        PowerBlockKind::ConsumeGenerator,
+        |power| {
+            set_requirements(
+                &mut power.requirements,
+                items,
+                &[
+                    ("graphite", 100),
+                    ("carbide", 60),
+                    ("oxide", 60),
+                    ("silicon", 100),
+                ],
+            );
+            power.power_production = 1400.0 / 60.0;
+            power.drawer = "DrawMulti(DrawRegion(-bottom), DrawPistons, DrawRegion(-mid), DrawLiquidTile(arkycite), DrawDefault, DrawGlowRegion)".into();
+            push_liquid_amount(&mut power.consume_liquids, liquids, "slag", 20.0 / 60.0);
+            push_liquid_amount(&mut power.consume_liquids, liquids, "arkycite", 40.0 / 60.0);
+            power.base.has_liquids = true;
+            power.base.size = 3;
+            power.base.liquid_capacity = 30.0 * 5.0;
+            power.liquid_capacity = 30.0 * 5.0;
+            power.output_liquid = liquid_amount(liquids, "water", 20.0 / 60.0);
+            power.generate_effect = "none".into();
+            power.ambient_sound = "loopSmelter".into();
+            power.ambient_sound_volume = 0.06;
+            power.research_cost_multiplier = 0.4;
+        },
+    );
+
+    registry.register_power_block("flux-reactor", PowerBlockKind::VariableReactor, |power| {
+        set_requirements(
+            &mut power.requirements,
+            items,
+            &[
+                ("graphite", 240),
+                ("carbide", 60),
+                ("oxide", 80),
+                ("silicon", 480),
+                ("surge-alloy", 120),
+            ],
+        );
+        power.power_production = 18000.0 / 60.0;
+        power.max_heat = 150.0;
+        push_liquid_amount(&mut power.consume_liquids, liquids, "cyanogen", 9.0 / 60.0);
+        power.base.has_liquids = true;
+        power.base.liquid_capacity = 30.0;
+        power.liquid_capacity = 30.0;
+        power.explosion_min_warmup = 0.5;
+        power.explosion_radius = 17;
+        power.explosion_damage = 2500;
+        power.explosion_puddle_liquid = liquid_id(liquids, "slag");
+        power.ambient_sound = "loopFlux".into();
+        power.ambient_sound_volume = 0.15;
+        power.base.size = 5;
+        power.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(cyanogen), DrawRegion(-mid), DrawSoftParticles, DrawDefault, DrawHeatInput, DrawGlowRegion)".into();
+    });
+
+    registry.register_power_block(
+        "neoplasia-reactor",
+        PowerBlockKind::HeaterGenerator,
+        |power| {
+            set_requirements(
+                &mut power.requirements,
+                items,
+                &[
+                    ("tungsten", 750),
+                    ("carbide", 300),
+                    ("oxide", 150),
+                    ("silicon", 500),
+                    ("phase-fabric", 150),
+                    ("surge-alloy", 200),
+                ],
+            );
+            power.base.size = 5;
+            power.base.liquid_capacity = 80.0;
+            power.liquid_capacity = 80.0;
+            power.output_liquid = liquid_amount(liquids, "neoplasm", 20.0 / 60.0);
+            power.explode_on_full = true;
+            power.heat_output = 60.0;
+            push_liquid_amount(&mut power.consume_liquids, liquids, "arkycite", 80.0 / 60.0);
+            push_liquid_amount(&mut power.consume_liquids, liquids, "water", 10.0 / 60.0);
+            push_item_amount(&mut power.consume_items, items, "phase-fabric", 1);
+            power.base.has_liquids = true;
+            power.base.has_items = true;
+            power.item_duration = 60.0 * 3.0;
+            power.item_capacity = 10;
+            power.base.item_capacity = 10;
+            power.explosion_radius = 9;
+            power.explosion_damage = 2000;
+            power.power_production = 140.0;
+            power.ambient_sound = "loopBio".into();
+            power.ambient_sound_volume = 0.2;
+            power.explosion_puddles = 80;
+            power.explosion_puddle_range = TILE_SIZE as f32 * 7.0;
+            power.explosion_puddle_liquid = liquid_id(liquids, "neoplasm");
+            power.explosion_puddle_amount = 200.0;
+            power.explosion_min_warmup = 0.5;
+            power.drawer = "DrawMulti(DrawRegion(-bottom), DrawLiquidTile(arkycite), DrawCircles, DrawRegion(-center), DrawCells, DrawDefault, DrawHeatOutput)".into();
         },
     );
 }
@@ -8247,6 +8440,198 @@ mod tests {
         );
         assert_eq!(turbine.base.liquid_capacity, 20.0);
         assert_eq!(turbine.fog_radius, 3.0);
+    }
+
+    #[test]
+    fn erekir_advanced_power_generators_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let chemical = registry
+            .get_power_by_name("chemical-combustion-chamber")
+            .unwrap();
+        assert_eq!(chemical.kind, PowerBlockKind::ConsumeGenerator);
+        assert_eq!(chemical.power_production, 550.0 / 60.0);
+        assert_eq!(chemical.base.size, 3);
+        assert!(chemical.base.has_liquids);
+        assert_eq!(chemical.base.liquid_capacity, 100.0);
+        assert_eq!(chemical.generate_effect, "none");
+        assert_eq!(chemical.ambient_sound, "loopSmelter");
+        assert_eq!(
+            chemical.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 30
+                }
+            ]
+        );
+        assert_eq!(
+            chemical.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 2000
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 1000
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 10
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 1500
+                }
+            ]
+        );
+        assert_eq!(
+            chemical.consume_liquids,
+            vec![
+                LiquidAmount {
+                    liquid: liquid_id("ozone"),
+                    amount: 2.0 / 60.0
+                },
+                LiquidAmount {
+                    liquid: liquid_id("arkycite"),
+                    amount: 40.0 / 60.0
+                }
+            ]
+        );
+
+        let pyrolysis = registry.get_power_by_name("pyrolysis-generator").unwrap();
+        assert_eq!(pyrolysis.kind, PowerBlockKind::ConsumeGenerator);
+        assert_eq!(pyrolysis.power_production, 1400.0 / 60.0);
+        assert_eq!(pyrolysis.base.size, 3);
+        assert_eq!(pyrolysis.base.liquid_capacity, 150.0);
+        assert_eq!(pyrolysis.research_cost_multiplier, 0.4);
+        assert_eq!(
+            pyrolysis.consume_liquids,
+            vec![
+                LiquidAmount {
+                    liquid: liquid_id("slag"),
+                    amount: 20.0 / 60.0
+                },
+                LiquidAmount {
+                    liquid: liquid_id("arkycite"),
+                    amount: 40.0 / 60.0
+                }
+            ]
+        );
+        assert_eq!(
+            pyrolysis.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("water"),
+                amount: 20.0 / 60.0
+            })
+        );
+
+        let flux = registry.get_power_by_name("flux-reactor").unwrap();
+        assert_eq!(flux.kind, PowerBlockKind::VariableReactor);
+        assert_eq!(flux.power_production, 18000.0 / 60.0);
+        assert_eq!(flux.max_heat, 150.0);
+        assert_eq!(flux.unstable_speed, 1.0 / 60.0 / 3.0);
+        assert_eq!(flux.warmup_speed, 0.1);
+        assert_eq!(flux.generate_effect, "fluxVapor");
+        assert_eq!(flux.effect_chance, 0.05);
+        assert!(!flux.rebuildable);
+        assert_eq!(flux.base.size, 5);
+        assert_eq!(flux.base.liquid_capacity, 30.0);
+        assert_eq!(
+            flux.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cyanogen"),
+                amount: 9.0 / 60.0
+            }]
+        );
+        assert_eq!(flux.explosion_min_warmup, 0.5);
+        assert_eq!(flux.explosion_radius, 17);
+        assert_eq!(flux.explosion_damage, 2500);
+        assert_eq!(flux.explosion_puddles, 70);
+        assert_eq!(flux.explosion_puddle_range, TILE_SIZE as f32 * 6.0);
+        assert_eq!(flux.explosion_puddle_liquid, Some(liquid_id("slag")));
+        assert_eq!(flux.explosion_puddle_amount, 100.0);
+        assert_eq!(flux.ambient_sound, "loopFlux");
+        assert_eq!(flux.ambient_sound_volume, 0.15);
+
+        let neoplasia = registry.get_power_by_name("neoplasia-reactor").unwrap();
+        assert_eq!(neoplasia.kind, PowerBlockKind::HeaterGenerator);
+        assert_eq!(neoplasia.base.size, 5);
+        assert_eq!(neoplasia.base.liquid_capacity, 80.0);
+        assert_eq!(
+            neoplasia.output_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("neoplasm"),
+                amount: 20.0 / 60.0
+            })
+        );
+        assert!(neoplasia.explode_on_full);
+        assert_eq!(neoplasia.heat_output, 60.0);
+        assert_eq!(neoplasia.warmup_rate, 0.15);
+        assert!(neoplasia.rotate);
+        assert!(!neoplasia.rotate_draw);
+        assert!(!neoplasia.can_overdrive);
+        assert!(neoplasia.draw_arrow);
+        assert_eq!(
+            neoplasia.consume_liquids,
+            vec![
+                LiquidAmount {
+                    liquid: liquid_id("arkycite"),
+                    amount: 80.0 / 60.0
+                },
+                LiquidAmount {
+                    liquid: liquid_id("water"),
+                    amount: 10.0 / 60.0
+                }
+            ]
+        );
+        assert_eq!(
+            neoplasia.consume_items,
+            vec![ItemAmount {
+                item: item_id("phase-fabric"),
+                amount: 1
+            }]
+        );
+        assert_eq!(neoplasia.item_duration, 60.0 * 3.0);
+        assert_eq!(neoplasia.item_capacity, 10);
+        assert_eq!(neoplasia.base.item_capacity, 10);
+        assert_eq!(neoplasia.explosion_radius, 9);
+        assert_eq!(neoplasia.explosion_damage, 2000);
+        assert_eq!(neoplasia.power_production, 140.0);
+        assert_eq!(neoplasia.ambient_sound, "loopBio");
+        assert_eq!(neoplasia.ambient_sound_volume, 0.2);
+        assert_eq!(neoplasia.explosion_puddles, 80);
+        assert_eq!(neoplasia.explosion_puddle_range, TILE_SIZE as f32 * 7.0);
+        assert_eq!(
+            neoplasia.explosion_puddle_liquid,
+            Some(liquid_id("neoplasm"))
+        );
+        assert_eq!(neoplasia.explosion_puddle_amount, 200.0);
+        assert_eq!(neoplasia.explosion_min_warmup, 0.5);
     }
 
     #[test]
