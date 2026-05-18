@@ -3760,6 +3760,29 @@ fn liquid_bullet(liquids: &[Liquid], name: &str) -> BulletSpec {
     bullet
 }
 
+fn missile_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Missile, speed, damage);
+    bullet.back_color = "missileYellowBack".into();
+    bullet.front_color = "missileYellow".into();
+    bullet.homing_power = 0.08;
+    bullet.shrink_y = 0.0;
+    bullet.width = 8.0;
+    bullet.height = 8.0;
+    bullet.lifetime = 52.0;
+    bullet
+}
+
+fn shoot_barrels(specs: &[(f32, f32, f32)]) -> Vec<ShootBarrel> {
+    specs
+        .iter()
+        .map(|(x, y, rotation)| ShootBarrel {
+            x: *x,
+            y: *y,
+            rotation: *rotation,
+        })
+        .collect()
+}
+
 fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
     registry.register_production_block(
         "mechanical-drill",
@@ -4774,6 +4797,86 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.scaled_health = 160.0;
         turret.rotate_speed = 12.0;
         turret.consume_power = 3.3;
+    });
+
+    registry.register_turret_block("swarmer", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("graphite", 35),
+                ("titanium", 35),
+                ("plastanium", 45),
+                ("silicon", 30),
+            ],
+        );
+
+        let mut blast = missile_bullet(3.7, 10.0);
+        blast.width = 8.0;
+        blast.height = 8.0;
+        blast.shrink_y = 0.0;
+        blast.splash_damage_radius = 30.0;
+        blast.splash_damage = 30.0 * 1.5;
+        blast.ammo_multiplier = 5.0;
+        blast.hit_effect = "blastExplosion".into();
+        blast.despawn_effect = "blastExplosion".into();
+        blast.status = "blasted".into();
+        blast.hit_color = "blastAmmoBack".into();
+        blast.back_color = "blastAmmoBack".into();
+        blast.trail_color = "blastAmmoBack".into();
+        blast.front_color = "blastAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "blast-compound", blast);
+
+        let mut pyratite = missile_bullet(3.7, 12.0);
+        pyratite.front_color = "lightishOrange".into();
+        pyratite.back_color = "lightOrange".into();
+        pyratite.width = 7.0;
+        pyratite.height = 8.0;
+        pyratite.shrink_y = 0.0;
+        pyratite.homing_power = 0.08;
+        pyratite.splash_damage_radius = 20.0;
+        pyratite.splash_damage = 30.0 * 1.5;
+        pyratite.make_fire = true;
+        pyratite.ammo_multiplier = 5.0;
+        pyratite.hit_effect = "blastExplosion".into();
+        pyratite.status = "burning".into();
+        push_turret_ammo(&mut turret.ammo, items, "pyratite", pyratite);
+
+        let mut surge = missile_bullet(3.7, 18.0);
+        surge.width = 8.0;
+        surge.height = 8.0;
+        surge.shrink_y = 0.0;
+        surge.splash_damage_radius = 25.0;
+        surge.splash_damage = 25.0 * 1.4;
+        surge.hit_effect = "blastExplosion".into();
+        surge.despawn_effect = "blastExplosion".into();
+        surge.ammo_multiplier = 4.0;
+        surge.lightning_damage = 10.0;
+        surge.lightning = 2;
+        surge.lightning_length = 10;
+        surge.hit_color = "surgeAmmoBack".into();
+        surge.back_color = "surgeAmmoBack".into();
+        surge.trail_color = "surgeAmmoBack".into();
+        surge.front_color = "surgeAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "surge-alloy", surge);
+
+        turret.shoot_pattern = "ShootBarrel".into();
+        turret.shoot_barrels =
+            shoot_barrels(&[(-4.0, -1.25, 0.0), (0.0, 0.0, 0.0), (4.0, -1.25, 0.0)]);
+        turret.shoot_shots = 4;
+        turret.shoot_shot_delay = 5.0;
+        turret.shoot_y = 4.5;
+        turret.reload = 60.0 * 4.0 / 7.0;
+        turret.inaccuracy = 10.0;
+        turret.range = 240.0;
+        turret.consume_ammo_once = false;
+        turret.base.size = 2;
+        turret.scaled_health = 300.0;
+        turret.shoot_sound = "shootMissile".into();
+        turret.base.env_enabled |= Env::SPACE;
+        turret.limit_range(5.0);
+        turret.consume_coolant(0.3);
+        turret.deposit_cooldown = 2.0;
     });
 
     registry.register_turret_block("salvo", TurretBlockKind::ItemTurret, |turret| {
@@ -9654,6 +9757,135 @@ mod tests {
         assert_eq!(thorium.front_color, "thoriumAmmoFront");
         assert_eq!(thorium.back_color, "thoriumAmmoBack");
         assert_close(thorium.lifetime, (190.0 + 9.0 + 10.0) / 4.0);
+    }
+
+    #[test]
+    fn swarmer_missile_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let swarmer = registry.get_turret_by_name("swarmer").unwrap();
+        assert_eq!(swarmer.kind, TurretBlockKind::ItemTurret);
+        assert!(swarmer.base.has_items);
+        assert_eq!(swarmer.shoot_pattern, "ShootBarrel");
+        assert_eq!(
+            swarmer.shoot_barrels,
+            vec![
+                ShootBarrel {
+                    x: -4.0,
+                    y: -1.25,
+                    rotation: 0.0
+                },
+                ShootBarrel {
+                    x: 0.0,
+                    y: 0.0,
+                    rotation: 0.0
+                },
+                ShootBarrel {
+                    x: 4.0,
+                    y: -1.25,
+                    rotation: 0.0
+                }
+            ]
+        );
+        assert_eq!(swarmer.shoot_shots, 4);
+        assert_eq!(swarmer.shoot_shot_delay, 5.0);
+        assert_eq!(swarmer.shoot_y, 4.5);
+        assert_close(swarmer.reload, 60.0 * 4.0 / 7.0);
+        assert_eq!(swarmer.inaccuracy, 10.0);
+        assert_eq!(swarmer.range, 240.0);
+        assert!(!swarmer.consume_ammo_once);
+        assert_eq!(swarmer.base.size, 2);
+        assert_eq!(swarmer.scaled_health, 300.0);
+        assert_eq!(swarmer.base.health, 2 * 2 * 300);
+        assert_eq!(swarmer.shoot_sound, "shootMissile");
+        assert_ne!(swarmer.base.env_enabled & Env::SPACE, 0);
+        assert!(swarmer.consume_coolant);
+        assert_eq!(swarmer.coolant_amount, 0.3);
+        assert_eq!(swarmer.deposit_cooldown, 2.0);
+        assert_eq!(swarmer.fog_radius, 30.0);
+        assert_eq!(swarmer.place_overlap_range, 240.0 + 8.0 * 7.0);
+        assert_eq!(
+            swarmer.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 35
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 35
+                },
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 45
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 30
+                }
+            ]
+        );
+
+        let blast = &ammo_for(swarmer, item_id("blast-compound")).bullet;
+        assert_eq!(blast.kind, BulletKind::Missile);
+        assert_eq!(blast.speed, 3.7);
+        assert_eq!(blast.damage, 10.0);
+        assert_eq!(blast.width, 8.0);
+        assert_eq!(blast.height, 8.0);
+        assert_eq!(blast.shrink_y, 0.0);
+        assert_eq!(blast.homing_power, 0.08);
+        assert_eq!(blast.splash_damage_radius, 30.0);
+        assert_eq!(blast.splash_damage, 30.0 * 1.5);
+        assert_eq!(blast.ammo_multiplier, 5.0);
+        assert_eq!(blast.hit_effect, "blastExplosion");
+        assert_eq!(blast.despawn_effect, "blastExplosion");
+        assert_eq!(blast.status, "blasted");
+        assert_eq!(blast.front_color, "blastAmmoFront");
+        assert_eq!(blast.back_color, "blastAmmoBack");
+        assert_close(blast.lifetime, (240.0 + 5.0 + 10.0) / 3.7);
+
+        let pyratite = &ammo_for(swarmer, item_id("pyratite")).bullet;
+        assert_eq!(pyratite.kind, BulletKind::Missile);
+        assert_eq!(pyratite.damage, 12.0);
+        assert_eq!(pyratite.front_color, "lightishOrange");
+        assert_eq!(pyratite.back_color, "lightOrange");
+        assert_eq!(pyratite.width, 7.0);
+        assert_eq!(pyratite.height, 8.0);
+        assert_eq!(pyratite.homing_power, 0.08);
+        assert_eq!(pyratite.splash_damage_radius, 20.0);
+        assert_eq!(pyratite.splash_damage, 30.0 * 1.5);
+        assert!(pyratite.make_fire);
+        assert_eq!(pyratite.ammo_multiplier, 5.0);
+        assert_eq!(pyratite.hit_effect, "blastExplosion");
+        assert_eq!(pyratite.status, "burning");
+        assert_close(pyratite.lifetime, (240.0 + 5.0 + 10.0) / 3.7);
+
+        let surge = &ammo_for(swarmer, item_id("surge-alloy")).bullet;
+        assert_eq!(surge.kind, BulletKind::Missile);
+        assert_eq!(surge.damage, 18.0);
+        assert_eq!(surge.width, 8.0);
+        assert_eq!(surge.height, 8.0);
+        assert_eq!(surge.splash_damage_radius, 25.0);
+        assert_eq!(surge.splash_damage, 25.0 * 1.4);
+        assert_eq!(surge.hit_effect, "blastExplosion");
+        assert_eq!(surge.despawn_effect, "blastExplosion");
+        assert_eq!(surge.ammo_multiplier, 4.0);
+        assert_eq!(surge.lightning_damage, 10.0);
+        assert_eq!(surge.lightning, 2);
+        assert_eq!(surge.lightning_length, 10);
+        assert_eq!(surge.front_color, "surgeAmmoFront");
+        assert_eq!(surge.back_color, "surgeAmmoBack");
+        assert_close(surge.lifetime, (240.0 + 5.0 + 10.0) / 3.7);
     }
 
     #[test]
