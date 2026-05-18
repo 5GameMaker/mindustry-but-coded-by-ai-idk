@@ -2722,6 +2722,12 @@ pub enum UnitBlockKind {
     RepairTower,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadBlockKind {
+    PayloadConveyor,
+    PayloadRouter,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitPlanSpec {
     pub unit: String,
@@ -3059,6 +3065,77 @@ impl UnitRepairTowerBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PayloadBlockData {
+    pub base: Block,
+    pub kind: PayloadBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub move_time: f32,
+    pub move_force: f32,
+    pub interp: String,
+    pub payload_limit: f32,
+    pub push_units: bool,
+    pub rotate: bool,
+    pub outputs_payload: bool,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub output_facing: bool,
+    pub no_update_disabled: bool,
+    pub under_bullets: bool,
+    pub can_overdrive: bool,
+    pub configurable: bool,
+    pub clear_on_double_tap: bool,
+    pub invert: bool,
+}
+
+impl PayloadBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: PayloadBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.group = BlockGroup::Payloads;
+        base.size = 3;
+        base.update = true;
+        base.sync = true;
+        base.priority = -1;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            move_time: 45.0,
+            move_force: 201.0,
+            interp: "pow5".into(),
+            payload_limit: 3.0,
+            push_units: true,
+            rotate: true,
+            outputs_payload: true,
+            accepts_payload: false,
+            accepts_unit_payloads: true,
+            output_facing: true,
+            no_update_disabled: true,
+            under_bullets: true,
+            can_overdrive: true,
+            configurable: false,
+            clear_on_double_tap: false,
+            invert: false,
+        };
+        if matches!(block.kind, PayloadBlockKind::PayloadRouter) {
+            block.apply_router_defaults();
+        }
+        block
+    }
+
+    fn apply_router_defaults(&mut self) {
+        self.outputs_payload = true;
+        self.output_facing = false;
+        self.configurable = true;
+        self.clear_on_double_tap = true;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -3081,6 +3158,7 @@ pub enum BlockDef {
     UnitAssembler(UnitAssemblerBlockData),
     UnitAssemblerModule(UnitAssemblerModuleBlockData),
     UnitRepairTower(UnitRepairTowerBlockData),
+    Payload(PayloadBlockData),
 }
 
 impl BlockDef {
@@ -3107,6 +3185,7 @@ impl BlockDef {
             Self::UnitAssembler(assembler) => &assembler.base,
             Self::UnitAssemblerModule(module) => &module.base,
             Self::UnitRepairTower(tower) => &tower.base,
+            Self::Payload(payload) => &payload.base,
         }
     }
 
@@ -3260,6 +3339,13 @@ impl BlockRegistry {
     pub fn get_unit_repair_tower_by_name(&self, name: &str) -> Option<&UnitRepairTowerBlockData> {
         match self.get_by_name(name)? {
             BlockDef::UnitRepairTower(tower) => Some(tower),
+            _ => None,
+        }
+    }
+
+    pub fn get_payload_by_name(&self, name: &str) -> Option<&PayloadBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Payload(payload) => Some(payload),
             _ => None,
         }
     }
@@ -3538,6 +3624,19 @@ impl BlockRegistry {
         self.insert(BlockDef::UnitRepairTower(block))
     }
 
+    pub fn register_payload_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: PayloadBlockKind,
+        configure: impl FnOnce(&mut PayloadBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = PayloadBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Payload(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -3667,6 +3766,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_liquid_blocks(&mut registry, items, liquids);
     register_power_blocks(&mut registry, items, liquids);
     register_unit_blocks(&mut registry, items, liquids);
+    register_payload_blocks(&mut registry, items);
 
     registry.finalize_floor_links();
     registry
@@ -10636,6 +10736,21 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &
     );
 }
 
+fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+    registry.register_payload_block(
+        "payload-conveyor",
+        PayloadBlockKind::PayloadConveyor,
+        |payload| {
+            set_requirements(
+                &mut payload.requirements,
+                items,
+                &[("graphite", 10), ("copper", 10)],
+            );
+            payload.can_overdrive = false;
+        },
+    );
+}
+
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
     items
         .iter()
@@ -17555,6 +17670,55 @@ mod tests {
                 ItemAmount {
                     item: item_id("tungsten"),
                     amount: 80
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn payload_conveyor_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let payload = registry.get_payload_by_name("payload-conveyor").unwrap();
+
+        assert_eq!(payload.kind, PayloadBlockKind::PayloadConveyor);
+        assert_eq!(payload.base.group, BlockGroup::Payloads);
+        assert_eq!(payload.base.size, 3);
+        assert!(payload.base.update);
+        assert!(payload.base.sync);
+        assert_eq!(payload.base.priority, -1);
+        assert_eq!(
+            payload.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert!(payload.rotate);
+        assert!(payload.outputs_payload);
+        assert!(!payload.accepts_payload);
+        assert!(payload.accepts_unit_payloads);
+        assert!(payload.output_facing);
+        assert!(payload.no_update_disabled);
+        assert!(payload.under_bullets);
+        assert!(!payload.can_overdrive);
+        assert!(!payload.configurable);
+        assert!(!payload.clear_on_double_tap);
+        assert!(!payload.invert);
+        assert_eq!(payload.move_time, 45.0);
+        assert_eq!(payload.move_force, 201.0);
+        assert_eq!(payload.interp, "pow5");
+        assert_eq!(payload.payload_limit, 3.0);
+        assert!(payload.push_units);
+        assert_eq!(payload.research_cost_multiplier, 1.0);
+        assert!(payload.research_cost.is_empty());
+        assert_eq!(
+            payload.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 10
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 10
                 }
             ]
         );
