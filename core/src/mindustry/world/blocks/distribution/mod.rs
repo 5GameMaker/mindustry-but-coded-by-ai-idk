@@ -456,6 +456,230 @@ pub fn read_directional_unloader_state<R: Read>(
     })
 }
 
+pub const CONVEYOR_ITEM_SPACE: f32 = 0.4;
+pub const CONVEYOR_CAPACITY: usize = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConveyorItemState {
+    pub item: ContentId,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConveyorState {
+    pub items: Vec<ConveyorItemState>,
+}
+
+pub fn conveyor_accept_stack(min_item: f32, amount: i32) -> i32 {
+    ((min_item / CONVEYOR_ITEM_SPACE) as i32).min(amount).max(0)
+}
+
+pub fn conveyor_accept_item(
+    len: usize,
+    min_item: f32,
+    facing_relative_to_tile: Option<i32>,
+    rotation: i32,
+    source_rotate_and_is_next: bool,
+) -> bool {
+    if len >= CONVEYOR_CAPACITY || source_rotate_and_is_next {
+        return false;
+    }
+    let Some(relative) = facing_relative_to_tile else {
+        return false;
+    };
+    let direction = (relative - rotation).abs();
+    ((direction == 0) && min_item >= CONVEYOR_ITEM_SPACE)
+        || ((direction % 2 == 1) && min_item > 0.7)
+}
+
+pub fn conveyor_clog_heat(min_item: f32, blendbits: i32, current: f32) -> f32 {
+    if min_item < CONVEYOR_ITEM_SPACE + if blendbits == 1 { 0.3 } else { 0.0 } {
+        approach_delta(current, 1.0, 1.0 / 60.0)
+    } else {
+        0.0
+    }
+}
+
+pub fn conveyor_next_max(aligned: bool, next_min_item: f32) -> f32 {
+    if aligned {
+        1.0 - (CONVEYOR_ITEM_SPACE - next_min_item).max(0.0)
+    } else {
+        1.0
+    }
+}
+
+pub fn conveyor_encode_coord_x(x: f32) -> i8 {
+    (x * 127.0) as i8
+}
+
+pub fn conveyor_encode_coord_y(y: f32) -> i8 {
+    (y * 255.0 - 128.0) as i8
+}
+
+pub fn conveyor_decode_coord_x(x: i8) -> f32 {
+    x as f32 / 127.0
+}
+
+pub fn conveyor_decode_coord_y(y: i8) -> f32 {
+    (y as f32 + 128.0) / 255.0
+}
+
+pub fn write_conveyor_state<W: Write>(write: &mut W, state: &ConveyorState) -> io::Result<()> {
+    write_i32(write, state.items.len() as i32)?;
+    for item in &state.items {
+        write_i16(write, item.item)?;
+        write_i8(write, conveyor_encode_coord_x(item.x))?;
+        write_i8(write, conveyor_encode_coord_y(item.y))?;
+    }
+    Ok(())
+}
+
+pub fn read_conveyor_state<R: Read>(read: &mut R, revision: u8) -> io::Result<ConveyorState> {
+    let amount = read_i32(read)?;
+    let mut items = Vec::new();
+    for i in 0..amount {
+        let (item, x, y) = if revision == 0 {
+            let val = read_i32(read)?;
+            (
+                (((val >> 24) as i8) as i16 & 0xff) as i16,
+                ((val >> 16) as i8) as f32 / 127.0,
+                (((val >> 8) as i8) as f32 + 128.0) / 255.0,
+            )
+        } else {
+            (
+                read_i16(read)?,
+                conveyor_decode_coord_x(read_i8(read)?),
+                conveyor_decode_coord_y(read_i8(read)?),
+            )
+        };
+        if i < CONVEYOR_CAPACITY as i32 {
+            items.push(ConveyorItemState { item, x, y });
+        }
+    }
+    Ok(ConveyorState { items })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BufferedItemBridgeState {
+    pub bridge: ItemBridgeState,
+    pub index: i32,
+    pub buffer: Vec<i64>,
+}
+
+pub fn buffered_bridge_can_accept(
+    buffer_len: usize,
+    buffer_capacity: usize,
+    items_total: i32,
+) -> bool {
+    buffer_len < buffer_capacity && items_total > 0
+}
+
+pub fn buffered_bridge_delivers(
+    timer_accept_ready: bool,
+    polled_item: Option<ContentId>,
+    target_accepts: bool,
+) -> bool {
+    timer_accept_ready && polled_item.is_some() && target_accepts
+}
+
+pub fn write_buffered_bridge_state<W: Write>(
+    write: &mut W,
+    state: &BufferedItemBridgeState,
+) -> io::Result<()> {
+    write_item_bridge_state(write, &state.bridge)?;
+    write_i32(write, state.index)?;
+    write_i32(write, state.buffer.len() as i32)?;
+    for item in &state.buffer {
+        write_i64(write, *item)?;
+    }
+    Ok(())
+}
+
+pub fn read_buffered_bridge_state<R: Read>(
+    read: &mut R,
+    revision: u8,
+) -> io::Result<BufferedItemBridgeState> {
+    let bridge = read_item_bridge_state(read, revision)?;
+    let index = read_i32(read)?;
+    let len = read_i32(read)?;
+    let mut buffer = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        buffer.push(read_i64(read)?);
+    }
+    Ok(BufferedItemBridgeState {
+        bridge,
+        index,
+        buffer,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackConveyorStateKind {
+    Move,
+    Load,
+    Unload,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StackConveyorState {
+    pub link: i32,
+    pub cooldown: f32,
+    pub last_item: Option<ContentId>,
+}
+
+pub fn stack_conveyor_accept_item(
+    source_is_self: bool,
+    items_total: i32,
+    item_capacity: i32,
+    items_empty_or_same: bool,
+    cooldown: f32,
+    recharge: f32,
+    state: StackConveyorStateKind,
+    maximum_accepted: i32,
+    source_is_front: bool,
+) -> bool {
+    if source_is_self {
+        return items_total < item_capacity && items_empty_or_same;
+    }
+    if cooldown > recharge - 1.0 {
+        return false;
+    }
+    state == StackConveyorStateKind::Load
+        && items_empty_or_same
+        && items_total < maximum_accepted
+        && !source_is_front
+}
+
+pub fn stack_conveyor_cooldown_step(
+    cooldown: f32,
+    speed: f32,
+    efficiency: f32,
+    delta: f32,
+    recharge: f32,
+) -> f32 {
+    (cooldown - speed * efficiency * delta).clamp(0.0, recharge)
+}
+
+pub fn write_stack_conveyor_state<W: Write>(
+    write: &mut W,
+    state: &StackConveyorState,
+) -> io::Result<()> {
+    write_i32(write, state.link)?;
+    write_f32(write, state.cooldown)
+}
+
+pub fn read_stack_conveyor_state<R: Read>(
+    read: &mut R,
+    last_item: Option<ContentId>,
+) -> io::Result<StackConveyorState> {
+    Ok(StackConveyorState {
+        link: read_i32(read)?,
+        cooldown: read_f32(read)?,
+        last_item,
+    })
+}
+
 fn approach_delta(from: f32, to: f32, amount: f32) -> f32 {
     if from < to {
         (from + amount).min(to)
@@ -474,6 +698,16 @@ fn write_i32<W: Write>(write: &mut W, value: i32) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
 
+fn read_i64<R: Read>(read: &mut R) -> io::Result<i64> {
+    let mut buf = [0; 8];
+    read.read_exact(&mut buf)?;
+    Ok(i64::from_be_bytes(buf))
+}
+
+fn write_i64<W: Write>(write: &mut W, value: i64) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
 fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
     let mut buf = [0; 2];
     read.read_exact(&mut buf)?;
@@ -482,6 +716,16 @@ fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
 
 fn write_i16<W: Write>(write: &mut W, value: i16) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
+}
+
+fn read_i8<R: Read>(read: &mut R) -> io::Result<i8> {
+    let mut buf = [0; 1];
+    read.read_exact(&mut buf)?;
+    Ok(buf[0] as i8)
+}
+
+fn write_i8<W: Write>(write: &mut W, value: i8) -> io::Result<()> {
+    write.write_all(&[value as u8])
 }
 
 fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
@@ -722,6 +966,122 @@ mod tests {
         assert_eq!(
             read_directional_unloader_state(&mut bytes.as_slice()).unwrap(),
             unload
+        );
+    }
+
+    #[test]
+    fn conveyor_acceptance_clog_and_serialization_follow_java_layout() {
+        assert_eq!(conveyor_accept_stack(0.8, 5), 2);
+        assert!(conveyor_accept_item(0, 0.4, Some(0), 0, false));
+        assert!(!conveyor_accept_item(3, 1.0, Some(0), 0, false));
+        assert!(conveyor_accept_item(0, 0.71, Some(1), 0, false));
+        assert!(!conveyor_accept_item(0, 0.7, Some(1), 0, false));
+        assert!(!conveyor_accept_item(0, 1.0, Some(0), 0, true));
+        assert_eq!(conveyor_clog_heat(0.1, 0, 0.0), 1.0 / 60.0);
+        assert_eq!(conveyor_clog_heat(0.8, 1, 0.5), 0.0);
+        assert_eq!(conveyor_next_max(true, 0.2), 0.8);
+        assert_eq!(conveyor_next_max(false, 0.0), 1.0);
+
+        let state = ConveyorState {
+            items: vec![
+                ConveyorItemState {
+                    item: 1,
+                    x: 0.0,
+                    y: 0.5,
+                },
+                ConveyorItemState {
+                    item: 2,
+                    x: -0.5,
+                    y: 1.0,
+                },
+            ],
+        };
+        let mut bytes = Vec::new();
+        write_conveyor_state(&mut bytes, &state).unwrap();
+        assert_eq!(&bytes[0..4], &[0, 0, 0, 2]);
+        let restored = read_conveyor_state(&mut bytes.as_slice(), 1).unwrap();
+        assert_eq!(restored.items.len(), 2);
+        assert_eq!(restored.items[0].item, 1);
+        assert_eq!(
+            restored.items[0].y,
+            conveyor_decode_coord_y(conveyor_encode_coord_y(0.5))
+        );
+    }
+
+    #[test]
+    fn buffered_bridge_and_stack_conveyor_shells_follow_upstream_state() {
+        assert!(buffered_bridge_can_accept(0, 10, 1));
+        assert!(!buffered_bridge_can_accept(10, 10, 1));
+        assert!(!buffered_bridge_can_accept(0, 10, 0));
+        assert!(buffered_bridge_delivers(true, Some(1), true));
+        assert!(!buffered_bridge_delivers(true, None, true));
+
+        let bridge = ItemBridgeState {
+            link: 5,
+            warmup: 0.25,
+            incoming: vec![1],
+            was_moved: true,
+            moved: false,
+        };
+        let state = BufferedItemBridgeState {
+            bridge,
+            index: 2,
+            buffer: vec![0x0102030405060708],
+        };
+        let mut bytes = Vec::new();
+        write_buffered_bridge_state(&mut bytes, &state).unwrap();
+        let restored = read_buffered_bridge_state(&mut bytes.as_slice(), 1).unwrap();
+        assert_eq!(restored.buffer, state.buffer);
+        assert_eq!(restored.index, 2);
+
+        assert!(stack_conveyor_accept_item(
+            true,
+            1,
+            10,
+            true,
+            100.0,
+            120.0,
+            StackConveyorStateKind::Unload,
+            4,
+            true
+        ));
+        assert!(!stack_conveyor_accept_item(
+            false,
+            0,
+            10,
+            true,
+            119.5,
+            120.0,
+            StackConveyorStateKind::Load,
+            4,
+            false
+        ));
+        assert!(stack_conveyor_accept_item(
+            false,
+            3,
+            10,
+            true,
+            0.0,
+            120.0,
+            StackConveyorStateKind::Load,
+            4,
+            false
+        ));
+        assert_eq!(
+            stack_conveyor_cooldown_step(10.0, 2.0, 1.0, 3.0, 120.0),
+            4.0
+        );
+
+        let stack = StackConveyorState {
+            link: 123,
+            cooldown: 4.5,
+            last_item: Some(9),
+        };
+        let mut bytes = Vec::new();
+        write_stack_conveyor_state(&mut bytes, &stack).unwrap();
+        assert_eq!(
+            read_stack_conveyor_state(&mut bytes.as_slice(), Some(9)).unwrap(),
+            stack
         );
     }
 }
