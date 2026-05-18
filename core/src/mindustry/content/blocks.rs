@@ -3359,6 +3359,109 @@ impl PayloadDeconstructorBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PayloadConstructorBlockData {
+    pub base: Block,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub region_suffix: String,
+    pub payload_speed: f32,
+    pub payload_rotate_speed: f32,
+    pub build_speed: f32,
+    pub min_block_size: i32,
+    pub max_block_size: i32,
+    pub filter: Vec<String>,
+    pub dynamic_item_consumption: bool,
+    pub max_accepted_multiplier: i32,
+    pub output_payload: String,
+    pub progress_bar_color: String,
+    pub construct_color: String,
+    pub heat_lerp: f32,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub outputs_payload: bool,
+    pub output_facing: bool,
+    pub rotate: bool,
+    pub configurable: bool,
+    pub clear_on_double_tap: bool,
+    pub save_config: bool,
+    pub can_overdrive: bool,
+    pub under_bullets: bool,
+    pub region_rotated1: i32,
+    pub fog_radius: f32,
+}
+
+impl PayloadConstructorBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.sync = true;
+        base.group = BlockGroup::Payloads;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        base.solid = true;
+        base.has_items = true;
+        base.has_power = true;
+        base.size = 3;
+        let mut block = Self {
+            base,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            region_suffix: String::new(),
+            payload_speed: 0.7,
+            payload_rotate_speed: 5.0,
+            build_speed: 0.4,
+            min_block_size: 1,
+            max_block_size: 2,
+            filter: Vec::new(),
+            dynamic_item_consumption: true,
+            max_accepted_multiplier: 2,
+            output_payload: "BuildPayload".into(),
+            progress_bar_color: "ammo".into(),
+            construct_color: "accent".into(),
+            heat_lerp: 0.15,
+            accepts_payload: false,
+            accepts_unit_payloads: false,
+            outputs_payload: true,
+            output_facing: true,
+            rotate: true,
+            configurable: true,
+            clear_on_double_tap: true,
+            save_config: false,
+            can_overdrive: true,
+            under_bullets: false,
+            region_rotated1: 1,
+            fog_radius: -1.0,
+        };
+        block.apply_payload_constructor_base_flags();
+        block
+    }
+
+    fn apply_payload_constructor_base_flags(&mut self) {
+        self.base.has_items = true;
+        self.base.has_power = true;
+        self.base.solid = true;
+        self.base.update = true;
+        self.base.sync = true;
+        self.base.group = BlockGroup::Payloads;
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        self.apply_payload_constructor_base_flags();
+        self.base.consumes_power = self.consume_power > 0.0;
+        if self.fog_radius > 0.0 && !self.base.flags.contains(&BlockFlag::HasFogRadius) {
+            self.base.flags.push(BlockFlag::HasFogRadius);
+        }
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -3384,6 +3487,7 @@ pub enum BlockDef {
     Payload(PayloadBlockData),
     PayloadMassDriver(PayloadMassDriverBlockData),
     PayloadDeconstructor(PayloadDeconstructorBlockData),
+    PayloadConstructor(PayloadConstructorBlockData),
 }
 
 impl BlockDef {
@@ -3413,6 +3517,7 @@ impl BlockDef {
             Self::Payload(payload) => &payload.base,
             Self::PayloadMassDriver(driver) => &driver.base,
             Self::PayloadDeconstructor(deconstructor) => &deconstructor.base,
+            Self::PayloadConstructor(constructor) => &constructor.base,
         }
     }
 
@@ -3593,6 +3698,16 @@ impl BlockRegistry {
     ) -> Option<&PayloadDeconstructorBlockData> {
         match self.get_by_name(name)? {
             BlockDef::PayloadDeconstructor(deconstructor) => Some(deconstructor),
+            _ => None,
+        }
+    }
+
+    pub fn get_payload_constructor_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&PayloadConstructorBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::PayloadConstructor(constructor) => Some(constructor),
             _ => None,
         }
     }
@@ -3910,6 +4025,20 @@ impl BlockRegistry {
         block.finalize(items);
         block.base.derive_layout_fields();
         self.insert(BlockDef::PayloadDeconstructor(block))
+    }
+
+    pub fn register_payload_constructor_block(
+        &mut self,
+        name: impl Into<String>,
+        items: &[Item],
+        configure: impl FnOnce(&mut PayloadConstructorBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = PayloadConstructorBlockData::new(id, name);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::PayloadConstructor(block))
     }
 
     pub fn set_floor_wall_by_name(
@@ -11135,6 +11264,48 @@ fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         deconstructor.consume_power = 3.0;
         deconstructor.base.size = 5;
         deconstructor.deconstruct_speed = 6.0;
+    });
+
+    registry.register_payload_constructor_block("constructor", items, |constructor| {
+        set_requirements(
+            &mut constructor.requirements,
+            items,
+            &[("silicon", 50), ("beryllium", 75), ("tungsten", 40)],
+        );
+        constructor.region_suffix = "-dark".into();
+        constructor.base.has_power = true;
+        constructor.build_speed = 0.6;
+        constructor.consume_power = 2.5;
+        constructor.base.size = 3;
+        constructor.filter = vec![
+            "tungsten-wall-large".into(),
+            "beryllium-wall-large".into(),
+            "carbide-wall-large".into(),
+            "reinforced-surge-wall-large".into(),
+            "reinforced-liquid-container".into(),
+            "reinforced-container".into(),
+            "beam-node".into(),
+        ];
+    });
+
+    registry.register_payload_constructor_block("large-constructor", items, |constructor| {
+        set_requirements(
+            &mut constructor.requirements,
+            items,
+            &[
+                ("silicon", 150),
+                ("oxide", 100),
+                ("tungsten", 200),
+                ("thorium", 80),
+            ],
+        );
+        constructor.region_suffix = "-dark".into();
+        constructor.base.has_power = true;
+        constructor.build_speed = 0.75;
+        constructor.max_block_size = 4;
+        constructor.min_block_size = 3;
+        constructor.base.size = 5;
+        constructor.consume_power = 3.0;
     });
 }
 
@@ -18541,6 +18712,145 @@ mod tests {
                 ItemAmount {
                     item: item_id("carbide"),
                     amount: 50
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn payload_constructors_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let constructor = registry
+            .get_payload_constructor_by_name("constructor")
+            .unwrap();
+        assert_eq!(constructor.base.group, BlockGroup::Payloads);
+        assert!(constructor.base.update);
+        assert!(constructor.base.sync);
+        assert!(constructor.base.solid);
+        assert!(constructor.base.has_items);
+        assert!(constructor.base.has_power);
+        assert!(constructor.base.consumes_power);
+        assert_eq!(
+            constructor.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(constructor.base.size, 3);
+        assert_eq!(constructor.base.health, 860);
+        assert_eq!(constructor.region_suffix, "-dark");
+        assert_eq!(constructor.payload_speed, 0.7);
+        assert_eq!(constructor.payload_rotate_speed, 5.0);
+        assert_eq!(constructor.build_speed, 0.6);
+        assert_eq!(constructor.min_block_size, 1);
+        assert_eq!(constructor.max_block_size, 2);
+        assert!(constructor.dynamic_item_consumption);
+        assert_eq!(constructor.max_accepted_multiplier, 2);
+        assert_eq!(constructor.output_payload, "BuildPayload");
+        assert_eq!(constructor.progress_bar_color, "ammo");
+        assert_eq!(constructor.construct_color, "accent");
+        assert_eq!(constructor.heat_lerp, 0.15);
+        assert!(!constructor.accepts_payload);
+        assert!(!constructor.accepts_unit_payloads);
+        assert!(constructor.outputs_payload);
+        assert!(constructor.output_facing);
+        assert!(constructor.rotate);
+        assert!(constructor.configurable);
+        assert!(constructor.clear_on_double_tap);
+        assert!(!constructor.save_config);
+        assert!(constructor.can_overdrive);
+        assert!(!constructor.under_bullets);
+        assert_eq!(constructor.region_rotated1, 1);
+        assert_eq!(constructor.fog_radius, -1.0);
+        assert_eq!(constructor.consume_power, 2.5);
+        assert!(constructor.research_cost.is_empty());
+        assert_eq!(constructor.research_cost_multiplier, 1.0);
+        assert_eq!(
+            constructor.filter,
+            vec![
+                "tungsten-wall-large",
+                "beryllium-wall-large",
+                "carbide-wall-large",
+                "reinforced-surge-wall-large",
+                "reinforced-liquid-container",
+                "reinforced-container",
+                "beam-node",
+            ]
+        );
+        assert_eq!(
+            constructor.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 75
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 40
+                }
+            ]
+        );
+
+        let large = registry
+            .get_payload_constructor_by_name("large-constructor")
+            .unwrap();
+        assert_eq!(large.base.group, BlockGroup::Payloads);
+        assert!(large.base.update);
+        assert!(large.base.sync);
+        assert!(large.base.solid);
+        assert!(large.base.has_items);
+        assert!(large.base.has_power);
+        assert!(large.base.consumes_power);
+        assert_eq!(
+            large.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(large.base.size, 5);
+        assert_eq!(large.base.health, 2500);
+        assert_eq!(large.region_suffix, "-dark");
+        assert_eq!(large.payload_speed, 0.7);
+        assert_eq!(large.payload_rotate_speed, 5.0);
+        assert_eq!(large.build_speed, 0.75);
+        assert_eq!(large.min_block_size, 3);
+        assert_eq!(large.max_block_size, 4);
+        assert!(large.filter.is_empty());
+        assert!(large.dynamic_item_consumption);
+        assert_eq!(large.max_accepted_multiplier, 2);
+        assert_eq!(large.output_payload, "BuildPayload");
+        assert!(!large.accepts_payload);
+        assert!(!large.accepts_unit_payloads);
+        assert!(large.outputs_payload);
+        assert!(large.output_facing);
+        assert!(large.rotate);
+        assert!(large.configurable);
+        assert!(large.clear_on_double_tap);
+        assert!(large.can_overdrive);
+        assert_eq!(large.region_rotated1, 1);
+        assert_eq!(large.fog_radius, -1.0);
+        assert_eq!(large.consume_power, 3.0);
+        assert!(large.research_cost.is_empty());
+        assert_eq!(
+            large.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 80
                 }
             ]
         );
