@@ -4251,6 +4251,182 @@ impl CampaignBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicBlockKind {
+    Message,
+    Switch,
+    Processor,
+    Memory,
+    Display,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicBlockData {
+    pub base: Block,
+    pub kind: LogicBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub consume_liquid_names: Vec<String>,
+    pub configurable: bool,
+    pub can_overdrive: bool,
+    pub draw_disabled: bool,
+    pub auto_reset_enabled: bool,
+    pub configure_sound: String,
+    pub schematic_priority: i32,
+    pub ignore_resize_config: bool,
+    pub privileged_only: bool,
+    pub accessible_with_editor_rules: bool,
+    pub max_text_length: i32,
+    pub max_newlines: i32,
+    pub can_pickup: bool,
+    pub collides_when_privileged: bool,
+    pub click_sound: String,
+    pub read_enabled_revision: i32,
+    pub max_byte_len: i32,
+    pub max_links: i32,
+    pub max_name_length: i32,
+    pub max_instruction_scale: i32,
+    pub instructions_per_tick: i32,
+    pub max_instructions_per_tick: i32,
+    pub range: f32,
+    pub memory_capacity: i32,
+    pub display_size: i32,
+    pub scale_factor: f32,
+    pub max_sides: i32,
+    pub display_draw_type: i32,
+    pub scale_step: f32,
+    pub buffer_capacity: i32,
+}
+
+impl LogicBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: LogicBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.group = BlockGroup::Logic;
+        base.env_enabled = Env::ANY;
+        base.connected_power = true;
+        base.consumes_power = true;
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_liquids: Vec::new(),
+            consume_liquid_names: Vec::new(),
+            configurable: false,
+            can_overdrive: true,
+            draw_disabled: true,
+            auto_reset_enabled: true,
+            configure_sound: "click".into(),
+            schematic_priority: 0,
+            ignore_resize_config: false,
+            privileged_only: false,
+            accessible_with_editor_rules: true,
+            max_text_length: 0,
+            max_newlines: 0,
+            can_pickup: true,
+            collides_when_privileged: true,
+            click_sound: String::new(),
+            read_enabled_revision: 0,
+            max_byte_len: 0,
+            max_links: 0,
+            max_name_length: 0,
+            max_instruction_scale: 0,
+            instructions_per_tick: 0,
+            max_instructions_per_tick: 0,
+            range: 0.0,
+            memory_capacity: 0,
+            display_size: 0,
+            scale_factor: 0.0,
+            max_sides: 0,
+            display_draw_type: 0,
+            scale_step: 0.0,
+            buffer_capacity: 0,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            LogicBlockKind::Message => {
+                self.configurable = true;
+                self.base.solid = true;
+                self.base.destructible = true;
+                self.draw_disabled = false;
+                self.max_text_length = 300;
+                self.max_newlines = 24;
+                self.can_pickup = false;
+                self.collides_when_privileged = false;
+            }
+            LogicBlockKind::Switch => {
+                self.configurable = true;
+                self.base.update = true;
+                self.draw_disabled = false;
+                self.auto_reset_enabled = false;
+                self.configure_sound = "none".into();
+                self.click_sound = "click".into();
+                self.read_enabled_revision = 1;
+                self.can_pickup = true;
+                self.collides_when_privileged = false;
+            }
+            LogicBlockKind::Processor => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.configurable = true;
+                self.schematic_priority = 5;
+                self.ignore_resize_config = true;
+                self.max_byte_len = 1024 * 100;
+                self.max_links = 6000;
+                self.max_name_length = 32;
+                self.max_instruction_scale = 5;
+                self.instructions_per_tick = 1;
+                self.max_instructions_per_tick = 40;
+                self.range = 8.0 * 10.0;
+            }
+            LogicBlockKind::Memory => {
+                self.base.destructible = true;
+                self.base.solid = true;
+                self.draw_disabled = false;
+                self.can_overdrive = false;
+                self.memory_capacity = 32;
+                self.can_pickup = false;
+                self.collides_when_privileged = false;
+            }
+            LogicBlockKind::Display => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.can_overdrive = false;
+                self.draw_disabled = false;
+                self.max_sides = 25;
+                self.display_size = 64;
+                self.scale_factor = 1.0;
+                self.display_draw_type = 30;
+                self.scale_step = 0.05;
+                self.buffer_capacity = 256;
+            }
+        }
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        if !self.consume_liquids.is_empty() {
+            self.base.has_liquids = true;
+        }
+        if self.kind == LogicBlockKind::Display {
+            self.base.clip_size = self
+                .base
+                .clip_size
+                .max(self.scale_factor * self.display_size as f32);
+        }
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
@@ -4283,6 +4459,7 @@ pub enum BlockDef {
     Light(LightBlockData),
     Legacy(LegacyBlockData),
     Campaign(CampaignBlockData),
+    Logic(LogicBlockData),
 }
 
 impl BlockDef {
@@ -4318,6 +4495,7 @@ impl BlockDef {
             Self::Light(light) => &light.base,
             Self::Legacy(legacy) => &legacy.base,
             Self::Campaign(campaign) => &campaign.base,
+            Self::Logic(logic) => &logic.base,
         }
     }
 
@@ -4543,6 +4721,13 @@ impl BlockRegistry {
     pub fn get_campaign_by_name(&self, name: &str) -> Option<&CampaignBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Campaign(campaign) => Some(campaign),
+            _ => None,
+        }
+    }
+
+    pub fn get_logic_by_name(&self, name: &str) -> Option<&LogicBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Logic(logic) => Some(logic),
             _ => None,
         }
     }
@@ -4950,6 +5135,21 @@ impl BlockRegistry {
         self.insert(BlockDef::Campaign(block))
     }
 
+    pub fn register_logic_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: LogicBlockKind,
+        items: &[Item],
+        configure: impl FnOnce(&mut LogicBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = LogicBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Logic(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -5084,6 +5284,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_light_blocks(&mut registry, items);
     register_legacy_blocks(&mut registry, items);
     register_campaign_blocks(&mut registry, items, liquids);
+    register_logic_blocks(&mut registry, items, liquids);
 
     registry.finalize_floor_links();
     registry
@@ -12511,6 +12712,140 @@ fn register_campaign_blocks(registry: &mut BlockRegistry, items: &[Item], liquid
             campaign.launch_block_name = Some("core-nucleus".into());
             campaign.consume_items = core_nucleus_requirements;
             campaign.launch_block_item_capacity = core_nucleus_capacity;
+        },
+    );
+}
+
+fn register_logic_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
+    registry.register_logic_block("message", LogicBlockKind::Message, items, |logic| {
+        set_requirements(
+            &mut logic.requirements,
+            items,
+            &[("graphite", 5), ("copper", 5)],
+        );
+    });
+
+    registry.register_logic_block("switch", LogicBlockKind::Switch, items, |logic| {
+        set_requirements(
+            &mut logic.requirements,
+            items,
+            &[("graphite", 5), ("copper", 5)],
+        );
+    });
+
+    registry.register_logic_block(
+        "micro-processor",
+        LogicBlockKind::Processor,
+        items,
+        |logic| {
+            set_requirements(
+                &mut logic.requirements,
+                items,
+                &[("copper", 90), ("lead", 50), ("silicon", 50)],
+            );
+            logic.instructions_per_tick = 2;
+            logic.base.size = 1;
+        },
+    );
+
+    registry.register_logic_block(
+        "logic-processor",
+        LogicBlockKind::Processor,
+        items,
+        |logic| {
+            set_requirements(
+                &mut logic.requirements,
+                items,
+                &[
+                    ("lead", 320),
+                    ("silicon", 80),
+                    ("graphite", 60),
+                    ("thorium", 50),
+                ],
+            );
+            logic.instructions_per_tick = 8;
+            logic.range = 8.0 * 22.0;
+            logic.base.size = 2;
+        },
+    );
+
+    registry.register_logic_block(
+        "hyper-processor",
+        LogicBlockKind::Processor,
+        items,
+        |logic| {
+            set_requirements(
+                &mut logic.requirements,
+                items,
+                &[
+                    ("lead", 450),
+                    ("silicon", 150),
+                    ("thorium", 75),
+                    ("surge-alloy", 50),
+                ],
+            );
+            logic.consume_liquids = liquid_amount(liquids, "cryofluid", 0.08)
+                .into_iter()
+                .collect();
+            logic.consume_liquid_names.push("cryofluid".into());
+            logic.base.has_liquids = true;
+            logic.instructions_per_tick = 25;
+            logic.range = 8.0 * 42.0;
+            logic.base.size = 3;
+        },
+    );
+
+    registry.register_logic_block("memory-cell", LogicBlockKind::Memory, items, |logic| {
+        set_requirements(
+            &mut logic.requirements,
+            items,
+            &[("graphite", 30), ("silicon", 30), ("copper", 30)],
+        );
+        logic.memory_capacity = 64;
+    });
+
+    registry.register_logic_block("memory-bank", LogicBlockKind::Memory, items, |logic| {
+        set_requirements(
+            &mut logic.requirements,
+            items,
+            &[
+                ("graphite", 80),
+                ("silicon", 80),
+                ("phase-fabric", 30),
+                ("copper", 30),
+            ],
+        );
+        logic.memory_capacity = 512;
+        logic.base.size = 2;
+    });
+
+    registry.register_logic_block("logic-display", LogicBlockKind::Display, items, |logic| {
+        set_requirements(
+            &mut logic.requirements,
+            items,
+            &[("lead", 100), ("silicon", 50), ("metaglass", 50)],
+        );
+        logic.display_size = 80;
+        logic.base.size = 3;
+    });
+
+    registry.register_logic_block(
+        "large-logic-display",
+        LogicBlockKind::Display,
+        items,
+        |logic| {
+            set_requirements(
+                &mut logic.requirements,
+                items,
+                &[
+                    ("lead", 200),
+                    ("silicon", 150),
+                    ("metaglass", 100),
+                    ("phase-fabric", 75),
+                ],
+            );
+            logic.display_size = 176;
+            logic.base.size = 6;
         },
     );
 }
@@ -20770,6 +21105,310 @@ mod tests {
                 ItemAmount {
                     item: item_id("phase-fabric"),
                     amount: 5000
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn logic_core_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let assert_logic_common = |block: &LogicBlockData, expected_health: i32| {
+            assert_eq!(block.base.group, BlockGroup::Logic);
+            assert_eq!(block.base.build_visibility, BuildVisibility::Shown);
+            assert_eq!(block.base.env_enabled, Env::ANY);
+            assert_eq!(block.base.env_required, Env::NONE);
+            assert_eq!(block.base.env_disabled, Env::NONE);
+            assert!(block.base.consumes_power);
+            assert!(block.base.connected_power);
+            assert_eq!(block.base.health, expected_health);
+            assert!(block.research_cost.is_empty());
+            assert_eq!(block.research_cost_multiplier, 1.0);
+            assert!(block.accessible_with_editor_rules);
+        };
+
+        let message = registry.get_logic_by_name("message").unwrap();
+        assert_logic_common(message, 40);
+        assert_eq!(message.kind, LogicBlockKind::Message);
+        assert!(message.base.solid);
+        assert!(message.base.destructible);
+        assert!(!message.base.update);
+        assert!(!message.base.has_power);
+        assert!(message.configurable);
+        assert!(!message.draw_disabled);
+        assert_eq!(message.max_text_length, 300);
+        assert_eq!(message.max_newlines, 24);
+        assert!(!message.can_pickup);
+        assert!(!message.collides_when_privileged);
+        assert_eq!(
+            message.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 5
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 5
+                }
+            ]
+        );
+
+        let switch = registry.get_logic_by_name("switch").unwrap();
+        assert_logic_common(switch, 40);
+        assert_eq!(switch.kind, LogicBlockKind::Switch);
+        assert!(switch.base.update);
+        assert!(!switch.base.solid);
+        assert!(!switch.base.destructible);
+        assert!(switch.configurable);
+        assert!(!switch.draw_disabled);
+        assert!(!switch.auto_reset_enabled);
+        assert_eq!(switch.configure_sound, "none");
+        assert_eq!(switch.click_sound, "click");
+        assert_eq!(switch.read_enabled_revision, 1);
+        assert!(switch.can_pickup);
+        assert!(!switch.collides_when_privileged);
+        assert_eq!(
+            switch.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 5
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 5
+                }
+            ]
+        );
+
+        let micro = registry.get_logic_by_name("micro-processor").unwrap();
+        assert_logic_common(micro, 40);
+        assert_eq!(micro.kind, LogicBlockKind::Processor);
+        assert!(micro.base.update);
+        assert!(micro.base.solid);
+        assert!(micro.configurable);
+        assert_eq!(micro.schematic_priority, 5);
+        assert!(micro.ignore_resize_config);
+        assert_eq!(micro.max_byte_len, 1024 * 100);
+        assert_eq!(micro.max_links, 6000);
+        assert_eq!(micro.max_name_length, 32);
+        assert_eq!(micro.max_instruction_scale, 5);
+        assert_eq!(micro.instructions_per_tick, 2);
+        assert_eq!(micro.max_instructions_per_tick, 40);
+        assert_eq!(micro.range, 8.0 * 10.0);
+        assert_eq!(micro.base.size, 1);
+        assert_eq!(
+            micro.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 90
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 50
+                }
+            ]
+        );
+
+        let processor = registry.get_logic_by_name("logic-processor").unwrap();
+        assert_logic_common(processor, 190);
+        assert_eq!(processor.kind, LogicBlockKind::Processor);
+        assert_eq!(processor.base.size, 2);
+        assert_eq!(processor.base.clip_size, 16.0);
+        assert_eq!(processor.instructions_per_tick, 8);
+        assert_eq!(processor.range, 8.0 * 22.0);
+        assert_eq!(
+            processor.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 320
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 60
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 50
+                }
+            ]
+        );
+
+        let hyper = registry.get_logic_by_name("hyper-processor").unwrap();
+        assert_logic_common(hyper, 520);
+        assert_eq!(hyper.kind, LogicBlockKind::Processor);
+        assert_eq!(hyper.base.size, 3);
+        assert_eq!(hyper.base.clip_size, 24.0);
+        assert!(hyper.base.has_liquids);
+        assert_eq!(hyper.instructions_per_tick, 25);
+        assert_eq!(hyper.range, 8.0 * 42.0);
+        assert_eq!(
+            hyper.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cryofluid"),
+                amount: 0.08
+            }]
+        );
+        assert_eq!(hyper.consume_liquid_names, vec!["cryofluid"]);
+        assert_eq!(
+            hyper.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 450
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 75
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 50
+                }
+            ]
+        );
+
+        let memory = registry.get_logic_by_name("memory-cell").unwrap();
+        assert_logic_common(memory, 40);
+        assert_eq!(memory.kind, LogicBlockKind::Memory);
+        assert!(memory.base.destructible);
+        assert!(memory.base.solid);
+        assert!(!memory.base.update);
+        assert!(!memory.draw_disabled);
+        assert!(!memory.can_overdrive);
+        assert_eq!(memory.memory_capacity, 64);
+        assert!(!memory.can_pickup);
+        assert!(!memory.collides_when_privileged);
+        assert_eq!(
+            memory.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 30
+                }
+            ]
+        );
+
+        let bank = registry.get_logic_by_name("memory-bank").unwrap();
+        assert_logic_common(bank, 200);
+        assert_eq!(bank.kind, LogicBlockKind::Memory);
+        assert_eq!(bank.base.size, 2);
+        assert_eq!(bank.base.clip_size, 16.0);
+        assert_eq!(bank.memory_capacity, 512);
+        assert_eq!(
+            bank.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 30
+                }
+            ]
+        );
+
+        let display = registry.get_logic_by_name("logic-display").unwrap();
+        assert_logic_common(display, 360);
+        assert_eq!(display.kind, LogicBlockKind::Display);
+        assert!(display.base.update);
+        assert!(display.base.solid);
+        assert!(!display.can_overdrive);
+        assert!(!display.draw_disabled);
+        assert_eq!(display.base.size, 3);
+        assert_eq!(display.base.clip_size, 80.0);
+        assert_eq!(display.max_sides, 25);
+        assert_eq!(display.display_size, 80);
+        assert_eq!(display.scale_factor, 1.0);
+        assert_eq!(display.display_draw_type, 30);
+        assert_eq!(display.scale_step, 0.05);
+        assert_eq!(display.buffer_capacity, 256);
+        assert_eq!(
+            display.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 50
+                }
+            ]
+        );
+
+        let large_display = registry.get_logic_by_name("large-logic-display").unwrap();
+        assert_logic_common(large_display, 1800);
+        assert_eq!(large_display.kind, LogicBlockKind::Display);
+        assert_eq!(large_display.base.size, 6);
+        assert_eq!(large_display.base.clip_size, 176.0);
+        assert_eq!(large_display.display_size, 176);
+        assert_eq!(
+            large_display.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 75
                 }
             ]
         );
