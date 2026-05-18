@@ -524,6 +524,7 @@ pub struct BulletSpec {
     pub smoke_effect: String,
     pub charge_effect: String,
     pub bullet_shoot_sound: String,
+    pub hit_sound: String,
     pub hit_color: String,
     pub back_color: String,
     pub trail_color: String,
@@ -554,18 +555,25 @@ pub struct BulletSpec {
     pub incend_amount: i32,
     pub trail_length: i32,
     pub trail_width: f32,
+    pub trail_sin_scl: f32,
+    pub trail_sin_mag: f32,
+    pub trail_interp: String,
     pub splash_damage: f32,
     pub splash_damage_radius: f32,
+    pub scaled_splash_damage: bool,
     pub explode_range: f32,
     pub explode_delay: f32,
     pub flak_delay: f32,
     pub flak_interval: f32,
     pub frag_bullets: i32,
     pub frag_bullet: Option<Box<BulletSpec>>,
+    pub frag_life_min: f32,
     pub frag_random_spread: f32,
     pub frag_spread: f32,
     pub frag_velocity_min: f32,
     pub frag_velocity_max: f32,
+    pub bullet_interval: f32,
+    pub interval_bullet: Option<Box<BulletSpec>>,
     pub collides_ground: bool,
     pub collides_air: bool,
     pub collides_tiles: bool,
@@ -586,12 +594,14 @@ pub struct BulletSpec {
     pub hittable: bool,
     pub keep_velocity: bool,
     pub absorbable: bool,
+    pub instant_disappear: bool,
     pub status: String,
     pub status_duration: f32,
     pub make_fire: bool,
     pub trail_effect: String,
     pub trail_interval: f32,
     pub trail_rotation: bool,
+    pub despawn_shake: f32,
     pub display_ammo_multiplier: bool,
     pub building_damage_multiplier: f32,
     pub shield_damage_multiplier: f32,
@@ -638,6 +648,7 @@ impl BulletSpec {
             smoke_effect: "shootSmallSmoke".into(),
             charge_effect: "none".into(),
             bullet_shoot_sound: "none".into(),
+            hit_sound: "none".into(),
             hit_color: String::new(),
             back_color: String::new(),
             trail_color: String::new(),
@@ -668,18 +679,25 @@ impl BulletSpec {
             incend_amount: 0,
             trail_length: 0,
             trail_width: 0.0,
+            trail_sin_scl: 3.0,
+            trail_sin_mag: 0.0,
+            trail_interp: String::new(),
             splash_damage: 0.0,
             splash_damage_radius: 0.0,
+            scaled_splash_damage: false,
             explode_range: 0.0,
             explode_delay: 0.0,
             flak_delay: 0.0,
             flak_interval: 0.0,
             frag_bullets: 0,
             frag_bullet: None,
+            frag_life_min: 0.0,
             frag_random_spread: 360.0,
             frag_spread: 0.0,
             frag_velocity_min: 0.2,
             frag_velocity_max: 1.0,
+            bullet_interval: 0.0,
+            interval_bullet: None,
             collides_ground: true,
             collides_air: true,
             collides_tiles: true,
@@ -700,12 +718,14 @@ impl BulletSpec {
             hittable: true,
             keep_velocity: true,
             absorbable: true,
+            instant_disappear: false,
             status: "none".into(),
             status_duration: 60.0 * 8.0,
             make_fire: false,
             trail_effect: "missileTrail".into(),
             trail_interval: 0.0,
             trail_rotation: false,
+            despawn_shake: 0.0,
             display_ammo_multiplier: true,
             building_damage_multiplier: 1.0,
             shield_damage_multiplier: 1.0,
@@ -757,6 +777,7 @@ pub struct TurretBlockData {
     pub requirements: Vec<ItemAmount>,
     pub ammo: Vec<TurretAmmo>,
     pub liquid_ammo: Vec<LiquidTurretAmmo>,
+    pub consume_liquids: Vec<LiquidAmount>,
     pub shoot_type: Option<Box<BulletSpec>>,
     pub research_cost_multiplier: f32,
     pub consume_power: f32,
@@ -878,6 +899,7 @@ impl TurretBlockData {
             requirements: Vec::new(),
             ammo: Vec::new(),
             liquid_ammo: Vec::new(),
+            consume_liquids: Vec::new(),
             shoot_type: None,
             research_cost_multiplier: 1.0,
             consume_power: 0.0,
@@ -6125,6 +6147,181 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
 
         turret.scaled_health = 210.0;
         turret.base.size = 3;
+    });
+
+    registry.register_turret_block("titan", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("tungsten", 250), ("silicon", 300), ("thorium", 400)],
+        );
+
+        let mut thorium = artillery_bullet(2.5, 350.0);
+        thorium.hit_effect = "MultiEffect(titanExplosion, titanSmoke)".into();
+        thorium.despawn_effect = "none".into();
+        thorium.knockback = 2.0;
+        thorium.lifetime = 140.0;
+        thorium.height = 19.0;
+        thorium.width = 17.0;
+        thorium.splash_damage_radius = 65.0;
+        thorium.splash_damage = 350.0;
+        thorium.scaled_splash_damage = true;
+        thorium.back_color = "f49e7c".into();
+        thorium.hit_color = "f49e7c".into();
+        thorium.trail_color = "f49e7c".into();
+        thorium.front_color = "white".into();
+        thorium.ammo_multiplier = 1.0;
+        thorium.hit_sound = "explosionTitan".into();
+        thorium.status = "blasted".into();
+        thorium.trail_length = 32;
+        thorium.trail_width = 3.35;
+        thorium.trail_sin_scl = 2.5;
+        thorium.trail_sin_mag = 0.5;
+        thorium.trail_effect = "none".into();
+        thorium.despawn_shake = 7.0;
+        thorium.shoot_effect = "shootTitan".into();
+        thorium.smoke_effect = "shootSmokeTitan".into();
+        thorium.trail_interp = "max(slope,0.8)".into();
+        thorium.shrink_x = 0.2;
+        thorium.shrink_y = 0.1;
+        thorium.building_damage_multiplier = 0.3;
+        push_turret_ammo(&mut turret.ammo, items, "thorium", thorium);
+
+        let mut carbide_frag = artillery_bullet(0.5, 50.0);
+        carbide_frag.hit_effect =
+            "MultiEffect(titanExplosionFrag, titanLightSmall, WaveEffect(sizeTo=8))".into();
+        carbide_frag.despawn_effect = "hitBulletColor".into();
+        carbide_frag.width = 8.0;
+        carbide_frag.height = 12.0;
+        carbide_frag.lifetime = 50.0;
+        carbide_frag.knockback = 0.5;
+        carbide_frag.splash_damage_radius = 22.0;
+        carbide_frag.splash_damage = 50.0;
+        carbide_frag.scaled_splash_damage = true;
+        carbide_frag.pierce_armor = true;
+        carbide_frag.back_color = "ab8ec5".into();
+        carbide_frag.hit_color = "ab8ec5".into();
+        carbide_frag.front_color = "white".into();
+        carbide_frag.building_damage_multiplier = 0.25;
+        carbide_frag.shrink_y = 0.3;
+
+        let mut carbide = artillery_bullet(3.25, 700.0);
+        carbide.hit_effect = "MultiEffect(titanExplosionSmall, titanSmokeSmall)".into();
+        carbide.despawn_effect = "none".into();
+        carbide.knockback = 3.0;
+        carbide.lifetime = 140.0;
+        carbide.height = 28.0;
+        carbide.width = 15.0;
+        carbide.splash_damage_radius = 36.0;
+        carbide.splash_damage = 750.0;
+        carbide.range_change = 10.0 * 8.0;
+        carbide.reload_multiplier = 0.8;
+        carbide.scaled_splash_damage = true;
+        carbide.back_color = "ab8ec5".into();
+        carbide.hit_color = "ab8ec5".into();
+        carbide.trail_color = "ab8ec5".into();
+        carbide.front_color = "white".into();
+        carbide.ammo_multiplier = 1.0;
+        carbide.hit_sound = "explosionTitan".into();
+        carbide.status = "blasted".into();
+        carbide.trail_length = 32;
+        carbide.trail_width = 3.35;
+        carbide.trail_sin_scl = 2.5;
+        carbide.trail_sin_mag = 0.5;
+        carbide.trail_effect = "disperseTrail".into();
+        carbide.trail_interval = 2.0;
+        carbide.despawn_shake = 7.0;
+        carbide.shoot_effect = "shootTitan".into();
+        carbide.smoke_effect = "shootSmokeTitan".into();
+        carbide.trail_rotation = true;
+        carbide.trail_interp = "max(slope,0.8)".into();
+        carbide.shrink_x = 0.2;
+        carbide.shrink_y = 0.1;
+        carbide.building_damage_multiplier = 0.2;
+        carbide.frag_life_min = 1.5;
+        carbide.frag_bullets = 12;
+        carbide.frag_bullet = Some(Box::new(carbide_frag));
+        push_turret_ammo(&mut turret.ammo, items, "carbide", carbide);
+
+        let mut oxide_interval = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+        oxide_interval.splash_damage = 15.0;
+        oxide_interval.collides_ground = true;
+        oxide_interval.collides_air = false;
+        oxide_interval.collides = false;
+        oxide_interval.hit_effect = "none".into();
+        oxide_interval.despawn_effect = "none".into();
+        oxide_interval.pierce = true;
+        oxide_interval.instant_disappear = true;
+        oxide_interval.splash_damage_radius = 90.0;
+        oxide_interval.building_damage_multiplier = 0.0;
+
+        let mut oxide_frag = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+        oxide_frag.damage = 0.0;
+        oxide_frag.lifetime = 60.0 * 2.5;
+        oxide_frag.bullet_interval = 20.0;
+        oxide_frag.hit_effect = "none".into();
+        oxide_frag.despawn_effect = "none".into();
+        oxide_frag.interval_bullet = Some(Box::new(oxide_interval));
+
+        let mut oxide = artillery_bullet(2.5, 300.0);
+        oxide.hit_effect = "MultiEffect(titanExplosionLarge, titanSmokeLarge, smokeAoeCloud)".into();
+        oxide.despawn_effect = "none".into();
+        oxide.knockback = 2.0;
+        oxide.lifetime = 190.0;
+        oxide.height = 19.0;
+        oxide.width = 17.0;
+        oxide.reload_multiplier = 0.7;
+        oxide.splash_damage_radius = 110.0;
+        oxide.range_change = 8.0;
+        oxide.splash_damage = 180.0;
+        oxide.scaled_splash_damage = true;
+        oxide.hit_color = "a0b380".into();
+        oxide.back_color = "a0b380".into();
+        oxide.trail_color = "a0b380".into();
+        oxide.front_color = "e4ffd6".into();
+        oxide.ammo_multiplier = 1.0;
+        oxide.hit_sound = "explosionTitan".into();
+        oxide.trail_length = 32;
+        oxide.trail_width = 3.35;
+        oxide.trail_sin_scl = 2.5;
+        oxide.trail_sin_mag = 0.5;
+        oxide.trail_effect = "vapor".into();
+        oxide.trail_interval = 3.0;
+        oxide.despawn_shake = 7.0;
+        oxide.shoot_effect = "shootTitan".into();
+        oxide.smoke_effect = "shootSmokeTitan".into();
+        oxide.trail_interp = "max(slope,0.8)".into();
+        oxide.shrink_x = 0.2;
+        oxide.shrink_y = 0.1;
+        oxide.building_damage_multiplier = 0.25;
+        oxide.status = "corroded".into();
+        oxide.status_duration = 60.0 * 8.0;
+        oxide.frag_bullets = 1;
+        oxide.frag_bullet = Some(Box::new(oxide_frag));
+        push_turret_ammo(&mut turret.ammo, items, "oxide", oxide);
+
+        turret.shoot_sound = "shootTank".into();
+        turret.ammo_per_shot = 4;
+        turret.max_ammo = turret.ammo_per_shot * 3;
+        turret.target_air = false;
+        turret.shake = 4.0;
+        turret.recoil = 1.0;
+        turret.reload = 60.0 * 2.3;
+        turret.shoot_y = 7.0;
+        turret.rotate_speed = 1.4;
+        turret.min_warmup = 0.85;
+        turret.new_target_interval = 40.0;
+        turret.shoot_warmup_speed = 0.08;
+        turret.warmup_maintain_time = 120.0;
+        turret.consume_coolant(30.0 / 60.0);
+        turret.coolant_multiplier = 3.75;
+        turret.drawer = "DrawTurret(reinforced-, RegionPart(-barrel recoil moveY=-6.6667 heatColor=f03b0e), RegionPart(-side warmup mirror moveX=2.6667 moveY=-0.5 moveRot=-40 under heatColor=red))".into();
+        turret.outline_color = "darkOutline".into();
+        push_liquid_amount(&mut turret.consume_liquids, liquids, "hydrogen", 5.0 / 60.0);
+        turret.base.has_liquids = !turret.consume_liquids.is_empty();
+        turret.scaled_health = 250.0;
+        turret.range = 390.0;
+        turret.base.size = 4;
     });
 }
 
@@ -12142,6 +12339,211 @@ mod tests {
         assert_eq!(cyanogen.flare_color, "89e8b6");
         assert_eq!(cyanogen.light_color, "89e8b6");
         assert_eq!(cyanogen.hit_color, "89e8b6");
+    }
+
+    #[test]
+    fn titan_item_turret_keeps_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name.as_str() == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let titan = registry.get_turret_by_name("titan").unwrap();
+        assert_eq!(titan.kind, TurretBlockKind::ItemTurret);
+        assert!(titan.base.has_items);
+        assert!(titan.base.has_liquids);
+        assert_eq!(titan.shoot_sound, "shootTank");
+        assert_eq!(titan.ammo_per_shot, 4);
+        assert_eq!(titan.max_ammo, 12);
+        assert!(!titan.target_air);
+        assert!(titan.target_ground);
+        assert_eq!(titan.shake, 4.0);
+        assert_eq!(titan.recoil, 1.0);
+        assert_close(titan.reload, 60.0 * 2.3);
+        assert_eq!(titan.shoot_y, 7.0);
+        assert_eq!(titan.rotate_speed, 1.4);
+        assert_eq!(titan.min_warmup, 0.85);
+        assert_eq!(titan.new_target_interval, 40.0);
+        assert_eq!(titan.shoot_warmup_speed, 0.08);
+        assert_eq!(titan.warmup_maintain_time, 120.0);
+        assert!(titan.consume_coolant);
+        assert_eq!(titan.coolant_amount, 30.0 / 60.0);
+        assert_eq!(titan.coolant_multiplier, 3.75);
+        assert_eq!(titan.outline_color, "darkOutline");
+        assert!(titan.drawer.contains("reinforced-"));
+        assert!(titan.drawer.contains("RegionPart(-barrel"));
+        assert!(titan.drawer.contains("RegionPart(-side"));
+        assert_eq!(titan.scaled_health, 250.0);
+        assert_eq!(titan.range, 390.0);
+        assert_eq!(titan.base.size, 4);
+        assert_eq!(titan.base.health, 4 * 4 * 250);
+        assert_eq!(titan.fog_radius, 49.0);
+        assert_eq!(titan.place_overlap_range, 390.0 + 80.0 + 8.0 * 7.0);
+        assert_eq!(
+            titan.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("hydrogen"),
+                amount: 5.0 / 60.0
+            }]
+        );
+        assert_eq!(
+            titan.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 400
+                }
+            ]
+        );
+
+        let thorium = &ammo_for(titan, item_id("thorium")).bullet;
+        assert_eq!(thorium.kind, BulletKind::Artillery);
+        assert_eq!(thorium.speed, 2.5);
+        assert_eq!(thorium.damage, 350.0);
+        assert_eq!(
+            thorium.hit_effect,
+            "MultiEffect(titanExplosion, titanSmoke)"
+        );
+        assert_eq!(thorium.despawn_effect, "none");
+        assert_eq!(thorium.knockback, 2.0);
+        assert_eq!(thorium.lifetime, 140.0);
+        assert_eq!(thorium.width, 17.0);
+        assert_eq!(thorium.height, 19.0);
+        assert_eq!(thorium.splash_damage_radius, 65.0);
+        assert_eq!(thorium.splash_damage, 350.0);
+        assert!(thorium.scaled_splash_damage);
+        assert_eq!(thorium.back_color, "f49e7c");
+        assert_eq!(thorium.hit_color, "f49e7c");
+        assert_eq!(thorium.trail_color, "f49e7c");
+        assert_eq!(thorium.front_color, "white");
+        assert_eq!(thorium.hit_sound, "explosionTitan");
+        assert_eq!(thorium.status, "blasted");
+        assert_eq!(thorium.trail_length, 32);
+        assert_eq!(thorium.trail_width, 3.35);
+        assert_eq!(thorium.trail_sin_scl, 2.5);
+        assert_eq!(thorium.trail_sin_mag, 0.5);
+        assert_eq!(thorium.trail_effect, "none");
+        assert_eq!(thorium.despawn_shake, 7.0);
+        assert_eq!(thorium.shoot_effect, "shootTitan");
+        assert_eq!(thorium.smoke_effect, "shootSmokeTitan");
+        assert_eq!(thorium.trail_interp, "max(slope,0.8)");
+        assert_eq!(thorium.shrink_x, 0.2);
+        assert_eq!(thorium.shrink_y, 0.1);
+        assert_close(thorium.building_damage_multiplier, 0.3);
+
+        let carbide = &ammo_for(titan, item_id("carbide")).bullet;
+        assert_eq!(carbide.kind, BulletKind::Artillery);
+        assert_eq!(carbide.speed, 3.25);
+        assert_eq!(carbide.damage, 700.0);
+        assert_eq!(
+            carbide.hit_effect,
+            "MultiEffect(titanExplosionSmall, titanSmokeSmall)"
+        );
+        assert_eq!(carbide.lifetime, 140.0);
+        assert_eq!(carbide.width, 15.0);
+        assert_eq!(carbide.height, 28.0);
+        assert_eq!(carbide.splash_damage_radius, 36.0);
+        assert_eq!(carbide.splash_damage, 750.0);
+        assert_eq!(carbide.range_change, 10.0 * 8.0);
+        assert_eq!(carbide.reload_multiplier, 0.8);
+        assert!(carbide.scaled_splash_damage);
+        assert_eq!(carbide.hit_sound, "explosionTitan");
+        assert_eq!(carbide.status, "blasted");
+        assert_eq!(carbide.trail_effect, "disperseTrail");
+        assert_eq!(carbide.trail_interval, 2.0);
+        assert!(carbide.trail_rotation);
+        assert_close(carbide.building_damage_multiplier, 0.2);
+        assert_eq!(carbide.frag_life_min, 1.5);
+        assert_eq!(carbide.frag_bullets, 12);
+
+        let carbide_frag = carbide.frag_bullet.as_ref().unwrap();
+        assert_eq!(carbide_frag.kind, BulletKind::Artillery);
+        assert_eq!(carbide_frag.speed, 0.5);
+        assert_eq!(carbide_frag.damage, 50.0);
+        assert_eq!(carbide_frag.despawn_effect, "hitBulletColor");
+        assert_eq!(carbide_frag.width, 8.0);
+        assert_eq!(carbide_frag.height, 12.0);
+        assert_eq!(carbide_frag.lifetime, 50.0);
+        assert_eq!(carbide_frag.knockback, 0.5);
+        assert_eq!(carbide_frag.splash_damage_radius, 22.0);
+        assert_eq!(carbide_frag.splash_damage, 50.0);
+        assert!(carbide_frag.scaled_splash_damage);
+        assert!(carbide_frag.pierce_armor);
+        assert_eq!(carbide_frag.back_color, "ab8ec5");
+        assert_eq!(carbide_frag.hit_color, "ab8ec5");
+        assert_eq!(carbide_frag.front_color, "white");
+        assert_close(carbide_frag.building_damage_multiplier, 0.25);
+        assert_eq!(carbide_frag.shrink_y, 0.3);
+
+        let oxide = &ammo_for(titan, item_id("oxide")).bullet;
+        assert_eq!(oxide.kind, BulletKind::Artillery);
+        assert_eq!(oxide.speed, 2.5);
+        assert_eq!(oxide.damage, 300.0);
+        assert_eq!(
+            oxide.hit_effect,
+            "MultiEffect(titanExplosionLarge, titanSmokeLarge, smokeAoeCloud)"
+        );
+        assert_eq!(oxide.lifetime, 190.0);
+        assert_eq!(oxide.width, 17.0);
+        assert_eq!(oxide.height, 19.0);
+        assert_eq!(oxide.reload_multiplier, 0.7);
+        assert_eq!(oxide.splash_damage_radius, 110.0);
+        assert_eq!(oxide.range_change, 8.0);
+        assert_eq!(oxide.splash_damage, 180.0);
+        assert!(oxide.scaled_splash_damage);
+        assert_eq!(oxide.hit_color, "a0b380");
+        assert_eq!(oxide.front_color, "e4ffd6");
+        assert_eq!(oxide.hit_sound, "explosionTitan");
+        assert_eq!(oxide.trail_effect, "vapor");
+        assert_eq!(oxide.trail_interval, 3.0);
+        assert_close(oxide.building_damage_multiplier, 0.25);
+        assert_eq!(oxide.status, "corroded");
+        assert_eq!(oxide.status_duration, 60.0 * 8.0);
+        assert_eq!(oxide.frag_bullets, 1);
+
+        let oxide_frag = oxide.frag_bullet.as_ref().unwrap();
+        assert_eq!(oxide_frag.kind, BulletKind::Generic);
+        assert_eq!(oxide_frag.damage, 0.0);
+        assert_eq!(oxide_frag.lifetime, 60.0 * 2.5);
+        assert_eq!(oxide_frag.bullet_interval, 20.0);
+        assert_eq!(oxide_frag.hit_effect, "none");
+        assert_eq!(oxide_frag.despawn_effect, "none");
+
+        let oxide_interval = oxide_frag.interval_bullet.as_ref().unwrap();
+        assert_eq!(oxide_interval.kind, BulletKind::Generic);
+        assert_eq!(oxide_interval.splash_damage, 15.0);
+        assert!(oxide_interval.collides_ground);
+        assert!(!oxide_interval.collides_air);
+        assert!(!oxide_interval.collides);
+        assert!(oxide_interval.pierce);
+        assert!(oxide_interval.instant_disappear);
+        assert_eq!(oxide_interval.splash_damage_radius, 90.0);
+        assert_eq!(oxide_interval.building_damage_multiplier, 0.0);
     }
 
     #[test]
