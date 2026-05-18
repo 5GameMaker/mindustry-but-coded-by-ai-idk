@@ -514,6 +514,8 @@ pub struct BulletSpec {
     pub lifetime: f32,
     pub drag: f32,
     pub layer: String,
+    pub sprite: String,
+    pub back_sprite: String,
     pub ammo_multiplier: f32,
     pub reload_multiplier: f32,
     pub range_change: f32,
@@ -535,6 +537,7 @@ pub struct BulletSpec {
     pub colors: Vec<String>,
     pub homing_power: f32,
     pub homing_range: f32,
+    pub velocity_rnd: f32,
     pub point_effect: String,
     pub pierce_effect: String,
     pub line_effect: String,
@@ -601,6 +604,8 @@ pub struct BulletSpec {
     pub trail_effect: String,
     pub trail_interval: f32,
     pub trail_rotation: bool,
+    pub trail_chance: f32,
+    pub rotation_offset: f32,
     pub despawn_shake: f32,
     pub display_ammo_multiplier: bool,
     pub building_damage_multiplier: f32,
@@ -616,6 +621,7 @@ pub struct BulletSpec {
     pub serration_fade_offset: f32,
     pub lightning_length: i32,
     pub lightning_length_rand: i32,
+    pub lightning_cone: f32,
     pub lightning_color: String,
     pub lightning: i32,
     pub lightning_damage: f32,
@@ -638,6 +644,8 @@ impl BulletSpec {
             lifetime: 0.0,
             drag: 0.0,
             layer: String::new(),
+            sprite: String::new(),
+            back_sprite: String::new(),
             ammo_multiplier: 1.0,
             reload_multiplier: 1.0,
             range_change: 0.0,
@@ -659,6 +667,7 @@ impl BulletSpec {
             colors: Vec::new(),
             homing_power: 0.0,
             homing_range: 0.0,
+            velocity_rnd: 0.0,
             point_effect: "none".into(),
             pierce_effect: "hitBulletSmall".into(),
             line_effect: "none".into(),
@@ -725,6 +734,8 @@ impl BulletSpec {
             trail_effect: "missileTrail".into(),
             trail_interval: 0.0,
             trail_rotation: false,
+            trail_chance: 0.0,
+            rotation_offset: 0.0,
             despawn_shake: 0.0,
             display_ammo_multiplier: true,
             building_damage_multiplier: 1.0,
@@ -740,6 +751,7 @@ impl BulletSpec {
             serration_fade_offset: 0.5,
             lightning_length: 5,
             lightning_length_rand: 0,
+            lightning_cone: 360.0,
             lightning_color: String::new(),
             lightning: 0,
             lightning_damage: -1.0,
@@ -6322,6 +6334,131 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.scaled_health = 250.0;
         turret.range = 390.0;
         turret.base.size = 4;
+    });
+
+    registry.register_turret_block("disperse", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("thorium", 50),
+                ("oxide", 150),
+                ("silicon", 200),
+                ("beryllium", 350),
+            ],
+        );
+
+        let disperse_bullet = |speed: f32, damage: f32| {
+            let mut bullet = BulletSpec::new(BulletKind::Basic, speed, damage);
+            bullet.width = 16.0;
+            bullet.height = 16.0;
+            bullet.shrink_y = 0.3;
+            bullet.back_sprite = "large-bomb-back".into();
+            bullet.sprite = "mine-bullet".into();
+            bullet.velocity_rnd = 0.11;
+            bullet.collides_ground = false;
+            bullet.collides_tiles = false;
+            bullet.shoot_effect = "shootBig2".into();
+            bullet.smoke_effect = "shootSmokeDisperse".into();
+            bullet.lifetime = 34.0;
+            bullet.rotation_offset = 90.0;
+            bullet.hit_effect = "hitBulletColor".into();
+            bullet.despawn_effect = "hitBulletColor".into();
+            bullet
+        };
+
+        let mut tungsten = disperse_bullet(8.5, 65.0);
+        tungsten.front_color = "white".into();
+        tungsten.back_color = "sky".into();
+        tungsten.trail_color = "sky".into();
+        tungsten.hit_color = "sky".into();
+        tungsten.trail_chance = 0.44;
+        tungsten.ammo_multiplier = 3.0;
+        tungsten.trail_rotation = true;
+        tungsten.trail_effect = "disperseTrail".into();
+        push_turret_ammo(&mut turret.ammo, items, "tungsten", tungsten);
+
+        let mut thorium = disperse_bullet(9.5, 90.0);
+        thorium.reload_multiplier = 0.85;
+        thorium.range_change = -120.0;
+        thorium.pierce_cap = 2;
+        thorium.velocity_rnd = 0.5;
+        thorium.front_color = "white".into();
+        thorium.back_color = "e89dbd".into();
+        thorium.trail_color = "e89dbd".into();
+        thorium.hit_color = "e89dbd".into();
+        thorium.trail_chance = 0.44;
+        thorium.ammo_multiplier = 1.0;
+        thorium.extra_range_margin = 32.0;
+        thorium.trail_rotation = true;
+        thorium.trail_effect = "disperseTrail".into();
+        push_turret_ammo(&mut turret.ammo, items, "thorium", thorium);
+
+        let mut silicon = disperse_bullet(9.0, 37.0);
+        silicon.homing_power = 0.045;
+        silicon.front_color = "dae1ee".into();
+        silicon.back_color = "siliconAmmoBack".into();
+        silicon.trail_color = "siliconAmmoBack".into();
+        silicon.hit_color = "siliconAmmoBack".into();
+        silicon.ammo_multiplier = 4.0;
+        silicon.trail_length = 7;
+        silicon.extra_range_margin = 32.0;
+        push_turret_ammo(&mut turret.ammo, items, "silicon", silicon);
+
+        let mut surge_interval = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+        surge_interval.collides_ground = false;
+        surge_interval.collides_tiles = false;
+        surge_interval.lightning_length_rand = 4;
+        surge_interval.lightning_length = 2;
+        surge_interval.lightning_cone = 30.0;
+        surge_interval.lightning_damage = 20.0;
+        surge_interval.lightning = 1;
+        surge_interval.hittable = false;
+        surge_interval.collides = false;
+        surge_interval.instant_disappear = true;
+        surge_interval.hit_effect = "none".into();
+        surge_interval.despawn_effect = "none".into();
+
+        let mut surge = disperse_bullet(6.0, 65.0);
+        surge.reload_multiplier = 0.75;
+        surge.range_change = 8.0 * 3.0;
+        surge.lightning = 3;
+        surge.lightning_length = 4;
+        surge.lightning_damage = 18.0;
+        surge.lightning_length_rand = 3;
+        surge.front_color = "white".into();
+        surge.back_color = "surge".into();
+        surge.trail_color = "surge".into();
+        surge.hit_color = "surge".into();
+        surge.trail_chance = 0.44;
+        surge.ammo_multiplier = 3.0;
+        surge.trail_rotation = true;
+        surge.trail_effect = "disperseTrail".into();
+        surge.bullet_interval = 4.0;
+        surge.interval_bullet = Some(Box::new(surge_interval));
+        push_turret_ammo(&mut turret.ammo, items, "surge-alloy", surge);
+
+        turret.reload = 9.0;
+        turret.shoot_y = 15.0;
+        turret.rotate_speed = 5.0;
+        turret.shoot_cone = 30.0;
+        turret.consume_ammo_once = true;
+        turret.shoot_sound = "shootDisperse".into();
+        turret.drawer = "DrawTurret(reinforced-, RegionPart(-side mirror under moveX=1.75 moveY=-0.5), RegionPart(-mid under moveY=-1.5 recoil heatColor=sky@0.9), RegionPart(-blade warmup mirror under moveY=1 moveX=1.5 moveRot=8 heatColor=sky@0.9))".into();
+        turret.shoot_pattern = "ShootAlternate".into();
+        turret.shoot_alternate_spread = 4.7;
+        turret.shoot_shots = 4;
+        turret.shoot_alternate_barrels = 4;
+        turret.target_ground = false;
+        turret.inaccuracy = 8.0;
+        turret.shoot_warmup_speed = 0.08;
+        turret.outline_color = "darkOutline".into();
+        turret.scaled_health = 280.0;
+        turret.range = 310.0;
+        turret.base.size = 4;
+        turret.consume_coolant(20.0 / 60.0);
+        turret.coolant_multiplier = 6.25;
+        turret.limit_range(16.0);
     });
 }
 
@@ -12544,6 +12681,165 @@ mod tests {
         assert!(oxide_interval.instant_disappear);
         assert_eq!(oxide_interval.splash_damage_radius, 90.0);
         assert_eq!(oxide_interval.building_damage_multiplier, 0.0);
+    }
+
+    #[test]
+    fn disperse_item_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let disperse = registry.get_turret_by_name("disperse").unwrap();
+        assert_eq!(disperse.kind, TurretBlockKind::ItemTurret);
+        assert!(disperse.base.has_items);
+        assert_eq!(disperse.reload, 9.0);
+        assert_eq!(disperse.shoot_y, 15.0);
+        assert_eq!(disperse.rotate_speed, 5.0);
+        assert_eq!(disperse.shoot_cone, 30.0);
+        assert!(disperse.consume_ammo_once);
+        assert_eq!(disperse.shoot_sound, "shootDisperse");
+        assert_eq!(disperse.shoot_pattern, "ShootAlternate");
+        assert_eq!(disperse.shoot_alternate_spread, 4.7);
+        assert_eq!(disperse.shoot_shots, 4);
+        assert_eq!(disperse.shoot_alternate_barrels, 4);
+        assert!(!disperse.target_ground);
+        assert_eq!(disperse.inaccuracy, 8.0);
+        assert_eq!(disperse.shoot_warmup_speed, 0.08);
+        assert_eq!(disperse.outline_color, "darkOutline");
+        assert!(disperse.drawer.contains("reinforced-"));
+        assert!(disperse.drawer.contains("RegionPart(-side"));
+        assert!(disperse.drawer.contains("RegionPart(-mid"));
+        assert!(disperse.drawer.contains("RegionPart(-blade"));
+        assert_eq!(disperse.scaled_health, 280.0);
+        assert_eq!(disperse.range, 310.0);
+        assert_eq!(disperse.base.size, 4);
+        assert_eq!(disperse.base.health, 4 * 4 * 280);
+        assert!(disperse.consume_coolant);
+        assert_eq!(disperse.coolant_amount, 20.0 / 60.0);
+        assert_eq!(disperse.coolant_multiplier, 6.25);
+        assert_eq!(disperse.fog_radius, 39.0);
+        assert_eq!(disperse.place_overlap_range, 310.0 + 8.0 * 7.0);
+        assert_eq!(
+            disperse.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 350
+                }
+            ]
+        );
+
+        let tungsten = &ammo_for(disperse, item_id("tungsten")).bullet;
+        assert_eq!(tungsten.kind, BulletKind::Basic);
+        assert_eq!(tungsten.speed, 8.5);
+        assert_eq!(tungsten.damage, 65.0);
+        assert_eq!(tungsten.width, 16.0);
+        assert_eq!(tungsten.height, 16.0);
+        assert_eq!(tungsten.shrink_y, 0.3);
+        assert_eq!(tungsten.back_sprite, "large-bomb-back");
+        assert_eq!(tungsten.sprite, "mine-bullet");
+        assert_eq!(tungsten.velocity_rnd, 0.11);
+        assert!(!tungsten.collides_ground);
+        assert!(!tungsten.collides_tiles);
+        assert_eq!(tungsten.shoot_effect, "shootBig2");
+        assert_eq!(tungsten.smoke_effect, "shootSmokeDisperse");
+        assert_eq!(tungsten.front_color, "white");
+        assert_eq!(tungsten.back_color, "sky");
+        assert_eq!(tungsten.trail_color, "sky");
+        assert_eq!(tungsten.hit_color, "sky");
+        assert_eq!(tungsten.trail_chance, 0.44);
+        assert_eq!(tungsten.ammo_multiplier, 3.0);
+        assert_eq!(tungsten.rotation_offset, 90.0);
+        assert!(tungsten.trail_rotation);
+        assert_eq!(tungsten.trail_effect, "disperseTrail");
+        assert_eq!(tungsten.hit_effect, "hitBulletColor");
+        assert_eq!(tungsten.despawn_effect, "hitBulletColor");
+        assert_close(tungsten.lifetime, (310.0 + 16.0 + 10.0) / 8.5);
+
+        let thorium = &ammo_for(disperse, item_id("thorium")).bullet;
+        assert_eq!(thorium.kind, BulletKind::Basic);
+        assert_eq!(thorium.damage, 90.0);
+        assert_eq!(thorium.reload_multiplier, 0.85);
+        assert_eq!(thorium.range_change, -120.0);
+        assert_eq!(thorium.speed, 9.5);
+        assert_eq!(thorium.pierce_cap, 2);
+        assert_eq!(thorium.velocity_rnd, 0.5);
+        assert_eq!(thorium.back_color, "e89dbd");
+        assert_eq!(thorium.trail_color, "e89dbd");
+        assert_eq!(thorium.hit_color, "e89dbd");
+        assert_eq!(thorium.extra_range_margin, 32.0);
+        assert!(thorium.trail_rotation);
+        assert_eq!(thorium.trail_effect, "disperseTrail");
+        assert_close(thorium.lifetime, (310.0 - 120.0 + 16.0 + 32.0 + 10.0) / 9.5);
+
+        let silicon = &ammo_for(disperse, item_id("silicon")).bullet;
+        assert_eq!(silicon.kind, BulletKind::Basic);
+        assert_eq!(silicon.damage, 37.0);
+        assert_eq!(silicon.homing_power, 0.045);
+        assert_eq!(silicon.speed, 9.0);
+        assert_eq!(silicon.ammo_multiplier, 4.0);
+        assert_eq!(silicon.trail_length, 7);
+        assert_eq!(silicon.extra_range_margin, 32.0);
+        assert_eq!(silicon.front_color, "dae1ee");
+        assert_eq!(silicon.back_color, "siliconAmmoBack");
+        assert_eq!(silicon.trail_color, "siliconAmmoBack");
+        assert_eq!(silicon.hit_color, "siliconAmmoBack");
+        assert_close(silicon.lifetime, (310.0 + 16.0 + 32.0 + 10.0) / 9.0);
+
+        let surge = &ammo_for(disperse, item_id("surge-alloy")).bullet;
+        assert_eq!(surge.kind, BulletKind::Basic);
+        assert_eq!(surge.reload_multiplier, 0.75);
+        assert_eq!(surge.damage, 65.0);
+        assert_eq!(surge.range_change, 8.0 * 3.0);
+        assert_eq!(surge.lightning, 3);
+        assert_eq!(surge.lightning_length, 4);
+        assert_eq!(surge.lightning_damage, 18.0);
+        assert_eq!(surge.lightning_length_rand, 3);
+        assert_eq!(surge.speed, 6.0);
+        assert_eq!(surge.back_color, "surge");
+        assert_eq!(surge.trail_color, "surge");
+        assert_eq!(surge.hit_color, "surge");
+        assert_eq!(surge.trail_chance, 0.44);
+        assert_eq!(surge.ammo_multiplier, 3.0);
+        assert!(surge.trail_rotation);
+        assert_eq!(surge.trail_effect, "disperseTrail");
+        assert_eq!(surge.bullet_interval, 4.0);
+        assert_close(surge.lifetime, (310.0 + 24.0 + 16.0 + 10.0) / 6.0);
+
+        let interval = surge.interval_bullet.as_ref().unwrap();
+        assert_eq!(interval.kind, BulletKind::Generic);
+        assert!(!interval.collides_ground);
+        assert!(!interval.collides_tiles);
+        assert!(!interval.collides);
+        assert!(!interval.hittable);
+        assert_eq!(interval.lightning_length_rand, 4);
+        assert_eq!(interval.lightning_length, 2);
+        assert_eq!(interval.lightning_cone, 30.0);
+        assert_eq!(interval.lightning_damage, 20.0);
+        assert_eq!(interval.lightning, 1);
+        assert!(interval.instant_disappear);
+        assert_eq!(interval.hit_effect, "none");
+        assert_eq!(interval.despawn_effect, "none");
     }
 
     #[test]
