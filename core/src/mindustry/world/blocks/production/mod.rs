@@ -425,6 +425,280 @@ pub fn solid_pump_update(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WallCrafterState {
+    pub time: f32,
+    pub warmup: f32,
+    pub total_time: f32,
+    pub last_efficiency: f32,
+}
+
+impl Default for WallCrafterState {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            warmup: 0.0,
+            total_time: 0.0,
+            last_efficiency: 0.0,
+        }
+    }
+}
+
+pub fn wall_crafter_side_positions(
+    tile_x: i32,
+    tile_y: i32,
+    size: i32,
+    rotation: i32,
+) -> Vec<(i32, i32)> {
+    let corner_x = tile_x - (size - 1) / 2;
+    let corner_y = tile_y - (size - 1) / 2;
+    (0..size)
+        .map(|i| match rotation.rem_euclid(4) {
+            0 => (corner_x + size, corner_y + i),
+            1 => (corner_x + i, corner_y + size),
+            2 => (corner_x - 1, corner_y + i),
+            _ => (corner_x + i, corner_y - 1),
+        })
+        .collect()
+}
+
+pub fn wall_crafter_efficiency(wall_attributes: &[f32]) -> f32 {
+    wall_attributes.iter().copied().filter(|v| *v > 0.0).sum()
+}
+
+pub fn wall_crafter_should_consume(output_amount: i32, item_capacity: i32) -> bool {
+    output_amount < item_capacity
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WallCrafterUpdate {
+    pub produced: bool,
+    pub time: f32,
+    pub warmup: f32,
+    pub total_time: f32,
+    pub last_efficiency: f32,
+}
+
+pub fn wall_crafter_update(
+    state: &mut WallCrafterState,
+    output_amount: i32,
+    item_capacity: i32,
+    wall_efficiency: f32,
+    efficiency: f32,
+    optional_efficiency: f32,
+    has_liquid_booster: bool,
+    liquid_boost_intensity: f32,
+    item_boost_valid: bool,
+    item_boost_intensity: f32,
+    drill_time: f32,
+    time_scale: f32,
+    edelta: f32,
+) -> WallCrafterUpdate {
+    let should_consume = wall_crafter_should_consume(output_amount, item_capacity);
+    state.warmup = approach_delta(
+        state.warmup,
+        if efficiency > 0.0 { 1.0 } else { 0.0 },
+        1.0 / 40.0,
+    );
+
+    let eff = wall_efficiency
+        * lerp(
+            1.0,
+            liquid_boost_intensity,
+            if has_liquid_booster {
+                optional_efficiency
+            } else {
+                0.0
+            },
+        )
+        * if item_boost_valid {
+            item_boost_intensity
+        } else {
+            1.0
+        };
+    state.last_efficiency = eff * time_scale * efficiency;
+
+    let mut produced = false;
+    if should_consume {
+        state.time += edelta * eff;
+        if state.time >= drill_time {
+            produced = true;
+            state.time %= drill_time;
+        }
+    }
+
+    state.total_time += edelta * state.warmup * if eff <= 0.0 { 0.0 } else { 1.0 };
+
+    WallCrafterUpdate {
+        produced,
+        time: state.time,
+        warmup: state.warmup,
+        total_time: state.total_time,
+        last_efficiency: state.last_efficiency,
+    }
+}
+
+pub fn write_wall_crafter_state<W: Write>(
+    write: &mut W,
+    state: &WallCrafterState,
+) -> io::Result<()> {
+    write_f32(write, state.time)?;
+    write_f32(write, state.warmup)
+}
+
+pub fn read_wall_crafter_state<R: Read>(
+    read: &mut R,
+    revision: u8,
+) -> io::Result<WallCrafterState> {
+    if revision >= 1 {
+        Ok(WallCrafterState {
+            time: read_f32(read)?,
+            warmup: read_f32(read)?,
+            ..Default::default()
+        })
+    } else {
+        Ok(WallCrafterState::default())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeamDrillTarget {
+    pub item: ContentId,
+    pub hardness: i32,
+    pub blocked: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeamDrillFacing {
+    pub facing_amount: i32,
+    pub last_item: Option<ContentId>,
+}
+
+pub fn beam_drill_resolve_facing(
+    targets: &[Option<BeamDrillTarget>],
+    tier: i32,
+) -> BeamDrillFacing {
+    let mut facing_amount = 0;
+    let mut last_item = None;
+    let mut multiple = false;
+
+    for target in targets.iter().flatten() {
+        if target.hardness <= tier && !target.blocked {
+            facing_amount += 1;
+            if last_item.is_some() && last_item != Some(target.item) {
+                multiple = true;
+            }
+            last_item = Some(target.item);
+        }
+    }
+
+    BeamDrillFacing {
+        facing_amount,
+        last_item: if multiple { None } else { last_item },
+    }
+}
+
+pub fn beam_drill_should_consume(
+    items_total: i32,
+    item_capacity: i32,
+    facing_amount: i32,
+    enabled: bool,
+) -> bool {
+    items_total < item_capacity && facing_amount > 0 && enabled
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeamDrillState {
+    pub time: f32,
+    pub warmup: f32,
+    pub boost_warmup: f32,
+    pub last_drill_speed: f32,
+    pub facing_amount: i32,
+    pub last_item: Option<ContentId>,
+}
+
+impl Default for BeamDrillState {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            warmup: 0.0,
+            boost_warmup: 0.0,
+            last_drill_speed: 0.0,
+            facing_amount: 0,
+            last_item: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeamDrillUpdate {
+    pub produced: i32,
+    pub time: f32,
+    pub warmup: f32,
+    pub boost_warmup: f32,
+    pub last_drill_speed: f32,
+}
+
+pub fn beam_drill_update(
+    state: &mut BeamDrillState,
+    items_total: i32,
+    item_capacity: i32,
+    base_drill_time: f32,
+    last_item_multiplier: f32,
+    optional_boost_intensity: f32,
+    optional_efficiency: f32,
+    efficiency: f32,
+    time_scale: f32,
+    edelta: f32,
+) -> BeamDrillUpdate {
+    state.warmup = approach_delta(
+        state.warmup,
+        if efficiency > 0.0 { 1.0 } else { 0.0 },
+        1.0 / 60.0,
+    );
+
+    let multiplier = lerp(1.0, optional_boost_intensity, optional_efficiency);
+    let drill_time = base_drill_time / last_item_multiplier;
+    state.boost_warmup = lerp_delta(state.boost_warmup, optional_efficiency, 0.1);
+    state.last_drill_speed =
+        (state.facing_amount as f32 * multiplier * time_scale) / drill_time * efficiency;
+
+    state.time += edelta * multiplier;
+
+    let mut produced = 0;
+    if state.time >= drill_time {
+        produced = (item_capacity - items_total)
+            .max(0)
+            .min(state.facing_amount);
+        state.time %= drill_time;
+    }
+
+    BeamDrillUpdate {
+        produced,
+        time: state.time,
+        warmup: state.warmup,
+        boost_warmup: state.boost_warmup,
+        last_drill_speed: state.last_drill_speed,
+    }
+}
+
+pub fn write_beam_drill_state<W: Write>(write: &mut W, state: &BeamDrillState) -> io::Result<()> {
+    write_f32(write, state.time)?;
+    write_f32(write, state.warmup)
+}
+
+pub fn read_beam_drill_state<R: Read>(read: &mut R, revision: u8) -> io::Result<BeamDrillState> {
+    if revision >= 1 {
+        Ok(BeamDrillState {
+            time: read_f32(read)?,
+            warmup: read_f32(read)?,
+            ..Default::default()
+        })
+    } else {
+        Ok(BeamDrillState::default())
+    }
+}
+
 fn lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * progress
 }
@@ -627,5 +901,108 @@ mod tests {
         assert_eq!(idle.pumped, 0.0);
         assert_eq!(idle.last_pump, 0.0);
         assert_eq!(idle.warmup, 0.49);
+    }
+
+    #[test]
+    fn wall_crafter_side_scan_update_and_roundtrip_follow_upstream_shell() {
+        assert_eq!(
+            wall_crafter_side_positions(10, 20, 2, 0),
+            vec![(12, 20), (12, 21)]
+        );
+        assert_eq!(
+            wall_crafter_side_positions(10, 20, 2, 3),
+            vec![(10, 19), (11, 19)]
+        );
+        assert_eq!(wall_crafter_efficiency(&[0.0, 1.0, 0.5, -1.0]), 1.5);
+        assert!(wall_crafter_should_consume(9, 10));
+        assert!(!wall_crafter_should_consume(10, 10));
+
+        let mut state = WallCrafterState::default();
+        let update = wall_crafter_update(
+            &mut state, 0, 10, 2.0, 1.0, 0.5, true, 1.6, true, 1.5, 150.0, 1.0, 40.0,
+        );
+        assert!(update.produced);
+        assert_eq!(state.warmup, 0.025);
+        assert!((state.last_efficiency - 3.9).abs() < 0.0001);
+        assert!((state.time - 6.0).abs() < 0.0001);
+
+        let mut bytes = Vec::new();
+        write_wall_crafter_state(&mut bytes, &state).unwrap();
+        let restored = read_wall_crafter_state(&mut bytes.as_slice(), 1).unwrap();
+        assert_eq!(restored.time, state.time);
+        assert_eq!(restored.warmup, state.warmup);
+        assert_eq!(
+            read_wall_crafter_state(&mut [].as_slice(), 0).unwrap(),
+            WallCrafterState::default()
+        );
+    }
+
+    #[test]
+    fn beam_drill_facing_update_and_roundtrip_follow_upstream_shell() {
+        let copper = BeamDrillTarget {
+            item: 1,
+            hardness: 1,
+            blocked: false,
+        };
+        let lead = BeamDrillTarget {
+            item: 2,
+            hardness: 1,
+            blocked: false,
+        };
+        let blocked = BeamDrillTarget {
+            item: 3,
+            hardness: 1,
+            blocked: true,
+        };
+        assert_eq!(
+            beam_drill_resolve_facing(&[Some(copper), None, Some(blocked)], 1),
+            BeamDrillFacing {
+                facing_amount: 1,
+                last_item: Some(1)
+            }
+        );
+        assert_eq!(
+            beam_drill_resolve_facing(&[Some(copper), Some(lead)], 1),
+            BeamDrillFacing {
+                facing_amount: 2,
+                last_item: None
+            }
+        );
+        assert_eq!(
+            beam_drill_resolve_facing(
+                &[Some(BeamDrillTarget {
+                    item: 4,
+                    hardness: 3,
+                    blocked: false
+                })],
+                2
+            ),
+            BeamDrillFacing {
+                facing_amount: 0,
+                last_item: None
+            }
+        );
+        assert!(beam_drill_should_consume(9, 10, 1, true));
+        assert!(!beam_drill_should_consume(10, 10, 1, true));
+        assert!(!beam_drill_should_consume(0, 10, 0, true));
+
+        let mut state = BeamDrillState {
+            facing_amount: 3,
+            last_item: Some(1),
+            ..Default::default()
+        };
+        let update = beam_drill_update(&mut state, 8, 10, 200.0, 2.0, 2.5, 0.5, 1.0, 1.0, 100.0);
+        assert_eq!(update.produced, 2);
+        assert_eq!(state.time, 75.0);
+        assert_eq!(state.warmup, 1.0 / 60.0);
+        assert_eq!(state.boost_warmup, 0.05);
+        assert_eq!(state.last_drill_speed, 0.0525);
+
+        let mut bytes = Vec::new();
+        write_beam_drill_state(&mut bytes, &state).unwrap();
+        let restored = read_beam_drill_state(&mut bytes.as_slice(), 1).unwrap();
+        assert_eq!(restored.time, state.time);
+        assert_eq!(restored.warmup, state.warmup);
+        assert_eq!(restored.facing_amount, 0);
     }
 }
