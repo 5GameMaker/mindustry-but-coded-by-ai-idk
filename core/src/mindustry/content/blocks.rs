@@ -521,6 +521,7 @@ pub struct BulletSpec {
     pub shoot_effect: String,
     pub smoke_effect: String,
     pub charge_effect: String,
+    pub bullet_shoot_sound: String,
     pub hit_color: String,
     pub back_color: String,
     pub trail_color: String,
@@ -555,6 +556,10 @@ pub struct BulletSpec {
     pub flak_interval: f32,
     pub frag_bullets: i32,
     pub frag_bullet: Option<Box<BulletSpec>>,
+    pub frag_random_spread: f32,
+    pub frag_spread: f32,
+    pub frag_velocity_min: f32,
+    pub frag_velocity_max: f32,
     pub collides_ground: bool,
     pub collides_air: bool,
     pub collides_tiles: bool,
@@ -579,6 +584,8 @@ pub struct BulletSpec {
     pub status_duration: f32,
     pub make_fire: bool,
     pub trail_effect: String,
+    pub trail_interval: f32,
+    pub trail_rotation: bool,
     pub display_ammo_multiplier: bool,
     pub building_damage_multiplier: f32,
     pub shield_damage_multiplier: f32,
@@ -624,6 +631,7 @@ impl BulletSpec {
             shoot_effect: "none".into(),
             smoke_effect: "shootSmallSmoke".into(),
             charge_effect: "none".into(),
+            bullet_shoot_sound: "none".into(),
             hit_color: String::new(),
             back_color: String::new(),
             trail_color: String::new(),
@@ -658,6 +666,10 @@ impl BulletSpec {
             flak_interval: 0.0,
             frag_bullets: 0,
             frag_bullet: None,
+            frag_random_spread: 360.0,
+            frag_spread: 0.0,
+            frag_velocity_min: 0.2,
+            frag_velocity_max: 1.0,
             collides_ground: true,
             collides_air: true,
             collides_tiles: true,
@@ -682,6 +694,8 @@ impl BulletSpec {
             status_duration: 60.0 * 8.0,
             make_fire: false,
             trail_effect: "missileTrail".into(),
+            trail_interval: 0.0,
+            trail_rotation: false,
             display_ammo_multiplier: true,
             building_damage_multiplier: 1.0,
             shield_damage_multiplier: 1.0,
@@ -828,6 +842,8 @@ pub struct TurretBlockData {
     pub status: String,
     pub status_duration: f32,
     pub drawer: String,
+    pub outline_color: String,
+    pub build_time: f32,
     pub liquid_capacity: f32,
     pub outlined_icon: bool,
     pub draw_liquid_light: bool,
@@ -946,6 +962,8 @@ impl TurretBlockData {
             status: "none".into(),
             status_duration: 300.0,
             drawer: "DrawTurret".into(),
+            outline_color: "darkOutline".into(),
+            build_time: -1.0,
             liquid_capacity: 20.0,
             outlined_icon: true,
             draw_liquid_light: false,
@@ -5759,6 +5777,131 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.liquid_capacity = 60.0;
         turret.consume_coolant(0.5);
         turret.consume_power = 17.0;
+    });
+
+    registry.register_turret_block("breach", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("beryllium", 150), ("silicon", 150), ("graphite", 125)],
+        );
+
+        let shoot_effect = "MultiEffect(shootBigColor, colorSparkBig)";
+
+        let mut beryllium = basic_bullet(7.5, 85.0);
+        beryllium.width = 12.0;
+        beryllium.hit_size = 7.0;
+        beryllium.height = 20.0;
+        beryllium.shoot_effect = shoot_effect.into();
+        beryllium.smoke_effect = "shootBigSmoke".into();
+        beryllium.ammo_multiplier = 1.0;
+        beryllium.pierce_cap = 2;
+        beryllium.pierce = true;
+        beryllium.pierce_building = true;
+        beryllium.hit_color = "berylShot".into();
+        beryllium.back_color = "berylShot".into();
+        beryllium.trail_color = "berylShot".into();
+        beryllium.front_color = "white".into();
+        beryllium.trail_width = 2.1;
+        beryllium.trail_length = 10;
+        beryllium.hit_effect = "hitBulletColor".into();
+        beryllium.despawn_effect = "hitBulletColor".into();
+        beryllium.building_damage_multiplier = 0.3;
+        push_turret_ammo(&mut turret.ammo, items, "beryllium", beryllium);
+
+        let mut tungsten = basic_bullet(8.0, 95.0);
+        tungsten.width = 13.0;
+        tungsten.height = 19.0;
+        tungsten.hit_size = 7.0;
+        tungsten.shoot_effect = shoot_effect.into();
+        tungsten.smoke_effect = "shootBigSmoke".into();
+        tungsten.ammo_multiplier = 2.0;
+        tungsten.reload_multiplier = 1.0;
+        tungsten.pierce_cap = 4;
+        tungsten.pierce = true;
+        tungsten.pierce_building = true;
+        tungsten.hit_color = "tungstenShot".into();
+        tungsten.back_color = "tungstenShot".into();
+        tungsten.trail_color = "tungstenShot".into();
+        tungsten.front_color = "white".into();
+        tungsten.trail_width = 2.2;
+        tungsten.trail_length = 11;
+        tungsten.hit_effect = "hitBulletColor".into();
+        tungsten.despawn_effect = "hitBulletColor".into();
+        tungsten.range_change = 40.0;
+        tungsten.building_damage_multiplier = 0.3;
+        push_turret_ammo(&mut turret.ammo, items, "tungsten", tungsten);
+
+        let mut carbide_frag = basic_bullet(8.1, 227.0);
+        carbide_frag.lifetime = 8.0;
+        carbide_frag.width = 11.0;
+        carbide_frag.height = 14.0;
+        carbide_frag.hit_size = 7.0;
+        carbide_frag.shoot_effect = shoot_effect.into();
+        carbide_frag.ammo_multiplier = 1.0;
+        carbide_frag.reload_multiplier = 1.0;
+        carbide_frag.pierce_cap = 2;
+        carbide_frag.pierce = true;
+        carbide_frag.pierce_building = true;
+        carbide_frag.hit_color = "ab8ec5".into();
+        carbide_frag.back_color = "ab8ec5".into();
+        carbide_frag.trail_color = "ab8ec5".into();
+        carbide_frag.front_color = "white".into();
+        carbide_frag.trail_width = 1.8;
+        carbide_frag.trail_length = 11;
+        carbide_frag.hit_effect = "hitBulletColor".into();
+        carbide_frag.despawn_effect = "hitBulletColor".into();
+        carbide_frag.building_damage_multiplier = 0.2;
+
+        let mut carbide = basic_bullet(12.0, 325.0 / 0.75);
+        carbide.width = 15.0;
+        carbide.height = 21.0;
+        carbide.hit_size = 7.0;
+        carbide.shoot_effect = shoot_effect.into();
+        carbide.smoke_effect = "shootBigSmoke".into();
+        carbide.ammo_multiplier = 2.0;
+        carbide.reload_multiplier = 0.2;
+        carbide.hit_color = "ab8ec5".into();
+        carbide.back_color = "ab8ec5".into();
+        carbide.trail_color = "ab8ec5".into();
+        carbide.front_color = "white".into();
+        carbide.trail_width = 2.2;
+        carbide.trail_length = 11;
+        carbide.trail_effect = "disperseTrail".into();
+        carbide.trail_interval = 2.0;
+        carbide.hit_effect = "hitBulletColor".into();
+        carbide.despawn_effect = "hitBulletColor".into();
+        carbide.range_change = 7.0 * 8.0;
+        carbide.building_damage_multiplier = 0.3;
+        carbide.trail_rotation = true;
+        carbide.bullet_shoot_sound = "shootBreachCarbide".into();
+        carbide.frag_bullets = 3;
+        carbide.frag_random_spread = 0.0;
+        carbide.frag_spread = 25.0;
+        carbide.frag_velocity_min = 1.0;
+        carbide.frag_bullet = Some(Box::new(carbide_frag));
+        push_turret_ammo(&mut turret.ammo, items, "carbide", carbide);
+
+        turret.coolant_multiplier = 15.0;
+        turret.shoot_sound = "shootBreach".into();
+        turret.target_under_blocks = false;
+        turret.shake = 1.0;
+        turret.ammo_per_shot = 2;
+        turret.drawer = "DrawTurret(reinforced-)".into();
+        turret.shoot_y = -2.0;
+        turret.outline_color = "darkOutline".into();
+        turret.base.size = 3;
+        turret.base.env_enabled |= Env::SPACE;
+        turret.reload = 40.0;
+        turret.recoil = 2.0;
+        turret.range = 190.0;
+        turret.shoot_cone = 3.0;
+        turret.scaled_health = 180.0;
+        turret.rotate_speed = 1.5;
+        turret.research_cost_multiplier = 0.05;
+        turret.build_time = 60.0 * 9.0;
+        turret.consume_coolant(15.0 / 60.0);
+        turret.limit_range(12.0);
     });
 }
 
@@ -11382,6 +11525,163 @@ mod tests {
         assert!(!laser.absorbable);
         assert_eq!(laser.hit_size, 4.0);
         assert_close(laser.width, 9.0);
+    }
+
+    #[test]
+    fn breach_item_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let breach = registry.get_turret_by_name("breach").unwrap();
+        assert_eq!(breach.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(breach.coolant_multiplier, 15.0);
+        assert_eq!(breach.shoot_sound, "shootBreach");
+        assert!(!breach.target_under_blocks);
+        assert_eq!(breach.shake, 1.0);
+        assert_eq!(breach.ammo_per_shot, 2);
+        assert_eq!(breach.drawer, "DrawTurret(reinforced-)");
+        assert_eq!(breach.shoot_y, -2.0);
+        assert_eq!(breach.outline_color, "darkOutline");
+        assert_eq!(breach.base.size, 3);
+        assert_ne!(breach.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(breach.reload, 40.0);
+        assert_eq!(breach.recoil, 2.0);
+        assert_eq!(breach.range, 190.0);
+        assert_eq!(breach.shoot_cone, 3.0);
+        assert_eq!(breach.scaled_health, 180.0);
+        assert_eq!(breach.base.health, 3 * 3 * 180);
+        assert_eq!(breach.rotate_speed, 1.5);
+        assert_eq!(breach.research_cost_multiplier, 0.05);
+        assert_eq!(breach.build_time, 60.0 * 9.0);
+        assert!(breach.consume_coolant);
+        assert_close(breach.coolant_amount, 15.0 / 60.0);
+        assert_eq!(breach.fog_radius, 24.0);
+        assert_eq!(breach.place_overlap_range, 190.0 + 7.0 * 8.0 + 8.0 * 7.0);
+        assert_eq!(
+            breach.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 125
+                }
+            ]
+        );
+
+        let beryllium = &ammo_for(breach, item_id("beryllium")).bullet;
+        assert_eq!(beryllium.kind, BulletKind::Basic);
+        assert_eq!(beryllium.speed, 7.5);
+        assert_eq!(beryllium.damage, 85.0);
+        assert_eq!(beryllium.width, 12.0);
+        assert_eq!(beryllium.hit_size, 7.0);
+        assert_eq!(beryllium.height, 20.0);
+        assert_eq!(
+            beryllium.shoot_effect,
+            "MultiEffect(shootBigColor, colorSparkBig)"
+        );
+        assert_eq!(beryllium.smoke_effect, "shootBigSmoke");
+        assert_eq!(beryllium.ammo_multiplier, 1.0);
+        assert_eq!(beryllium.pierce_cap, 2);
+        assert!(beryllium.pierce);
+        assert!(beryllium.pierce_building);
+        assert_eq!(beryllium.front_color, "white");
+        assert_eq!(beryllium.back_color, "berylShot");
+        assert_eq!(beryllium.hit_color, "berylShot");
+        assert_eq!(beryllium.trail_color, "berylShot");
+        assert_eq!(beryllium.trail_width, 2.1);
+        assert_eq!(beryllium.trail_length, 10);
+        assert_eq!(beryllium.hit_effect, "hitBulletColor");
+        assert_eq!(beryllium.despawn_effect, "hitBulletColor");
+        assert_close(beryllium.building_damage_multiplier, 0.3);
+        assert_close(beryllium.lifetime, (190.0 + 12.0 + 10.0) / 7.5);
+
+        let tungsten = &ammo_for(breach, item_id("tungsten")).bullet;
+        assert_eq!(tungsten.kind, BulletKind::Basic);
+        assert_eq!(tungsten.speed, 8.0);
+        assert_eq!(tungsten.damage, 95.0);
+        assert_eq!(tungsten.width, 13.0);
+        assert_eq!(tungsten.height, 19.0);
+        assert_eq!(tungsten.hit_size, 7.0);
+        assert_eq!(tungsten.ammo_multiplier, 2.0);
+        assert_eq!(tungsten.reload_multiplier, 1.0);
+        assert_eq!(tungsten.pierce_cap, 4);
+        assert!(tungsten.pierce);
+        assert!(tungsten.pierce_building);
+        assert_eq!(tungsten.front_color, "white");
+        assert_eq!(tungsten.back_color, "tungstenShot");
+        assert_eq!(tungsten.trail_width, 2.2);
+        assert_eq!(tungsten.trail_length, 11);
+        assert_eq!(tungsten.range_change, 40.0);
+        assert_close(tungsten.building_damage_multiplier, 0.3);
+        assert_close(tungsten.lifetime, (190.0 + 40.0 + 12.0 + 10.0) / 8.0);
+
+        let carbide = &ammo_for(breach, item_id("carbide")).bullet;
+        assert_eq!(carbide.kind, BulletKind::Basic);
+        assert_eq!(carbide.speed, 12.0);
+        assert_close(carbide.damage, 325.0 / 0.75);
+        assert_eq!(carbide.width, 15.0);
+        assert_eq!(carbide.height, 21.0);
+        assert_eq!(carbide.hit_size, 7.0);
+        assert_eq!(carbide.ammo_multiplier, 2.0);
+        assert_eq!(carbide.reload_multiplier, 0.2);
+        assert_eq!(carbide.front_color, "white");
+        assert_eq!(carbide.back_color, "ab8ec5");
+        assert_eq!(carbide.trail_width, 2.2);
+        assert_eq!(carbide.trail_length, 11);
+        assert_eq!(carbide.trail_effect, "disperseTrail");
+        assert_eq!(carbide.trail_interval, 2.0);
+        assert_eq!(carbide.hit_effect, "hitBulletColor");
+        assert_eq!(carbide.despawn_effect, "hitBulletColor");
+        assert_eq!(carbide.range_change, 7.0 * 8.0);
+        assert_close(carbide.building_damage_multiplier, 0.3);
+        assert!(carbide.trail_rotation);
+        assert_eq!(carbide.bullet_shoot_sound, "shootBreachCarbide");
+        assert_eq!(carbide.frag_bullets, 3);
+        assert_eq!(carbide.frag_random_spread, 0.0);
+        assert_eq!(carbide.frag_spread, 25.0);
+        assert_eq!(carbide.frag_velocity_min, 1.0);
+        assert_close(carbide.lifetime, (190.0 + 7.0 * 8.0 + 12.0 + 10.0) / 12.0);
+
+        let frag = carbide.frag_bullet.as_ref().unwrap();
+        assert_eq!(frag.kind, BulletKind::Basic);
+        assert_eq!(frag.speed, 8.1);
+        assert_eq!(frag.damage, 227.0);
+        assert_eq!(frag.lifetime, 8.0);
+        assert_eq!(frag.width, 11.0);
+        assert_eq!(frag.height, 14.0);
+        assert_eq!(frag.hit_size, 7.0);
+        assert_eq!(
+            frag.shoot_effect,
+            "MultiEffect(shootBigColor, colorSparkBig)"
+        );
+        assert_eq!(frag.ammo_multiplier, 1.0);
+        assert_eq!(frag.reload_multiplier, 1.0);
+        assert_eq!(frag.pierce_cap, 2);
+        assert!(frag.pierce);
+        assert!(frag.pierce_building);
+        assert_eq!(frag.front_color, "white");
+        assert_eq!(frag.back_color, "ab8ec5");
+        assert_eq!(frag.trail_width, 1.8);
+        assert_eq!(frag.trail_length, 11);
+        assert_eq!(frag.hit_effect, "hitBulletColor");
+        assert_eq!(frag.despawn_effect, "hitBulletColor");
+        assert_close(frag.building_damage_multiplier, 0.2);
     }
 
     #[test]
