@@ -491,6 +491,7 @@ pub enum BulletKind {
     Missile,
     Flak,
     Artillery,
+    Shrapnel,
     Liquid,
     Laser,
     Lightning,
@@ -521,6 +522,8 @@ pub struct BulletSpec {
     pub back_color: String,
     pub trail_color: String,
     pub front_color: String,
+    pub from_color: String,
+    pub to_color: String,
     pub light_color: String,
     pub colors: Vec<String>,
     pub homing_power: f32,
@@ -551,6 +554,13 @@ pub struct BulletSpec {
     pub shield_damage_multiplier: f32,
     pub armor_multiplier: f32,
     pub length: f32,
+    pub hit_large: bool,
+    pub serrations: i32,
+    pub serration_len_scl: f32,
+    pub serration_width: f32,
+    pub serration_spacing: f32,
+    pub serration_space_offset: f32,
+    pub serration_fade_offset: f32,
     pub lightning_length: i32,
     pub lightning_length_rand: i32,
     pub lightning_color: String,
@@ -588,6 +598,8 @@ impl BulletSpec {
             back_color: String::new(),
             trail_color: String::new(),
             front_color: String::new(),
+            from_color: "white".into(),
+            to_color: String::new(),
             light_color: "powerLight".into(),
             colors: Vec::new(),
             homing_power: 0.0,
@@ -618,6 +630,13 @@ impl BulletSpec {
             shield_damage_multiplier: 1.0,
             armor_multiplier: 1.0,
             length: 0.0,
+            hit_large: false,
+            serrations: 7,
+            serration_len_scl: 10.0,
+            serration_width: 4.0,
+            serration_spacing: 8.0,
+            serration_space_offset: 80.0,
+            serration_fade_offset: 0.5,
             lightning_length: 5,
             lightning_length_rand: 0,
             lightning_color: String::new(),
@@ -701,6 +720,7 @@ pub struct TurretBlockData {
     pub shoot_first_shot_delay: f32,
     pub shoot_shot_delay: f32,
     pub shoot_barrels: Vec<ShootBarrel>,
+    pub shoot_spread: f32,
     pub shoot_alternate_spread: f32,
     pub shoot_alternate_barrels: i32,
     pub target_air: bool,
@@ -815,6 +835,7 @@ impl TurretBlockData {
             shoot_first_shot_delay: 0.0,
             shoot_shot_delay: 0.0,
             shoot_barrels: Vec::new(),
+            shoot_spread: 5.0,
             shoot_alternate_spread: 0.0,
             shoot_alternate_barrels: 1,
             target_air: true,
@@ -3796,6 +3817,32 @@ fn missile_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn shrapnel_bullet() -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, 1.0);
+    bullet.length = 100.0;
+    bullet.width = 20.0;
+    bullet.from_color = "white".into();
+    bullet.to_color = "lancerLaser".into();
+    bullet.hit_large = false;
+    bullet.serrations = 7;
+    bullet.serration_len_scl = 10.0;
+    bullet.serration_width = 4.0;
+    bullet.serration_spacing = 8.0;
+    bullet.serration_space_offset = 80.0;
+    bullet.serration_fade_offset = 0.5;
+    bullet.hit_effect = "hitLancer".into();
+    bullet.shoot_effect = "lightningShoot".into();
+    bullet.smoke_effect = "lightningShoot".into();
+    bullet.lifetime = 10.0;
+    bullet.despawn_effect = "none".into();
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet
+}
+
 fn shoot_barrels(specs: &[(f32, f32, f32)]) -> Vec<ShootBarrel> {
     specs
         .iter()
@@ -5106,6 +5153,50 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.base.flags.clear();
         turret.base.flags.push(BlockFlag::Turret);
         turret.base.flags.push(BlockFlag::Extinguisher);
+    });
+
+    registry.register_turret_block("fuse", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("copper", 225), ("graphite", 225), ("thorium", 100)],
+        );
+
+        turret.reload = 35.0;
+        turret.shake = 4.0;
+        turret.range = 90.0;
+        turret.recoil = 5.0;
+        turret.shoot_pattern = "ShootSpread".into();
+        turret.shoot_shots = 3;
+        turret.shoot_spread = 20.0;
+        turret.shoot_cone = 30.0;
+        turret.base.size = 3;
+        turret.base.env_enabled |= Env::SPACE;
+        turret.scaled_health = 220.0;
+        turret.shoot_sound = "shootFuse".into();
+        turret.shoot_sound_volume = 0.9;
+        turret.consume_coolant(0.3);
+
+        let brange = turret.range + 10.0;
+
+        let mut titanium = shrapnel_bullet();
+        titanium.length = brange;
+        titanium.damage = 66.0;
+        titanium.ammo_multiplier = 4.0;
+        titanium.width = 17.0;
+        titanium.reload_multiplier = 1.3;
+        push_turret_ammo(&mut turret.ammo, items, "titanium", titanium);
+
+        let mut thorium = shrapnel_bullet();
+        thorium.length = brange;
+        thorium.damage = 105.0;
+        thorium.ammo_multiplier = 5.0;
+        thorium.to_color = "thoriumPink".into();
+        thorium.shoot_effect = "thoriumShoot".into();
+        thorium.smoke_effect = "thoriumShoot".into();
+        push_turret_ammo(&mut turret.ammo, items, "thorium", thorium);
+
+        turret.deposit_cooldown = 1.0;
     });
 }
 
@@ -9993,6 +10084,91 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn shrapnel_item_turrets_keep_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+
+        let fuse = registry.get_turret_by_name("fuse").unwrap();
+        assert_eq!(fuse.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(fuse.reload, 35.0);
+        assert_eq!(fuse.shake, 4.0);
+        assert_eq!(fuse.range, 90.0);
+        assert_eq!(fuse.recoil, 5.0);
+        assert_eq!(fuse.shoot_pattern, "ShootSpread");
+        assert_eq!(fuse.shoot_shots, 3);
+        assert_eq!(fuse.shoot_spread, 20.0);
+        assert_eq!(fuse.shoot_cone, 30.0);
+        assert_eq!(fuse.base.size, 3);
+        assert_ne!(fuse.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(fuse.scaled_health, 220.0);
+        assert_eq!(fuse.base.health, 3 * 3 * 220);
+        assert_eq!(fuse.shoot_sound, "shootFuse");
+        assert_eq!(fuse.shoot_sound_volume, 0.9);
+        assert!(fuse.consume_coolant);
+        assert_eq!(fuse.coolant_amount, 0.3);
+        assert_eq!(fuse.deposit_cooldown, 1.0);
+        assert_eq!(fuse.fog_radius, 11.0);
+        assert_eq!(fuse.place_overlap_range, 90.0 + 8.0 * 7.0);
+        assert_eq!(
+            fuse.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 225
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 225
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 100
+                }
+            ]
+        );
+
+        let titanium = &ammo_for(fuse, item_id("titanium")).bullet;
+        assert_eq!(titanium.kind, BulletKind::Shrapnel);
+        assert_eq!(titanium.speed, 0.0);
+        assert_eq!(titanium.length, 100.0);
+        assert_eq!(titanium.damage, 66.0);
+        assert_eq!(titanium.ammo_multiplier, 4.0);
+        assert_eq!(titanium.width, 17.0);
+        assert_eq!(titanium.reload_multiplier, 1.3);
+        assert_eq!(titanium.from_color, "white");
+        assert_eq!(titanium.to_color, "lancerLaser");
+        assert!(!titanium.hit_large);
+        assert_eq!(titanium.serrations, 7);
+        assert_eq!(titanium.serration_len_scl, 10.0);
+        assert_eq!(titanium.serration_width, 4.0);
+        assert_eq!(titanium.serration_spacing, 8.0);
+        assert_eq!(titanium.serration_space_offset, 80.0);
+        assert_eq!(titanium.serration_fade_offset, 0.5);
+        assert_eq!(titanium.hit_effect, "hitLancer");
+        assert_eq!(titanium.shoot_effect, "lightningShoot");
+        assert_eq!(titanium.smoke_effect, "lightningShoot");
+        assert_eq!(titanium.lifetime, 10.0);
+        assert_eq!(titanium.despawn_effect, "none");
+        assert!(!titanium.keep_velocity);
+        assert!(!titanium.collides);
+        assert!(titanium.pierce);
+        assert!(!titanium.hittable);
+        assert!(!titanium.absorbable);
+
+        let thorium = &ammo_for(fuse, item_id("thorium")).bullet;
+        assert_eq!(thorium.kind, BulletKind::Shrapnel);
+        assert_eq!(thorium.length, 100.0);
+        assert_eq!(thorium.damage, 105.0);
+        assert_eq!(thorium.ammo_multiplier, 5.0);
+        assert_eq!(thorium.to_color, "thoriumPink");
+        assert_eq!(thorium.shoot_effect, "thoriumShoot");
+        assert_eq!(thorium.smoke_effect, "thoriumShoot");
     }
 
     #[test]
