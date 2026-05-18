@@ -699,8 +699,267 @@ pub fn read_beam_drill_state<R: Read>(read: &mut R, revision: u8) -> io::Result<
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BurstDrillState {
+    pub progress: f32,
+    pub warmup: f32,
+    pub time_drilled: f32,
+    pub last_drill_speed: f32,
+    pub smooth_progress: f32,
+    pub invert_time: f32,
+}
+
+impl Default for BurstDrillState {
+    fn default() -> Self {
+        Self {
+            progress: 0.0,
+            warmup: 0.0,
+            time_drilled: 0.0,
+            last_drill_speed: 0.0,
+            smooth_progress: 0.0,
+            invert_time: 0.0,
+        }
+    }
+}
+
+pub fn burst_drill_time(drill_time: f32, multiplier: f32) -> f32 {
+    drill_time / multiplier
+}
+
+pub fn burst_drill_speed_curve(progress: f32, drill_time: f32) -> f32 {
+    let value = if drill_time == 0.0 {
+        0.0
+    } else {
+        progress / drill_time
+    };
+    value * value
+}
+
+pub fn burst_drill_should_consume(
+    items_total: i32,
+    item_capacity: i32,
+    dominant_items: i32,
+    enabled: bool,
+) -> bool {
+    items_total <= item_capacity - dominant_items && enabled
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BurstDrillUpdate {
+    pub produced: i32,
+    pub progress: f32,
+    pub warmup: f32,
+    pub smooth_progress: f32,
+    pub invert_time: f32,
+    pub last_drill_speed: f32,
+}
+
+pub fn burst_drill_update(
+    state: &mut BurstDrillState,
+    has_dominant_item: bool,
+    items_total: i32,
+    item_capacity: i32,
+    dominant_items: i32,
+    drill_time: f32,
+    efficiency: f32,
+    optional_efficiency: f32,
+    liquid_boost_intensity: f32,
+    delta: f32,
+    inverted_time: f32,
+) -> BurstDrillUpdate {
+    if !has_dominant_item {
+        return BurstDrillUpdate {
+            produced: 0,
+            progress: state.progress,
+            warmup: state.warmup,
+            smooth_progress: state.smooth_progress,
+            invert_time: state.invert_time,
+            last_drill_speed: state.last_drill_speed,
+        };
+    }
+
+    if state.invert_time > 0.0 {
+        state.invert_time -= delta / inverted_time;
+    }
+
+    state.smooth_progress = lerp_delta(
+        state.smooth_progress,
+        state.progress / (drill_time - 20.0),
+        0.1,
+    );
+
+    if items_total <= item_capacity - dominant_items && dominant_items > 0 && efficiency > 0.0 {
+        state.warmup = approach_delta(state.warmup, state.progress / drill_time, 0.01);
+
+        let speed = lerp(1.0, liquid_boost_intensity, optional_efficiency) * efficiency;
+        state.time_drilled += burst_drill_speed_curve(state.progress, drill_time) * speed;
+        state.last_drill_speed = 1.0 / drill_time * speed * dominant_items as f32;
+        state.progress += delta * speed;
+    } else {
+        state.warmup = approach_delta(state.warmup, 0.0, 0.01);
+        state.last_drill_speed = 0.0;
+        return BurstDrillUpdate {
+            produced: 0,
+            progress: state.progress,
+            warmup: state.warmup,
+            smooth_progress: state.smooth_progress,
+            invert_time: state.invert_time,
+            last_drill_speed: state.last_drill_speed,
+        };
+    }
+
+    let mut produced = 0;
+    if dominant_items > 0 && state.progress >= drill_time && items_total < item_capacity {
+        produced = dominant_items;
+        state.invert_time = 1.0;
+        state.progress %= drill_time;
+    }
+
+    BurstDrillUpdate {
+        produced,
+        progress: state.progress,
+        warmup: state.warmup,
+        smooth_progress: state.smooth_progress,
+        invert_time: state.invert_time,
+        last_drill_speed: state.last_drill_speed,
+    }
+}
+
+pub fn heat_crafter_calculate_heat(side_heat: &[f32]) -> f32 {
+    side_heat.iter().copied().sum()
+}
+
+pub fn heat_crafter_should_consume(
+    heat_requirement: f32,
+    heat: f32,
+    super_should_consume: bool,
+) -> bool {
+    (heat_requirement <= 0.0 || heat > 0.0) && super_should_consume
+}
+
+pub fn heat_crafter_warmup_target(heat: f32, heat_requirement: f32) -> f32 {
+    clamp(if heat_requirement == 0.0 {
+        1.0
+    } else {
+        heat / heat_requirement
+    })
+}
+
+pub fn heat_crafter_efficiency_scale(
+    heat: f32,
+    heat_requirement: f32,
+    overheat_scale: f32,
+    max_efficiency: f32,
+) -> f32 {
+    if heat_requirement == 0.0 {
+        return max_efficiency;
+    }
+    let over = (heat - heat_requirement).max(0.0);
+    (clamp(heat / heat_requirement) + over / heat_requirement * overheat_scale).min(max_efficiency)
+}
+
+pub fn attribute_crafter_efficiency_multiplier(
+    base_efficiency: f32,
+    max_boost: f32,
+    boost_scale: f32,
+    attrsum: f32,
+    env_bonus: f32,
+) -> f32 {
+    base_efficiency + max_boost.min(boost_scale * attrsum) + env_bonus
+}
+
+pub fn attribute_crafter_can_place_on(
+    base_efficiency: f32,
+    attribute_sum: f32,
+    min_efficiency: f32,
+) -> bool {
+    base_efficiency + attribute_sum >= min_efficiency
+}
+
+pub fn attribute_crafter_efficiency_scale(
+    scale_liquid_consumption: bool,
+    efficiency_multiplier: f32,
+    super_efficiency_scale: f32,
+) -> f32 {
+    if scale_liquid_consumption {
+        efficiency_multiplier
+    } else {
+        super_efficiency_scale
+    }
+}
+
+pub fn attribute_crafter_progress_increase(base: f32, efficiency_multiplier: f32) -> f32 {
+    base * efficiency_multiplier
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrackerState {
+    pub accumulator: f32,
+    pub warmup: f32,
+    pub last_pump: f32,
+}
+
+impl Default for FrackerState {
+    fn default() -> Self {
+        Self {
+            accumulator: 0.0,
+            warmup: 0.0,
+            last_pump: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrackerUpdate {
+    pub consumed: bool,
+    pub run_solid_pump: bool,
+    pub accumulator: f32,
+    pub warmup: f32,
+    pub last_pump: f32,
+}
+
+pub fn fracker_update(
+    state: &mut FrackerState,
+    efficiency: f32,
+    delta: f32,
+    item_use_time: f32,
+) -> FrackerUpdate {
+    if efficiency > 0.0 {
+        let consumed = state.accumulator >= item_use_time;
+        if consumed {
+            state.accumulator -= item_use_time;
+        }
+        state.accumulator += delta * efficiency;
+        FrackerUpdate {
+            consumed,
+            run_solid_pump: true,
+            accumulator: state.accumulator,
+            warmup: state.warmup,
+            last_pump: state.last_pump,
+        }
+    } else {
+        state.warmup = lerp_delta(state.warmup, 0.0, 0.02);
+        state.last_pump = 0.0;
+        FrackerUpdate {
+            consumed: false,
+            run_solid_pump: false,
+            accumulator: state.accumulator,
+            warmup: state.warmup,
+            last_pump: state.last_pump,
+        }
+    }
+}
+
+pub fn single_block_producer_recipe(result: Option<ContentId>) -> Option<ContentId> {
+    result
+}
+
 fn lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * progress
+}
+
+fn clamp(value: f32) -> f32 {
+    value.clamp(0.0, 1.0)
 }
 
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
@@ -1004,5 +1263,77 @@ mod tests {
         assert_eq!(restored.time, state.time);
         assert_eq!(restored.warmup, state.warmup);
         assert_eq!(restored.facing_amount, 0);
+    }
+
+    #[test]
+    fn burst_drill_state_machine_matches_upstream_completion_edges() {
+        assert_eq!(burst_drill_time(200.0, 2.0), 100.0);
+        assert_eq!(burst_drill_speed_curve(50.0, 100.0), 0.25);
+        assert!(burst_drill_should_consume(8, 10, 2, true));
+        assert!(!burst_drill_should_consume(9, 10, 2, true));
+
+        let mut state = BurstDrillState {
+            progress: 90.0,
+            invert_time: 0.5,
+            ..Default::default()
+        };
+        let update = burst_drill_update(
+            &mut state, true, 0, 10, 2, 100.0, 1.0, 0.5, 2.0, 10.0, 200.0,
+        );
+        assert_eq!(update.produced, 2);
+        assert_eq!(state.progress, 5.0);
+        assert_eq!(state.invert_time, 1.0);
+        assert_eq!(state.last_drill_speed, 0.03);
+        assert!((state.time_drilled - 1.215).abs() < 0.0001);
+
+        let blocked = burst_drill_update(
+            &mut state, false, 0, 10, 2, 100.0, 1.0, 0.0, 2.0, 10.0, 200.0,
+        );
+        assert_eq!(blocked.produced, 0);
+    }
+
+    #[test]
+    fn heat_and_attribute_crafter_formulae_follow_java_shells() {
+        assert_eq!(heat_crafter_calculate_heat(&[1.0, 2.0, 3.0, 4.0]), 10.0);
+        assert!(heat_crafter_should_consume(10.0, 0.1, true));
+        assert!(!heat_crafter_should_consume(10.0, 0.0, true));
+        assert!(heat_crafter_should_consume(0.0, 0.0, true));
+        assert_eq!(heat_crafter_warmup_target(5.0, 10.0), 0.5);
+        assert_eq!(heat_crafter_warmup_target(20.0, 10.0), 1.0);
+        assert_eq!(heat_crafter_efficiency_scale(5.0, 10.0, 1.0, 4.0), 0.5);
+        assert_eq!(heat_crafter_efficiency_scale(20.0, 10.0, 1.0, 4.0), 2.0);
+        assert_eq!(heat_crafter_efficiency_scale(100.0, 10.0, 1.0, 4.0), 4.0);
+
+        let multiplier = attribute_crafter_efficiency_multiplier(1.0, 2.0, 0.5, 10.0, 0.25);
+        assert_eq!(multiplier, 3.25);
+        assert!(attribute_crafter_can_place_on(1.0, 0.5, 1.5));
+        assert!(!attribute_crafter_can_place_on(1.0, 0.49, 1.5));
+        assert_eq!(attribute_crafter_efficiency_scale(true, 3.25, 1.0), 3.25);
+        assert_eq!(attribute_crafter_efficiency_scale(false, 3.25, 1.0), 1.0);
+        assert!((attribute_crafter_progress_increase(0.2, 3.25) - 0.65).abs() < 0.0001);
+    }
+
+    #[test]
+    fn fracker_accumulator_and_single_block_recipe_follow_upstream_shells() {
+        let mut state = FrackerState {
+            accumulator: 100.0,
+            warmup: 0.5,
+            last_pump: 1.0,
+        };
+        let update = fracker_update(&mut state, 0.5, 10.0, 100.0);
+        assert!(update.consumed);
+        assert!(update.run_solid_pump);
+        assert_eq!(state.accumulator, 5.0);
+        assert_eq!(state.warmup, 0.5);
+        assert_eq!(state.last_pump, 1.0);
+
+        let idle = fracker_update(&mut state, 0.0, 10.0, 100.0);
+        assert!(!idle.consumed);
+        assert!(!idle.run_solid_pump);
+        assert_eq!(state.warmup, 0.49);
+        assert_eq!(state.last_pump, 0.0);
+
+        assert_eq!(single_block_producer_recipe(Some(42)), Some(42));
+        assert_eq!(single_block_producer_recipe(None), None);
     }
 }
