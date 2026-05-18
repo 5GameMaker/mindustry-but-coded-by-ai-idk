@@ -2717,6 +2717,7 @@ impl CraftingBlockData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitBlockKind {
     UnitFactory,
+    UnitAssembler,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2724,6 +2725,27 @@ pub struct UnitPlanSpec {
     pub unit: String,
     pub time: f32,
     pub requirements: Vec<ItemAmount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PayloadContentSpec {
+    Unit(String),
+    Block(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PayloadStackSpec {
+    pub content: PayloadContentSpec,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssemblerUnitPlanSpec {
+    pub unit: String,
+    pub time: f32,
+    pub payload_requirements: Vec<PayloadStackSpec>,
+    pub item_requirements: Vec<ItemAmount>,
+    pub liquid_requirements: Vec<LiquidAmount>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2811,6 +2833,120 @@ impl UnitFactoryBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UnitAssemblerBlockData {
+    pub base: Block,
+    pub kind: UnitBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub plans: Vec<AssemblerUnitPlanSpec>,
+    pub region_suffix: String,
+    pub outputs_payload: bool,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub floating: bool,
+    pub rotate: bool,
+    pub rotate_draw: bool,
+    pub quick_rotate: bool,
+    pub region_rotated1: i32,
+    pub area_size: i32,
+    pub drone_type: String,
+    pub drones_created: i32,
+    pub drone_construct_time: f32,
+    pub commandable: bool,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+    pub create_sound: String,
+    pub create_sound_volume: f32,
+    pub payload_speed: f32,
+    pub payload_rotate_speed: f32,
+    pub capacities: Vec<ItemAmount>,
+    pub liquid_filter: Vec<ContentId>,
+}
+
+impl UnitAssemblerBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: UnitBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.sync = true;
+        base.solid = true;
+        base.has_items = true;
+        base.group = BlockGroup::Units;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        base.flags.push(BlockFlag::UnitAssembler);
+        Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            consume_liquids: Vec::new(),
+            plans: Vec::new(),
+            region_suffix: String::new(),
+            outputs_payload: false,
+            accepts_payload: true,
+            accepts_unit_payloads: true,
+            floating: false,
+            rotate: true,
+            rotate_draw: false,
+            quick_rotate: false,
+            region_rotated1: 1,
+            area_size: 11,
+            drone_type: "assembly-drone".into(),
+            drones_created: 4,
+            drone_construct_time: 60.0 * 4.0,
+            commandable: true,
+            ambient_sound: "loopUnitBuilding".into(),
+            ambient_sound_volume: 0.13,
+            create_sound: "unitCreateBig".into(),
+            create_sound_volume: 1.0,
+            payload_speed: 0.7,
+            payload_rotate_speed: 5.0,
+            capacities: Vec::new(),
+            liquid_filter: Vec::new(),
+        }
+    }
+
+    fn finalize(&mut self) {
+        self.base.consumes_power = self.consume_power > 0.0;
+        self.base.has_power = self.consume_power > 0.0;
+        self.base.has_liquids = !self.consume_liquids.is_empty()
+            || self
+                .plans
+                .iter()
+                .any(|plan| !plan.liquid_requirements.is_empty());
+        self.base.item_capacity = 10;
+        self.capacities.clear();
+        self.liquid_filter.clear();
+        for plan in &self.plans {
+            for requirement in &plan.item_requirements {
+                if let Some(existing) = self
+                    .capacities
+                    .iter_mut()
+                    .find(|capacity| capacity.item == requirement.item)
+                {
+                    existing.amount = existing.amount.max(requirement.amount * 2);
+                } else {
+                    self.capacities.push(ItemAmount {
+                        item: requirement.item,
+                        amount: requirement.amount * 2,
+                    });
+                }
+                self.base.item_capacity = self.base.item_capacity.max(requirement.amount * 2);
+            }
+            for requirement in &plan.liquid_requirements {
+                if !self.liquid_filter.contains(&requirement.liquid) {
+                    self.liquid_filter.push(requirement.liquid);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -2830,6 +2966,7 @@ pub enum BlockDef {
     Liquid(LiquidBlockData),
     Power(PowerBlockData),
     UnitFactory(UnitFactoryBlockData),
+    UnitAssembler(UnitAssemblerBlockData),
 }
 
 impl BlockDef {
@@ -2853,6 +2990,7 @@ impl BlockDef {
             Self::Liquid(liquid) => &liquid.base,
             Self::Power(power) => &power.base,
             Self::UnitFactory(factory) => &factory.base,
+            Self::UnitAssembler(assembler) => &assembler.base,
         }
     }
 
@@ -2982,6 +3120,13 @@ impl BlockRegistry {
     pub fn get_unit_factory_by_name(&self, name: &str) -> Option<&UnitFactoryBlockData> {
         match self.get_by_name(name)? {
             BlockDef::UnitFactory(factory) => Some(factory),
+            _ => None,
+        }
+    }
+
+    pub fn get_unit_assembler_by_name(&self, name: &str) -> Option<&UnitAssemblerBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::UnitAssembler(assembler) => Some(assembler),
             _ => None,
         }
     }
@@ -3218,6 +3363,20 @@ impl BlockRegistry {
         self.insert(BlockDef::UnitFactory(block))
     }
 
+    pub fn register_unit_assembler_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: UnitBlockKind,
+        configure: impl FnOnce(&mut UnitAssemblerBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = UnitAssemblerBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::UnitAssembler(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -3346,7 +3505,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_distribution_blocks(&mut registry, items, liquids);
     register_liquid_blocks(&mut registry, items, liquids);
     register_power_blocks(&mut registry, items, liquids);
-    register_unit_blocks(&mut registry, items);
+    register_unit_blocks(&mut registry, items, liquids);
 
     registry.finalize_floor_links();
     registry
@@ -4188,6 +4347,34 @@ fn unit_plan(items: &[Item], unit: &str, time: f32, specs: &[(&str, i32)]) -> Un
         unit: unit.into(),
         time,
         requirements,
+    }
+}
+
+fn unit_payload(name: &str, amount: i32) -> PayloadStackSpec {
+    PayloadStackSpec {
+        content: PayloadContentSpec::Unit(name.into()),
+        amount,
+    }
+}
+
+fn block_payload(name: &str, amount: i32) -> PayloadStackSpec {
+    PayloadStackSpec {
+        content: PayloadContentSpec::Block(name.into()),
+        amount,
+    }
+}
+
+fn assembler_unit_plan(
+    unit: &str,
+    time: f32,
+    payload_requirements: Vec<PayloadStackSpec>,
+) -> AssemblerUnitPlanSpec {
+    AssemblerUnitPlanSpec {
+        unit: unit.into(),
+        time,
+        payload_requirements,
+        item_requirements: Vec::new(),
+        liquid_requirements: Vec::new(),
     }
 }
 
@@ -9963,7 +10150,7 @@ fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquid
     });
 }
 
-fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
     registry.register_unit_factory_block("ground-factory", UnitBlockKind::UnitFactory, |factory| {
         set_requirements(
             &mut factory.requirements,
@@ -10108,6 +10295,52 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item]) {
             factory.fog_radius = 3.0;
             factory.research_cost_multiplier = 0.65;
             factory.consume_power = 1.5;
+        },
+    );
+
+    registry.register_unit_assembler_block(
+        "tank-assembler",
+        UnitBlockKind::UnitAssembler,
+        |assembler| {
+            set_requirements(
+                &mut assembler.requirements,
+                items,
+                &[
+                    ("thorium", 500),
+                    ("oxide", 150),
+                    ("carbide", 80),
+                    ("silicon", 650),
+                ],
+            );
+            assembler.region_suffix = "-dark".into();
+            assembler.base.size = 5;
+            assembler.plans = vec![
+                assembler_unit_plan(
+                    "vanquish",
+                    60.0 * 50.0,
+                    vec![
+                        unit_payload("stell", 4),
+                        block_payload("tungsten-wall-large", 10),
+                    ],
+                ),
+                assembler_unit_plan(
+                    "conquer",
+                    60.0 * 60.0 * 3.0,
+                    vec![
+                        unit_payload("locus", 6),
+                        block_payload("carbide-wall-large", 20),
+                    ],
+                ),
+            ];
+            assembler.area_size = 13;
+            assembler.research_cost_multiplier = 0.4;
+            assembler.consume_power = 2.5;
+            push_liquid_amount(
+                &mut assembler.consume_liquids,
+                liquids,
+                "cyanogen",
+                9.0 / 60.0,
+            );
         },
     );
 }
@@ -16567,6 +16800,123 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn tank_assembler_unit_assembler_keeps_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| liquid_id(&all_liquids, name).unwrap();
+        let assembler = registry
+            .get_unit_assembler_by_name("tank-assembler")
+            .unwrap();
+
+        assert_eq!(assembler.kind, UnitBlockKind::UnitAssembler);
+        assert_eq!(assembler.base.group, BlockGroup::Units);
+        assert_eq!(assembler.base.flags, vec![BlockFlag::UnitAssembler]);
+        assert_eq!(
+            assembler.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert!(assembler.base.update);
+        assert!(assembler.base.sync);
+        assert!(assembler.base.solid);
+        assert!(assembler.base.has_items);
+        assert!(assembler.base.has_power);
+        assert!(assembler.base.has_liquids);
+        assert!(assembler.base.consumes_power);
+        assert_eq!(assembler.base.size, 5);
+        assert_eq!(assembler.base.item_capacity, 10);
+        assert_eq!(assembler.consume_power, 2.5);
+        assert_eq!(assembler.consume_liquids.len(), 1);
+        assert_eq!(
+            assembler.consume_liquids[0],
+            LiquidAmount {
+                liquid: liquid_id("cyanogen"),
+                amount: 9.0 / 60.0
+            }
+        );
+        assert_eq!(assembler.region_suffix, "-dark");
+        assert_eq!(assembler.area_size, 13);
+        assert_eq!(assembler.research_cost_multiplier, 0.4);
+        assert!(assembler.research_cost.is_empty());
+        assert!(!assembler.outputs_payload);
+        assert!(assembler.accepts_payload);
+        assert!(assembler.accepts_unit_payloads);
+        assert!(!assembler.floating);
+        assert!(assembler.rotate);
+        assert!(!assembler.rotate_draw);
+        assert!(!assembler.quick_rotate);
+        assert_eq!(assembler.region_rotated1, 1);
+        assert!(assembler.commandable);
+        assert_eq!(assembler.ambient_sound, "loopUnitBuilding");
+        assert_eq!(assembler.ambient_sound_volume, 0.13);
+        assert_eq!(assembler.create_sound, "unitCreateBig");
+        assert_eq!(assembler.create_sound_volume, 1.0);
+        assert_eq!(assembler.payload_speed, 0.7);
+        assert_eq!(assembler.payload_rotate_speed, 5.0);
+        assert_eq!(assembler.drone_type, "assembly-drone");
+        assert_eq!(assembler.drones_created, 4);
+        assert_eq!(assembler.drone_construct_time, 60.0 * 4.0);
+        assert!(assembler.capacities.is_empty());
+        assert!(assembler.liquid_filter.is_empty());
+        assert_eq!(
+            assembler.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 500
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 650
+                }
+            ]
+        );
+
+        assert_eq!(assembler.plans.len(), 2);
+        assert_eq!(assembler.plans[0].unit, "vanquish");
+        assert_eq!(assembler.plans[0].time, 60.0 * 50.0);
+        assert_eq!(
+            assembler.plans[0].payload_requirements,
+            vec![
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Unit("stell".into()),
+                    amount: 4
+                },
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Block("tungsten-wall-large".into()),
+                    amount: 10
+                }
+            ]
+        );
+        assert!(assembler.plans[0].item_requirements.is_empty());
+        assert!(assembler.plans[0].liquid_requirements.is_empty());
+        assert_eq!(assembler.plans[1].unit, "conquer");
+        assert_eq!(assembler.plans[1].time, 60.0 * 60.0 * 3.0);
+        assert_eq!(
+            assembler.plans[1].payload_requirements,
+            vec![
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Unit("locus".into()),
+                    amount: 6
+                },
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Block("carbide-wall-large".into()),
+                    amount: 20
+                }
+            ]
+        );
+        assert!(assembler.plans[1].item_requirements.is_empty());
+        assert!(assembler.plans[1].liquid_requirements.is_empty());
     }
 
     #[test]
