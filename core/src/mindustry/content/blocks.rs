@@ -2714,6 +2714,93 @@ impl CraftingBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitBlockKind {
+    UnitFactory,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitPlanSpec {
+    pub unit: String,
+    pub time: f32,
+    pub requirements: Vec<ItemAmount>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitFactoryBlockData {
+    pub base: Block,
+    pub kind: UnitBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub plans: Vec<UnitPlanSpec>,
+    pub configurable: bool,
+    pub clear_on_double_tap: bool,
+    pub outputs_payload: bool,
+    pub rotate: bool,
+    pub region_rotated1: i32,
+    pub commandable: bool,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+    pub create_sound: String,
+    pub create_sound_volume: f32,
+    pub capacities: Vec<ItemAmount>,
+}
+
+impl UnitFactoryBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: UnitBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.has_power = true;
+        base.has_items = true;
+        base.solid = true;
+        base.group = BlockGroup::Units;
+        base.flags.push(BlockFlag::Factory);
+        Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            plans: Vec::new(),
+            configurable: true,
+            clear_on_double_tap: true,
+            outputs_payload: true,
+            rotate: true,
+            region_rotated1: 1,
+            commandable: true,
+            ambient_sound: "loopUnitBuilding".into(),
+            ambient_sound_volume: 0.09,
+            create_sound: "unitCreate".into(),
+            create_sound_volume: 1.0,
+            capacities: Vec::new(),
+        }
+    }
+
+    fn finalize(&mut self) {
+        self.base.consumes_power = self.consume_power > 0.0;
+        self.base.item_capacity = 10;
+        self.capacities.clear();
+        for plan in &self.plans {
+            for requirement in &plan.requirements {
+                if let Some(existing) = self
+                    .capacities
+                    .iter_mut()
+                    .find(|capacity| capacity.item == requirement.item)
+                {
+                    existing.amount = existing.amount.max(requirement.amount * 2);
+                } else {
+                    self.capacities.push(ItemAmount {
+                        item: requirement.item,
+                        amount: requirement.amount * 2,
+                    });
+                }
+                self.base.item_capacity = self.base.item_capacity.max(requirement.amount * 2);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
@@ -2733,6 +2820,7 @@ pub enum BlockDef {
     Distribution(DistributionBlockData),
     Liquid(LiquidBlockData),
     Power(PowerBlockData),
+    UnitFactory(UnitFactoryBlockData),
 }
 
 impl BlockDef {
@@ -2755,6 +2843,7 @@ impl BlockDef {
             Self::Distribution(distribution) => &distribution.base,
             Self::Liquid(liquid) => &liquid.base,
             Self::Power(power) => &power.base,
+            Self::UnitFactory(factory) => &factory.base,
         }
     }
 
@@ -2877,6 +2966,13 @@ impl BlockRegistry {
     pub fn get_power_by_name(&self, name: &str) -> Option<&PowerBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Power(power) => Some(power),
+            _ => None,
+        }
+    }
+
+    pub fn get_unit_factory_by_name(&self, name: &str) -> Option<&UnitFactoryBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::UnitFactory(factory) => Some(factory),
             _ => None,
         }
     }
@@ -3099,6 +3195,20 @@ impl BlockRegistry {
         self.insert(BlockDef::Power(block))
     }
 
+    pub fn register_unit_factory_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: UnitBlockKind,
+        configure: impl FnOnce(&mut UnitFactoryBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = UnitFactoryBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::UnitFactory(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -3227,6 +3337,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_distribution_blocks(&mut registry, items, liquids);
     register_liquid_blocks(&mut registry, items, liquids);
     register_power_blocks(&mut registry, items, liquids);
+    register_unit_blocks(&mut registry, items);
 
     registry.finalize_floor_links();
     registry
@@ -4058,6 +4169,16 @@ fn set_requirements(target: &mut Vec<ItemAmount>, items: &[Item], specs: &[(&str
     target.clear();
     for (name, amount) in specs {
         push_item_amount(target, items, name, *amount);
+    }
+}
+
+fn unit_plan(items: &[Item], unit: &str, time: f32, specs: &[(&str, i32)]) -> UnitPlanSpec {
+    let mut requirements = Vec::new();
+    set_requirements(&mut requirements, items, specs);
+    UnitPlanSpec {
+        unit: unit.into(),
+        time,
+        requirements,
     }
 }
 
@@ -9830,6 +9951,39 @@ fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquid
         craft.all_database_tabs = true;
         craft.ambient_sound = "none".into();
         craft.drawer = "DrawMulti(DrawDefault, DrawHeatOutput)".into();
+    });
+}
+
+fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+    registry.register_unit_factory_block("ground-factory", UnitBlockKind::UnitFactory, |factory| {
+        set_requirements(
+            &mut factory.requirements,
+            items,
+            &[("copper", 50), ("lead", 120), ("silicon", 80)],
+        );
+        factory.plans = vec![
+            unit_plan(
+                items,
+                "dagger",
+                60.0 * 15.0,
+                &[("silicon", 10), ("lead", 10)],
+            ),
+            unit_plan(
+                items,
+                "crawler",
+                60.0 * 10.0,
+                &[("silicon", 8), ("coal", 10)],
+            ),
+            unit_plan(
+                items,
+                "nova",
+                60.0 * 40.0,
+                &[("silicon", 30), ("lead", 20), ("titanium", 20)],
+            ),
+        ];
+        factory.base.size = 3;
+        factory.consume_power = 1.2;
+        factory.research_cost_multiplier = 0.5;
     });
 }
 
@@ -15713,6 +15867,125 @@ mod tests {
                 ItemAmount {
                     item: item_id("beryllium"),
                     amount: 12
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn ground_factory_unit_factory_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let factory = registry.get_unit_factory_by_name("ground-factory").unwrap();
+
+        assert_eq!(factory.kind, UnitBlockKind::UnitFactory);
+        assert_eq!(factory.base.group, BlockGroup::Units);
+        assert_eq!(factory.base.flags, vec![BlockFlag::Factory]);
+        assert!(factory.base.update);
+        assert!(factory.base.has_power);
+        assert!(factory.base.has_items);
+        assert!(factory.base.solid);
+        assert!(factory.configurable);
+        assert!(factory.clear_on_double_tap);
+        assert!(factory.outputs_payload);
+        assert!(factory.rotate);
+        assert_eq!(factory.region_rotated1, 1);
+        assert!(factory.commandable);
+        assert_eq!(factory.ambient_sound, "loopUnitBuilding");
+        assert_eq!(factory.ambient_sound_volume, 0.09);
+        assert_eq!(factory.create_sound, "unitCreate");
+        assert_eq!(factory.create_sound_volume, 1.0);
+        assert_eq!(factory.base.size, 3);
+        assert_eq!(factory.consume_power, 1.2);
+        assert!(factory.base.consumes_power);
+        assert_eq!(factory.research_cost_multiplier, 0.5);
+        assert_eq!(factory.base.item_capacity, 60);
+        assert_eq!(
+            factory.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 120
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 80
+                }
+            ]
+        );
+
+        assert_eq!(factory.plans.len(), 3);
+        assert_eq!(factory.plans[0].unit, "dagger");
+        assert_eq!(factory.plans[0].time, 60.0 * 15.0);
+        assert_eq!(
+            factory.plans[0].requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 10
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 10
+                }
+            ]
+        );
+        assert_eq!(factory.plans[1].unit, "crawler");
+        assert_eq!(factory.plans[1].time, 60.0 * 10.0);
+        assert_eq!(
+            factory.plans[1].requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 8
+                },
+                ItemAmount {
+                    item: item_id("coal"),
+                    amount: 10
+                }
+            ]
+        );
+        assert_eq!(factory.plans[2].unit, "nova");
+        assert_eq!(factory.plans[2].time, 60.0 * 40.0);
+        assert_eq!(
+            factory.plans[2].requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 30
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 20
+                }
+            ]
+        );
+        assert_eq!(
+            factory.capacities,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 60
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("coal"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 40
                 }
             ]
         );
