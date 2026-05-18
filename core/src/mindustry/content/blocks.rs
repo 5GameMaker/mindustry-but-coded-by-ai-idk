@@ -3592,6 +3592,216 @@ impl PayloadLoaderBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxBlockKind {
+    PowerSource,
+    PowerVoid,
+    ItemSource,
+    ItemVoid,
+    LiquidSource,
+    LiquidVoid,
+    PayloadSource,
+    PayloadVoid,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SandboxBlockData {
+    pub base: Block,
+    pub kind: SandboxBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub always_unlocked: bool,
+    pub power_production: f32,
+    pub consume_power: f32,
+    pub max_nodes: i32,
+    pub laser_range: f32,
+    pub items_per_second: i32,
+    pub liquid_capacity: f32,
+    pub payload_speed: f32,
+    pub payload_rotate_speed: f32,
+    pub selection_rows: i32,
+    pub selection_columns: i32,
+    pub commandable: bool,
+    pub incinerate_effect: String,
+    pub incinerate_sound: String,
+    pub floating: bool,
+    pub outputs_items: bool,
+    pub accepts_items: bool,
+    pub outputs_liquid: bool,
+    pub outputs_payload: bool,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub rotate: bool,
+    pub configurable: bool,
+    pub clear_on_double_tap: bool,
+    pub save_config: bool,
+    pub no_update_disabled: bool,
+    pub can_overdrive: bool,
+    pub display_flow: bool,
+    pub draw_disabled: bool,
+    pub enable_draw_status: bool,
+    pub region_rotated1: i32,
+}
+
+impl SandboxBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: SandboxBlockKind) -> Self {
+        let base = Block::new(id, name);
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            always_unlocked: false,
+            power_production: 0.0,
+            consume_power: 0.0,
+            max_nodes: 0,
+            laser_range: 0.0,
+            items_per_second: 0,
+            liquid_capacity: 0.0,
+            payload_speed: 0.7,
+            payload_rotate_speed: 5.0,
+            selection_rows: 0,
+            selection_columns: 0,
+            commandable: false,
+            incinerate_effect: String::new(),
+            incinerate_sound: String::new(),
+            floating: false,
+            outputs_items: false,
+            accepts_items: false,
+            outputs_liquid: false,
+            outputs_payload: false,
+            accepts_payload: false,
+            accepts_unit_payloads: false,
+            rotate: false,
+            configurable: false,
+            clear_on_double_tap: false,
+            save_config: false,
+            no_update_disabled: false,
+            can_overdrive: true,
+            display_flow: true,
+            draw_disabled: false,
+            enable_draw_status: true,
+            region_rotated1: -1,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        self.base.build_visibility = BuildVisibility::SandboxOnly;
+        self.base.env_enabled = Env::ANY;
+        self.base.consumes_power = true;
+        match self.kind {
+            SandboxBlockKind::PowerSource => {
+                self.base.update = false;
+                self.base.solid = true;
+                self.base.has_power = true;
+                self.base.outputs_power = true;
+                self.base.consumes_power = false;
+                self.base.group = BlockGroup::Power;
+                self.base.destructible = true;
+                self.configurable = true;
+                self.max_nodes = 100;
+                self.laser_range = 6.0;
+                self.power_production = 10000.0;
+                self.can_overdrive = false;
+                self.draw_disabled = true;
+            }
+            SandboxBlockKind::PowerVoid => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.has_power = true;
+                self.base.consumes_power = true;
+                self.base.group = BlockGroup::Power;
+                self.consume_power = f32::MAX;
+                self.enable_draw_status = false;
+            }
+            SandboxBlockKind::ItemSource => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.has_items = true;
+                self.base.group = BlockGroup::Transportation;
+                self.configurable = true;
+                self.save_config = true;
+                self.no_update_disabled = true;
+                self.clear_on_double_tap = true;
+                self.outputs_items = true;
+                self.items_per_second = 100;
+            }
+            SandboxBlockKind::ItemVoid => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.base.group = BlockGroup::Transportation;
+                self.accepts_items = true;
+            }
+            SandboxBlockKind::LiquidSource => {
+                self.apply_liquid_sandbox_defaults();
+                self.configurable = true;
+                self.outputs_liquid = true;
+                self.save_config = true;
+                self.no_update_disabled = true;
+                self.display_flow = false;
+                self.clear_on_double_tap = true;
+            }
+            SandboxBlockKind::LiquidVoid => {
+                self.apply_liquid_sandbox_defaults();
+            }
+            SandboxBlockKind::PayloadSource => {
+                self.apply_payload_sandbox_defaults();
+                self.outputs_payload = true;
+                self.configurable = true;
+                self.selection_rows = 8;
+                self.selection_columns = 8;
+                self.no_update_disabled = true;
+                self.clear_on_double_tap = true;
+                self.region_rotated1 = 1;
+                self.accepts_unit_payloads = false;
+                self.commandable = true;
+                self.base.clip_size = 120.0;
+            }
+            SandboxBlockKind::PayloadVoid => {
+                self.apply_payload_sandbox_defaults();
+                self.outputs_payload = false;
+                self.accepts_payload = true;
+                self.rotate = false;
+                self.payload_speed = 1.2;
+                self.base.clip_size = 120.0;
+                self.incinerate_effect = "blastExplosion".into();
+                self.incinerate_sound = "unitExplode1".into();
+            }
+        }
+    }
+
+    fn apply_liquid_sandbox_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.base.has_liquids = true;
+        self.base.group = BlockGroup::Liquids;
+        self.base.liquid_capacity = 10000.0;
+        self.liquid_capacity = 10000.0;
+    }
+
+    fn apply_payload_sandbox_defaults(&mut self) {
+        self.base.update = true;
+        self.base.sync = true;
+        self.base.group = BlockGroup::Payloads;
+        self.base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        self.base.size = 3;
+        self.base.has_power = false;
+        self.rotate = true;
+        self.accepts_unit_payloads = true;
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
@@ -3620,6 +3830,7 @@ pub enum BlockDef {
     PayloadDeconstructor(PayloadDeconstructorBlockData),
     PayloadConstructor(PayloadConstructorBlockData),
     PayloadLoader(PayloadLoaderBlockData),
+    Sandbox(SandboxBlockData),
 }
 
 impl BlockDef {
@@ -3651,6 +3862,7 @@ impl BlockDef {
             Self::PayloadDeconstructor(deconstructor) => &deconstructor.base,
             Self::PayloadConstructor(constructor) => &constructor.base,
             Self::PayloadLoader(loader) => &loader.base,
+            Self::Sandbox(sandbox) => &sandbox.base,
         }
     }
 
@@ -3848,6 +4060,13 @@ impl BlockRegistry {
     pub fn get_payload_loader_by_name(&self, name: &str) -> Option<&PayloadLoaderBlockData> {
         match self.get_by_name(name)? {
             BlockDef::PayloadLoader(loader) => Some(loader),
+            _ => None,
+        }
+    }
+
+    pub fn get_sandbox_by_name(&self, name: &str) -> Option<&SandboxBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Sandbox(sandbox) => Some(sandbox),
             _ => None,
         }
     }
@@ -4196,6 +4415,21 @@ impl BlockRegistry {
         self.insert(BlockDef::PayloadLoader(block))
     }
 
+    pub fn register_sandbox_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: SandboxBlockKind,
+        items: &[Item],
+        configure: impl FnOnce(&mut SandboxBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = SandboxBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Sandbox(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -4326,6 +4560,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_power_blocks(&mut registry, items, liquids);
     register_unit_blocks(&mut registry, items, liquids);
     register_payload_blocks(&mut registry, items);
+    register_sandbox_blocks(&mut registry, items);
 
     registry.finalize_floor_links();
     registry
@@ -11496,6 +11731,83 @@ fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
             loader.consume_power = 2.0;
             loader.base.size = 3;
             loader.fog_radius = 5.0;
+        },
+    );
+}
+
+fn register_sandbox_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+    registry.register_sandbox_block(
+        "power-source",
+        SandboxBlockKind::PowerSource,
+        items,
+        |block| {
+            block.base.group = BlockGroup::Power;
+            block.power_production = 1_000_000.0 / 60.0;
+            block.always_unlocked = true;
+        },
+    );
+
+    registry.register_sandbox_block("power-void", SandboxBlockKind::PowerVoid, items, |block| {
+        block.base.group = BlockGroup::Power;
+        block.always_unlocked = true;
+    });
+
+    registry.register_sandbox_block(
+        "item-source",
+        SandboxBlockKind::ItemSource,
+        items,
+        |block| {
+            block.base.group = BlockGroup::Transportation;
+            block.always_unlocked = true;
+        },
+    );
+
+    registry.register_sandbox_block("item-void", SandboxBlockKind::ItemVoid, items, |block| {
+        block.base.group = BlockGroup::Transportation;
+        block.always_unlocked = true;
+    });
+
+    registry.register_sandbox_block(
+        "liquid-source",
+        SandboxBlockKind::LiquidSource,
+        items,
+        |block| {
+            block.base.group = BlockGroup::Liquids;
+            block.always_unlocked = true;
+            block.floating = true;
+        },
+    );
+
+    registry.register_sandbox_block(
+        "liquid-void",
+        SandboxBlockKind::LiquidVoid,
+        items,
+        |block| {
+            block.base.group = BlockGroup::Liquids;
+            block.always_unlocked = true;
+            block.floating = true;
+        },
+    );
+
+    registry.register_sandbox_block(
+        "payload-source",
+        SandboxBlockKind::PayloadSource,
+        items,
+        |block| {
+            block.base.group = BlockGroup::Payloads;
+            block.base.size = 5;
+            block.always_unlocked = true;
+        },
+    );
+
+    registry.register_sandbox_block(
+        "payload-void",
+        SandboxBlockKind::PayloadVoid,
+        items,
+        |block| {
+            block.base.group = BlockGroup::Payloads;
+            block.base.size = 5;
+            block.always_unlocked = true;
         },
     );
 }
@@ -19182,6 +19494,160 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn sandbox_source_and_void_blocks_keep_upstream_subset() {
+        let (_, _, registry) = load_test_registry();
+        let sandbox_env = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+
+        let assert_common = |block: &SandboxBlockData, expected_health: i32| {
+            assert_eq!(block.base.build_visibility, BuildVisibility::SandboxOnly);
+            assert!(block.always_unlocked);
+            assert!(block.requirements.is_empty());
+            assert!(block.research_cost.is_empty());
+            assert_eq!(block.research_cost_multiplier, 1.0);
+            assert_eq!(block.base.health, expected_health);
+        };
+
+        let power_source = registry.get_sandbox_by_name("power-source").unwrap();
+        assert_common(power_source, 40);
+        assert_eq!(power_source.kind, SandboxBlockKind::PowerSource);
+        assert_eq!(power_source.base.group, BlockGroup::Power);
+        assert_eq!(power_source.base.env_enabled, Env::ANY);
+        assert!(!power_source.base.update);
+        assert!(power_source.base.solid);
+        assert!(power_source.base.has_power);
+        assert!(power_source.base.outputs_power);
+        assert!(!power_source.base.consumes_power);
+        assert!(power_source.configurable);
+        assert_eq!(power_source.max_nodes, 100);
+        assert_eq!(power_source.laser_range, 6.0);
+        assert!((power_source.power_production - 1_000_000.0 / 60.0).abs() < 0.001);
+        assert!(!power_source.can_overdrive);
+        assert!(power_source.draw_disabled);
+
+        let power_void = registry.get_sandbox_by_name("power-void").unwrap();
+        assert_common(power_void, 40);
+        assert_eq!(power_void.kind, SandboxBlockKind::PowerVoid);
+        assert_eq!(power_void.base.group, BlockGroup::Power);
+        assert_eq!(power_void.base.env_enabled, Env::ANY);
+        assert!(power_void.base.update);
+        assert!(power_void.base.solid);
+        assert!(power_void.base.has_power);
+        assert!(power_void.base.consumes_power);
+        assert!(!power_void.base.outputs_power);
+        assert_eq!(power_void.consume_power, f32::MAX);
+        assert!(!power_void.enable_draw_status);
+
+        let item_source = registry.get_sandbox_by_name("item-source").unwrap();
+        assert_common(item_source, 40);
+        assert_eq!(item_source.kind, SandboxBlockKind::ItemSource);
+        assert_eq!(item_source.base.group, BlockGroup::Transportation);
+        assert_eq!(item_source.base.env_enabled, Env::ANY);
+        assert!(item_source.base.update);
+        assert!(item_source.base.solid);
+        assert!(item_source.base.has_items);
+        assert!(item_source.base.consumes_power);
+        assert!(item_source.outputs_items);
+        assert!(!item_source.accepts_items);
+        assert_eq!(item_source.items_per_second, 100);
+        assert!(item_source.configurable);
+        assert!(item_source.save_config);
+        assert!(item_source.no_update_disabled);
+        assert!(item_source.clear_on_double_tap);
+
+        let item_void = registry.get_sandbox_by_name("item-void").unwrap();
+        assert_common(item_void, 40);
+        assert_eq!(item_void.kind, SandboxBlockKind::ItemVoid);
+        assert_eq!(item_void.base.group, BlockGroup::Transportation);
+        assert_eq!(item_void.base.env_enabled, Env::ANY);
+        assert!(item_void.base.update);
+        assert!(item_void.base.solid);
+        assert!(!item_void.base.has_items);
+        assert!(item_void.base.consumes_power);
+        assert!(!item_void.outputs_items);
+        assert!(item_void.accepts_items);
+        assert!(!item_void.configurable);
+
+        let liquid_source = registry.get_sandbox_by_name("liquid-source").unwrap();
+        assert_common(liquid_source, 40);
+        assert_eq!(liquid_source.kind, SandboxBlockKind::LiquidSource);
+        assert_eq!(liquid_source.base.group, BlockGroup::Liquids);
+        assert_eq!(liquid_source.base.env_enabled, Env::ANY);
+        assert!(liquid_source.base.update);
+        assert!(liquid_source.base.solid);
+        assert!(liquid_source.base.has_liquids);
+        assert!(liquid_source.base.consumes_power);
+        assert_eq!(liquid_source.base.liquid_capacity, 10000.0);
+        assert_eq!(liquid_source.liquid_capacity, 10000.0);
+        assert!(liquid_source.outputs_liquid);
+        assert!(liquid_source.configurable);
+        assert!(liquid_source.save_config);
+        assert!(liquid_source.no_update_disabled);
+        assert!(!liquid_source.display_flow);
+        assert!(liquid_source.clear_on_double_tap);
+        assert!(liquid_source.floating);
+
+        let liquid_void = registry.get_sandbox_by_name("liquid-void").unwrap();
+        assert_common(liquid_void, 40);
+        assert_eq!(liquid_void.kind, SandboxBlockKind::LiquidVoid);
+        assert_eq!(liquid_void.base.group, BlockGroup::Liquids);
+        assert_eq!(liquid_void.base.env_enabled, Env::ANY);
+        assert!(liquid_void.base.update);
+        assert!(liquid_void.base.solid);
+        assert!(liquid_void.base.has_liquids);
+        assert!(liquid_void.base.consumes_power);
+        assert_eq!(liquid_void.base.liquid_capacity, 10000.0);
+        assert_eq!(liquid_void.liquid_capacity, 10000.0);
+        assert!(!liquid_void.outputs_liquid);
+        assert!(!liquid_void.configurable);
+        assert!(liquid_void.floating);
+
+        let payload_source = registry.get_sandbox_by_name("payload-source").unwrap();
+        assert_common(payload_source, 1000);
+        assert_eq!(payload_source.kind, SandboxBlockKind::PayloadSource);
+        assert_eq!(payload_source.base.group, BlockGroup::Payloads);
+        assert_eq!(payload_source.base.env_enabled, sandbox_env);
+        assert!(payload_source.base.update);
+        assert!(payload_source.base.sync);
+        assert!(!payload_source.base.solid);
+        assert!(!payload_source.base.has_power);
+        assert!(payload_source.base.consumes_power);
+        assert_eq!(payload_source.base.size, 5);
+        assert_eq!(payload_source.base.clip_size, 120.0);
+        assert!(payload_source.outputs_payload);
+        assert!(!payload_source.accepts_payload);
+        assert!(!payload_source.accepts_unit_payloads);
+        assert!(payload_source.rotate);
+        assert!(payload_source.configurable);
+        assert!(payload_source.clear_on_double_tap);
+        assert!(payload_source.no_update_disabled);
+        assert_eq!(payload_source.selection_rows, 8);
+        assert_eq!(payload_source.selection_columns, 8);
+        assert_eq!(payload_source.region_rotated1, 1);
+        assert!(payload_source.commandable);
+
+        let payload_void = registry.get_sandbox_by_name("payload-void").unwrap();
+        assert_common(payload_void, 1000);
+        assert_eq!(payload_void.kind, SandboxBlockKind::PayloadVoid);
+        assert_eq!(payload_void.base.group, BlockGroup::Payloads);
+        assert_eq!(payload_void.base.env_enabled, sandbox_env);
+        assert!(payload_void.base.update);
+        assert!(payload_void.base.sync);
+        assert!(!payload_void.base.solid);
+        assert!(!payload_void.base.has_power);
+        assert!(payload_void.base.consumes_power);
+        assert_eq!(payload_void.base.size, 5);
+        assert_eq!(payload_void.base.clip_size, 120.0);
+        assert!(!payload_void.outputs_payload);
+        assert!(payload_void.accepts_payload);
+        assert!(payload_void.accepts_unit_payloads);
+        assert!(!payload_void.rotate);
+        assert_eq!(payload_void.payload_speed, 1.2);
+        assert_eq!(payload_void.payload_rotate_speed, 5.0);
+        assert_eq!(payload_void.incinerate_effect, "blastExplosion");
+        assert_eq!(payload_void.incinerate_sound, "unitExplode1");
     }
 
     #[test]
