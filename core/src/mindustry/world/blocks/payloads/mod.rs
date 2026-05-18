@@ -498,11 +498,135 @@ pub fn payload_loader_should_export(state: &PayloadLoaderState) -> bool {
             || (state.has_battery && state.payload_power_status >= 0.999_999_999))
 }
 
+pub fn payload_loader_accept_payload(
+    base_accepts: bool,
+    payload_fits: bool,
+    is_build_payload: bool,
+    block_has_items: bool,
+    unloadable: bool,
+    item_capacity: i32,
+    block_size: i32,
+    max_block_size: i32,
+    block_has_liquids: bool,
+    liquid_capacity: f32,
+    has_buffered_power: bool,
+) -> bool {
+    base_accepts
+        && payload_fits
+        && is_build_payload
+        && ((block_has_items && unloadable && item_capacity >= 10 && block_size <= max_block_size)
+            || (block_has_liquids && liquid_capacity >= 10.0)
+            || has_buffered_power)
+}
+
+pub fn payload_loader_accept_item(
+    items_total: i32,
+    item_capacity: i32,
+    source_is_payload_unloader: bool,
+) -> bool {
+    items_total < item_capacity && !source_is_payload_unloader
+}
+
+pub fn payload_loader_accept_liquid(
+    current_liquid_matches: bool,
+    current_amount: f32,
+    source_is_payload_unloader: bool,
+) -> bool {
+    (current_liquid_matches || current_amount < 0.2) && !source_is_payload_unloader
+}
+
+pub fn payload_loader_liquid_flow(
+    liquids_loaded: f32,
+    edelta: f32,
+    payload_liquid_capacity: f32,
+    payload_liquid_amount: f32,
+    loader_liquid_amount: f32,
+) -> f32 {
+    (liquids_loaded * edelta)
+        .min(payload_liquid_capacity - payload_liquid_amount)
+        .min(loader_liquid_amount)
+        .max(0.0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PayloadLoaderPowerStep {
+    pub payload_power_status: f32,
+    pub exporting: bool,
+    pub available_input: f32,
+}
+
+pub fn payload_loader_charge_battery(
+    payload_power_status: f32,
+    loader_power_status: f32,
+    base_power_use: f32,
+    max_power_consumption: f32,
+    battery_capacity: f32,
+    edelta: f32,
+) -> PayloadLoaderPowerStep {
+    let power_input = loader_power_status * (base_power_use + max_power_consumption);
+    let available_input = (power_input - base_power_use).max(0.0);
+    let mut next = payload_power_status + available_input / battery_capacity * edelta;
+    let exporting = next >= 1.0;
+    if exporting {
+        next = next.clamp(0.0, 1.0);
+    }
+    PayloadLoaderPowerStep {
+        payload_power_status: next,
+        exporting,
+        available_input,
+    }
+}
+
 pub fn payload_unloader_should_export(state: &PayloadLoaderState) -> bool {
     state.has_payload
         && (!state.payload_has_items || state.payload_items_total == 0)
         && (!state.payload_has_liquids || state.payload_liquid_amount <= 0.011)
         && (!state.has_battery || state.payload_power_status <= 0.000_000_1)
+}
+
+pub fn payload_unloader_accept_item() -> bool {
+    false
+}
+
+pub fn payload_unloader_accept_liquid() -> bool {
+    false
+}
+
+pub fn payload_unloader_full(items_total: i32, item_capacity: i32) -> bool {
+    items_total >= item_capacity
+}
+
+pub fn payload_unloader_liquid_flow(
+    liquids_loaded: f32,
+    edelta: f32,
+    unloader_liquid_capacity: f32,
+    unloader_liquid_amount: f32,
+    payload_liquid_amount: f32,
+) -> f32 {
+    (liquids_loaded * edelta)
+        .min(unloader_liquid_capacity - unloader_liquid_amount)
+        .min(payload_liquid_amount)
+        .max(0.0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PayloadUnloaderPowerStep {
+    pub payload_power_status: f32,
+    pub last_output_power: f32,
+}
+
+pub fn payload_unloader_drain_battery(
+    payload_power_status: f32,
+    battery_capacity: f32,
+    max_power_unload: f32,
+    edelta: f32,
+) -> PayloadUnloaderPowerStep {
+    let total = payload_power_status * battery_capacity;
+    let unloaded = (max_power_unload * edelta).min(total).max(0.0);
+    PayloadUnloaderPowerStep {
+        payload_power_status: payload_power_status - unloaded / battery_capacity,
+        last_output_power: unloaded,
+    }
 }
 
 pub fn write_payload_loader_extra<W: Write>(write: &mut W, exporting: bool) -> io::Result<()> {
@@ -912,6 +1036,26 @@ mod tests {
 
     #[test]
     fn loader_unloader_export_and_loader_revision_flag_match_upstream() {
+        assert!(payload_loader_accept_payload(
+            true, true, true, true, true, 10, 3, 3, false, 0.0, false
+        ));
+        assert!(payload_loader_accept_payload(
+            true, true, true, false, false, 0, 5, 3, true, 10.0, false
+        ));
+        assert!(payload_loader_accept_payload(
+            true, true, true, false, false, 0, 5, 3, false, 0.0, true
+        ));
+        assert!(!payload_loader_accept_payload(
+            true, true, false, true, true, 100, 3, 3, false, 0.0, false
+        ));
+        assert!(payload_loader_accept_item(99, 100, false));
+        assert!(!payload_loader_accept_item(100, 100, false));
+        assert!(!payload_loader_accept_item(0, 100, true));
+        assert!(payload_loader_accept_liquid(true, 50.0, false));
+        assert!(payload_loader_accept_liquid(false, 0.1, false));
+        assert!(!payload_loader_accept_liquid(false, 0.2, false));
+        assert!(!payload_loader_accept_liquid(true, 0.0, true));
+
         let loader = PayloadLoaderState {
             has_payload: true,
             payload_has_liquids: true,
@@ -921,6 +1065,30 @@ mod tests {
             ..Default::default()
         };
         assert!(payload_loader_should_export(&loader));
+        assert_eq!(
+            payload_loader_liquid_flow(40.0, 0.5, 100.0, 90.0, 50.0),
+            10.0
+        );
+        assert_eq!(
+            payload_loader_liquid_flow(40.0, 0.5, 100.0, 10.0, 12.0),
+            12.0
+        );
+        assert_eq!(
+            payload_loader_charge_battery(0.5, 1.0, 2.0, 40.0, 100.0, 1.0),
+            PayloadLoaderPowerStep {
+                payload_power_status: 0.9,
+                exporting: false,
+                available_input: 40.0
+            }
+        );
+        assert_eq!(
+            payload_loader_charge_battery(0.9, 1.0, 2.0, 40.0, 100.0, 1.0),
+            PayloadLoaderPowerStep {
+                payload_power_status: 1.0,
+                exporting: true,
+                available_input: 40.0
+            }
+        );
 
         let unloader = PayloadLoaderState {
             has_payload: true,
@@ -933,6 +1101,21 @@ mod tests {
             ..Default::default()
         };
         assert!(payload_unloader_should_export(&unloader));
+        assert!(!payload_unloader_accept_item());
+        assert!(!payload_unloader_accept_liquid());
+        assert!(payload_unloader_full(100, 100));
+        assert!(!payload_unloader_full(99, 100));
+        assert_eq!(
+            payload_unloader_liquid_flow(40.0, 0.5, 100.0, 95.0, 50.0),
+            5.0
+        );
+        assert_eq!(
+            payload_unloader_drain_battery(0.5, 100.0, 80.0, 0.25),
+            PayloadUnloaderPowerStep {
+                payload_power_status: 0.3,
+                last_output_power: 20.0
+            }
+        );
 
         let mut bytes = Vec::new();
         write_payload_loader_extra(&mut bytes, true).unwrap();
