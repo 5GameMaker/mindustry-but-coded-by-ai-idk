@@ -18,6 +18,41 @@ pub struct Vec2 {
 
 impl Vec2 {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
+
+    pub fn len(self) -> f32 {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
+
+    pub fn dst(self, other: Vec2) -> f32 {
+        Vec2 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+        .len()
+    }
+
+    pub fn clamp_rect(self, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> Self {
+        Self {
+            x: self.x.clamp(min_x, max_x),
+            y: self.y.clamp(min_y, max_y),
+        }
+    }
+
+    pub fn approach(self, target: Vec2, amount: f32) -> Self {
+        let delta = Vec2 {
+            x: target.x - self.x,
+            y: target.y - self.y,
+        };
+        let len = delta.len();
+        if len <= amount || len <= f32::EPSILON {
+            target
+        } else {
+            Self {
+                x: self.x + delta.x / len * amount,
+                y: self.y + delta.y / len * amount,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +66,156 @@ pub enum PayloadRef {
         class_id: u8,
         unit_bytes: Vec<u8>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadBlockBuildState {
+    pub payload: Option<PayloadRef>,
+    pub pay_vector: Vec2,
+    pub pay_rotation: f32,
+    pub carried: bool,
+}
+
+impl Default for PayloadBlockBuildState {
+    fn default() -> Self {
+        Self {
+            payload: None,
+            pay_vector: Vec2::ZERO,
+            pay_rotation: 0.0,
+            carried: false,
+        }
+    }
+}
+
+pub fn payload_block_accept_payload(state: &PayloadBlockBuildState) -> bool {
+    state.payload.is_none()
+}
+
+pub fn payload_block_handle_payload(
+    state: &mut PayloadBlockBuildState,
+    payload: PayloadRef,
+    build_pos: Vec2,
+    source_pos: Vec2,
+    source_rotation: f32,
+    size: i32,
+    tile_size: f32,
+) {
+    state.payload = Some(payload);
+    state.pay_vector = payload_offset_from_source(build_pos, source_pos, size, tile_size);
+    state.pay_rotation = source_rotation;
+}
+
+pub fn payload_block_take_payload(state: &mut PayloadBlockBuildState) -> Option<PayloadRef> {
+    state.payload.take()
+}
+
+pub fn payload_block_picked_up(state: &mut PayloadBlockBuildState) {
+    state.carried = true;
+}
+
+pub fn payload_block_draw_team_top(state: &mut PayloadBlockBuildState) {
+    state.carried = false;
+}
+
+pub fn payload_offset_from_source(
+    build_pos: Vec2,
+    source_pos: Vec2,
+    size: i32,
+    tile_size: f32,
+) -> Vec2 {
+    let half = size as f32 * tile_size / 2.0;
+    Vec2 {
+        x: source_pos.x - build_pos.x,
+        y: source_pos.y - build_pos.y,
+    }
+    .clamp_rect(-half, -half, half, half)
+}
+
+pub fn payload_block_move_in(
+    state: &mut PayloadBlockBuildState,
+    rotate_payload: bool,
+    block_rotate: bool,
+    rotdeg: f32,
+    payload_speed: f32,
+    payload_rotate_speed: f32,
+    delta: f32,
+) -> bool {
+    if state.payload.is_none() {
+        return false;
+    }
+
+    if rotate_payload {
+        let target = if block_rotate { rotdeg } else { 90.0 };
+        state.pay_rotation =
+            move_toward_angle(state.pay_rotation, target, payload_rotate_speed * delta);
+    }
+    state.pay_vector = state.pay_vector.approach(Vec2::ZERO, payload_speed * delta);
+    payload_block_has_arrived(state)
+}
+
+pub fn payload_block_move_out_target(rotdeg: f32, size: i32, tile_size: f32) -> Vec2 {
+    let length = size as f32 * tile_size / 2.0;
+    let radians = rotdeg.to_radians();
+    Vec2 {
+        x: radians.cos() * length,
+        y: radians.sin() * length,
+    }
+}
+
+pub fn payload_block_move_out_step(
+    state: &mut PayloadBlockBuildState,
+    rotdeg: f32,
+    size: i32,
+    tile_size: f32,
+    payload_speed: f32,
+    payload_rotate_speed: f32,
+    delta: f32,
+) -> bool {
+    if state.payload.is_none() {
+        return false;
+    }
+
+    let dest = payload_block_move_out_target(rotdeg, size, tile_size);
+    state.pay_rotation =
+        move_toward_angle(state.pay_rotation, rotdeg, payload_rotate_speed * delta);
+    state.pay_vector = state.pay_vector.approach(dest, payload_speed * delta);
+    state.pay_vector.dst(dest) <= 0.001
+}
+
+pub fn payload_block_has_arrived(state: &PayloadBlockBuildState) -> bool {
+    state.pay_vector.len() <= 0.01
+}
+
+pub fn write_payload_block_build_common<W: Write>(
+    write: &mut W,
+    state: &PayloadBlockBuildState,
+) -> io::Result<()> {
+    write_f32(write, state.pay_vector.x)?;
+    write_f32(write, state.pay_vector.y)?;
+    write_f32(write, state.pay_rotation)?;
+    write_payload_ref(write, state.payload.as_ref())
+}
+
+pub fn read_empty_payload_block_build_common<R: Read>(
+    read: &mut R,
+) -> io::Result<PayloadBlockBuildState> {
+    let pay_vector = Vec2 {
+        x: read_f32(read)?,
+        y: read_f32(read)?,
+    };
+    let pay_rotation = read_f32(read)?;
+    if read_bool(read)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "non-empty payload body requires block/unit codec",
+        ));
+    }
+    Ok(PayloadBlockBuildState {
+        payload: None,
+        pay_vector,
+        pay_rotation,
+        carried: false,
+    })
 }
 
 pub fn write_payload_ref<W: Write>(write: &mut W, payload: Option<&PayloadRef>) -> io::Result<()> {
@@ -444,6 +629,33 @@ fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
     from + (to - from) * alpha
 }
 
+fn move_toward_angle(from: f32, to: f32, amount: f32) -> f32 {
+    let delta = angle_delta(from, to);
+    if delta.abs() <= amount {
+        normalize_angle(to)
+    } else {
+        normalize_angle(from + delta.signum() * amount)
+    }
+}
+
+fn angle_delta(from: f32, to: f32) -> f32 {
+    let mut delta = (to - from) % 360.0;
+    if delta > 180.0 {
+        delta -= 360.0;
+    } else if delta < -180.0 {
+        delta += 360.0;
+    }
+    delta
+}
+
+fn normalize_angle(value: f32) -> f32 {
+    let mut value = value % 360.0;
+    if value < 0.0 {
+        value += 360.0;
+    }
+    value
+}
+
 fn write_vec_nullable<W: Write>(write: &mut W, value: Option<Vec2>) -> io::Result<()> {
     match value {
         Some(value) => {
@@ -542,6 +754,86 @@ mod tests {
         let mut bytes = Vec::new();
         write_payload_ref(&mut bytes, Some(&unit)).unwrap();
         assert_eq!(bytes, vec![1, PAYLOAD_UNIT_TYPE, 9, 1, 2]);
+    }
+
+    #[test]
+    fn payload_block_common_state_moves_and_serializes_empty_payload_prefix() {
+        let payload = PayloadRef::Unit {
+            class_id: 7,
+            unit_bytes: vec![0xde, 0xad],
+        };
+        let mut state = PayloadBlockBuildState::default();
+        assert!(payload_block_accept_payload(&state));
+        payload_block_handle_payload(
+            &mut state,
+            payload,
+            Vec2 { x: 10.0, y: 20.0 },
+            Vec2 {
+                x: 100.0,
+                y: -100.0,
+            },
+            270.0,
+            3,
+            8.0,
+        );
+        assert!(!payload_block_accept_payload(&state));
+        assert_eq!(state.pay_vector, Vec2 { x: 12.0, y: -12.0 });
+        assert_eq!(state.pay_rotation, 270.0);
+
+        assert!(!payload_block_move_in(
+            &mut state, true, true, 90.0, 6.0, 90.0, 1.0
+        ));
+        assert_eq!(state.pay_rotation, 180.0);
+        assert!(state.pay_vector.len() < 17.0);
+
+        state.pay_vector = Vec2::ZERO;
+        assert!(payload_block_move_in(
+            &mut state, false, true, 0.0, 6.0, 90.0, 1.0
+        ));
+        assert!(payload_block_take_payload(&mut state).is_some());
+        assert!(payload_block_accept_payload(&state));
+
+        payload_block_picked_up(&mut state);
+        assert!(state.carried);
+        payload_block_draw_team_top(&mut state);
+        assert!(!state.carried);
+
+        state.pay_vector = Vec2 { x: 1.0, y: 2.0 };
+        state.pay_rotation = 45.0;
+        let mut bytes = Vec::new();
+        write_payload_block_build_common(&mut bytes, &state).unwrap();
+        let restored = read_empty_payload_block_build_common(&mut bytes.as_slice()).unwrap();
+        assert_eq!(restored.pay_vector, Vec2 { x: 1.0, y: 2.0 });
+        assert_eq!(restored.pay_rotation, 45.0);
+        assert_eq!(restored.payload, None);
+    }
+
+    #[test]
+    fn payload_block_move_out_uses_rotation_target_and_arrival_threshold() {
+        let mut state = PayloadBlockBuildState {
+            payload: Some(PayloadRef::Block {
+                block: 1,
+                version: 0,
+                build_bytes: vec![],
+            }),
+            pay_vector: Vec2::ZERO,
+            pay_rotation: 180.0,
+            carried: false,
+        };
+        let dest = payload_block_move_out_target(0.0, 3, 8.0);
+        assert_eq!(dest, Vec2 { x: 12.0, y: 0.0 });
+
+        assert!(!payload_block_move_out_step(
+            &mut state, 0.0, 3, 8.0, 6.0, 90.0, 1.0
+        ));
+        assert_eq!(state.pay_vector, Vec2 { x: 6.0, y: 0.0 });
+        assert_eq!(state.pay_rotation, 90.0);
+
+        assert!(payload_block_move_out_step(
+            &mut state, 0.0, 3, 8.0, 6.0, 90.0, 1.0
+        ));
+        assert_eq!(state.pay_vector, dest);
+        assert_eq!(state.pay_rotation, 0.0);
     }
 
     #[test]
