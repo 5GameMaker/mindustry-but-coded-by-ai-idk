@@ -10389,6 +10389,52 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &
             );
         },
     );
+
+    registry.register_unit_assembler_block(
+        "mech-assembler",
+        UnitBlockKind::UnitAssembler,
+        |assembler| {
+            set_requirements(
+                &mut assembler.requirements,
+                items,
+                &[
+                    ("carbide", 200),
+                    ("thorium", 600),
+                    ("oxide", 200),
+                    ("tungsten", 550),
+                    ("silicon", 1000),
+                ],
+            );
+            assembler.region_suffix = "-dark".into();
+            assembler.base.size = 5;
+            assembler.plans = vec![
+                assembler_unit_plan(
+                    "tecta",
+                    60.0 * 70.0,
+                    vec![
+                        unit_payload("merui", 5),
+                        block_payload("tungsten-wall-large", 12),
+                    ],
+                ),
+                assembler_unit_plan(
+                    "collaris",
+                    60.0 * 60.0 * 3.0,
+                    vec![
+                        unit_payload("cleroi", 6),
+                        block_payload("carbide-wall-large", 20),
+                    ],
+                ),
+            ];
+            assembler.area_size = 13;
+            assembler.consume_power = 3.0;
+            push_liquid_amount(
+                &mut assembler.consume_liquids,
+                liquids,
+                "cyanogen",
+                12.0 / 60.0,
+            );
+        },
+    );
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -17071,6 +17117,124 @@ mod tests {
             vec![
                 PayloadStackSpec {
                     content: PayloadContentSpec::Unit("avert".into()),
+                    amount: 6
+                },
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Block("carbide-wall-large".into()),
+                    amount: 20
+                }
+            ]
+        );
+        assert!(assembler.plans[1].item_requirements.is_empty());
+        assert!(assembler.plans[1].liquid_requirements.is_empty());
+    }
+
+    #[test]
+    fn mech_assembler_unit_assembler_keeps_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| liquid_id(&all_liquids, name).unwrap();
+        let assembler = registry
+            .get_unit_assembler_by_name("mech-assembler")
+            .unwrap();
+
+        assert_eq!(assembler.kind, UnitBlockKind::UnitAssembler);
+        assert_eq!(assembler.base.group, BlockGroup::Units);
+        assert_eq!(assembler.base.flags, vec![BlockFlag::UnitAssembler]);
+        assert_eq!(
+            assembler.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert!(assembler.base.update);
+        assert!(assembler.base.sync);
+        assert!(assembler.base.solid);
+        assert!(assembler.base.has_items);
+        assert!(assembler.base.has_power);
+        assert!(assembler.base.has_liquids);
+        assert!(assembler.base.consumes_power);
+        assert_eq!(assembler.base.size, 5);
+        assert_eq!(assembler.base.item_capacity, 10);
+        assert_eq!(assembler.consume_power, 3.0);
+        assert_eq!(
+            assembler.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cyanogen"),
+                amount: 12.0 / 60.0
+            }]
+        );
+        assert_eq!(assembler.region_suffix, "-dark");
+        assert_eq!(assembler.area_size, 13);
+        assert_eq!(assembler.research_cost_multiplier, 1.0);
+        assert!(assembler.research_cost.is_empty());
+        assert!(!assembler.outputs_payload);
+        assert!(assembler.accepts_payload);
+        assert!(assembler.accepts_unit_payloads);
+        assert!(!assembler.floating);
+        assert!(assembler.rotate);
+        assert!(!assembler.rotate_draw);
+        assert!(!assembler.quick_rotate);
+        assert_eq!(assembler.region_rotated1, 1);
+        assert!(assembler.commandable);
+        assert_eq!(assembler.ambient_sound, "loopUnitBuilding");
+        assert_eq!(assembler.ambient_sound_volume, 0.13);
+        assert_eq!(assembler.create_sound, "unitCreateBig");
+        assert_eq!(assembler.create_sound_volume, 1.0);
+        assert_eq!(assembler.drone_type, "assembly-drone");
+        assert_eq!(assembler.drones_created, 4);
+        assert_eq!(assembler.drone_construct_time, 60.0 * 4.0);
+        assert!(assembler.capacities.is_empty());
+        assert!(assembler.liquid_filter.is_empty());
+        assert_eq!(
+            assembler.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 600
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 550
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 1000
+                }
+            ]
+        );
+
+        assert_eq!(assembler.plans.len(), 2);
+        assert_eq!(assembler.plans[0].unit, "tecta");
+        assert_eq!(assembler.plans[0].time, 60.0 * 70.0);
+        assert_eq!(
+            assembler.plans[0].payload_requirements,
+            vec![
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Unit("merui".into()),
+                    amount: 5
+                },
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Block("tungsten-wall-large".into()),
+                    amount: 12
+                }
+            ]
+        );
+        assert!(assembler.plans[0].item_requirements.is_empty());
+        assert!(assembler.plans[0].liquid_requirements.is_empty());
+        assert_eq!(assembler.plans[1].unit, "collaris");
+        assert_eq!(assembler.plans[1].time, 60.0 * 60.0 * 3.0);
+        assert_eq!(
+            assembler.plans[1].payload_requirements,
+            vec![
+                PayloadStackSpec {
+                    content: PayloadContentSpec::Unit("cleroi".into()),
                     amount: 6
                 },
                 PayloadStackSpec {
