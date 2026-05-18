@@ -3262,6 +3262,103 @@ impl PayloadMassDriverBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PayloadDeconstructorBlockData {
+    pub base: Block,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub region_suffix: String,
+    pub payload_speed: f32,
+    pub payload_rotate_speed: f32,
+    pub max_payload_size: f32,
+    pub deconstruct_speed: f32,
+    pub dump_rate: i32,
+    pub finish_effect: String,
+    pub construct_color: String,
+    pub progress_bar_color: String,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub outputs_payload: bool,
+    pub output_facing: bool,
+    pub rotate: bool,
+    pub configurable: bool,
+    pub clear_on_double_tap: bool,
+    pub save_config: bool,
+    pub can_overdrive: bool,
+    pub under_bullets: bool,
+    pub region_rotated1: i32,
+    pub fog_radius: f32,
+}
+
+impl PayloadDeconstructorBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.sync = true;
+        base.group = BlockGroup::Payloads;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        base.solid = true;
+        base.has_items = true;
+        base.has_power = true;
+        base.item_capacity = 100;
+        base.size = 5;
+        base.clip_size = 120.0;
+        let mut block = Self {
+            base,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            region_suffix: String::new(),
+            payload_speed: 1.0,
+            payload_rotate_speed: 5.0,
+            max_payload_size: 4.0,
+            deconstruct_speed: 2.5,
+            dump_rate: 4,
+            finish_effect: "breakBlock".into(),
+            construct_color: "remove".into(),
+            progress_bar_color: "ammo".into(),
+            accepts_payload: true,
+            accepts_unit_payloads: true,
+            outputs_payload: false,
+            output_facing: true,
+            rotate: false,
+            configurable: false,
+            clear_on_double_tap: false,
+            save_config: false,
+            can_overdrive: true,
+            under_bullets: false,
+            region_rotated1: -1,
+            fog_radius: -1.0,
+        };
+        block.apply_payload_deconstructor_base_flags();
+        block
+    }
+
+    fn apply_payload_deconstructor_base_flags(&mut self) {
+        self.base.has_items = true;
+        self.base.has_power = true;
+        self.base.solid = true;
+        self.base.update = true;
+        self.base.sync = true;
+        self.base.group = BlockGroup::Payloads;
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        self.apply_payload_deconstructor_base_flags();
+        self.base.consumes_power = self.consume_power > 0.0;
+        if self.fog_radius > 0.0 && !self.base.flags.contains(&BlockFlag::HasFogRadius) {
+            self.base.flags.push(BlockFlag::HasFogRadius);
+        }
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -3286,6 +3383,7 @@ pub enum BlockDef {
     UnitRepairTower(UnitRepairTowerBlockData),
     Payload(PayloadBlockData),
     PayloadMassDriver(PayloadMassDriverBlockData),
+    PayloadDeconstructor(PayloadDeconstructorBlockData),
 }
 
 impl BlockDef {
@@ -3314,6 +3412,7 @@ impl BlockDef {
             Self::UnitRepairTower(tower) => &tower.base,
             Self::Payload(payload) => &payload.base,
             Self::PayloadMassDriver(driver) => &driver.base,
+            Self::PayloadDeconstructor(deconstructor) => &deconstructor.base,
         }
     }
 
@@ -3484,6 +3583,16 @@ impl BlockRegistry {
     ) -> Option<&PayloadMassDriverBlockData> {
         match self.get_by_name(name)? {
             BlockDef::PayloadMassDriver(driver) => Some(driver),
+            _ => None,
+        }
+    }
+
+    pub fn get_payload_deconstructor_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&PayloadDeconstructorBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::PayloadDeconstructor(deconstructor) => Some(deconstructor),
             _ => None,
         }
     }
@@ -3787,6 +3896,20 @@ impl BlockRegistry {
         block.finalize(items);
         block.base.derive_layout_fields();
         self.insert(BlockDef::PayloadMassDriver(block))
+    }
+
+    pub fn register_payload_deconstructor_block(
+        &mut self,
+        name: impl Into<String>,
+        items: &[Item],
+        configure: impl FnOnce(&mut PayloadDeconstructorBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = PayloadDeconstructorBlockData::new(id, name);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::PayloadDeconstructor(block))
     }
 
     pub fn set_floor_wall_by_name(
@@ -10977,6 +11100,42 @@ fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         driver.max_payload_size = 4.0;
         driver.consume_power = 3.0;
     });
+
+    registry.register_payload_deconstructor_block("small-deconstructor", items, |deconstructor| {
+        set_requirements(
+            &mut deconstructor.requirements,
+            items,
+            &[
+                ("beryllium", 100),
+                ("silicon", 100),
+                ("oxide", 40),
+                ("graphite", 80),
+            ],
+        );
+        deconstructor.region_suffix = "-dark".into();
+        deconstructor.base.item_capacity = 100;
+        deconstructor.consume_power = 1.0;
+        deconstructor.base.size = 3;
+        deconstructor.deconstruct_speed = 3.0;
+    });
+
+    registry.register_payload_deconstructor_block("deconstructor", items, |deconstructor| {
+        set_requirements(
+            &mut deconstructor.requirements,
+            items,
+            &[
+                ("beryllium", 250),
+                ("oxide", 100),
+                ("silicon", 250),
+                ("carbide", 50),
+            ],
+        );
+        deconstructor.region_suffix = "-dark".into();
+        deconstructor.base.item_capacity = 250;
+        deconstructor.consume_power = 3.0;
+        deconstructor.base.size = 5;
+        deconstructor.deconstruct_speed = 6.0;
+    });
 }
 
 fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[Item]) -> i32 {
@@ -10986,13 +11145,13 @@ fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[
             .find(|item| item.base.mappable.base.id == requirement.item)
             .map(|item| item.health_scaling)
             .unwrap_or(0.0);
-        total + health_scaling * requirement.amount as f32
+        total + health_scaling
     });
     round_to_multiple((size * size) as f32 * 40.0 * scaling, 5.0) as i32
 }
 
 fn round_to_multiple(value: f32, step: f32) -> f32 {
-    (value / step).round() * step
+    ((value / step) as i32) as f32 * step
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -18128,7 +18287,7 @@ mod tests {
             Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
         );
         assert_eq!(driver.base.size, 3);
-        assert_eq!(driver.base.health, 11880);
+        assert_eq!(driver.base.health, 645);
         assert_eq!(
             driver.base.clip_size,
             3.0 * TILE_SIZE as f32 + (700.0 + 4.0) * 2.0
@@ -18205,7 +18364,7 @@ mod tests {
             Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
         );
         assert_eq!(large.base.size, 5);
-        assert_eq!(large.base.health, 181000);
+        assert_eq!(large.base.health, 2550);
         assert_eq!(
             large.base.clip_size,
             5.0 * TILE_SIZE as f32 + (2100.0 + 4.0) * 2.0
@@ -18255,6 +18414,133 @@ mod tests {
                 ItemAmount {
                     item: item_id("oxide"),
                     amount: 30
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn payload_deconstructors_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let small = registry
+            .get_payload_deconstructor_by_name("small-deconstructor")
+            .unwrap();
+        assert_eq!(small.base.group, BlockGroup::Payloads);
+        assert!(small.base.update);
+        assert!(small.base.sync);
+        assert!(small.base.solid);
+        assert!(small.base.has_items);
+        assert!(small.base.has_power);
+        assert!(small.base.consumes_power);
+        assert_eq!(
+            small.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(small.base.size, 3);
+        assert_eq!(small.base.item_capacity, 100);
+        assert_eq!(small.base.health, 755);
+        assert_eq!(small.base.clip_size, 120.0);
+        assert_eq!(small.region_suffix, "-dark");
+        assert_eq!(small.payload_speed, 1.0);
+        assert_eq!(small.payload_rotate_speed, 5.0);
+        assert_eq!(small.max_payload_size, 4.0);
+        assert_eq!(small.deconstruct_speed, 3.0);
+        assert_eq!(small.dump_rate, 4);
+        assert_eq!(small.consume_power, 1.0);
+        assert_eq!(small.finish_effect, "breakBlock");
+        assert_eq!(small.construct_color, "remove");
+        assert_eq!(small.progress_bar_color, "ammo");
+        assert!(small.accepts_payload);
+        assert!(small.accepts_unit_payloads);
+        assert!(!small.outputs_payload);
+        assert!(small.output_facing);
+        assert!(!small.rotate);
+        assert!(!small.configurable);
+        assert!(!small.clear_on_double_tap);
+        assert!(!small.save_config);
+        assert!(small.can_overdrive);
+        assert!(!small.under_bullets);
+        assert_eq!(small.region_rotated1, -1);
+        assert_eq!(small.fog_radius, -1.0);
+        assert!(small.research_cost.is_empty());
+        assert_eq!(small.research_cost_multiplier, 1.0);
+        assert_eq!(
+            small.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 80
+                }
+            ]
+        );
+
+        let deconstructor = registry
+            .get_payload_deconstructor_by_name("deconstructor")
+            .unwrap();
+        assert_eq!(deconstructor.base.group, BlockGroup::Payloads);
+        assert!(deconstructor.base.update);
+        assert!(deconstructor.base.sync);
+        assert!(deconstructor.base.solid);
+        assert!(deconstructor.base.has_items);
+        assert!(deconstructor.base.has_power);
+        assert!(deconstructor.base.consumes_power);
+        assert_eq!(
+            deconstructor.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(deconstructor.base.size, 5);
+        assert_eq!(deconstructor.base.item_capacity, 250);
+        assert_eq!(deconstructor.base.health, 3195);
+        assert_eq!(deconstructor.base.clip_size, 120.0);
+        assert_eq!(deconstructor.region_suffix, "-dark");
+        assert_eq!(deconstructor.payload_speed, 1.0);
+        assert_eq!(deconstructor.payload_rotate_speed, 5.0);
+        assert_eq!(deconstructor.max_payload_size, 4.0);
+        assert_eq!(deconstructor.deconstruct_speed, 6.0);
+        assert_eq!(deconstructor.dump_rate, 4);
+        assert_eq!(deconstructor.consume_power, 3.0);
+        assert!(deconstructor.accepts_payload);
+        assert!(deconstructor.accepts_unit_payloads);
+        assert!(!deconstructor.outputs_payload);
+        assert!(deconstructor.output_facing);
+        assert!(!deconstructor.rotate);
+        assert!(!deconstructor.configurable);
+        assert!(deconstructor.can_overdrive);
+        assert_eq!(deconstructor.region_rotated1, -1);
+        assert_eq!(deconstructor.fog_radius, -1.0);
+        assert!(deconstructor.research_cost.is_empty());
+        assert_eq!(
+            deconstructor.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 50
                 }
             ]
         );
