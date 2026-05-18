@@ -2731,15 +2731,18 @@ pub struct UnitFactoryBlockData {
     pub base: Block,
     pub kind: UnitBlockKind,
     pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
     pub research_cost_multiplier: f32,
     pub consume_power: f32,
     pub plans: Vec<UnitPlanSpec>,
+    pub region_suffix: String,
     pub configurable: bool,
     pub clear_on_double_tap: bool,
     pub outputs_payload: bool,
     pub floating: bool,
     pub rotate: bool,
     pub region_rotated1: i32,
+    pub fog_radius: f32,
     pub commandable: bool,
     pub ambient_sound: String,
     pub ambient_sound_volume: f32,
@@ -2761,15 +2764,18 @@ impl UnitFactoryBlockData {
             base,
             kind,
             requirements: Vec::new(),
+            research_cost: Vec::new(),
             research_cost_multiplier: 1.0,
             consume_power: 0.0,
             plans: Vec::new(),
+            region_suffix: String::new(),
             configurable: true,
             clear_on_double_tap: true,
             outputs_payload: true,
             floating: false,
             rotate: true,
             region_rotated1: 1,
+            fog_radius: 0.0,
             commandable: true,
             ambient_sound: "loopUnitBuilding".into(),
             ambient_sound_volume: 0.09,
@@ -10027,6 +10033,34 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         factory.consume_power = 1.2;
         factory.floating = true;
     });
+
+    registry.register_unit_factory_block(
+        "tank-fabricator",
+        UnitBlockKind::UnitFactory,
+        |factory| {
+            set_requirements(
+                &mut factory.requirements,
+                items,
+                &[("silicon", 200), ("beryllium", 150)],
+            );
+            factory.plans = vec![unit_plan(
+                items,
+                "stell",
+                60.0 * 35.0,
+                &[("beryllium", 40), ("silicon", 50)],
+            )];
+            set_requirements(
+                &mut factory.research_cost,
+                items,
+                &[("beryllium", 200), ("graphite", 80), ("silicon", 80)],
+            );
+            factory.base.size = 3;
+            factory.configurable = false;
+            factory.region_suffix = "-dark".into();
+            factory.fog_radius = 3.0;
+            factory.consume_power = 1.5;
+        },
+    );
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -16212,6 +16246,101 @@ mod tests {
                 ItemAmount {
                     item: item_id("titanium"),
                     amount: 40
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn tank_fabricator_unit_factory_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let factory = registry
+            .get_unit_factory_by_name("tank-fabricator")
+            .unwrap();
+
+        assert_eq!(factory.kind, UnitBlockKind::UnitFactory);
+        assert_eq!(factory.base.group, BlockGroup::Units);
+        assert_eq!(factory.base.flags, vec![BlockFlag::Factory]);
+        assert!(factory.base.update);
+        assert!(factory.base.has_power);
+        assert!(factory.base.has_items);
+        assert!(factory.base.solid);
+        assert!(!factory.configurable);
+        assert!(factory.clear_on_double_tap);
+        assert!(factory.outputs_payload);
+        assert!(!factory.floating);
+        assert!(factory.rotate);
+        assert_eq!(factory.region_rotated1, 1);
+        assert_eq!(factory.region_suffix, "-dark");
+        assert_eq!(factory.fog_radius, 3.0);
+        assert!(factory.commandable);
+        assert_eq!(factory.ambient_sound, "loopUnitBuilding");
+        assert_eq!(factory.ambient_sound_volume, 0.09);
+        assert_eq!(factory.create_sound, "unitCreate");
+        assert_eq!(factory.create_sound_volume, 1.0);
+        assert_eq!(factory.base.size, 3);
+        assert_eq!(factory.consume_power, 1.5);
+        assert!(factory.base.consumes_power);
+        assert_eq!(factory.research_cost_multiplier, 1.0);
+        assert_eq!(factory.base.item_capacity, 100);
+        assert_eq!(
+            factory.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 150
+                }
+            ]
+        );
+        assert_eq!(
+            factory.research_cost,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 80
+                }
+            ]
+        );
+
+        assert_eq!(factory.plans.len(), 1);
+        assert_eq!(factory.plans[0].unit, "stell");
+        assert_eq!(factory.plans[0].time, 60.0 * 35.0);
+        assert_eq!(
+            factory.plans[0].requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 50
+                }
+            ]
+        );
+        assert_eq!(
+            factory.capacities,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 100
                 }
             ]
         );
