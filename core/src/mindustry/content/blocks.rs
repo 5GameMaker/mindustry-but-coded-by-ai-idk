@@ -7705,7 +7705,7 @@ mod tests {
         assert!(wall_ore.wall_ore);
         assert_eq!(
             wall_ore.base.localized_name.as_deref(),
-            Some("thorium wall ore")
+            Some("thorium (Wall)")
         );
     }
 

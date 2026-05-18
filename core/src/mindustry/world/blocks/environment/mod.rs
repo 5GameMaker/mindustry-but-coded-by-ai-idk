@@ -309,7 +309,7 @@ impl OreBlockData {
 
     pub fn setup(&mut self, ore: &Item) {
         self.floor.base.localized_name = Some(if self.floor.wall_ore {
-            format!("{} wall ore", item_localized_name(ore))
+            format!("{} (Wall)", item_localized_name(ore))
         } else {
             item_localized_name(ore)
         });
@@ -323,7 +323,6 @@ impl OreBlockData {
                 self.setup(ore);
                 Ok(())
             }
-            None if self.floor.base.item_drop.is_some() => Ok(()),
             None => Err(format!("{} must have an item drop!", self.floor.base.name)),
         }
     }
@@ -437,15 +436,57 @@ mod tests {
     fn ore_block_setup_uses_item_drop_and_color() {
         let mut item = Item::new(7, "copper");
         item.color_rgba = 0xffaa00ff;
+        item.base.localized_name = Some("Copper".into());
         let mut ore = OreBlockData::new(3, &item);
         assert_eq!(ore.floor.base.item_drop, Some(7));
+        assert_eq!(ore.floor.base.variants, 3);
         assert_eq!(ore.floor.base.map_color_rgba, 0xffaa00ff);
+        assert!(ore.floor.base.use_color);
+        assert_eq!(ore.floor.base.localized_name.as_deref(), Some("Copper"));
+        assert!(!ore.floor.wall_ore);
+
+        item.base.localized_name = Some("Copper Prime".into());
+        ore.setup(&item);
+        assert_eq!(
+            ore.floor.base.localized_name.as_deref(),
+            Some("Copper Prime")
+        );
 
         ore.floor.wall_ore = true;
         ore.setup(&item);
         assert_eq!(
             ore.floor.base.localized_name.as_deref(),
-            Some("copper wall ore")
+            Some("Copper Prime (Wall)")
+        );
+
+        item.base.localized_name = None;
+        ore.setup(&item);
+        assert_eq!(
+            ore.floor.base.localized_name.as_deref(),
+            Some("copper (Wall)")
+        );
+    }
+
+    #[test]
+    fn ore_block_init_requires_item_drop_like_upstream() {
+        let mut item = Item::new(8, "lead");
+        item.color_rgba = 0x12345678;
+        item.base.localized_name = Some("Lead".into());
+
+        let mut ore = OreBlockData::new(6, &item);
+        ore.floor.base.item_drop = None;
+        ore.floor.base.map_color_rgba = 0;
+        ore.floor.base.localized_name = None;
+
+        ore.init(Some(&item)).unwrap();
+        assert_eq!(ore.floor.base.item_drop, Some(8));
+        assert_eq!(ore.floor.base.map_color_rgba, 0x12345678);
+        assert_eq!(ore.floor.base.localized_name.as_deref(), Some("Lead"));
+
+        ore.floor.base.item_drop = Some(8);
+        assert_eq!(
+            ore.init(None).unwrap_err(),
+            "ore-lead must have an item drop!"
         );
     }
 }
