@@ -478,6 +478,8 @@ impl StorageBlockData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurretBlockKind {
     ItemTurret,
+    LiquidTurret,
+    PowerTurret,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -486,6 +488,9 @@ pub enum BulletKind {
     Basic,
     Flak,
     Artillery,
+    Liquid,
+    Laser,
+    Lightning,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -494,9 +499,12 @@ pub struct BulletSpec {
     pub speed: f32,
     pub damage: f32,
     pub hit_size: f32,
+    pub draw_size: f32,
     pub width: f32,
     pub height: f32,
     pub lifetime: f32,
+    pub drag: f32,
+    pub layer: String,
     pub ammo_multiplier: f32,
     pub reload_multiplier: f32,
     pub range_change: f32,
@@ -504,10 +512,14 @@ pub struct BulletSpec {
     pub hit_effect: String,
     pub despawn_effect: String,
     pub shoot_effect: String,
+    pub smoke_effect: String,
+    pub charge_effect: String,
     pub hit_color: String,
     pub back_color: String,
     pub trail_color: String,
     pub front_color: String,
+    pub light_color: String,
+    pub colors: Vec<String>,
     pub homing_power: f32,
     pub homing_range: f32,
     pub trail_length: i32,
@@ -519,14 +531,30 @@ pub struct BulletSpec {
     pub collides_ground: bool,
     pub collides_air: bool,
     pub collides_tiles: bool,
+    pub collides: bool,
     pub shrink_y: f32,
     pub knockback: f32,
     pub pierce: bool,
+    pub pierce_cap: i32,
     pub hittable: bool,
+    pub keep_velocity: bool,
+    pub absorbable: bool,
     pub status: String,
     pub status_duration: f32,
     pub make_fire: bool,
     pub trail_effect: String,
+    pub display_ammo_multiplier: bool,
+    pub building_damage_multiplier: f32,
+    pub shield_damage_multiplier: f32,
+    pub armor_multiplier: f32,
+    pub length: f32,
+    pub lightning_length: i32,
+    pub lightning_length_rand: i32,
+    pub lightning_color: String,
+    pub lightning_type: Option<Box<BulletSpec>>,
+    pub puddle_size: f32,
+    pub orb_size: f32,
+    pub boil_time: f32,
 }
 
 impl BulletSpec {
@@ -536,9 +564,12 @@ impl BulletSpec {
             speed,
             damage,
             hit_size: 4.0,
+            draw_size: 40.0,
             width: 0.0,
             height: 0.0,
             lifetime: 0.0,
+            drag: 0.0,
+            layer: String::new(),
             ammo_multiplier: 1.0,
             reload_multiplier: 1.0,
             range_change: 0.0,
@@ -546,10 +577,14 @@ impl BulletSpec {
             hit_effect: "none".into(),
             despawn_effect: "none".into(),
             shoot_effect: "none".into(),
+            smoke_effect: "shootSmallSmoke".into(),
+            charge_effect: "none".into(),
             hit_color: String::new(),
             back_color: String::new(),
             trail_color: String::new(),
             front_color: String::new(),
+            light_color: "powerLight".into(),
+            colors: Vec::new(),
             homing_power: 0.0,
             homing_range: 0.0,
             trail_length: 0,
@@ -561,14 +596,30 @@ impl BulletSpec {
             collides_ground: true,
             collides_air: true,
             collides_tiles: true,
+            collides: true,
             shrink_y: 0.0,
             knockback: 0.0,
             pierce: false,
+            pierce_cap: -1,
             hittable: true,
+            keep_velocity: true,
+            absorbable: true,
             status: "none".into(),
             status_duration: 60.0 * 8.0,
             make_fire: false,
             trail_effect: "missileTrail".into(),
+            display_ammo_multiplier: true,
+            building_damage_multiplier: 1.0,
+            shield_damage_multiplier: 1.0,
+            armor_multiplier: 1.0,
+            length: 0.0,
+            lightning_length: 5,
+            lightning_length_rand: 0,
+            lightning_color: String::new(),
+            lightning_type: None,
+            puddle_size: 0.0,
+            orb_size: 0.0,
+            boil_time: 0.0,
         }
     }
 }
@@ -580,12 +631,21 @@ pub struct TurretAmmo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LiquidTurretAmmo {
+    pub liquid: ContentId,
+    pub bullet: BulletSpec,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TurretBlockData {
     pub base: Block,
     pub kind: TurretBlockKind,
     pub requirements: Vec<ItemAmount>,
     pub ammo: Vec<TurretAmmo>,
+    pub liquid_ammo: Vec<LiquidTurretAmmo>,
+    pub shoot_type: Option<Box<BulletSpec>>,
     pub research_cost_multiplier: f32,
+    pub consume_power: f32,
     pub coolant_amount: f32,
     pub coolant_multiplier: f32,
     pub consume_coolant: bool,
@@ -658,6 +718,7 @@ pub struct TurretBlockData {
     pub cooldown_time: f32,
     pub elevation: f32,
     pub shake: f32,
+    pub extinguish: bool,
     pub drawer: String,
     pub liquid_capacity: f32,
     pub outlined_icon: bool,
@@ -681,7 +742,10 @@ impl TurretBlockData {
             kind,
             requirements: Vec::new(),
             ammo: Vec::new(),
+            liquid_ammo: Vec::new(),
+            shoot_type: None,
             research_cost_multiplier: 1.0,
+            consume_power: 0.0,
             coolant_amount: 0.0,
             coolant_multiplier: 5.0,
             consume_coolant: false,
@@ -754,6 +818,7 @@ impl TurretBlockData {
             cooldown_time: 20.0,
             elevation: -1.0,
             shake: 0.0,
+            extinguish: false,
             drawer: "DrawTurret".into(),
             liquid_capacity: 20.0,
             outlined_icon: true,
@@ -785,6 +850,17 @@ impl TurretBlockData {
             TurretBlockKind::ItemTurret => {
                 self.base.has_items = true;
             }
+            TurretBlockKind::LiquidTurret => {
+                self.base.has_liquids = true;
+                self.loop_sound = "loopSpray".into();
+                self.shoot_sound = "none".into();
+                self.smoke_effect = "none".into();
+                self.shoot_effect = "none".into();
+                self.extinguish = true;
+            }
+            TurretBlockKind::PowerTurret => {
+                self.base.has_power = true;
+            }
         }
     }
 
@@ -808,6 +884,13 @@ impl TurretBlockData {
         }
         if matches!(self.kind, TurretBlockKind::ItemTurret) && self.target_ground {
             for ammo in &self.ammo {
+                self.place_overlap_range = self
+                    .place_overlap_range
+                    .max(self.range + ammo.bullet.range_change + self.place_overlap_margin);
+            }
+        }
+        if matches!(self.kind, TurretBlockKind::LiquidTurret) && self.target_ground {
+            for ammo in &self.liquid_ammo {
                 self.place_overlap_range = self
                     .place_overlap_range
                     .max(self.range + ammo.bullet.range_change + self.place_overlap_margin);
@@ -2749,7 +2832,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_ores(&mut registry, items);
     register_production_blocks(&mut registry, items, liquids);
     register_storage_blocks(&mut registry, items);
-    register_turret_blocks(&mut registry, items);
+    register_turret_blocks(&mut registry, items, liquids);
     register_crafting_blocks(&mut registry, items, liquids);
     register_defense_walls(&mut registry, items);
     register_effect_blocks(&mut registry, items, liquids);
@@ -3566,6 +3649,17 @@ fn push_turret_ammo(target: &mut Vec<TurretAmmo>, items: &[Item], name: &str, bu
     }
 }
 
+fn push_liquid_turret_ammo(
+    target: &mut Vec<LiquidTurretAmmo>,
+    liquids: &[Liquid],
+    name: &str,
+    bullet: BulletSpec,
+) {
+    if let Some(liquid) = liquid_id(liquids, name) {
+        target.push(LiquidTurretAmmo { liquid, bullet });
+    }
+}
+
 fn push_liquid_amount(target: &mut Vec<LiquidAmount>, liquids: &[Liquid], name: &str, amount: f32) {
     if let Some(liquid) = liquid_amount(liquids, name, amount) {
         target.push(liquid);
@@ -3589,6 +3683,38 @@ fn push_liquid_consume(
     if let Some(liquid) = liquid_consume(liquids, name, amount, booster) {
         target.push(liquid);
     }
+}
+
+fn rgba_name(color: u32) -> String {
+    format!("{color:08x}")
+}
+
+fn liquid_bullet(liquids: &[Liquid], name: &str) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Liquid, 3.5, 0.0);
+    bullet.ammo_multiplier = 1.0;
+    bullet.lifetime = 34.0;
+    bullet.status_duration = 60.0 * 2.0;
+    bullet.despawn_effect = "none".into();
+    bullet.hit_effect = "hitLiquid".into();
+    bullet.smoke_effect = "none".into();
+    bullet.shoot_effect = "none".into();
+    bullet.drag = 0.001;
+    bullet.knockback = 0.55;
+    bullet.display_ammo_multiplier = false;
+    bullet.puddle_size = 6.0;
+    bullet.orb_size = 3.0;
+    bullet.boil_time = 5.0;
+
+    if let Some(liquid) = liquids
+        .iter()
+        .find(|liquid| liquid.base.mappable.name.as_str() == name)
+    {
+        bullet.status = liquid.effect.clone().unwrap_or_else(|| "none".into());
+        bullet.hit_color = rgba_name(liquid.color_rgba);
+        bullet.light_color = rgba_name(liquid.light_color_rgba);
+    }
+
+    bullet
 }
 
 fn register_production_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
@@ -4149,7 +4275,7 @@ fn register_storage_blocks(registry: &mut BlockRegistry, items: &[Item]) {
     });
 }
 
-fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
     registry.register_turret_block("duo", TurretBlockKind::ItemTurret, |turret| {
         set_requirements(&mut turret.requirements, items, &[("copper", 35)]);
 
@@ -4442,6 +4568,152 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         turret.coolant_multiplier = 10.0;
         turret.deposit_cooldown = 2.0;
         turret.limit_range(0.0);
+    });
+
+    registry.register_turret_block("wave", TurretBlockKind::LiquidTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("metaglass", 45), ("lead", 75), ("copper", 25)],
+        );
+
+        let mut water = liquid_bullet(liquids, "water");
+        water.knockback = 0.7;
+        water.drag = 0.01;
+        water.layer = "Layer.bullet-2".into();
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "water", water);
+
+        let mut slag = liquid_bullet(liquids, "slag");
+        slag.damage = 4.0;
+        slag.drag = 0.01;
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "slag", slag);
+
+        let mut cryofluid = liquid_bullet(liquids, "cryofluid");
+        cryofluid.drag = 0.01;
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "cryofluid", cryofluid);
+
+        let mut oil = liquid_bullet(liquids, "oil");
+        oil.drag = 0.01;
+        oil.layer = "Layer.bullet-2".into();
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "oil", oil);
+
+        turret.base.size = 2;
+        turret.recoil = 0.0;
+        turret.reload = 3.0;
+        turret.inaccuracy = 5.0;
+        turret.shoot_cone = 50.0;
+        turret.liquid_capacity = 10.0;
+        turret.shoot_effect = "shootLiquid".into();
+        turret.range = 110.0;
+        turret.scaled_health = 250.0;
+        turret.base.flags.clear();
+        turret.base.flags.push(BlockFlag::Turret);
+        turret.base.flags.push(BlockFlag::Extinguisher);
+    });
+
+    registry.register_turret_block("lancer", TurretBlockKind::PowerTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("copper", 60),
+                ("lead", 70),
+                ("silicon", 60),
+                ("titanium", 30),
+            ],
+        );
+        turret.range = 165.0;
+        turret.shoot_first_shot_delay = 40.0;
+        turret.recoil = 2.0;
+        turret.reload = 80.0;
+        turret.shake = 2.0;
+        turret.shoot_effect = "lancerLaserShoot".into();
+        turret.smoke_effect = "none".into();
+        turret.heat_color = "red".into();
+        turret.base.size = 2;
+        turret.scaled_health = 280.0;
+        turret.target_air = false;
+        turret.move_while_charging = false;
+        turret.accurate_delay = false;
+        turret.shoot_sound = "shootLancer".into();
+        turret.consume_coolant(0.2);
+        turret.charge_sound = "chargeLancer".into();
+        turret.consume_power = 6.0;
+
+        let mut shoot_type = BulletSpec::new(BulletKind::Laser, 0.0, 140.0);
+        shoot_type.colors = vec!["a9d8ff66".into(), "a9d8ffff".into(), "ffffffff".into()];
+        shoot_type.charge_effect = "MultiEffect(lancerLaserCharge, lancerLaserChargeBegin)".into();
+        shoot_type.building_damage_multiplier = 0.25;
+        shoot_type.armor_multiplier = 4.0;
+        shoot_type.hit_effect = "hitLancer".into();
+        shoot_type.hit_size = 4.0;
+        shoot_type.lifetime = 16.0;
+        shoot_type.draw_size = 400.0;
+        shoot_type.collides_air = false;
+        shoot_type.length = 173.0;
+        shoot_type.ammo_multiplier = 1.0;
+        shoot_type.pierce_cap = 4;
+        shoot_type.despawn_effect = "none".into();
+        shoot_type.shoot_effect = "hitLancer".into();
+        shoot_type.smoke_effect = "none".into();
+        shoot_type.hit_color = "ffffffff".into();
+        shoot_type.keep_velocity = false;
+        shoot_type.collides = false;
+        shoot_type.pierce = true;
+        shoot_type.hittable = false;
+        shoot_type.absorbable = false;
+        shoot_type.length = 173.0;
+        turret.shoot_type = Some(Box::new(shoot_type));
+    });
+
+    registry.register_turret_block("arc", TurretBlockKind::PowerTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("copper", 50), ("lead", 50)],
+        );
+
+        let mut lightning_type = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
+        lightning_type.lifetime = 10.0;
+        lightning_type.hit_effect = "hitLancer".into();
+        lightning_type.despawn_effect = "none".into();
+        lightning_type.status = "shocked".into();
+        lightning_type.hittable = false;
+        lightning_type.light_color = "ffffffff".into();
+        lightning_type.collides_air = false;
+        lightning_type.building_damage_multiplier = 0.25;
+        lightning_type.shield_damage_multiplier = 0.2;
+
+        let mut shoot_type = BulletSpec::new(BulletKind::Lightning, 0.0, 20.0);
+        shoot_type.lifetime = 1.0;
+        shoot_type.despawn_effect = "none".into();
+        shoot_type.hit_effect = "hitLancer".into();
+        shoot_type.keep_velocity = false;
+        shoot_type.hittable = false;
+        shoot_type.status = "shocked".into();
+        shoot_type.lightning_length = 25;
+        shoot_type.lightning_length_rand = 0;
+        shoot_type.lightning_color = "a9d8ffff".into();
+        shoot_type.collides_air = false;
+        shoot_type.ammo_multiplier = 1.0;
+        shoot_type.building_damage_multiplier = 0.25;
+        shoot_type.lightning_type = Some(Box::new(lightning_type));
+        turret.shoot_type = Some(Box::new(shoot_type));
+
+        turret.research_cost_multiplier = 1.0 / 3.0;
+        turret.reload = 35.0;
+        turret.shoot_cone = 40.0;
+        turret.rotate_speed = 8.0;
+        turret.target_air = false;
+        turret.range = 90.0;
+        turret.shoot_effect = "lightningShoot".into();
+        turret.heat_color = "red".into();
+        turret.recoil = 1.0;
+        turret.base.size = 1;
+        turret.base.health = 260;
+        turret.shoot_sound = "shootArc".into();
+        turret.consume_power = 3.3;
+        turret.consume_coolant(0.1);
     });
 }
 
@@ -8718,6 +8990,242 @@ mod tests {
         assert_eq!(pyratite.ammo_multiplier, 4.0);
         assert_eq!(pyratite.despawn_effect, "hitBulletColor");
         assert_close(pyratite.lifetime, (235.0 + 10.0) / 3.0);
+    }
+
+    #[test]
+    fn liquid_and_power_turrets_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_content_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name.as_str() == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+        fn liquid_ammo_for(turret: &TurretBlockData, liquid: ContentId) -> &LiquidTurretAmmo {
+            turret
+                .liquid_ammo
+                .iter()
+                .find(|ammo| ammo.liquid == liquid)
+                .unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let wave = registry.get_turret_by_name("wave").unwrap();
+        assert_eq!(wave.kind, TurretBlockKind::LiquidTurret);
+        assert!(wave.base.has_liquids);
+        assert_eq!(wave.loop_sound, "loopSpray");
+        assert_eq!(wave.shoot_sound, "none");
+        assert_eq!(wave.smoke_effect, "none");
+        assert_eq!(wave.shoot_effect, "shootLiquid");
+        assert!(wave.extinguish);
+        assert_eq!(
+            wave.base.flags,
+            vec![BlockFlag::Turret, BlockFlag::Extinguisher]
+        );
+        assert_eq!(wave.base.size, 2);
+        assert_eq!(wave.recoil, 0.0);
+        assert_eq!(wave.reload, 3.0);
+        assert_eq!(wave.inaccuracy, 5.0);
+        assert_eq!(wave.shoot_cone, 50.0);
+        assert_eq!(wave.liquid_capacity, 10.0);
+        assert_eq!(wave.base.liquid_capacity, 10.0);
+        assert_eq!(wave.range, 110.0);
+        assert_eq!(wave.scaled_health, 250.0);
+        assert_eq!(wave.base.health, 2 * 2 * 250);
+        assert_eq!(wave.fog_radius, 14.0);
+        assert_eq!(wave.place_overlap_range, 110.0 + 8.0 * 7.0);
+        assert_eq!(
+            wave.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 45
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 75
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 25
+                }
+            ]
+        );
+
+        let water = &liquid_ammo_for(wave, liquid_content_id("water")).bullet;
+        assert_eq!(water.kind, BulletKind::Liquid);
+        assert_eq!(water.speed, 3.5);
+        assert_eq!(water.damage, 0.0);
+        assert_eq!(water.ammo_multiplier, 1.0);
+        assert_eq!(water.lifetime, 34.0);
+        assert_eq!(water.status_duration, 60.0 * 2.0);
+        assert_eq!(water.despawn_effect, "none");
+        assert_eq!(water.hit_effect, "hitLiquid");
+        assert_eq!(water.smoke_effect, "none");
+        assert_eq!(water.shoot_effect, "none");
+        assert_eq!(water.knockback, 0.7);
+        assert_eq!(water.drag, 0.01);
+        assert_eq!(water.layer, "Layer.bullet-2");
+        assert!(!water.display_ammo_multiplier);
+        assert_eq!(water.puddle_size, 6.0);
+        assert_eq!(water.orb_size, 3.0);
+        assert_eq!(water.boil_time, 5.0);
+        assert_eq!(water.status, "wet");
+        assert_eq!(water.hit_color, "596ab8ff");
+
+        let slag = &liquid_ammo_for(wave, liquid_content_id("slag")).bullet;
+        assert_eq!(slag.damage, 4.0);
+        assert_eq!(slag.drag, 0.01);
+        assert_eq!(slag.status, "melting");
+        assert_eq!(slag.light_color, "f0511d66");
+
+        let cryofluid = &liquid_ammo_for(wave, liquid_content_id("cryofluid")).bullet;
+        assert_eq!(cryofluid.drag, 0.01);
+        assert_eq!(cryofluid.status, "freezing");
+
+        let oil = &liquid_ammo_for(wave, liquid_content_id("oil")).bullet;
+        assert_eq!(oil.drag, 0.01);
+        assert_eq!(oil.layer, "Layer.bullet-2");
+        assert_eq!(oil.status, "tarred");
+
+        let lancer = registry.get_turret_by_name("lancer").unwrap();
+        assert_eq!(lancer.kind, TurretBlockKind::PowerTurret);
+        assert!(lancer.base.has_power);
+        assert_eq!(lancer.range, 165.0);
+        assert_eq!(lancer.shoot_first_shot_delay, 40.0);
+        assert_eq!(lancer.recoil, 2.0);
+        assert_eq!(lancer.reload, 80.0);
+        assert_eq!(lancer.shake, 2.0);
+        assert_eq!(lancer.shoot_effect, "lancerLaserShoot");
+        assert_eq!(lancer.smoke_effect, "none");
+        assert_eq!(lancer.heat_color, "red");
+        assert_eq!(lancer.base.size, 2);
+        assert_eq!(lancer.scaled_health, 280.0);
+        assert_eq!(lancer.base.health, 2 * 2 * 280);
+        assert!(!lancer.target_air);
+        assert!(!lancer.move_while_charging);
+        assert!(!lancer.accurate_delay);
+        assert_eq!(lancer.shoot_sound, "shootLancer");
+        assert!(lancer.consume_coolant);
+        assert_eq!(lancer.coolant_amount, 0.2);
+        assert_eq!(lancer.charge_sound, "chargeLancer");
+        assert_eq!(lancer.consume_power, 6.0);
+        assert_eq!(
+            lancer.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 60
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 70
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 60
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 30
+                }
+            ]
+        );
+        let laser = lancer.shoot_type.as_ref().unwrap();
+        assert_eq!(laser.kind, BulletKind::Laser);
+        assert_eq!(laser.speed, 0.0);
+        assert_eq!(laser.damage, 140.0);
+        assert_eq!(laser.colors, vec!["a9d8ff66", "a9d8ffff", "ffffffff"]);
+        assert_eq!(
+            laser.charge_effect,
+            "MultiEffect(lancerLaserCharge, lancerLaserChargeBegin)"
+        );
+        assert_eq!(laser.building_damage_multiplier, 0.25);
+        assert_eq!(laser.armor_multiplier, 4.0);
+        assert_eq!(laser.hit_effect, "hitLancer");
+        assert_eq!(laser.hit_size, 4.0);
+        assert_eq!(laser.lifetime, 16.0);
+        assert_eq!(laser.draw_size, 400.0);
+        assert!(!laser.collides_air);
+        assert_eq!(laser.length, 173.0);
+        assert_eq!(laser.ammo_multiplier, 1.0);
+        assert_eq!(laser.pierce_cap, 4);
+        assert!(!laser.collides);
+        assert!(laser.pierce);
+        assert!(!laser.hittable);
+        assert!(!laser.keep_velocity);
+        assert!(!laser.absorbable);
+
+        let arc = registry.get_turret_by_name("arc").unwrap();
+        assert_eq!(arc.kind, TurretBlockKind::PowerTurret);
+        assert!(arc.base.has_power);
+        assert_close(arc.research_cost_multiplier, 1.0 / 3.0);
+        assert_eq!(arc.reload, 35.0);
+        assert_eq!(arc.shoot_cone, 40.0);
+        assert_eq!(arc.rotate_speed, 8.0);
+        assert!(!arc.target_air);
+        assert_eq!(arc.range, 90.0);
+        assert_eq!(arc.shoot_effect, "lightningShoot");
+        assert_eq!(arc.heat_color, "red");
+        assert_eq!(arc.recoil, 1.0);
+        assert_eq!(arc.base.size, 1);
+        assert_eq!(arc.base.health, 260);
+        assert_eq!(arc.shoot_sound, "shootArc");
+        assert_close(arc.consume_power, 3.3);
+        assert!(arc.consume_coolant);
+        assert_eq!(arc.coolant_amount, 0.1);
+        assert_eq!(
+            arc.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 50
+                }
+            ]
+        );
+        let lightning = arc.shoot_type.as_ref().unwrap();
+        assert_eq!(lightning.kind, BulletKind::Lightning);
+        assert_eq!(lightning.damage, 20.0);
+        assert_eq!(lightning.lifetime, 1.0);
+        assert_eq!(lightning.despawn_effect, "none");
+        assert_eq!(lightning.hit_effect, "hitLancer");
+        assert!(!lightning.keep_velocity);
+        assert!(!lightning.hittable);
+        assert_eq!(lightning.status, "shocked");
+        assert_eq!(lightning.lightning_length, 25);
+        assert_eq!(lightning.lightning_length_rand, 0);
+        assert_eq!(lightning.lightning_color, "a9d8ffff");
+        assert!(!lightning.collides_air);
+        assert_eq!(lightning.ammo_multiplier, 1.0);
+        assert_eq!(lightning.building_damage_multiplier, 0.25);
+
+        let nested = lightning.lightning_type.as_ref().unwrap();
+        assert_eq!(nested.kind, BulletKind::Generic);
+        assert_eq!(nested.speed, 0.0001);
+        assert_eq!(nested.damage, 0.0);
+        assert_eq!(nested.lifetime, 10.0);
+        assert_eq!(nested.hit_effect, "hitLancer");
+        assert_eq!(nested.despawn_effect, "none");
+        assert_eq!(nested.status, "shocked");
+        assert!(!nested.hittable);
+        assert_eq!(nested.light_color, "ffffffff");
+        assert!(!nested.collides_air);
+        assert_eq!(nested.building_damage_multiplier, 0.25);
+        assert_eq!(nested.shield_damage_multiplier, 0.2);
     }
 
     #[test]
