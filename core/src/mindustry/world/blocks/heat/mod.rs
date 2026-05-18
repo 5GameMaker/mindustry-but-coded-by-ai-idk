@@ -34,6 +34,76 @@ pub fn calculate_heat_excluding(side_heat: &[f32], came_from: &[usize]) -> f32 {
         .sum()
 }
 
+pub fn valid_heat_neighbor(
+    rotatable: bool,
+    split: bool,
+    relative_to_neighbor: i32,
+    neighbor_rotation: i32,
+) -> bool {
+    !rotatable
+        || (!split && relative_to_neighbor == neighbor_rotation)
+        || (split && relative_to_neighbor == (neighbor_rotation + 2).rem_euclid(4))
+}
+
+pub fn heat_contact_points(self_size: i32, other_size: i32, diff_tiles: f32) -> i32 {
+    ((self_size as f32 / 2.0 + other_size as f32 / 2.0 - diff_tiles) as i32)
+        .min(self_size.min(other_size))
+        .max(0)
+}
+
+pub fn heat_contribution(
+    neighbor_heat: f32,
+    neighbor_size: i32,
+    contact_points: i32,
+    split: bool,
+) -> f32 {
+    let base = neighbor_heat / neighbor_size as f32 * contact_points as f32;
+    if split {
+        base / 3.0
+    } else {
+        base
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeatNeighbor {
+    pub side: usize,
+    pub heat: f32,
+    pub size: i32,
+    pub contact_points: i32,
+    pub split: bool,
+    pub valid: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeatAccumulation {
+    pub heat: f32,
+    pub side_heat: [f32; 4],
+}
+
+pub fn calculate_heat_from_neighbors(neighbors: &[HeatNeighbor]) -> HeatAccumulation {
+    let mut result = HeatAccumulation {
+        heat: 0.0,
+        side_heat: [0.0; 4],
+    };
+
+    for neighbor in neighbors {
+        if !neighbor.valid || neighbor.side >= 4 {
+            continue;
+        }
+        let add = heat_contribution(
+            neighbor.heat,
+            neighbor.size,
+            neighbor.contact_points,
+            neighbor.split,
+        );
+        result.side_heat[neighbor.side] += add;
+        result.heat += add;
+    }
+
+    result
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeatConductorState {
     pub heat: f32,
@@ -161,6 +231,51 @@ mod tests {
         assert_eq!(state.heat, 8.0);
         assert!(update_conductor_heat(&mut state, 43, &[]));
         assert_eq!(state.heat, 400.0);
+    }
+
+    #[test]
+    fn heat_neighbor_orientation_contact_and_contribution_match_building_formula() {
+        assert!(valid_heat_neighbor(false, false, 0, 2));
+        assert!(valid_heat_neighbor(true, false, 1, 1));
+        assert!(!valid_heat_neighbor(true, false, 1, 3));
+        assert!(valid_heat_neighbor(true, true, 3, 1));
+        assert!(!valid_heat_neighbor(true, true, 1, 1));
+
+        assert_eq!(heat_contact_points(3, 3, 0.0), 3);
+        assert_eq!(heat_contact_points(3, 3, 1.0), 2);
+        assert_eq!(heat_contact_points(1, 3, 3.0), 0);
+        assert_eq!(heat_contribution(12.0, 3, 2, false), 8.0);
+        assert_eq!(heat_contribution(12.0, 3, 2, true), 8.0 / 3.0);
+
+        let accumulated = calculate_heat_from_neighbors(&[
+            HeatNeighbor {
+                side: 0,
+                heat: 12.0,
+                size: 3,
+                contact_points: 2,
+                split: false,
+                valid: true,
+            },
+            HeatNeighbor {
+                side: 0,
+                heat: 9.0,
+                size: 3,
+                contact_points: 3,
+                split: true,
+                valid: true,
+            },
+            HeatNeighbor {
+                side: 2,
+                heat: 99.0,
+                size: 3,
+                contact_points: 3,
+                split: false,
+                valid: false,
+            },
+        ]);
+        assert_eq!(accumulated.side_heat[0], 11.0);
+        assert_eq!(accumulated.side_heat[2], 0.0);
+        assert_eq!(accumulated.heat, 11.0);
     }
 
     #[test]
