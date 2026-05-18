@@ -963,6 +963,8 @@ pub struct TurretBlockData {
     pub shoot_spread: f32,
     pub shoot_alternate_spread: f32,
     pub shoot_alternate_barrels: i32,
+    pub shoot_helix_scl: f32,
+    pub shoot_helix_mag: f32,
     pub target_air: bool,
     pub target_ground: bool,
     pub target_blocks: bool,
@@ -1088,6 +1090,8 @@ impl TurretBlockData {
             shoot_spread: 5.0,
             shoot_alternate_spread: 0.0,
             shoot_alternate_barrels: 1,
+            shoot_helix_scl: 0.0,
+            shoot_helix_mag: 0.0,
             target_air: true,
             target_ground: true,
             target_blocks: true,
@@ -7099,6 +7103,126 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.rotate_speed = 0.9;
         turret.consume_coolant(15.0 / 60.0);
         turret.limit_range(9.0);
+    });
+
+    registry.register_turret_block("smite", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("oxide", 200),
+                ("surge-alloy", 400),
+                ("silicon", 800),
+                ("carbide", 500),
+                ("phase-fabric", 300),
+            ],
+        );
+
+        let mut lightning_type = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
+        lightning_type.lifetime = 10.0;
+        lightning_type.hit_effect = "hitLancer".into();
+        lightning_type.despawn_effect = "none".into();
+        lightning_type.status = "shocked".into();
+        lightning_type.hittable = false;
+        lightning_type.light_color = "ffffffff".into();
+        lightning_type.building_damage_multiplier = 0.25;
+
+        let mut interval = BulletSpec::new(BulletKind::Lightning, 0.0, 30.0);
+        interval.lifetime = 1.0;
+        interval.despawn_effect = "none".into();
+        interval.hit_effect = "hitLancer".into();
+        interval.keep_velocity = false;
+        interval.hittable = false;
+        interval.status = "shocked".into();
+        interval.collides_air = false;
+        interval.ammo_multiplier = 1.0;
+        interval.lightning_color = "accent".into();
+        interval.lightning_length = 5;
+        interval.lightning_length_rand = 10;
+        interval.building_damage_multiplier = 0.25;
+        interval.lightning_type = Some(Box::new(lightning_type));
+
+        let mut surge = basic_bullet(7.0, 250.0);
+        surge.sprite = "large-orb".into();
+        surge.width = 17.0;
+        surge.height = 21.0;
+        surge.hit_size = 8.0;
+        surge.shoot_effect =
+            "MultiEffect(shootTitan, colorSparkBig, WaveEffect(colorFrom=accent,colorTo=accent,lifetime=12,sizeTo=20,strokeFrom=3,strokeTo=0.3))"
+                .into();
+        surge.smoke_effect = "shootSmokeSmite".into();
+        surge.ammo_multiplier = 1.0;
+        surge.pierce_cap = 4;
+        surge.pierce = true;
+        surge.pierce_building = true;
+        surge.hit_color = "accent".into();
+        surge.back_color = "accent".into();
+        surge.trail_color = "accent".into();
+        surge.front_color = "white".into();
+        surge.trail_width = 2.8;
+        surge.trail_length = 9;
+        surge.hit_effect = "hitBulletColor".into();
+        surge.building_damage_multiplier = 0.3;
+        surge.despawn_effect =
+            "MultiEffect(hitBulletColor, WaveEffect(sizeTo=30,colorFrom=accent,colorTo=accent,lifetime=12))"
+                .into();
+        surge.trail_rotation = true;
+        surge.trail_effect = "disperseTrail".into();
+        surge.trail_interval = 3.0;
+        surge.interval_bullet = Some(Box::new(interval));
+        surge.bullet_interval = 3.0;
+        push_turret_ammo(&mut turret.ammo, items, "surge-alloy", surge);
+
+        let smite_parts = [
+            "RegionPart(-mid heatProgress=heat.blend(warmup,0.5) mirror=false)",
+            "RegionPart(-blade progress=warmup heatProgress=warmup mirror moveX=5.5 PartMove(recoil,0,-3,0))",
+            "RegionPart(-front progress=warmup heatProgress=recoil mirror under moveY=4 moveX=6.5 PartMove(recoil,0,-5.5,0))",
+            "RegionPart(-back progress=warmup heatProgress=warmup mirror under moveX=5.5)",
+            "ShapePart(progress=warmup.delay(0.2) color=accent circle hollow stroke=0 strokeTo=2 radius=10 layer=effect y=-15 rotateSpeed=1)",
+            "ShapePart(progress=warmup.delay(0.2) color=accent circle hollow stroke=0 strokeTo=1.6 radius=4 layer=effect y=-15 rotateSpeed=1)",
+            "HaloPart(progress=warmup.delay(0.5) color=accent layer=effect y=-15 haloRotation=90 shapes=2 triLength=0 triLengthTo=20 haloRadius=16 tri radius=4)",
+            "HaloPart(progress=warmup.delay(0.5) color=accent layer=effect y=-15 haloRotation=90 shapes=2 triLength=0 triLengthTo=5 haloRadius=16 tri radius=4 shapeRotation=180)",
+            "HaloPart(progress=warmup.delay(0.5) color=accent layer=effect y=-15 haloRotateSpeed=-1 shapes=4 triLength=0 triLengthTo=5 haloRotation=45 haloRadius=16 tri radius=8)",
+            "HaloPart(progress=warmup.delay(0.5) color=accent layer=effect y=-15 haloRotateSpeed=-1 shapes=4 shapeRotation=180 triLength=0 triLengthTo=2 haloRotation=45 haloRadius=16 tri radius=8)",
+            "HaloPart(progress=warmup.delay(0.5) color=accent layer=effect y=-15 haloRotateSpeed=1 shapes=4 triLength=0 triLengthTo=3 haloRotation=45 haloRadius=10 tri radius=6)",
+            "RegionPart(-blade-bar progress=warmup heatProgress=warmup mirror under outline=false layerOffset=-0.3 turretHeatLayer=turret-0.2 y=11 moveX=2 color=accent)",
+            "RegionPart(-blade-bar progress=warmup heatProgress=warmup mirror under outline=false layerOffset=-0.3 turretHeatLayer=turret-0.2 y=1.5 moveX=2 color=accent)",
+            "RegionPart(-blade-bar progress=warmup heatProgress=warmup mirror under outline=false layerOffset=-0.3 turretHeatLayer=turret-0.2 y=-8 moveX=2 color=accent)",
+            "RegionPart(-spine progress=warmup.delay(0) heatProgress=warmup mirror under layerOffset=-0.3 turretHeatLayer=turret-0.2 moveY=-5.5 moveX=15 moveRot=0 color=accent PartMove(recoil.delay(0),0,0,35))",
+            "RegionPart(-spine progress=warmup.delay(0.2) heatProgress=warmup mirror under layerOffset=-0.3 turretHeatLayer=turret-0.2 moveY=-8.5 moveX=14 moveRot=-30 color=accent PartMove(recoil.delay(0.2),0,0,35))",
+            "RegionPart(-spine progress=warmup.delay(0.4) heatProgress=warmup mirror under layerOffset=-0.3 turretHeatLayer=turret-0.2 moveY=-11.5 moveX=13 moveRot=-60 color=accent PartMove(recoil.delay(0.4),0,0,35))",
+            "RegionPart(-spine progress=warmup.delay(0.6) heatProgress=warmup mirror under layerOffset=-0.3 turretHeatLayer=turret-0.2 moveY=-14.5 moveX=12 moveRot=-90 color=accent PartMove(recoil.delay(0.6),0,0,35))",
+        ];
+        turret.drawer = format!("DrawTurret(reinforced-, {})", smite_parts.join(", "));
+
+        turret.shoot_pattern = "ShootMulti(ShootAlternate,ShootHelix)".into();
+        turret.shoot_alternate_spread = 3.3 * 1.9;
+        turret.shoot_shots = 5;
+        turret.shoot_alternate_barrels = 5;
+        turret.shoot_helix_scl = 4.0;
+        turret.shoot_helix_mag = 3.0;
+        turret.shoot_sound = "shootSmite".into();
+        turret.min_warmup = 0.99;
+        turret.coolant_multiplier = 15.0;
+        turret.shake = 2.0;
+        turret.ammo_per_shot = 2;
+        turret.shoot_warmup_speed = 0.04;
+        turret.shoot_y = 15.0;
+        turret.outline_color = "darkOutline".into();
+        turret.base.size = 5;
+        turret.base.env_enabled |= Env::SPACE;
+        turret.warmup_maintain_time = 120.0;
+        turret.reload = 100.0;
+        turret.recoil = 2.0;
+        turret.range = 300.0;
+        turret.tracking_range = turret.range * 1.4;
+        turret.shoot_cone = 30.0;
+        turret.scaled_health = 350.0;
+        turret.rotate_speed = 1.5;
+        turret.consume_coolant(15.0 / 60.0);
+        turret.limit_range(9.0);
+        turret.loop_sound = "loopGlow".into();
+        turret.loop_sound_volume = 0.8;
     });
 }
 
@@ -13923,6 +14047,149 @@ mod tests {
         assert_eq!(split_explosion.lightning, 4);
         assert_eq!(split_explosion.lightning_damage, 25.0);
         assert_eq!(split_explosion.lightning_length, 6);
+    }
+
+    #[test]
+    fn smite_item_turret_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let smite = registry.get_turret_by_name("smite").unwrap();
+        assert_eq!(smite.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(
+            smite.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 400
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 800
+                },
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 500
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 300
+                }
+            ]
+        );
+        assert_eq!(smite.ammo.len(), 1);
+        assert_eq!(smite.shoot_pattern, "ShootMulti(ShootAlternate,ShootHelix)");
+        assert_close(smite.shoot_alternate_spread, 3.3 * 1.9);
+        assert_eq!(smite.shoot_shots, 5);
+        assert_eq!(smite.shoot_alternate_barrels, 5);
+        assert_eq!(smite.shoot_helix_scl, 4.0);
+        assert_eq!(smite.shoot_helix_mag, 3.0);
+        assert_eq!(smite.shoot_sound, "shootSmite");
+        assert_eq!(smite.min_warmup, 0.99);
+        assert_eq!(smite.coolant_multiplier, 15.0);
+        assert_eq!(smite.shake, 2.0);
+        assert_eq!(smite.ammo_per_shot, 2);
+        assert_eq!(smite.shoot_warmup_speed, 0.04);
+        assert_eq!(smite.shoot_y, 15.0);
+        assert_eq!(smite.outline_color, "darkOutline");
+        assert_eq!(smite.base.size, 5);
+        assert_ne!(smite.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(smite.warmup_maintain_time, 120.0);
+        assert_eq!(smite.reload, 100.0);
+        assert_eq!(smite.recoil, 2.0);
+        assert_eq!(smite.range, 300.0);
+        assert_eq!(smite.tracking_range, 300.0 * 1.4);
+        assert_eq!(smite.shoot_cone, 30.0);
+        assert_eq!(smite.scaled_health, 350.0);
+        assert_eq!(smite.base.health, 5 * 5 * 350);
+        assert_eq!(smite.rotate_speed, 1.5);
+        assert!(smite.consume_coolant);
+        assert_close(smite.coolant_amount, 15.0 / 60.0);
+        assert_eq!(smite.loop_sound, "loopGlow");
+        assert_eq!(smite.loop_sound_volume, 0.8);
+        assert_eq!(smite.fog_radius, (300.0_f32 / 8.0).round());
+        assert_eq!(smite.place_overlap_range, 300.0 + 8.0 * 7.0);
+
+        assert!(smite.drawer.contains("DrawTurret(reinforced-"));
+        assert_eq!(smite.drawer.matches("RegionPart(").count(), 11);
+        assert_eq!(smite.drawer.matches("ShapePart(").count(), 2);
+        assert_eq!(smite.drawer.matches("HaloPart(").count(), 5);
+        assert_eq!(smite.drawer.matches("RegionPart(-blade-bar").count(), 3);
+        assert_eq!(smite.drawer.matches("RegionPart(-spine").count(), 4);
+        assert!(smite.drawer.contains("heat.blend(warmup,0.5)"));
+        assert!(smite.drawer.contains("warmup.delay(0.5)"));
+        assert!(smite.drawer.contains("triLengthTo=20"));
+
+        let surge = ammo_for(smite, item_id("surge-alloy"));
+        let bullet = &surge.bullet;
+        assert_eq!(bullet.kind, BulletKind::Basic);
+        assert_eq!(bullet.speed, 7.0);
+        assert_eq!(bullet.damage, 250.0);
+        assert_close(bullet.lifetime, (300.0 + 9.0 + 10.0) / 7.0);
+        assert_eq!(bullet.sprite, "large-orb");
+        assert_eq!(bullet.width, 17.0);
+        assert_eq!(bullet.height, 21.0);
+        assert_eq!(bullet.hit_size, 8.0);
+        assert!(bullet.shoot_effect.contains("shootTitan"));
+        assert!(bullet.shoot_effect.contains("colorSparkBig"));
+        assert!(bullet.shoot_effect.contains("strokeTo=0.3"));
+        assert_eq!(bullet.smoke_effect, "shootSmokeSmite");
+        assert_eq!(bullet.ammo_multiplier, 1.0);
+        assert_eq!(bullet.pierce_cap, 4);
+        assert!(bullet.pierce);
+        assert!(bullet.pierce_building);
+        assert_eq!(bullet.hit_color, "accent");
+        assert_eq!(bullet.back_color, "accent");
+        assert_eq!(bullet.trail_color, "accent");
+        assert_eq!(bullet.front_color, "white");
+        assert_eq!(bullet.trail_width, 2.8);
+        assert_eq!(bullet.trail_length, 9);
+        assert_eq!(bullet.hit_effect, "hitBulletColor");
+        assert_close(bullet.building_damage_multiplier, 0.3);
+        assert!(bullet.despawn_effect.contains("hitBulletColor"));
+        assert!(bullet.despawn_effect.contains("sizeTo=30"));
+        assert!(bullet.trail_rotation);
+        assert_eq!(bullet.trail_effect, "disperseTrail");
+        assert_eq!(bullet.trail_interval, 3.0);
+        assert_eq!(bullet.bullet_interval, 3.0);
+
+        let interval = bullet.interval_bullet.as_ref().unwrap();
+        assert_eq!(interval.kind, BulletKind::Lightning);
+        assert_eq!(interval.damage, 30.0);
+        assert!(!interval.collides_air);
+        assert_eq!(interval.ammo_multiplier, 1.0);
+        assert_eq!(interval.lightning_color, "accent");
+        assert_eq!(interval.lightning_length, 5);
+        assert_eq!(interval.lightning_length_rand, 10);
+        assert_close(interval.building_damage_multiplier, 0.25);
+        assert_eq!(interval.status, "shocked");
+        assert!(!interval.keep_velocity);
+        assert!(!interval.hittable);
+
+        let lightning_type = interval.lightning_type.as_ref().unwrap();
+        assert_eq!(lightning_type.kind, BulletKind::Generic);
+        assert_eq!(lightning_type.speed, 0.0001);
+        assert_eq!(lightning_type.damage, 0.0);
+        assert_eq!(lightning_type.lifetime, 10.0);
+        assert_eq!(lightning_type.hit_effect, "hitLancer");
+        assert_eq!(lightning_type.despawn_effect, "none");
+        assert_eq!(lightning_type.status, "shocked");
+        assert!(!lightning_type.hittable);
+        assert_eq!(lightning_type.light_color, "ffffffff");
+        assert_close(lightning_type.building_damage_multiplier, 0.25);
     }
 
     #[test]
