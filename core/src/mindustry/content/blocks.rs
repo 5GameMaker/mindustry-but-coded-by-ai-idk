@@ -2718,6 +2718,7 @@ impl CraftingBlockData {
 pub enum UnitBlockKind {
     UnitFactory,
     UnitAssembler,
+    UnitAssemblerModule,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2947,6 +2948,59 @@ impl UnitAssemblerBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UnitAssemblerModuleBlockData {
+    pub base: Block,
+    pub kind: UnitBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub region_suffix: String,
+    pub tier: i32,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub floating: bool,
+    pub rotate: bool,
+    pub rotate_draw: bool,
+    pub region_rotated1: i32,
+    pub payload_speed: f32,
+    pub payload_rotate_speed: f32,
+}
+
+impl UnitAssemblerModuleBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: UnitBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.sync = true;
+        base.group = BlockGroup::Payloads;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            region_suffix: String::new(),
+            tier: 1,
+            accepts_payload: true,
+            accepts_unit_payloads: true,
+            floating: false,
+            rotate: true,
+            rotate_draw: false,
+            region_rotated1: -1,
+            payload_speed: 0.7,
+            payload_rotate_speed: 5.0,
+        }
+    }
+
+    fn finalize(&mut self) {
+        self.base.consumes_power = self.consume_power > 0.0;
+        self.base.has_power = self.consume_power > 0.0;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -2967,6 +3021,7 @@ pub enum BlockDef {
     Power(PowerBlockData),
     UnitFactory(UnitFactoryBlockData),
     UnitAssembler(UnitAssemblerBlockData),
+    UnitAssemblerModule(UnitAssemblerModuleBlockData),
 }
 
 impl BlockDef {
@@ -2991,6 +3046,7 @@ impl BlockDef {
             Self::Power(power) => &power.base,
             Self::UnitFactory(factory) => &factory.base,
             Self::UnitAssembler(assembler) => &assembler.base,
+            Self::UnitAssemblerModule(module) => &module.base,
         }
     }
 
@@ -3127,6 +3183,16 @@ impl BlockRegistry {
     pub fn get_unit_assembler_by_name(&self, name: &str) -> Option<&UnitAssemblerBlockData> {
         match self.get_by_name(name)? {
             BlockDef::UnitAssembler(assembler) => Some(assembler),
+            _ => None,
+        }
+    }
+
+    pub fn get_unit_assembler_module_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&UnitAssemblerModuleBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::UnitAssemblerModule(module) => Some(module),
             _ => None,
         }
     }
@@ -3375,6 +3441,20 @@ impl BlockRegistry {
         block.finalize();
         block.base.derive_layout_fields();
         self.insert(BlockDef::UnitAssembler(block))
+    }
+
+    pub fn register_unit_assembler_module_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: UnitBlockKind,
+        configure: impl FnOnce(&mut UnitAssemblerModuleBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = UnitAssemblerModuleBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::UnitAssemblerModule(block))
     }
 
     pub fn set_floor_wall_by_name(
@@ -10435,6 +10515,27 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &
             );
         },
     );
+
+    registry.register_unit_assembler_module_block(
+        "basic-assembler-module",
+        UnitBlockKind::UnitAssemblerModule,
+        |module| {
+            set_requirements(
+                &mut module.requirements,
+                items,
+                &[
+                    ("carbide", 300),
+                    ("thorium", 500),
+                    ("oxide", 250),
+                    ("phase-fabric", 400),
+                ],
+            );
+            module.consume_power = 3.5;
+            module.region_suffix = "-dark".into();
+            module.research_cost_multiplier = 0.75;
+            module.base.size = 5;
+        },
+    );
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -17245,6 +17346,63 @@ mod tests {
         );
         assert!(assembler.plans[1].item_requirements.is_empty());
         assert!(assembler.plans[1].liquid_requirements.is_empty());
+    }
+
+    #[test]
+    fn basic_assembler_module_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let module = registry
+            .get_unit_assembler_module_by_name("basic-assembler-module")
+            .unwrap();
+
+        assert_eq!(module.kind, UnitBlockKind::UnitAssemblerModule);
+        assert_eq!(module.base.group, BlockGroup::Payloads);
+        assert_eq!(
+            module.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert!(module.base.update);
+        assert!(module.base.sync);
+        assert!(module.base.has_power);
+        assert!(module.base.consumes_power);
+        assert!(!module.base.solid);
+        assert_eq!(module.base.size, 5);
+        assert!(module.base.flags.is_empty());
+        assert_eq!(module.consume_power, 3.5);
+        assert_eq!(module.region_suffix, "-dark");
+        assert_eq!(module.research_cost_multiplier, 0.75);
+        assert!(module.research_cost.is_empty());
+        assert_eq!(module.tier, 1);
+        assert!(module.accepts_payload);
+        assert!(module.accepts_unit_payloads);
+        assert!(!module.floating);
+        assert!(module.rotate);
+        assert!(!module.rotate_draw);
+        assert_eq!(module.region_rotated1, -1);
+        assert_eq!(module.payload_speed, 0.7);
+        assert_eq!(module.payload_rotate_speed, 5.0);
+        assert_eq!(
+            module.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 500
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 400
+                }
+            ]
+        );
     }
 
     #[test]
