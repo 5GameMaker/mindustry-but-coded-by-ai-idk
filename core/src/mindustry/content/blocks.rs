@@ -4761,6 +4761,86 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.rotate_speed = 12.0;
         turret.consume_power = 3.3;
     });
+
+    registry.register_turret_block("tsunami", TurretBlockKind::LiquidTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("metaglass", 100),
+                ("lead", 400),
+                ("titanium", 250),
+                ("thorium", 100),
+            ],
+        );
+
+        let mut water = liquid_bullet(liquids, "water");
+        water.lifetime = 49.0;
+        water.speed = 4.0;
+        water.knockback = 1.7;
+        water.puddle_size = 8.0;
+        water.orb_size = 4.0;
+        water.drag = 0.001;
+        water.ammo_multiplier = 0.4;
+        water.status_duration = 60.0 * 4.0;
+        water.damage = 0.2;
+        water.layer = "Layer.bullet-2".into();
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "water", water);
+
+        let mut slag = liquid_bullet(liquids, "slag");
+        slag.lifetime = 49.0;
+        slag.speed = 4.0;
+        slag.knockback = 1.3;
+        slag.puddle_size = 8.0;
+        slag.orb_size = 4.0;
+        slag.damage = 4.75;
+        slag.drag = 0.001;
+        slag.ammo_multiplier = 0.4;
+        slag.status_duration = 60.0 * 4.0;
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "slag", slag);
+
+        let mut cryofluid = liquid_bullet(liquids, "cryofluid");
+        cryofluid.lifetime = 49.0;
+        cryofluid.speed = 4.0;
+        cryofluid.knockback = 1.3;
+        cryofluid.puddle_size = 8.0;
+        cryofluid.orb_size = 4.0;
+        cryofluid.drag = 0.001;
+        cryofluid.ammo_multiplier = 0.4;
+        cryofluid.status_duration = 60.0 * 4.0;
+        cryofluid.damage = 0.2;
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "cryofluid", cryofluid);
+
+        let mut oil = liquid_bullet(liquids, "oil");
+        oil.lifetime = 49.0;
+        oil.speed = 4.0;
+        oil.knockback = 1.3;
+        oil.puddle_size = 8.0;
+        oil.orb_size = 4.0;
+        oil.drag = 0.001;
+        oil.ammo_multiplier = 0.4;
+        oil.status_duration = 60.0 * 4.0;
+        oil.damage = 0.2;
+        oil.layer = "Layer.bullet-2".into();
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "oil", oil);
+
+        turret.base.size = 3;
+        turret.reload = 3.0;
+        turret.shoot_pattern = "ShootAlternate".into();
+        turret.shoot_alternate_spread = 4.0;
+        turret.shoot_shots = 2;
+        turret.velocity_rnd = 0.1;
+        turret.inaccuracy = 3.0;
+        turret.recoil = 1.0;
+        turret.shoot_cone = 45.0;
+        turret.liquid_capacity = 40.0;
+        turret.shoot_effect = "shootLiquid".into();
+        turret.range = 190.0;
+        turret.scaled_health = 250.0;
+        turret.base.flags.clear();
+        turret.base.flags.push(BlockFlag::Turret);
+        turret.base.flags.push(BlockFlag::Extinguisher);
+    });
 }
 
 fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
@@ -9335,6 +9415,133 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn heavy_liquid_turrets_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_content_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name.as_str() == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+        fn liquid_ammo_for(turret: &TurretBlockData, liquid: ContentId) -> &LiquidTurretAmmo {
+            turret
+                .liquid_ammo
+                .iter()
+                .find(|ammo| ammo.liquid == liquid)
+                .unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let tsunami = registry.get_turret_by_name("tsunami").unwrap();
+        assert_eq!(tsunami.kind, TurretBlockKind::LiquidTurret);
+        assert!(tsunami.base.has_liquids);
+        assert!(tsunami.extinguish);
+        assert_eq!(
+            tsunami.base.flags,
+            vec![BlockFlag::Turret, BlockFlag::Extinguisher]
+        );
+        assert_eq!(tsunami.base.size, 3);
+        assert_eq!(tsunami.reload, 3.0);
+        assert_eq!(tsunami.shoot_pattern, "ShootAlternate");
+        assert_eq!(tsunami.shoot_alternate_spread, 4.0);
+        assert_eq!(tsunami.shoot_shots, 2);
+        assert_eq!(tsunami.velocity_rnd, 0.1);
+        assert_eq!(tsunami.inaccuracy, 3.0);
+        assert_eq!(tsunami.recoil, 1.0);
+        assert_eq!(tsunami.shoot_cone, 45.0);
+        assert_eq!(tsunami.liquid_capacity, 40.0);
+        assert_eq!(tsunami.base.liquid_capacity, 40.0);
+        assert_eq!(tsunami.shoot_effect, "shootLiquid");
+        assert_eq!(tsunami.range, 190.0);
+        assert_eq!(tsunami.scaled_health, 250.0);
+        assert_eq!(tsunami.base.health, 3 * 3 * 250);
+        assert_eq!(tsunami.fog_radius, 24.0);
+        assert_eq!(tsunami.place_overlap_range, 190.0 + 8.0 * 7.0);
+        assert_eq!(
+            tsunami.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 400
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 100
+                }
+            ]
+        );
+
+        let water = &liquid_ammo_for(tsunami, liquid_content_id("water")).bullet;
+        assert_eq!(water.kind, BulletKind::Liquid);
+        assert_eq!(water.lifetime, 49.0);
+        assert_eq!(water.speed, 4.0);
+        assert_eq!(water.knockback, 1.7);
+        assert_eq!(water.puddle_size, 8.0);
+        assert_eq!(water.orb_size, 4.0);
+        assert_eq!(water.drag, 0.001);
+        assert_eq!(water.ammo_multiplier, 0.4);
+        assert_eq!(water.status_duration, 60.0 * 4.0);
+        assert_eq!(water.damage, 0.2);
+        assert_eq!(water.layer, "Layer.bullet-2");
+        assert_eq!(water.status, "wet");
+
+        let slag = &liquid_ammo_for(tsunami, liquid_content_id("slag")).bullet;
+        assert_eq!(slag.lifetime, 49.0);
+        assert_eq!(slag.speed, 4.0);
+        assert_eq!(slag.knockback, 1.3);
+        assert_eq!(slag.puddle_size, 8.0);
+        assert_eq!(slag.orb_size, 4.0);
+        assert_close(slag.damage, 4.75);
+        assert_eq!(slag.drag, 0.001);
+        assert_eq!(slag.ammo_multiplier, 0.4);
+        assert_eq!(slag.status_duration, 60.0 * 4.0);
+        assert_eq!(slag.status, "melting");
+
+        let cryofluid = &liquid_ammo_for(tsunami, liquid_content_id("cryofluid")).bullet;
+        assert_eq!(cryofluid.lifetime, 49.0);
+        assert_eq!(cryofluid.speed, 4.0);
+        assert_eq!(cryofluid.knockback, 1.3);
+        assert_eq!(cryofluid.puddle_size, 8.0);
+        assert_eq!(cryofluid.orb_size, 4.0);
+        assert_eq!(cryofluid.drag, 0.001);
+        assert_eq!(cryofluid.ammo_multiplier, 0.4);
+        assert_eq!(cryofluid.status_duration, 60.0 * 4.0);
+        assert_eq!(cryofluid.damage, 0.2);
+        assert_eq!(cryofluid.status, "freezing");
+
+        let oil = &liquid_ammo_for(tsunami, liquid_content_id("oil")).bullet;
+        assert_eq!(oil.lifetime, 49.0);
+        assert_eq!(oil.speed, 4.0);
+        assert_eq!(oil.knockback, 1.3);
+        assert_eq!(oil.puddle_size, 8.0);
+        assert_eq!(oil.orb_size, 4.0);
+        assert_eq!(oil.drag, 0.001);
+        assert_eq!(oil.ammo_multiplier, 0.4);
+        assert_eq!(oil.status_duration, 60.0 * 4.0);
+        assert_eq!(oil.damage, 0.2);
+        assert_eq!(oil.layer, "Layer.bullet-2");
+        assert_eq!(oil.status, "tarred");
     }
 
     #[test]
