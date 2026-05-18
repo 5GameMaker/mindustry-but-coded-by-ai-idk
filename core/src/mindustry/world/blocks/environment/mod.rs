@@ -361,7 +361,32 @@ mod tests {
         assert!(!wall.base.breakable);
         assert!(!wall.base.always_replace);
         assert!(!wall.base.unit_move_breakable);
+        assert_eq!(wall.base.variants, 2);
         assert_eq!(wall.base.cache_layer, CacheLayer::Walls);
+        assert!(wall.base.allow_rectangle_placement);
+        assert_eq!(wall.base.place_effect, "rotateBlock");
+        assert!(wall.base.instant_build);
+        assert!(wall.base.ignore_build_darkness);
+        assert!(wall.base.placeable_liquid);
+        assert!(wall.large_region.is_none());
+        assert!(!wall.autotile);
+        assert_eq!(wall.autotile_mid_variants, 1);
+    }
+
+    #[test]
+    fn static_wall_can_replace_matches_static_wall_or_block_default_subset() {
+        let wall = StaticWallData::new(2, "stone-wall");
+
+        let mut another_static_wall = Block::new(3, "dirt-wall");
+        another_static_wall.cache_layer = CacheLayer::Walls;
+        assert!(wall.can_replace(&another_static_wall));
+
+        let mut replaceable_floor = Block::new(4, "sand");
+        replaceable_floor.replaceable = true;
+        assert!(wall.can_replace(&replaceable_floor));
+
+        let solid_block = Block::new(5, "router");
+        assert!(!wall.can_replace(&solid_block));
     }
 
     #[test]
