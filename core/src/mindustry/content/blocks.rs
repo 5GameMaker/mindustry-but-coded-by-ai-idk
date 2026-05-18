@@ -4258,6 +4258,8 @@ pub enum LogicBlockKind {
     Processor,
     Memory,
     Display,
+    TileDisplay,
+    Canvas,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -4298,6 +4300,15 @@ pub struct LogicBlockData {
     pub display_draw_type: i32,
     pub scale_step: f32,
     pub buffer_capacity: i32,
+    pub max_display_dimensions: i32,
+    pub frame_size: i32,
+    pub tile_region_count: i32,
+    pub display_tile_size: i32,
+    pub canvas_size: i32,
+    pub padding: f32,
+    pub palette: Vec<u32>,
+    pub bits_per_pixel: i32,
+    pub canvas_data_bytes: i32,
 }
 
 impl LogicBlockData {
@@ -4344,6 +4355,15 @@ impl LogicBlockData {
             display_draw_type: 0,
             scale_step: 0.0,
             buffer_capacity: 0,
+            max_display_dimensions: 0,
+            frame_size: 0,
+            tile_region_count: 0,
+            display_tile_size: 0,
+            canvas_size: 0,
+            padding: 0.0,
+            palette: Vec::new(),
+            bits_per_pixel: 0,
+            canvas_data_bytes: 0,
         };
         block.apply_kind_defaults();
         block
@@ -4407,6 +4427,33 @@ impl LogicBlockData {
                 self.scale_step = 0.05;
                 self.buffer_capacity = 256;
             }
+            LogicBlockKind::TileDisplay => {
+                self.base.update = true;
+                self.base.solid = true;
+                self.can_overdrive = false;
+                self.draw_disabled = false;
+                self.max_sides = 25;
+                self.display_size = 32;
+                self.scale_factor = 1.0;
+                self.display_draw_type = 30;
+                self.scale_step = 0.05;
+                self.buffer_capacity = 256;
+                self.max_display_dimensions = 16;
+                self.frame_size = 6;
+                self.tile_region_count = 47;
+                self.display_tile_size = 32;
+            }
+            LogicBlockKind::Canvas => {
+                self.configurable = true;
+                self.base.destructible = true;
+                self.can_overdrive = false;
+                self.base.solid = true;
+                self.canvas_size = 8;
+                self.palette = vec![
+                    0x362944ff, 0xc45d9fff, 0xe39aacff, 0xf0dab1ff, 0x6461c2ff, 0x2ba9b4ff,
+                    0x93d4b5ff, 0xf0f6e8ff,
+                ];
+            }
         }
     }
 
@@ -4414,11 +4461,24 @@ impl LogicBlockData {
         if !self.consume_liquids.is_empty() {
             self.base.has_liquids = true;
         }
-        if self.kind == LogicBlockKind::Display {
+        if matches!(
+            self.kind,
+            LogicBlockKind::Display | LogicBlockKind::TileDisplay
+        ) {
             self.base.clip_size = self
                 .base
                 .clip_size
                 .max(self.scale_factor * self.display_size as f32);
+        }
+        if self.kind == LogicBlockKind::Canvas {
+            self.bits_per_pixel = ceil_log2_next_power_of_two(self.palette.len() as i32);
+            self.canvas_data_bytes =
+                ((self.canvas_size * self.canvas_size * self.bits_per_pixel) as f32 / 8.0).ceil()
+                    as i32;
+            self.base.clip_size = self
+                .base
+                .clip_size
+                .max(self.base.size as f32 * TILE_SIZE as f32 - self.padding);
         }
         if self.base.health == 40 {
             self.base.health =
@@ -12848,6 +12908,104 @@ fn register_logic_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: 
             logic.base.size = 6;
         },
     );
+
+    registry.register_logic_block(
+        "tile-logic-display",
+        LogicBlockKind::TileDisplay,
+        items,
+        |logic| {
+            set_requirements(
+                &mut logic.requirements,
+                items,
+                &[
+                    ("lead", 8),
+                    ("silicon", 8),
+                    ("metaglass", 8),
+                    ("phase-fabric", 3),
+                ],
+            );
+        },
+    );
+
+    registry.register_logic_block("canvas", LogicBlockKind::Canvas, items, |logic| {
+        set_requirements(
+            &mut logic.requirements,
+            items,
+            &[("silicon", 10), ("beryllium", 10)],
+        );
+        logic.base.build_visibility = BuildVisibility::Shown;
+        logic.canvas_size = 12;
+        logic.padding = 7.0 / 4.0 * 2.0;
+        logic.base.size = 2;
+    });
+
+    registry.register_logic_block("large-canvas", LogicBlockKind::Canvas, items, |logic| {
+        set_requirements(
+            &mut logic.requirements,
+            items,
+            &[("silicon", 15), ("beryllium", 15), ("surge-alloy", 5)],
+        );
+        logic.base.build_visibility = BuildVisibility::Shown;
+        logic.canvas_size = 24;
+        logic.padding = 7.0 / 4.0 * 2.0;
+        logic.base.size = 3;
+        logic.palette = vec![
+            0x452b3fff, 0x8a5865ff, 0xe08d51ff, 0xfabf61ff, 0xf5eeb0ff, 0x2c5e3bff, 0x609c4fff,
+            0xc6cc54ff, 0x78c2d6ff, 0x5479b0ff, 0x56546eff, 0x839fa6ff, 0xe0d3c8ff, 0xf05b5bff,
+            0x8f325fff, 0xeb6c98ff,
+        ];
+    });
+
+    registry.register_logic_block(
+        "reinforced-message",
+        LogicBlockKind::Message,
+        items,
+        |logic| {
+            set_requirements(
+                &mut logic.requirements,
+                items,
+                &[("graphite", 10), ("beryllium", 5)],
+            );
+            logic.base.health = 100;
+        },
+    );
+
+    registry.register_logic_block(
+        "world-processor",
+        LogicBlockKind::Processor,
+        items,
+        |logic| {
+            logic.base.build_visibility = BuildVisibility::WorldProcessorOnly;
+            logic.can_overdrive = false;
+            logic.base.targetable = false;
+            logic.privileged_only = true;
+            logic.base.force_dark = true;
+            logic.instructions_per_tick = 8;
+            logic.base.size = 1;
+            logic.max_instructions_per_tick = 1000;
+            logic.range = f32::MAX;
+        },
+    );
+
+    registry.register_logic_block("world-cell", LogicBlockKind::Memory, items, |logic| {
+        logic.base.build_visibility = BuildVisibility::WorldProcessorOnly;
+        logic.base.targetable = false;
+        logic.privileged_only = true;
+        logic.memory_capacity = 512;
+        logic.base.force_dark = true;
+    });
+
+    registry.register_logic_block("world-message", LogicBlockKind::Message, items, |logic| {
+        logic.base.build_visibility = BuildVisibility::WorldProcessorOnly;
+        logic.base.targetable = false;
+        logic.privileged_only = true;
+    });
+
+    registry.register_logic_block("world-switch", LogicBlockKind::Switch, items, |logic| {
+        logic.base.build_visibility = BuildVisibility::WorldProcessorOnly;
+        logic.base.targetable = false;
+        logic.privileged_only = true;
+    });
 }
 
 fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[Item]) -> i32 {
@@ -12864,6 +13022,16 @@ fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[
 
 fn round_to_multiple(value: f32, step: f32) -> f32 {
     ((value / step) as i32) as f32 * step
+}
+
+fn ceil_log2_next_power_of_two(value: i32) -> i32 {
+    let mut power = 1;
+    let mut bits = 0;
+    while power < value {
+        power <<= 1;
+        bits += 1;
+    }
+    bits
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -21412,6 +21580,190 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn logic_tile_display_canvas_and_world_blocks_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let tile_display = registry.get_logic_by_name("tile-logic-display").unwrap();
+        assert_eq!(tile_display.kind, LogicBlockKind::TileDisplay);
+        assert_eq!(tile_display.base.group, BlockGroup::Logic);
+        assert_eq!(tile_display.base.env_enabled, Env::ANY);
+        assert!(tile_display.base.update);
+        assert!(tile_display.base.solid);
+        assert!(!tile_display.can_overdrive);
+        assert!(!tile_display.draw_disabled);
+        assert_eq!(tile_display.base.size, 1);
+        assert_eq!(tile_display.base.health, 50);
+        assert_eq!(tile_display.base.clip_size, 32.0);
+        assert_eq!(tile_display.display_size, 32);
+        assert_eq!(tile_display.max_display_dimensions, 16);
+        assert_eq!(tile_display.frame_size, 6);
+        assert_eq!(tile_display.tile_region_count, 47);
+        assert_eq!(tile_display.display_tile_size, 32);
+        assert_eq!(
+            tile_display.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 8
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 8
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 8
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 3
+                }
+            ]
+        );
+
+        let canvas = registry.get_logic_by_name("canvas").unwrap();
+        assert_eq!(canvas.kind, LogicBlockKind::Canvas);
+        assert_eq!(canvas.base.group, BlockGroup::Logic);
+        assert_eq!(canvas.base.build_visibility, BuildVisibility::Shown);
+        assert_eq!(canvas.base.env_enabled, Env::ANY);
+        assert!(canvas.configurable);
+        assert!(canvas.base.destructible);
+        assert!(canvas.base.solid);
+        assert!(!canvas.can_overdrive);
+        assert_eq!(canvas.base.size, 2);
+        assert_eq!(canvas.base.health, 255);
+        assert_eq!(canvas.canvas_size, 12);
+        assert_eq!(canvas.padding, 7.0 / 4.0 * 2.0);
+        assert_eq!(canvas.palette.len(), 8);
+        assert_eq!(
+            canvas.palette,
+            vec![
+                0x362944ff, 0xc45d9fff, 0xe39aacff, 0xf0dab1ff, 0x6461c2ff, 0x2ba9b4ff, 0x93d4b5ff,
+                0xf0f6e8ff
+            ]
+        );
+        assert_eq!(canvas.bits_per_pixel, 3);
+        assert_eq!(canvas.canvas_data_bytes, 54);
+        assert_eq!(canvas.base.clip_size, 16.0);
+        assert_eq!(
+            canvas.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 10
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 10
+                }
+            ]
+        );
+
+        let large_canvas = registry.get_logic_by_name("large-canvas").unwrap();
+        assert_eq!(large_canvas.kind, LogicBlockKind::Canvas);
+        assert_eq!(large_canvas.base.size, 3);
+        assert_eq!(large_canvas.base.health, 665);
+        assert_eq!(large_canvas.canvas_size, 24);
+        assert_eq!(large_canvas.padding, 7.0 / 4.0 * 2.0);
+        assert_eq!(large_canvas.palette.len(), 16);
+        assert_eq!(
+            large_canvas.palette,
+            vec![
+                0x452b3fff, 0x8a5865ff, 0xe08d51ff, 0xfabf61ff, 0xf5eeb0ff, 0x2c5e3bff, 0x609c4fff,
+                0xc6cc54ff, 0x78c2d6ff, 0x5479b0ff, 0x56546eff, 0x839fa6ff, 0xe0d3c8ff, 0xf05b5bff,
+                0x8f325fff, 0xeb6c98ff
+            ]
+        );
+        assert_eq!(large_canvas.bits_per_pixel, 4);
+        assert_eq!(large_canvas.canvas_data_bytes, 288);
+        assert_eq!(large_canvas.base.clip_size, 24.0);
+        assert_eq!(
+            large_canvas.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 15
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 15
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 5
+                }
+            ]
+        );
+
+        let reinforced = registry.get_logic_by_name("reinforced-message").unwrap();
+        assert_eq!(reinforced.kind, LogicBlockKind::Message);
+        assert_eq!(reinforced.base.health, 100);
+        assert!(reinforced.base.solid);
+        assert!(reinforced.base.destructible);
+        assert_eq!(
+            reinforced.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 10
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 5
+                }
+            ]
+        );
+
+        let world_processor = registry.get_logic_by_name("world-processor").unwrap();
+        assert_eq!(world_processor.kind, LogicBlockKind::Processor);
+        assert_eq!(
+            world_processor.base.build_visibility,
+            BuildVisibility::WorldProcessorOnly
+        );
+        assert!(!world_processor.can_overdrive);
+        assert!(!world_processor.base.targetable);
+        assert!(world_processor.base.force_dark);
+        assert!(world_processor.privileged_only);
+        assert_eq!(world_processor.instructions_per_tick, 8);
+        assert_eq!(world_processor.max_instructions_per_tick, 1000);
+        assert_eq!(world_processor.range, f32::MAX);
+        assert!(world_processor.requirements.is_empty());
+
+        let world_cell = registry.get_logic_by_name("world-cell").unwrap();
+        assert_eq!(world_cell.kind, LogicBlockKind::Memory);
+        assert_eq!(
+            world_cell.base.build_visibility,
+            BuildVisibility::WorldProcessorOnly
+        );
+        assert!(!world_cell.base.targetable);
+        assert!(world_cell.privileged_only);
+        assert!(world_cell.base.force_dark);
+        assert_eq!(world_cell.memory_capacity, 512);
+        assert!(world_cell.requirements.is_empty());
+
+        let world_message = registry.get_logic_by_name("world-message").unwrap();
+        assert_eq!(world_message.kind, LogicBlockKind::Message);
+        assert_eq!(
+            world_message.base.build_visibility,
+            BuildVisibility::WorldProcessorOnly
+        );
+        assert!(!world_message.base.targetable);
+        assert!(world_message.privileged_only);
+        assert!(world_message.requirements.is_empty());
+
+        let world_switch = registry.get_logic_by_name("world-switch").unwrap();
+        assert_eq!(world_switch.kind, LogicBlockKind::Switch);
+        assert_eq!(
+            world_switch.base.build_visibility,
+            BuildVisibility::WorldProcessorOnly
+        );
+        assert!(!world_switch.base.targetable);
+        assert!(world_switch.privileged_only);
+        assert!(world_switch.requirements.is_empty());
     }
 
     #[test]
