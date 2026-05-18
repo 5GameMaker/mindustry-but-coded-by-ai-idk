@@ -277,7 +277,7 @@ impl PropData {
         Self {
             base,
             kind,
-            layer: 50.0,
+            layer: 32.0,
             sea_bush: matches!(kind, PropKind::SeaBush).then(SeaBushData::default),
         }
     }
@@ -392,6 +392,7 @@ mod tests {
         assert_eq!(prop.base.break_effect, "breakProp");
         assert_eq!(prop.base.break_sound, "rockBreak");
         assert_eq!(prop.kind, PropKind::Prop);
+        assert_eq!(prop.layer, 32.0);
         assert!(prop.sea_bush.is_none());
 
         let sea_bush = PropData::with_kind(4, "pur-bush", PropKind::SeaBush);
