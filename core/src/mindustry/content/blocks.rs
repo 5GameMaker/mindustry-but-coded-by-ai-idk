@@ -538,7 +538,11 @@ pub struct BulletSpec {
     pub collides_air: bool,
     pub collides_tiles: bool,
     pub collides: bool,
+    pub shrink_x: f32,
     pub shrink_y: f32,
+    pub scale_life: bool,
+    pub life_scale_rand_min: f32,
+    pub life_scale_rand_max: f32,
     pub knockback: f32,
     pub pierce: bool,
     pub pierce_cap: i32,
@@ -614,7 +618,11 @@ impl BulletSpec {
             collides_air: true,
             collides_tiles: true,
             collides: true,
+            shrink_x: 0.0,
             shrink_y: 0.0,
+            scale_life: false,
+            life_scale_rand_min: 1.0,
+            life_scale_rand_max: 1.0,
             knockback: 0.0,
             pierce: false,
             pierce_cap: -1,
@@ -3817,6 +3825,20 @@ fn missile_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn artillery_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Artillery, speed, damage);
+    bullet.collides_tiles = false;
+    bullet.collides = false;
+    bullet.collides_air = false;
+    bullet.scale_life = true;
+    bullet.hit_effect = "flakExplosion".into();
+    bullet.shoot_effect = "shootBig".into();
+    bullet.trail_effect = "artilleryTrail".into();
+    bullet.shrink_x = 0.15;
+    bullet.shrink_y = 0.5;
+    bullet
+}
+
 fn shrapnel_bullet() -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, 1.0);
     bullet.length = 100.0;
@@ -4623,13 +4645,11 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
             &[("copper", 40), ("graphite", 17)],
         );
 
-        let mut graphite = BulletSpec::new(BulletKind::Artillery, 3.0, 20.0);
+        let mut graphite = artillery_bullet(3.0, 20.0);
         graphite.knockback = 0.8;
         graphite.lifetime = 80.0;
         graphite.width = 11.0;
         graphite.height = 11.0;
-        graphite.collides_tiles = false;
-        graphite.collides_air = false;
         graphite.splash_damage_radius = 25.0 * 0.75;
         graphite.splash_damage = 33.0;
         graphite.hit_color = "graphiteAmmoBack".into();
@@ -4637,19 +4657,13 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         graphite.trail_color = "graphiteAmmoBack".into();
         graphite.front_color = "graphiteAmmoFront".into();
         graphite.despawn_effect = "hitBulletColor".into();
-        graphite.hit_effect = "flakExplosion".into();
-        graphite.shoot_effect = "shootBig".into();
-        graphite.trail_effect = "artilleryTrail".into();
-        graphite.shrink_y = 0.5;
         push_turret_ammo(&mut turret.ammo, items, "graphite", graphite);
 
-        let mut silicon = BulletSpec::new(BulletKind::Artillery, 3.0, 20.0);
+        let mut silicon = artillery_bullet(3.0, 20.0);
         silicon.knockback = 0.8;
         silicon.lifetime = 80.0;
         silicon.width = 11.0;
         silicon.height = 11.0;
-        silicon.collides_tiles = false;
-        silicon.collides_air = false;
         silicon.splash_damage_radius = 25.0 * 0.75;
         silicon.splash_damage = 33.0;
         silicon.reload_multiplier = 1.2;
@@ -4663,20 +4677,14 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         silicon.trail_color = "siliconAmmoBack".into();
         silicon.front_color = "siliconAmmoFront".into();
         silicon.despawn_effect = "hitBulletColor".into();
-        silicon.hit_effect = "flakExplosion".into();
-        silicon.shoot_effect = "shootBig".into();
-        silicon.trail_effect = "artilleryTrail".into();
-        silicon.shrink_y = 0.5;
         push_turret_ammo(&mut turret.ammo, items, "silicon", silicon);
 
-        let mut pyratite = BulletSpec::new(BulletKind::Artillery, 3.0, 25.0);
+        let mut pyratite = artillery_bullet(3.0, 25.0);
         pyratite.hit_effect = "blastExplosion".into();
         pyratite.knockback = 0.8;
         pyratite.lifetime = 80.0;
         pyratite.width = 13.0;
         pyratite.height = 13.0;
-        pyratite.collides_tiles = false;
-        pyratite.collides_air = false;
         pyratite.splash_damage_radius = 25.0 * 0.75;
         pyratite.splash_damage = 45.0;
         pyratite.status = "burning".into();
@@ -4689,8 +4697,6 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         pyratite.trail_effect = "incendTrail".into();
         pyratite.ammo_multiplier = 4.0;
         pyratite.despawn_effect = "hitBulletColor".into();
-        pyratite.shoot_effect = "shootBig".into();
-        pyratite.shrink_y = 0.5;
         push_turret_ammo(&mut turret.ammo, items, "pyratite", pyratite);
 
         turret.target_air = false;
@@ -5197,6 +5203,138 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         push_turret_ammo(&mut turret.ammo, items, "thorium", thorium);
 
         turret.deposit_cooldown = 1.0;
+    });
+
+    registry.register_turret_block("ripple", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("copper", 150), ("graphite", 135), ("titanium", 60)],
+        );
+
+        let mut graphite = artillery_bullet(3.0, 40.0);
+        graphite.hit_effect = "MultiEffect(flakExplosion, shockwaveSmaller)".into();
+        graphite.knockback = 0.8;
+        graphite.lifetime = 80.0;
+        graphite.width = 12.0;
+        graphite.height = 14.0;
+        graphite.splash_damage_radius = 30.0 * 0.75;
+        graphite.splash_damage = 70.0;
+        graphite.back_color = "graphiteAmmoBack".into();
+        graphite.hit_color = "graphiteAmmoBack".into();
+        graphite.trail_color = "graphiteAmmoBack".into();
+        graphite.front_color = "graphiteAmmoFront".into();
+        graphite.despawn_effect = "hitBulletColor".into();
+        graphite.life_scale_rand_max = 1.08;
+        graphite.life_scale_rand_min = 0.95;
+        push_turret_ammo(&mut turret.ammo, items, "graphite", graphite);
+
+        let mut silicon = artillery_bullet(3.0, 40.0);
+        silicon.hit_effect = "MultiEffect(flakExplosion, shockwaveSmaller)".into();
+        silicon.knockback = 0.8;
+        silicon.lifetime = 80.0;
+        silicon.width = 12.0;
+        silicon.height = 14.0;
+        silicon.splash_damage_radius = 30.0 * 0.75;
+        silicon.splash_damage = 70.0;
+        silicon.reload_multiplier = 1.2;
+        silicon.ammo_multiplier = 3.0;
+        silicon.homing_power = 0.08;
+        silicon.homing_range = 50.0;
+        silicon.trail_length = 9;
+        silicon.trail_width = 3.1;
+        silicon.despawn_effect = "hitBulletColor".into();
+        silicon.back_color = "siliconAmmoBack".into();
+        silicon.hit_color = "siliconAmmoBack".into();
+        silicon.trail_color = "siliconAmmoBack".into();
+        silicon.front_color = "siliconAmmoFront".into();
+        silicon.life_scale_rand_max = 1.08;
+        silicon.life_scale_rand_min = 0.95;
+        push_turret_ammo(&mut turret.ammo, items, "silicon", silicon);
+
+        let mut pyratite = artillery_bullet(3.0, 48.0);
+        pyratite.hit_effect = "MultiEffect(blastExplosion, shockwave)".into();
+        pyratite.knockback = 0.8;
+        pyratite.lifetime = 80.0;
+        pyratite.width = 13.0;
+        pyratite.height = 15.0;
+        pyratite.splash_damage_radius = 30.0 * 0.75;
+        pyratite.splash_damage = 90.0;
+        pyratite.status = "burning".into();
+        pyratite.status_duration = 60.0 * 12.0;
+        pyratite.front_color = "lightishOrange".into();
+        pyratite.back_color = "lightOrange".into();
+        pyratite.hit_color = "lightOrange".into();
+        pyratite.make_fire = true;
+        pyratite.trail_effect = "incendTrail".into();
+        pyratite.ammo_multiplier = 4.0;
+        pyratite.despawn_effect = "hitBulletColor".into();
+        pyratite.life_scale_rand_max = 1.08;
+        pyratite.life_scale_rand_min = 0.95;
+        push_turret_ammo(&mut turret.ammo, items, "pyratite", pyratite);
+
+        let mut blast = artillery_bullet(2.0, 40.0);
+        blast.hit_effect = "MultiEffect(blastExplosion, shockwave)".into();
+        blast.knockback = 0.8;
+        blast.lifetime = 80.0;
+        blast.width = 14.0;
+        blast.height = 16.0;
+        blast.ammo_multiplier = 4.0;
+        blast.splash_damage_radius = 50.0 * 0.75;
+        blast.splash_damage = 90.0;
+        blast.status = "blasted".into();
+        blast.life_scale_rand_max = 1.08;
+        blast.life_scale_rand_min = 0.95;
+        blast.despawn_effect = "hitBulletColor".into();
+        blast.back_color = "blastAmmoBack".into();
+        blast.hit_color = "blastAmmoBack".into();
+        blast.trail_color = "blastAmmoBack".into();
+        blast.front_color = "blastAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "blast-compound", blast);
+
+        let mut plastanium = artillery_bullet(3.4, 40.0);
+        plastanium.hit_effect = "MultiEffect(plasticExplosion, shockwave)".into();
+        plastanium.knockback = 1.0;
+        plastanium.lifetime = 80.0;
+        plastanium.width = 13.0;
+        plastanium.height = 15.0;
+        plastanium.splash_damage_radius = 40.0 * 0.75;
+        plastanium.splash_damage = 90.0;
+        let mut frag = BulletSpec::new(BulletKind::Basic, 2.5, 14.0);
+        frag.width = 10.0;
+        frag.height = 12.0;
+        frag.shrink_y = 1.0;
+        frag.lifetime = 15.0;
+        frag.back_color = "plastaniumBack".into();
+        frag.front_color = "plastaniumFront".into();
+        frag.despawn_effect = "none".into();
+        frag.collides_air = false;
+        plastanium.frag_bullet = Some(Box::new(frag));
+        plastanium.frag_bullets = 15;
+        plastanium.back_color = "plastaniumBack".into();
+        plastanium.front_color = "plastaniumFront".into();
+        plastanium.life_scale_rand_max = 1.08;
+        plastanium.life_scale_rand_min = 0.95;
+        push_turret_ammo(&mut turret.ammo, items, "plastanium", plastanium);
+
+        turret.target_air = false;
+        turret.base.size = 3;
+        turret.shoot_shots = 4;
+        turret.inaccuracy = 11.0;
+        turret.reload = 120.0;
+        turret.ammo_eject_back = 5.0;
+        turret.ammo_use_effect = "casing3Double".into();
+        turret.ammo_per_shot = 2;
+        turret.velocity_rnd = 0.2;
+        turret.scale_lifetime_offset = 1.0 / 9.0;
+        turret.recoil = 6.0;
+        turret.shake = 2.0;
+        turret.range = 290.0;
+        turret.min_range = 50.0;
+        turret.consume_coolant(0.3);
+        turret.scaled_health = 130.0;
+        turret.deposit_cooldown = 2.0;
+        turret.shoot_sound = "shootRipple".into();
     });
 }
 
@@ -10169,6 +10307,172 @@ mod tests {
         assert_eq!(thorium.to_color, "thoriumPink");
         assert_eq!(thorium.shoot_effect, "thoriumShoot");
         assert_eq!(thorium.smoke_effect, "thoriumShoot");
+    }
+
+    #[test]
+    fn ripple_artillery_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let ripple = registry.get_turret_by_name("ripple").unwrap();
+        assert_eq!(ripple.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(ripple.base.size, 3);
+        assert!(!ripple.target_air);
+        assert!(ripple.target_ground);
+        assert_eq!(ripple.shoot_shots, 4);
+        assert_eq!(ripple.inaccuracy, 11.0);
+        assert_eq!(ripple.reload, 120.0);
+        assert_eq!(ripple.ammo_eject_back, 5.0);
+        assert_eq!(ripple.ammo_use_effect, "casing3Double");
+        assert_eq!(ripple.ammo_per_shot, 2);
+        assert_eq!(ripple.velocity_rnd, 0.2);
+        assert_close(ripple.scale_lifetime_offset, 1.0 / 9.0);
+        assert_eq!(ripple.recoil, 6.0);
+        assert_eq!(ripple.shake, 2.0);
+        assert_eq!(ripple.range, 290.0);
+        assert_eq!(ripple.min_range, 50.0);
+        assert!(ripple.consume_coolant);
+        assert_eq!(ripple.coolant_amount, 0.3);
+        assert_eq!(ripple.scaled_health, 130.0);
+        assert_eq!(ripple.base.health, 3 * 3 * 130);
+        assert_eq!(ripple.deposit_cooldown, 2.0);
+        assert_eq!(ripple.shoot_sound, "shootRipple");
+        assert_eq!(ripple.fog_radius, 36.0);
+        assert_eq!(ripple.place_overlap_range, 290.0 + 8.0 * 7.0);
+        assert_eq!(
+            ripple.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 135
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 60
+                }
+            ]
+        );
+
+        let graphite = &ammo_for(ripple, item_id("graphite")).bullet;
+        assert_eq!(graphite.kind, BulletKind::Artillery);
+        assert_eq!(graphite.speed, 3.0);
+        assert_eq!(graphite.damage, 40.0);
+        assert_eq!(
+            graphite.hit_effect,
+            "MultiEffect(flakExplosion, shockwaveSmaller)"
+        );
+        assert_eq!(graphite.shoot_effect, "shootBig");
+        assert_eq!(graphite.trail_effect, "artilleryTrail");
+        assert_eq!(graphite.knockback, 0.8);
+        assert_eq!(graphite.lifetime, 80.0);
+        assert_eq!(graphite.width, 12.0);
+        assert_eq!(graphite.height, 14.0);
+        assert!(!graphite.collides_tiles);
+        assert!(!graphite.collides);
+        assert!(!graphite.collides_air);
+        assert!(graphite.scale_life);
+        assert_eq!(graphite.shrink_x, 0.15);
+        assert_eq!(graphite.shrink_y, 0.5);
+        assert_eq!(graphite.splash_damage_radius, 30.0 * 0.75);
+        assert_eq!(graphite.splash_damage, 70.0);
+        assert_eq!(graphite.front_color, "graphiteAmmoFront");
+        assert_eq!(graphite.back_color, "graphiteAmmoBack");
+        assert_eq!(graphite.hit_color, "graphiteAmmoBack");
+        assert_eq!(graphite.trail_color, "graphiteAmmoBack");
+        assert_eq!(graphite.despawn_effect, "hitBulletColor");
+        assert_eq!(graphite.life_scale_rand_min, 0.95);
+        assert_eq!(graphite.life_scale_rand_max, 1.08);
+
+        let silicon = &ammo_for(ripple, item_id("silicon")).bullet;
+        assert_eq!(silicon.kind, BulletKind::Artillery);
+        assert_eq!(silicon.reload_multiplier, 1.2);
+        assert_eq!(silicon.ammo_multiplier, 3.0);
+        assert_eq!(silicon.homing_power, 0.08);
+        assert_eq!(silicon.homing_range, 50.0);
+        assert_eq!(silicon.trail_length, 9);
+        assert_eq!(silicon.trail_width, 3.1);
+        assert_eq!(silicon.front_color, "siliconAmmoFront");
+        assert_eq!(silicon.back_color, "siliconAmmoBack");
+        assert_eq!(silicon.life_scale_rand_min, 0.95);
+        assert_eq!(silicon.life_scale_rand_max, 1.08);
+
+        let pyratite = &ammo_for(ripple, item_id("pyratite")).bullet;
+        assert_eq!(pyratite.kind, BulletKind::Artillery);
+        assert_eq!(pyratite.damage, 48.0);
+        assert_eq!(
+            pyratite.hit_effect,
+            "MultiEffect(blastExplosion, shockwave)"
+        );
+        assert_eq!(pyratite.width, 13.0);
+        assert_eq!(pyratite.height, 15.0);
+        assert_eq!(pyratite.splash_damage_radius, 30.0 * 0.75);
+        assert_eq!(pyratite.splash_damage, 90.0);
+        assert_eq!(pyratite.status, "burning");
+        assert_eq!(pyratite.status_duration, 60.0 * 12.0);
+        assert_eq!(pyratite.front_color, "lightishOrange");
+        assert_eq!(pyratite.back_color, "lightOrange");
+        assert_eq!(pyratite.hit_color, "lightOrange");
+        assert!(pyratite.make_fire);
+        assert_eq!(pyratite.trail_effect, "incendTrail");
+        assert_eq!(pyratite.ammo_multiplier, 4.0);
+        assert_eq!(pyratite.despawn_effect, "hitBulletColor");
+
+        let blast = &ammo_for(ripple, item_id("blast-compound")).bullet;
+        assert_eq!(blast.kind, BulletKind::Artillery);
+        assert_eq!(blast.speed, 2.0);
+        assert_eq!(blast.damage, 40.0);
+        assert_eq!(blast.hit_effect, "MultiEffect(blastExplosion, shockwave)");
+        assert_eq!(blast.width, 14.0);
+        assert_eq!(blast.height, 16.0);
+        assert_eq!(blast.ammo_multiplier, 4.0);
+        assert_eq!(blast.splash_damage_radius, 50.0 * 0.75);
+        assert_eq!(blast.splash_damage, 90.0);
+        assert_eq!(blast.status, "blasted");
+        assert_eq!(blast.front_color, "blastAmmoFront");
+        assert_eq!(blast.back_color, "blastAmmoBack");
+
+        let plastanium = &ammo_for(ripple, item_id("plastanium")).bullet;
+        assert_eq!(plastanium.kind, BulletKind::Artillery);
+        assert_eq!(plastanium.speed, 3.4);
+        assert_eq!(
+            plastanium.hit_effect,
+            "MultiEffect(plasticExplosion, shockwave)"
+        );
+        assert_eq!(plastanium.knockback, 1.0);
+        assert_eq!(plastanium.width, 13.0);
+        assert_eq!(plastanium.height, 15.0);
+        assert_eq!(plastanium.splash_damage_radius, 40.0 * 0.75);
+        assert_eq!(plastanium.splash_damage, 90.0);
+        assert_eq!(plastanium.frag_bullets, 15);
+        assert_eq!(plastanium.front_color, "plastaniumFront");
+        assert_eq!(plastanium.back_color, "plastaniumBack");
+        assert_eq!(plastanium.life_scale_rand_min, 0.95);
+        assert_eq!(plastanium.life_scale_rand_max, 1.08);
+        let frag = plastanium.frag_bullet.as_ref().unwrap();
+        assert_eq!(frag.kind, BulletKind::Basic);
+        assert_eq!(frag.speed, 2.5);
+        assert_eq!(frag.damage, 14.0);
+        assert_eq!(frag.width, 10.0);
+        assert_eq!(frag.height, 12.0);
+        assert_eq!(frag.shrink_y, 1.0);
+        assert_eq!(frag.lifetime, 15.0);
+        assert_eq!(frag.back_color, "plastaniumBack");
+        assert_eq!(frag.front_color, "plastaniumFront");
+        assert_eq!(frag.despawn_effect, "none");
+        assert!(!frag.collides_air);
     }
 
     #[test]
