@@ -425,6 +425,81 @@ pub fn payload_deconstructor_begin_if_arrived(
     }
 }
 
+pub fn payload_deconstructor_should_consume(has_deconstructing: bool, enabled: bool) -> bool {
+    has_deconstructing && enabled
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadDeconstructorProgressStep {
+    pub can_progress: bool,
+    pub finished: bool,
+    pub items_added: Vec<i32>,
+}
+
+pub fn payload_deconstructor_update_progress(
+    progress: &mut f32,
+    time: &mut f32,
+    accum: &mut [f32],
+    requirement_amounts: &[i32],
+    items_total: &mut i32,
+    item_capacity: i32,
+    edelta: f32,
+    deconstruct_speed: f32,
+    build_time: f32,
+    cost_multiplier: f32,
+) -> PayloadDeconstructorProgressStep {
+    let mut items_added = vec![0; requirement_amounts.len()];
+    let mut can_progress = *items_total <= item_capacity && accum.iter().all(|value| *value < 1.0);
+
+    if can_progress {
+        let shift = edelta * deconstruct_speed / build_time;
+        let real_shift = shift.min(1.0 - *progress);
+        *progress += shift;
+        *time += edelta;
+
+        for (accum, amount) in accum.iter_mut().zip(requirement_amounts.iter()) {
+            *accum += *amount as f32 * cost_multiplier * real_shift;
+        }
+    }
+
+    for (index, value) in accum.iter_mut().enumerate() {
+        let free = item_capacity - *items_total;
+        if free <= 0 {
+            break;
+        }
+        let taken = (*value as i32).min(free);
+        if taken > 0 {
+            *items_total += taken;
+            *value -= taken as f32;
+            items_added[index] += taken;
+        }
+    }
+
+    let mut finished = false;
+    if *progress >= 1.0 {
+        can_progress = true;
+        for (index, value) in accum.iter_mut().enumerate() {
+            if (*value - 1.0).abs() <= 0.0001 {
+                if *items_total < item_capacity {
+                    *items_total += 1;
+                    *value = 0.0;
+                    items_added[index] += 1;
+                } else {
+                    can_progress = false;
+                    break;
+                }
+            }
+        }
+        finished = can_progress;
+    }
+
+    PayloadDeconstructorProgressStep {
+        can_progress,
+        finished,
+        items_added,
+    }
+}
+
 pub fn write_deconstructor_extra<W: Write>(
     write: &mut W,
     progress: f32,
@@ -1017,6 +1092,8 @@ mod tests {
     fn deconstructor_accept_begin_and_accum_serialization_follow_java_order() {
         let empty = PayloadDeconstructorState::default();
         assert!(payload_deconstructor_accept_payload(&empty, 3, 4.0, 4.0));
+        assert!(payload_deconstructor_should_consume(true, true));
+        assert!(!payload_deconstructor_should_consume(true, false));
 
         let mut state = PayloadDeconstructorState {
             has_payload: true,
@@ -1032,6 +1109,81 @@ mod tests {
         let (progress, accum) = read_deconstructor_extra(&mut bytes.as_slice()).unwrap();
         assert_eq!(progress, 0.5);
         assert_eq!(accum, Some(vec![1.0, 2.0]));
+    }
+
+    #[test]
+    fn deconstructor_progress_accumulates_outputs_and_finishes_like_java() {
+        let mut progress = 0.0;
+        let mut time = 0.0;
+        let mut accum = vec![0.0, 0.0];
+        let mut total = 0;
+        let step = payload_deconstructor_update_progress(
+            &mut progress,
+            &mut time,
+            &mut accum,
+            &[4, 2],
+            &mut total,
+            100,
+            50.0,
+            2.0,
+            100.0,
+            1.0,
+        );
+        assert_eq!(
+            step,
+            PayloadDeconstructorProgressStep {
+                can_progress: true,
+                finished: true,
+                items_added: vec![4, 2]
+            }
+        );
+        assert_eq!(progress, 1.0);
+        assert_eq!(time, 50.0);
+        assert_eq!(accum, vec![0.0, 0.0]);
+        assert_eq!(total, 6);
+
+        let mut progress = 0.25;
+        let mut time = 0.0;
+        let mut accum = vec![1.0];
+        let mut total = 10;
+        let step = payload_deconstructor_update_progress(
+            &mut progress,
+            &mut time,
+            &mut accum,
+            &[4],
+            &mut total,
+            100,
+            10.0,
+            2.0,
+            100.0,
+            1.0,
+        );
+        assert!(!step.can_progress);
+        assert_eq!(progress, 0.25);
+        assert_eq!(time, 0.0);
+        assert_eq!(step.items_added, vec![1]);
+        assert_eq!(accum, vec![0.0]);
+        assert_eq!(total, 11);
+
+        let mut progress = 1.0;
+        let mut time = 0.0;
+        let mut accum = vec![1.0];
+        let mut total = 100;
+        let step = payload_deconstructor_update_progress(
+            &mut progress,
+            &mut time,
+            &mut accum,
+            &[1],
+            &mut total,
+            100,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        );
+        assert!(!step.finished);
+        assert!(!step.can_progress);
+        assert_eq!(accum, vec![1.0]);
     }
 
     #[test]
