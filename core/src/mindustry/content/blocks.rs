@@ -487,6 +487,7 @@ pub enum TurretBlockKind {
 pub enum BulletKind {
     Generic,
     Basic,
+    Missile,
     Flak,
     Artillery,
     Liquid,
@@ -552,6 +553,8 @@ pub struct BulletSpec {
     pub lightning_length: i32,
     pub lightning_length_rand: i32,
     pub lightning_color: String,
+    pub lightning: i32,
+    pub lightning_damage: f32,
     pub lightning_type: Option<Box<BulletSpec>>,
     pub puddle_size: f32,
     pub orb_size: f32,
@@ -617,6 +620,8 @@ impl BulletSpec {
             lightning_length: 5,
             lightning_length_rand: 0,
             lightning_color: String::new(),
+            lightning: 0,
+            lightning_damage: -1.0,
             lightning_type: None,
             puddle_size: 0.0,
             orb_size: 0.0,
@@ -635,6 +640,13 @@ pub struct TurretAmmo {
 pub struct LiquidTurretAmmo {
     pub liquid: ContentId,
     pub bullet: BulletSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShootBarrel {
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -687,6 +699,7 @@ pub struct TurretBlockData {
     pub shoot_shots: i32,
     pub shoot_first_shot_delay: f32,
     pub shoot_shot_delay: f32,
+    pub shoot_barrels: Vec<ShootBarrel>,
     pub shoot_alternate_spread: f32,
     pub shoot_alternate_barrels: i32,
     pub target_air: bool,
@@ -796,6 +809,7 @@ impl TurretBlockData {
             shoot_shots: 1,
             shoot_first_shot_delay: 0.0,
             shoot_shot_delay: 0.0,
+            shoot_barrels: Vec::new(),
             shoot_alternate_spread: 0.0,
             shoot_alternate_barrels: 1,
             target_air: true,
@@ -4760,6 +4774,109 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.scaled_health = 160.0;
         turret.rotate_speed = 12.0;
         turret.consume_power = 3.3;
+    });
+
+    registry.register_turret_block("salvo", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("copper", 100), ("graphite", 80), ("titanium", 50)],
+        );
+
+        let mut copper = BulletSpec::new(BulletKind::Basic, 2.5, 15.0);
+        copper.width = 7.0;
+        copper.height = 9.0;
+        copper.lifetime = 60.0;
+        copper.ammo_multiplier = 5.0;
+        copper.armor_multiplier = 1.5;
+        copper.hit_effect = "hitBulletColor".into();
+        copper.despawn_effect = "hitBulletColor".into();
+        copper.hit_color = "copperAmmoBack".into();
+        copper.back_color = "copperAmmoBack".into();
+        copper.trail_color = "copperAmmoBack".into();
+        copper.front_color = "copperAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "copper", copper);
+
+        let mut graphite = BulletSpec::new(BulletKind::Basic, 3.5, 31.0);
+        graphite.width = 9.0;
+        graphite.height = 12.0;
+        graphite.ammo_multiplier = 4.0;
+        graphite.lifetime = 60.0;
+        graphite.reload_multiplier = 0.8;
+        graphite.range_change = 4.0 * 8.0;
+        graphite.hit_effect = "hitBulletColor".into();
+        graphite.despawn_effect = "hitBulletColor".into();
+        graphite.hit_color = "graphiteAmmoBack".into();
+        graphite.back_color = "graphiteAmmoBack".into();
+        graphite.trail_color = "graphiteAmmoBack".into();
+        graphite.front_color = "graphiteAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "graphite", graphite);
+
+        let mut pyratite = BulletSpec::new(BulletKind::Basic, 3.2, 25.0);
+        pyratite.width = 10.0;
+        pyratite.height = 12.0;
+        pyratite.front_color = "lightishOrange".into();
+        pyratite.hit_color = "lightishOrange".into();
+        pyratite.back_color = "lightOrange".into();
+        pyratite.status = "burning".into();
+        pyratite.hit_effect = "MultiEffect(hitBulletColor, fireHit)".into();
+        pyratite.ammo_multiplier = 5.0;
+        pyratite.splash_damage = 15.0;
+        pyratite.splash_damage_radius = 22.0;
+        pyratite.make_fire = true;
+        pyratite.lifetime = 60.0;
+        push_turret_ammo(&mut turret.ammo, items, "pyratite", pyratite);
+
+        let mut silicon = BulletSpec::new(BulletKind::Basic, 3.0, 23.0);
+        silicon.width = 8.0;
+        silicon.height = 10.0;
+        silicon.homing_power = 0.2;
+        silicon.reload_multiplier = 1.5;
+        silicon.ammo_multiplier = 5.0;
+        silicon.lifetime = 60.0;
+        silicon.trail_length = 5;
+        silicon.trail_width = 1.5;
+        silicon.hit_effect = "hitBulletColor".into();
+        silicon.despawn_effect = "hitBulletColor".into();
+        silicon.hit_color = "siliconAmmoBack".into();
+        silicon.back_color = "siliconAmmoBack".into();
+        silicon.trail_color = "siliconAmmoBack".into();
+        silicon.front_color = "siliconAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "silicon", silicon);
+
+        let mut thorium = BulletSpec::new(BulletKind::Basic, 4.0, 28.0);
+        thorium.width = 8.0;
+        thorium.height = 13.0;
+        thorium.shoot_effect = "shootBig".into();
+        thorium.smoke_effect = "shootBigSmoke".into();
+        thorium.ammo_multiplier = 4.0;
+        thorium.lifetime = 60.0;
+        thorium.armor_multiplier = 0.8;
+        thorium.hit_effect = "hitBulletColor".into();
+        thorium.despawn_effect = "hitBulletColor".into();
+        thorium.back_color = "thoriumAmmoBack".into();
+        thorium.hit_color = "thoriumAmmoBack".into();
+        thorium.trail_color = "thoriumAmmoBack".into();
+        thorium.front_color = "thoriumAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "thorium", thorium);
+
+        turret.drawer = "DrawTurret(RegionPart(-side warmup mirror layerOffset=0.001 moveX=0.6 moveRot=-15 PartMove(recoil,0.5,-0.5,-8)), RegionPart(-barrel recoil moveY=-2.5))".into();
+        turret.base.size = 2;
+        turret.range = 190.0;
+        turret.reload = 29.0;
+        turret.consume_ammo_once = false;
+        turret.ammo_eject_back = 3.0;
+        turret.recoil = 0.0;
+        turret.shake = 1.0;
+        turret.shoot_pattern = "ShootPattern".into();
+        turret.shoot_shots = 4;
+        turret.shoot_shot_delay = 3.0;
+        turret.ammo_use_effect = "casing2".into();
+        turret.scaled_health = 240.0;
+        turret.shoot_sound = "shootSalvo".into();
+        turret.limit_range(9.0);
+        turret.consume_coolant(0.2);
+        turret.deposit_cooldown = 2.0;
     });
 
     registry.register_turret_block("tsunami", TurretBlockKind::LiquidTurret, |turret| {
@@ -9415,6 +9532,128 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn salvo_item_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let salvo = registry.get_turret_by_name("salvo").unwrap();
+        assert_eq!(salvo.kind, TurretBlockKind::ItemTurret);
+        assert!(salvo.base.has_items);
+        assert_eq!(salvo.base.size, 2);
+        assert_eq!(salvo.range, 190.0);
+        assert_eq!(salvo.reload, 29.0);
+        assert!(!salvo.consume_ammo_once);
+        assert_eq!(salvo.ammo_eject_back, 3.0);
+        assert_eq!(salvo.recoil, 0.0);
+        assert_eq!(salvo.shake, 1.0);
+        assert_eq!(salvo.shoot_pattern, "ShootPattern");
+        assert_eq!(salvo.shoot_shots, 4);
+        assert_eq!(salvo.shoot_shot_delay, 3.0);
+        assert_eq!(salvo.ammo_use_effect, "casing2");
+        assert_eq!(salvo.scaled_health, 240.0);
+        assert_eq!(salvo.base.health, 2 * 2 * 240);
+        assert_eq!(salvo.shoot_sound, "shootSalvo");
+        assert!(salvo.consume_coolant);
+        assert_eq!(salvo.coolant_amount, 0.2);
+        assert_eq!(salvo.deposit_cooldown, 2.0);
+        assert_eq!(salvo.fog_radius, 24.0);
+        assert_eq!(salvo.place_overlap_range, 190.0 + 32.0 + 8.0 * 7.0);
+        assert!(salvo.drawer.contains("RegionPart(-side"));
+        assert_eq!(
+            salvo.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 50
+                }
+            ]
+        );
+
+        let copper = &ammo_for(salvo, item_id("copper")).bullet;
+        assert_eq!(copper.kind, BulletKind::Basic);
+        assert_eq!(copper.speed, 2.5);
+        assert_eq!(copper.damage, 15.0);
+        assert_eq!(copper.width, 7.0);
+        assert_eq!(copper.height, 9.0);
+        assert_close(copper.lifetime, (190.0 + 9.0 + 10.0) / 2.5);
+        assert_eq!(copper.ammo_multiplier, 5.0);
+        assert_eq!(copper.armor_multiplier, 1.5);
+        assert_eq!(copper.hit_effect, "hitBulletColor");
+        assert_eq!(copper.despawn_effect, "hitBulletColor");
+        assert_eq!(copper.front_color, "copperAmmoFront");
+        assert_eq!(copper.back_color, "copperAmmoBack");
+
+        let graphite = &ammo_for(salvo, item_id("graphite")).bullet;
+        assert_eq!(graphite.damage, 31.0);
+        assert_eq!(graphite.width, 9.0);
+        assert_eq!(graphite.height, 12.0);
+        assert_eq!(graphite.ammo_multiplier, 4.0);
+        assert_eq!(graphite.reload_multiplier, 0.8);
+        assert_eq!(graphite.range_change, 32.0);
+        assert_close(graphite.lifetime, (190.0 + 32.0 + 9.0 + 10.0) / 3.5);
+        assert_eq!(graphite.front_color, "graphiteAmmoFront");
+        assert_eq!(graphite.back_color, "graphiteAmmoBack");
+
+        let pyratite = &ammo_for(salvo, item_id("pyratite")).bullet;
+        assert_eq!(pyratite.speed, 3.2);
+        assert_eq!(pyratite.damage, 25.0);
+        assert_eq!(pyratite.width, 10.0);
+        assert_eq!(pyratite.height, 12.0);
+        assert_eq!(pyratite.front_color, "lightishOrange");
+        assert_eq!(pyratite.hit_color, "lightishOrange");
+        assert_eq!(pyratite.back_color, "lightOrange");
+        assert_eq!(pyratite.status, "burning");
+        assert_eq!(pyratite.hit_effect, "MultiEffect(hitBulletColor, fireHit)");
+        assert_eq!(pyratite.ammo_multiplier, 5.0);
+        assert_eq!(pyratite.splash_damage, 15.0);
+        assert_eq!(pyratite.splash_damage_radius, 22.0);
+        assert!(pyratite.make_fire);
+        assert_close(pyratite.lifetime, (190.0 + 9.0 + 10.0) / 3.2);
+
+        let silicon = &ammo_for(salvo, item_id("silicon")).bullet;
+        assert_eq!(silicon.speed, 3.0);
+        assert_eq!(silicon.damage, 23.0);
+        assert_eq!(silicon.width, 8.0);
+        assert_eq!(silicon.height, 10.0);
+        assert_eq!(silicon.homing_power, 0.2);
+        assert_eq!(silicon.reload_multiplier, 1.5);
+        assert_eq!(silicon.ammo_multiplier, 5.0);
+        assert_eq!(silicon.trail_length, 5);
+        assert_eq!(silicon.trail_width, 1.5);
+        assert_close(silicon.lifetime, (190.0 + 9.0 + 10.0) / 3.0);
+
+        let thorium = &ammo_for(salvo, item_id("thorium")).bullet;
+        assert_eq!(thorium.speed, 4.0);
+        assert_eq!(thorium.damage, 28.0);
+        assert_eq!(thorium.width, 8.0);
+        assert_eq!(thorium.height, 13.0);
+        assert_eq!(thorium.shoot_effect, "shootBig");
+        assert_eq!(thorium.smoke_effect, "shootBigSmoke");
+        assert_eq!(thorium.ammo_multiplier, 4.0);
+        assert_eq!(thorium.armor_multiplier, 0.8);
+        assert_eq!(thorium.front_color, "thoriumAmmoFront");
+        assert_eq!(thorium.back_color, "thoriumAmmoBack");
+        assert_close(thorium.lifetime, (190.0 + 9.0 + 10.0) / 4.0);
     }
 
     #[test]
