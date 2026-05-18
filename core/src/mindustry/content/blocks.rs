@@ -532,6 +532,10 @@ pub struct BulletSpec {
     pub trail_width: f32,
     pub splash_damage: f32,
     pub splash_damage_radius: f32,
+    pub explode_range: f32,
+    pub explode_delay: f32,
+    pub flak_delay: f32,
+    pub flak_interval: f32,
     pub frag_bullets: i32,
     pub frag_bullet: Option<Box<BulletSpec>>,
     pub collides_ground: bool,
@@ -612,6 +616,10 @@ impl BulletSpec {
             trail_width: 0.0,
             splash_damage: 0.0,
             splash_damage_radius: 0.0,
+            explode_range: 0.0,
+            explode_delay: 0.0,
+            flak_delay: 0.0,
+            flak_interval: 0.0,
             frag_bullets: 0,
             frag_bullet: None,
             collides_ground: true,
@@ -3825,6 +3833,21 @@ fn missile_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn flak_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Flak, speed, damage);
+    bullet.splash_damage = 15.0;
+    bullet.splash_damage_radius = 34.0;
+    bullet.hit_effect = "flakExplosionBig".into();
+    bullet.width = 8.0;
+    bullet.height = 10.0;
+    bullet.collides_ground = false;
+    bullet.explode_range = 30.0;
+    bullet.explode_delay = 5.0;
+    bullet.flak_delay = 0.0;
+    bullet.flak_interval = 6.0;
+    bullet
+}
+
 fn artillery_bullet(speed: f32, damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Artillery, speed, damage);
     bullet.collides_tiles = false;
@@ -4512,7 +4535,7 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
             &[("copper", 85), ("lead", 45)],
         );
 
-        let mut scrap = BulletSpec::new(BulletKind::Flak, 4.0, 3.0);
+        let mut scrap = flak_bullet(4.0, 3.0);
         scrap.lifetime = 60.0;
         scrap.ammo_multiplier = 5.0;
         scrap.shoot_effect = "shootSmall".into();
@@ -4528,7 +4551,7 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         scrap.despawn_effect = "hitBulletColor".into();
         push_turret_ammo(&mut turret.ammo, items, "scrap", scrap);
 
-        let mut lead = BulletSpec::new(BulletKind::Flak, 4.2, 3.0);
+        let mut lead = flak_bullet(4.2, 3.0);
         lead.lifetime = 60.0;
         lead.ammo_multiplier = 4.0;
         lead.shoot_effect = "shootSmall".into();
@@ -4551,7 +4574,7 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         frag.despawn_effect = "none".into();
         frag.collides_ground = false;
 
-        let mut metaglass = BulletSpec::new(BulletKind::Flak, 4.0, 3.0);
+        let mut metaglass = flak_bullet(4.0, 3.0);
         metaglass.back_color = "glassAmmoBack".into();
         metaglass.trail_color = "glassAmmoBack".into();
         metaglass.hit_color = "glassAmmoFront".into();
@@ -5335,6 +5358,116 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.scaled_health = 130.0;
         turret.deposit_cooldown = 2.0;
         turret.shoot_sound = "shootRipple".into();
+    });
+
+    registry.register_turret_block("cyclone", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("copper", 200), ("titanium", 125), ("plastanium", 80)],
+        );
+
+        let mut metaglass_frag = BulletSpec::new(BulletKind::Basic, 3.0, 12.0);
+        metaglass_frag.width = 5.0;
+        metaglass_frag.height = 12.0;
+        metaglass_frag.shrink_y = 1.0;
+        metaglass_frag.lifetime = 20.0;
+        metaglass_frag.back_color = "gray".into();
+        metaglass_frag.front_color = "white".into();
+        metaglass_frag.despawn_effect = "none".into();
+
+        let mut metaglass = flak_bullet(4.0, 6.0);
+        metaglass.ammo_multiplier = 2.0;
+        metaglass.shoot_effect = "shootSmall".into();
+        metaglass.reload_multiplier = 0.8;
+        metaglass.width = 6.0;
+        metaglass.height = 11.0;
+        metaglass.hit_effect = "flakExplosion".into();
+        metaglass.splash_damage = 45.0;
+        metaglass.splash_damage_radius = 25.0;
+        metaglass.frag_bullet = Some(Box::new(metaglass_frag));
+        metaglass.frag_bullets = 4;
+        metaglass.explode_range = 20.0;
+        metaglass.collides_ground = true;
+        metaglass.back_color = "glassAmmoBack".into();
+        metaglass.hit_color = "glassAmmoBack".into();
+        metaglass.trail_color = "glassAmmoBack".into();
+        metaglass.front_color = "glassAmmoFront".into();
+        metaglass.despawn_effect = "hitBulletColor".into();
+        push_turret_ammo(&mut turret.ammo, items, "metaglass", metaglass);
+
+        let mut blast = flak_bullet(4.0, 8.0);
+        blast.shoot_effect = "shootBig".into();
+        blast.ammo_multiplier = 5.0;
+        blast.splash_damage = 45.0;
+        blast.splash_damage_radius = 60.0;
+        blast.collides_ground = true;
+        blast.status = "blasted".into();
+        blast.back_color = "blastAmmoBack".into();
+        blast.hit_color = "blastAmmoBack".into();
+        blast.trail_color = "blastAmmoBack".into();
+        blast.front_color = "blastAmmoFront".into();
+        blast.despawn_effect = "hitBulletColor".into();
+        push_turret_ammo(&mut turret.ammo, items, "blast-compound", blast);
+
+        let mut plastanium_frag = BulletSpec::new(BulletKind::Basic, 2.5, 12.0);
+        plastanium_frag.width = 10.0;
+        plastanium_frag.height = 12.0;
+        plastanium_frag.shrink_y = 1.0;
+        plastanium_frag.lifetime = 15.0;
+        plastanium_frag.back_color = "plastaniumBack".into();
+        plastanium_frag.front_color = "plastaniumFront".into();
+        plastanium_frag.despawn_effect = "none".into();
+
+        let mut plastanium = flak_bullet(4.0, 8.0);
+        plastanium.ammo_multiplier = 4.0;
+        plastanium.splash_damage_radius = 40.0;
+        plastanium.splash_damage = 37.5;
+        plastanium.frag_bullet = Some(Box::new(plastanium_frag));
+        plastanium.frag_bullets = 6;
+        plastanium.hit_effect = "plasticExplosion".into();
+        plastanium.front_color = "plastaniumFront".into();
+        plastanium.back_color = "plastaniumBack".into();
+        plastanium.shoot_effect = "shootBig".into();
+        plastanium.collides_ground = true;
+        plastanium.explode_range = 20.0;
+        plastanium.despawn_effect = "hitBulletColor".into();
+        push_turret_ammo(&mut turret.ammo, items, "plastanium", plastanium);
+
+        let mut surge = flak_bullet(4.5, 13.0);
+        surge.ammo_multiplier = 5.0;
+        surge.splash_damage = 50.0 * 1.5;
+        surge.splash_damage_radius = 38.0;
+        surge.lightning = 2;
+        surge.lightning_length = 7;
+        surge.shoot_effect = "shootBig".into();
+        surge.collides_ground = true;
+        surge.explode_range = 20.0;
+        surge.back_color = "surgeAmmoBack".into();
+        surge.hit_color = "surgeAmmoBack".into();
+        surge.trail_color = "surgeAmmoBack".into();
+        surge.front_color = "surgeAmmoFront".into();
+        surge.despawn_effect = "hitBulletColor".into();
+        push_turret_ammo(&mut turret.ammo, items, "surge-alloy", surge);
+
+        turret.shoot_y = 10.0;
+        turret.shoot_pattern = "ShootBarrel".into();
+        turret.shoot_barrels = shoot_barrels(&[(0.0, 1.0, 0.0), (3.0, 0.0, 0.0), (-3.0, 0.0, 0.0)]);
+        turret.recoils = 3;
+        turret.drawer = "DrawTurret(RegionPart(-barrel-3 recoilIndex=2 under moveY=-2), RegionPart(-barrel-2 recoilIndex=1 under moveY=-2), RegionPart(-barrel-1 recoilIndex=0 under moveY=-2))".into();
+        turret.reload = 10.0;
+        turret.range = 200.0;
+        turret.base.size = 3;
+        turret.recoil = 1.5;
+        turret.recoil_time = 10.0;
+        turret.rotate_speed = 10.0;
+        turret.inaccuracy = 10.0;
+        turret.shoot_cone = 30.0;
+        turret.shoot_sound = "shootCyclone".into();
+        turret.consume_coolant(0.3);
+        turret.scaled_health = 145.0;
+        turret.deposit_cooldown = 2.0;
+        turret.limit_range(9.0);
     });
 }
 
@@ -9447,6 +9580,10 @@ mod tests {
         assert_eq!(metaglass.splash_damage, 30.0 * 1.5);
         assert_eq!(metaglass.splash_damage_radius, 20.0);
         assert_eq!(metaglass.frag_bullets, 6);
+        assert!(!metaglass.collides_ground);
+        assert_eq!(metaglass.explode_range, 30.0);
+        assert_eq!(metaglass.explode_delay, 5.0);
+        assert_eq!(metaglass.flak_interval, 6.0);
         assert_close(metaglass.lifetime, (220.0 + 2.0 + 10.0) / 4.0);
         let frag = metaglass.frag_bullet.as_ref().unwrap();
         assert_eq!(frag.kind, BulletKind::Basic);
@@ -10473,6 +10610,174 @@ mod tests {
         assert_eq!(frag.front_color, "plastaniumFront");
         assert_eq!(frag.despawn_effect, "none");
         assert!(!frag.collides_air);
+    }
+
+    #[test]
+    fn cyclone_flak_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let cyclone = registry.get_turret_by_name("cyclone").unwrap();
+        assert_eq!(cyclone.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(cyclone.base.size, 3);
+        assert_eq!(cyclone.shoot_y, 10.0);
+        assert_eq!(cyclone.shoot_pattern, "ShootBarrel");
+        assert_eq!(
+            cyclone.shoot_barrels,
+            vec![
+                ShootBarrel {
+                    x: 0.0,
+                    y: 1.0,
+                    rotation: 0.0
+                },
+                ShootBarrel {
+                    x: 3.0,
+                    y: 0.0,
+                    rotation: 0.0
+                },
+                ShootBarrel {
+                    x: -3.0,
+                    y: 0.0,
+                    rotation: 0.0
+                }
+            ]
+        );
+        assert_eq!(cyclone.recoils, 3);
+        assert!(cyclone.drawer.contains("RegionPart(-barrel-3"));
+        assert_eq!(cyclone.reload, 10.0);
+        assert_eq!(cyclone.range, 200.0);
+        assert_eq!(cyclone.recoil, 1.5);
+        assert_eq!(cyclone.recoil_time, 10.0);
+        assert_eq!(cyclone.rotate_speed, 10.0);
+        assert_eq!(cyclone.inaccuracy, 10.0);
+        assert_eq!(cyclone.shoot_cone, 30.0);
+        assert_eq!(cyclone.shoot_sound, "shootCyclone");
+        assert!(cyclone.consume_coolant);
+        assert_eq!(cyclone.coolant_amount, 0.3);
+        assert_eq!(cyclone.scaled_health, 145.0);
+        assert_eq!(cyclone.base.health, 3 * 3 * 145);
+        assert_eq!(cyclone.deposit_cooldown, 2.0);
+        assert_eq!(cyclone.fog_radius, 25.0);
+        assert_eq!(cyclone.place_overlap_range, 200.0 + 8.0 * 7.0);
+        assert_eq!(
+            cyclone.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 125
+                },
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 80
+                }
+            ]
+        );
+
+        let metaglass = &ammo_for(cyclone, item_id("metaglass")).bullet;
+        assert_eq!(metaglass.kind, BulletKind::Flak);
+        assert_eq!(metaglass.speed, 4.0);
+        assert_eq!(metaglass.damage, 6.0);
+        assert_close(metaglass.lifetime, (200.0 + 9.0 + 10.0) / 4.0);
+        assert_eq!(metaglass.ammo_multiplier, 2.0);
+        assert_eq!(metaglass.reload_multiplier, 0.8);
+        assert_eq!(metaglass.shoot_effect, "shootSmall");
+        assert_eq!(metaglass.width, 6.0);
+        assert_eq!(metaglass.height, 11.0);
+        assert_eq!(metaglass.hit_effect, "flakExplosion");
+        assert_eq!(metaglass.splash_damage, 45.0);
+        assert_eq!(metaglass.splash_damage_radius, 25.0);
+        assert_eq!(metaglass.frag_bullets, 4);
+        assert_eq!(metaglass.explode_range, 20.0);
+        assert_eq!(metaglass.explode_delay, 5.0);
+        assert_eq!(metaglass.flak_interval, 6.0);
+        assert!(metaglass.collides_ground);
+        assert_eq!(metaglass.front_color, "glassAmmoFront");
+        assert_eq!(metaglass.back_color, "glassAmmoBack");
+        assert_eq!(metaglass.hit_color, "glassAmmoBack");
+        assert_eq!(metaglass.trail_color, "glassAmmoBack");
+        assert_eq!(metaglass.despawn_effect, "hitBulletColor");
+        let frag = metaglass.frag_bullet.as_ref().unwrap();
+        assert_eq!(frag.kind, BulletKind::Basic);
+        assert_eq!(frag.speed, 3.0);
+        assert_eq!(frag.damage, 12.0);
+        assert_eq!(frag.width, 5.0);
+        assert_eq!(frag.height, 12.0);
+        assert_eq!(frag.shrink_y, 1.0);
+        assert_eq!(frag.lifetime, 20.0);
+        assert_eq!(frag.back_color, "gray");
+        assert_eq!(frag.front_color, "white");
+        assert_eq!(frag.despawn_effect, "none");
+
+        let blast = &ammo_for(cyclone, item_id("blast-compound")).bullet;
+        assert_eq!(blast.kind, BulletKind::Flak);
+        assert_eq!(blast.speed, 4.0);
+        assert_eq!(blast.damage, 8.0);
+        assert_eq!(blast.shoot_effect, "shootBig");
+        assert_eq!(blast.ammo_multiplier, 5.0);
+        assert_eq!(blast.splash_damage, 45.0);
+        assert_eq!(blast.splash_damage_radius, 60.0);
+        assert!(blast.collides_ground);
+        assert_eq!(blast.status, "blasted");
+        assert_eq!(blast.front_color, "blastAmmoFront");
+        assert_eq!(blast.back_color, "blastAmmoBack");
+        assert_eq!(blast.despawn_effect, "hitBulletColor");
+        assert_close(blast.lifetime, (200.0 + 9.0 + 10.0) / 4.0);
+
+        let plastanium = &ammo_for(cyclone, item_id("plastanium")).bullet;
+        assert_eq!(plastanium.kind, BulletKind::Flak);
+        assert_eq!(plastanium.ammo_multiplier, 4.0);
+        assert_eq!(plastanium.splash_damage_radius, 40.0);
+        assert_eq!(plastanium.splash_damage, 37.5);
+        assert_eq!(plastanium.frag_bullets, 6);
+        assert_eq!(plastanium.hit_effect, "plasticExplosion");
+        assert_eq!(plastanium.front_color, "plastaniumFront");
+        assert_eq!(plastanium.back_color, "plastaniumBack");
+        assert_eq!(plastanium.shoot_effect, "shootBig");
+        assert!(plastanium.collides_ground);
+        assert_eq!(plastanium.explode_range, 20.0);
+        assert_eq!(plastanium.despawn_effect, "hitBulletColor");
+        let frag = plastanium.frag_bullet.as_ref().unwrap();
+        assert_eq!(frag.kind, BulletKind::Basic);
+        assert_eq!(frag.speed, 2.5);
+        assert_eq!(frag.damage, 12.0);
+        assert_eq!(frag.width, 10.0);
+        assert_eq!(frag.height, 12.0);
+        assert_eq!(frag.shrink_y, 1.0);
+        assert_eq!(frag.lifetime, 15.0);
+        assert_eq!(frag.back_color, "plastaniumBack");
+        assert_eq!(frag.front_color, "plastaniumFront");
+        assert_eq!(frag.despawn_effect, "none");
+        assert_close(plastanium.lifetime, (200.0 + 9.0 + 10.0) / 4.0);
+
+        let surge = &ammo_for(cyclone, item_id("surge-alloy")).bullet;
+        assert_eq!(surge.kind, BulletKind::Flak);
+        assert_eq!(surge.speed, 4.5);
+        assert_eq!(surge.damage, 13.0);
+        assert_eq!(surge.ammo_multiplier, 5.0);
+        assert_eq!(surge.splash_damage, 50.0 * 1.5);
+        assert_eq!(surge.splash_damage_radius, 38.0);
+        assert_eq!(surge.lightning, 2);
+        assert_eq!(surge.lightning_length, 7);
+        assert_eq!(surge.shoot_effect, "shootBig");
+        assert!(surge.collides_ground);
+        assert_eq!(surge.explode_range, 20.0);
+        assert_eq!(surge.front_color, "surgeAmmoFront");
+        assert_eq!(surge.back_color, "surgeAmmoBack");
+        assert_eq!(surge.despawn_effect, "hitBulletColor");
+        assert_close(surge.lifetime, (200.0 + 9.0 + 10.0) / 4.5);
     }
 
     #[test]
