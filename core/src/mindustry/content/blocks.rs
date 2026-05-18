@@ -502,6 +502,88 @@ pub enum BulletKind {
     ContinuousLaser,
     ContinuousFlame,
     PointLaser,
+    Explosion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitPartKind {
+    Shape,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitPartSpec {
+    pub kind: UnitPartKind,
+    pub progress: String,
+    pub color: String,
+    pub sides: i32,
+    pub radius: f32,
+    pub rotate_speed: f32,
+    pub hollow: bool,
+    pub layer: String,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbilityKind {
+    MoveEffect,
+    ForceField,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AbilitySpec {
+    pub kind: AbilityKind,
+    pub effect: String,
+    pub rotation: f32,
+    pub y: f32,
+    pub color: String,
+    pub interval: f32,
+    pub radius: f32,
+    pub regen: f32,
+    pub max: f32,
+    pub cooldown: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeaponSpec {
+    pub shoot_cone: f32,
+    pub mirror: bool,
+    pub rotate: bool,
+    pub rotation_limit: f32,
+    pub rotate_speed: f32,
+    pub reload: f32,
+    pub death_explosion_effect: String,
+    pub shoot_on_death: bool,
+    pub shake: f32,
+    pub bullet: Option<Box<BulletSpec>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MissileUnitSpec {
+    pub name: String,
+    pub speed: f32,
+    pub max_range: f32,
+    pub lifetime: f32,
+    pub hit_size: f32,
+    pub outline_color: String,
+    pub engine_color: String,
+    pub trail_color: String,
+    pub engine_layer: String,
+    pub engine_size: f32,
+    pub engine_offset: f32,
+    pub rotate_speed: f32,
+    pub trail_length: i32,
+    pub missile_accel_time: f32,
+    pub low_altitude: bool,
+    pub loop_sound: String,
+    pub loop_sound_volume: f32,
+    pub death_sound: String,
+    pub target_air: bool,
+    pub target_under_blocks: bool,
+    pub fog_radius: f32,
+    pub health: f32,
+    pub parts: Vec<UnitPartSpec>,
+    pub weapons: Vec<WeaponSpec>,
+    pub abilities: Vec<AbilitySpec>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -573,6 +655,7 @@ pub struct BulletSpec {
     pub splash_damage: f32,
     pub splash_damage_radius: f32,
     pub scaled_splash_damage: bool,
+    pub range_override: f32,
     pub explode_range: f32,
     pub explode_delay: f32,
     pub flak_delay: f32,
@@ -612,6 +695,7 @@ pub struct BulletSpec {
     pub keep_velocity: bool,
     pub absorbable: bool,
     pub instant_disappear: bool,
+    pub kill_shooter: bool,
     pub status: String,
     pub status_duration: f32,
     pub make_fire: bool,
@@ -644,6 +728,9 @@ pub struct BulletSpec {
     pub puddle_size: f32,
     pub orb_size: f32,
     pub boil_time: f32,
+    pub light_radius: f32,
+    pub light_opacity: f32,
+    pub spawn_unit: Option<Box<MissileUnitSpec>>,
 }
 
 impl BulletSpec {
@@ -716,6 +803,7 @@ impl BulletSpec {
             splash_damage: 0.0,
             splash_damage_radius: 0.0,
             scaled_splash_damage: false,
+            range_override: 0.0,
             explode_range: 0.0,
             explode_delay: 0.0,
             flak_delay: 0.0,
@@ -755,6 +843,7 @@ impl BulletSpec {
             keep_velocity: true,
             absorbable: true,
             instant_disappear: false,
+            kill_shooter: false,
             status: "none".into(),
             status_duration: 60.0 * 8.0,
             make_fire: false,
@@ -787,6 +876,9 @@ impl BulletSpec {
             puddle_size: 0.0,
             orb_size: 0.0,
             boil_time: 0.0,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+            spawn_unit: None,
         }
     }
 }
@@ -4160,6 +4252,109 @@ fn point_laser_bullet(damage: f32) -> BulletSpec {
     bullet
 }
 
+fn explosion_bullet(splash_damage: f32, splash_damage_radius: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Explosion, 0.0, 0.0);
+    bullet.splash_damage = splash_damage;
+    bullet.splash_damage_radius = splash_damage_radius;
+    bullet.range_override = (splash_damage_radius * 2.0 / 3.0).max(20.0);
+    bullet.hittable = false;
+    bullet.lifetime = 1.0;
+    bullet.speed = 0.0;
+    bullet.shoot_effect = "massiveExplosion".into();
+    bullet.instant_disappear = true;
+    bullet.scaled_splash_damage = true;
+    bullet.kill_shooter = true;
+    bullet.collides = false;
+    bullet.keep_velocity = false;
+    bullet
+}
+
+fn missile_unit(
+    name: &str,
+    color: &str,
+    speed: f32,
+    lifetime: f32,
+    health: f32,
+    rotate_speed: f32,
+    missile_accel_time: f32,
+    trail_length: i32,
+    engine_size: f32,
+    engine_offset: f32,
+) -> MissileUnitSpec {
+    MissileUnitSpec {
+        name: name.into(),
+        speed,
+        max_range: 6.0,
+        lifetime,
+        hit_size: 10.0,
+        outline_color: "darkOutline".into(),
+        engine_color: color.into(),
+        trail_color: color.into(),
+        engine_layer: "effect".into(),
+        engine_size,
+        engine_offset,
+        rotate_speed,
+        trail_length,
+        missile_accel_time,
+        low_altitude: true,
+        loop_sound: "loopMissileTrail".into(),
+        loop_sound_volume: 0.6,
+        death_sound: "explosionMissile".into(),
+        target_air: false,
+        target_under_blocks: false,
+        fog_radius: 6.0,
+        health,
+        parts: Vec::new(),
+        weapons: Vec::new(),
+        abilities: Vec::new(),
+    }
+}
+
+fn death_weapon(bullet: BulletSpec) -> WeaponSpec {
+    WeaponSpec {
+        shoot_cone: 360.0,
+        mirror: false,
+        rotate: false,
+        rotation_limit: 0.0,
+        rotate_speed: 0.0,
+        reload: 1.0,
+        death_explosion_effect: "massiveExplosion".into(),
+        shoot_on_death: true,
+        shake: 10.0,
+        bullet: Some(Box::new(bullet)),
+    }
+}
+
+fn move_effect_ability(effect: &str, color: &str, interval: f32) -> AbilitySpec {
+    AbilitySpec {
+        kind: AbilityKind::MoveEffect,
+        effect: effect.into(),
+        rotation: 180.0,
+        y: -9.0,
+        color: color.into(),
+        interval,
+        radius: 0.0,
+        regen: 0.0,
+        max: 0.0,
+        cooldown: 0.0,
+    }
+}
+
+fn force_field_ability(radius: f32, regen: f32, max: f32, cooldown: f32) -> AbilitySpec {
+    AbilitySpec {
+        kind: AbilityKind::ForceField,
+        effect: String::new(),
+        rotation: 0.0,
+        y: 0.0,
+        color: String::new(),
+        interval: 0.0,
+        radius,
+        regen,
+        max,
+        cooldown,
+    }
+}
+
 fn shrapnel_bullet() -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, 1.0);
     bullet.length = 100.0;
@@ -6668,6 +6863,242 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.base.has_liquids = !turret.consume_liquids.is_empty();
         turret.consume_power = 200.0 / 60.0;
         turret.base.has_power = true;
+    });
+
+    registry.register_turret_block("scathe", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("silicon", 450),
+                ("graphite", 400),
+                ("tungsten", 500),
+                ("oxide", 100),
+                ("carbide", 200),
+            ],
+        );
+
+        let make_carrier = |hit_color: &str, ammo_multiplier: f32, reload_multiplier: f32| {
+            let mut bullet = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+            bullet.shoot_effect = "shootBig".into();
+            bullet.smoke_effect = "shootSmokeMissileColor".into();
+            bullet.hit_color = hit_color.into();
+            bullet.ammo_multiplier = ammo_multiplier;
+            bullet.reload_multiplier = reload_multiplier;
+            bullet
+        };
+
+        let make_frag = |color: &str, building_damage_multiplier: f32, splash_radius: f32, splash_damage: f32| {
+            let mut frag = artillery_bullet(3.4, 32.0);
+            frag.building_damage_multiplier = building_damage_multiplier;
+            frag.drag = 0.02;
+            frag.hit_effect = "massiveExplosion".into();
+            frag.despawn_effect = "scatheSlash".into();
+            frag.knockback = 0.8;
+            frag.lifetime = 23.0;
+            frag.width = 18.0;
+            frag.height = 18.0;
+            frag.collides_tiles = false;
+            frag.splash_damage_radius = splash_radius;
+            frag.splash_damage = splash_damage;
+            frag.back_color = color.into();
+            frag.trail_color = color.into();
+            frag.hit_color = color.into();
+            frag.front_color = "white".into();
+            frag.smoke_effect = "shootBigSmoke2".into();
+            frag.despawn_shake = 7.0;
+            frag.light_radius = 30.0;
+            frag.light_color = color.into();
+            frag.light_opacity = 0.5;
+            frag.trail_length = 20;
+            frag.trail_width = 3.5;
+            frag.trail_effect = "none".into();
+            frag
+        };
+
+        let mut carbide_explosion = explosion_bullet(1000.0, 65.0);
+        carbide_explosion.hit_color = "redLight".into();
+        carbide_explosion.shoot_effect =
+            "MultiEffect(massiveExplosion, scatheExplosion, scatheLight, WaveEffect(lifetime=10,strokeFrom=4,sizeTo=130))"
+                .into();
+        carbide_explosion.collides_air = false;
+        carbide_explosion.building_damage_multiplier = 0.1;
+        carbide_explosion.ammo_multiplier = 1.0;
+        carbide_explosion.frag_life_min = 0.1;
+        carbide_explosion.frag_bullets = 7;
+        carbide_explosion.frag_bullet = Some(Box::new(make_frag("redLight", 0.1, 40.0, 100.0)));
+
+        let mut carbide_unit = missile_unit(
+            "scathe-missile",
+            "redLight",
+            4.6,
+            60.0 * 5.5,
+            240.0,
+            0.25,
+            50.0,
+            18,
+            3.1,
+            10.0,
+        );
+        carbide_unit.weapons.push(death_weapon(carbide_explosion));
+        carbide_unit
+            .abilities
+            .push(move_effect_ability("missileTrailSmoke", "gray-redLight-0.4", 7.0));
+
+        let mut carbide = make_carrier("redLight", 1.0, 1.0);
+        carbide.spawn_unit = Some(Box::new(carbide_unit));
+        push_turret_ammo(&mut turret.ammo, items, "carbide", carbide);
+
+        let phase_color = "ffd37f";
+        let mut phase_explosion = explosion_bullet(320.0, 120.0);
+        phase_explosion.reload_multiplier = 0.8;
+        phase_explosion.ammo_multiplier = 5.0;
+        phase_explosion.hit_color = phase_color.into();
+        phase_explosion.shoot_effect =
+            "MultiEffect(massiveExplosion, scatheExplosion, scatheLight, WaveEffect(lifetime=10,strokeFrom=4,sizeTo=130))"
+                .into();
+        phase_explosion.collides_air = false;
+        phase_explosion.building_damage_multiplier = 0.1;
+        phase_explosion.frag_life_min = 0.1;
+        phase_explosion.frag_bullets = 7;
+        phase_explosion.frag_bullet = Some(Box::new(make_frag(phase_color, 0.2, 56.0, 120.0)));
+
+        let mut phase_unit = missile_unit(
+            "scathe-missile-phase",
+            phase_color,
+            2.5,
+            60.0 * 9.77,
+            500.0,
+            0.2,
+            50.0,
+            18,
+            3.1,
+            10.0,
+        );
+        phase_unit.parts.push(UnitPartSpec {
+            kind: UnitPartKind::Shape,
+            progress: "constant(1)".into(),
+            color: "accent".into(),
+            sides: 6,
+            radius: 3.0,
+            rotate_speed: 3.0,
+            hollow: true,
+            layer: "effect".into(),
+            y: 1.8,
+        });
+        phase_unit.weapons.push(death_weapon(phase_explosion));
+        phase_unit
+            .abilities
+            .push(move_effect_ability("missileTrailSmoke", "gray-redLight-0.4", 15.0));
+        phase_unit
+            .abilities
+            .push(force_field_ability(120.0, 0.0, 3000.0, 999999999.0));
+
+        let mut phase = make_carrier(phase_color, 5.0, 0.8);
+        phase.spawn_unit = Some(Box::new(phase_unit));
+        push_turret_ammo(&mut turret.ammo, items, "phase-fabric", phase);
+
+        let surge_color = "f7e97e";
+        let mut split_explosion = explosion_bullet(180.0, 35.0);
+        split_explosion.lightning = 4;
+        split_explosion.lightning_damage = 25.0;
+        split_explosion.lightning_length = 6;
+        split_explosion.hit_color = surge_color.into();
+        split_explosion.shoot_effect =
+            "MultiEffect(massiveExplosion, scatheExplosionSmall, scatheLightSmall, WaveEffect(lifetime=10,strokeFrom=4,sizeTo=100))"
+                .into();
+        split_explosion.collides_air = false;
+        split_explosion.building_damage_multiplier = 0.1;
+
+        let mut split_unit = missile_unit(
+            "scathe-missile-surge-split",
+            surge_color,
+            4.8,
+            60.0 * 3.7,
+            50.0,
+            1.4,
+            0.0,
+            12,
+            2.2,
+            8.0,
+        );
+        split_unit.hit_size = 0.0;
+        split_unit.weapons.push(death_weapon(split_explosion));
+        split_unit
+            .abilities
+            .push(move_effect_ability("missileTrailSmokeSmall", "gray-f7e97e-0.4", 5.0));
+
+        let mut split_carrier = make_carrier(surge_color, 1.0, 1.0);
+        split_carrier.spawn_unit = Some(Box::new(split_unit));
+
+        let mut surge_explosion = explosion_bullet(1800.0, 40.0);
+        surge_explosion.ammo_multiplier = 1.0;
+        surge_explosion.reload_multiplier = 0.9;
+        surge_explosion.lightning = 10;
+        surge_explosion.lightning_damage = 45.0;
+        surge_explosion.lightning_length = 12;
+        surge_explosion.hit_color = surge_color.into();
+        surge_explosion.shoot_effect =
+            "MultiEffect(massiveExplosion, scatheExplosionSmall)".into();
+        surge_explosion.collides_air = false;
+        surge_explosion.building_damage_multiplier = 0.1;
+        surge_explosion.frag_life_min = 0.1;
+        surge_explosion.frag_bullets = 5;
+        surge_explosion.frag_random_spread = 0.0;
+        surge_explosion.frag_spread = 20.0;
+        surge_explosion.frag_bullet = Some(Box::new(split_carrier));
+
+        let mut surge_unit = missile_unit(
+            "scathe-missile-surge",
+            surge_color,
+            4.4,
+            60.0 * 1.4,
+            300.0,
+            0.25,
+            30.0,
+            18,
+            3.1,
+            10.0,
+        );
+        let mut surge_weapon = death_weapon(surge_explosion);
+        surge_weapon.rotate = true;
+        surge_weapon.rotation_limit = 0.0;
+        surge_weapon.rotate_speed = 0.0;
+        surge_unit.weapons.push(surge_weapon);
+        surge_unit
+            .abilities
+            .push(move_effect_ability("missileTrailSmoke", "gray-f7e97e-0.4", 7.0));
+
+        let mut surge = make_carrier(surge_color, 1.0, 0.9);
+        surge.spawn_unit = Some(Box::new(surge_unit));
+        push_turret_ammo(&mut turret.ammo, items, "surge-alloy", surge);
+
+        turret.drawer = "DrawTurret(reinforced-, RegionPart(-blade warmup mirror child=-side moveRot=-22 moveY=-5 heatColor=red), RegionPart(-mid recoil under moveY=-5), RegionPart(-missile reload under outline=false PartMove(warmup.inv,0,-4,0)))".into();
+        turret.predict_target = false;
+        turret.recoil = 0.5;
+        turret.fog_radius_multiplier = 0.4;
+        turret.coolant_multiplier = 15.0;
+        turret.shoot_sound = "shootScathe".into();
+        turret.min_warmup = 0.94;
+        turret.new_target_interval = 40.0;
+        turret.unit_sort = "strongest".into();
+        turret.shoot_warmup_speed = 0.03;
+        turret.target_air = false;
+        turret.target_under_blocks = false;
+        turret.shake = 6.0;
+        turret.ammo_per_shot = 15;
+        turret.max_ammo = 45;
+        turret.shoot_y = -1.0;
+        turret.outline_color = "darkOutline".into();
+        turret.base.size = 4;
+        turret.base.env_enabled |= Env::SPACE;
+        turret.reload = 600.0;
+        turret.range = 1350.0;
+        turret.shoot_cone = 1.0;
+        turret.scaled_health = 220.0;
+        turret.rotate_speed = 0.9;
+        turret.consume_coolant(15.0 / 60.0);
+        turret.limit_range(9.0);
     });
 }
 
@@ -13292,6 +13723,206 @@ mod tests {
         assert_eq!(shoot.shoot_effect, "none");
         assert_eq!(shoot.smoke_effect, "none");
         assert_eq!(shoot.despawn_effect, "none");
+    }
+
+    #[test]
+    fn scathe_item_turret_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let scathe = registry.get_turret_by_name("scathe").unwrap();
+        assert_eq!(scathe.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(
+            scathe.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 450
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 400
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 500
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 200
+                }
+            ]
+        );
+        assert!(!scathe.predict_target);
+        assert!(!scathe.target_air);
+        assert!(!scathe.target_under_blocks);
+        assert_eq!(scathe.base.size, 4);
+        assert_eq!(scathe.scaled_health, 220.0);
+        assert_eq!(scathe.base.health, 4 * 4 * 220);
+        assert_eq!(scathe.recoil, 0.5);
+        assert_eq!(scathe.fog_radius_multiplier, 0.4);
+        assert_eq!(scathe.coolant_multiplier, 15.0);
+        assert_eq!(scathe.shoot_sound, "shootScathe");
+        assert_eq!(scathe.min_warmup, 0.94);
+        assert_eq!(scathe.new_target_interval, 40.0);
+        assert_eq!(scathe.unit_sort, "strongest");
+        assert_eq!(scathe.shoot_warmup_speed, 0.03);
+        assert_eq!(scathe.shake, 6.0);
+        assert_eq!(scathe.ammo_per_shot, 15);
+        assert_eq!(scathe.max_ammo, 45);
+        assert_eq!(scathe.shoot_y, -1.0);
+        assert_eq!(scathe.outline_color, "darkOutline");
+        assert_eq!(scathe.reload, 600.0);
+        assert_eq!(scathe.range, 1350.0);
+        assert_eq!(scathe.shoot_cone, 1.0);
+        assert_eq!(scathe.rotate_speed, 0.9);
+        assert!(scathe.consume_coolant);
+        assert_close(scathe.coolant_amount, 15.0 / 60.0);
+        assert_eq!(scathe.fog_radius, (1350.0_f32 / 8.0 * 0.4).round());
+        assert_eq!(scathe.place_overlap_range, 1350.0 + 8.0 * 7.0);
+        assert!(scathe.drawer.contains("reinforced-"));
+        assert!(scathe.drawer.contains("blade"));
+        assert!(scathe.drawer.contains("mid"));
+        assert!(scathe.drawer.contains("missile"));
+
+        let carbide = ammo_for(scathe, item_id("carbide"));
+        assert_eq!(carbide.bullet.kind, BulletKind::Generic);
+        assert_eq!(carbide.bullet.speed, 0.0);
+        assert_eq!(carbide.bullet.damage, 0.0);
+        assert_eq!(carbide.bullet.shoot_effect, "shootBig");
+        assert_eq!(carbide.bullet.smoke_effect, "shootSmokeMissileColor");
+        assert_eq!(carbide.bullet.hit_color, "redLight");
+        assert_eq!(carbide.bullet.ammo_multiplier, 1.0);
+        let carbide_unit = carbide.bullet.spawn_unit.as_ref().unwrap();
+        assert_eq!(carbide_unit.name, "scathe-missile");
+        assert_eq!(carbide_unit.speed, 4.6);
+        assert_eq!(carbide_unit.lifetime, 330.0);
+        assert_eq!(carbide_unit.health, 240.0);
+        assert_eq!(carbide_unit.rotate_speed, 0.25);
+        assert_eq!(carbide_unit.missile_accel_time, 50.0);
+        assert_eq!(carbide_unit.trail_length, 18);
+        assert_eq!(carbide_unit.engine_color, "redLight");
+        assert_eq!(carbide_unit.weapons.len(), 1);
+        assert_eq!(carbide_unit.abilities.len(), 1);
+        assert_eq!(carbide_unit.abilities[0].kind, AbilityKind::MoveEffect);
+        assert_eq!(carbide_unit.abilities[0].interval, 7.0);
+        let carbide_explosion = carbide_unit.weapons[0].bullet.as_ref().unwrap();
+        assert_eq!(carbide_explosion.kind, BulletKind::Explosion);
+        assert_eq!(carbide_explosion.splash_damage, 1000.0);
+        assert_eq!(carbide_explosion.splash_damage_radius, 65.0);
+        assert_eq!(carbide_explosion.hit_color, "redLight");
+        assert!(!carbide_explosion.collides_air);
+        assert_close(carbide_explosion.building_damage_multiplier, 0.1);
+        assert_eq!(carbide_explosion.frag_life_min, 0.1);
+        assert_eq!(carbide_explosion.frag_bullets, 7);
+        let carbide_frag = carbide_explosion.frag_bullet.as_ref().unwrap();
+        assert_eq!(carbide_frag.kind, BulletKind::Artillery);
+        assert_eq!(carbide_frag.speed, 3.4);
+        assert_eq!(carbide_frag.damage, 32.0);
+        assert_close(carbide_frag.building_damage_multiplier, 0.1);
+        assert_eq!(carbide_frag.drag, 0.02);
+        assert_eq!(carbide_frag.lifetime, 23.0);
+        assert_eq!(carbide_frag.width, 18.0);
+        assert_eq!(carbide_frag.height, 18.0);
+        assert_eq!(carbide_frag.splash_damage_radius, 40.0);
+        assert_eq!(carbide_frag.splash_damage, 100.0);
+        assert_eq!(carbide_frag.light_radius, 30.0);
+        assert_eq!(carbide_frag.light_color, "redLight");
+        assert_eq!(carbide_frag.light_opacity, 0.5);
+
+        let phase = ammo_for(scathe, item_id("phase-fabric"));
+        assert_eq!(phase.bullet.hit_color, "ffd37f");
+        assert_eq!(phase.bullet.ammo_multiplier, 5.0);
+        assert_eq!(phase.bullet.reload_multiplier, 0.8);
+        let phase_unit = phase.bullet.spawn_unit.as_ref().unwrap();
+        assert_eq!(phase_unit.name, "scathe-missile-phase");
+        assert_eq!(phase_unit.speed, 2.5);
+        assert_close(phase_unit.lifetime, 586.2);
+        assert_eq!(phase_unit.health, 500.0);
+        assert_eq!(phase_unit.rotate_speed, 0.2);
+        assert_eq!(phase_unit.parts.len(), 1);
+        let phase_part = &phase_unit.parts[0];
+        assert_eq!(phase_part.kind, UnitPartKind::Shape);
+        assert_eq!(phase_part.color, "accent");
+        assert_eq!(phase_part.sides, 6);
+        assert_eq!(phase_part.radius, 3.0);
+        assert_eq!(phase_part.rotate_speed, 3.0);
+        assert!(phase_part.hollow);
+        assert_eq!(phase_part.layer, "effect");
+        assert_eq!(phase_part.y, 1.8);
+        assert!(phase_unit
+            .abilities
+            .iter()
+            .any(|ability| ability.kind == AbilityKind::MoveEffect && ability.interval == 15.0));
+        assert!(phase_unit.abilities.iter().any(|ability| {
+            ability.kind == AbilityKind::ForceField
+                && ability.radius == 120.0
+                && ability.regen == 0.0
+                && ability.max == 3000.0
+                && ability.cooldown == 999999999.0
+        }));
+        let phase_explosion = phase_unit.weapons[0].bullet.as_ref().unwrap();
+        assert_eq!(phase_explosion.splash_damage, 320.0);
+        assert_eq!(phase_explosion.splash_damage_radius, 120.0);
+        assert_eq!(phase_explosion.reload_multiplier, 0.8);
+        assert_eq!(phase_explosion.ammo_multiplier, 5.0);
+        let phase_frag = phase_explosion.frag_bullet.as_ref().unwrap();
+        assert_eq!(phase_frag.splash_damage_radius, 56.0);
+        assert_eq!(phase_frag.splash_damage, 120.0);
+        assert_close(phase_frag.building_damage_multiplier, 0.2);
+
+        let surge = ammo_for(scathe, item_id("surge-alloy"));
+        assert_eq!(surge.bullet.hit_color, "f7e97e");
+        assert_eq!(surge.bullet.ammo_multiplier, 1.0);
+        assert_eq!(surge.bullet.reload_multiplier, 0.9);
+        let surge_unit = surge.bullet.spawn_unit.as_ref().unwrap();
+        assert_eq!(surge_unit.name, "scathe-missile-surge");
+        assert_eq!(surge_unit.speed, 4.4);
+        assert_eq!(surge_unit.lifetime, 84.0);
+        assert_eq!(surge_unit.health, 300.0);
+        assert_eq!(surge_unit.missile_accel_time, 30.0);
+        let surge_weapon = &surge_unit.weapons[0];
+        assert!(surge_weapon.rotate);
+        assert_eq!(surge_weapon.rotation_limit, 0.0);
+        assert_eq!(surge_weapon.rotate_speed, 0.0);
+        let surge_explosion = surge_weapon.bullet.as_ref().unwrap();
+        assert_eq!(surge_explosion.splash_damage, 1800.0);
+        assert_eq!(surge_explosion.splash_damage_radius, 40.0);
+        assert_eq!(surge_explosion.lightning, 10);
+        assert_eq!(surge_explosion.lightning_damage, 45.0);
+        assert_eq!(surge_explosion.lightning_length, 12);
+        assert_eq!(surge_explosion.frag_bullets, 5);
+        assert_eq!(surge_explosion.frag_random_spread, 0.0);
+        assert_eq!(surge_explosion.frag_spread, 20.0);
+        let split_carrier = surge_explosion.frag_bullet.as_ref().unwrap();
+        assert_eq!(split_carrier.kind, BulletKind::Generic);
+        let split_unit = split_carrier.spawn_unit.as_ref().unwrap();
+        assert_eq!(split_unit.name, "scathe-missile-surge-split");
+        assert_eq!(split_unit.speed, 4.8);
+        assert_eq!(split_unit.lifetime, 222.0);
+        assert_eq!(split_unit.health, 50.0);
+        assert_eq!(split_unit.engine_size, 2.2);
+        assert_eq!(split_unit.engine_offset, 8.0);
+        assert_eq!(split_unit.trail_length, 12);
+        let split_explosion = split_unit.weapons[0].bullet.as_ref().unwrap();
+        assert_eq!(split_explosion.splash_damage, 180.0);
+        assert_eq!(split_explosion.splash_damage_radius, 35.0);
+        assert_eq!(split_explosion.lightning, 4);
+        assert_eq!(split_explosion.lightning_damage, 25.0);
+        assert_eq!(split_explosion.lightning_length, 6);
     }
 
     #[test]
