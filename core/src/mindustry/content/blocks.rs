@@ -495,6 +495,7 @@ pub enum BulletKind {
     Liquid,
     Laser,
     Lightning,
+    Rail,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -528,6 +529,12 @@ pub struct BulletSpec {
     pub colors: Vec<String>,
     pub homing_power: f32,
     pub homing_range: f32,
+    pub point_effect: String,
+    pub pierce_effect: String,
+    pub line_effect: String,
+    pub end_effect: String,
+    pub point_effect_space: f32,
+    pub hit_shake: f32,
     pub trail_length: i32,
     pub trail_width: f32,
     pub splash_damage: f32,
@@ -549,6 +556,10 @@ pub struct BulletSpec {
     pub life_scale_rand_max: f32,
     pub knockback: f32,
     pub pierce: bool,
+    pub pierce_building: bool,
+    pub pierce_damage_factor: f32,
+    pub reflectable: bool,
+    pub delay_frags: bool,
     pub pierce_cap: i32,
     pub hittable: bool,
     pub keep_velocity: bool,
@@ -612,6 +623,12 @@ impl BulletSpec {
             colors: Vec::new(),
             homing_power: 0.0,
             homing_range: 0.0,
+            point_effect: "none".into(),
+            pierce_effect: "hitBulletSmall".into(),
+            line_effect: "none".into(),
+            end_effect: "none".into(),
+            point_effect_space: 20.0,
+            hit_shake: 0.0,
             trail_length: 0,
             trail_width: 0.0,
             splash_damage: 0.0,
@@ -633,6 +650,10 @@ impl BulletSpec {
             life_scale_rand_max: 1.0,
             knockback: 0.0,
             pierce: false,
+            pierce_building: false,
+            pierce_damage_factor: 0.0,
+            reflectable: true,
+            delay_frags: false,
             pierce_cap: -1,
             hittable: true,
             keep_velocity: true,
@@ -748,6 +769,7 @@ pub struct TurretBlockData {
     pub target_under_blocks: bool,
     pub always_shooting: bool,
     pub predict_target: bool,
+    pub unit_sort: String,
     pub heat_color: String,
     pub shoot_effect: String,
     pub smoke_effect: String,
@@ -863,6 +885,7 @@ impl TurretBlockData {
             target_under_blocks: true,
             always_shooting: false,
             predict_target: true,
+            unit_sort: "closest".into(),
             heat_color: "turretHeat".into(),
             shoot_effect: String::new(),
             smoke_effect: String::new(),
@@ -3862,6 +3885,22 @@ fn artillery_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn rail_bullet() -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Rail, 0.0, 0.0);
+    bullet.pierce_building = true;
+    bullet.pierce = true;
+    bullet.reflectable = false;
+    bullet.hit_effect = "none".into();
+    bullet.despawn_effect = "none".into();
+    bullet.collides = false;
+    bullet.keep_velocity = false;
+    bullet.lifetime = 1.0;
+    bullet.delay_frags = true;
+    bullet.length = 100.0;
+    bullet.point_effect_space = 20.0;
+    bullet
+}
+
 fn shrapnel_bullet() -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, 1.0);
     bullet.length = 100.0;
@@ -5468,6 +5507,59 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.scaled_health = 145.0;
         turret.deposit_cooldown = 2.0;
         turret.limit_range(9.0);
+    });
+
+    registry.register_turret_block("foreshadow", TurretBlockKind::ItemTurret, |turret| {
+        let brange = 500.0;
+        turret.range = brange;
+
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("copper", 1000),
+                ("metaglass", 600),
+                ("surge-alloy", 300),
+                ("plastanium", 200),
+                ("silicon", 600),
+            ],
+        );
+
+        let mut surge = rail_bullet();
+        surge.shoot_effect = "instShoot".into();
+        surge.hit_effect = "instHit".into();
+        surge.pierce_effect = "railHit".into();
+        surge.smoke_effect = "smokeCloud".into();
+        surge.point_effect = "instTrail".into();
+        surge.despawn_effect = "instBomb".into();
+        surge.point_effect_space = 20.0;
+        surge.damage = 1350.0;
+        surge.building_damage_multiplier = 0.2;
+        surge.pierce_damage_factor = 1.0;
+        surge.length = brange;
+        surge.hit_shake = 6.0;
+        surge.ammo_multiplier = 1.0;
+        push_turret_ammo(&mut turret.ammo, items, "surge-alloy", surge);
+
+        turret.max_ammo = 40;
+        turret.ammo_per_shot = 5;
+        turret.rotate_speed = 2.0;
+        turret.reload = 200.0;
+        turret.ammo_use_effect = "casing3Double".into();
+        turret.recoil = 5.0;
+        turret.cooldown_time = turret.reload;
+        turret.shake = 4.0;
+        turret.base.size = 4;
+        turret.shoot_cone = 2.0;
+        turret.shoot_sound = "shootForeshadow".into();
+        turret.unit_sort = "strongest".into();
+        turret.base.env_enabled |= Env::SPACE;
+        turret.coolant_multiplier = 0.4;
+        turret.liquid_capacity = 60.0;
+        turret.scaled_health = 150.0;
+        turret.consume_coolant(1.0);
+        turret.deposit_cooldown = 2.0;
+        turret.consume_power = 10.0;
     });
 }
 
@@ -10778,6 +10870,99 @@ mod tests {
         assert_eq!(surge.back_color, "surgeAmmoBack");
         assert_eq!(surge.despawn_effect, "hitBulletColor");
         assert_close(surge.lifetime, (200.0 + 9.0 + 10.0) / 4.5);
+    }
+
+    #[test]
+    fn foreshadow_rail_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let foreshadow = registry.get_turret_by_name("foreshadow").unwrap();
+        assert_eq!(foreshadow.kind, TurretBlockKind::ItemTurret);
+        assert!(foreshadow.base.has_items);
+        assert_eq!(foreshadow.range, 500.0);
+        assert_eq!(foreshadow.max_ammo, 40);
+        assert_eq!(foreshadow.ammo_per_shot, 5);
+        assert_eq!(foreshadow.rotate_speed, 2.0);
+        assert_eq!(foreshadow.reload, 200.0);
+        assert_eq!(foreshadow.ammo_use_effect, "casing3Double");
+        assert_eq!(foreshadow.recoil, 5.0);
+        assert_eq!(foreshadow.cooldown_time, 200.0);
+        assert_eq!(foreshadow.shake, 4.0);
+        assert_eq!(foreshadow.base.size, 4);
+        assert_eq!(foreshadow.shoot_cone, 2.0);
+        assert_eq!(foreshadow.shoot_sound, "shootForeshadow");
+        assert_eq!(foreshadow.unit_sort, "strongest");
+        assert_ne!(foreshadow.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(foreshadow.coolant_multiplier, 0.4);
+        assert_eq!(foreshadow.liquid_capacity, 60.0);
+        assert_eq!(foreshadow.base.liquid_capacity, 60.0);
+        assert_eq!(foreshadow.scaled_health, 150.0);
+        assert_eq!(foreshadow.base.health, 4 * 4 * 150);
+        assert!(foreshadow.consume_coolant);
+        assert_eq!(foreshadow.coolant_amount, 1.0);
+        assert_eq!(foreshadow.deposit_cooldown, 2.0);
+        assert_eq!(foreshadow.consume_power, 10.0);
+        assert_eq!(foreshadow.fog_radius, 63.0);
+        assert_eq!(foreshadow.place_overlap_range, 500.0 + 8.0 * 7.0);
+        assert_eq!(
+            foreshadow.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 1000
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 600
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 600
+                }
+            ]
+        );
+
+        let rail = &ammo_for(foreshadow, item_id("surge-alloy")).bullet;
+        assert_eq!(rail.kind, BulletKind::Rail);
+        assert_eq!(rail.speed, 0.0);
+        assert_eq!(rail.damage, 1350.0);
+        assert_eq!(rail.shoot_effect, "instShoot");
+        assert_eq!(rail.hit_effect, "instHit");
+        assert_eq!(rail.pierce_effect, "railHit");
+        assert_eq!(rail.smoke_effect, "smokeCloud");
+        assert_eq!(rail.point_effect, "instTrail");
+        assert_eq!(rail.despawn_effect, "instBomb");
+        assert_eq!(rail.point_effect_space, 20.0);
+        assert_close(rail.building_damage_multiplier, 0.2);
+        assert_eq!(rail.pierce_damage_factor, 1.0);
+        assert_eq!(rail.length, 500.0);
+        assert_eq!(rail.hit_shake, 6.0);
+        assert_eq!(rail.ammo_multiplier, 1.0);
+        assert!(rail.pierce);
+        assert!(rail.pierce_building);
+        assert!(!rail.reflectable);
+        assert!(!rail.collides);
+        assert!(!rail.keep_velocity);
+        assert_eq!(rail.lifetime, 1.0);
+        assert!(rail.delay_frags);
     }
 
     #[test]
