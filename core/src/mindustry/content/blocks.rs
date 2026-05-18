@@ -480,6 +480,7 @@ pub enum TurretBlockKind {
     ItemTurret,
     LiquidTurret,
     PowerTurret,
+    LaserTurret,
     TractorBeamTurret,
     PointDefenseTurret,
 }
@@ -496,6 +497,7 @@ pub enum BulletKind {
     Laser,
     Lightning,
     Rail,
+    ContinuousLaser,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -535,6 +537,14 @@ pub struct BulletSpec {
     pub end_effect: String,
     pub point_effect_space: f32,
     pub hit_shake: f32,
+    pub shake: f32,
+    pub damage_interval: f32,
+    pub continuous: bool,
+    pub timescale_damage: bool,
+    pub impact: bool,
+    pub incend_chance: f32,
+    pub incend_spread: f32,
+    pub incend_amount: i32,
     pub trail_length: i32,
     pub trail_width: f32,
     pub splash_damage: f32,
@@ -559,6 +569,7 @@ pub struct BulletSpec {
     pub pierce_building: bool,
     pub pierce_damage_factor: f32,
     pub reflectable: bool,
+    pub remove_after_pierce: bool,
     pub delay_frags: bool,
     pub pierce_cap: i32,
     pub hittable: bool,
@@ -629,6 +640,14 @@ impl BulletSpec {
             end_effect: "none".into(),
             point_effect_space: 20.0,
             hit_shake: 0.0,
+            shake: 0.0,
+            damage_interval: 5.0,
+            continuous: false,
+            timescale_damage: false,
+            impact: false,
+            incend_chance: 0.0,
+            incend_spread: 0.0,
+            incend_amount: 0,
             trail_length: 0,
             trail_width: 0.0,
             splash_damage: 0.0,
@@ -653,6 +672,7 @@ impl BulletSpec {
             pierce_building: false,
             pierce_damage_factor: 0.0,
             reflectable: true,
+            remove_after_pierce: true,
             delay_frags: false,
             pierce_cap: -1,
             hittable: true,
@@ -752,6 +772,8 @@ pub struct TurretBlockData {
     pub move_while_charging: bool,
     pub reload_while_charging: bool,
     pub warmup_maintain_time: f32,
+    pub firing_move_fract: f32,
+    pub shoot_duration: f32,
     pub shoot_pattern: String,
     pub shoot_shots: i32,
     pub shoot_first_shot_delay: f32,
@@ -868,6 +890,8 @@ impl TurretBlockData {
             move_while_charging: true,
             reload_while_charging: true,
             warmup_maintain_time: 0.0,
+            firing_move_fract: 0.25,
+            shoot_duration: 100.0,
             shoot_pattern: "ShootPattern".into(),
             shoot_shots: 1,
             shoot_first_shot_delay: 0.0,
@@ -962,6 +986,10 @@ impl TurretBlockData {
             }
             TurretBlockKind::PowerTurret => {
                 self.base.has_power = true;
+            }
+            TurretBlockKind::LaserTurret => {
+                self.base.has_power = true;
+                self.coolant_multiplier = 1.0;
             }
             TurretBlockKind::TractorBeamTurret => {
                 self.base.has_power = true;
@@ -3913,6 +3941,38 @@ fn rail_bullet() -> BulletSpec {
     bullet
 }
 
+fn continuous_laser_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
+    bullet.length = 220.0;
+    bullet.shake = 1.0;
+    bullet.damage_interval = 5.0;
+    bullet.hit_large = true;
+    bullet.continuous = true;
+    bullet.timescale_damage = false;
+    bullet.remove_after_pierce = false;
+    bullet.pierce_cap = -1;
+    bullet.speed = 0.0;
+    bullet.despawn_effect = "none".into();
+    bullet.shoot_effect = "none".into();
+    bullet.lifetime = 16.0;
+    bullet.impact = true;
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet.hit_effect = "hitBeam".into();
+    bullet.hit_size = 4.0;
+    bullet.draw_size = 420.0;
+    bullet.hit_color = "ff9c5a".into();
+    bullet.incend_amount = 1;
+    bullet.incend_spread = 5.0;
+    bullet.incend_chance = 0.4;
+    bullet.light_color = "orange".into();
+    bullet.width = 9.0;
+    bullet
+}
+
 fn shrapnel_bullet() -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, 1.0);
     bullet.length = 100.0;
@@ -5653,6 +5713,52 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.consume_coolant(1.0);
         turret.deposit_cooldown = 2.0;
         turret.limit_range(9.0);
+    });
+
+    registry.register_turret_block("meltdown", TurretBlockKind::LaserTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("copper", 1200),
+                ("lead", 350),
+                ("graphite", 300),
+                ("surge-alloy", 325),
+                ("silicon", 325),
+            ],
+        );
+
+        turret.shoot_effect = "shootBigSmoke2".into();
+        turret.shoot_cone = 40.0;
+        turret.recoil = 4.0;
+        turret.base.size = 4;
+        turret.shake = 2.0;
+        turret.range = 195.0;
+        turret.reload = 90.0;
+        turret.firing_move_fract = 0.5;
+        turret.shoot_duration = 230.0;
+        turret.shoot_sound = "shootMeltdown".into();
+        turret.loop_sound = "beamMeltdown".into();
+        turret.loop_sound_volume = 2.0;
+        turret.base.env_enabled |= Env::SPACE;
+
+        let mut shoot_type = continuous_laser_bullet(78.0);
+        shoot_type.length = 200.0;
+        shoot_type.hit_effect = "hitMeltdown".into();
+        shoot_type.hit_color = "meltdownHit".into();
+        shoot_type.status = "melting".into();
+        shoot_type.draw_size = 420.0;
+        shoot_type.timescale_damage = true;
+        shoot_type.incend_chance = 0.4;
+        shoot_type.incend_spread = 5.0;
+        shoot_type.incend_amount = 1;
+        shoot_type.ammo_multiplier = 1.0;
+        turret.shoot_type = Some(Box::new(shoot_type));
+
+        turret.scaled_health = 200.0;
+        turret.liquid_capacity = 60.0;
+        turret.consume_coolant(0.5);
+        turret.consume_power = 17.0;
     });
 }
 
@@ -11181,6 +11287,101 @@ mod tests {
         assert_eq!(pyratite.splash_damage, 20.0);
         assert_eq!(pyratite.splash_damage_radius, 25.0);
         assert_close(pyratite.lifetime, (260.0 + 9.0 + 10.0) / 7.0);
+    }
+
+    #[test]
+    fn meltdown_laser_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let meltdown = registry.get_turret_by_name("meltdown").unwrap();
+        assert_eq!(meltdown.kind, TurretBlockKind::LaserTurret);
+        assert!(meltdown.base.has_power);
+        assert_eq!(meltdown.shoot_effect, "shootBigSmoke2");
+        assert_eq!(meltdown.shoot_cone, 40.0);
+        assert_eq!(meltdown.recoil, 4.0);
+        assert_eq!(meltdown.base.size, 4);
+        assert_eq!(meltdown.shake, 2.0);
+        assert_eq!(meltdown.range, 195.0);
+        assert_eq!(meltdown.reload, 90.0);
+        assert_eq!(meltdown.firing_move_fract, 0.5);
+        assert_eq!(meltdown.shoot_duration, 230.0);
+        assert_eq!(meltdown.shoot_sound, "shootMeltdown");
+        assert_eq!(meltdown.loop_sound, "beamMeltdown");
+        assert_eq!(meltdown.loop_sound_volume, 2.0);
+        assert_ne!(meltdown.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(meltdown.scaled_health, 200.0);
+        assert_eq!(meltdown.base.health, 4 * 4 * 200);
+        assert_eq!(meltdown.liquid_capacity, 60.0);
+        assert_eq!(meltdown.base.liquid_capacity, 60.0);
+        assert!(meltdown.consume_coolant);
+        assert_eq!(meltdown.coolant_amount, 0.5);
+        assert_eq!(meltdown.coolant_multiplier, 1.0);
+        assert_eq!(meltdown.consume_power, 17.0);
+        assert_eq!(meltdown.fog_radius, 24.0);
+        assert_eq!(meltdown.place_overlap_range, 195.0 + 8.0 * 7.0);
+        assert_eq!(
+            meltdown.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 1200
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 350
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 325
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 325
+                }
+            ]
+        );
+
+        let laser = meltdown.shoot_type.as_ref().unwrap();
+        assert_eq!(laser.kind, BulletKind::ContinuousLaser);
+        assert_eq!(laser.speed, 0.0);
+        assert_eq!(laser.damage, 78.0);
+        assert_eq!(laser.length, 200.0);
+        assert_eq!(laser.hit_effect, "hitMeltdown");
+        assert_eq!(laser.hit_color, "meltdownHit");
+        assert_eq!(laser.status, "melting");
+        assert_eq!(laser.draw_size, 420.0);
+        assert!(laser.timescale_damage);
+        assert_eq!(laser.incend_chance, 0.4);
+        assert_eq!(laser.incend_spread, 5.0);
+        assert_eq!(laser.incend_amount, 1);
+        assert_eq!(laser.ammo_multiplier, 1.0);
+        assert_eq!(laser.shake, 1.0);
+        assert_eq!(laser.damage_interval, 5.0);
+        assert!(laser.hit_large);
+        assert!(laser.continuous);
+        assert!(!laser.remove_after_pierce);
+        assert_eq!(laser.despawn_effect, "none");
+        assert_eq!(laser.shoot_effect, "none");
+        assert_eq!(laser.lifetime, 16.0);
+        assert!(laser.impact);
+        assert!(!laser.keep_velocity);
+        assert!(!laser.collides);
+        assert!(laser.pierce);
+        assert!(!laser.hittable);
+        assert!(!laser.absorbable);
+        assert_eq!(laser.hit_size, 4.0);
+        assert_close(laser.width, 9.0);
     }
 
     #[test]
