@@ -481,6 +481,7 @@ pub enum TurretBlockKind {
     LiquidTurret,
     PowerTurret,
     LaserTurret,
+    ContinuousTurret,
     ContinuousLiquidTurret,
     TractorBeamTurret,
     PointDefenseTurret,
@@ -500,6 +501,7 @@ pub enum BulletKind {
     Rail,
     ContinuousLaser,
     ContinuousFlame,
+    PointLaser,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -516,6 +518,7 @@ pub struct BulletSpec {
     pub layer: String,
     pub sprite: String,
     pub back_sprite: String,
+    pub color: String,
     pub ammo_multiplier: f32,
     pub reload_multiplier: f32,
     pub range_change: f32,
@@ -543,10 +546,15 @@ pub struct BulletSpec {
     pub pierce_effect: String,
     pub line_effect: String,
     pub end_effect: String,
+    pub beam_effect: String,
+    pub beam_effect_interval: f32,
+    pub beam_effect_size: f32,
     pub point_effect_space: f32,
     pub hit_shake: f32,
     pub shake: f32,
     pub damage_interval: f32,
+    pub osc_scl: f32,
+    pub osc_mag: f32,
     pub continuous: bool,
     pub timescale_damage: bool,
     pub impact: bool,
@@ -653,6 +661,7 @@ impl BulletSpec {
             layer: String::new(),
             sprite: String::new(),
             back_sprite: String::new(),
+            color: "white".into(),
             ammo_multiplier: 1.0,
             reload_multiplier: 1.0,
             range_change: 0.0,
@@ -680,10 +689,15 @@ impl BulletSpec {
             pierce_effect: "hitBulletSmall".into(),
             line_effect: "none".into(),
             end_effect: "none".into(),
+            beam_effect: "none".into(),
+            beam_effect_interval: 0.0,
+            beam_effect_size: 0.0,
             point_effect_space: 20.0,
             hit_shake: 0.0,
             shake: 0.0,
             damage_interval: 5.0,
+            osc_scl: 0.0,
+            osc_mag: 0.0,
             continuous: false,
             timescale_damage: false,
             impact: false,
@@ -814,11 +828,13 @@ pub struct TurretBlockData {
     pub consume_coolant: bool,
     pub cool_effect: String,
     pub deposit_cooldown: f32,
+    pub scale_damage_efficiency: bool,
     pub range: f32,
     pub fog_radius: f32,
     pub place_overlap_margin: f32,
     pub place_overlap_range: f32,
     pub rotate_speed: f32,
+    pub aim_change_speed: f32,
     pub fog_radius_multiplier: f32,
     pub disable_overlap_check: bool,
     pub activation_time: f32,
@@ -937,11 +953,13 @@ impl TurretBlockData {
             consume_coolant: false,
             cool_effect: "fuelburn".into(),
             deposit_cooldown: -1.0,
+            scale_damage_efficiency: false,
             range: 80.0,
             fog_radius: 0.0,
             place_overlap_margin: 8.0 * 7.0,
             place_overlap_range: 0.0,
             rotate_speed: 5.0,
+            aim_change_speed: f32::INFINITY,
             fog_radius_multiplier: 1.0,
             disable_overlap_check: false,
             activation_time: 0.0,
@@ -1070,6 +1088,11 @@ impl TurretBlockData {
             TurretBlockKind::LaserTurret => {
                 self.base.has_power = true;
                 self.coolant_multiplier = 1.0;
+            }
+            TurretBlockKind::ContinuousTurret => {
+                self.coolant_multiplier = 1.0;
+                self.display_ammo_multiplier = false;
+                self.base.env_enabled |= Env::SPACE;
             }
             TurretBlockKind::ContinuousLiquidTurret => {
                 self.base.has_liquids = true;
@@ -4108,6 +4131,35 @@ fn continuous_flame_bullet(damage: f32) -> BulletSpec {
     bullet
 }
 
+fn point_laser_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::PointLaser, 0.0, damage);
+    bullet.sprite = "point-laser".into();
+    bullet.color = "white".into();
+    bullet.beam_effect = "colorTrail".into();
+    bullet.beam_effect_interval = 3.0;
+    bullet.beam_effect_size = 3.5;
+    bullet.osc_scl = 2.0;
+    bullet.osc_mag = 0.3;
+    bullet.damage_interval = 5.0;
+    bullet.shake = 0.0;
+    bullet.remove_after_pierce = false;
+    bullet.despawn_effect = "none".into();
+    bullet.lifetime = 20.0;
+    bullet.impact = true;
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet.optimal_life_fract = 0.5;
+    bullet.shoot_effect = "none".into();
+    bullet.smoke_effect = "none".into();
+    bullet.draw_size = 1000.0;
+    bullet.hit_effect = "hitBulletSmall".into();
+    bullet.ammo_multiplier = 2.0;
+    bullet
+}
+
 fn shrapnel_bullet() -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, 1.0);
     bullet.length = 100.0;
@@ -6577,6 +6629,45 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.research_cost_multiplier = 0.04;
         turret.build_cost_multiplier = 1.5;
         turret.limit_range(-55.0);
+    });
+
+    registry.register_turret_block("lustre", TurretBlockKind::ContinuousTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("silicon", 250),
+                ("graphite", 200),
+                ("oxide", 50),
+                ("carbide", 90),
+            ],
+        );
+
+        let mut shoot_type = point_laser_bullet(210.0);
+        shoot_type.building_damage_multiplier = 0.3;
+        shoot_type.hit_color = "fda981".into();
+        turret.shoot_type = Some(Box::new(shoot_type));
+
+        turret.drawer = "DrawTurret(reinforced-, RegionPart(-blade warmup mirror under moveX=2 moveRot=-7 PartMove(warmup,0,-2,3) heatColor=ff6214), RegionPart(-inner warmup mirror moveX=2 moveY=-8 heatColor=ff6214), RegionPart(-mid warmup under moveY=-8 heatColor=ff6214))".into();
+        turret.scale_damage_efficiency = true;
+        turret.shoot_sound = "none".into();
+        turret.loop_sound_volume = 1.0;
+        turret.loop_sound = "beamLustre".into();
+        turret.shoot_warmup_speed = 0.08;
+        turret.shoot_cone = 360.0;
+        turret.aim_change_speed = 0.9;
+        turret.rotate_speed = 0.9;
+        turret.shoot_y = 0.5;
+        turret.outline_color = "darkOutline".into();
+        turret.base.size = 4;
+        turret.base.env_enabled |= Env::SPACE;
+        turret.range = 250.0;
+        turret.scaled_health = 210.0;
+        turret.unit_sort = "strongest".into();
+        push_liquid_amount(&mut turret.consume_liquids, liquids, "nitrogen", 6.0 / 60.0);
+        turret.base.has_liquids = !turret.consume_liquids.is_empty();
+        turret.consume_power = 200.0 / 60.0;
+        turret.base.has_power = true;
     });
 }
 
@@ -13082,6 +13173,125 @@ mod tests {
             shoot.interval_bullet.as_ref().unwrap().as_ref(),
             frag.as_ref()
         );
+    }
+
+    #[test]
+    fn lustre_continuous_turret_keeps_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name.as_str() == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let lustre = registry.get_turret_by_name("lustre").unwrap();
+        assert_eq!(lustre.kind, TurretBlockKind::ContinuousTurret);
+        assert_eq!(lustre.base.group, BlockGroup::Turrets);
+        assert_eq!(lustre.base.flags, vec![BlockFlag::Turret]);
+        assert!(lustre.base.update);
+        assert!(lustre.base.solid);
+        assert!(lustre.base.sync);
+        assert!(lustre.base.has_power);
+        assert!(lustre.base.has_liquids);
+        assert_ne!(lustre.base.env_enabled & Env::SPACE, 0);
+        assert!(!lustre.display_ammo_multiplier);
+        assert_eq!(lustre.coolant_multiplier, 1.0);
+        assert!(lustre.scale_damage_efficiency);
+        assert_eq!(lustre.aim_change_speed, 0.9);
+        assert_eq!(lustre.rotate_speed, 0.9);
+        assert_eq!(lustre.shoot_warmup_speed, 0.08);
+        assert_eq!(lustre.shoot_cone, 360.0);
+        assert_eq!(lustre.shoot_y, 0.5);
+        assert_eq!(lustre.outline_color, "darkOutline");
+        assert_eq!(lustre.base.size, 4);
+        assert_eq!(lustre.range, 250.0);
+        assert_eq!(lustre.scaled_health, 210.0);
+        assert_eq!(lustre.base.health, 4 * 4 * 210);
+        assert_eq!(lustre.unit_sort, "strongest");
+        assert_eq!(lustre.loop_sound, "beamLustre");
+        assert_eq!(lustre.loop_sound_volume, 1.0);
+        assert_eq!(lustre.shoot_sound, "none");
+        assert_close(lustre.consume_power, 200.0 / 60.0);
+        assert_eq!(
+            lustre.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("nitrogen"),
+                amount: 6.0 / 60.0
+            }]
+        );
+        assert_eq!(lustre.fog_radius, 31.0);
+        assert_eq!(lustre.place_overlap_range, 250.0 + 8.0 * 7.0);
+        assert_eq!(
+            lustre.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 90
+                }
+            ]
+        );
+        assert!(lustre.drawer.contains("reinforced-"));
+        assert!(lustre.drawer.contains("RegionPart(-blade"));
+        assert!(lustre.drawer.contains("RegionPart(-inner"));
+        assert!(lustre.drawer.contains("RegionPart(-mid"));
+        assert!(lustre.drawer.contains("heatColor=ff6214"));
+        assert!(lustre.drawer.contains("moveRot=-7"));
+        assert!(lustre.drawer.contains("moveY=-8"));
+        assert!(lustre.drawer.contains("PartMove(warmup,0,-2,3)"));
+
+        let shoot = lustre.shoot_type.as_ref().unwrap();
+        assert_eq!(shoot.kind, BulletKind::PointLaser);
+        assert_eq!(shoot.damage, 210.0);
+        assert_close(shoot.building_damage_multiplier, 0.3);
+        assert_eq!(shoot.hit_color, "fda981");
+        assert_eq!(shoot.color, "white");
+        assert_eq!(shoot.sprite, "point-laser");
+        assert_eq!(shoot.damage_interval, 5.0);
+        assert_eq!(shoot.beam_effect, "colorTrail");
+        assert_eq!(shoot.beam_effect_interval, 3.0);
+        assert_eq!(shoot.beam_effect_size, 3.5);
+        assert_eq!(shoot.osc_scl, 2.0);
+        assert_eq!(shoot.osc_mag, 0.3);
+        assert_eq!(shoot.draw_size, 1000.0);
+        assert_eq!(shoot.lifetime, 20.0);
+        assert_eq!(shoot.speed, 0.0);
+        assert_eq!(shoot.hit_effect, "hitBulletSmall");
+        assert_eq!(shoot.ammo_multiplier, 2.0);
+        assert!(!shoot.remove_after_pierce);
+        assert!(shoot.impact);
+        assert!(!shoot.keep_velocity);
+        assert!(!shoot.collides);
+        assert!(shoot.pierce);
+        assert!(!shoot.hittable);
+        assert!(!shoot.absorbable);
+        assert_eq!(shoot.optimal_life_fract, 0.5);
+        assert_eq!(shoot.shoot_effect, "none");
+        assert_eq!(shoot.smoke_effect, "none");
+        assert_eq!(shoot.despawn_effect, "none");
     }
 
     #[test]
