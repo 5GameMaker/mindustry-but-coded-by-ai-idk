@@ -3844,6 +3844,18 @@ fn liquid_bullet(liquids: &[Liquid], name: &str) -> BulletSpec {
     bullet
 }
 
+fn basic_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Basic, speed, damage);
+    bullet.width = 5.0;
+    bullet.height = 7.0;
+    bullet.shrink_y = 0.5;
+    bullet.back_color = "bulletYellowBack".into();
+    bullet.front_color = "bulletYellow".into();
+    bullet.hit_effect = "hitBulletSmall".into();
+    bullet.despawn_effect = "hitBulletSmall".into();
+    bullet
+}
+
 fn missile_bullet(speed: f32, damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Missile, speed, damage);
     bullet.back_color = "missileYellowBack".into();
@@ -5560,6 +5572,87 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.consume_coolant(1.0);
         turret.deposit_cooldown = 2.0;
         turret.consume_power = 10.0;
+    });
+
+    registry.register_turret_block("spectre", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("copper", 900),
+                ("graphite", 300),
+                ("surge-alloy", 250),
+                ("plastanium", 175),
+                ("thorium", 250),
+            ],
+        );
+
+        let mut graphite = basic_bullet(7.5, 50.0);
+        graphite.hit_size = 4.8;
+        graphite.width = 15.0;
+        graphite.height = 21.0;
+        graphite.shoot_effect = "shootBig".into();
+        graphite.ammo_multiplier = 4.0;
+        graphite.reload_multiplier = 1.7;
+        graphite.knockback = 0.3;
+        graphite.hit_effect = "hitBulletColor".into();
+        graphite.despawn_effect = "hitBulletColor".into();
+        graphite.hit_color = "graphiteAmmoBack".into();
+        graphite.back_color = "graphiteAmmoBack".into();
+        graphite.trail_color = "graphiteAmmoBack".into();
+        graphite.front_color = "graphiteAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "graphite", graphite);
+
+        let mut thorium = basic_bullet(8.0, 80.0);
+        thorium.hit_size = 5.0;
+        thorium.width = 16.0;
+        thorium.height = 23.0;
+        thorium.shoot_effect = "shootBig".into();
+        thorium.pierce_cap = 2;
+        thorium.pierce_building = true;
+        thorium.knockback = 0.7;
+        thorium.back_color = "thoriumAmmoBack".into();
+        thorium.hit_color = "thoriumAmmoBack".into();
+        thorium.trail_color = "thoriumAmmoBack".into();
+        thorium.front_color = "thoriumAmmoFront".into();
+        push_turret_ammo(&mut turret.ammo, items, "thorium", thorium);
+
+        let mut pyratite = basic_bullet(7.0, 70.0);
+        pyratite.hit_size = 5.0;
+        pyratite.width = 16.0;
+        pyratite.height = 21.0;
+        pyratite.front_color = "lightishOrange".into();
+        pyratite.back_color = "lightOrange".into();
+        pyratite.status = "burning".into();
+        pyratite.hit_effect = "MultiEffect(hitBulletSmall, fireHit)".into();
+        pyratite.shoot_effect = "shootBig".into();
+        pyratite.make_fire = true;
+        pyratite.pierce_cap = 2;
+        pyratite.pierce_building = true;
+        pyratite.knockback = 0.6;
+        pyratite.ammo_multiplier = 3.0;
+        pyratite.splash_damage = 20.0;
+        pyratite.splash_damage_radius = 25.0;
+        push_turret_ammo(&mut turret.ammo, items, "pyratite", pyratite);
+
+        turret.reload = 7.0;
+        turret.recoil_time = turret.reload * 2.0;
+        turret.coolant_multiplier = 0.5;
+        turret.liquid_capacity = 120.0;
+        turret.ammo_use_effect = "casing3".into();
+        turret.range = 260.0;
+        turret.inaccuracy = 3.0;
+        turret.recoil = 3.0;
+        turret.shoot_pattern = "ShootAlternate".into();
+        turret.shoot_alternate_spread = 8.0;
+        turret.shake = 2.0;
+        turret.base.size = 4;
+        turret.shoot_cone = 24.0;
+        turret.shoot_sound = "shootSpectre".into();
+        turret.scaled_health = 160.0;
+        turret.consume_coolant(1.0);
+        turret.deposit_cooldown = 2.0;
+        turret.limit_range(9.0);
     });
 }
 
@@ -10963,6 +11056,131 @@ mod tests {
         assert!(!rail.keep_velocity);
         assert_eq!(rail.lifetime, 1.0);
         assert!(rail.delay_frags);
+    }
+
+    #[test]
+    fn spectre_item_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let spectre = registry.get_turret_by_name("spectre").unwrap();
+        assert_eq!(spectre.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(spectre.reload, 7.0);
+        assert_eq!(spectre.recoil_time, 14.0);
+        assert_eq!(spectre.coolant_multiplier, 0.5);
+        assert_eq!(spectre.liquid_capacity, 120.0);
+        assert_eq!(spectre.base.liquid_capacity, 120.0);
+        assert_eq!(spectre.ammo_use_effect, "casing3");
+        assert_eq!(spectre.range, 260.0);
+        assert_eq!(spectre.inaccuracy, 3.0);
+        assert_eq!(spectre.recoil, 3.0);
+        assert_eq!(spectre.shoot_pattern, "ShootAlternate");
+        assert_eq!(spectre.shoot_alternate_spread, 8.0);
+        assert_eq!(spectre.shake, 2.0);
+        assert_eq!(spectre.base.size, 4);
+        assert_eq!(spectre.shoot_cone, 24.0);
+        assert_eq!(spectre.shoot_sound, "shootSpectre");
+        assert_eq!(spectre.scaled_health, 160.0);
+        assert_eq!(spectre.base.health, 4 * 4 * 160);
+        assert!(spectre.consume_coolant);
+        assert_eq!(spectre.coolant_amount, 1.0);
+        assert_eq!(spectre.deposit_cooldown, 2.0);
+        assert_eq!(spectre.fog_radius, 33.0);
+        assert_eq!(spectre.place_overlap_range, 260.0 + 8.0 * 7.0);
+        assert_eq!(
+            spectre.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 900
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("plastanium"),
+                    amount: 175
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 250
+                }
+            ]
+        );
+
+        let graphite = &ammo_for(spectre, item_id("graphite")).bullet;
+        assert_eq!(graphite.kind, BulletKind::Basic);
+        assert_eq!(graphite.speed, 7.5);
+        assert_eq!(graphite.damage, 50.0);
+        assert_eq!(graphite.hit_size, 4.8);
+        assert_eq!(graphite.width, 15.0);
+        assert_eq!(graphite.height, 21.0);
+        assert_eq!(graphite.shrink_y, 0.5);
+        assert_eq!(graphite.shoot_effect, "shootBig");
+        assert_eq!(graphite.ammo_multiplier, 4.0);
+        assert_eq!(graphite.reload_multiplier, 1.7);
+        assert_eq!(graphite.knockback, 0.3);
+        assert_eq!(graphite.hit_effect, "hitBulletColor");
+        assert_eq!(graphite.despawn_effect, "hitBulletColor");
+        assert_eq!(graphite.front_color, "graphiteAmmoFront");
+        assert_eq!(graphite.back_color, "graphiteAmmoBack");
+        assert_eq!(graphite.hit_color, "graphiteAmmoBack");
+        assert_eq!(graphite.trail_color, "graphiteAmmoBack");
+        assert_close(graphite.lifetime, (260.0 + 9.0 + 10.0) / 7.5);
+
+        let thorium = &ammo_for(spectre, item_id("thorium")).bullet;
+        assert_eq!(thorium.kind, BulletKind::Basic);
+        assert_eq!(thorium.speed, 8.0);
+        assert_eq!(thorium.damage, 80.0);
+        assert_eq!(thorium.hit_size, 5.0);
+        assert_eq!(thorium.width, 16.0);
+        assert_eq!(thorium.height, 23.0);
+        assert_eq!(thorium.shoot_effect, "shootBig");
+        assert_eq!(thorium.pierce_cap, 2);
+        assert!(thorium.pierce_building);
+        assert_eq!(thorium.knockback, 0.7);
+        assert_eq!(thorium.front_color, "thoriumAmmoFront");
+        assert_eq!(thorium.back_color, "thoriumAmmoBack");
+        assert_eq!(thorium.hit_color, "thoriumAmmoBack");
+        assert_eq!(thorium.trail_color, "thoriumAmmoBack");
+        assert_eq!(thorium.hit_effect, "hitBulletSmall");
+        assert_eq!(thorium.despawn_effect, "hitBulletSmall");
+        assert_close(thorium.lifetime, (260.0 + 9.0 + 10.0) / 8.0);
+
+        let pyratite = &ammo_for(spectre, item_id("pyratite")).bullet;
+        assert_eq!(pyratite.kind, BulletKind::Basic);
+        assert_eq!(pyratite.speed, 7.0);
+        assert_eq!(pyratite.damage, 70.0);
+        assert_eq!(pyratite.hit_size, 5.0);
+        assert_eq!(pyratite.width, 16.0);
+        assert_eq!(pyratite.height, 21.0);
+        assert_eq!(pyratite.front_color, "lightishOrange");
+        assert_eq!(pyratite.back_color, "lightOrange");
+        assert_eq!(pyratite.status, "burning");
+        assert_eq!(pyratite.hit_effect, "MultiEffect(hitBulletSmall, fireHit)");
+        assert_eq!(pyratite.shoot_effect, "shootBig");
+        assert!(pyratite.make_fire);
+        assert_eq!(pyratite.pierce_cap, 2);
+        assert!(pyratite.pierce_building);
+        assert_eq!(pyratite.knockback, 0.6);
+        assert_eq!(pyratite.ammo_multiplier, 3.0);
+        assert_eq!(pyratite.splash_damage, 20.0);
+        assert_eq!(pyratite.splash_damage_radius, 25.0);
+        assert_close(pyratite.lifetime, (260.0 + 9.0 + 10.0) / 7.0);
     }
 
     #[test]
