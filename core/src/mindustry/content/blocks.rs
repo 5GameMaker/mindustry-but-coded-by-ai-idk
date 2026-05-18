@@ -10002,6 +10002,31 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         factory.consume_power = 1.2;
         factory.research_cost_multiplier = 0.5;
     });
+
+    registry.register_unit_factory_block("naval-factory", UnitBlockKind::UnitFactory, |factory| {
+        set_requirements(
+            &mut factory.requirements,
+            items,
+            &[("copper", 150), ("lead", 130), ("metaglass", 120)],
+        );
+        factory.plans = vec![
+            unit_plan(
+                items,
+                "risso",
+                60.0 * 45.0,
+                &[("silicon", 20), ("metaglass", 35)],
+            ),
+            unit_plan(
+                items,
+                "retusa",
+                60.0 * 35.0,
+                &[("silicon", 15), ("titanium", 20)],
+            ),
+        ];
+        factory.base.size = 3;
+        factory.consume_power = 1.2;
+        factory.floating = true;
+    });
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -16090,6 +16115,103 @@ mod tests {
                 ItemAmount {
                     item: item_id("lead"),
                     amount: 30
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn naval_factory_unit_factory_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let factory = registry.get_unit_factory_by_name("naval-factory").unwrap();
+
+        assert_eq!(factory.kind, UnitBlockKind::UnitFactory);
+        assert_eq!(factory.base.group, BlockGroup::Units);
+        assert_eq!(factory.base.flags, vec![BlockFlag::Factory]);
+        assert!(factory.base.update);
+        assert!(factory.base.has_power);
+        assert!(factory.base.has_items);
+        assert!(factory.base.solid);
+        assert!(factory.floating);
+        assert!(factory.configurable);
+        assert!(factory.clear_on_double_tap);
+        assert!(factory.outputs_payload);
+        assert!(factory.rotate);
+        assert_eq!(factory.region_rotated1, 1);
+        assert!(factory.commandable);
+        assert_eq!(factory.ambient_sound, "loopUnitBuilding");
+        assert_eq!(factory.ambient_sound_volume, 0.09);
+        assert_eq!(factory.create_sound, "unitCreate");
+        assert_eq!(factory.create_sound_volume, 1.0);
+        assert_eq!(factory.base.size, 3);
+        assert_eq!(factory.consume_power, 1.2);
+        assert!(factory.base.consumes_power);
+        assert_eq!(factory.research_cost_multiplier, 1.0);
+        assert_eq!(factory.base.item_capacity, 70);
+        assert_eq!(
+            factory.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 130
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 120
+                }
+            ]
+        );
+
+        assert_eq!(factory.plans.len(), 2);
+        assert_eq!(factory.plans[0].unit, "risso");
+        assert_eq!(factory.plans[0].time, 60.0 * 45.0);
+        assert_eq!(
+            factory.plans[0].requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 35
+                }
+            ]
+        );
+        assert_eq!(factory.plans[1].unit, "retusa");
+        assert_eq!(factory.plans[1].time, 60.0 * 35.0);
+        assert_eq!(
+            factory.plans[1].requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 15
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 20
+                }
+            ]
+        );
+        assert_eq!(
+            factory.capacities,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("metaglass"),
+                    amount: 70
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 40
                 }
             ]
         );
