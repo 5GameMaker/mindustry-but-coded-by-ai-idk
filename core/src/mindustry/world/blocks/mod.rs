@@ -2,6 +2,7 @@ pub mod campaign;
 pub mod environment;
 pub mod heat;
 pub mod legacy;
+pub mod liquid;
 pub mod logic;
 pub mod payloads;
 pub mod production;
