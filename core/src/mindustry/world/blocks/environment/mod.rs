@@ -343,14 +343,69 @@ mod tests {
     #[test]
     fn floor_defaults_match_environment_constructor() {
         let floor = FloorData::new(1, "stone");
+        assert!(floor.base.replaceable);
+        assert_eq!(floor.base.variants, 3);
+        assert!(floor.base.placeable_liquid);
+        assert!(floor.base.allow_rectangle_placement);
+        assert!(floor.base.instant_build);
+        assert!(floor.base.ignore_build_darkness);
+        assert!(!floor.base.obstructs_light);
+        assert_eq!(floor.base.place_effect, "rotateBlock");
         assert!(!floor.overlay_floor);
         assert_eq!(floor.edge, "stone");
         assert_eq!(floor.speed_multiplier, 1.0);
+        assert_eq!(floor.drag_multiplier, 1.0);
+        assert_eq!(floor.damage_taken, 0.0);
+        assert_eq!(floor.drown_time, 0.0);
+        assert_eq!(floor.walk_effect, "none");
+        assert_eq!(floor.walk_sound, "none");
+        assert_eq!(floor.walk_sound_volume, 0.1);
+        assert_eq!(floor.walk_sound_pitch_min, 0.8);
+        assert_eq!(floor.walk_sound_pitch_max, 1.2);
+        assert_eq!(floor.drown_update_effect, "bubble");
         assert_eq!(floor.status, "none");
+        assert_eq!(floor.status_duration, 60.0);
+        assert_eq!(floor.liquid_drop, None);
+        assert_eq!(floor.liquid_multiplier, 1.0);
+        assert!(!floor.is_liquid);
+        assert_eq!(floor.overlay_alpha, 0.65);
+        assert!(!floor.supports_overlay);
+        assert!(!floor.shallow);
+        assert_eq!(floor.blend_group, 1);
         assert!(floor.can_shadow);
+        assert!(!floor.force_draw_light);
+        assert!(floor.needs_surface);
+        assert!(!floor.allow_core_placement);
         assert_eq!(floor.ore_scale, 24.0);
         assert_eq!(floor.ore_threshold, 0.828);
+        assert!(!floor.ore_default);
+        assert!(!floor.wall_ore);
         assert_eq!(floor.wall, 0);
+        assert_eq!(floor.decoration, 0);
+        assert_eq!(floor.blend_id, -1);
+        assert_eq!(floor.tiling_variants, 0);
+        assert!(!floor.autotile);
+        assert_eq!(floor.autotile_mid_variants, 1);
+        assert_eq!(floor.autotile_variants, 1);
+        assert!(floor.draw_edge_in);
+        assert!(floor.draw_edge_out);
+
+        let custom = FloorData::with_variants(2, "custom-floor", 0);
+        assert_eq!(custom.base.variants, 0);
+    }
+
+    #[test]
+    fn floor_init_links_match_upstream_id_resolution_subset() {
+        let mut floor = FloorData::new(10, "basalt");
+        floor.blend_group = 7;
+        floor.init_links(Some(11), Some(12));
+        assert_eq!(floor.blend_id, 7);
+        assert_eq!(floor.wall, 11);
+        assert_eq!(floor.decoration, 12);
+
+        floor.init_links(None, None);
+        assert_eq!(floor.wall, 0);
+        assert_eq!(floor.decoration, 0);
     }
 
     #[test]
