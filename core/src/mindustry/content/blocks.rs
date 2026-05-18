@@ -5903,6 +5903,103 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.consume_coolant(15.0 / 60.0);
         turret.limit_range(12.0);
     });
+
+    registry.register_turret_block("diffuse", TurretBlockKind::ItemTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("beryllium", 150),
+                ("silicon", 200),
+                ("graphite", 200),
+                ("tungsten", 50),
+            ],
+        );
+
+        let mut graphite = basic_bullet(8.0, 41.0);
+        graphite.knockback = 4.0;
+        graphite.width = 25.0;
+        graphite.hit_size = 7.0;
+        graphite.height = 20.0;
+        graphite.shoot_effect = "shootBigColor".into();
+        graphite.smoke_effect = "shootSmokeSquareSparse".into();
+        graphite.ammo_multiplier = 1.0;
+        graphite.hit_color = "ea8878".into();
+        graphite.back_color = "ea8878".into();
+        graphite.trail_color = "ea8878".into();
+        graphite.front_color = "redLight".into();
+        graphite.trail_width = 6.0;
+        graphite.trail_length = 3;
+        graphite.hit_effect = "hitSquaresColor".into();
+        graphite.despawn_effect = "hitSquaresColor".into();
+        graphite.building_damage_multiplier = 0.2;
+        push_turret_ammo(&mut turret.ammo, items, "graphite", graphite);
+
+        let mut oxide = basic_bullet(8.0, 90.0);
+        oxide.knockback = 3.0;
+        oxide.width = 25.0;
+        oxide.hit_size = 7.0;
+        oxide.height = 20.0;
+        oxide.shoot_effect = "shootBigColor".into();
+        oxide.smoke_effect = "shootSmokeSquareSparse".into();
+        oxide.ammo_multiplier = 2.0;
+        oxide.hit_color = "a0b380".into();
+        oxide.back_color = "a0b380".into();
+        oxide.trail_color = "a0b380".into();
+        oxide.front_color = "e4ffd6".into();
+        oxide.trail_width = 6.0;
+        oxide.trail_length = 3;
+        oxide.hit_effect = "hitSquaresColor".into();
+        oxide.despawn_effect = "hitSquaresColor".into();
+        oxide.building_damage_multiplier = 0.2;
+        push_turret_ammo(&mut turret.ammo, items, "oxide", oxide);
+
+        let mut silicon = basic_bullet(8.0, 35.0);
+        silicon.knockback = 3.0;
+        silicon.width = 25.0;
+        silicon.hit_size = 7.0;
+        silicon.height = 20.0;
+        silicon.homing_power = 0.045;
+        silicon.shoot_effect = "shootBigColor".into();
+        silicon.smoke_effect = "shootSmokeSquareSparse".into();
+        silicon.ammo_multiplier = 1.0;
+        silicon.hit_color = "siliconAmmoBack".into();
+        silicon.back_color = "siliconAmmoBack".into();
+        silicon.trail_color = "siliconAmmoBack".into();
+        silicon.front_color = "dae1ee".into();
+        silicon.trail_width = 6.0;
+        silicon.trail_length = 6;
+        silicon.hit_effect = "hitSquaresColor".into();
+        silicon.despawn_effect = "hitSquaresColor".into();
+        silicon.building_damage_multiplier = 0.2;
+        push_turret_ammo(&mut turret.ammo, items, "silicon", silicon);
+
+        turret.shoot_pattern = "ShootSpread".into();
+        turret.shoot_shots = 15;
+        turret.shoot_spread = 4.0;
+        turret.coolant_multiplier = 15.0;
+        turret.inaccuracy = 0.2;
+        turret.velocity_rnd = 0.17;
+        turret.shake = 1.0;
+        turret.ammo_per_shot = 3;
+        turret.max_ammo = 30;
+        turret.consume_ammo_once = true;
+        turret.target_under_blocks = false;
+        turret.shoot_sound = "shootDiffuse".into();
+        turret.drawer = "DrawTurret(reinforced-, RegionPart(-front warmup mirror moveRot=-10 PartMove(recoil,0,-3,-5) heatColor=red))".into();
+        turret.shoot_y = 5.0;
+        turret.outline_color = "darkOutline".into();
+        turret.base.size = 3;
+        turret.base.env_enabled |= Env::SPACE;
+        turret.reload = 30.0;
+        turret.recoil = 2.0;
+        turret.range = 125.0;
+        turret.shoot_cone = 40.0;
+        turret.scaled_health = 210.0;
+        turret.rotate_speed = 3.0;
+        turret.consume_coolant(15.0 / 60.0);
+        turret.limit_range(25.0);
+    });
 }
 
 fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
@@ -11682,6 +11779,126 @@ mod tests {
         assert_eq!(frag.hit_effect, "hitBulletColor");
         assert_eq!(frag.despawn_effect, "hitBulletColor");
         assert_close(frag.building_damage_multiplier, 0.2);
+    }
+
+    #[test]
+    fn diffuse_spread_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        fn ammo_for(turret: &TurretBlockData, item: ContentId) -> &TurretAmmo {
+            turret.ammo.iter().find(|ammo| ammo.item == item).unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let diffuse = registry.get_turret_by_name("diffuse").unwrap();
+        assert_eq!(diffuse.kind, TurretBlockKind::ItemTurret);
+        assert_eq!(diffuse.shoot_pattern, "ShootSpread");
+        assert_eq!(diffuse.shoot_shots, 15);
+        assert_eq!(diffuse.shoot_spread, 4.0);
+        assert_eq!(diffuse.coolant_multiplier, 15.0);
+        assert_eq!(diffuse.inaccuracy, 0.2);
+        assert_eq!(diffuse.velocity_rnd, 0.17);
+        assert_eq!(diffuse.shake, 1.0);
+        assert_eq!(diffuse.ammo_per_shot, 3);
+        assert_eq!(diffuse.max_ammo, 30);
+        assert!(diffuse.consume_ammo_once);
+        assert!(!diffuse.target_under_blocks);
+        assert_eq!(diffuse.shoot_sound, "shootDiffuse");
+        assert!(diffuse.drawer.contains("RegionPart(-front"));
+        assert_eq!(diffuse.shoot_y, 5.0);
+        assert_eq!(diffuse.outline_color, "darkOutline");
+        assert_eq!(diffuse.base.size, 3);
+        assert_ne!(diffuse.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(diffuse.reload, 30.0);
+        assert_eq!(diffuse.recoil, 2.0);
+        assert_eq!(diffuse.range, 125.0);
+        assert_eq!(diffuse.shoot_cone, 40.0);
+        assert_eq!(diffuse.scaled_health, 210.0);
+        assert_eq!(diffuse.base.health, 3 * 3 * 210);
+        assert_eq!(diffuse.rotate_speed, 3.0);
+        assert!(diffuse.consume_coolant);
+        assert_close(diffuse.coolant_amount, 15.0 / 60.0);
+        assert_eq!(diffuse.fog_radius, 16.0);
+        assert_eq!(diffuse.place_overlap_range, 125.0 + 8.0 * 7.0);
+        assert_eq!(
+            diffuse.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 50
+                }
+            ]
+        );
+
+        let graphite = &ammo_for(diffuse, item_id("graphite")).bullet;
+        assert_eq!(graphite.kind, BulletKind::Basic);
+        assert_eq!(graphite.speed, 8.0);
+        assert_eq!(graphite.damage, 41.0);
+        assert_eq!(graphite.knockback, 4.0);
+        assert_eq!(graphite.width, 25.0);
+        assert_eq!(graphite.hit_size, 7.0);
+        assert_eq!(graphite.height, 20.0);
+        assert_eq!(graphite.shoot_effect, "shootBigColor");
+        assert_eq!(graphite.smoke_effect, "shootSmokeSquareSparse");
+        assert_eq!(graphite.ammo_multiplier, 1.0);
+        assert_eq!(graphite.hit_color, "ea8878");
+        assert_eq!(graphite.back_color, "ea8878");
+        assert_eq!(graphite.trail_color, "ea8878");
+        assert_eq!(graphite.front_color, "redLight");
+        assert_eq!(graphite.trail_width, 6.0);
+        assert_eq!(graphite.trail_length, 3);
+        assert_eq!(graphite.hit_effect, "hitSquaresColor");
+        assert_eq!(graphite.despawn_effect, "hitSquaresColor");
+        assert_close(graphite.building_damage_multiplier, 0.2);
+        assert_close(graphite.lifetime, (125.0 + 25.0 + 10.0) / 8.0);
+
+        let oxide = &ammo_for(diffuse, item_id("oxide")).bullet;
+        assert_eq!(oxide.kind, BulletKind::Basic);
+        assert_eq!(oxide.damage, 90.0);
+        assert_eq!(oxide.knockback, 3.0);
+        assert_eq!(oxide.ammo_multiplier, 2.0);
+        assert_eq!(oxide.hit_color, "a0b380");
+        assert_eq!(oxide.back_color, "a0b380");
+        assert_eq!(oxide.trail_color, "a0b380");
+        assert_eq!(oxide.front_color, "e4ffd6");
+        assert_eq!(oxide.trail_width, 6.0);
+        assert_eq!(oxide.trail_length, 3);
+        assert_eq!(oxide.hit_effect, "hitSquaresColor");
+        assert_close(oxide.building_damage_multiplier, 0.2);
+        assert_close(oxide.lifetime, (125.0 + 25.0 + 10.0) / 8.0);
+
+        let silicon = &ammo_for(diffuse, item_id("silicon")).bullet;
+        assert_eq!(silicon.kind, BulletKind::Basic);
+        assert_eq!(silicon.damage, 35.0);
+        assert_eq!(silicon.knockback, 3.0);
+        assert_eq!(silicon.homing_power, 0.045);
+        assert_eq!(silicon.ammo_multiplier, 1.0);
+        assert_eq!(silicon.hit_color, "siliconAmmoBack");
+        assert_eq!(silicon.back_color, "siliconAmmoBack");
+        assert_eq!(silicon.trail_color, "siliconAmmoBack");
+        assert_eq!(silicon.front_color, "dae1ee");
+        assert_eq!(silicon.trail_width, 6.0);
+        assert_eq!(silicon.trail_length, 6);
+        assert_eq!(silicon.hit_effect, "hitSquaresColor");
+        assert_close(silicon.building_damage_multiplier, 0.2);
+        assert_close(silicon.lifetime, (125.0 + 25.0 + 10.0) / 8.0);
     }
 
     #[test]
