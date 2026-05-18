@@ -164,6 +164,8 @@ impl StaticTreeData {
 pub struct TreeBlockData {
     pub base: Block,
     pub shadow_offset: f32,
+    pub layer: f32,
+    pub shadow_layer: f32,
 }
 
 impl TreeBlockData {
@@ -176,6 +178,8 @@ impl TreeBlockData {
         Self {
             base,
             shadow_offset: -4.0,
+            layer: 71.0,
+            shadow_layer: 69.0,
         }
     }
 }
@@ -371,6 +375,8 @@ mod tests {
         assert_eq!(tree.base.clip_size, 90.0);
         assert!(tree.base.custom_shadow);
         assert_eq!(tree.shadow_offset, -4.0);
+        assert_eq!(tree.layer, 71.0);
+        assert_eq!(tree.shadow_layer, 69.0);
 
         let tall = TallBlockData::new(5, "crystal-cluster");
         assert!(tall.base.solid);

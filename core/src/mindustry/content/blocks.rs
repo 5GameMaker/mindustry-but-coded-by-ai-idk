@@ -7487,6 +7487,8 @@ mod tests {
             assert_eq!(tree.base.clip_size, 90.0);
             assert!(tree.base.custom_shadow);
             assert_eq!(tree.shadow_offset, -4.0);
+            assert_eq!(tree.layer, 71.0);
+            assert_eq!(tree.shadow_layer, 69.0);
         }
 
         for name in ["crystal-cluster", "vibrant-crystal-cluster"] {
