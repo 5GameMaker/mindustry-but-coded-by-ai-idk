@@ -10061,6 +10061,30 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item]) {
             factory.consume_power = 1.5;
         },
     );
+
+    registry.register_unit_factory_block(
+        "ship-fabricator",
+        UnitBlockKind::UnitFactory,
+        |factory| {
+            set_requirements(
+                &mut factory.requirements,
+                items,
+                &[("silicon", 250), ("beryllium", 200)],
+            );
+            factory.plans = vec![unit_plan(
+                items,
+                "elude",
+                60.0 * 40.0,
+                &[("graphite", 50), ("silicon", 70)],
+            )];
+            factory.base.size = 3;
+            factory.configurable = false;
+            factory.region_suffix = "-dark".into();
+            factory.fog_radius = 3.0;
+            factory.research_cost_multiplier = 0.5;
+            factory.consume_power = 1.5;
+        },
+    );
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -16341,6 +16365,85 @@ mod tests {
                 ItemAmount {
                     item: item_id("silicon"),
                     amount: 100
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn ship_fabricator_unit_factory_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let factory = registry
+            .get_unit_factory_by_name("ship-fabricator")
+            .unwrap();
+
+        assert_eq!(factory.kind, UnitBlockKind::UnitFactory);
+        assert_eq!(factory.base.group, BlockGroup::Units);
+        assert_eq!(factory.base.flags, vec![BlockFlag::Factory]);
+        assert!(factory.base.update);
+        assert!(factory.base.has_power);
+        assert!(factory.base.has_items);
+        assert!(factory.base.solid);
+        assert!(!factory.configurable);
+        assert!(factory.clear_on_double_tap);
+        assert!(factory.outputs_payload);
+        assert!(!factory.floating);
+        assert!(factory.rotate);
+        assert_eq!(factory.region_rotated1, 1);
+        assert_eq!(factory.region_suffix, "-dark");
+        assert_eq!(factory.fog_radius, 3.0);
+        assert!(factory.commandable);
+        assert_eq!(factory.ambient_sound, "loopUnitBuilding");
+        assert_eq!(factory.ambient_sound_volume, 0.09);
+        assert_eq!(factory.create_sound, "unitCreate");
+        assert_eq!(factory.create_sound_volume, 1.0);
+        assert_eq!(factory.base.size, 3);
+        assert_eq!(factory.consume_power, 1.5);
+        assert!(factory.base.consumes_power);
+        assert_eq!(factory.research_cost_multiplier, 0.5);
+        assert!(factory.research_cost.is_empty());
+        assert_eq!(factory.base.item_capacity, 140);
+        assert_eq!(
+            factory.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 200
+                }
+            ]
+        );
+
+        assert_eq!(factory.plans.len(), 1);
+        assert_eq!(factory.plans[0].unit, "elude");
+        assert_eq!(factory.plans[0].time, 60.0 * 40.0);
+        assert_eq!(
+            factory.plans[0].requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 70
+                }
+            ]
+        );
+        assert_eq!(
+            factory.capacities,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 140
                 }
             ]
         );
