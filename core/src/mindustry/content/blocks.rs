@@ -3961,6 +3961,296 @@ impl LegacyBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CampaignBlockKind {
+    LaunchPad,
+    AdvancedLaunchPad,
+    LandingPad,
+    Accelerator,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CampaignBlockData {
+    pub base: Block,
+    pub kind: CampaignBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub build_cost_multiplier: f32,
+    pub scaled_health: f32,
+    pub consume_power: f32,
+    pub consume_liquid: Option<LiquidAmount>,
+    pub consume_liquid_name: Option<String>,
+    pub consume_liquid_amount: f32,
+    pub consume_items: Vec<ItemAmount>,
+    pub launch_block: Option<BlockId>,
+    pub launch_block_name: Option<String>,
+    pub launch_block_item_capacity: i32,
+    pub configurable: bool,
+    pub accepts_items: bool,
+    pub can_overdrive: bool,
+    pub outputs_items: bool,
+    pub launch_time: f32,
+    pub launch_sound_pitch_rand: f32,
+    pub launch_sound: String,
+    pub launch_light_color_rgba: u32,
+    pub accept_multiple_items: bool,
+    pub light_step: f32,
+    pub light_steps: i32,
+    pub liquid_pad: f32,
+    pub draw_liquid: Option<ContentId>,
+    pub draw_liquid_name: Option<String>,
+    pub bottom_color: String,
+    pub arrival_duration: f32,
+    pub cooldown_time: f32,
+    pub land_effect: String,
+    pub cooling_effect: String,
+    pub cooling_effect_chance: f32,
+    pub land_sound_volume: f32,
+    pub land_sound: String,
+    pub power_buffer_requirement: f32,
+    pub launch_candidates: Vec<String>,
+    pub lightning_sound: String,
+    pub lightning_sound_volume: f32,
+    pub charge_sound: String,
+    pub construct_sound: String,
+    pub launch_duration: f32,
+    pub charge_duration: f32,
+    pub build_duration: f32,
+    pub land_zoom_interp: String,
+    pub charge_zoom_interp: String,
+    pub land_zoom_from: f32,
+    pub land_zoom_to: f32,
+    pub charge_zoom_to: f32,
+    pub charge_rings: i32,
+    pub ring_rad_base: f32,
+    pub ring_rad_spacing: f32,
+    pub ring_rad_pow: f32,
+    pub ring_stroke: f32,
+    pub ring_speedup: f32,
+    pub charge_ring_merge: f32,
+    pub ring_arrow_rad: f32,
+    pub ring_handle_tilt: f32,
+    pub ring_handle_len: f32,
+    pub ring_color: String,
+    pub launch_lightning: i32,
+    pub lightning_color: String,
+    pub lightning_damage: f32,
+    pub lightning_offset: f32,
+    pub lightning_length_min: i32,
+    pub lightning_length_max: i32,
+    pub lightning_launch_chance: f64,
+}
+
+impl CampaignBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: CampaignBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.env_enabled = Env::TERRESTRIAL;
+        base.connected_power = true;
+        base.consumes_power = true;
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            build_cost_multiplier: 1.0,
+            scaled_health: -1.0,
+            consume_power: 0.0,
+            consume_liquid: None,
+            consume_liquid_name: None,
+            consume_liquid_amount: 0.0,
+            consume_items: Vec::new(),
+            launch_block: None,
+            launch_block_name: None,
+            launch_block_item_capacity: 0,
+            configurable: false,
+            accepts_items: false,
+            can_overdrive: true,
+            outputs_items: false,
+            launch_time: 0.0,
+            launch_sound_pitch_rand: 0.0,
+            launch_sound: String::new(),
+            launch_light_color_rgba: 0x00000000,
+            accept_multiple_items: false,
+            light_step: 0.0,
+            light_steps: 0,
+            liquid_pad: 0.0,
+            draw_liquid: None,
+            draw_liquid_name: None,
+            bottom_color: String::new(),
+            arrival_duration: 0.0,
+            cooldown_time: 0.0,
+            land_effect: String::new(),
+            cooling_effect: String::new(),
+            cooling_effect_chance: 0.0,
+            land_sound_volume: 0.0,
+            land_sound: String::new(),
+            power_buffer_requirement: 0.0,
+            launch_candidates: Vec::new(),
+            lightning_sound: String::new(),
+            lightning_sound_volume: 0.0,
+            charge_sound: String::new(),
+            construct_sound: String::new(),
+            launch_duration: 0.0,
+            charge_duration: 0.0,
+            build_duration: 0.0,
+            land_zoom_interp: String::new(),
+            charge_zoom_interp: String::new(),
+            land_zoom_from: 0.0,
+            land_zoom_to: 0.0,
+            charge_zoom_to: 0.0,
+            charge_rings: 0,
+            ring_rad_base: 0.0,
+            ring_rad_spacing: 0.0,
+            ring_rad_pow: 0.0,
+            ring_stroke: 0.0,
+            ring_speedup: 0.0,
+            charge_ring_merge: 0.0,
+            ring_arrow_rad: 0.0,
+            ring_handle_tilt: 0.0,
+            ring_handle_len: 0.0,
+            ring_color: String::new(),
+            launch_lightning: 0,
+            lightning_color: String::new(),
+            lightning_damage: 0.0,
+            lightning_offset: 0.0,
+            lightning_length_min: 0,
+            lightning_length_max: 0,
+            lightning_launch_chance: 0.0,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_launch_pad_defaults(&mut self) {
+        self.base.has_items = true;
+        self.base.solid = true;
+        self.base.update = true;
+        if !self.base.flags.contains(&BlockFlag::LaunchPad) {
+            self.base.flags.push(BlockFlag::LaunchPad);
+        }
+        self.configurable = true;
+        self.outputs_items = false;
+        self.launch_time = 1.0;
+        self.launch_sound_pitch_rand = 0.1;
+        self.launch_sound = "padLaunch".into();
+        self.launch_light_color_rgba = 0xeab678ff;
+        self.accept_multiple_items = false;
+        self.light_step = 1.0;
+        self.light_steps = 3;
+        self.liquid_pad = 2.0;
+        self.bottom_color = "darkerMetal".into();
+    }
+
+    fn apply_landing_pad_defaults(&mut self) {
+        self.base.has_items = true;
+        self.base.has_liquids = true;
+        self.base.solid = true;
+        self.base.update = true;
+        self.base.emit_light = true;
+        self.base.light_radius = 90.0;
+        self.configurable = true;
+        self.accepts_items = false;
+        self.can_overdrive = false;
+        self.outputs_items = true;
+        self.arrival_duration = 150.0;
+        self.cooldown_time = 150.0;
+        self.consume_liquid_amount = 100.0;
+        self.consume_liquid_name = Some("water".into());
+        self.land_effect = "podLandShockwave".into();
+        self.cooling_effect = "none".into();
+        self.cooling_effect_chance = 0.2;
+        self.liquid_pad = 2.0;
+        self.bottom_color = "darkerMetal".into();
+        self.land_sound_volume = 0.75;
+        self.land_sound = "padLand".into();
+    }
+
+    fn apply_accelerator_defaults(&mut self) {
+        self.base.update = true;
+        self.base.solid = true;
+        self.base.has_items = true;
+        self.base.has_power = true;
+        self.base.item_capacity = 8000;
+        self.base.emit_light = true;
+        self.base.light_radius = 70.0;
+        self.base.light_color_rgba = 0xffd37fff;
+        self.configurable = true;
+        self.outputs_items = false;
+        self.can_overdrive = true;
+        self.launch_block_name = Some("core-nucleus".into());
+        self.lightning_sound =
+            "RandomSound(acceleratorLightning1,acceleratorLightning2,shootArc)".into();
+        self.lightning_sound_volume = 0.85;
+        self.charge_sound = "acceleratorCharge".into();
+        self.launch_sound = "acceleratorLaunch".into();
+        self.construct_sound = "acceleratorConstruct".into();
+        self.launch_duration = 120.0;
+        self.charge_duration = 220.0;
+        self.build_duration = 120.0;
+        self.land_zoom_interp = "pow4In".into();
+        self.charge_zoom_interp = "pow4In".into();
+        self.land_zoom_from = 0.02;
+        self.land_zoom_to = 4.0;
+        self.charge_zoom_to = 5.0;
+        self.charge_rings = 4;
+        self.ring_rad_base = 60.0;
+        self.ring_rad_spacing = 25.0;
+        self.ring_rad_pow = 1.6;
+        self.ring_stroke = 3.0;
+        self.ring_speedup = 1.4;
+        self.charge_ring_merge = 2.0;
+        self.ring_arrow_rad = 3.0;
+        self.ring_handle_tilt = 0.8;
+        self.ring_handle_len = 30.0;
+        self.ring_color = "accent".into();
+        self.launch_lightning = 20;
+        self.lightning_color = "accent".into();
+        self.lightning_damage = 40.0;
+        self.lightning_offset = 24.0;
+        self.lightning_length_min = 5;
+        self.lightning_length_max = 25;
+        self.lightning_launch_chance = 0.8;
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            CampaignBlockKind::LaunchPad | CampaignBlockKind::AdvancedLaunchPad => {
+                self.apply_launch_pad_defaults();
+            }
+            CampaignBlockKind::LandingPad => self.apply_landing_pad_defaults(),
+            CampaignBlockKind::Accelerator => self.apply_accelerator_defaults(),
+        }
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        if self.consume_power > 0.0 {
+            self.base.has_power = true;
+            self.base.consumes_power = true;
+        }
+        if let Some(liquid) = self.consume_liquid {
+            self.base.has_liquids = true;
+            self.consume_liquid_amount = liquid.amount;
+        }
+        if self.kind == CampaignBlockKind::Accelerator && !self.consume_items.is_empty() {
+            self.base.item_capacity = self
+                .consume_items
+                .iter()
+                .map(|item| item.amount)
+                .sum::<i32>();
+            self.accepts_items = true;
+        }
+        if self.scaled_health >= 0.0 {
+            self.base.health =
+                ((self.base.size * self.base.size) as f32 * self.scaled_health) as i32;
+        } else if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
@@ -3992,6 +4282,7 @@ pub enum BlockDef {
     Sandbox(SandboxBlockData),
     Light(LightBlockData),
     Legacy(LegacyBlockData),
+    Campaign(CampaignBlockData),
 }
 
 impl BlockDef {
@@ -4026,6 +4317,7 @@ impl BlockDef {
             Self::Sandbox(sandbox) => &sandbox.base,
             Self::Light(light) => &light.base,
             Self::Legacy(legacy) => &legacy.base,
+            Self::Campaign(campaign) => &campaign.base,
         }
     }
 
@@ -4244,6 +4536,13 @@ impl BlockRegistry {
     pub fn get_legacy_by_name(&self, name: &str) -> Option<&LegacyBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Legacy(legacy) => Some(legacy),
+            _ => None,
+        }
+    }
+
+    pub fn get_campaign_by_name(&self, name: &str) -> Option<&CampaignBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Campaign(campaign) => Some(campaign),
             _ => None,
         }
     }
@@ -4636,6 +4935,21 @@ impl BlockRegistry {
         self.insert(BlockDef::Legacy(block))
     }
 
+    pub fn register_campaign_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: CampaignBlockKind,
+        items: &[Item],
+        configure: impl FnOnce(&mut CampaignBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = CampaignBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Campaign(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -4769,6 +5083,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_sandbox_blocks(&mut registry, items);
     register_light_blocks(&mut registry, items);
     register_legacy_blocks(&mut registry, items);
+    register_campaign_blocks(&mut registry, items, liquids);
 
     registry.finalize_floor_links();
     registry
@@ -12076,6 +12391,126 @@ fn register_legacy_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         items,
         |legacy| {
             legacy.base.size = 2;
+        },
+    );
+}
+
+fn register_campaign_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &[Liquid]) {
+    registry.register_campaign_block(
+        "launch-pad",
+        CampaignBlockKind::LaunchPad,
+        items,
+        |campaign| {
+            set_requirements(
+                &mut campaign.requirements,
+                items,
+                &[
+                    ("copper", 350),
+                    ("silicon", 140),
+                    ("lead", 200),
+                    ("titanium", 150),
+                ],
+            );
+            campaign.base.build_visibility = BuildVisibility::LegacyLaunchPadOnly;
+            campaign.base.size = 3;
+            campaign.base.item_capacity = 100;
+            campaign.launch_time = 60.0 * 20.0;
+            campaign.base.has_power = true;
+            campaign.accept_multiple_items = true;
+            campaign.consume_power = 4.0;
+        },
+    );
+
+    registry.register_campaign_block(
+        "advanced-launch-pad",
+        CampaignBlockKind::AdvancedLaunchPad,
+        items,
+        |campaign| {
+            set_requirements(
+                &mut campaign.requirements,
+                items,
+                &[
+                    ("copper", 350),
+                    ("silicon", 250),
+                    ("lead", 300),
+                    ("titanium", 200),
+                ],
+            );
+            campaign.base.build_visibility = BuildVisibility::NotLegacyLaunchPadOnly;
+            campaign.base.size = 4;
+            campaign.base.item_capacity = 100;
+            campaign.launch_time = 60.0 * 30.0;
+            campaign.base.liquid_capacity = 40.0;
+            campaign.base.has_power = true;
+            if let Some(oil) = liquid_id(liquids, "oil") {
+                campaign.draw_liquid = Some(oil);
+                campaign.draw_liquid_name = Some("oil".into());
+            }
+            campaign.consume_liquid = liquid_amount(liquids, "oil", 9.0 / 60.0);
+            campaign.consume_liquid_name = Some("oil".into());
+            campaign.consume_power = 8.0;
+        },
+    );
+
+    registry.register_campaign_block(
+        "landing-pad",
+        CampaignBlockKind::LandingPad,
+        items,
+        |campaign| {
+            set_requirements(
+                &mut campaign.requirements,
+                items,
+                &[("copper", 200), ("graphite", 100), ("titanium", 100)],
+            );
+            campaign.base.build_visibility = BuildVisibility::NotLegacyLaunchPadOnly;
+            campaign.base.size = 4;
+            campaign.base.item_capacity = 100;
+            campaign.cooling_effect = "RadialEffect(steamCoolSmoke,4,90,9.5,180)".into();
+            campaign.base.liquid_capacity = 3000.0;
+            campaign.consume_liquid_amount = 1500.0;
+            campaign.consume_liquid = liquid_amount(liquids, "water", 1500.0);
+            campaign.consume_liquid_name = Some("water".into());
+        },
+    );
+
+    let core_nucleus = registry.id_by_name("core-nucleus");
+    let core_nucleus_requirements = registry
+        .get_storage_by_name("core-nucleus")
+        .map(|core| core.requirements.clone())
+        .unwrap_or_default();
+    let core_nucleus_capacity = registry
+        .get_storage_by_name("core-nucleus")
+        .map(|core| core.base.item_capacity)
+        .unwrap_or_default();
+    registry.register_campaign_block(
+        "interplanetary-accelerator",
+        CampaignBlockKind::Accelerator,
+        items,
+        |campaign| {
+            set_requirements(
+                &mut campaign.requirements,
+                items,
+                &[
+                    ("copper", 16000),
+                    ("silicon", 11000),
+                    ("thorium", 13000),
+                    ("titanium", 12000),
+                    ("surge-alloy", 6000),
+                    ("phase-fabric", 5000),
+                ],
+            );
+            campaign.base.build_visibility = BuildVisibility::CampaignOnly;
+            campaign.research_cost_multiplier = 0.1;
+            campaign.power_buffer_requirement = 1_000_000.0;
+            campaign.base.size = 7;
+            campaign.base.has_power = true;
+            campaign.consume_power = 10.0;
+            campaign.build_cost_multiplier = 0.5;
+            campaign.scaled_health = 80.0;
+            campaign.launch_block = core_nucleus;
+            campaign.launch_block_name = Some("core-nucleus".into());
+            campaign.consume_items = core_nucleus_requirements;
+            campaign.launch_block_item_capacity = core_nucleus_capacity;
         },
     );
 }
@@ -20062,6 +20497,282 @@ mod tests {
         assert_eq!(command.legacy_read_revision0_ints, 0);
         assert_eq!(command.legacy_read_bytes, 1);
         assert!(command.legacy_write_zero_byte);
+    }
+
+    #[test]
+    fn campaign_launch_landing_and_accelerator_blocks_keep_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+
+        let launch = registry.get_campaign_by_name("launch-pad").unwrap();
+        assert_eq!(launch.kind, CampaignBlockKind::LaunchPad);
+        assert_eq!(
+            launch.base.build_visibility,
+            BuildVisibility::LegacyLaunchPadOnly
+        );
+        assert_eq!(launch.base.env_enabled, Env::TERRESTRIAL);
+        assert!(launch.base.has_items);
+        assert!(launch.base.has_power);
+        assert!(launch.base.consumes_power);
+        assert!(launch.base.solid);
+        assert!(launch.base.update);
+        assert_eq!(launch.base.size, 3);
+        assert_eq!(launch.base.item_capacity, 100);
+        assert_eq!(launch.base.health, 360);
+        assert_eq!(launch.base.clip_size, 24.0);
+        assert!(launch.base.flags.contains(&BlockFlag::LaunchPad));
+        assert!(launch.configurable);
+        assert!(!launch.outputs_items);
+        assert_eq!(launch.launch_time, 1200.0);
+        assert_eq!(launch.launch_sound_pitch_rand, 0.1);
+        assert_eq!(launch.launch_sound, "padLaunch");
+        assert_eq!(launch.launch_light_color_rgba, 0xeab678ff);
+        assert!(launch.accept_multiple_items);
+        assert_eq!(launch.light_step, 1.0);
+        assert_eq!(launch.light_steps, 3);
+        assert_eq!(launch.liquid_pad, 2.0);
+        assert_eq!(launch.bottom_color, "darkerMetal");
+        assert_eq!(launch.consume_power, 4.0);
+        assert!(launch.consume_liquid.is_none());
+        assert_eq!(
+            launch.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 350
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 140
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 150
+                }
+            ]
+        );
+
+        let advanced = registry
+            .get_campaign_by_name("advanced-launch-pad")
+            .unwrap();
+        assert_eq!(advanced.kind, CampaignBlockKind::AdvancedLaunchPad);
+        assert_eq!(
+            advanced.base.build_visibility,
+            BuildVisibility::NotLegacyLaunchPadOnly
+        );
+        assert!(advanced.base.has_items);
+        assert!(advanced.base.has_power);
+        assert!(advanced.base.has_liquids);
+        assert!(advanced.base.consumes_power);
+        assert!(advanced.base.solid);
+        assert!(advanced.base.update);
+        assert_eq!(advanced.base.size, 4);
+        assert_eq!(advanced.base.item_capacity, 100);
+        assert_eq!(advanced.base.liquid_capacity, 40.0);
+        assert_eq!(advanced.base.health, 640);
+        assert_eq!(advanced.launch_time, 1800.0);
+        assert!(!advanced.accept_multiple_items);
+        assert_eq!(advanced.consume_power, 8.0);
+        assert_eq!(
+            advanced.consume_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("oil"),
+                amount: 9.0 / 60.0
+            })
+        );
+        assert_eq!(advanced.consume_liquid_name.as_deref(), Some("oil"));
+        assert_eq!(advanced.draw_liquid, Some(liquid_id("oil")));
+        assert_eq!(advanced.draw_liquid_name.as_deref(), Some("oil"));
+        assert_eq!(
+            advanced.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 350
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 300
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 200
+                }
+            ]
+        );
+
+        let landing = registry.get_campaign_by_name("landing-pad").unwrap();
+        assert_eq!(landing.kind, CampaignBlockKind::LandingPad);
+        assert_eq!(
+            landing.base.build_visibility,
+            BuildVisibility::NotLegacyLaunchPadOnly
+        );
+        assert!(landing.base.has_items);
+        assert!(landing.base.has_liquids);
+        assert!(!landing.base.has_power);
+        assert!(landing.base.consumes_power);
+        assert!(landing.base.solid);
+        assert!(landing.base.update);
+        assert!(landing.base.emit_light);
+        assert_eq!(landing.base.light_radius, 90.0);
+        assert_eq!(landing.base.size, 4);
+        assert_eq!(landing.base.item_capacity, 100);
+        assert_eq!(landing.base.liquid_capacity, 3000.0);
+        assert_eq!(landing.base.health, 640);
+        assert!(landing.configurable);
+        assert!(!landing.accepts_items);
+        assert!(!landing.can_overdrive);
+        assert!(landing.outputs_items);
+        assert_eq!(landing.arrival_duration, 150.0);
+        assert_eq!(landing.cooldown_time, 150.0);
+        assert_eq!(landing.consume_liquid_amount, 1500.0);
+        assert_eq!(
+            landing.consume_liquid,
+            Some(LiquidAmount {
+                liquid: liquid_id("water"),
+                amount: 1500.0
+            })
+        );
+        assert_eq!(landing.consume_liquid_name.as_deref(), Some("water"));
+        assert_eq!(landing.land_effect, "podLandShockwave");
+        assert_eq!(
+            landing.cooling_effect,
+            "RadialEffect(steamCoolSmoke,4,90,9.5,180)"
+        );
+        assert_eq!(landing.cooling_effect_chance, 0.2);
+        assert_eq!(landing.liquid_pad, 2.0);
+        assert_eq!(landing.bottom_color, "darkerMetal");
+        assert_eq!(landing.land_sound_volume, 0.75);
+        assert_eq!(landing.land_sound, "padLand");
+        assert_eq!(
+            landing.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 100
+                }
+            ]
+        );
+
+        let accelerator = registry
+            .get_campaign_by_name("interplanetary-accelerator")
+            .unwrap();
+        let core = registry.get_storage_by_name("core-nucleus").unwrap();
+        assert_eq!(accelerator.kind, CampaignBlockKind::Accelerator);
+        assert_eq!(
+            accelerator.base.build_visibility,
+            BuildVisibility::CampaignOnly
+        );
+        assert!(accelerator.base.has_items);
+        assert!(accelerator.base.has_power);
+        assert!(accelerator.base.consumes_power);
+        assert!(accelerator.base.solid);
+        assert!(accelerator.base.update);
+        assert!(accelerator.base.emit_light);
+        assert_eq!(accelerator.base.light_radius, 70.0);
+        assert_eq!(accelerator.base.light_color_rgba, 0xffd37fff);
+        assert_eq!(accelerator.base.size, 7);
+        assert_eq!(accelerator.base.item_capacity, 25000);
+        assert_eq!(accelerator.base.health, 3920);
+        assert_eq!(accelerator.research_cost_multiplier, 0.1);
+        assert_eq!(accelerator.power_buffer_requirement, 1_000_000.0);
+        assert_eq!(accelerator.consume_power, 10.0);
+        assert_eq!(accelerator.build_cost_multiplier, 0.5);
+        assert_eq!(accelerator.scaled_health, 80.0);
+        assert!(accelerator.configurable);
+        assert!(accelerator.accepts_items);
+        assert_eq!(accelerator.launch_block, Some(core.base.id));
+        assert_eq!(
+            accelerator.launch_block_name.as_deref(),
+            Some("core-nucleus")
+        );
+        assert_eq!(accelerator.launch_block_item_capacity, 13000);
+        assert_eq!(accelerator.consume_items, core.requirements);
+        assert_eq!(accelerator.launch_duration, 120.0);
+        assert_eq!(accelerator.charge_duration, 220.0);
+        assert_eq!(accelerator.build_duration, 120.0);
+        assert_eq!(accelerator.land_zoom_interp, "pow4In");
+        assert_eq!(accelerator.charge_zoom_interp, "pow4In");
+        assert_eq!(accelerator.land_zoom_from, 0.02);
+        assert_eq!(accelerator.land_zoom_to, 4.0);
+        assert_eq!(accelerator.charge_zoom_to, 5.0);
+        assert_eq!(accelerator.charge_rings, 4);
+        assert_eq!(accelerator.ring_rad_base, 60.0);
+        assert_eq!(accelerator.ring_rad_spacing, 25.0);
+        assert_eq!(accelerator.ring_rad_pow, 1.6);
+        assert_eq!(accelerator.ring_stroke, 3.0);
+        assert_eq!(accelerator.ring_speedup, 1.4);
+        assert_eq!(accelerator.charge_ring_merge, 2.0);
+        assert_eq!(accelerator.ring_arrow_rad, 3.0);
+        assert_eq!(accelerator.ring_handle_tilt, 0.8);
+        assert_eq!(accelerator.ring_handle_len, 30.0);
+        assert_eq!(accelerator.ring_color, "accent");
+        assert_eq!(accelerator.launch_lightning, 20);
+        assert_eq!(accelerator.lightning_color, "accent");
+        assert_eq!(accelerator.lightning_damage, 40.0);
+        assert_eq!(accelerator.lightning_offset, 24.0);
+        assert_eq!(accelerator.lightning_length_min, 5);
+        assert_eq!(accelerator.lightning_length_max, 25);
+        assert_eq!(accelerator.lightning_launch_chance, 0.8);
+        assert_eq!(accelerator.lightning_sound_volume, 0.85);
+        assert_eq!(accelerator.charge_sound, "acceleratorCharge");
+        assert_eq!(accelerator.launch_sound, "acceleratorLaunch");
+        assert_eq!(accelerator.construct_sound, "acceleratorConstruct");
+        assert_eq!(
+            accelerator.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 16000
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 11000
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 13000
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 12000
+                },
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 6000
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 5000
+                }
+            ]
+        );
     }
 
     #[test]
