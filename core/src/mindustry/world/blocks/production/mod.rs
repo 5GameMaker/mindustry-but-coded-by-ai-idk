@@ -267,6 +267,24 @@ pub fn incinerator_status(enabled: bool, heat: f32) -> IncineratorStatus {
     }
 }
 
+pub fn item_incinerator_accept_item(efficiency: f32) -> bool {
+    efficiency > 0.0
+}
+
+pub fn item_incinerator_status(enabled: bool, efficiency: f32) -> IncineratorStatus {
+    if !enabled {
+        IncineratorStatus::LogicDisable
+    } else if efficiency > 0.0 {
+        IncineratorStatus::Active
+    } else {
+        IncineratorStatus::NoInput
+    }
+}
+
+pub fn item_incinerator_effect_triggers(chance_sample: f32, effect_chance: f32) -> bool {
+    chance_sample < effect_chance
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrillState {
     pub progress: f32,
@@ -1118,6 +1136,26 @@ mod tests {
         );
         assert_eq!(incinerator_status(true, 0.51), IncineratorStatus::Active);
         assert_eq!(incinerator_status(true, 0.5), IncineratorStatus::NoInput);
+    }
+
+    #[test]
+    fn item_incinerator_acceptance_status_and_effect_chance_follow_upstream() {
+        assert!(!item_incinerator_accept_item(0.0));
+        assert!(item_incinerator_accept_item(0.01));
+        assert_eq!(
+            item_incinerator_status(false, 1.0),
+            IncineratorStatus::LogicDisable
+        );
+        assert_eq!(
+            item_incinerator_status(true, 0.0),
+            IncineratorStatus::NoInput
+        );
+        assert_eq!(
+            item_incinerator_status(true, 0.5),
+            IncineratorStatus::Active
+        );
+        assert!(item_incinerator_effect_triggers(0.19, 0.2));
+        assert!(!item_incinerator_effect_triggers(0.2, 0.2));
     }
 
     #[test]
