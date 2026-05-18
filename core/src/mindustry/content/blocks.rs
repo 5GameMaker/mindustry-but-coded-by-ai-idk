@@ -481,6 +481,7 @@ pub enum TurretBlockKind {
     LiquidTurret,
     PowerTurret,
     TractorBeamTurret,
+    PointDefenseTurret,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -740,6 +741,10 @@ pub struct TurretBlockData {
     pub scaled_force: f32,
     pub damage: f32,
     pub laser_color: String,
+    pub color: String,
+    pub beam_effect: String,
+    pub point_hit_effect: String,
+    pub bullet_damage: f32,
     pub status: String,
     pub status_duration: f32,
     pub drawer: String,
@@ -850,6 +855,10 @@ impl TurretBlockData {
             scaled_force: 0.0,
             damage: 0.0,
             laser_color: "white".into(),
+            color: "white".into(),
+            beam_effect: "none".into(),
+            point_hit_effect: "none".into(),
+            bullet_damage: 0.0,
             status: "none".into(),
             status_duration: 300.0,
             drawer: "DrawTurret".into(),
@@ -903,6 +912,21 @@ impl TurretBlockData {
                 self.shoot_sound = "beamParallax".into();
                 self.shoot_sound_volume = 0.9;
                 self.shoot_cone = 6.0;
+            }
+            TurretBlockKind::PointDefenseTurret => {
+                self.base.has_power = true;
+                self.rotate_speed = 20.0;
+                self.reload = 30.0;
+                self.coolant_multiplier = 2.0;
+                self.retarget_time = 5.0;
+                self.color = "white".into();
+                self.beam_effect = "pointBeam".into();
+                self.point_hit_effect = "pointHit".into();
+                self.shoot_effect = "sparkShoot".into();
+                self.shoot_sound = "shootSegment".into();
+                self.shoot_cone = 5.0;
+                self.bullet_damage = 10.0;
+                self.shoot_length = 3.0;
             }
         }
     }
@@ -4980,6 +5004,28 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.limit_range(9.0);
         turret.consume_coolant(0.2);
         turret.deposit_cooldown = 2.0;
+    });
+
+    registry.register_turret_block("segment", TurretBlockKind::PointDefenseTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("silicon", 130),
+                ("thorium", 80),
+                ("phase-fabric", 40),
+                ("titanium", 40),
+            ],
+        );
+
+        turret.scaled_health = 250.0;
+        turret.range = 180.0;
+        turret.consume_power = 8.0;
+        turret.base.size = 2;
+        turret.shoot_length = 5.0;
+        turret.bullet_damage = 30.0;
+        turret.reload = 8.0;
+        turret.base.env_enabled |= Env::SPACE;
     });
 
     registry.register_turret_block("tsunami", TurretBlockKind::LiquidTurret, |turret| {
@@ -9886,6 +9932,67 @@ mod tests {
         assert_eq!(surge.front_color, "surgeAmmoFront");
         assert_eq!(surge.back_color, "surgeAmmoBack");
         assert_close(surge.lifetime, (240.0 + 5.0 + 10.0) / 3.7);
+    }
+
+    #[test]
+    fn point_defense_turrets_keep_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let segment = registry.get_turret_by_name("segment").unwrap();
+        assert_eq!(segment.kind, TurretBlockKind::PointDefenseTurret);
+        assert!(segment.base.has_power);
+        assert!(segment.base.update);
+        assert!(segment.base.solid);
+        assert_eq!(segment.base.group, BlockGroup::Turrets);
+        assert_eq!(segment.base.flags, vec![BlockFlag::Turret]);
+        assert_ne!(segment.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(segment.rotate_speed, 20.0);
+        assert_eq!(segment.retarget_time, 5.0);
+        assert_eq!(segment.color, "white");
+        assert_eq!(segment.beam_effect, "pointBeam");
+        assert_eq!(segment.point_hit_effect, "pointHit");
+        assert_eq!(segment.shoot_effect, "sparkShoot");
+        assert_eq!(segment.shoot_sound, "shootSegment");
+        assert_eq!(segment.shoot_cone, 5.0);
+        assert_eq!(segment.coolant_multiplier, 2.0);
+        assert_eq!(segment.scaled_health, 250.0);
+        assert_eq!(segment.base.health, 2 * 2 * 250);
+        assert_eq!(segment.range, 180.0);
+        assert_close(segment.consume_power, 8.0);
+        assert_eq!(segment.base.size, 2);
+        assert_eq!(segment.shoot_length, 5.0);
+        assert_eq!(segment.bullet_damage, 30.0);
+        assert_eq!(segment.reload, 8.0);
+        assert_eq!(segment.fog_radius, 23.0);
+        assert_eq!(segment.place_overlap_range, 180.0 + 8.0 * 7.0);
+        assert_eq!(
+            segment.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 130
+                },
+                ItemAmount {
+                    item: item_id("thorium"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 40
+                }
+            ]
+        );
     }
 
     #[test]
