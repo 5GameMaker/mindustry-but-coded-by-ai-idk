@@ -480,6 +480,7 @@ pub enum TurretBlockKind {
     ItemTurret,
     LiquidTurret,
     PowerTurret,
+    TractorBeamTurret,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -719,6 +720,15 @@ pub struct TurretBlockData {
     pub elevation: f32,
     pub shake: f32,
     pub extinguish: bool,
+    pub retarget_time: f32,
+    pub shoot_length: f32,
+    pub laser_width: f32,
+    pub force: f32,
+    pub scaled_force: f32,
+    pub damage: f32,
+    pub laser_color: String,
+    pub status: String,
+    pub status_duration: f32,
     pub drawer: String,
     pub liquid_capacity: f32,
     pub outlined_icon: bool,
@@ -819,6 +829,15 @@ impl TurretBlockData {
             elevation: -1.0,
             shake: 0.0,
             extinguish: false,
+            retarget_time: 5.0,
+            shoot_length: 5.0,
+            laser_width: 0.6,
+            force: 0.3,
+            scaled_force: 0.0,
+            damage: 0.0,
+            laser_color: "white".into(),
+            status: "none".into(),
+            status_duration: 300.0,
             drawer: "DrawTurret".into(),
             liquid_capacity: 20.0,
             outlined_icon: true,
@@ -860,6 +879,16 @@ impl TurretBlockData {
             }
             TurretBlockKind::PowerTurret => {
                 self.base.has_power = true;
+            }
+            TurretBlockKind::TractorBeamTurret => {
+                self.base.has_power = true;
+                self.target_ground = false;
+                self.rotate_speed = 10.0;
+                self.coolant_multiplier = 1.0;
+                self.base.env_enabled |= Env::SPACE;
+                self.shoot_sound = "beamParallax".into();
+                self.shoot_sound_volume = 0.9;
+                self.shoot_cone = 6.0;
             }
         }
     }
@@ -4714,6 +4743,23 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.shoot_sound = "shootArc".into();
         turret.consume_power = 3.3;
         turret.consume_coolant(0.1);
+    });
+
+    registry.register_turret_block("parallax", TurretBlockKind::TractorBeamTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[("silicon", 160), ("titanium", 110), ("graphite", 50)],
+        );
+
+        turret.base.size = 2;
+        turret.force = 16.0;
+        turret.scaled_force = 9.0;
+        turret.range = 300.0;
+        turret.damage = 0.5;
+        turret.scaled_health = 160.0;
+        turret.rotate_speed = 12.0;
+        turret.consume_power = 3.3;
     });
 }
 
@@ -9228,6 +9274,67 @@ mod tests {
         assert!(!nested.collides_air);
         assert_eq!(nested.building_damage_multiplier, 0.25);
         assert_eq!(nested.shield_damage_multiplier, 0.2);
+    }
+
+    #[test]
+    fn tractor_beam_turrets_keep_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let parallax = registry.get_turret_by_name("parallax").unwrap();
+        assert_eq!(parallax.kind, TurretBlockKind::TractorBeamTurret);
+        assert!(parallax.base.has_power);
+        assert!(parallax.base.update);
+        assert!(parallax.base.solid);
+        assert_eq!(parallax.base.group, BlockGroup::Turrets);
+        assert_eq!(parallax.base.flags, vec![BlockFlag::Turret]);
+        assert_ne!(parallax.base.env_enabled & Env::SPACE, 0);
+        assert!(parallax.target_air);
+        assert!(!parallax.target_ground);
+        assert_eq!(parallax.retarget_time, 5.0);
+        assert_eq!(parallax.shoot_cone, 6.0);
+        assert_eq!(parallax.shoot_length, 5.0);
+        assert_eq!(parallax.laser_width, 0.6);
+        assert_eq!(parallax.laser_color, "white");
+        assert_eq!(parallax.status, "none");
+        assert_eq!(parallax.status_duration, 300.0);
+        assert_eq!(parallax.shoot_sound, "beamParallax");
+        assert_eq!(parallax.shoot_sound_volume, 0.9);
+        assert_eq!(parallax.coolant_multiplier, 1.0);
+        assert_eq!(parallax.base.size, 2);
+        assert_eq!(parallax.force, 16.0);
+        assert_eq!(parallax.scaled_force, 9.0);
+        assert_eq!(parallax.range, 300.0);
+        assert_eq!(parallax.damage, 0.5);
+        assert_eq!(parallax.scaled_health, 160.0);
+        assert_eq!(parallax.base.health, 2 * 2 * 160);
+        assert_eq!(parallax.rotate_speed, 12.0);
+        assert_close(parallax.consume_power, 3.3);
+        assert_eq!(parallax.fog_radius, 38.0);
+        assert_eq!(parallax.place_overlap_range, 300.0 + 8.0 * 7.0);
+        assert_eq!(
+            parallax.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 160
+                },
+                ItemAmount {
+                    item: item_id("titanium"),
+                    amount: 110
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 50
+                }
+            ]
+        );
     }
 
     #[test]
