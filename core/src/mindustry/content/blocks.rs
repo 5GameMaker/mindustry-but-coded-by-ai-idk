@@ -3872,6 +3872,95 @@ impl LightBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyBlockKind {
+    MechPad,
+    UnitFactory,
+    CommandCenter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyRemoveAction {
+    Remove,
+    Replace,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacyBlockData {
+    pub base: Block,
+    pub kind: LegacyBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub in_editor: bool,
+    pub generate_icons: bool,
+    pub remove_action: LegacyRemoveAction,
+    pub replacement: Option<BlockId>,
+    pub replacement_name: Option<String>,
+    pub preserve_rotation_on_replace: bool,
+    pub legacy_read_floats: i32,
+    pub legacy_read_revision0_ints: i32,
+    pub legacy_read_bytes: i32,
+    pub legacy_write_zero_byte: bool,
+}
+
+impl LegacyBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: LegacyBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.env_enabled = Env::TERRESTRIAL;
+        base.connected_power = true;
+        base.consumes_power = true;
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            in_editor: false,
+            generate_icons: false,
+            remove_action: LegacyRemoveAction::Remove,
+            replacement: None,
+            replacement_name: None,
+            preserve_rotation_on_replace: false,
+            legacy_read_floats: 0,
+            legacy_read_revision0_ints: 0,
+            legacy_read_bytes: 0,
+            legacy_write_zero_byte: false,
+        };
+        block.apply_kind_defaults();
+        block
+    }
+
+    fn apply_kind_defaults(&mut self) {
+        match self.kind {
+            LegacyBlockKind::MechPad => {
+                self.base.update = true;
+                self.base.has_power = true;
+                self.legacy_read_floats = 3;
+            }
+            LegacyBlockKind::UnitFactory => {
+                self.base.update = true;
+                self.base.has_power = true;
+                self.base.has_items = true;
+                self.base.solid = false;
+                self.remove_action = LegacyRemoveAction::Replace;
+                self.preserve_rotation_on_replace = true;
+                self.legacy_read_floats = 1;
+                self.legacy_read_revision0_ints = 1;
+            }
+            LegacyBlockKind::CommandCenter => {
+                self.base.update = true;
+                self.legacy_read_bytes = 1;
+                self.legacy_write_zero_byte = true;
+            }
+        }
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        self.apply_kind_defaults();
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
@@ -3902,6 +3991,7 @@ pub enum BlockDef {
     PayloadLoader(PayloadLoaderBlockData),
     Sandbox(SandboxBlockData),
     Light(LightBlockData),
+    Legacy(LegacyBlockData),
 }
 
 impl BlockDef {
@@ -3935,6 +4025,7 @@ impl BlockDef {
             Self::PayloadLoader(loader) => &loader.base,
             Self::Sandbox(sandbox) => &sandbox.base,
             Self::Light(light) => &light.base,
+            Self::Legacy(legacy) => &legacy.base,
         }
     }
 
@@ -4146,6 +4237,13 @@ impl BlockRegistry {
     pub fn get_light_by_name(&self, name: &str) -> Option<&LightBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Light(light) => Some(light),
+            _ => None,
+        }
+    }
+
+    pub fn get_legacy_by_name(&self, name: &str) -> Option<&LegacyBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Legacy(legacy) => Some(legacy),
             _ => None,
         }
     }
@@ -4523,6 +4621,21 @@ impl BlockRegistry {
         self.insert(BlockDef::Light(block))
     }
 
+    pub fn register_legacy_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: LegacyBlockKind,
+        items: &[Item],
+        configure: impl FnOnce(&mut LegacyBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = LegacyBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Legacy(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -4655,6 +4768,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_payload_blocks(&mut registry, items);
     register_sandbox_blocks(&mut registry, items);
     register_light_blocks(&mut registry, items);
+    register_legacy_blocks(&mut registry, items);
 
     registry.finalize_floor_links();
     registry
@@ -11918,6 +12032,52 @@ fn register_light_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         light.radius = 140.0;
         light.consume_power = 0.05;
     });
+}
+
+fn register_legacy_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+    registry.register_legacy_block("legacy-mech-pad", LegacyBlockKind::MechPad, items, |_| {});
+
+    let air = registry.id_by_name("air");
+    registry.register_legacy_block(
+        "legacy-unit-factory",
+        LegacyBlockKind::UnitFactory,
+        items,
+        |legacy| {
+            legacy.replacement = air;
+            legacy.replacement_name = Some("air".into());
+        },
+    );
+
+    let air_factory = registry.id_by_name("air-factory");
+    registry.register_legacy_block(
+        "legacy-unit-factory-air",
+        LegacyBlockKind::UnitFactory,
+        items,
+        |legacy| {
+            legacy.replacement = air_factory;
+            legacy.replacement_name = Some("air-factory".into());
+        },
+    );
+
+    let ground_factory = registry.id_by_name("ground-factory");
+    registry.register_legacy_block(
+        "legacy-unit-factory-ground",
+        LegacyBlockKind::UnitFactory,
+        items,
+        |legacy| {
+            legacy.replacement = ground_factory;
+            legacy.replacement_name = Some("ground-factory".into());
+        },
+    );
+
+    registry.register_legacy_block(
+        "command-center",
+        LegacyBlockKind::CommandCenter,
+        items,
+        |legacy| {
+            legacy.base.size = 2;
+        },
+    );
 }
 
 fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[Item]) -> i32 {
@@ -19816,6 +19976,92 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn legacy_blocks_keep_upstream_compatibility_subset() {
+        let (_, _, registry) = load_test_registry();
+        let air = registry.id_by_name("air").unwrap();
+        let air_factory = registry.id_by_name("air-factory").unwrap();
+        let ground_factory = registry.id_by_name("ground-factory").unwrap();
+
+        let assert_legacy_common = |legacy: &LegacyBlockData, expected_health: i32| {
+            assert_eq!(legacy.base.build_visibility, BuildVisibility::Shown);
+            assert_eq!(legacy.base.env_enabled, Env::TERRESTRIAL);
+            assert_eq!(legacy.base.env_required, Env::NONE);
+            assert_eq!(legacy.base.env_disabled, Env::NONE);
+            assert!(legacy.base.connected_power);
+            assert!(legacy.base.consumes_power);
+            assert!(!legacy.in_editor);
+            assert!(!legacy.generate_icons);
+            assert!(legacy.requirements.is_empty());
+            assert_eq!(legacy.base.health, expected_health);
+        };
+
+        let mech = registry.get_legacy_by_name("legacy-mech-pad").unwrap();
+        assert_legacy_common(mech, 40);
+        assert_eq!(mech.kind, LegacyBlockKind::MechPad);
+        assert_eq!(mech.remove_action, LegacyRemoveAction::Remove);
+        assert!(mech.base.update);
+        assert!(mech.base.has_power);
+        assert!(!mech.base.has_items);
+        assert!(!mech.base.solid);
+        assert_eq!(mech.legacy_read_floats, 3);
+        assert_eq!(mech.legacy_read_revision0_ints, 0);
+        assert_eq!(mech.legacy_read_bytes, 0);
+        assert!(!mech.legacy_write_zero_byte);
+        assert_eq!(mech.replacement, None);
+        assert_eq!(mech.replacement_name, None);
+
+        let legacy_factory = registry.get_legacy_by_name("legacy-unit-factory").unwrap();
+        assert_legacy_common(legacy_factory, 40);
+        assert_eq!(legacy_factory.kind, LegacyBlockKind::UnitFactory);
+        assert_eq!(legacy_factory.remove_action, LegacyRemoveAction::Replace);
+        assert_eq!(legacy_factory.replacement, Some(air));
+        assert_eq!(legacy_factory.replacement_name.as_deref(), Some("air"));
+        assert!(legacy_factory.preserve_rotation_on_replace);
+        assert!(legacy_factory.base.update);
+        assert!(legacy_factory.base.has_power);
+        assert!(legacy_factory.base.has_items);
+        assert!(!legacy_factory.base.solid);
+        assert_eq!(legacy_factory.legacy_read_floats, 1);
+        assert_eq!(legacy_factory.legacy_read_revision0_ints, 1);
+        assert_eq!(legacy_factory.legacy_read_bytes, 0);
+
+        let legacy_air = registry
+            .get_legacy_by_name("legacy-unit-factory-air")
+            .unwrap();
+        assert_legacy_common(legacy_air, 40);
+        assert_eq!(legacy_air.kind, LegacyBlockKind::UnitFactory);
+        assert_eq!(legacy_air.replacement, Some(air_factory));
+        assert_eq!(legacy_air.replacement_name.as_deref(), Some("air-factory"));
+        assert_eq!(legacy_air.remove_action, LegacyRemoveAction::Replace);
+
+        let legacy_ground = registry
+            .get_legacy_by_name("legacy-unit-factory-ground")
+            .unwrap();
+        assert_legacy_common(legacy_ground, 40);
+        assert_eq!(legacy_ground.kind, LegacyBlockKind::UnitFactory);
+        assert_eq!(legacy_ground.replacement, Some(ground_factory));
+        assert_eq!(
+            legacy_ground.replacement_name.as_deref(),
+            Some("ground-factory")
+        );
+        assert_eq!(legacy_ground.remove_action, LegacyRemoveAction::Replace);
+
+        let command = registry.get_legacy_by_name("command-center").unwrap();
+        assert_legacy_common(command, 160);
+        assert_eq!(command.kind, LegacyBlockKind::CommandCenter);
+        assert_eq!(command.base.size, 2);
+        assert_eq!(command.base.clip_size, 16.0);
+        assert_eq!(command.remove_action, LegacyRemoveAction::Remove);
+        assert!(command.base.update);
+        assert!(!command.base.has_power);
+        assert!(!command.base.has_items);
+        assert_eq!(command.legacy_read_floats, 0);
+        assert_eq!(command.legacy_read_revision0_ints, 0);
+        assert_eq!(command.legacy_read_bytes, 1);
+        assert!(command.legacy_write_zero_byte);
     }
 
     #[test]
