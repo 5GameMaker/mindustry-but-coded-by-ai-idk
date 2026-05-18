@@ -622,6 +622,7 @@ pub struct BulletSpec {
     pub light_color: String,
     pub colors: Vec<String>,
     pub homing_power: f32,
+    pub homing_delay: f32,
     pub homing_range: f32,
     pub velocity_rnd: f32,
     pub point_effect: String,
@@ -711,6 +712,9 @@ pub struct BulletSpec {
     pub shield_damage_multiplier: f32,
     pub armor_multiplier: f32,
     pub length: f32,
+    pub side_angle: f32,
+    pub side_width: f32,
+    pub side_length: f32,
     pub hit_large: bool,
     pub serrations: i32,
     pub serration_len_scl: f32,
@@ -770,6 +774,7 @@ impl BulletSpec {
             light_color: "powerLight".into(),
             colors: Vec::new(),
             homing_power: 0.0,
+            homing_delay: 0.0,
             homing_range: 0.0,
             velocity_rnd: 0.0,
             point_effect: "none".into(),
@@ -859,6 +864,9 @@ impl BulletSpec {
             shield_damage_multiplier: 1.0,
             armor_multiplier: 1.0,
             length: 0.0,
+            side_angle: 0.0,
+            side_width: 0.0,
+            side_length: 0.0,
             hit_large: false,
             serrations: 7,
             serration_len_scl: 10.0,
@@ -965,6 +973,10 @@ pub struct TurretBlockData {
     pub shoot_alternate_barrels: i32,
     pub shoot_helix_scl: f32,
     pub shoot_helix_mag: f32,
+    pub shoot_summon_x: f32,
+    pub shoot_summon_y: f32,
+    pub shoot_summon_radius: f32,
+    pub shoot_summon_spread: f32,
     pub target_air: bool,
     pub target_ground: bool,
     pub target_blocks: bool,
@@ -1092,6 +1104,10 @@ impl TurretBlockData {
             shoot_alternate_barrels: 1,
             shoot_helix_scl: 0.0,
             shoot_helix_mag: 0.0,
+            shoot_summon_x: 0.0,
+            shoot_summon_y: 0.0,
+            shoot_summon_radius: 0.0,
+            shoot_summon_spread: 0.0,
             target_air: true,
             target_ground: true,
             target_blocks: true,
@@ -4256,6 +4272,34 @@ fn point_laser_bullet(damage: f32) -> BulletSpec {
     bullet
 }
 
+fn laser_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Laser, 0.0, damage);
+    bullet.colors = vec![
+        "lancerLaser@0.4".into(),
+        "lancerLaser".into(),
+        "white".into(),
+    ];
+    bullet.hit_effect = "hitLaserBlast".into();
+    bullet.hit_color = "white".into();
+    bullet.despawn_effect = "none".into();
+    bullet.shoot_effect = "hitLancer".into();
+    bullet.smoke_effect = "none".into();
+    bullet.hit_size = 4.0;
+    bullet.lifetime = 16.0;
+    bullet.impact = true;
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet.length = 160.0;
+    bullet.width = 15.0;
+    bullet.side_length = 29.0;
+    bullet.side_width = 0.7;
+    bullet.side_angle = 90.0;
+    bullet
+}
+
 fn explosion_bullet(splash_damage: f32, splash_damage_radius: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Explosion, 0.0, 0.0);
     bullet.splash_damage = splash_damage;
@@ -7223,6 +7267,153 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.limit_range(9.0);
         turret.loop_sound = "loopGlow".into();
         turret.loop_sound_volume = 0.8;
+    });
+
+    registry.register_turret_block("malign", TurretBlockKind::PowerTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("carbide", 200),
+                ("beryllium", 1000),
+                ("silicon", 500),
+                ("graphite", 500),
+                ("phase-fabric", 200),
+            ],
+        );
+
+        let halo_color = "d370d3";
+        let heat_color = "purple";
+        let circle_rad = 11.0;
+        let circle_y = 25.0;
+
+        let mut interval = BulletSpec::new(BulletKind::Lightning, 0.0, 18.0);
+        interval.lifetime = 1.0;
+        interval.despawn_effect = "none".into();
+        interval.hit_effect = "hitLancer".into();
+        interval.keep_velocity = false;
+        interval.hittable = false;
+        interval.status = "shocked".into();
+        interval.lightning_color = halo_color.into();
+        interval.lightning_cone = 15.0;
+        interval.lightning_length = 35;
+        interval.lightning_length_rand = 5;
+
+        let mut frag = laser_bullet(65.0);
+        frag.colors = vec![format!("{halo_color}@0.4"), halo_color.into(), "white".into()];
+        frag.building_damage_multiplier = 0.25;
+        frag.width = 19.0;
+        frag.hit_effect = "hitLancer".into();
+        frag.side_angle = 175.0;
+        frag.side_width = 1.0;
+        frag.side_length = 40.0;
+        frag.lifetime = 22.0;
+        frag.draw_size = 400.0;
+        frag.length = 120.0;
+        frag.pierce_cap = 2;
+        frag.optimal_life_fract = 1.0;
+
+        let mut shoot_type = flak_bullet(8.0, 70.0);
+        shoot_type.sprite = "missile-large".into();
+        shoot_type.lifetime = 40.0;
+        shoot_type.width = 12.0;
+        shoot_type.height = 22.0;
+        shoot_type.hit_size = 7.0;
+        shoot_type.shoot_effect = "shootSmokeSquareBig".into();
+        shoot_type.smoke_effect = "shootSmokeDisperse".into();
+        shoot_type.ammo_multiplier = 1.0;
+        shoot_type.hit_color = halo_color.into();
+        shoot_type.back_color = halo_color.into();
+        shoot_type.trail_color = halo_color.into();
+        shoot_type.lightning_color = halo_color.into();
+        shoot_type.front_color = "white".into();
+        shoot_type.trail_width = 3.0;
+        shoot_type.trail_length = 12;
+        shoot_type.hit_effect = "hitSquaresColor".into();
+        shoot_type.despawn_effect = "hitBulletColor".into();
+        shoot_type.building_damage_multiplier = 0.3;
+        shoot_type.trail_effect = "colorSpark".into();
+        shoot_type.trail_rotation = true;
+        shoot_type.trail_interval = 3.0;
+        shoot_type.homing_power = 0.17;
+        shoot_type.homing_delay = 19.0;
+        shoot_type.homing_range = 160.0;
+        shoot_type.explode_range = 100.0;
+        shoot_type.explode_delay = 0.0;
+        shoot_type.flak_interval = 20.0;
+        shoot_type.despawn_shake = 3.0;
+        shoot_type.interval_bullet = Some(Box::new(interval));
+        shoot_type.frag_bullet = Some(Box::new(frag));
+        shoot_type.interval_bullets = 1;
+        shoot_type.frag_spread = 0.0;
+        shoot_type.frag_random_spread = 0.0;
+        shoot_type.interval_random_spread = 0.0;
+        shoot_type.bullet_interval = 20.0;
+        shoot_type.splash_damage = 0.0;
+        shoot_type.collides_ground = true;
+        turret.shoot_type = Some(Box::new(shoot_type));
+
+        let mut malign_parts = vec![
+            "ShapePart(progress=warmup.delay(0.9) color=d370d3 circle hollow stroke=0 strokeTo=1.6 radius=11 layer=effect y=25)".to_string(),
+            "ShapePart(progress=warmup.delay(0.9) rotateSpeed=-3.5 color=d370d3 sides=4 hollow stroke=0 strokeTo=1.6 radius=10 layer=effect y=25)".to_string(),
+            "ShapePart(progress=warmup.delay(0.9) rotateSpeed=-3.5 color=d370d3 sides=4 hollow stroke=0 strokeTo=1.6 radius=10 layer=effect y=25)".to_string(),
+            "ShapePart(progress=warmup.delay(0.9) rotateSpeed=-1.75 color=d370d3 sides=4 hollow stroke=0 strokeTo=2 radius=3 layer=effect y=25)".to_string(),
+            "HaloPart(progress=warmup.delay(0.9) color=d370d3 tri shapes=3 triLength=0 triLengthTo=5 radius=6 haloRadius=11 haloRotateSpeed=0.75 shapeRotation=180 haloRotation=180 layer=effect y=25)".to_string(),
+            format!("RegionPart(-mouth heatColor={heat_color} heatProgress=warmup moveY=-8)"),
+            "RegionPart(-end moveY=0)".to_string(),
+            format!("RegionPart(-front heatColor={heat_color} heatProgress=warmup mirror moveRot=33 moveY=-4 moveX=10)"),
+            format!("RegionPart(-back heatColor={heat_color} heatProgress=warmup mirror moveRot=10 moveX=2 moveY=5)"),
+            format!("RegionPart(-mid heatColor={heat_color} heatProgress=recoil moveY=-9.5)"),
+            "ShapePart(progress=warmup color=d370d3 circle hollow stroke=0 strokeTo=2 radius=10 layer=effect y=-15)".to_string(),
+            "ShapePart(progress=warmup color=d370d3 sides=3 rotation=90 hollow stroke=0 strokeTo=2 radius=4 layer=effect y=-15)".to_string(),
+            "HaloPart(progress=warmup color=d370d3 sides=3 shapes=3 hollow stroke=0 strokeTo=2 radius=3 haloRadius=11.5 haloRotateSpeed=1.5 layer=effect y=-15)".to_string(),
+            "HaloPart(progress=warmup color=d370d3 tri shapes=3 triLength=0 triLengthTo=10 radius=6 haloRadius=16 haloRotation=180 layer=effect y=-15)".to_string(),
+            "HaloPart(progress=warmup color=d370d3 tri shapes=3 triLength=0 triLengthTo=3 radius=6 haloRadius=16 shapeRotation=180 haloRotation=180 layer=effect y=-15)".to_string(),
+            "HaloPart(progress=warmup color=d370d3 sides=3 tri shapes=3 triLength=0 triLengthTo=10 shapeRotation=180 radius=6 haloRadius=16 haloRotateSpeed=-1.5 haloRotation=60 layer=effect y=-15)".to_string(),
+            "HaloPart(progress=warmup color=d370d3 sides=3 tri shapes=3 triLength=0 triLengthTo=4 radius=6 haloRadius=16 haloRotateSpeed=-1.5 haloRotation=60 layer=effect y=-15)".to_string(),
+        ];
+        for i in 1..4 {
+            let fi = i as f32;
+            malign_parts.push(format!(
+                "RegionPart(-spine outline=false progress=warmup.delay({}) heatProgress=warmup.add(absin(3,0.2)-0.2) mirror under layerOffset=-0.3 turretHeatLayer=turret-0.2 moveY=9 moveX={} moveRot={} color=bb68c3 heatColor=heatCol2 PartMove(recoil.delay({}),1,0,3))",
+                fi / 5.0,
+                1.0 + fi * 4.0,
+                fi * 60.0 - 130.0,
+                fi / 5.0
+            ));
+        }
+        turret.drawer = format!("DrawTurret(reinforced-, {})", malign_parts.join(", "));
+
+        turret.shoot_sound = "shootMalign".into();
+        turret.loop_sound = "loopMalign".into();
+        turret.loop_sound_volume = 1.3;
+        turret.base.size = 5;
+        turret.velocity_rnd = 0.15;
+        turret.heat_requirement = 144.0;
+        turret.max_heat_efficiency = 1.0;
+        turret.warmup_maintain_time = 120.0;
+        turret.consume_power = 40.0;
+        turret.base.has_power = true;
+        turret.unit_sort = "strongest".into();
+        turret.shoot_pattern = "ShootSummon".into();
+        turret.shoot_summon_x = 0.0;
+        turret.shoot_summon_y = 0.0;
+        turret.shoot_summon_radius = circle_rad;
+        turret.shoot_summon_spread = 20.0;
+        turret.min_warmup = 0.96;
+        turret.shoot_warmup_speed = 0.08;
+        turret.shoot_y = circle_y - 5.0;
+        turret.outline_color = "darkOutline".into();
+        turret.base.env_enabled |= Env::SPACE;
+        turret.reload = 3.5;
+        turret.range = 410.0;
+        turret.tracking_range = turret.range * 1.4;
+        turret.shoot_cone = 100.0;
+        turret.scaled_health = 370.0;
+        turret.rotate_speed = 2.6;
+        turret.recoil = 0.5;
+        turret.recoil_time = 30.0;
+        turret.shake = 3.0;
     });
 }
 
@@ -14190,6 +14381,164 @@ mod tests {
         assert!(!lightning_type.hittable);
         assert_eq!(lightning_type.light_color, "ffffffff");
         assert_close(lightning_type.building_damage_multiplier, 0.25);
+    }
+
+    #[test]
+    fn malign_power_turret_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let malign = registry.get_turret_by_name("malign").unwrap();
+        assert_eq!(malign.kind, TurretBlockKind::PowerTurret);
+        assert_eq!(
+            malign.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("carbide"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 1000
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 500
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 500
+                },
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 200
+                }
+            ]
+        );
+        assert!(malign.ammo.is_empty());
+        assert!(!malign.consume_coolant);
+        assert!(malign.consume_liquids.is_empty());
+        assert_eq!(malign.consume_power, 40.0);
+        assert!(malign.base.has_power);
+        assert_eq!(malign.base.size, 5);
+        assert_ne!(malign.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(malign.shoot_sound, "shootMalign");
+        assert_eq!(malign.loop_sound, "loopMalign");
+        assert_eq!(malign.loop_sound_volume, 1.3);
+        assert_eq!(malign.velocity_rnd, 0.15);
+        assert_eq!(malign.heat_requirement, 144.0);
+        assert_eq!(malign.max_heat_efficiency, 1.0);
+        assert_eq!(malign.warmup_maintain_time, 120.0);
+        assert_eq!(malign.unit_sort, "strongest");
+        assert_eq!(malign.shoot_pattern, "ShootSummon");
+        assert_eq!(malign.shoot_summon_x, 0.0);
+        assert_eq!(malign.shoot_summon_y, 0.0);
+        assert_eq!(malign.shoot_summon_radius, 11.0);
+        assert_eq!(malign.shoot_summon_spread, 20.0);
+        assert_eq!(malign.min_warmup, 0.96);
+        assert_eq!(malign.shoot_warmup_speed, 0.08);
+        assert_eq!(malign.shoot_y, 20.0);
+        assert_eq!(malign.outline_color, "darkOutline");
+        assert_eq!(malign.reload, 3.5);
+        assert_eq!(malign.range, 410.0);
+        assert_close(malign.tracking_range, 410.0 * 1.4);
+        assert_eq!(malign.shoot_cone, 100.0);
+        assert_eq!(malign.scaled_health, 370.0);
+        assert_eq!(malign.base.health, 5 * 5 * 370);
+        assert_eq!(malign.rotate_speed, 2.6);
+        assert_eq!(malign.recoil, 0.5);
+        assert_eq!(malign.recoil_time, 30.0);
+        assert_eq!(malign.shake, 3.0);
+        assert_eq!(malign.fog_radius, (410.0_f32 / 8.0).round());
+        assert_eq!(malign.place_overlap_range, 410.0 + 8.0 * 7.0);
+
+        assert!(malign.drawer.contains("DrawTurret(reinforced-"));
+        assert_eq!(malign.drawer.matches("ShapePart(").count(), 6);
+        assert_eq!(malign.drawer.matches("HaloPart(").count(), 6);
+        assert_eq!(malign.drawer.matches("RegionPart(").count(), 8);
+        assert_eq!(malign.drawer.matches("RegionPart(-spine").count(), 3);
+        assert!(malign.drawer.contains("warmup.delay(0.9)"));
+        assert!(malign.drawer.contains("heatColor=purple"));
+        assert!(malign.drawer.contains("color=bb68c3"));
+        assert!(malign.drawer.contains("haloRotateSpeed=-1.5"));
+
+        let shoot = malign.shoot_type.as_ref().unwrap();
+        assert_eq!(shoot.kind, BulletKind::Flak);
+        assert_eq!(shoot.speed, 8.0);
+        assert_eq!(shoot.damage, 70.0);
+        assert_eq!(shoot.sprite, "missile-large");
+        assert_eq!(shoot.lifetime, 40.0);
+        assert_eq!(shoot.width, 12.0);
+        assert_eq!(shoot.height, 22.0);
+        assert_eq!(shoot.hit_size, 7.0);
+        assert_eq!(shoot.shoot_effect, "shootSmokeSquareBig");
+        assert_eq!(shoot.smoke_effect, "shootSmokeDisperse");
+        assert_eq!(shoot.ammo_multiplier, 1.0);
+        assert_eq!(shoot.hit_color, "d370d3");
+        assert_eq!(shoot.back_color, "d370d3");
+        assert_eq!(shoot.trail_color, "d370d3");
+        assert_eq!(shoot.lightning_color, "d370d3");
+        assert_eq!(shoot.front_color, "white");
+        assert_eq!(shoot.trail_width, 3.0);
+        assert_eq!(shoot.trail_length, 12);
+        assert_eq!(shoot.hit_effect, "hitSquaresColor");
+        assert_eq!(shoot.despawn_effect, "hitBulletColor");
+        assert_close(shoot.building_damage_multiplier, 0.3);
+        assert_eq!(shoot.trail_effect, "colorSpark");
+        assert!(shoot.trail_rotation);
+        assert_eq!(shoot.trail_interval, 3.0);
+        assert_eq!(shoot.homing_power, 0.17);
+        assert_eq!(shoot.homing_delay, 19.0);
+        assert_eq!(shoot.homing_range, 160.0);
+        assert_eq!(shoot.explode_range, 100.0);
+        assert_eq!(shoot.explode_delay, 0.0);
+        assert_eq!(shoot.flak_interval, 20.0);
+        assert_eq!(shoot.despawn_shake, 3.0);
+        assert_eq!(shoot.interval_bullets, 1);
+        assert_eq!(shoot.frag_spread, 0.0);
+        assert_eq!(shoot.frag_random_spread, 0.0);
+        assert_eq!(shoot.interval_random_spread, 0.0);
+        assert_eq!(shoot.bullet_interval, 20.0);
+        assert_eq!(shoot.splash_damage, 0.0);
+        assert!(shoot.collides_ground);
+
+        let interval = shoot.interval_bullet.as_ref().unwrap();
+        assert_eq!(interval.kind, BulletKind::Lightning);
+        assert_eq!(interval.damage, 18.0);
+        assert_eq!(interval.lightning_color, "d370d3");
+        assert_eq!(interval.lightning_cone, 15.0);
+        assert_eq!(interval.lightning_length, 35);
+        assert_eq!(interval.lightning_length_rand, 5);
+        assert_eq!(interval.status, "shocked");
+        assert_eq!(interval.hit_effect, "hitLancer");
+        assert!(!interval.keep_velocity);
+        assert!(!interval.hittable);
+
+        let frag = shoot.frag_bullet.as_ref().unwrap();
+        assert_eq!(frag.kind, BulletKind::Laser);
+        assert_eq!(frag.damage, 65.0);
+        assert_eq!(frag.colors, vec!["d370d3@0.4", "d370d3", "white"]);
+        assert_close(frag.building_damage_multiplier, 0.25);
+        assert_eq!(frag.width, 19.0);
+        assert_eq!(frag.hit_effect, "hitLancer");
+        assert_eq!(frag.side_angle, 175.0);
+        assert_eq!(frag.side_width, 1.0);
+        assert_eq!(frag.side_length, 40.0);
+        assert_eq!(frag.lifetime, 22.0);
+        assert_eq!(frag.draw_size, 400.0);
+        assert_eq!(frag.length, 120.0);
+        assert_eq!(frag.pierce_cap, 2);
+        assert_eq!(frag.optimal_life_fract, 1.0);
+        assert!(frag.impact);
+        assert!(frag.pierce);
+        assert!(!frag.hittable);
+        assert!(!frag.absorbable);
     }
 
     #[test]
