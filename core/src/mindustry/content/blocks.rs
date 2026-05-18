@@ -3136,6 +3136,132 @@ impl PayloadBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PayloadMassDriverBlockData {
+    pub base: Block,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub region_suffix: String,
+    pub payload_speed: f32,
+    pub payload_rotate_speed: f32,
+    pub range: f32,
+    pub rotate_speed: f32,
+    pub length: f32,
+    pub knockback: f32,
+    pub reload: f32,
+    pub charge_time: f32,
+    pub max_payload_size: f32,
+    pub grab_width: f32,
+    pub grab_height: f32,
+    pub shoot_effect: String,
+    pub smoke_effect: String,
+    pub receive_effect: String,
+    pub shoot_sound: String,
+    pub receive_sound: String,
+    pub shoot_sound_volume: f32,
+    pub shake: f32,
+    pub transfer_effect_lifetime: f32,
+    pub transfer_effect_clip: f32,
+    pub transfer_effect_interp: String,
+    pub transfer_effect_layer: String,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub outputs_payload: bool,
+    pub output_facing: bool,
+    pub rotate: bool,
+    pub configurable: bool,
+    pub clear_on_double_tap: bool,
+    pub save_config: bool,
+    pub outline_icon: bool,
+    pub can_overdrive: bool,
+    pub under_bullets: bool,
+    pub region_rotated1: i32,
+    pub fog_radius: f32,
+}
+
+impl PayloadMassDriverBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.sync = true;
+        base.group = BlockGroup::Units;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        base.solid = true;
+        base.has_power = true;
+        let mut block = Self {
+            base,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            region_suffix: String::new(),
+            payload_speed: 0.7,
+            payload_rotate_speed: 5.0,
+            range: 100.0,
+            rotate_speed: 5.0,
+            length: 89.0 / 8.0,
+            knockback: 5.0,
+            reload: 30.0,
+            charge_time: 100.0,
+            max_payload_size: 3.0,
+            grab_width: 8.0,
+            grab_height: 11.0 / 4.0,
+            shoot_effect: "shootBig2".into(),
+            smoke_effect: "shootPayloadDriver".into(),
+            receive_effect: "payloadReceive".into(),
+            shoot_sound: "massdriver".into(),
+            receive_sound: "massdriverReceive".into(),
+            shoot_sound_volume: 0.7,
+            shake: 3.0,
+            transfer_effect_lifetime: 11.0,
+            transfer_effect_clip: 600.0,
+            transfer_effect_interp: "sineIn".into(),
+            transfer_effect_layer: "Layer.flyingUnitLow-1".into(),
+            accepts_payload: false,
+            accepts_unit_payloads: true,
+            outputs_payload: true,
+            output_facing: true,
+            rotate: true,
+            configurable: true,
+            clear_on_double_tap: false,
+            save_config: false,
+            outline_icon: true,
+            can_overdrive: true,
+            under_bullets: false,
+            region_rotated1: 1,
+            fog_radius: -1.0,
+        };
+        block.apply_payload_mass_driver_base_flags();
+        block
+    }
+
+    fn apply_payload_mass_driver_base_flags(&mut self) {
+        self.base.has_power = true;
+        self.base.solid = true;
+        self.base.update = true;
+        self.base.sync = true;
+        self.base.group = BlockGroup::Units;
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        self.apply_payload_mass_driver_base_flags();
+        self.base.consumes_power = self.consume_power > 0.0;
+        self.base.clip_size = self
+            .base
+            .clip_size
+            .max(self.base.size as f32 * TILE_SIZE as f32 + (self.range + 4.0) * 2.0);
+        if self.fog_radius > 0.0 && !self.base.flags.contains(&BlockFlag::HasFogRadius) {
+            self.base.flags.push(BlockFlag::HasFogRadius);
+        }
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -3159,6 +3285,7 @@ pub enum BlockDef {
     UnitAssemblerModule(UnitAssemblerModuleBlockData),
     UnitRepairTower(UnitRepairTowerBlockData),
     Payload(PayloadBlockData),
+    PayloadMassDriver(PayloadMassDriverBlockData),
 }
 
 impl BlockDef {
@@ -3186,6 +3313,7 @@ impl BlockDef {
             Self::UnitAssemblerModule(module) => &module.base,
             Self::UnitRepairTower(tower) => &tower.base,
             Self::Payload(payload) => &payload.base,
+            Self::PayloadMassDriver(driver) => &driver.base,
         }
     }
 
@@ -3346,6 +3474,16 @@ impl BlockRegistry {
     pub fn get_payload_by_name(&self, name: &str) -> Option<&PayloadBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Payload(payload) => Some(payload),
+            _ => None,
+        }
+    }
+
+    pub fn get_payload_mass_driver_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&PayloadMassDriverBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::PayloadMassDriver(driver) => Some(driver),
             _ => None,
         }
     }
@@ -3635,6 +3773,20 @@ impl BlockRegistry {
         configure(&mut block);
         block.base.derive_layout_fields();
         self.insert(BlockDef::Payload(block))
+    }
+
+    pub fn register_payload_mass_driver_block(
+        &mut self,
+        name: impl Into<String>,
+        items: &[Item],
+        configure: impl FnOnce(&mut PayloadMassDriverBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = PayloadMassDriverBlockData::new(id, name);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::PayloadMassDriver(block))
     }
 
     pub fn set_floor_wall_by_name(
@@ -10788,6 +10940,59 @@ fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
             payload.under_bullets = true;
         },
     );
+
+    registry.register_payload_mass_driver_block("payload-mass-driver", items, |driver| {
+        set_requirements(
+            &mut driver.requirements,
+            items,
+            &[("tungsten", 40), ("silicon", 50), ("graphite", 20)],
+        );
+        driver.region_suffix = "-dark".into();
+        driver.base.size = 3;
+        driver.reload = 130.0;
+        driver.charge_time = 90.0;
+        driver.range = 700.0;
+        driver.max_payload_size = 2.5;
+        driver.fog_radius = 5.0;
+        driver.consume_power = 0.5;
+    });
+
+    registry.register_payload_mass_driver_block("large-payload-mass-driver", items, |driver| {
+        set_requirements(
+            &mut driver.requirements,
+            items,
+            &[
+                ("phase-fabric", 20),
+                ("tungsten", 200),
+                ("silicon", 200),
+                ("graphite", 100),
+                ("oxide", 30),
+            ],
+        );
+        driver.region_suffix = "-dark".into();
+        driver.base.size = 5;
+        driver.reload = 130.0;
+        driver.charge_time = 100.0;
+        driver.range = 2100.0;
+        driver.max_payload_size = 4.0;
+        driver.consume_power = 3.0;
+    });
+}
+
+fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[Item]) -> i32 {
+    let scaling = requirements.iter().fold(1.0, |total, requirement| {
+        let health_scaling = items
+            .iter()
+            .find(|item| item.base.mappable.base.id == requirement.item)
+            .map(|item| item.health_scaling)
+            .unwrap_or(0.0);
+        total + health_scaling * requirement.amount as f32
+    });
+    round_to_multiple((size * size) as f32 * 40.0 * scaling, 5.0) as i32
+}
+
+fn round_to_multiple(value: f32, step: f32) -> f32 {
+    (value / step).round() * step
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -17901,6 +18106,157 @@ mod tests {
                 item: item_id("tungsten"),
                 amount: 15
             }]
+        );
+    }
+
+    #[test]
+    fn payload_mass_drivers_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let driver = registry
+            .get_payload_mass_driver_by_name("payload-mass-driver")
+            .unwrap();
+        assert_eq!(driver.base.group, BlockGroup::Units);
+        assert!(driver.base.update);
+        assert!(driver.base.solid);
+        assert!(driver.base.has_power);
+        assert!(driver.base.consumes_power);
+        assert!(driver.base.sync);
+        assert_eq!(
+            driver.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(driver.base.size, 3);
+        assert_eq!(driver.base.health, 11880);
+        assert_eq!(
+            driver.base.clip_size,
+            3.0 * TILE_SIZE as f32 + (700.0 + 4.0) * 2.0
+        );
+        assert!(driver.base.flags.contains(&BlockFlag::HasFogRadius));
+        assert_eq!(driver.region_suffix, "-dark");
+        assert_eq!(driver.payload_speed, 0.7);
+        assert_eq!(driver.payload_rotate_speed, 5.0);
+        assert_eq!(driver.range, 700.0);
+        assert_eq!(driver.rotate_speed, 5.0);
+        assert_eq!(driver.length, 89.0 / 8.0);
+        assert_eq!(driver.knockback, 5.0);
+        assert_eq!(driver.reload, 130.0);
+        assert_eq!(driver.charge_time, 90.0);
+        assert_eq!(driver.max_payload_size, 2.5);
+        assert_eq!(driver.grab_width, 8.0);
+        assert_eq!(driver.grab_height, 11.0 / 4.0);
+        assert_eq!(driver.consume_power, 0.5);
+        assert_eq!(driver.shoot_effect, "shootBig2");
+        assert_eq!(driver.smoke_effect, "shootPayloadDriver");
+        assert_eq!(driver.receive_effect, "payloadReceive");
+        assert_eq!(driver.shoot_sound, "massdriver");
+        assert_eq!(driver.receive_sound, "massdriverReceive");
+        assert_eq!(driver.shoot_sound_volume, 0.7);
+        assert_eq!(driver.shake, 3.0);
+        assert_eq!(driver.transfer_effect_lifetime, 11.0);
+        assert_eq!(driver.transfer_effect_clip, 600.0);
+        assert_eq!(driver.transfer_effect_interp, "sineIn");
+        assert_eq!(driver.transfer_effect_layer, "Layer.flyingUnitLow-1");
+        assert!(!driver.accepts_payload);
+        assert!(driver.accepts_unit_payloads);
+        assert!(driver.outputs_payload);
+        assert!(driver.output_facing);
+        assert!(driver.rotate);
+        assert!(driver.configurable);
+        assert!(!driver.clear_on_double_tap);
+        assert!(!driver.save_config);
+        assert!(driver.outline_icon);
+        assert!(driver.can_overdrive);
+        assert!(!driver.under_bullets);
+        assert_eq!(driver.region_rotated1, 1);
+        assert_eq!(driver.fog_radius, 5.0);
+        assert!(driver.research_cost.is_empty());
+        assert_eq!(driver.research_cost_multiplier, 1.0);
+        assert_eq!(
+            driver.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 50
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 20
+                }
+            ]
+        );
+
+        let large = registry
+            .get_payload_mass_driver_by_name("large-payload-mass-driver")
+            .unwrap();
+        assert_eq!(large.base.group, BlockGroup::Units);
+        assert!(large.base.update);
+        assert!(large.base.solid);
+        assert!(large.base.has_power);
+        assert!(large.base.consumes_power);
+        assert!(large.base.sync);
+        assert_eq!(
+            large.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(large.base.size, 5);
+        assert_eq!(large.base.health, 181000);
+        assert_eq!(
+            large.base.clip_size,
+            5.0 * TILE_SIZE as f32 + (2100.0 + 4.0) * 2.0
+        );
+        assert!(!large.base.flags.contains(&BlockFlag::HasFogRadius));
+        assert_eq!(large.region_suffix, "-dark");
+        assert_eq!(large.payload_speed, 0.7);
+        assert_eq!(large.payload_rotate_speed, 5.0);
+        assert_eq!(large.range, 2100.0);
+        assert_eq!(large.rotate_speed, 5.0);
+        assert_eq!(large.length, 89.0 / 8.0);
+        assert_eq!(large.knockback, 5.0);
+        assert_eq!(large.reload, 130.0);
+        assert_eq!(large.charge_time, 100.0);
+        assert_eq!(large.max_payload_size, 4.0);
+        assert_eq!(large.consume_power, 3.0);
+        assert!(!large.accepts_payload);
+        assert!(large.accepts_unit_payloads);
+        assert!(large.outputs_payload);
+        assert!(large.output_facing);
+        assert!(large.rotate);
+        assert!(large.configurable);
+        assert!(large.outline_icon);
+        assert!(large.can_overdrive);
+        assert_eq!(large.region_rotated1, 1);
+        assert_eq!(large.fog_radius, -1.0);
+        assert!(large.research_cost.is_empty());
+        assert_eq!(
+            large.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("phase-fabric"),
+                    amount: 20
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 30
+                }
+            ]
         );
     }
 
