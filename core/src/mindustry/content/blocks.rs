@@ -3461,6 +3461,137 @@ impl PayloadConstructorBlockData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadLoaderBlockKind {
+    Loader,
+    Unloader,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadLoaderBlockData {
+    pub base: Block,
+    pub kind: PayloadLoaderBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub region_suffix: String,
+    pub payload_speed: f32,
+    pub payload_rotate_speed: f32,
+    pub load_time: f32,
+    pub items_loaded: i32,
+    pub liquids_loaded: f32,
+    pub max_block_size: i32,
+    pub max_power_consumption: f32,
+    pub load_power_dynamic: bool,
+    pub base_power_use: f32,
+    pub offload_speed: i32,
+    pub max_power_unload: f32,
+    pub outputs_items: bool,
+    pub outputs_liquid: bool,
+    pub accepts_payload: bool,
+    pub accepts_unit_payloads: bool,
+    pub outputs_payload: bool,
+    pub output_facing: bool,
+    pub rotate: bool,
+    pub configurable: bool,
+    pub clear_on_double_tap: bool,
+    pub save_config: bool,
+    pub can_overdrive: bool,
+    pub under_bullets: bool,
+    pub region_rotated1: i32,
+    pub fog_radius: f32,
+}
+
+impl PayloadLoaderBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: PayloadLoaderBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.sync = true;
+        base.group = BlockGroup::Payloads;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        base.has_items = true;
+        base.has_liquids = true;
+        base.has_power = true;
+        base.item_capacity = 100;
+        base.liquid_capacity = 100.0;
+        base.size = 3;
+        let mut block = Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            region_suffix: String::new(),
+            payload_speed: 0.7,
+            payload_rotate_speed: 5.0,
+            load_time: 2.0,
+            items_loaded: 8,
+            liquids_loaded: 40.0,
+            max_block_size: 3,
+            max_power_consumption: 40.0,
+            load_power_dynamic: true,
+            base_power_use: 0.0,
+            offload_speed: 0,
+            max_power_unload: 0.0,
+            outputs_items: false,
+            outputs_liquid: false,
+            accepts_payload: true,
+            accepts_unit_payloads: true,
+            outputs_payload: true,
+            output_facing: true,
+            rotate: true,
+            configurable: false,
+            clear_on_double_tap: false,
+            save_config: false,
+            can_overdrive: false,
+            under_bullets: false,
+            region_rotated1: -1,
+            fog_radius: -1.0,
+        };
+        if matches!(block.kind, PayloadLoaderBlockKind::Unloader) {
+            block.apply_payload_unloader_defaults();
+        }
+        block.apply_payload_loader_base_flags();
+        block
+    }
+
+    fn apply_payload_unloader_defaults(&mut self) {
+        self.base.outputs_power = true;
+        self.base.consumes_power = true;
+        self.outputs_items = true;
+        self.outputs_liquid = true;
+        self.load_power_dynamic = false;
+        self.offload_speed = 4;
+        self.max_power_unload = 80.0;
+        self.can_overdrive = false;
+    }
+
+    fn apply_payload_loader_base_flags(&mut self) {
+        self.base.has_items = true;
+        self.base.has_liquids = true;
+        self.base.has_power = true;
+        self.base.update = true;
+        self.base.sync = true;
+        self.base.group = BlockGroup::Payloads;
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        self.apply_payload_loader_base_flags();
+        self.base.consumes_power = self.base.consumes_power || self.consume_power > 0.0;
+        self.base.outputs_power =
+            self.base.outputs_power || self.kind == PayloadLoaderBlockKind::Unloader;
+        if self.fog_radius > 0.0 && !self.base.flags.contains(&BlockFlag::HasFogRadius) {
+            self.base.flags.push(BlockFlag::HasFogRadius);
+        }
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
@@ -3488,6 +3619,7 @@ pub enum BlockDef {
     PayloadMassDriver(PayloadMassDriverBlockData),
     PayloadDeconstructor(PayloadDeconstructorBlockData),
     PayloadConstructor(PayloadConstructorBlockData),
+    PayloadLoader(PayloadLoaderBlockData),
 }
 
 impl BlockDef {
@@ -3518,6 +3650,7 @@ impl BlockDef {
             Self::PayloadMassDriver(driver) => &driver.base,
             Self::PayloadDeconstructor(deconstructor) => &deconstructor.base,
             Self::PayloadConstructor(constructor) => &constructor.base,
+            Self::PayloadLoader(loader) => &loader.base,
         }
     }
 
@@ -3708,6 +3841,13 @@ impl BlockRegistry {
     ) -> Option<&PayloadConstructorBlockData> {
         match self.get_by_name(name)? {
             BlockDef::PayloadConstructor(constructor) => Some(constructor),
+            _ => None,
+        }
+    }
+
+    pub fn get_payload_loader_by_name(&self, name: &str) -> Option<&PayloadLoaderBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::PayloadLoader(loader) => Some(loader),
             _ => None,
         }
     }
@@ -4039,6 +4179,21 @@ impl BlockRegistry {
         block.finalize(items);
         block.base.derive_layout_fields();
         self.insert(BlockDef::PayloadConstructor(block))
+    }
+
+    pub fn register_payload_loader_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: PayloadLoaderBlockKind,
+        items: &[Item],
+        configure: impl FnOnce(&mut PayloadLoaderBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = PayloadLoaderBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::PayloadLoader(block))
     }
 
     pub fn set_floor_wall_by_name(
@@ -11307,6 +11462,42 @@ fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
         constructor.base.size = 5;
         constructor.consume_power = 3.0;
     });
+
+    registry.register_payload_loader_block(
+        "payload-loader",
+        PayloadLoaderBlockKind::Loader,
+        items,
+        |loader| {
+            set_requirements(
+                &mut loader.requirements,
+                items,
+                &[("graphite", 80), ("silicon", 160), ("tungsten", 90)],
+            );
+            loader.region_suffix = "-dark".into();
+            loader.base.has_power = true;
+            loader.consume_power = 2.0;
+            loader.base.size = 3;
+            loader.fog_radius = 5.0;
+        },
+    );
+
+    registry.register_payload_loader_block(
+        "payload-unloader",
+        PayloadLoaderBlockKind::Unloader,
+        items,
+        |loader| {
+            set_requirements(
+                &mut loader.requirements,
+                items,
+                &[("graphite", 140), ("silicon", 220), ("tungsten", 180)],
+            );
+            loader.region_suffix = "-dark".into();
+            loader.base.has_power = true;
+            loader.consume_power = 2.0;
+            loader.base.size = 3;
+            loader.fog_radius = 5.0;
+        },
+    );
 }
 
 fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[Item]) -> i32 {
@@ -18851,6 +19042,143 @@ mod tests {
                 ItemAmount {
                     item: item_id("thorium"),
                     amount: 80
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn payload_loader_and_unloader_keep_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let loader = registry
+            .get_payload_loader_by_name("payload-loader")
+            .unwrap();
+        assert_eq!(loader.kind, PayloadLoaderBlockKind::Loader);
+        assert_eq!(loader.base.group, BlockGroup::Payloads);
+        assert!(loader.base.update);
+        assert!(loader.base.sync);
+        assert!(loader.base.has_items);
+        assert!(loader.base.has_liquids);
+        assert!(loader.base.has_power);
+        assert!(loader.base.consumes_power);
+        assert!(!loader.base.outputs_power);
+        assert_eq!(
+            loader.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(loader.base.size, 3);
+        assert_eq!(loader.base.item_capacity, 100);
+        assert_eq!(loader.base.liquid_capacity, 100.0);
+        assert_eq!(loader.base.health, 645);
+        assert!(loader.base.flags.contains(&BlockFlag::HasFogRadius));
+        assert_eq!(loader.region_suffix, "-dark");
+        assert_eq!(loader.payload_speed, 0.7);
+        assert_eq!(loader.payload_rotate_speed, 5.0);
+        assert_eq!(loader.load_time, 2.0);
+        assert_eq!(loader.items_loaded, 8);
+        assert_eq!(loader.liquids_loaded, 40.0);
+        assert_eq!(loader.max_block_size, 3);
+        assert_eq!(loader.max_power_consumption, 40.0);
+        assert!(loader.load_power_dynamic);
+        assert_eq!(loader.base_power_use, 0.0);
+        assert_eq!(loader.offload_speed, 0);
+        assert_eq!(loader.max_power_unload, 0.0);
+        assert!(!loader.outputs_items);
+        assert!(!loader.outputs_liquid);
+        assert!(loader.accepts_payload);
+        assert!(loader.accepts_unit_payloads);
+        assert!(loader.outputs_payload);
+        assert!(loader.output_facing);
+        assert!(loader.rotate);
+        assert!(!loader.configurable);
+        assert!(!loader.clear_on_double_tap);
+        assert!(!loader.save_config);
+        assert!(!loader.can_overdrive);
+        assert!(!loader.under_bullets);
+        assert_eq!(loader.region_rotated1, -1);
+        assert_eq!(loader.fog_radius, 5.0);
+        assert_eq!(loader.consume_power, 2.0);
+        assert!(loader.research_cost.is_empty());
+        assert_eq!(loader.research_cost_multiplier, 1.0);
+        assert_eq!(
+            loader.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 160
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 90
+                }
+            ]
+        );
+
+        let unloader = registry
+            .get_payload_loader_by_name("payload-unloader")
+            .unwrap();
+        assert_eq!(unloader.kind, PayloadLoaderBlockKind::Unloader);
+        assert_eq!(unloader.base.group, BlockGroup::Payloads);
+        assert!(unloader.base.update);
+        assert!(unloader.base.sync);
+        assert!(unloader.base.has_items);
+        assert!(unloader.base.has_liquids);
+        assert!(unloader.base.has_power);
+        assert!(unloader.base.consumes_power);
+        assert!(unloader.base.outputs_power);
+        assert_eq!(
+            unloader.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert_eq!(unloader.base.size, 3);
+        assert_eq!(unloader.base.item_capacity, 100);
+        assert_eq!(unloader.base.liquid_capacity, 100.0);
+        assert_eq!(unloader.base.health, 645);
+        assert!(unloader.base.flags.contains(&BlockFlag::HasFogRadius));
+        assert_eq!(unloader.region_suffix, "-dark");
+        assert_eq!(unloader.payload_speed, 0.7);
+        assert_eq!(unloader.payload_rotate_speed, 5.0);
+        assert_eq!(unloader.load_time, 2.0);
+        assert_eq!(unloader.items_loaded, 8);
+        assert_eq!(unloader.liquids_loaded, 40.0);
+        assert_eq!(unloader.max_block_size, 3);
+        assert_eq!(unloader.max_power_consumption, 40.0);
+        assert!(!unloader.load_power_dynamic);
+        assert_eq!(unloader.offload_speed, 4);
+        assert_eq!(unloader.max_power_unload, 80.0);
+        assert!(unloader.outputs_items);
+        assert!(unloader.outputs_liquid);
+        assert!(unloader.accepts_payload);
+        assert!(unloader.accepts_unit_payloads);
+        assert!(unloader.outputs_payload);
+        assert!(unloader.output_facing);
+        assert!(unloader.rotate);
+        assert!(!unloader.configurable);
+        assert!(!unloader.can_overdrive);
+        assert_eq!(unloader.region_rotated1, -1);
+        assert_eq!(unloader.fog_radius, 5.0);
+        assert_eq!(unloader.consume_power, 2.0);
+        assert!(unloader.research_cost.is_empty());
+        assert_eq!(
+            unloader.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 140
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 220
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 180
                 }
             ]
         );
