@@ -1,5 +1,6 @@
 pub mod campaign;
 pub mod environment;
+pub mod heat;
 pub mod legacy;
 pub mod logic;
 pub mod payloads;
