@@ -481,6 +481,7 @@ pub enum TurretBlockKind {
     LiquidTurret,
     PowerTurret,
     LaserTurret,
+    ContinuousLiquidTurret,
     TractorBeamTurret,
     PointDefenseTurret,
 }
@@ -498,6 +499,7 @@ pub enum BulletKind {
     Lightning,
     Rail,
     ContinuousLaser,
+    ContinuousFlame,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -543,6 +545,10 @@ pub struct BulletSpec {
     pub continuous: bool,
     pub timescale_damage: bool,
     pub impact: bool,
+    pub optimal_life_fract: f32,
+    pub laser_absorb: bool,
+    pub pierce_armor: bool,
+    pub flare_color: String,
     pub incend_chance: f32,
     pub incend_spread: f32,
     pub incend_amount: i32,
@@ -653,6 +659,10 @@ impl BulletSpec {
             continuous: false,
             timescale_damage: false,
             impact: false,
+            optimal_life_fract: 1.0,
+            laser_absorb: true,
+            pierce_armor: false,
+            flare_color: "e189f5".into(),
             incend_chance: 0.0,
             incend_spread: 0.0,
             incend_amount: 0,
@@ -750,6 +760,7 @@ pub struct TurretBlockData {
     pub shoot_type: Option<Box<BulletSpec>>,
     pub research_cost_multiplier: f32,
     pub consume_power: f32,
+    pub liquid_consumed: f32,
     pub coolant_amount: f32,
     pub coolant_multiplier: f32,
     pub consume_coolant: bool,
@@ -870,6 +881,7 @@ impl TurretBlockData {
             shoot_type: None,
             research_cost_multiplier: 1.0,
             consume_power: 0.0,
+            liquid_consumed: 1.0 / 60.0,
             coolant_amount: 0.0,
             coolant_multiplier: 5.0,
             consume_coolant: false,
@@ -1009,6 +1021,13 @@ impl TurretBlockData {
                 self.base.has_power = true;
                 self.coolant_multiplier = 1.0;
             }
+            TurretBlockKind::ContinuousLiquidTurret => {
+                self.base.has_liquids = true;
+                self.loop_sound = "loopMineBeam".into();
+                self.shoot_sound = "none".into();
+                self.smoke_effect = "none".into();
+                self.shoot_effect = "none".into();
+            }
             TurretBlockKind::TractorBeamTurret => {
                 self.base.has_power = true;
                 self.target_ground = false;
@@ -1062,7 +1081,11 @@ impl TurretBlockData {
                     .max(self.range + ammo.bullet.range_change + self.place_overlap_margin);
             }
         }
-        if matches!(self.kind, TurretBlockKind::LiquidTurret) && self.target_ground {
+        if matches!(
+            self.kind,
+            TurretBlockKind::LiquidTurret | TurretBlockKind::ContinuousLiquidTurret
+        ) && self.target_ground
+        {
             for ammo in &self.liquid_ammo {
                 self.place_overlap_range = self
                     .place_overlap_range
@@ -3991,6 +4014,43 @@ fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     bullet
 }
 
+fn continuous_flame_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::ContinuousFlame, 0.0, damage);
+    bullet.length = 120.0;
+    bullet.damage_interval = 5.0;
+    bullet.continuous = true;
+    bullet.remove_after_pierce = false;
+    bullet.pierce_cap = -1;
+    bullet.speed = 0.0;
+    bullet.despawn_effect = "none".into();
+    bullet.shoot_effect = "none".into();
+    bullet.lifetime = 16.0;
+    bullet.impact = true;
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet.optimal_life_fract = 0.5;
+    bullet.hit_effect = "hitFlameBeam".into();
+    bullet.hit_size = 4.0;
+    bullet.draw_size = 420.0;
+    bullet.hit_color = "e189f5".into();
+    bullet.light_color = "e189f5".into();
+    bullet.laser_absorb = false;
+    bullet.ammo_multiplier = 1.0;
+    bullet.pierce_armor = true;
+    bullet.width = 3.7;
+    bullet.colors = vec![
+        "eb7abe88".into(),
+        "e189f5b2".into(),
+        "907ef7cc".into(),
+        "91a4ff".into(),
+        "white".into(),
+    ];
+    bullet
+}
+
 fn shrapnel_bullet() -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, 1.0);
     bullet.length = 100.0;
@@ -5999,6 +6059,72 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.rotate_speed = 3.0;
         turret.consume_coolant(15.0 / 60.0);
         turret.limit_range(25.0);
+    });
+
+    registry.register_turret_block("sublimate", TurretBlockKind::ContinuousLiquidTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("tungsten", 150),
+                ("silicon", 200),
+                ("oxide", 40),
+                ("beryllium", 400),
+            ],
+        );
+
+        turret.drawer = "DrawTurret(reinforced-, heatColor=fa2859, RegionPart(-back warmup mirror moveRot=40 under), RegionPart(-front warmup mirror moveRot=40 under), RegionPart(-nozzle warmup mirror))".into();
+        turret.outline_color = "darkOutline".into();
+        turret.liquid_capacity = 50.0;
+        turret.liquid_consumed = 18.0 / 60.0;
+        turret.target_interval = 5.0;
+        turret.new_target_interval = 30.0;
+        turret.target_under_blocks = false;
+        turret.shoot_y = 8.0;
+
+        let r = 130.0;
+        turret.range = r;
+        turret.loop_sound = "shootSublimate".into();
+        turret.shoot_sound = "none".into();
+        turret.loop_sound_volume = 1.0;
+
+        let mut ozone = continuous_flame_bullet(60.0);
+        ozone.length = r;
+        ozone.ammo_multiplier = 1.2;
+        ozone.knockback = 1.0;
+        ozone.pierce_cap = 2;
+        ozone.building_damage_multiplier = 0.3;
+        ozone.timescale_damage = true;
+        ozone.colors = vec![
+            "eb7abe88".into(),
+            "e189f5b2".into(),
+            "907ef7cc".into(),
+            "91a4ff".into(),
+            "white".into(),
+        ];
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "ozone", ozone);
+
+        let mut cyanogen = continuous_flame_bullet(130.0);
+        cyanogen.range_change = 70.0;
+        cyanogen.length = r + cyanogen.range_change;
+        cyanogen.knockback = 2.0;
+        cyanogen.pierce_cap = 3;
+        cyanogen.building_damage_multiplier = 0.3;
+        cyanogen.timescale_damage = true;
+        cyanogen.colors = vec![
+            "465ab888".into(),
+            "66a6d2b2".into(),
+            "89e8b6cc".into(),
+            "cafcbe".into(),
+            "white".into(),
+        ];
+        cyanogen.flare_color = "89e8b6".into();
+        cyanogen.light_color = "89e8b6".into();
+        cyanogen.hit_color = "89e8b6".into();
+        push_liquid_turret_ammo(&mut turret.liquid_ammo, liquids, "cyanogen", cyanogen);
+
+        turret.scaled_health = 210.0;
+        turret.base.size = 3;
     });
 }
 
@@ -11899,6 +12025,123 @@ mod tests {
         assert_eq!(silicon.hit_effect, "hitSquaresColor");
         assert_close(silicon.building_damage_multiplier, 0.2);
         assert_close(silicon.lifetime, (125.0 + 25.0 + 10.0) / 8.0);
+    }
+
+    #[test]
+    fn sublimate_continuous_liquid_turret_keeps_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_content_id = |name: &str| {
+            all_liquids
+                .iter()
+                .find(|liquid| liquid.base.mappable.name.as_str() == name)
+                .unwrap()
+                .base
+                .mappable
+                .base
+                .id
+        };
+        fn liquid_ammo_for(turret: &TurretBlockData, liquid: ContentId) -> &LiquidTurretAmmo {
+            turret
+                .liquid_ammo
+                .iter()
+                .find(|ammo| ammo.liquid == liquid)
+                .unwrap()
+        }
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let sublimate = registry.get_turret_by_name("sublimate").unwrap();
+        assert_eq!(sublimate.kind, TurretBlockKind::ContinuousLiquidTurret);
+        assert!(sublimate.base.has_liquids);
+        assert_eq!(sublimate.drawer.contains("heatColor=fa2859"), true);
+        assert_eq!(sublimate.outline_color, "darkOutline");
+        assert_eq!(sublimate.liquid_capacity, 50.0);
+        assert_eq!(sublimate.base.liquid_capacity, 50.0);
+        assert_close(sublimate.liquid_consumed, 18.0 / 60.0);
+        assert_eq!(sublimate.target_interval, 5.0);
+        assert_eq!(sublimate.new_target_interval, 30.0);
+        assert!(!sublimate.target_under_blocks);
+        assert_eq!(sublimate.shoot_y, 8.0);
+        assert_eq!(sublimate.range, 130.0);
+        assert_eq!(sublimate.loop_sound, "shootSublimate");
+        assert_eq!(sublimate.shoot_sound, "none");
+        assert_eq!(sublimate.loop_sound_volume, 1.0);
+        assert_eq!(sublimate.scaled_health, 210.0);
+        assert_eq!(sublimate.base.size, 3);
+        assert_eq!(sublimate.base.health, 3 * 3 * 210);
+        assert_eq!(sublimate.fog_radius, 16.0);
+        assert_eq!(sublimate.place_overlap_range, 130.0 + 70.0 + 8.0 * 7.0);
+        assert_eq!(
+            sublimate.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 150
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("beryllium"),
+                    amount: 400
+                }
+            ]
+        );
+
+        let ozone = &liquid_ammo_for(sublimate, liquid_content_id("ozone")).bullet;
+        assert_eq!(ozone.kind, BulletKind::ContinuousFlame);
+        assert_eq!(ozone.damage, 60.0);
+        assert_eq!(ozone.length, 130.0);
+        assert_eq!(ozone.ammo_multiplier, 1.2);
+        assert_eq!(ozone.knockback, 1.0);
+        assert_eq!(ozone.pierce_cap, 2);
+        assert_close(ozone.building_damage_multiplier, 0.3);
+        assert!(ozone.timescale_damage);
+        assert_eq!(ozone.hit_effect, "hitFlameBeam");
+        assert_eq!(ozone.hit_size, 4.0);
+        assert_eq!(ozone.draw_size, 420.0);
+        assert_eq!(ozone.lifetime, 16.0);
+        assert_eq!(ozone.optimal_life_fract, 0.5);
+        assert!(!ozone.laser_absorb);
+        assert!(ozone.pierce_armor);
+        assert!(ozone.continuous);
+        assert!(!ozone.remove_after_pierce);
+        assert!(!ozone.keep_velocity);
+        assert!(!ozone.collides);
+        assert!(ozone.pierce);
+        assert!(!ozone.hittable);
+        assert!(!ozone.absorbable);
+        assert_eq!(
+            ozone.colors,
+            vec!["eb7abe88", "e189f5b2", "907ef7cc", "91a4ff", "white"]
+        );
+
+        let cyanogen = &liquid_ammo_for(sublimate, liquid_content_id("cyanogen")).bullet;
+        assert_eq!(cyanogen.kind, BulletKind::ContinuousFlame);
+        assert_eq!(cyanogen.damage, 130.0);
+        assert_eq!(cyanogen.range_change, 70.0);
+        assert_eq!(cyanogen.length, 200.0);
+        assert_eq!(cyanogen.knockback, 2.0);
+        assert_eq!(cyanogen.pierce_cap, 3);
+        assert_close(cyanogen.building_damage_multiplier, 0.3);
+        assert!(cyanogen.timescale_damage);
+        assert_eq!(
+            cyanogen.colors,
+            vec!["465ab888", "66a6d2b2", "89e8b6cc", "cafcbe", "white"]
+        );
+        assert_eq!(cyanogen.flare_color, "89e8b6");
+        assert_eq!(cyanogen.light_color, "89e8b6");
+        assert_eq!(cyanogen.hit_color, "89e8b6");
     }
 
     #[test]
