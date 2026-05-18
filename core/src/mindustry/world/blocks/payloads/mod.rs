@@ -789,6 +789,98 @@ pub fn payload_mass_driver_progress(reload_counter: f32, reload: f32) -> f32 {
     (1.0 - reload_counter / reload).clamp(0.0, 1.0)
 }
 
+pub fn payload_mass_driver_discharge(charge: &mut f32, charging: bool, delta: f32) {
+    if !charging {
+        *charge = (*charge - delta * 10.0).max(0.0);
+    }
+}
+
+pub fn payload_mass_driver_reload_tick(reload_counter: &mut f32, edelta: f32, reload: f32) {
+    *reload_counter = (*reload_counter - edelta / reload).max(0.0);
+}
+
+pub fn payload_mass_driver_idle_next(
+    waiting_shooters_empty: bool,
+    has_payload: bool,
+    has_link: bool,
+) -> PayloadDriverState {
+    if !waiting_shooters_empty && !has_payload {
+        PayloadDriverState::Accepting
+    } else if has_link {
+        PayloadDriverState::Shooting
+    } else {
+        PayloadDriverState::Idle
+    }
+}
+
+pub fn payload_mass_driver_accepting_should_idle(
+    current_shooter_exists: bool,
+    has_payload: bool,
+) -> bool {
+    !current_shooter_exists || has_payload
+}
+
+pub fn payload_mass_driver_shooting_should_idle(
+    has_link: bool,
+    waiting_shooters_empty: bool,
+    has_payload: bool,
+) -> bool {
+    !has_link || (!waiting_shooters_empty && !has_payload)
+}
+
+pub fn payload_mass_driver_loaded_pay_length(
+    length: f32,
+    reload_counter: f32,
+    knockback: f32,
+) -> f32 {
+    length - reload_counter * knockback
+}
+
+pub fn payload_mass_driver_ready_to_fire(
+    moved_out: bool,
+    has_payload: bool,
+    other_payload_empty: bool,
+    reload_counter: f32,
+    other_current_is_self: bool,
+    other_state: PayloadDriverState,
+    other_reload_counter: f32,
+    turret_rotation: f32,
+    target_rotation: f32,
+    other_turret_rotation: f32,
+) -> bool {
+    moved_out
+        && has_payload
+        && other_payload_empty
+        && reload_counter <= 0.0
+        && other_current_is_self
+        && other_state == PayloadDriverState::Accepting
+        && other_reload_counter <= 0.0
+        && angle_within(turret_rotation, target_rotation, 1.0)
+        && angle_within(other_turret_rotation, target_rotation + 180.0, 1.0)
+}
+
+pub fn payload_mass_driver_charge_until_fire(
+    charge: &mut f32,
+    edelta: f32,
+    charge_time: f32,
+    ready_to_fire: bool,
+) -> bool {
+    if ready_to_fire {
+        *charge += edelta;
+        *charge >= charge_time
+    } else {
+        false
+    }
+}
+
+pub fn payload_mass_driver_reset_after_fire(state: &mut PayloadMassDriverState) {
+    state.charge = 0.0;
+    state.loaded = false;
+    state.charging = false;
+    state.state = PayloadDriverState::Idle;
+    state.reload_counter = 1.0;
+}
+
 pub fn write_payload_mass_driver_extra<W: Write>(
     write: &mut W,
     state: &PayloadMassDriverState,
@@ -853,6 +945,10 @@ fn normalize_angle(value: f32) -> f32 {
         value += 360.0;
     }
     value
+}
+
+fn angle_within(a: f32, b: f32, margin: f32) -> bool {
+    angle_delta(a, b).abs() <= margin
 }
 
 fn write_vec_nullable<W: Write>(write: &mut W, value: Option<Vec2>) -> io::Result<()> {
@@ -1307,5 +1403,87 @@ mod tests {
             read_payload_mass_driver_extra(&mut bytes.as_slice(), 1).unwrap(),
             state
         );
+    }
+
+    #[test]
+    fn payload_mass_driver_state_machine_helpers_follow_java_conditions() {
+        assert_eq!(
+            payload_mass_driver_idle_next(false, false, true),
+            PayloadDriverState::Accepting
+        );
+        assert_eq!(
+            payload_mass_driver_idle_next(true, false, true),
+            PayloadDriverState::Shooting
+        );
+        assert_eq!(
+            payload_mass_driver_idle_next(true, false, false),
+            PayloadDriverState::Idle
+        );
+        assert!(payload_mass_driver_accepting_should_idle(false, false));
+        assert!(payload_mass_driver_accepting_should_idle(true, true));
+        assert!(!payload_mass_driver_accepting_should_idle(true, false));
+        assert!(payload_mass_driver_shooting_should_idle(false, true, true));
+        assert!(payload_mass_driver_shooting_should_idle(true, false, false));
+        assert!(!payload_mass_driver_shooting_should_idle(true, true, false));
+
+        let mut charge = 25.0;
+        payload_mass_driver_discharge(&mut charge, false, 1.0);
+        assert_eq!(charge, 15.0);
+        payload_mass_driver_discharge(&mut charge, false, 2.0);
+        assert_eq!(charge, 0.0);
+        let mut reload_counter = 0.5;
+        payload_mass_driver_reload_tick(&mut reload_counter, 15.0, 30.0);
+        assert_eq!(reload_counter, 0.0);
+        assert_eq!(
+            payload_mass_driver_loaded_pay_length(11.125, 0.5, 5.0),
+            8.625
+        );
+
+        assert!(payload_mass_driver_ready_to_fire(
+            true,
+            true,
+            true,
+            0.0,
+            true,
+            PayloadDriverState::Accepting,
+            0.0,
+            44.5,
+            45.0,
+            225.5,
+        ));
+        assert!(!payload_mass_driver_ready_to_fire(
+            true,
+            true,
+            true,
+            0.0,
+            true,
+            PayloadDriverState::Accepting,
+            0.0,
+            43.0,
+            45.0,
+            225.0,
+        ));
+
+        let mut charge = 99.0;
+        assert!(payload_mass_driver_charge_until_fire(
+            &mut charge,
+            1.0,
+            100.0,
+            true
+        ));
+        let mut state = PayloadMassDriverState {
+            charge,
+            loaded: true,
+            charging: true,
+            state: PayloadDriverState::Shooting,
+            reload_counter: 0.0,
+            ..Default::default()
+        };
+        payload_mass_driver_reset_after_fire(&mut state);
+        assert_eq!(state.charge, 0.0);
+        assert!(!state.loaded);
+        assert!(!state.charging);
+        assert_eq!(state.state, PayloadDriverState::Idle);
+        assert_eq!(state.reload_counter, 1.0);
     }
 }
