@@ -2759,6 +2759,7 @@ impl UnitFactoryBlockData {
         base.has_items = true;
         base.solid = true;
         base.group = BlockGroup::Units;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
         base.flags.push(BlockFlag::Factory);
         Self {
             base,
@@ -16004,6 +16005,10 @@ mod tests {
 
         assert_eq!(factory.kind, UnitBlockKind::UnitFactory);
         assert_eq!(factory.base.group, BlockGroup::Units);
+        assert_eq!(
+            factory.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
         assert_eq!(factory.base.flags, vec![BlockFlag::Factory]);
         assert!(factory.base.update);
         assert!(factory.base.has_power);
@@ -16123,6 +16128,10 @@ mod tests {
 
         assert_eq!(factory.kind, UnitBlockKind::UnitFactory);
         assert_eq!(factory.base.group, BlockGroup::Units);
+        assert_eq!(
+            factory.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
         assert_eq!(factory.base.flags, vec![BlockFlag::Factory]);
         assert!(factory.base.update);
         assert!(factory.base.has_power);
@@ -16210,6 +16219,10 @@ mod tests {
 
         assert_eq!(factory.kind, UnitBlockKind::UnitFactory);
         assert_eq!(factory.base.group, BlockGroup::Units);
+        assert_eq!(
+            factory.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
         assert_eq!(factory.base.flags, vec![BlockFlag::Factory]);
         assert!(factory.base.update);
         assert!(factory.base.has_power);
