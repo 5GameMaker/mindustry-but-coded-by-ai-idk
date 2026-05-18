@@ -10749,6 +10749,19 @@ fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
             payload.can_overdrive = false;
         },
     );
+
+    registry.register_payload_block(
+        "payload-router",
+        PayloadBlockKind::PayloadRouter,
+        |payload| {
+            set_requirements(
+                &mut payload.requirements,
+                items,
+                &[("graphite", 15), ("copper", 10)],
+            );
+            payload.can_overdrive = false;
+        },
+    );
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -17715,6 +17728,55 @@ mod tests {
                 ItemAmount {
                     item: item_id("graphite"),
                     amount: 10
+                },
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 10
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn payload_router_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let payload = registry.get_payload_by_name("payload-router").unwrap();
+
+        assert_eq!(payload.kind, PayloadBlockKind::PayloadRouter);
+        assert_eq!(payload.base.group, BlockGroup::Payloads);
+        assert_eq!(payload.base.size, 3);
+        assert!(payload.base.update);
+        assert!(payload.base.sync);
+        assert_eq!(payload.base.priority, -1);
+        assert_eq!(
+            payload.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert!(payload.rotate);
+        assert!(payload.outputs_payload);
+        assert!(!payload.accepts_payload);
+        assert!(payload.accepts_unit_payloads);
+        assert!(!payload.output_facing);
+        assert!(payload.no_update_disabled);
+        assert!(payload.under_bullets);
+        assert!(!payload.can_overdrive);
+        assert!(payload.configurable);
+        assert!(payload.clear_on_double_tap);
+        assert!(!payload.invert);
+        assert_eq!(payload.move_time, 45.0);
+        assert_eq!(payload.move_force, 201.0);
+        assert_eq!(payload.interp, "pow5");
+        assert_eq!(payload.payload_limit, 3.0);
+        assert!(payload.push_units);
+        assert_eq!(payload.research_cost_multiplier, 1.0);
+        assert!(payload.research_cost.is_empty());
+        assert_eq!(
+            payload.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 15
                 },
                 ItemAmount {
                     item: item_id("copper"),
