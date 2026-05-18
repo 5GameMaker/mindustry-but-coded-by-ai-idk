@@ -10762,6 +10762,19 @@ fn register_payload_blocks(registry: &mut BlockRegistry, items: &[Item]) {
             payload.can_overdrive = false;
         },
     );
+
+    registry.register_payload_block(
+        "reinforced-payload-conveyor",
+        PayloadBlockKind::PayloadConveyor,
+        |payload| {
+            set_requirements(&mut payload.requirements, items, &[("tungsten", 10)]);
+            payload.move_time = 35.0;
+            payload.can_overdrive = false;
+            payload.base.health = 800;
+            payload.research_cost_multiplier = 4.0;
+            payload.under_bullets = true;
+        },
+    );
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -17783,6 +17796,52 @@ mod tests {
                     amount: 10
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn reinforced_payload_conveyor_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let payload = registry
+            .get_payload_by_name("reinforced-payload-conveyor")
+            .unwrap();
+
+        assert_eq!(payload.kind, PayloadBlockKind::PayloadConveyor);
+        assert_eq!(payload.base.group, BlockGroup::Payloads);
+        assert_eq!(payload.base.size, 3);
+        assert_eq!(payload.base.health, 800);
+        assert!(payload.base.update);
+        assert!(payload.base.sync);
+        assert_eq!(payload.base.priority, -1);
+        assert_eq!(
+            payload.base.env_enabled,
+            Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER
+        );
+        assert!(payload.rotate);
+        assert!(payload.outputs_payload);
+        assert!(!payload.accepts_payload);
+        assert!(payload.accepts_unit_payloads);
+        assert!(payload.output_facing);
+        assert!(payload.no_update_disabled);
+        assert!(payload.under_bullets);
+        assert!(!payload.can_overdrive);
+        assert!(!payload.configurable);
+        assert!(!payload.clear_on_double_tap);
+        assert!(!payload.invert);
+        assert_eq!(payload.move_time, 35.0);
+        assert_eq!(payload.move_force, 201.0);
+        assert_eq!(payload.interp, "pow5");
+        assert_eq!(payload.payload_limit, 3.0);
+        assert!(payload.push_units);
+        assert_eq!(payload.research_cost_multiplier, 4.0);
+        assert!(payload.research_cost.is_empty());
+        assert_eq!(
+            payload.requirements,
+            vec![ItemAmount {
+                item: item_id("tungsten"),
+                amount: 10
+            }]
         );
     }
 
