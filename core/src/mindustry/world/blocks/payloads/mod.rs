@@ -716,6 +716,283 @@ pub fn read_payload_loader_extra<R: Read>(read: &mut R, revision: u8) -> io::Res
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockProducerState {
+    pub progress: f32,
+    pub time: f32,
+    pub heat: f32,
+    pub has_payload: bool,
+}
+
+impl Default for BlockProducerState {
+    fn default() -> Self {
+        Self {
+            progress: 0.0,
+            time: 0.0,
+            heat: 0.0,
+            has_payload: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockProducerStep {
+    pub produced: bool,
+    pub progress: f32,
+    pub heat: f32,
+    pub time: f32,
+}
+
+pub fn block_producer_maximum_accepted(
+    recipe_requirements: &[(ContentId, i32)],
+    item: ContentId,
+) -> i32 {
+    recipe_requirements
+        .iter()
+        .find_map(|(requirement_item, amount)| (*requirement_item == item).then_some(amount * 2))
+        .unwrap_or(0)
+}
+
+pub fn block_producer_accept_item(current_amount: i32, maximum_accepted: i32) -> bool {
+    current_amount < maximum_accepted
+}
+
+pub fn block_producer_should_consume(super_should_consume: bool, has_recipe: bool) -> bool {
+    super_should_consume && has_recipe
+}
+
+pub fn block_producer_update(
+    state: &mut BlockProducerState,
+    recipe_build_time: Option<f32>,
+    efficiency: f32,
+    build_speed: f32,
+    edelta: f32,
+    delta: f32,
+) -> BlockProducerStep {
+    let produce = recipe_build_time.is_some() && efficiency > 0.0 && !state.has_payload;
+    let mut produced = false;
+
+    if let Some(build_time) = recipe_build_time.filter(|_| produce) {
+        state.progress += build_speed * edelta;
+        if state.progress >= build_time {
+            state.has_payload = true;
+            state.progress %= 1.0;
+            produced = true;
+        }
+    }
+
+    state.heat = lerp_delta(state.heat, if produce { 1.0 } else { 0.0 }, 0.15);
+    state.time += state.heat * delta;
+
+    BlockProducerStep {
+        produced,
+        progress: state.progress,
+        heat: state.heat,
+        time: state.time,
+    }
+}
+
+pub fn write_block_producer_progress<W: Write>(write: &mut W, progress: f32) -> io::Result<()> {
+    write_f32(write, progress)
+}
+
+pub fn read_block_producer_progress<R: Read>(read: &mut R) -> io::Result<f32> {
+    read_f32(read)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadConveyorState {
+    pub item: Option<PayloadRef>,
+    pub progress: f32,
+    pub item_rotation: f32,
+    pub animation: f32,
+    pub cur_interp: f32,
+    pub last_interp: f32,
+    pub blocked: bool,
+    pub step: i32,
+    pub step_accepted: i32,
+}
+
+impl Default for PayloadConveyorState {
+    fn default() -> Self {
+        Self {
+            item: None,
+            progress: 0.0,
+            item_rotation: 0.0,
+            animation: 0.0,
+            cur_interp: 0.0,
+            last_interp: 0.0,
+            blocked: false,
+            step: -1,
+            step_accepted: -1,
+        }
+    }
+}
+
+pub fn payload_conveyor_cur_step(time: f32, move_time: f32) -> i32 {
+    (time / move_time) as i32
+}
+
+pub fn payload_conveyor_accept_payload(
+    has_item: bool,
+    payload_fits: bool,
+    source_is_self: bool,
+    enabled: bool,
+    progress: f32,
+) -> bool {
+    !has_item && payload_fits && (source_is_self || (enabled && progress <= 5.0))
+}
+
+pub fn payload_conveyor_handle_payload(
+    state: &mut PayloadConveyorState,
+    payload: PayloadRef,
+    cur_step: i32,
+    source_is_self: bool,
+    rotdeg: f32,
+    source_angle_to_this: f32,
+) {
+    state.item = Some(payload);
+    state.step_accepted = cur_step;
+    state.item_rotation = if source_is_self {
+        rotdeg
+    } else {
+        source_angle_to_this
+    };
+    state.animation = 0.0;
+}
+
+pub fn payload_conveyor_update_timing(
+    state: &mut PayloadConveyorState,
+    time: f32,
+    move_time: f32,
+    interp_progress: f32,
+) {
+    state.last_interp = state.cur_interp;
+    state.cur_interp = interp_progress;
+    if state.last_interp > state.cur_interp {
+        state.last_interp = 0.0;
+    }
+    state.progress = time % move_time;
+}
+
+pub fn payload_conveyor_should_attempt_move(
+    state: &mut PayloadConveyorState,
+    cur_step: i32,
+) -> bool {
+    if cur_step > state.step {
+        let valid = state.step != -1;
+        state.step = cur_step;
+        valid && state.step_accepted != cur_step && state.item.is_some()
+    } else {
+        false
+    }
+}
+
+pub fn write_payload_conveyor_extra<W: Write>(
+    write: &mut W,
+    progress: f32,
+    item_rotation: f32,
+    item: Option<&PayloadRef>,
+) -> io::Result<()> {
+    write_f32(write, progress)?;
+    write_f32(write, item_rotation)?;
+    write_payload_ref(write, item)
+}
+
+pub fn read_empty_payload_conveyor_extra<R: Read>(
+    read: &mut R,
+) -> io::Result<(f32, Option<PayloadRef>)> {
+    let _progress = read_f32(read)?;
+    let item_rotation = read_f32(read)?;
+    if read_bool(read)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "non-empty conveyor payload body requires block/unit codec",
+        ));
+    }
+    Ok((item_rotation, None))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PayloadSortKey {
+    pub content_type: i8,
+    pub id: ContentId,
+}
+
+pub fn payload_router_check_match(
+    sorted: Option<PayloadSortKey>,
+    payload: Option<PayloadSortKey>,
+    invert: bool,
+) -> bool {
+    let matches = sorted.is_some() && sorted == payload;
+    if invert {
+        !matches
+    } else {
+        matches
+    }
+}
+
+pub fn payload_router_logic_control(rotation: &mut i32, requested: i32) -> f32 {
+    *rotation = requested.rem_euclid(4);
+    60.0 * 6.0
+}
+
+pub fn payload_router_pick_next_rotation(
+    current_rotation: i32,
+    rec_dir: i32,
+    matches: bool,
+    sorted_some: bool,
+    candidate_accepts: [bool; 4],
+) -> i32 {
+    if matches {
+        return rec_dir.rem_euclid(4);
+    }
+
+    let mut rotation = current_rotation;
+    for _ in 0..4 {
+        rotation = (rotation + 1).rem_euclid(4);
+        if !matches && sorted_some && rotation == rec_dir {
+            rotation = (rotation + 1).rem_euclid(4);
+        }
+        if candidate_accepts[rotation as usize] {
+            return rotation;
+        }
+    }
+    rotation
+}
+
+pub fn write_payload_router_extra<W: Write>(
+    write: &mut W,
+    sorted: Option<PayloadSortKey>,
+    rec_dir: i32,
+) -> io::Result<()> {
+    match sorted {
+        Some(sorted) => {
+            write_i8(write, sorted.content_type)?;
+            write_i16(write, sorted.id)?;
+        }
+        None => {
+            write_i8(write, -1)?;
+            write_i16(write, -1)?;
+        }
+    }
+    write_i8(write, rec_dir as i8)
+}
+
+pub fn read_payload_router_extra<R: Read>(
+    read: &mut R,
+    revision: u8,
+) -> io::Result<(Option<PayloadSortKey>, i32)> {
+    if revision < 1 {
+        return Ok((None, 0));
+    }
+    let content_type = read_i8(read)?;
+    let id = read_i16(read)?;
+    let rec_dir = read_i8(read)? as i32;
+    let sorted = (content_type >= 0 && id >= 0).then_some(PayloadSortKey { content_type, id });
+    Ok((sorted, rec_dir))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PayloadDriverState {
     Idle,
@@ -991,6 +1268,16 @@ fn read_u8<R: Read>(read: &mut R) -> io::Result<u8> {
 
 fn write_u8<W: Write>(write: &mut W, value: u8) -> io::Result<()> {
     write.write_all(&[value])
+}
+
+fn read_i8<R: Read>(read: &mut R) -> io::Result<i8> {
+    let mut buf = [0; 1];
+    read.read_exact(&mut buf)?;
+    Ok(i8::from_be_bytes(buf))
+}
+
+fn write_i8<W: Write>(write: &mut W, value: i8) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
 }
 
 fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
@@ -1374,6 +1661,119 @@ mod tests {
         assert_eq!(
             read_payload_loader_extra(&mut [].as_slice(), 0).unwrap(),
             false
+        );
+    }
+
+    #[test]
+    fn block_producer_progress_and_item_acceptance_follow_java_build_shell() {
+        let requirements = vec![(1, 5), (2, 7)];
+        assert_eq!(block_producer_maximum_accepted(&requirements, 1), 10);
+        assert_eq!(block_producer_maximum_accepted(&requirements, 3), 0);
+        assert!(block_producer_accept_item(9, 10));
+        assert!(!block_producer_accept_item(10, 10));
+        assert!(block_producer_should_consume(true, true));
+        assert!(!block_producer_should_consume(true, false));
+
+        let mut state = BlockProducerState::default();
+        let step = block_producer_update(&mut state, Some(10.0), 1.0, 0.4, 25.0, 1.0);
+        assert!(step.produced);
+        assert!(state.has_payload);
+        assert_eq!(state.progress, 0.0);
+        assert_eq!(state.heat, 0.15);
+        assert_eq!(state.time, 0.15);
+
+        let mut bytes = Vec::new();
+        write_block_producer_progress(&mut bytes, 3.5).unwrap();
+        assert_eq!(
+            read_block_producer_progress(&mut bytes.as_slice()).unwrap(),
+            3.5
+        );
+    }
+
+    #[test]
+    fn payload_conveyor_accepts_steps_and_serializes_empty_payload_like_java() {
+        assert!(payload_conveyor_accept_payload(
+            false, true, true, false, 100.0
+        ));
+        assert!(payload_conveyor_accept_payload(
+            false, true, false, true, 5.0
+        ));
+        assert!(!payload_conveyor_accept_payload(
+            false, true, false, true, 5.1
+        ));
+        assert!(!payload_conveyor_accept_payload(
+            true, true, true, true, 0.0
+        ));
+        assert_eq!(payload_conveyor_cur_step(89.9, 45.0), 1);
+
+        let mut state = PayloadConveyorState::default();
+        payload_conveyor_update_timing(&mut state, 50.0, 45.0, 0.2);
+        assert_eq!(state.progress, 5.0);
+        assert_eq!(state.last_interp, 0.0);
+        state.cur_interp = 0.9;
+        payload_conveyor_update_timing(&mut state, 91.0, 45.0, 0.1);
+        assert_eq!(state.last_interp, 0.0);
+
+        payload_conveyor_handle_payload(
+            &mut state,
+            PayloadRef::Block {
+                block: 3,
+                version: 0,
+                build_bytes: vec![],
+            },
+            2,
+            false,
+            90.0,
+            270.0,
+        );
+        assert_eq!(state.step_accepted, 2);
+        assert_eq!(state.item_rotation, 270.0);
+        state.step = 1;
+        assert!(!payload_conveyor_should_attempt_move(&mut state, 2));
+        assert!(payload_conveyor_should_attempt_move(&mut state, 3));
+
+        let mut bytes = Vec::new();
+        write_payload_conveyor_extra(&mut bytes, 12.0, 45.0, None).unwrap();
+        let (rotation, item) = read_empty_payload_conveyor_extra(&mut bytes.as_slice()).unwrap();
+        assert_eq!(rotation, 45.0);
+        assert_eq!(item, None);
+    }
+
+    #[test]
+    fn payload_router_match_pick_control_and_serialization_follow_java_shell() {
+        let sorted = Some(PayloadSortKey {
+            content_type: 2,
+            id: 10,
+        });
+        assert!(payload_router_check_match(sorted, sorted, false));
+        assert!(!payload_router_check_match(sorted, None, false));
+        assert!(payload_router_check_match(sorted, None, true));
+
+        let mut rotation = 0;
+        assert_eq!(payload_router_logic_control(&mut rotation, -1), 360.0);
+        assert_eq!(rotation, 3);
+        assert_eq!(
+            payload_router_pick_next_rotation(0, 1, true, true, [false, false, false, false]),
+            1
+        );
+        assert_eq!(
+            payload_router_pick_next_rotation(0, 1, false, true, [false, true, true, false]),
+            2
+        );
+        assert_eq!(
+            payload_router_pick_next_rotation(0, 1, false, false, [false, true, false, false]),
+            1
+        );
+
+        let mut bytes = Vec::new();
+        write_payload_router_extra(&mut bytes, sorted, 3).unwrap();
+        assert_eq!(
+            read_payload_router_extra(&mut bytes.as_slice(), 1).unwrap(),
+            (sorted, 3)
+        );
+        assert_eq!(
+            read_payload_router_extra(&mut [].as_slice(), 0).unwrap(),
+            (None, 0)
         );
     }
 
