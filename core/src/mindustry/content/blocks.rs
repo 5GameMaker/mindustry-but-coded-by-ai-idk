@@ -527,6 +527,7 @@ pub struct BulletSpec {
     pub charge_effect: String,
     pub bullet_shoot_sound: String,
     pub hit_sound: String,
+    pub despawn_sound: String,
     pub hit_color: String,
     pub back_color: String,
     pub trail_color: String,
@@ -570,12 +571,17 @@ pub struct BulletSpec {
     pub flak_interval: f32,
     pub frag_bullets: i32,
     pub frag_bullet: Option<Box<BulletSpec>>,
+    pub frag_on_hit: bool,
     pub frag_life_min: f32,
     pub frag_random_spread: f32,
     pub frag_spread: f32,
     pub frag_velocity_min: f32,
     pub frag_velocity_max: f32,
     pub bullet_interval: f32,
+    pub interval_random_spread: f32,
+    pub interval_bullets: i32,
+    pub interval_angle: f32,
+    pub interval_spread: f32,
     pub interval_bullet: Option<Box<BulletSpec>>,
     pub collides_ground: bool,
     pub collides_air: bool,
@@ -604,6 +610,7 @@ pub struct BulletSpec {
     pub trail_effect: String,
     pub trail_interval: f32,
     pub trail_rotation: bool,
+    pub trail_param: f32,
     pub trail_chance: f32,
     pub rotation_offset: f32,
     pub despawn_shake: f32,
@@ -657,6 +664,7 @@ impl BulletSpec {
             charge_effect: "none".into(),
             bullet_shoot_sound: "none".into(),
             hit_sound: "none".into(),
+            despawn_sound: "none".into(),
             hit_color: String::new(),
             back_color: String::new(),
             trail_color: String::new(),
@@ -700,12 +708,17 @@ impl BulletSpec {
             flak_interval: 0.0,
             frag_bullets: 0,
             frag_bullet: None,
+            frag_on_hit: true,
             frag_life_min: 0.0,
             frag_random_spread: 360.0,
             frag_spread: 0.0,
             frag_velocity_min: 0.2,
             frag_velocity_max: 1.0,
             bullet_interval: 0.0,
+            interval_random_spread: 360.0,
+            interval_bullets: 1,
+            interval_angle: 0.0,
+            interval_spread: 0.0,
             interval_bullet: None,
             collides_ground: true,
             collides_air: true,
@@ -734,6 +747,7 @@ impl BulletSpec {
             trail_effect: "missileTrail".into(),
             trail_interval: 0.0,
             trail_rotation: false,
+            trail_param: 2.0,
             trail_chance: 0.0,
             rotation_offset: 0.0,
             despawn_shake: 0.0,
@@ -792,6 +806,7 @@ pub struct TurretBlockData {
     pub consume_liquids: Vec<LiquidAmount>,
     pub shoot_type: Option<Box<BulletSpec>>,
     pub research_cost_multiplier: f32,
+    pub build_cost_multiplier: f32,
     pub consume_power: f32,
     pub liquid_consumed: f32,
     pub coolant_amount: f32,
@@ -914,6 +929,7 @@ impl TurretBlockData {
             consume_liquids: Vec::new(),
             shoot_type: None,
             research_cost_multiplier: 1.0,
+            build_cost_multiplier: 1.0,
             consume_power: 0.0,
             liquid_consumed: 1.0 / 60.0,
             coolant_amount: 0.0,
@@ -1095,6 +1111,13 @@ impl TurretBlockData {
             let real_range = ammo.bullet.range_change + self.range;
             ammo.bullet.lifetime =
                 (real_range + margin + ammo.bullet.extra_range_margin + 10.0) / ammo.bullet.speed;
+        }
+        if let Some(shoot_type) = &mut self.shoot_type {
+            if shoot_type.speed != 0.0 {
+                let real_range = shoot_type.range_change + self.range;
+                shoot_type.lifetime =
+                    (real_range + margin + shoot_type.extra_range_margin + 10.0) / shoot_type.speed;
+            }
         }
     }
 
@@ -6459,6 +6482,101 @@ fn register_turret_blocks(registry: &mut BlockRegistry, items: &[Item], liquids:
         turret.consume_coolant(20.0 / 60.0);
         turret.coolant_multiplier = 6.25;
         turret.limit_range(16.0);
+    });
+
+    registry.register_turret_block("afflict", TurretBlockKind::PowerTurret, |turret| {
+        set_requirements(
+            &mut turret.requirements,
+            items,
+            &[
+                ("surge-alloy", 100),
+                ("silicon", 200),
+                ("graphite", 250),
+                ("oxide", 40),
+            ],
+        );
+
+        let mut child = BulletSpec::new(BulletKind::Basic, 3.0, 35.0);
+        child.width = 9.0;
+        child.hit_size = 5.0;
+        child.height = 15.0;
+        child.pierce_cap = 3;
+        child.lifetime = 28.0;
+        child.pierce_building = true;
+        child.hit_color = "surge".into();
+        child.back_color = "surge".into();
+        child.trail_color = "surge".into();
+        child.front_color = "white".into();
+        child.trail_width = 2.1;
+        child.trail_length = 5;
+        child.hit_effect = "WaveEffect(surge,sizeTo=4,strokeFrom=4,lifetime=10)".into();
+        child.despawn_effect = child.hit_effect.clone();
+        child.building_damage_multiplier = 0.3;
+        child.homing_power = 0.1;
+
+        let mut shoot_type = BulletSpec::new(BulletKind::Basic, 5.0, 180.0);
+        shoot_type.shoot_effect =
+            "MultiEffect(shootTitan, WaveEffect(colorTo=surge,sizeTo=26,lifetime=14,strokeFrom=4))"
+                .into();
+        shoot_type.smoke_effect = "shootSmokeTitan".into();
+        shoot_type.hit_color = "surge".into();
+        shoot_type.sprite = "large-orb".into();
+        shoot_type.trail_effect = "missileTrail".into();
+        shoot_type.trail_interval = 3.0;
+        shoot_type.trail_param = 4.0;
+        shoot_type.pierce_cap = 2;
+        shoot_type.building_damage_multiplier = 0.5;
+        shoot_type.frag_on_hit = false;
+        shoot_type.lifetime = 80.0;
+        shoot_type.width = 16.0;
+        shoot_type.height = 16.0;
+        shoot_type.back_color = "surge".into();
+        shoot_type.front_color = "white".into();
+        shoot_type.shrink_x = 0.0;
+        shoot_type.shrink_y = 0.0;
+        shoot_type.trail_color = "surge".into();
+        shoot_type.trail_length = 12;
+        shoot_type.trail_width = 2.2;
+        shoot_type.hit_effect =
+            "ExplosionEffect(waveColor=surge,smokeColor=gray,sparkColor=sap,waveStroke=4,waveRad=40)"
+                .into();
+        shoot_type.despawn_effect = shoot_type.hit_effect.clone();
+        shoot_type.despawn_sound = "explosionAfflict".into();
+        shoot_type.bullet_shoot_sound = "shootAfflict".into();
+        shoot_type.frag_bullet = Some(Box::new(child.clone()));
+        shoot_type.interval_bullet = Some(Box::new(child));
+        shoot_type.bullet_interval = 3.0;
+        shoot_type.interval_random_spread = 20.0;
+        shoot_type.interval_bullets = 2;
+        shoot_type.interval_angle = 180.0;
+        shoot_type.interval_spread = 300.0;
+        shoot_type.frag_bullets = 20;
+        shoot_type.frag_velocity_min = 0.5;
+        shoot_type.frag_velocity_max = 1.2;
+        shoot_type.frag_life_min = 0.5;
+        turret.shoot_type = Some(Box::new(shoot_type));
+
+        turret.drawer = "DrawTurret(reinforced-, RegionPart(-blade recoil mirror under moveX=2 moveY=-1 moveRot=-7 heatColor=ff6214), RegionPart(-blade-glow recoil warmup mirror under moveX=2 moveY=-1 moveRot=-7 heatColor=ff6214 drawRegion=false))".into();
+        turret.consume_power = 5.0;
+        turret.heat_requirement = 20.0;
+        turret.max_heat_efficiency = 1.0;
+        turret.new_target_interval = 40.0;
+        turret.inaccuracy = 1.0;
+        turret.shake = 2.0;
+        turret.shoot_y = 4.0;
+        turret.outline_color = "darkOutline".into();
+        turret.base.size = 4;
+        turret.base.env_enabled |= Env::SPACE;
+        turret.reload = 50.0;
+        turret.cooldown_time = 100.0;
+        turret.recoil = 3.0;
+        turret.range = 368.0;
+        turret.shoot_cone = 20.0;
+        turret.scaled_health = 220.0;
+        turret.rotate_speed = 1.5;
+        turret.research_cost_multiplier = 0.04;
+        turret.build_cost_multiplier = 1.5;
+        turret.limit_range(-55.0);
     });
 }
 
@@ -12840,6 +12958,130 @@ mod tests {
         assert!(interval.instant_disappear);
         assert_eq!(interval.hit_effect, "none");
         assert_eq!(interval.despawn_effect, "none");
+    }
+
+    #[test]
+    fn afflict_power_turret_keeps_upstream_subset() {
+        let (all_items, _all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let afflict = registry.get_turret_by_name("afflict").unwrap();
+        assert_eq!(afflict.kind, TurretBlockKind::PowerTurret);
+        assert!(afflict.base.has_power);
+        assert_eq!(afflict.consume_power, 5.0);
+        assert_eq!(afflict.heat_requirement, 20.0);
+        assert_eq!(afflict.max_heat_efficiency, 1.0);
+        assert_eq!(afflict.new_target_interval, 40.0);
+        assert_eq!(afflict.inaccuracy, 1.0);
+        assert_eq!(afflict.shake, 2.0);
+        assert_eq!(afflict.shoot_y, 4.0);
+        assert_eq!(afflict.outline_color, "darkOutline");
+        assert_eq!(afflict.base.size, 4);
+        assert_ne!(afflict.base.env_enabled & Env::SPACE, 0);
+        assert_eq!(afflict.reload, 50.0);
+        assert_eq!(afflict.cooldown_time, 100.0);
+        assert_eq!(afflict.recoil, 3.0);
+        assert_eq!(afflict.range, 368.0);
+        assert_eq!(afflict.shoot_cone, 20.0);
+        assert_eq!(afflict.scaled_health, 220.0);
+        assert_eq!(afflict.base.health, 4 * 4 * 220);
+        assert_eq!(afflict.rotate_speed, 1.5);
+        assert_eq!(afflict.research_cost_multiplier, 0.04);
+        assert_eq!(afflict.build_cost_multiplier, 1.5);
+        assert_eq!(afflict.fog_radius, 46.0);
+        assert_eq!(afflict.place_overlap_range, 368.0 + 8.0 * 7.0);
+        assert!(afflict.drawer.contains("RegionPart(-blade"));
+        assert!(afflict.drawer.contains("RegionPart(-blade-glow"));
+        assert_eq!(
+            afflict.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("surge-alloy"),
+                    amount: 100
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 250
+                },
+                ItemAmount {
+                    item: item_id("oxide"),
+                    amount: 40
+                }
+            ]
+        );
+
+        let shoot = afflict.shoot_type.as_ref().unwrap();
+        assert_eq!(shoot.kind, BulletKind::Basic);
+        assert_eq!(shoot.speed, 5.0);
+        assert_eq!(shoot.damage, 180.0);
+        assert_close(shoot.lifetime, (368.0 - 55.0 + 10.0) / 5.0);
+        assert!(shoot.shoot_effect.contains("shootTitan"));
+        assert_eq!(shoot.smoke_effect, "shootSmokeTitan");
+        assert_eq!(shoot.hit_color, "surge");
+        assert_eq!(shoot.sprite, "large-orb");
+        assert_eq!(shoot.trail_effect, "missileTrail");
+        assert_eq!(shoot.trail_interval, 3.0);
+        assert_eq!(shoot.trail_param, 4.0);
+        assert_eq!(shoot.pierce_cap, 2);
+        assert_close(shoot.building_damage_multiplier, 0.5);
+        assert!(!shoot.frag_on_hit);
+        assert_eq!(shoot.width, 16.0);
+        assert_eq!(shoot.height, 16.0);
+        assert_eq!(shoot.back_color, "surge");
+        assert_eq!(shoot.front_color, "white");
+        assert_eq!(shoot.shrink_x, 0.0);
+        assert_eq!(shoot.shrink_y, 0.0);
+        assert_eq!(shoot.trail_color, "surge");
+        assert_eq!(shoot.trail_length, 12);
+        assert_eq!(shoot.trail_width, 2.2);
+        assert!(shoot.hit_effect.contains("ExplosionEffect"));
+        assert_eq!(shoot.despawn_effect, shoot.hit_effect);
+        assert_eq!(shoot.despawn_sound, "explosionAfflict");
+        assert_eq!(shoot.bullet_shoot_sound, "shootAfflict");
+        assert_eq!(shoot.bullet_interval, 3.0);
+        assert_eq!(shoot.interval_random_spread, 20.0);
+        assert_eq!(shoot.interval_bullets, 2);
+        assert_eq!(shoot.interval_angle, 180.0);
+        assert_eq!(shoot.interval_spread, 300.0);
+        assert_eq!(shoot.frag_bullets, 20);
+        assert_eq!(shoot.frag_velocity_min, 0.5);
+        assert_eq!(shoot.frag_velocity_max, 1.2);
+        assert_eq!(shoot.frag_life_min, 0.5);
+
+        let frag = shoot.frag_bullet.as_ref().unwrap();
+        assert_eq!(frag.kind, BulletKind::Basic);
+        assert_eq!(frag.speed, 3.0);
+        assert_eq!(frag.damage, 35.0);
+        assert_eq!(frag.width, 9.0);
+        assert_eq!(frag.hit_size, 5.0);
+        assert_eq!(frag.height, 15.0);
+        assert_eq!(frag.pierce_cap, 3);
+        assert_eq!(frag.lifetime, 28.0);
+        assert!(frag.pierce_building);
+        assert_eq!(frag.hit_color, "surge");
+        assert_eq!(frag.back_color, "surge");
+        assert_eq!(frag.trail_color, "surge");
+        assert_eq!(frag.front_color, "white");
+        assert_eq!(frag.trail_width, 2.1);
+        assert_eq!(frag.trail_length, 5);
+        assert!(frag.hit_effect.contains("WaveEffect"));
+        assert_eq!(frag.despawn_effect, frag.hit_effect);
+        assert_close(frag.building_damage_multiplier, 0.3);
+        assert_eq!(frag.homing_power, 0.1);
+        assert_eq!(
+            shoot.interval_bullet.as_ref().unwrap().as_ref(),
+            frag.as_ref()
+        );
     }
 
     #[test]
