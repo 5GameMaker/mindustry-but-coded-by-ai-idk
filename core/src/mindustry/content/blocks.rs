@@ -2719,6 +2719,7 @@ pub enum UnitBlockKind {
     UnitFactory,
     UnitAssembler,
     UnitAssemblerModule,
+    RepairTower,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3001,6 +3002,63 @@ impl UnitAssemblerModuleBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UnitRepairTowerBlockData {
+    pub base: Block,
+    pub kind: UnitBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub range: f32,
+    pub heal_amount: f32,
+    pub suppressable: bool,
+    pub circle_color: String,
+    pub glow_color: String,
+    pub circle_speed: f32,
+    pub circle_stroke: f32,
+    pub square_rad: f32,
+    pub square_spin_scl: f32,
+    pub glow_mag: f32,
+    pub glow_scl: f32,
+}
+
+impl UnitRepairTowerBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: UnitBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.solid = true;
+        base.flags.push(BlockFlag::Repair);
+        Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            consume_liquids: Vec::new(),
+            range: 80.0,
+            heal_amount: 1.0,
+            suppressable: true,
+            circle_color: "heal".into(),
+            glow_color: "heal@0.5".into(),
+            circle_speed: 120.0,
+            circle_stroke: 3.0,
+            square_rad: 3.0,
+            square_spin_scl: 0.8,
+            glow_mag: 0.5,
+            glow_scl: 8.0,
+        }
+    }
+
+    fn finalize(&mut self) {
+        self.base.consumes_power = self.consume_power > 0.0;
+        self.base.has_power = self.consume_power > 0.0;
+        self.base.has_liquids = !self.consume_liquids.is_empty();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -3022,6 +3080,7 @@ pub enum BlockDef {
     UnitFactory(UnitFactoryBlockData),
     UnitAssembler(UnitAssemblerBlockData),
     UnitAssemblerModule(UnitAssemblerModuleBlockData),
+    UnitRepairTower(UnitRepairTowerBlockData),
 }
 
 impl BlockDef {
@@ -3047,6 +3106,7 @@ impl BlockDef {
             Self::UnitFactory(factory) => &factory.base,
             Self::UnitAssembler(assembler) => &assembler.base,
             Self::UnitAssemblerModule(module) => &module.base,
+            Self::UnitRepairTower(tower) => &tower.base,
         }
     }
 
@@ -3193,6 +3253,13 @@ impl BlockRegistry {
     ) -> Option<&UnitAssemblerModuleBlockData> {
         match self.get_by_name(name)? {
             BlockDef::UnitAssemblerModule(module) => Some(module),
+            _ => None,
+        }
+    }
+
+    pub fn get_unit_repair_tower_by_name(&self, name: &str) -> Option<&UnitRepairTowerBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::UnitRepairTower(tower) => Some(tower),
             _ => None,
         }
     }
@@ -3455,6 +3522,20 @@ impl BlockRegistry {
         block.finalize();
         block.base.derive_layout_fields();
         self.insert(BlockDef::UnitAssemblerModule(block))
+    }
+
+    pub fn register_unit_repair_tower_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: UnitBlockKind,
+        configure: impl FnOnce(&mut UnitRepairTowerBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = UnitRepairTowerBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::UnitRepairTower(block))
     }
 
     pub fn set_floor_wall_by_name(
@@ -10536,6 +10617,23 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &
             module.base.size = 5;
         },
     );
+
+    registry.register_unit_repair_tower_block(
+        "unit-repair-tower",
+        UnitBlockKind::RepairTower,
+        |tower| {
+            set_requirements(
+                &mut tower.requirements,
+                items,
+                &[("graphite", 90), ("silicon", 90), ("tungsten", 80)],
+            );
+            tower.base.size = 2;
+            tower.range = 100.0;
+            tower.heal_amount = 1.5;
+            tower.consume_power = 1.0;
+            push_liquid_amount(&mut tower.consume_liquids, liquids, "ozone", 3.0 / 60.0);
+        },
+    );
 }
 
 fn find_item<'a>(items: &'a [Item], name: &str) -> Option<&'a Item> {
@@ -17400,6 +17498,63 @@ mod tests {
                 ItemAmount {
                     item: item_id("phase-fabric"),
                     amount: 400
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn unit_repair_tower_keeps_upstream_subset() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| liquid_id(&all_liquids, name).unwrap();
+        let tower = registry
+            .get_unit_repair_tower_by_name("unit-repair-tower")
+            .unwrap();
+
+        assert_eq!(tower.kind, UnitBlockKind::RepairTower);
+        assert!(tower.base.update);
+        assert!(tower.base.solid);
+        assert!(tower.suppressable);
+        assert_eq!(tower.base.flags, vec![BlockFlag::Repair]);
+        assert_eq!(tower.base.size, 2);
+        assert!(tower.base.has_power);
+        assert!(tower.base.consumes_power);
+        assert!(tower.base.has_liquids);
+        assert_eq!(tower.consume_power, 1.0);
+        assert_eq!(
+            tower.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("ozone"),
+                amount: 3.0 / 60.0
+            }]
+        );
+        assert_eq!(tower.range, 100.0);
+        assert_eq!(tower.heal_amount, 1.5);
+        assert_eq!(tower.research_cost_multiplier, 1.0);
+        assert!(tower.research_cost.is_empty());
+        assert_eq!(tower.circle_color, "heal");
+        assert_eq!(tower.glow_color, "heal@0.5");
+        assert_eq!(tower.circle_speed, 120.0);
+        assert_eq!(tower.circle_stroke, 3.0);
+        assert_eq!(tower.square_rad, 3.0);
+        assert_eq!(tower.square_spin_scl, 0.8);
+        assert_eq!(tower.glow_mag, 0.5);
+        assert_eq!(tower.glow_scl, 8.0);
+        assert_eq!(
+            tower.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 90
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 90
+                },
+                ItemAmount {
+                    item: item_id("tungsten"),
+                    amount: 80
                 }
             ]
         );
