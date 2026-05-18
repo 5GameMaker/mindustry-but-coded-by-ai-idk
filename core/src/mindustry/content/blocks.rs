@@ -3803,6 +3803,76 @@ impl SandboxBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LightBlockData {
+    pub base: Block,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub brightness: f32,
+    pub radius: f32,
+    pub top_region_suffix: String,
+    pub configurable: bool,
+    pub save_config: bool,
+    pub clear_on_double_tap: bool,
+    pub swap_diagonal_placement: bool,
+    pub default_color_rgba: u32,
+    pub default_smooth_time: f32,
+    pub top_alpha: f32,
+    pub draw_place_radius_scale: f32,
+    pub placement_path_radius_scale: f32,
+    pub placement_path_multiplier: f32,
+    pub logic_color_control: bool,
+    pub minimap_alpha_mask: u32,
+}
+
+impl LightBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut base = Block::new(id, name);
+        base.has_power = true;
+        base.update = true;
+        base.connected_power = true;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE;
+        Self {
+            base,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            brightness: 0.9,
+            radius: 200.0,
+            top_region_suffix: "-top".into(),
+            configurable: true,
+            save_config: true,
+            clear_on_double_tap: false,
+            swap_diagonal_placement: true,
+            default_color_rgba: 0xffd37fff,
+            default_smooth_time: 1.0,
+            top_alpha: 0.6,
+            draw_place_radius_scale: 0.75,
+            placement_path_radius_scale: 0.7,
+            placement_path_multiplier: 3.0,
+            logic_color_control: true,
+            minimap_alpha_mask: 0x000000ff,
+        }
+    }
+
+    fn finalize(&mut self, items: &[Item]) {
+        self.base.has_power = true;
+        self.base.update = true;
+        self.base.connected_power = true;
+        self.base.consumes_power = self.consume_power > 0.0;
+        self.base.emit_light = true;
+        self.base.light_radius = self.radius * 2.5;
+        self.base.light_clip_size = self.base.light_clip_size.max(self.base.light_radius * 3.0);
+        if self.base.health == 40 {
+            self.base.health =
+                default_scaled_block_health(self.base.size, &self.requirements, items);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BlockDef {
     Plain(Block),
     Floor(FloorData),
@@ -3831,6 +3901,7 @@ pub enum BlockDef {
     PayloadConstructor(PayloadConstructorBlockData),
     PayloadLoader(PayloadLoaderBlockData),
     Sandbox(SandboxBlockData),
+    Light(LightBlockData),
 }
 
 impl BlockDef {
@@ -3863,6 +3934,7 @@ impl BlockDef {
             Self::PayloadConstructor(constructor) => &constructor.base,
             Self::PayloadLoader(loader) => &loader.base,
             Self::Sandbox(sandbox) => &sandbox.base,
+            Self::Light(light) => &light.base,
         }
     }
 
@@ -4067,6 +4139,13 @@ impl BlockRegistry {
     pub fn get_sandbox_by_name(&self, name: &str) -> Option<&SandboxBlockData> {
         match self.get_by_name(name)? {
             BlockDef::Sandbox(sandbox) => Some(sandbox),
+            _ => None,
+        }
+    }
+
+    pub fn get_light_by_name(&self, name: &str) -> Option<&LightBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::Light(light) => Some(light),
             _ => None,
         }
     }
@@ -4430,6 +4509,20 @@ impl BlockRegistry {
         self.insert(BlockDef::Sandbox(block))
     }
 
+    pub fn register_light_block(
+        &mut self,
+        name: impl Into<String>,
+        items: &[Item],
+        configure: impl FnOnce(&mut LightBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = LightBlockData::new(id, name);
+        configure(&mut block);
+        block.finalize(items);
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::Light(block))
+    }
+
     pub fn set_floor_wall_by_name(
         &mut self,
         floor_name: &str,
@@ -4561,6 +4654,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     register_unit_blocks(&mut registry, items, liquids);
     register_payload_blocks(&mut registry, items);
     register_sandbox_blocks(&mut registry, items);
+    register_light_blocks(&mut registry, items);
 
     registry.finalize_floor_links();
     registry
@@ -11810,6 +11904,20 @@ fn register_sandbox_blocks(registry: &mut BlockRegistry, items: &[Item]) {
             block.always_unlocked = true;
         },
     );
+}
+
+fn register_light_blocks(registry: &mut BlockRegistry, items: &[Item]) {
+    registry.register_light_block("illuminator", items, |light| {
+        set_requirements(
+            &mut light.requirements,
+            items,
+            &[("graphite", 12), ("silicon", 8), ("lead", 8)],
+        );
+        light.base.build_visibility = BuildVisibility::LightingOnly;
+        light.brightness = 0.75;
+        light.radius = 140.0;
+        light.consume_power = 0.05;
+    });
 }
 
 fn default_scaled_block_health(size: i32, requirements: &[ItemAmount], items: &[Item]) -> i32 {
@@ -19648,6 +19756,66 @@ mod tests {
         assert_eq!(payload_void.payload_rotate_speed, 5.0);
         assert_eq!(payload_void.incinerate_effect, "blastExplosion");
         assert_eq!(payload_void.incinerate_sound, "unitExplode1");
+    }
+
+    #[test]
+    fn illuminator_light_block_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+
+        let light = registry.get_light_by_name("illuminator").unwrap();
+        assert_eq!(light.base.build_visibility, BuildVisibility::LightingOnly);
+        assert_eq!(light.base.group, BlockGroup::None);
+        assert_eq!(light.base.env_enabled, Env::TERRESTRIAL | Env::SPACE);
+        assert_eq!(light.base.env_required, Env::NONE);
+        assert_eq!(light.base.env_disabled, Env::NONE);
+        assert!(light.base.has_power);
+        assert!(light.base.connected_power);
+        assert!(light.base.consumes_power);
+        assert!(!light.base.outputs_power);
+        assert!(light.base.update);
+        assert!(!light.base.solid);
+        assert_eq!(light.base.size, 1);
+        assert_eq!(light.base.health, 40);
+        assert_eq!(light.base.clip_size, 8.0);
+        assert!(light.base.emit_light);
+        assert_eq!(light.base.light_radius, 350.0);
+        assert_eq!(light.base.light_clip_size, 1050.0);
+        assert_eq!(light.consume_power, 0.05);
+        assert_eq!(light.brightness, 0.75);
+        assert_eq!(light.radius, 140.0);
+        assert_eq!(light.top_region_suffix, "-top");
+        assert!(light.configurable);
+        assert!(light.save_config);
+        assert!(!light.clear_on_double_tap);
+        assert!(light.swap_diagonal_placement);
+        assert_eq!(light.default_color_rgba, 0xffd37fff);
+        assert_eq!(light.default_smooth_time, 1.0);
+        assert_eq!(light.top_alpha, 0.6);
+        assert_eq!(light.draw_place_radius_scale, 0.75);
+        assert_eq!(light.placement_path_radius_scale, 0.7);
+        assert_eq!(light.placement_path_multiplier, 3.0);
+        assert!(light.logic_color_control);
+        assert_eq!(light.minimap_alpha_mask, 0x000000ff);
+        assert!(light.research_cost.is_empty());
+        assert_eq!(light.research_cost_multiplier, 1.0);
+        assert_eq!(
+            light.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 12
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 8
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 8
+                }
+            ]
+        );
     }
 
     #[test]
