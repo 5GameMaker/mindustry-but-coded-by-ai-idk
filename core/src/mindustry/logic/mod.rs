@@ -4047,6 +4047,7 @@ pub struct LogicUnitObject {
     pub shoot: bool,
     pub boost: bool,
     pub flag: f64,
+    pub statuses: BTreeMap<String, f32>,
     pub mine_x: Option<f32>,
     pub mine_y: Option<f32>,
     pub mine_cleared: bool,
@@ -4086,6 +4087,7 @@ impl LogicUnitObject {
             shoot: false,
             boost: false,
             flag: 0.0,
+            statuses: BTreeMap::new(),
             mine_x: None,
             mine_y: None,
             mine_cleared: false,
@@ -4158,6 +4160,158 @@ impl LogicUnitObject {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicRulesState {
+    pub wave_timer: bool,
+    pub wave: i32,
+    pub wave_time: f32,
+    pub waves: bool,
+    pub wave_sending: bool,
+    pub attack_mode: bool,
+    pub wave_spacing: f32,
+    pub enemy_core_build_radius: f32,
+    pub drop_zone_radius: f32,
+    pub unit_cap: i32,
+    pub lighting: bool,
+    pub can_game_over: bool,
+    pub pause_disabled: bool,
+    pub ambient_light: f64,
+    pub solar_multiplier: f32,
+    pub drag_multiplier: f32,
+    pub map_area: Option<(i32, i32, i32, i32)>,
+    pub banned_blocks: BTreeSet<String>,
+    pub banned_units: BTreeSet<String>,
+    pub team_rules: BTreeMap<u8, LogicTeamRules>,
+    pub mission: String,
+}
+
+impl Default for LogicRulesState {
+    fn default() -> Self {
+        Self {
+            wave_timer: false,
+            wave: 1,
+            wave_time: 0.0,
+            waves: false,
+            wave_sending: false,
+            attack_mode: false,
+            wave_spacing: 0.0,
+            enemy_core_build_radius: 0.0,
+            drop_zone_radius: 0.0,
+            unit_cap: 0,
+            lighting: false,
+            can_game_over: true,
+            pause_disabled: false,
+            ambient_light: 0.0,
+            solar_multiplier: 1.0,
+            drag_multiplier: 1.0,
+            map_area: None,
+            banned_blocks: BTreeSet::new(),
+            banned_units: BTreeSet::new(),
+            team_rules: BTreeMap::new(),
+            mission: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicTeamRules {
+    pub build_speed_multiplier: f32,
+    pub unit_health_multiplier: f32,
+    pub unit_build_speed_multiplier: f32,
+    pub unit_mine_speed_multiplier: f32,
+    pub unit_cost_multiplier: f32,
+    pub unit_damage_multiplier: f32,
+    pub block_health_multiplier: f32,
+    pub block_damage_multiplier: f32,
+    pub rts_min_weight: f32,
+    pub rts_min_squad: i32,
+}
+
+impl Default for LogicTeamRules {
+    fn default() -> Self {
+        Self {
+            build_speed_multiplier: 1.0,
+            unit_health_multiplier: 1.0,
+            unit_build_speed_multiplier: 1.0,
+            unit_mine_speed_multiplier: 1.0,
+            unit_cost_multiplier: 1.0,
+            unit_damage_multiplier: 1.0,
+            block_health_multiplier: 1.0,
+            block_damage_multiplier: 1.0,
+            rts_min_weight: 0.0,
+            rts_min_squad: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicSpawnEvent {
+    pub unit_name: String,
+    pub type_name: String,
+    pub team: u8,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicEffectEvent {
+    pub type_name: String,
+    pub effect_name: String,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub color: f64,
+    pub data: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicExplosionEvent {
+    pub team: Option<u8>,
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub damage: f32,
+    pub air: bool,
+    pub ground: bool,
+    pub pierce: bool,
+    pub effect: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicMessageEvent {
+    pub type_: MessageType,
+    pub text: String,
+    pub duration: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicCutsceneState {
+    pub active: bool,
+    pub pan_x: f32,
+    pub pan_y: f32,
+    pub speed: f32,
+    pub zoom: f32,
+}
+
+impl Default for LogicCutsceneState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            pan_x: 0.0,
+            pan_y: 0.0,
+            speed: 0.0,
+            zoom: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LogicMessageState {
+    pub announcement_active: bool,
+    pub toast_active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -4422,6 +4576,15 @@ pub struct LogicExecutor {
     pub world: LogicWorldObject,
     pub query_result: Option<String>,
     pub objective_flags: BTreeSet<String>,
+    pub rules: LogicRulesState,
+    pub is_client: bool,
+    pub spawn_events: Vec<LogicSpawnEvent>,
+    pub effect_events: Vec<LogicEffectEvent>,
+    pub explosion_events: Vec<LogicExplosionEvent>,
+    pub message_events: Vec<LogicMessageEvent>,
+    pub message_state: LogicMessageState,
+    pub cutscene: LogicCutsceneState,
+    pub spawn_wave_events: Vec<(f32, f32, bool)>,
     pub bound_unit: Option<String>,
     pub unit_binds: BTreeMap<String, usize>,
     pub logic_unit_control: bool,
@@ -4458,6 +4621,15 @@ impl LogicExecutor {
             world: LogicWorldObject::new(),
             query_result: Some("@query".into()),
             objective_flags: BTreeSet::new(),
+            rules: LogicRulesState::default(),
+            is_client: false,
+            spawn_events: Vec::new(),
+            effect_events: Vec::new(),
+            explosion_events: Vec::new(),
+            message_events: Vec::new(),
+            message_state: LogicMessageState::default(),
+            cutscene: LogicCutsceneState::default(),
+            spawn_wave_events: Vec::new(),
             bound_unit: None,
             unit_binds: BTreeMap::new(),
             logic_unit_control: true,
@@ -4706,6 +4878,64 @@ pub enum LogicInstruction {
         flag: LVar,
         value: LVar,
     },
+    SpawnUnit {
+        type_: LVar,
+        x: LVar,
+        y: LVar,
+        rotation: LVar,
+        team: LVar,
+        result: LVar,
+    },
+    ApplyStatus {
+        clear: bool,
+        effect: String,
+        unit: LVar,
+        duration: LVar,
+    },
+    SpawnWave {
+        x: LVar,
+        y: LVar,
+        natural: LVar,
+    },
+    Effect {
+        type_name: String,
+        x: LVar,
+        y: LVar,
+        rotation: LVar,
+        color: LVar,
+        data: LVar,
+    },
+    Explosion {
+        team: LVar,
+        x: LVar,
+        y: LVar,
+        radius: LVar,
+        damage: LVar,
+        air: LVar,
+        ground: LVar,
+        pierce: LVar,
+        effect: LVar,
+    },
+    SetRule {
+        rule: LogicRule,
+        value: LVar,
+        p1: LVar,
+        p2: LVar,
+        p3: LVar,
+        p4: LVar,
+    },
+    FlushMessage {
+        type_: MessageType,
+        duration: LVar,
+        out_success: LVar,
+    },
+    Cutscene {
+        action: CutsceneAction,
+        p1: LVar,
+        p2: LVar,
+        p3: LVar,
+        p4: LVar,
+    },
     Set {
         from: LVar,
         to: LVar,
@@ -4924,6 +5154,78 @@ impl LogicInstruction {
             }
             LogicInstruction::SetFlag { flag, value } => {
                 exec_set_flag_runtime(exec, flag, value);
+            }
+            LogicInstruction::SpawnUnit {
+                type_,
+                x,
+                y,
+                rotation,
+                team,
+                result,
+            } => {
+                exec_spawn_unit_runtime(exec, type_, x, y, rotation, team, result);
+            }
+            LogicInstruction::ApplyStatus {
+                clear,
+                effect,
+                unit,
+                duration,
+            } => {
+                exec_apply_status_runtime(exec, *clear, effect, unit, duration);
+            }
+            LogicInstruction::SpawnWave { x, y, natural } => {
+                exec_spawn_wave_runtime(exec, x, y, natural);
+            }
+            LogicInstruction::Effect {
+                type_name,
+                x,
+                y,
+                rotation,
+                color,
+                data,
+            } => {
+                exec_effect_runtime(exec, type_name, x, y, rotation, color, data);
+            }
+            LogicInstruction::Explosion {
+                team,
+                x,
+                y,
+                radius,
+                damage,
+                air,
+                ground,
+                pierce,
+                effect,
+            } => {
+                exec_explosion_runtime(
+                    exec, team, x, y, radius, damage, air, ground, pierce, effect,
+                );
+            }
+            LogicInstruction::SetRule {
+                rule,
+                value,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                exec_set_rule_runtime(exec, *rule, value, p1, p2, p3, p4);
+            }
+            LogicInstruction::FlushMessage {
+                type_,
+                duration,
+                out_success,
+            } => {
+                exec_flush_message_runtime(exec, *type_, duration, out_success);
+            }
+            LogicInstruction::Cutscene {
+                action,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                exec_cutscene_runtime(exec, *action, p1, p2, p3, p4);
             }
             LogicInstruction::Set { from, to } => {
                 if !to.constant {
@@ -5708,6 +6010,292 @@ pub fn exec_set_flag_runtime(exec: &mut LogicExecutor, flag: &LVar, value: &LVar
         exec.objective_flags.insert(flag.to_string());
     } else {
         exec.objective_flags.remove(flag);
+    }
+}
+
+pub fn exec_spawn_unit_runtime(
+    exec: &mut LogicExecutor,
+    type_: &LVar,
+    x: &LVar,
+    y: &LVar,
+    rotation: &LVar,
+    team: &LVar,
+    result: &mut LVar,
+) {
+    if exec.is_client {
+        return;
+    }
+
+    let Some(team) = logic_team_from_var(team) else {
+        return;
+    };
+    let Some(type_name) = type_.obj().map(logic_unwrap_object_name) else {
+        return;
+    };
+
+    let unit_name = format!("spawned-{}-{}", type_name, exec.spawn_events.len());
+    let x = logic_unconv(x.numf());
+    let y = logic_unconv(y.numf());
+    let rotation = rotation.numf();
+    exec.register_object(
+        unit_name.clone(),
+        LogicRuntimeObject::Unit(LogicUnitObject::new(type_name, team, x, y)),
+    );
+    exec.spawn_events.push(LogicSpawnEvent {
+        unit_name: unit_name.clone(),
+        type_name: type_name.to_string(),
+        team,
+        x,
+        y,
+        rotation,
+    });
+    result.set_obj(Some(unit_name));
+}
+
+pub fn exec_apply_status_runtime(
+    exec: &mut LogicExecutor,
+    clear: bool,
+    effect: &str,
+    unit: &LVar,
+    duration: &LVar,
+) {
+    if exec.is_client {
+        return;
+    }
+
+    let Some(unit_name) = unit.obj() else {
+        return;
+    };
+    let Some(LogicRuntimeObject::Unit(unit)) = exec.objects.get_mut(unit_name) else {
+        return;
+    };
+
+    if clear {
+        unit.statuses.remove(effect);
+    } else {
+        unit.statuses
+            .insert(effect.to_string(), duration.numf() * 60.0);
+    }
+}
+
+pub fn exec_spawn_wave_runtime(exec: &mut LogicExecutor, x: &LVar, y: &LVar, natural: &LVar) {
+    if exec.is_client {
+        return;
+    }
+    exec.spawn_wave_events.push((
+        logic_unconv(x.numf()),
+        logic_unconv(y.numf()),
+        natural.bool(),
+    ));
+}
+
+pub fn exec_effect_runtime(
+    exec: &mut LogicExecutor,
+    type_name: &str,
+    x: &LVar,
+    y: &LVar,
+    rotation: &LVar,
+    color: &LVar,
+    data: &LVar,
+) {
+    let Some(effect) = get_logic_effect(type_name) else {
+        return;
+    };
+    let rotation = if effect.rotate {
+        rotation.numf()
+    } else {
+        rotation.numf().min(1000.0)
+    };
+    exec.effect_events.push(LogicEffectEvent {
+        type_name: type_name.to_string(),
+        effect_name: effect.effect.to_string(),
+        x: logic_unconv(x.numf()),
+        y: logic_unconv(y.numf()),
+        rotation,
+        color: color.num(),
+        data: data.obj().map(str::to_string),
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn exec_explosion_runtime(
+    exec: &mut LogicExecutor,
+    team: &LVar,
+    x: &LVar,
+    y: &LVar,
+    radius: &LVar,
+    damage: &LVar,
+    air: &LVar,
+    ground: &LVar,
+    pierce: &LVar,
+    effect: &LVar,
+) {
+    if exec.is_client {
+        return;
+    }
+    exec.explosion_events.push(LogicExplosionEvent {
+        team: logic_team_from_var(team),
+        x: logic_unconv(x.numf()),
+        y: logic_unconv(y.numf()),
+        radius: logic_unconv(radius.numf().min(100.0)),
+        damage: damage.numf(),
+        air: air.bool(),
+        ground: ground.bool(),
+        pierce: pierce.bool(),
+        effect: effect.bool(),
+    });
+}
+
+pub fn exec_set_rule_runtime(
+    exec: &mut LogicExecutor,
+    rule: LogicRule,
+    value: &LVar,
+    p1: &LVar,
+    p2: &LVar,
+    p3: &LVar,
+    p4: &LVar,
+) {
+    match rule {
+        LogicRule::WaveTimer => exec.rules.wave_timer = value.bool(),
+        LogicRule::Wave => exec.rules.wave = value.numi().max(1),
+        LogicRule::CurrentWaveTime => exec.rules.wave_time = (value.numf() * 60.0).max(0.0),
+        LogicRule::Waves => exec.rules.waves = value.bool(),
+        LogicRule::WaveSending => exec.rules.wave_sending = value.bool(),
+        LogicRule::AttackMode => exec.rules.attack_mode = value.bool(),
+        LogicRule::WaveSpacing => exec.rules.wave_spacing = value.numf() * 60.0,
+        LogicRule::EnemyCoreBuildRadius => {
+            exec.rules.enemy_core_build_radius = value.numf() * LOGIC_TILE_SIZE
+        }
+        LogicRule::DropZoneRadius => exec.rules.drop_zone_radius = value.numf() * LOGIC_TILE_SIZE,
+        LogicRule::UnitCap => exec.rules.unit_cap = value.numi().max(0),
+        LogicRule::Lighting => exec.rules.lighting = value.bool(),
+        LogicRule::CanGameOver => exec.rules.can_game_over = value.bool(),
+        LogicRule::PauseDisabled => exec.rules.pause_disabled = value.bool(),
+        LogicRule::MapArea => {
+            exec.rules.map_area = Some((p1.numi(), p2.numi(), p3.numi(), p4.numi()));
+        }
+        LogicRule::AmbientLight => exec.rules.ambient_light = value.num(),
+        LogicRule::SolarMultiplier => exec.rules.solar_multiplier = value.numf().max(0.0),
+        LogicRule::DragMultiplier => exec.rules.drag_multiplier = value.numf().max(0.0),
+        LogicRule::Ban => {
+            if let Some(content) = value.obj().map(logic_object_name) {
+                if exec
+                    .objects
+                    .contains_key(logic_unwrap_object_name(&content))
+                {
+                    exec.rules.banned_units.insert(content);
+                } else {
+                    exec.rules.banned_blocks.insert(content);
+                }
+            }
+        }
+        LogicRule::Unban => {
+            if let Some(content) = value.obj().map(logic_object_name) {
+                exec.rules.banned_blocks.remove(&content);
+                exec.rules.banned_units.remove(&content);
+            }
+        }
+        LogicRule::BuildSpeed
+        | LogicRule::UnitHealth
+        | LogicRule::UnitBuildSpeed
+        | LogicRule::UnitMineSpeed
+        | LogicRule::UnitCost
+        | LogicRule::UnitDamage
+        | LogicRule::BlockHealth
+        | LogicRule::BlockDamage
+        | LogicRule::RtsMinWeight
+        | LogicRule::RtsMinSquad => {
+            let Some(team) = logic_team_from_var(p1) else {
+                return;
+            };
+            let team_rules = exec.rules.team_rules.entry(team).or_default();
+            let num = value.numf();
+            match rule {
+                LogicRule::BuildSpeed => team_rules.build_speed_multiplier = num.clamp(0.001, 50.0),
+                LogicRule::UnitHealth => team_rules.unit_health_multiplier = num.max(0.001),
+                LogicRule::UnitBuildSpeed => {
+                    team_rules.unit_build_speed_multiplier = num.clamp(0.0, 50.0)
+                }
+                LogicRule::UnitMineSpeed => team_rules.unit_mine_speed_multiplier = num.max(0.0),
+                LogicRule::UnitCost => team_rules.unit_cost_multiplier = num.max(0.0),
+                LogicRule::UnitDamage => team_rules.unit_damage_multiplier = num.max(0.0),
+                LogicRule::BlockHealth => team_rules.block_health_multiplier = num.max(0.001),
+                LogicRule::BlockDamage => team_rules.block_damage_multiplier = num.max(0.0),
+                LogicRule::RtsMinWeight => team_rules.rts_min_weight = num,
+                LogicRule::RtsMinSquad => team_rules.rts_min_squad = num as i32,
+                _ => {}
+            }
+        }
+    }
+}
+
+pub fn exec_flush_message_runtime(
+    exec: &mut LogicExecutor,
+    type_: MessageType,
+    duration: &LVar,
+    out_success: &mut LVar,
+) {
+    out_success.set_num(1.0);
+    if exec.headless && type_ != MessageType::Mission {
+        exec.text_buffer.clear();
+        return;
+    }
+
+    let blocked = match type_ {
+        MessageType::Announce => exec.message_state.announcement_active,
+        MessageType::Notify => exec.message_state.toast_active,
+        MessageType::Toast => exec.message_state.announcement_active,
+        MessageType::Mission => false,
+    };
+    if blocked {
+        if out_success.name == "@wait" {
+            exec.counter.numval -= 1.0;
+            exec.yield_ = true;
+        } else {
+            out_success.set_num(0.0);
+        }
+        return;
+    }
+
+    let text = exec.text_buffer.clone();
+    if type_ == MessageType::Mission {
+        exec.rules.mission = text.clone();
+    } else {
+        exec.message_events.push(LogicMessageEvent {
+            type_,
+            text,
+            duration: duration.numf(),
+        });
+    }
+    exec.text_buffer.clear();
+}
+
+pub fn exec_cutscene_runtime(
+    exec: &mut LogicExecutor,
+    action: CutsceneAction,
+    p1: &LVar,
+    p2: &LVar,
+    p3: &LVar,
+    _p4: &LVar,
+) {
+    if exec.headless {
+        return;
+    }
+
+    match action {
+        CutsceneAction::Pan => {
+            exec.cutscene.active = true;
+            exec.cutscene.pan_x = logic_unconv(p1.numf());
+            exec.cutscene.pan_y = logic_unconv(p2.numf());
+            exec.cutscene.speed = p3.numf();
+        }
+        CutsceneAction::Zoom => {
+            exec.cutscene.active = true;
+            exec.cutscene.zoom = p1.numf().clamp(0.0, 1.0);
+        }
+        CutsceneAction::Stop => {
+            exec.cutscene.active = false;
+        }
     }
 }
 
@@ -11616,6 +12204,414 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn privileged_world_effect_message_and_rule_executor_instructions_follow_java_l_executor_semantics(
+    ) {
+        let mut exec = LogicExecutor::new();
+
+        let mut spawn = LogicInstruction::SpawnUnit {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@dagger".into()));
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(3.0);
+                value
+            },
+            rotation: {
+                let mut value = LVar::new("rotation");
+                value.set_num(90.0);
+                value
+            },
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@sharded".into()));
+                value
+            },
+            result: LVar::new("result"),
+        };
+        spawn.run(&mut exec);
+        match spawn {
+            LogicInstruction::SpawnUnit { result, .. } => {
+                assert_eq!(
+                    result.value(),
+                    LVarValue::Object(Some("spawned-dagger-0".into()))
+                );
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            exec.spawn_events,
+            vec![LogicSpawnEvent {
+                unit_name: "spawned-dagger-0".into(),
+                type_name: "dagger".into(),
+                team: 1,
+                x: 16.0,
+                y: 24.0,
+                rotation: 90.0,
+            }]
+        );
+
+        LogicInstruction::ApplyStatus {
+            clear: false,
+            effect: "burning".into(),
+            unit: {
+                let mut value = LVar::new("unit");
+                value.set_obj(Some("spawned-dagger-0".into()));
+                value
+            },
+            duration: {
+                let mut value = LVar::new("duration");
+                value.set_num(2.5);
+                value
+            },
+        }
+        .run(&mut exec);
+        match exec.objects.get("spawned-dagger-0").unwrap() {
+            LogicRuntimeObject::Unit(unit) => {
+                assert_eq!(unit.statuses.get("burning"), Some(&150.0));
+            }
+            _ => unreachable!(),
+        }
+        LogicInstruction::ApplyStatus {
+            clear: true,
+            effect: "burning".into(),
+            unit: {
+                let mut value = LVar::new("unit");
+                value.set_obj(Some("spawned-dagger-0".into()));
+                value
+            },
+            duration: LVar::new("duration"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("spawned-dagger-0").unwrap() {
+            LogicRuntimeObject::Unit(unit) => assert!(!unit.statuses.contains_key("burning")),
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::Effect {
+            type_name: "warn".into(),
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(1.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(2.0);
+                value
+            },
+            rotation: {
+                let mut value = LVar::new("size");
+                value.set_num(5000.0);
+                value
+            },
+            color: {
+                let mut value = LVar::new("color");
+                value.set_num(rgba_to_double_bits(0xff, 0x00, 0xaa, 0xff));
+                value
+            },
+            data: {
+                let mut value = LVar::new("data");
+                value.set_obj(Some("@duo".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(
+            exec.effect_events.last(),
+            Some(&LogicEffectEvent {
+                type_name: "warn".into(),
+                effect_name: "unitCapKill".into(),
+                x: 8.0,
+                y: 16.0,
+                rotation: 1000.0,
+                color: rgba_to_double_bits(0xff, 0x00, 0xaa, 0xff),
+                data: Some("@duo".into()),
+            })
+        );
+
+        LogicInstruction::Explosion {
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@crux".into()));
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(4.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(5.0);
+                value
+            },
+            radius: {
+                let mut value = LVar::new("radius");
+                value.set_num(200.0);
+                value
+            },
+            damage: {
+                let mut value = LVar::new("damage");
+                value.set_num(50.0);
+                value
+            },
+            air: {
+                let mut value = LVar::new("air");
+                value.set_num(1.0);
+                value
+            },
+            ground: {
+                let mut value = LVar::new("ground");
+                value.set_num(0.0);
+                value
+            },
+            pierce: {
+                let mut value = LVar::new("pierce");
+                value.set_num(1.0);
+                value
+            },
+            effect: {
+                let mut value = LVar::new("effect");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(
+            exec.explosion_events.last(),
+            Some(&LogicExplosionEvent {
+                team: Some(2),
+                x: 32.0,
+                y: 40.0,
+                radius: 800.0,
+                damage: 50.0,
+                air: true,
+                ground: false,
+                pierce: true,
+                effect: true,
+            })
+        );
+
+        LogicInstruction::SetRule {
+            rule: LogicRule::Wave,
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(-5.0);
+                value
+            },
+            p1: LVar::new("p1"),
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        assert_eq!(exec.rules.wave, 1);
+        LogicInstruction::SetRule {
+            rule: LogicRule::WaveSpacing,
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(10.0);
+                value
+            },
+            p1: LVar::new("p1"),
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        assert_eq!(exec.rules.wave_spacing, 600.0);
+        LogicInstruction::SetRule {
+            rule: LogicRule::MapArea,
+            value: LVar::new("value"),
+            p1: {
+                let mut value = LVar::new("x");
+                value.set_num(1.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("y");
+                value.set_num(2.0);
+                value
+            },
+            p3: {
+                let mut value = LVar::new("w");
+                value.set_num(30.0);
+                value
+            },
+            p4: {
+                let mut value = LVar::new("h");
+                value.set_num(40.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.rules.map_area, Some((1, 2, 30, 40)));
+        LogicInstruction::SetRule {
+            rule: LogicRule::BuildSpeed,
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(100.0);
+                value
+            },
+            p1: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@sharded".into()));
+                value
+            },
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        assert_eq!(
+            exec.rules
+                .team_rules
+                .get(&1)
+                .unwrap()
+                .build_speed_multiplier,
+            50.0
+        );
+
+        LogicInstruction::SpawnWave {
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(7.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(8.0);
+                value
+            },
+            natural: {
+                let mut value = LVar::new("natural");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.spawn_wave_events, vec![(56.0, 64.0, true)]);
+
+        LogicInstruction::Cutscene {
+            action: CutsceneAction::Pan,
+            p1: {
+                let mut value = LVar::new("x");
+                value.set_num(9.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("y");
+                value.set_num(10.0);
+                value
+            },
+            p3: {
+                let mut value = LVar::new("speed");
+                value.set_num(0.06);
+                value
+            },
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        assert!(exec.cutscene.active);
+        assert_eq!((exec.cutscene.pan_x, exec.cutscene.pan_y), (72.0, 80.0));
+        LogicInstruction::Cutscene {
+            action: CutsceneAction::Zoom,
+            p1: {
+                let mut value = LVar::new("zoom");
+                value.set_num(2.0);
+                value
+            },
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        assert_eq!(exec.cutscene.zoom, 1.0);
+        LogicInstruction::Cutscene {
+            action: CutsceneAction::Stop,
+            p1: LVar::new("p1"),
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        assert!(!exec.cutscene.active);
+
+        exec.text_buffer = "hello".into();
+        let mut message = LogicInstruction::FlushMessage {
+            type_: MessageType::Announce,
+            duration: {
+                let mut value = LVar::new("duration");
+                value.set_num(3.0);
+                value
+            },
+            out_success: LVar::new("ok"),
+        };
+        message.run(&mut exec);
+        match message {
+            LogicInstruction::FlushMessage { out_success, .. } => {
+                assert_eq!(out_success.value(), LVarValue::Number(1.0));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            exec.message_events,
+            vec![LogicMessageEvent {
+                type_: MessageType::Announce,
+                text: "hello".into(),
+                duration: 3.0,
+            }]
+        );
+        assert!(exec.text_buffer.is_empty());
+
+        exec.message_state.announcement_active = true;
+        exec.text_buffer = "blocked".into();
+        let mut blocked_message = LogicInstruction::FlushMessage {
+            type_: MessageType::Announce,
+            duration: LVar::new("duration"),
+            out_success: LVar::new("ok"),
+        };
+        blocked_message.run(&mut exec);
+        match blocked_message {
+            LogicInstruction::FlushMessage { out_success, .. } => {
+                assert_eq!(out_success.value(), LVarValue::Number(0.0));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(exec.text_buffer, "blocked");
+
+        let mut wait_blocked_message = LogicInstruction::FlushMessage {
+            type_: MessageType::Announce,
+            duration: LVar::new("duration"),
+            out_success: LVar::new("@wait"),
+        };
+        exec.counter.set_num(5.0);
+        wait_blocked_message.run(&mut exec);
+        assert_eq!(exec.counter.numval, 4.0);
+        assert!(exec.yield_);
+
+        exec.message_state.announcement_active = false;
+        exec.headless = true;
+        exec.text_buffer = "mission".into();
+        LogicInstruction::FlushMessage {
+            type_: MessageType::Mission,
+            duration: LVar::new("duration"),
+            out_success: LVar::new("ok"),
+        }
+        .run(&mut exec);
+        assert_eq!(exec.rules.mission, "mission");
+        assert!(exec.text_buffer.is_empty());
     }
 
     #[test]
