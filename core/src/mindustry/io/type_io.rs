@@ -1,5 +1,7 @@
 use std::io::{self, Read, Write};
 
+use crate::mindustry::logic::LMarkerControl;
+use crate::mindustry::net::KickReason;
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const MAX_ARRAY_SIZE: usize = 1000;
@@ -425,6 +427,10 @@ pub fn read_u8<R: Read>(read: &mut R) -> io::Result<u8> {
     Ok(b[0])
 }
 
+pub fn write_u8<W: Write>(write: &mut W, value: u8) -> io::Result<()> {
+    write.write_all(&[value])
+}
+
 pub fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
     let mut b = [0; 2];
     read.read_exact(&mut b)?;
@@ -554,6 +560,34 @@ pub fn write_team_id<W: Write>(write: &mut W, value: TeamId) -> io::Result<()> {
 
 pub fn read_team_id<R: Read>(read: &mut R) -> io::Result<TeamId> {
     Ok(TeamId(read_u8(read)?))
+}
+
+pub fn write_kick<W: Write>(write: &mut W, reason: KickReason) -> io::Result<()> {
+    write_u8(write, reason.ordinal())
+}
+
+pub fn read_kick<R: Read>(read: &mut R) -> io::Result<KickReason> {
+    let ordinal = read_u8(read)?;
+    KickReason::from_ordinal(ordinal).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid KickReason ordinal {ordinal}"),
+        )
+    })
+}
+
+pub fn write_marker_control<W: Write>(write: &mut W, control: LMarkerControl) -> io::Result<()> {
+    write_u8(write, control.ordinal())
+}
+
+pub fn read_marker_control<R: Read>(read: &mut R) -> io::Result<LMarkerControl> {
+    let ordinal = read_u8(read)?;
+    LMarkerControl::from_ordinal(ordinal).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid LMarkerControl ordinal {ordinal}"),
+        )
+    })
 }
 
 pub fn write_bytes_short<W: Write>(write: &mut W, values: &[u8]) -> io::Result<()> {
@@ -929,5 +963,52 @@ mod tests {
         assert_eq!(read_point2_packed(&mut slice).unwrap(), point);
         assert_eq!(read_vec2(&mut slice).unwrap(), vec);
         assert_eq!(read_team_id(&mut slice).unwrap(), team);
+    }
+
+    #[test]
+    fn kick_and_marker_control_match_java_ordinal_bytes() {
+        let mut bytes = Vec::new();
+        write_kick(&mut bytes, KickReason::Gameover).unwrap();
+        assert_eq!(bytes, vec![0x04]);
+        assert_eq!(
+            read_kick(&mut bytes.as_slice()).unwrap(),
+            KickReason::Gameover
+        );
+
+        bytes.clear();
+        write_kick(&mut bytes, KickReason::ServerRestarting).unwrap();
+        assert_eq!(bytes, vec![0x0f]);
+        assert_eq!(
+            read_kick(&mut bytes.as_slice()).unwrap(),
+            KickReason::ServerRestarting
+        );
+        assert!(read_kick(&mut [0x10].as_slice()).is_err());
+        assert!(read_kick(&mut [0xff].as_slice()).is_err());
+
+        bytes.clear();
+        write_marker_control(&mut bytes, LMarkerControl::Remove).unwrap();
+        assert_eq!(bytes, vec![0x00]);
+        assert_eq!(
+            read_marker_control(&mut bytes.as_slice()).unwrap(),
+            LMarkerControl::Remove
+        );
+
+        bytes.clear();
+        write_marker_control(&mut bytes, LMarkerControl::TextureSize).unwrap();
+        assert_eq!(bytes, vec![0x15]);
+        assert_eq!(
+            read_marker_control(&mut bytes.as_slice()).unwrap(),
+            LMarkerControl::TextureSize
+        );
+
+        bytes.clear();
+        write_marker_control(&mut bytes, LMarkerControl::Colori).unwrap();
+        assert_eq!(bytes, vec![0x18]);
+        assert_eq!(
+            read_marker_control(&mut bytes.as_slice()).unwrap(),
+            LMarkerControl::Colori
+        );
+        assert!(read_marker_control(&mut [0x19].as_slice()).is_err());
+        assert!(read_marker_control(&mut [0xff].as_slice()).is_err());
     }
 }

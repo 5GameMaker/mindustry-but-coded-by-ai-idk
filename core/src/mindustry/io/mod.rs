@@ -13,7 +13,8 @@ pub use save::{
     SAVE_REGION_META, SAVE_REGION_PATCHES,
 };
 pub use type_io::{
-    read_java_utf, read_object, read_point2, read_point2_packed, read_string, read_team_id,
-    read_vec2, write_java_utf, write_object, write_point2, write_point2_packed, write_string,
-    write_team_id, write_vec2, Point2, TeamId, TypeValue, Vec2,
+    read_java_utf, read_kick, read_marker_control, read_object, read_point2, read_point2_packed,
+    read_string, read_team_id, read_vec2, write_java_utf, write_kick, write_marker_control,
+    write_object, write_point2, write_point2_packed, write_string, write_team_id, write_vec2,
+    Point2, TeamId, TypeValue, Vec2,
 };
