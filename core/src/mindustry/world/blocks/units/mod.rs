@@ -302,8 +302,439 @@ pub fn repair_tower_update(
 
 pub const REPAIR_TOWER_REFRESH_INTERVAL: f32 = 6.0;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReconstructorState {
+    pub base: UnitBlockState,
+    pub command_pos: Option<Vec2>,
+    pub command_id: Option<u8>,
+    pub constructing: bool,
+}
+
+impl Default for ReconstructorState {
+    fn default() -> Self {
+        Self {
+            base: UnitBlockState::default(),
+            command_pos: None,
+            command_id: None,
+            constructing: false,
+        }
+    }
+}
+
+pub fn reconstructor_capacities(
+    item_count: usize,
+    consume_items: &[UnitPlanRequirement],
+) -> (Vec<i32>, i32) {
+    let mut capacities = vec![0; item_count];
+    let mut item_capacity = 10;
+    for stack in consume_items {
+        if stack.item_id < capacities.len() {
+            capacities[stack.item_id] = capacities[stack.item_id].max(stack.amount * 2);
+        }
+        item_capacity = item_capacity.max(stack.amount * 2);
+    }
+    (capacities, item_capacity)
+}
+
+pub fn reconstructor_fraction(progress: f32, construct_time: f32) -> f32 {
+    if construct_time == 0.0 {
+        0.0
+    } else {
+        progress / construct_time
+    }
+}
+
+pub fn reconstructor_accept_payload(
+    payload_empty: bool,
+    enabled_or_self_source: bool,
+    source_not_output_side: bool,
+    has_upgrade: bool,
+    upgrade_unlocked_or_ai: bool,
+    upgrade_banned: bool,
+) -> bool {
+    payload_empty
+        && enabled_or_self_source
+        && source_not_output_side
+        && has_upgrade
+        && upgrade_unlocked_or_ai
+        && !upgrade_banned
+}
+
+pub fn reconstructor_should_consume(
+    constructing: bool,
+    enabled: bool,
+    team_activates_factories: bool,
+) -> bool {
+    constructing && enabled && team_activates_factories
+}
+
+pub fn reconstructor_update(
+    state: &mut ReconstructorState,
+    has_payload: bool,
+    has_upgrade: bool,
+    moved_in: bool,
+    efficiency: f32,
+    edelta: f32,
+    unit_build_speed: f32,
+    construct_time: f32,
+) -> bool {
+    state.constructing = has_payload && has_upgrade;
+    let mut upgraded = false;
+    let mut valid = false;
+    if state.constructing && moved_in {
+        if efficiency > 0.0 {
+            valid = true;
+            state.base.progress += edelta * unit_build_speed;
+        }
+        if state.base.progress >= construct_time {
+            state.base.progress %= 1.0;
+            upgraded = true;
+        }
+    }
+    state.base.speed_scl = lerp_delta(state.base.speed_scl, if valid { 1.0 } else { 0.0 }, 0.05);
+    state.base.time += edelta * state.base.speed_scl * unit_build_speed;
+    upgraded
+}
+
+pub fn write_reconstructor_state<W: Write>(
+    write: &mut W,
+    state: &ReconstructorState,
+) -> io::Result<()> {
+    write_f32(write, state.base.progress)?;
+    write_vec_nullable(write, state.command_pos)?;
+    write_command(write, state.command_id)
+}
+
+pub fn read_reconstructor_state<R: Read>(
+    read: &mut R,
+    revision: i32,
+) -> io::Result<ReconstructorState> {
+    let progress = if revision >= 1 { read_f32(read)? } else { 0.0 };
+    let command_pos = if revision >= 2 {
+        read_vec_nullable(read)?
+    } else {
+        None
+    };
+    let command_id = if revision >= 3 {
+        read_command(read)?
+    } else {
+        None
+    };
+    Ok(ReconstructorState {
+        base: UnitBlockState {
+            progress,
+            ..UnitBlockState::default()
+        },
+        command_pos,
+        command_id,
+        constructing: false,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AssemblerRect {
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+}
+
+pub fn unit_assembler_rect(
+    x: f32,
+    y: f32,
+    rotation: i32,
+    area_size: i32,
+    block_size: i32,
+    tile_size: f32,
+) -> AssemblerRect {
+    let (dx, dy) = direction(rotation);
+    let len = tile_size * (area_size + block_size) as f32 / 2.0;
+    AssemblerRect {
+        x: x + dx as f32 * len,
+        y: y + dy as f32 * len,
+        size: area_size as f32 * tile_size,
+    }
+}
+
+pub fn unit_assembler_current_tier(mut tiers: Vec<i32>) -> i32 {
+    tiers.sort_unstable();
+    let mut max = 0;
+    for tier in tiers {
+        if tier == max || tier == max + 1 {
+            max = tier;
+        } else {
+            break;
+        }
+    }
+    max
+}
+
+pub fn unit_assembler_accept_item(
+    plan_has_item_req: bool,
+    stored: i32,
+    maximum_accepted: i32,
+    plan_contains_item: bool,
+) -> bool {
+    plan_has_item_req && stored < maximum_accepted && plan_contains_item
+}
+
+pub fn unit_assembler_accept_payload(
+    payload_slot_empty: bool,
+    source_is_module: bool,
+    requirement_amount: i32,
+    stored_blocks: i32,
+    unit_cost: f32,
+    same_payload_already_held_from_module: bool,
+) -> bool {
+    (payload_slot_empty || source_is_module)
+        && stored_blocks
+            < (requirement_amount as f32 * unit_cost).round() as i32
+                - if same_payload_already_held_from_module {
+                    1
+                } else {
+                    0
+                }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitAssemblerState {
+    pub progress: f32,
+    pub warmup: f32,
+    pub drone_warmup: f32,
+    pub power_warmup: f32,
+    pub same_type_warmup: f32,
+    pub invalid_warmup: f32,
+    pub drone_progress: f32,
+    pub total_drone_progress: f32,
+    pub current_tier: i32,
+    pub last_tier: i32,
+    pub was_occupied: bool,
+}
+
+impl Default for UnitAssemblerState {
+    fn default() -> Self {
+        Self {
+            progress: 0.0,
+            warmup: 0.0,
+            drone_warmup: 0.0,
+            power_warmup: 0.0,
+            same_type_warmup: 0.0,
+            invalid_warmup: 0.0,
+            drone_progress: 0.0,
+            total_drone_progress: 0.0,
+            current_tier: 0,
+            last_tier: -2,
+            was_occupied: false,
+        }
+    }
+}
+
+pub fn unit_assembler_update_progress(
+    state: &mut UnitAssemblerState,
+    enabled: bool,
+    power_status: f32,
+    units: usize,
+    drones_created: usize,
+    efficiency: f32,
+    can_create: bool,
+    requirements_met: bool,
+    drones_in_position: usize,
+    delta: f32,
+    edelta: f32,
+    unit_build_speed: f32,
+    plan_time: f32,
+) -> bool {
+    if state.last_tier != state.current_tier {
+        if state.last_tier >= 0 {
+            state.progress = 0.0;
+        }
+        state.last_tier = if state.last_tier == -2 {
+            -1
+        } else {
+            state.current_tier
+        };
+    }
+    let pstatus = if !enabled { 0.0 } else { power_status };
+    state.power_warmup = lerp_delta(pstatus, if pstatus > 0.0001 { 1.0 } else { 0.0 }, 0.1);
+    state.drone_warmup = lerp_delta(
+        state.drone_warmup,
+        if units < drones_created { pstatus } else { 0.0 },
+        0.1,
+    );
+    state.total_drone_progress += state.drone_warmup * delta;
+    let mut drone_spawned = false;
+    if units < drones_created {
+        state.drone_progress += delta * unit_build_speed * pstatus / (60.0 * 4.0);
+        if state.drone_progress >= 1.0 {
+            drone_spawned = true;
+        }
+    } else {
+        state.drone_progress = 0.0;
+    }
+
+    let eff = if drones_created == 0 {
+        0.0
+    } else {
+        drones_in_position as f32 / drones_created as f32
+    };
+    if !state.was_occupied && efficiency > 0.0 && can_create && requirements_met {
+        state.warmup = lerp_delta(state.warmup, efficiency, 0.1);
+        state.progress += edelta * unit_build_speed * eff / plan_time;
+    } else {
+        state.warmup = lerp_delta(state.warmup, 0.0, 0.1);
+    }
+    drone_spawned
+}
+
+pub fn unit_assembler_spawned(state: &mut UnitAssemblerState) {
+    state.progress = 0.0;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitCargoLoaderState {
+    pub read_unit_id: i32,
+    pub build_progress: f32,
+    pub total_progress: f32,
+    pub warmup: f32,
+    pub readyness: f32,
+    pub has_unit: bool,
+}
+
+impl Default for UnitCargoLoaderState {
+    fn default() -> Self {
+        Self {
+            read_unit_id: -1,
+            build_progress: 0.0,
+            total_progress: 0.0,
+            warmup: 0.0,
+            readyness: 0.0,
+            has_unit: false,
+        }
+    }
+}
+
+pub fn unit_cargo_loader_update(
+    state: &mut UnitCargoLoaderState,
+    efficiency: f32,
+    can_create: bool,
+    edelta: f32,
+    delta: f32,
+    unit_build_time: f32,
+) -> bool {
+    state.warmup = approach_delta(state.warmup, efficiency, 1.0 / 60.0);
+    state.readyness = approach_delta(
+        state.readyness,
+        if state.has_unit { 1.0 } else { 0.0 },
+        1.0 / 60.0,
+    );
+    if !state.has_unit && can_create {
+        state.build_progress += edelta / unit_build_time;
+        state.total_progress += edelta;
+        state.build_progress >= 1.0
+    } else {
+        let _ = delta;
+        false
+    }
+}
+
+pub fn unit_cargo_loader_spawned(state: &mut UnitCargoLoaderState, id: i32, net_client: bool) {
+    state.build_progress = 0.0;
+    if net_client {
+        state.read_unit_id = id;
+    }
+}
+
+pub fn unit_cargo_loader_accept_item(total_items: i32, item_capacity: i32) -> bool {
+    total_items < item_capacity
+}
+
+pub fn write_unit_cargo_loader_state<W: Write>(
+    write: &mut W,
+    unit_id: Option<i32>,
+) -> io::Result<()> {
+    write_i32(write, unit_id.unwrap_or(-1))
+}
+
+pub fn read_unit_cargo_loader_state<R: Read>(read: &mut R) -> io::Result<UnitCargoLoaderState> {
+    Ok(UnitCargoLoaderState {
+        read_unit_id: read_i32(read)?,
+        ..UnitCargoLoaderState::default()
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitCargoUnloadPointState {
+    pub item_id: Option<i32>,
+    pub stale_timer: f32,
+    pub stale: bool,
+}
+
+pub fn unit_cargo_unload_update(
+    state: &mut UnitCargoUnloadPointState,
+    items_total: i32,
+    item_capacity: i32,
+    dumped: bool,
+    delta: f32,
+    stale_time_duration: f32,
+) {
+    if items_total < item_capacity {
+        state.stale_timer = 0.0;
+        state.stale = false;
+    }
+    if dumped {
+        state.stale_timer = 0.0;
+        state.stale = false;
+    } else if items_total >= item_capacity {
+        state.stale_timer += delta;
+        if state.stale_timer >= stale_time_duration {
+            state.stale = true;
+        }
+    }
+}
+
+pub fn unit_cargo_unload_accept_stack(item_capacity: i32, items_total: i32, amount: i32) -> i32 {
+    (item_capacity - items_total).min(amount).max(0)
+}
+
+pub fn write_unit_cargo_unload_state<W: Write>(
+    write: &mut W,
+    state: &UnitCargoUnloadPointState,
+) -> io::Result<()> {
+    write_i16(write, state.item_id.unwrap_or(-1) as i16)?;
+    write.write_all(&[state.stale as u8])
+}
+
+pub fn read_unit_cargo_unload_state<R: Read>(
+    read: &mut R,
+) -> io::Result<UnitCargoUnloadPointState> {
+    let id = read_i16(read)? as i32;
+    let mut stale = [0; 1];
+    read.read_exact(&mut stale)?;
+    Ok(UnitCargoUnloadPointState {
+        item_id: (id != -1).then_some(id),
+        stale_timer: 0.0,
+        stale: stale[0] != 0,
+    })
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
     from + (to - from) * alpha
+}
+
+fn approach_delta(from: f32, to: f32, amount: f32) -> f32 {
+    if from < to {
+        (from + amount).min(to)
+    } else {
+        (from - amount).max(to)
+    }
+}
+
+fn direction(rotation: i32) -> (i32, i32) {
+    match rotation.rem_euclid(4) {
+        0 => (1, 0),
+        1 => (0, 1),
+        2 => (-1, 0),
+        _ => (0, -1),
+    }
 }
 
 fn write_command<W: Write>(write: &mut W, command_id: Option<u8>) -> io::Result<()> {
@@ -339,6 +770,16 @@ fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
     let mut buf = [0; 4];
     read.read_exact(&mut buf)?;
     Ok(f32::from_be_bytes(buf))
+}
+
+fn write_i32<W: Write>(write: &mut W, value: i32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_i32<R: Read>(read: &mut R) -> io::Result<i32> {
+    let mut buf = [0; 4];
+    read.read_exact(&mut buf)?;
+    Ok(i32::from_be_bytes(buf))
 }
 
 #[cfg(test)]
@@ -487,5 +928,134 @@ mod tests {
         let update = repair_tower_update(&mut state, 1.0, 1.0, true, 1, 1, 3.0, 1.0, 120.0);
         assert_eq!(state.warmup, 0.0);
         assert_eq!(update.heal_per_target, 0.0);
+    }
+
+    #[test]
+    fn reconstructor_progress_acceptance_and_serialization_follow_upstream() {
+        let (caps, item_cap) = reconstructor_capacities(
+            3,
+            &[
+                UnitPlanRequirement {
+                    item_id: 0,
+                    amount: 5,
+                },
+                UnitPlanRequirement {
+                    item_id: 1,
+                    amount: 30,
+                },
+            ],
+        );
+        assert_eq!(caps, vec![10, 60, 0]);
+        assert_eq!(item_cap, 60);
+        assert_eq!(reconstructor_fraction(30.0, 120.0), 0.25);
+        assert!(reconstructor_accept_payload(
+            true, true, true, true, true, false
+        ));
+        assert!(!reconstructor_accept_payload(
+            true, true, false, true, true, false
+        ));
+        assert!(reconstructor_should_consume(true, true, true));
+
+        let mut state = ReconstructorState {
+            base: UnitBlockState {
+                progress: 119.5,
+                speed_scl: 0.0,
+                ..UnitBlockState::default()
+            },
+            command_pos: Some(Vec2::new(2.0, 3.0)),
+            command_id: Some(4),
+            constructing: false,
+        };
+        assert!(reconstructor_update(
+            &mut state, true, true, true, 1.0, 1.0, 1.0, 120.0
+        ));
+        assert!(state.base.progress < 1.0);
+        assert_eq!(state.base.speed_scl, 0.05);
+
+        let mut bytes = Vec::new();
+        write_reconstructor_state(&mut bytes, &state).unwrap();
+        let restored = read_reconstructor_state(&mut bytes.as_slice(), 3).unwrap();
+        assert_eq!(restored.base.progress, state.base.progress);
+        assert_eq!(restored.command_pos, state.command_pos);
+        assert_eq!(restored.command_id, state.command_id);
+    }
+
+    #[test]
+    fn assembler_geometry_tiers_acceptance_and_progress_follow_upstream() {
+        let rect = unit_assembler_rect(80.0, 40.0, 1, 11, 5, 8.0);
+        assert_eq!(
+            rect,
+            AssemblerRect {
+                x: 80.0,
+                y: 104.0,
+                size: 88.0,
+            }
+        );
+        assert_eq!(unit_assembler_current_tier(vec![0, 1, 3]), 1);
+        assert_eq!(unit_assembler_current_tier(vec![2, 3]), 0);
+        assert!(unit_assembler_accept_item(true, 9, 10, true));
+        assert!(!unit_assembler_accept_item(false, 0, 10, true));
+        assert!(unit_assembler_accept_payload(true, false, 4, 3, 1.0, false));
+        assert!(!unit_assembler_accept_payload(
+            true, false, 4, 4, 1.0, false
+        ));
+        assert!(unit_assembler_accept_payload(false, true, 4, 2, 1.0, true));
+
+        let mut state = UnitAssemblerState::default();
+        let drone_spawned = unit_assembler_update_progress(
+            &mut state, true, 1.0, 0, 4, 0.5, true, true, 2, 1.0, 1.0, 1.0, 10.0,
+        );
+        assert!(!drone_spawned);
+        assert_eq!(state.warmup, 0.05);
+        assert_eq!(state.progress, 0.05);
+        unit_assembler_spawned(&mut state);
+        assert_eq!(state.progress, 0.0);
+    }
+
+    #[test]
+    fn cargo_loader_and_unload_point_state_match_java_fields() {
+        let mut loader = UnitCargoLoaderState::default();
+        assert!(unit_cargo_loader_accept_item(199, 200));
+        assert!(!unit_cargo_loader_update(
+            &mut loader,
+            1.0,
+            true,
+            60.0,
+            60.0,
+            480.0
+        ));
+        assert_eq!(loader.warmup, 1.0 / 60.0);
+        assert_eq!(loader.build_progress, 0.125);
+        unit_cargo_loader_spawned(&mut loader, 77, true);
+        assert_eq!(loader.build_progress, 0.0);
+        assert_eq!(loader.read_unit_id, 77);
+
+        let mut bytes = Vec::new();
+        write_unit_cargo_loader_state(&mut bytes, Some(77)).unwrap();
+        assert_eq!(bytes, 77i32.to_be_bytes());
+        assert_eq!(
+            read_unit_cargo_loader_state(&mut bytes.as_slice())
+                .unwrap()
+                .read_unit_id,
+            77
+        );
+
+        let mut unload = UnitCargoUnloadPointState {
+            item_id: Some(5),
+            stale_timer: 359.0,
+            stale: false,
+        };
+        unit_cargo_unload_update(&mut unload, 10, 10, false, 1.0, 360.0);
+        assert!(unload.stale);
+        assert_eq!(unit_cargo_unload_accept_stack(10, 7, 5), 3);
+
+        let mut bytes = Vec::new();
+        write_unit_cargo_unload_state(&mut bytes, &unload).unwrap();
+        assert_eq!(
+            read_unit_cargo_unload_state(&mut bytes.as_slice())
+                .unwrap()
+                .item_id,
+            Some(5)
+        );
     }
 }
