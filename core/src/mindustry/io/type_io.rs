@@ -55,8 +55,12 @@ pub enum TypeValue {
     Point2(Point2),
     Vec2(Vec2),
     Team(u8),
+    IntSeq(Vec<i32>),
     IntArray(Vec<i32>),
     ByteArray(Vec<u8>),
+    Point2Array(Vec<Point2>),
+    BoolArray(Vec<bool>),
+    Vec2Array(Vec<Vec2>),
     ObjectArray(Vec<TypeValue>),
 }
 
@@ -199,6 +203,28 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write_i32(write, value.x)?;
             write_i32(write, value.y)
         }
+        TypeValue::IntSeq(values) => {
+            if values.len() > MAX_ARRAY_SIZE || values.len() > i16::MAX as usize {
+                return Err(invalid_input("int seq too large"));
+            }
+            write.write_all(&[6])?;
+            write_i16(write, values.len() as i16)?;
+            for value in values {
+                write_i32(write, *value)?;
+            }
+            Ok(())
+        }
+        TypeValue::Point2Array(values) => {
+            if values.len() > u8::MAX as usize {
+                return Err(invalid_input("point2 array too large"));
+            }
+            write.write_all(&[8])?;
+            write.write_all(&[values.len() as u8])?;
+            for value in values {
+                write_point2_packed(write, *value)?;
+            }
+            Ok(())
+        }
         TypeValue::Vec2(value) => {
             write.write_all(&[19])?;
             write_u32(write, value.x.to_bits())?;
@@ -211,6 +237,28 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write.write_all(&[14])?;
             write_i32(write, values.len() as i32)?;
             write.write_all(values)
+        }
+        TypeValue::BoolArray(values) => {
+            if values.len() > MAX_ARRAY_SIZE {
+                return Err(invalid_input("bool array too large"));
+            }
+            write.write_all(&[16])?;
+            write_i32(write, values.len() as i32)?;
+            for value in values {
+                write.write_all(&[*value as u8])?;
+            }
+            Ok(())
+        }
+        TypeValue::Vec2Array(values) => {
+            if values.len() > MAX_ARRAY_SIZE || values.len() > i16::MAX as usize {
+                return Err(invalid_input("vec2 array too large"));
+            }
+            write.write_all(&[18])?;
+            write_i16(write, values.len() as i16)?;
+            for value in values {
+                write_vec2(write, *value)?;
+            }
+            Ok(())
         }
         TypeValue::Team(value) => {
             write.write_all(&[20])?;
@@ -262,6 +310,27 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
             read_i32(read)?,
             read_i32(read)?,
         ))),
+        6 => {
+            ensure_arrays_allowed(allow_arrays)?;
+            let len = read_i16(read)?;
+            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+                return Err(invalid_data("invalid int seq length"));
+            }
+            let mut values = Vec::with_capacity(len as usize);
+            for _ in 0..len {
+                values.push(read_i32(read)?);
+            }
+            Ok(TypeValue::IntSeq(values))
+        }
+        8 => {
+            ensure_arrays_allowed(allow_arrays)?;
+            let len = read_u8(read)? as usize;
+            let mut values = Vec::with_capacity(len);
+            for _ in 0..len {
+                values.push(read_point2_packed(read)?);
+            }
+            Ok(TypeValue::Point2Array(values))
+        }
         14 => {
             ensure_arrays_allowed(allow_arrays)?;
             let len = read_i32(read)?;
@@ -271,6 +340,30 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
             let mut bytes = vec![0; len as usize];
             read.read_exact(&mut bytes)?;
             Ok(TypeValue::ByteArray(bytes))
+        }
+        16 => {
+            ensure_arrays_allowed(allow_arrays)?;
+            let len = read_i32(read)?;
+            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+                return Err(invalid_data("invalid bool array length"));
+            }
+            let mut values = Vec::with_capacity(len as usize);
+            for _ in 0..len {
+                values.push(read_u8(read)? != 0);
+            }
+            Ok(TypeValue::BoolArray(values))
+        }
+        18 => {
+            ensure_arrays_allowed(allow_arrays)?;
+            let len = read_i16(read)?;
+            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+                return Err(invalid_data("invalid vec2 array length"));
+            }
+            let mut values = Vec::with_capacity(len as usize);
+            for _ in 0..len {
+                values.push(read_vec2(read)?);
+            }
+            Ok(TypeValue::Vec2Array(values))
         }
         20 => Ok(TypeValue::Team(read_u8(read)?)),
         19 => Ok(TypeValue::Vec2(Vec2::new(
@@ -408,12 +501,192 @@ pub fn read_vec2<R: Read>(read: &mut R) -> io::Result<Vec2> {
     ))
 }
 
+pub fn write_vec_nullable<W: Write>(write: &mut W, value: Option<Vec2>) -> io::Result<()> {
+    match value {
+        Some(value) => write_vec2(write, value),
+        None => {
+            write_u32(write, f32::NAN.to_bits())?;
+            write_u32(write, f32::NAN.to_bits())
+        }
+    }
+}
+
+pub fn read_vec_nullable<R: Read>(read: &mut R) -> io::Result<Option<Vec2>> {
+    let x = f32::from_bits(read_u32(read)?);
+    let y = f32::from_bits(read_u32(read)?);
+    if x.is_nan() || y.is_nan() {
+        Ok(None)
+    } else {
+        Ok(Some(Vec2::new(x, y)))
+    }
+}
+
 pub fn write_team_id<W: Write>(write: &mut W, value: TeamId) -> io::Result<()> {
     write.write_all(&[value.0])
 }
 
 pub fn read_team_id<R: Read>(read: &mut R) -> io::Result<TeamId> {
     Ok(TeamId(read_u8(read)?))
+}
+
+pub fn write_bytes_short<W: Write>(write: &mut W, values: &[u8]) -> io::Result<()> {
+    if values.len() > i16::MAX as usize {
+        return Err(invalid_input("byte block too large"));
+    }
+    write_i16(write, values.len() as i16)?;
+    write.write_all(values)
+}
+
+pub fn read_bytes_short<R: Read>(read: &mut R) -> io::Result<Vec<u8>> {
+    let len = read_i16(read)?;
+    if len < 0 {
+        return Err(invalid_data("invalid byte block length"));
+    }
+    let mut bytes = vec![0; len as usize];
+    read.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
+pub fn write_ints<W: Write>(write: &mut W, values: &[i32]) -> io::Result<()> {
+    if values.len() > i16::MAX as usize {
+        return Err(invalid_input("int array too large"));
+    }
+    write_i16(write, values.len() as i16)?;
+    for value in values {
+        write_i32(write, *value)?;
+    }
+    Ok(())
+}
+
+pub fn read_ints<R: Read>(read: &mut R) -> io::Result<Vec<i32>> {
+    let len = read_i16(read)?;
+    if len < 0 {
+        return Err(invalid_data("invalid int array length"));
+    }
+    let mut values = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        values.push(read_i32(read)?);
+    }
+    Ok(values)
+}
+
+pub fn write_int_seq<W: Write>(write: &mut W, values: &[i32]) -> io::Result<()> {
+    if values.len() > i32::MAX as usize {
+        return Err(invalid_input("int seq too large"));
+    }
+    write_i32(write, values.len() as i32)?;
+    for value in values {
+        write_i32(write, *value)?;
+    }
+    Ok(())
+}
+
+pub fn read_int_seq<R: Read>(read: &mut R) -> io::Result<Vec<i32>> {
+    let len = read_i32(read)?;
+    if len < 0 || len as usize > MAX_ARRAY_SIZE {
+        return Err(invalid_data("invalid int seq length"));
+    }
+    let mut values = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        values.push(read_i32(read)?);
+    }
+    Ok(values)
+}
+
+pub fn write_strings<W: Write>(write: &mut W, values: &[Option<&str>]) -> io::Result<()> {
+    if values.len() > u8::MAX as usize {
+        return Err(invalid_input("string array too large"));
+    }
+    write.write_all(&[values.len() as u8])?;
+    for value in values {
+        write_string(write, *value)?;
+    }
+    Ok(())
+}
+
+pub fn write_strings_limited<W: Write>(
+    write: &mut W,
+    values: &[Option<&str>],
+    max_len: usize,
+) -> io::Result<()> {
+    let len = values.len().min(max_len);
+    if len > u8::MAX as usize {
+        return Err(invalid_input("string array too large"));
+    }
+    write.write_all(&[len as u8])?;
+    for value in values.iter().take(len) {
+        write_string(write, *value)?;
+    }
+    Ok(())
+}
+
+pub fn read_strings<R: Read>(read: &mut R) -> io::Result<Vec<Option<String>>> {
+    let len = read_u8(read)? as usize;
+    let mut values = Vec::with_capacity(len);
+    for _ in 0..len {
+        values.push(read_string(read)?);
+    }
+    Ok(values)
+}
+
+pub fn write_string_array<W: Write>(write: &mut W, rows: &[Vec<Option<&str>>]) -> io::Result<()> {
+    if rows.len() > u8::MAX as usize {
+        return Err(invalid_input("string matrix too many rows"));
+    }
+    write.write_all(&[rows.len() as u8])?;
+    for row in rows {
+        if row.len() > u8::MAX as usize {
+            return Err(invalid_input("string matrix too many columns"));
+        }
+        write.write_all(&[row.len() as u8])?;
+        for value in row {
+            write_string(write, *value)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn read_string_array<R: Read>(read: &mut R) -> io::Result<Vec<Vec<Option<String>>>> {
+    let rows = read_u8(read)? as usize;
+    let mut values = Vec::with_capacity(rows);
+    for _ in 0..rows {
+        let columns = read_u8(read)? as usize;
+        let mut row = Vec::with_capacity(columns);
+        for _ in 0..columns {
+            row.push(read_string(read)?);
+        }
+        values.push(row);
+    }
+    Ok(values)
+}
+
+pub fn write_string_data<W: Write>(write: &mut W, string: Option<&str>) -> io::Result<()> {
+    match string {
+        Some(string) => {
+            let bytes = string.as_bytes();
+            if bytes.len() > i16::MAX as usize {
+                return Err(invalid_input("string data too large"));
+            }
+            write_i16(write, bytes.len() as i16)?;
+            write.write_all(bytes)
+        }
+        None => write_i16(write, -1),
+    }
+}
+
+pub fn read_string_data<R: Read>(read: &mut R) -> io::Result<Option<String>> {
+    let len = read_i16(read)?;
+    if len == -1 {
+        return Ok(None);
+    }
+    if len < -1 {
+        return Err(invalid_data("invalid string data length"));
+    }
+    let mut bytes = vec![0; len as usize];
+    read.read_exact(&mut bytes)?;
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| invalid_data("invalid UTF-8 string data"))
 }
 
 fn invalid_input(message: &'static str) -> io::Error {
@@ -468,6 +741,110 @@ mod tests {
         let ints = TypeValue::IntArray(vec![1, 2, 3]);
         write_object(&mut bytes, &ints).unwrap();
         assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), ints);
+    }
+
+    #[test]
+    fn java_length_prefixed_arrays_match_exact_layout() {
+        let mut bytes = Vec::new();
+        write_bytes_short(&mut bytes, &[0xaa, 0xbb]).unwrap();
+        assert_eq!(bytes, vec![0x00, 0x02, 0xaa, 0xbb]);
+        assert_eq!(
+            read_bytes_short(&mut bytes.as_slice()).unwrap(),
+            vec![0xaa, 0xbb]
+        );
+
+        bytes.clear();
+        write_ints(&mut bytes, &[1, -2]).unwrap();
+        assert_eq!(bytes, vec![0x00, 0x02, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xfe]);
+        assert_eq!(read_ints(&mut bytes.as_slice()).unwrap(), vec![1, -2]);
+
+        bytes.clear();
+        write_int_seq(&mut bytes, &[3, 4]).unwrap();
+        assert_eq!(bytes, vec![0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4]);
+        assert_eq!(read_int_seq(&mut bytes.as_slice()).unwrap(), vec![3, 4]);
+    }
+
+    #[test]
+    fn string_arrays_and_string_data_use_java_prefixes() {
+        let mut bytes = Vec::new();
+        write_strings(&mut bytes, &[Some("A"), None]).unwrap();
+        assert_eq!(bytes, vec![2, 1, 0, 1, b'A', 0]);
+        assert_eq!(
+            read_strings(&mut bytes.as_slice()).unwrap(),
+            vec![Some("A".into()), None]
+        );
+
+        bytes.clear();
+        write_strings_limited(&mut bytes, &[Some("A"), Some("B"), Some("C")], 2).unwrap();
+        assert_eq!(bytes, vec![2, 1, 0, 1, b'A', 1, 0, 1, b'B']);
+
+        bytes.clear();
+        write_string_array(&mut bytes, &[vec![Some("x")], vec![None, Some("y")]]).unwrap();
+        assert_eq!(
+            read_string_array(&mut bytes.as_slice()).unwrap(),
+            vec![vec![Some("x".into())], vec![None, Some("y".into())]]
+        );
+
+        bytes.clear();
+        write_string_data(&mut bytes, Some("A\0中")).unwrap();
+        assert_eq!(bytes[0..2], [0, 5]);
+        assert_eq!(
+            read_string_data(&mut bytes.as_slice()).unwrap(),
+            Some("A\0中".into())
+        );
+
+        bytes.clear();
+        write_string_data(&mut bytes, None).unwrap();
+        assert_eq!(bytes, vec![0xff, 0xff]);
+        assert_eq!(read_string_data(&mut bytes.as_slice()).unwrap(), None);
+    }
+
+    #[test]
+    fn nullable_vec_uses_nan_sentinel_like_typeio() {
+        let mut bytes = Vec::new();
+        write_vec_nullable(&mut bytes, None).unwrap();
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(read_vec_nullable(&mut bytes.as_slice()).unwrap(), None);
+
+        bytes.clear();
+        write_vec_nullable(&mut bytes, Some(Vec2::new(1.25, -2.5))).unwrap();
+        assert_eq!(bytes, vec![0x3f, 0xa0, 0, 0, 0xc0, 0x20, 0, 0]);
+        assert_eq!(
+            read_vec_nullable(&mut bytes.as_slice()).unwrap(),
+            Some(Vec2::new(1.25, -2.5))
+        );
+    }
+
+    #[test]
+    fn tagged_array_values_match_low_risk_java_tags() {
+        let mut bytes = Vec::new();
+        let seq = TypeValue::IntSeq(vec![5, -6]);
+        write_object(&mut bytes, &seq).unwrap();
+        assert_eq!(bytes, vec![6, 0, 2, 0, 0, 0, 5, 0xff, 0xff, 0xff, 0xfa]);
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), seq);
+
+        bytes.clear();
+        let points = TypeValue::Point2Array(vec![Point2::new(-1, 2), Point2::new(3, -4)]);
+        write_object(&mut bytes, &points).unwrap();
+        assert_eq!(bytes[0], 8);
+        assert_eq!(bytes[1], 2);
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), points);
+
+        bytes.clear();
+        let bools = TypeValue::BoolArray(vec![true, false, true]);
+        write_object(&mut bytes, &bools).unwrap();
+        assert_eq!(bytes, vec![16, 0, 0, 0, 3, 1, 0, 1]);
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), bools);
+
+        bytes.clear();
+        let vecs = TypeValue::Vec2Array(vec![Vec2::new(1.0, 2.0), Vec2::new(-3.0, 4.5)]);
+        write_object(&mut bytes, &vecs).unwrap();
+        assert_eq!(bytes[0], 18);
+        assert_eq!(&bytes[1..3], &[0, 2]);
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), vecs);
+
+        let nested = [22, 0, 0, 0, 1, 16, 0, 0, 0, 1, 1];
+        assert!(read_object(&mut nested.as_slice()).is_err());
     }
 
     #[test]
