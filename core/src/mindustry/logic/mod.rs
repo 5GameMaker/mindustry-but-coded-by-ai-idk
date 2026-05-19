@@ -1,6 +1,6 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
-use crate::mindustry::ctype::ContentType;
+use crate::mindustry::{ctype::ContentType, world::meta::BlockFlag};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -387,6 +387,41 @@ pub enum LogicStatement {
         sort_order: String,
         output: String,
     },
+    Sensor {
+        to: String,
+        from: String,
+        type_: String,
+    },
+    UnitBind {
+        type_: String,
+    },
+    UnitControl {
+        type_: LUnitControl,
+        p1: String,
+        p2: String,
+        p3: String,
+        p4: String,
+        p5: String,
+    },
+    UnitRadar {
+        target1: RadarTarget,
+        target2: RadarTarget,
+        target3: RadarTarget,
+        sort: RadarSort,
+        radar: String,
+        sort_order: String,
+        output: String,
+    },
+    UnitLocate {
+        locate: LLocate,
+        flag: BlockFlag,
+        enemy: String,
+        ore: String,
+        out_x: String,
+        out_y: String,
+        out_found: String,
+        out_build: String,
+    },
 }
 
 impl LogicStatement {
@@ -549,6 +584,56 @@ impl LogicStatement {
         }
     }
 
+    pub fn sensor() -> Self {
+        Self::Sensor {
+            to: "result".into(),
+            from: "block1".into(),
+            type_: "@copper".into(),
+        }
+    }
+
+    pub fn unit_bind() -> Self {
+        Self::UnitBind {
+            type_: "@poly".into(),
+        }
+    }
+
+    pub fn unit_control() -> Self {
+        Self::UnitControl {
+            type_: LUnitControl::Move,
+            p1: "0".into(),
+            p2: "0".into(),
+            p3: "0".into(),
+            p4: "0".into(),
+            p5: "0".into(),
+        }
+    }
+
+    pub fn unit_radar() -> Self {
+        Self::UnitRadar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Any,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Distance,
+            radar: "0".into(),
+            sort_order: "1".into(),
+            output: "result".into(),
+        }
+    }
+
+    pub fn unit_locate() -> Self {
+        Self::UnitLocate {
+            locate: LLocate::Building,
+            flag: BlockFlag::Core,
+            enemy: "true".into(),
+            ore: "@copper".into(),
+            out_x: "outx".into(),
+            out_y: "outy".into(),
+            out_found: "found".into(),
+            out_build: "building".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -573,6 +658,11 @@ impl LogicStatement {
             LogicStatement::Jump { .. } => "jump",
             LogicStatement::Control { .. } => "control",
             LogicStatement::Radar { .. } => "radar",
+            LogicStatement::Sensor { .. } => "sensor",
+            LogicStatement::UnitBind { .. } => "ubind",
+            LogicStatement::UnitControl { .. } => "ucontrol",
+            LogicStatement::UnitRadar { .. } => "uradar",
+            LogicStatement::UnitLocate { .. } => "ulocate",
         }
     }
 
@@ -598,9 +688,13 @@ impl LogicStatement {
             | LogicStatement::Stop
             | LogicStatement::End
             | LogicStatement::Jump { .. } => LCategory::by_name("control").unwrap(),
-            LogicStatement::Control { .. } | LogicStatement::Radar { .. } => {
-                LCategory::by_name("block").unwrap()
-            }
+            LogicStatement::Control { .. }
+            | LogicStatement::Radar { .. }
+            | LogicStatement::Sensor { .. } => LCategory::by_name("block").unwrap(),
+            LogicStatement::UnitBind { .. }
+            | LogicStatement::UnitControl { .. }
+            | LogicStatement::UnitRadar { .. }
+            | LogicStatement::UnitLocate { .. } => LCategory::by_name("unit").unwrap(),
         }
     }
 
@@ -724,6 +818,64 @@ impl LogicStatement {
                 radar.clone(),
                 sort_order.clone(),
                 output.clone(),
+            ],
+            LogicStatement::Sensor { to, from, type_ } => {
+                vec!["sensor".into(), to.clone(), from.clone(), type_.clone()]
+            }
+            LogicStatement::UnitBind { type_ } => vec!["ubind".into(), type_.clone()],
+            LogicStatement::UnitControl {
+                type_,
+                p1,
+                p2,
+                p3,
+                p4,
+                p5,
+            } => vec![
+                "ucontrol".into(),
+                type_.wire_name().into(),
+                p1.clone(),
+                p2.clone(),
+                p3.clone(),
+                p4.clone(),
+                p5.clone(),
+            ],
+            LogicStatement::UnitRadar {
+                target1,
+                target2,
+                target3,
+                sort,
+                radar,
+                sort_order,
+                output,
+            } => vec![
+                "uradar".into(),
+                target1.wire_name().into(),
+                target2.wire_name().into(),
+                target3.wire_name().into(),
+                sort.wire_name().into(),
+                radar.clone(),
+                sort_order.clone(),
+                output.clone(),
+            ],
+            LogicStatement::UnitLocate {
+                locate,
+                flag,
+                enemy,
+                ore,
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+            } => vec![
+                "ulocate".into(),
+                locate.wire_name().into(),
+                flag.wire_name().into(),
+                enemy.clone(),
+                ore.clone(),
+                out_x.clone(),
+                out_y.clone(),
+                out_found.clone(),
+                out_build.clone(),
             ],
         }
     }
@@ -997,6 +1149,136 @@ impl LogicStatement {
                     }
                     if tokens.len() > 7 {
                         *output = tokens[7].clone();
+                    }
+                }
+                statement
+            }
+            "sensor" => {
+                let mut statement = Self::sensor();
+                if let LogicStatement::Sensor { to, from, type_ } = &mut statement {
+                    if tokens.len() > 1 {
+                        *to = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *from = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *type_ = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "ubind" => Self::UnitBind {
+                type_: tokens.get(1).cloned().unwrap_or_else(|| "@poly".into()),
+            },
+            "ucontrol" => {
+                let mut statement = Self::unit_control();
+                if let LogicStatement::UnitControl {
+                    type_,
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                    p5,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = LUnitControl::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *p1 = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *p2 = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *p3 = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *p4 = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *p5 = tokens[6].clone();
+                    }
+                }
+                statement
+            }
+            "uradar" => {
+                let mut statement = Self::unit_radar();
+                if let LogicStatement::UnitRadar {
+                    target1,
+                    target2,
+                    target3,
+                    sort,
+                    radar,
+                    sort_order,
+                    output,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *target1 = RadarTarget::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *target2 = RadarTarget::by_wire_name(&tokens[2])?;
+                    }
+                    if tokens.len() > 3 {
+                        *target3 = RadarTarget::by_wire_name(&tokens[3])?;
+                    }
+                    if tokens.len() > 4 {
+                        *sort = RadarSort::by_wire_name(&tokens[4])?;
+                    }
+                    if tokens.len() > 5 {
+                        *radar = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *sort_order = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *output = tokens[7].clone();
+                    }
+                }
+                statement
+            }
+            "ulocate" => {
+                let mut statement = Self::unit_locate();
+                if let LogicStatement::UnitLocate {
+                    locate,
+                    flag,
+                    enemy,
+                    ore,
+                    out_x,
+                    out_y,
+                    out_found,
+                    out_build,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *locate = LLocate::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        let value = BlockFlag::by_wire_name(&tokens[2])?;
+                        if !value.is_logic() {
+                            return None;
+                        }
+                        *flag = value;
+                    }
+                    if tokens.len() > 3 {
+                        *enemy = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *ore = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *out_x = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *out_y = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *out_found = tokens[7].clone();
+                    }
+                    if tokens.len() > 8 {
+                        *out_build = tokens[8].clone();
                     }
                 }
                 statement
@@ -3643,6 +3925,13 @@ impl LUnitControl {
         Self::WIRE_NAMES[self.ordinal() as usize]
     }
 
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
+
     pub const fn params(self) -> &'static [&'static str] {
         match self {
             LUnitControl::Move => &["x", "y"],
@@ -3693,6 +3982,13 @@ impl LLocate {
 
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
     }
 }
 
@@ -4222,6 +4518,23 @@ mod tests {
             LogicStatement::radar().write_line(),
             "radar enemy any any distance turret1 1 result"
         );
+        assert_eq!(
+            LogicStatement::sensor().write_line(),
+            "sensor result block1 @copper"
+        );
+        assert_eq!(LogicStatement::unit_bind().write_line(), "ubind @poly");
+        assert_eq!(
+            LogicStatement::unit_control().write_line(),
+            "ucontrol move 0 0 0 0 0"
+        );
+        assert_eq!(
+            LogicStatement::unit_radar().write_line(),
+            "uradar enemy any any distance 0 1 result"
+        );
+        assert_eq!(
+            LogicStatement::unit_locate().write_line(),
+            "ulocate building core true @copper outx outy found building"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
@@ -4232,11 +4545,21 @@ mod tests {
         assert_eq!(LogicStatement::jump().category().name, "control");
         assert_eq!(LogicStatement::control().category().name, "block");
         assert_eq!(LogicStatement::radar().category().name, "block");
+        assert_eq!(LogicStatement::sensor().category().name, "block");
+        assert_eq!(LogicStatement::unit_bind().category().name, "unit");
+        assert_eq!(LogicStatement::unit_control().category().name, "unit");
+        assert_eq!(LogicStatement::unit_radar().category().name, "unit");
+        assert_eq!(LogicStatement::unit_locate().category().name, "unit");
         assert!(!LogicStatement::read().privileged());
         assert!(!LogicStatement::operation().privileged());
         assert!(!LogicStatement::stop().privileged());
         assert!(!LogicStatement::lookup().privileged());
         assert!(!LogicStatement::jump().privileged());
+        assert!(!LogicStatement::sensor().privileged());
+        assert!(!LogicStatement::unit_bind().privileged());
+        assert!(!LogicStatement::unit_control().privileged());
+        assert!(!LogicStatement::unit_radar().privileged());
+        assert!(!LogicStatement::unit_locate().privileged());
         assert!(LogicStatement::set_rate().privileged());
         assert!(LogicStatement::sync().privileged());
         assert!(LogicStatement::locale_print().privileged());
@@ -4441,6 +4764,90 @@ mod tests {
                 sort_order: "-1".into(),
                 output: "target".into()
             })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["sensor", "out", "turret", "@health"].map(String::from)),
+            Some(LogicStatement::Sensor {
+                to: "out".into(),
+                from: "turret".into(),
+                type_: "@health".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["ubind", "@dagger"].map(String::from)),
+            Some(LogicStatement::UnitBind {
+                type_: "@dagger".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["ucontrol", "build", "1", "2", "@copper", "0", "config"].map(String::from)
+            ),
+            Some(LogicStatement::UnitControl {
+                type_: LUnitControl::Build,
+                p1: "1".into(),
+                p2: "2".into(),
+                p3: "@copper".into(),
+                p4: "0".into(),
+                p5: "config".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &[
+                    "uradar",
+                    "enemy",
+                    "flying",
+                    "boss",
+                    "maxHealth",
+                    "0",
+                    "-1",
+                    "out"
+                ]
+                .map(String::from)
+            ),
+            Some(LogicStatement::UnitRadar {
+                target1: RadarTarget::Enemy,
+                target2: RadarTarget::Flying,
+                target3: RadarTarget::Boss,
+                sort: RadarSort::MaxHealth,
+                radar: "0".into(),
+                sort_order: "-1".into(),
+                output: "out".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["ulocate", "ore", "core", "false", "@thorium", "x", "y", "found", "build"]
+                    .map(String::from)
+            ),
+            Some(LogicStatement::UnitLocate {
+                locate: LLocate::Ore,
+                flag: BlockFlag::Core,
+                enemy: "false".into(),
+                ore: "@thorium".into(),
+                out_x: "x".into(),
+                out_y: "y".into(),
+                out_found: "found".into(),
+                out_build: "build".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &[
+                    "ulocate",
+                    "building",
+                    "launchPad",
+                    "true",
+                    "@copper",
+                    "x",
+                    "y",
+                    "found",
+                    "build"
+                ]
+                .map(String::from)
+            ),
+            None
         );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
     }
