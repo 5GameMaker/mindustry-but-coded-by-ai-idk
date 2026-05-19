@@ -1,6 +1,6 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
-use crate::mindustry::{ctype::ContentType, world::meta::BlockFlag};
+use crate::mindustry::{content::ContentCatalog, ctype::ContentType, world::meta::BlockFlag};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -206,6 +206,20 @@ pub fn rgba_to_double_bits(r: u8, g: u8, b: u8, a: u8) -> f64 {
 
 pub fn rgba_u32_to_double_bits(rgba: u32) -> f64 {
     f64::from_bits(rgba as u64)
+}
+
+pub fn double_bits_to_rgba(value: f64) -> u32 {
+    value.to_bits() as u32
+}
+
+pub fn unpack_double_color(value: f64) -> (f64, f64, f64, f64) {
+    let rgba = double_bits_to_rgba(value);
+    (
+        ((rgba >> 24) & 0xff) as f64 / 255.0,
+        ((rgba >> 16) & 0xff) as f64 / 255.0,
+        ((rgba >> 8) & 0xff) as f64 / 255.0,
+        (rgba & 0xff) as f64 / 255.0,
+    )
 }
 
 fn parse_hex_byte_or_zero(symbol: &str, start: usize, end: usize) -> u8 {
@@ -3880,6 +3894,8 @@ pub struct LogicExecutor {
     pub vars: Vec<LVar>,
     pub counter: LVar,
     pub yield_: bool,
+    pub headless: bool,
+    pub graphics_buffer: Vec<u64>,
     pub text_buffer: String,
 }
 
@@ -3891,6 +3907,7 @@ impl Default for LogicExecutor {
 
 impl LogicExecutor {
     pub const MAX_TEXT_BUFFER: usize = 400;
+    pub const MAX_GRAPHICS_BUFFER: usize = 256;
 
     pub fn new() -> Self {
         Self {
@@ -3902,6 +3919,8 @@ impl LogicExecutor {
                 counter
             },
             yield_: false,
+            headless: false,
+            graphics_buffer: Vec::new(),
             text_buffer: String::new(),
         }
     }
@@ -3940,8 +3959,117 @@ impl LogicExecutor {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogicDisplayCommand {
+    pub type_: u8,
+    pub x: u16,
+    pub y: u16,
+    pub p1: u16,
+    pub p2: u16,
+    pub p3: u16,
+    pub p4: u16,
+}
+
+impl LogicDisplayCommand {
+    pub const DISPLAY_DRAW_TYPE: i32 = 30;
+    pub const SCALE_STEP: f32 = 0.05;
+
+    pub const fn get(type_: u8, x: u16, y: u16, p1: u16, p2: u16, p3: u16, p4: u16) -> u64 {
+        (type_ as u64 & 0x0f)
+            | ((x as u64 & 0x03ff) << 4)
+            | ((y as u64 & 0x03ff) << 14)
+            | ((p1 as u64 & 0x03ff) << 24)
+            | ((p2 as u64 & 0x03ff) << 34)
+            | ((p3 as u64 & 0x03ff) << 44)
+            | ((p4 as u64 & 0x03ff) << 54)
+    }
+
+    pub const fn unpack(value: u64) -> Self {
+        Self {
+            type_: (value & 0x0f) as u8,
+            x: ((value >> 4) & 0x03ff) as u16,
+            y: ((value >> 14) & 0x03ff) as u16,
+            p1: ((value >> 24) & 0x03ff) as u16,
+            p2: ((value >> 34) & 0x03ff) as u16,
+            p3: ((value >> 44) & 0x03ff) as u16,
+            p4: ((value >> 54) & 0x03ff) as u16,
+        }
+    }
+
+    pub const fn pack(value: i32) -> u16 {
+        (value & 0b0111111111) as u16
+    }
+
+    pub fn pack_sign(value: i32) -> u16 {
+        ((value.abs() & 0b0111111111) | if value < 0 { 0b1000000000 } else { 0 }) as u16
+    }
+
+    pub const fn unpack_sign(value: u16) -> i32 {
+        ((value & 0b0111111111) as i32) * if (value & 0b1000000000) != 0 { -1 } else { 1 }
+    }
+
+    pub fn from_draw_instruction(
+        type_: GraphicsType,
+        x: &LVar,
+        y: &LVar,
+        p1: &LVar,
+        p2: &LVar,
+        p3: &LVar,
+        p4: &LVar,
+    ) -> Option<u64> {
+        let type_id = type_.ordinal();
+        if type_ == GraphicsType::Col {
+            let rgba = double_bits_to_rgba(x.num());
+            return Some(Self::get(
+                GraphicsType::Color.ordinal(),
+                Self::pack(((rgba >> 24) & 0xff) as i32),
+                Self::pack(((rgba >> 16) & 0xff) as i32),
+                Self::pack(((rgba >> 8) & 0xff) as i32),
+                Self::pack((rgba & 0xff) as i32),
+                0,
+                0,
+            ));
+        }
+
+        let mut num1 = Self::pack_sign(p1.numi());
+        let mut num4 = Self::pack_sign(p4.numi());
+        let mut xval = Self::pack_sign(x.numi());
+        let mut yval = Self::pack_sign(y.numi());
+
+        if type_ == GraphicsType::Image {
+            let packed = -1;
+            num1 = (packed & 0x3ff) as u16;
+            num4 = ((packed >> 10) & 0x3ff) as u16;
+        } else if type_ == GraphicsType::Scale {
+            xval = Self::pack_sign((x.numf() / Self::SCALE_STEP) as i32);
+            yval = Self::pack_sign((y.numf() / Self::SCALE_STEP) as i32);
+        } else if type_ == GraphicsType::Print {
+            return None;
+        }
+
+        Some(Self::get(
+            type_id,
+            xval,
+            yval,
+            num1,
+            Self::pack_sign(p2.numi()),
+            Self::pack_sign(p3.numi()),
+            num4,
+        ))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum LogicInstruction {
+    Draw {
+        type_: GraphicsType,
+        x: LVar,
+        y: LVar,
+        p1: LVar,
+        p2: LVar,
+        p3: LVar,
+        p4: LVar,
+    },
     Set {
         from: LVar,
         to: LVar,
@@ -3982,11 +4110,55 @@ pub enum LogicInstruction {
         cur_time: f32,
     },
     Stop,
+    Lookup {
+        dest: LVar,
+        from: LVar,
+        type_: ContentType,
+    },
+    PackColor {
+        result: LVar,
+        r: LVar,
+        g: LVar,
+        b: LVar,
+        a: LVar,
+    },
+    UnpackColor {
+        r: LVar,
+        g: LVar,
+        b: LVar,
+        a: LVar,
+        value: LVar,
+    },
 }
 
 impl LogicInstruction {
     pub fn run(&mut self, exec: &mut LogicExecutor) {
         match self {
+            LogicInstruction::Draw {
+                type_,
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                if exec.headless || exec.graphics_buffer.len() >= LogicExecutor::MAX_GRAPHICS_BUFFER
+                {
+                    return;
+                }
+
+                if *type_ == GraphicsType::Print {
+                    exec.text_buffer.clear();
+                    return;
+                }
+
+                if let Some(command) =
+                    LogicDisplayCommand::from_draw_instruction(*type_, x, y, p1, p2, p3, p4)
+                {
+                    exec.graphics_buffer.push(command);
+                }
+            }
             LogicInstruction::Set { from, to } => {
                 if !to.constant {
                     to.set_from(from);
@@ -4084,6 +4256,25 @@ impl LogicInstruction {
                 exec.counter.numval -= 1.0;
                 exec.yield_ = true;
             }
+            LogicInstruction::Lookup { dest, from, type_ } => {
+                let value = lookup_logic_content_name(*type_, from.numi());
+                dest.set_obj(value.map(str::to_string));
+            }
+            LogicInstruction::PackColor { result, r, g, b, a } => {
+                result.set_num(rgba_to_double_bits(
+                    logic_color_channel_to_byte(r.num()),
+                    logic_color_channel_to_byte(g.num()),
+                    logic_color_channel_to_byte(b.num()),
+                    logic_color_channel_to_byte(a.num()),
+                ));
+            }
+            LogicInstruction::UnpackColor { r, g, b, a, value } => {
+                let (rv, gv, bv, av) = unpack_double_color(value.num());
+                r.set_num(rv);
+                g.set_num(gv);
+                b.set_num(bv);
+                a.set_num(av);
+            }
         }
     }
 }
@@ -4147,6 +4338,36 @@ pub fn first_logic_placeholder(buffer: &str) -> Option<(usize, u8)> {
         }
     }
     best
+}
+
+pub fn logic_color_channel_to_byte(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0) as u8
+}
+
+pub fn lookup_logic_content_name(type_: ContentType, id: i32) -> Option<&'static str> {
+    if id < 0 {
+        return None;
+    }
+
+    let id = id as i16;
+    let catalog = ContentCatalog::load_base_content();
+    let name = match type_ {
+        ContentType::Item => catalog
+            .item_by_id(id)
+            .map(|item| item.base.mappable.name.clone()),
+        ContentType::Block => catalog
+            .blocks
+            .get(id)
+            .map(|block| block.base().name.clone()),
+        ContentType::Liquid => catalog
+            .liquid_by_id(id)
+            .map(|liquid| liquid.base.mappable.name.clone()),
+        ContentType::Status => catalog
+            .status_effect_by_id(id)
+            .map(|status| status.base.mappable.name.clone()),
+        _ => None,
+    }?;
+    Some(Box::leak(name.into_boxed_str()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8159,6 +8380,176 @@ mod tests {
         };
         LogicInstruction::End.run(&mut end_exec);
         assert_eq!(end_exec.counter.numval, 2.0);
+    }
+
+    #[test]
+    fn display_command_packing_and_draw_instruction_follow_java_logic_display_bits() {
+        let packed = LogicDisplayCommand::get(4, 1, 2, 3, 4, 5, 6);
+        assert_eq!(
+            LogicDisplayCommand::unpack(packed),
+            LogicDisplayCommand {
+                type_: 4,
+                x: 1,
+                y: 2,
+                p1: 3,
+                p2: 4,
+                p3: 5,
+                p4: 6
+            }
+        );
+        assert_eq!(LogicDisplayCommand::pack(1025), 1);
+        assert_eq!(LogicDisplayCommand::pack_sign(-12), 0b1000001100);
+        assert_eq!(LogicDisplayCommand::unpack_sign(0b1000001100), -12);
+
+        let mut exec = LogicExecutor::new();
+        let mut draw = LogicInstruction::Draw {
+            type_: GraphicsType::Line,
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(-1.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(2.0);
+                value
+            },
+            p1: {
+                let mut value = LVar::new("p1");
+                value.set_num(3.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("p2");
+                value.set_num(4.0);
+                value
+            },
+            p3: {
+                let mut value = LVar::new("p3");
+                value.set_num(5.0);
+                value
+            },
+            p4: {
+                let mut value = LVar::new("p4");
+                value.set_num(-6.0);
+                value
+            },
+        };
+        draw.run(&mut exec);
+        assert_eq!(exec.graphics_buffer.len(), 1);
+        let command = LogicDisplayCommand::unpack(exec.graphics_buffer[0]);
+        assert_eq!(command.type_, GraphicsType::Line.ordinal());
+        assert_eq!(LogicDisplayCommand::unpack_sign(command.x), -1);
+        assert_eq!(LogicDisplayCommand::unpack_sign(command.y), 2);
+        assert_eq!(LogicDisplayCommand::unpack_sign(command.p1), 3);
+        assert_eq!(LogicDisplayCommand::unpack_sign(command.p4), -6);
+
+        let mut color_exec = LogicExecutor::new();
+        LogicInstruction::Draw {
+            type_: GraphicsType::Col,
+            x: {
+                let mut value = LVar::new("packed");
+                value.set_num(rgba_to_double_bits(0xff, 0x00, 0xaa, 0x80));
+                value
+            },
+            y: LVar::new("y"),
+            p1: LVar::new("p1"),
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut color_exec);
+        let color = LogicDisplayCommand::unpack(color_exec.graphics_buffer[0]);
+        assert_eq!(color.type_, GraphicsType::Color.ordinal());
+        assert_eq!((color.x, color.y, color.p1, color.p2), (255, 0, 170, 128));
+    }
+
+    #[test]
+    fn color_and_lookup_executor_instructions_follow_java_l_executor_semantics() {
+        let mut pack = LogicInstruction::PackColor {
+            result: LVar::new("result"),
+            r: {
+                let mut value = LVar::new("r");
+                value.set_num(1.0);
+                value
+            },
+            g: {
+                let mut value = LVar::new("g");
+                value.set_num(0.0);
+                value
+            },
+            b: {
+                let mut value = LVar::new("b");
+                value.set_num(0.5);
+                value
+            },
+            a: {
+                let mut value = LVar::new("a");
+                value.set_num(2.0);
+                value
+            },
+        };
+        pack.run(&mut LogicExecutor::new());
+        let packed = match pack {
+            LogicInstruction::PackColor { result, .. } => {
+                assert_eq!(double_bits_to_rgba(result.numval), 0xff007fff);
+                result.numval
+            }
+            _ => unreachable!(),
+        };
+
+        let mut unpack = LogicInstruction::UnpackColor {
+            r: LVar::new("r"),
+            g: LVar::new("g"),
+            b: LVar::new("b"),
+            a: LVar::new("a"),
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(packed);
+                value
+            },
+        };
+        unpack.run(&mut LogicExecutor::new());
+        match unpack {
+            LogicInstruction::UnpackColor { r, g, b, a, .. } => {
+                assert_eq!(r.value(), LVarValue::Number(1.0));
+                assert_eq!(g.value(), LVarValue::Number(0.0));
+                assert!((b.numval - 127.0 / 255.0).abs() < 0.000001);
+                assert_eq!(a.value(), LVarValue::Number(1.0));
+            }
+            _ => unreachable!(),
+        }
+
+        assert_eq!(
+            lookup_logic_content_name(ContentType::Item, 0),
+            Some("copper")
+        );
+        assert_eq!(
+            lookup_logic_content_name(ContentType::Liquid, 0),
+            Some("water")
+        );
+        assert_eq!(
+            lookup_logic_content_name(ContentType::Status, 0),
+            Some("none")
+        );
+        assert_eq!(lookup_logic_content_name(ContentType::Item, -1), None);
+
+        let mut lookup = LogicInstruction::Lookup {
+            dest: LVar::new("dest"),
+            from: {
+                let mut value = LVar::new("from");
+                value.set_num(0.0);
+                value
+            },
+            type_: ContentType::Item,
+        };
+        lookup.run(&mut LogicExecutor::new());
+        match lookup {
+            LogicInstruction::Lookup { dest, .. } => {
+                assert_eq!(dest.value(), LVarValue::Object(Some("copper".into())));
+            }
+            _ => unreachable!(),
+        }
     }
 
     #[test]
