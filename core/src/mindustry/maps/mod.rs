@@ -78,6 +78,18 @@ impl MapDescriptor {
         self.tag("description")
     }
 
+    pub fn plain_name(&self) -> String {
+        strip_colors(self.name())
+    }
+
+    pub fn plain_author(&self) -> String {
+        strip_colors(self.author())
+    }
+
+    pub fn plain_description(&self) -> String {
+        strip_colors(self.description())
+    }
+
     pub fn tag(&self, name: &str) -> &str {
         if self.has_tag(name) {
             self.tags.get(name).unwrap()
@@ -95,6 +107,34 @@ impl MapDescriptor {
 
     pub fn steam_id(&self) -> Option<&str> {
         self.tags.get("steamid").map(String::as_str)
+    }
+
+    pub fn add_steam_id(&mut self, id: impl Into<String>) {
+        self.tags.insert("steamid".to_string(), id.into());
+    }
+
+    pub fn remove_steam_id(&mut self) {
+        self.tags.remove("steamid");
+    }
+
+    pub fn steam_title(&self) -> &str {
+        self.name()
+    }
+
+    pub fn steam_description(&self) -> &str {
+        self.description()
+    }
+
+    pub const fn steam_tag(&self) -> &'static str {
+        "map"
+    }
+
+    pub fn high_score_key(&self) -> String {
+        format!(
+            "hiscore{}{}",
+            self.file_stem(),
+            self.tags.get("steamid").map(String::as_str).unwrap_or("")
+        )
     }
 
     pub fn preview_file(&self, preview_dir: &str) -> String {
@@ -115,6 +155,27 @@ impl MapDescriptor {
                 self.file_stem()
             )
         }
+    }
+
+    pub fn create_steam_folder(&self, tmp_dir: &str, id: &str) -> String {
+        format!("{}/map_{id}", trim_slash(tmp_dir))
+    }
+
+    pub fn create_steam_map_file(&self, tmp_dir: &str, id: &str) -> String {
+        format!("{}/map.msav", self.create_steam_folder(tmp_dir, id))
+    }
+
+    pub fn create_steam_preview(&self, preview_dir: &str) -> String {
+        let stem = if self.workshop && parent_exists_and_ext_equals(&self.file, "png") {
+            parent_name(&self.file).unwrap_or_else(|| self.file_stem())
+        } else {
+            self.file_stem()
+        };
+        format!("{}/{}_v2.png", trim_slash(preview_dir), stem)
+    }
+
+    pub fn extra_tags(&self, attack_valid: bool) -> Vec<String> {
+        vec![if attack_valid { "attack" } else { "survival" }.to_string()]
     }
 
     pub fn rules(&self) -> Rules {
@@ -164,6 +225,35 @@ impl MapDescriptor {
     }
 }
 
+pub fn compare_maps(
+    left: &MapDescriptor,
+    right: &MapDescriptor,
+    left_pvp: bool,
+    right_pvp: bool,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    let workshop = right.workshop.cmp(&left.workshop);
+    if workshop != Ordering::Equal {
+        return workshop;
+    }
+    let custom = right.custom.cmp(&left.custom);
+    if custom != Ordering::Equal {
+        return custom;
+    }
+    let pvp = left_pvp.cmp(&right_pvp);
+    if pvp != Ordering::Equal {
+        return pvp;
+    }
+    left.plain_name().cmp(&right.plain_name())
+}
+
+pub fn rules_tag_json(tags: &BTreeMap<String, String>) -> String {
+    tags.get("rules")
+        .map(|rules| rules.replace("teams:{2:{infiniteAmmo:true}},", ""))
+        .unwrap_or_else(|| "{}".to_string())
+}
+
 fn parent_name(path: &str) -> Option<String> {
     Path::new(path)
         .parent()
@@ -172,8 +262,33 @@ fn parent_name(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn parent_exists_and_ext_equals(path: &str, ext: &str) -> bool {
+    Path::new(path)
+        .parent()
+        .and_then(|p| p.extension())
+        .and_then(|s| s.to_str())
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(ext.trim_start_matches('.')))
+}
+
 fn trim_slash(path: &str) -> &str {
     path.trim_end_matches(['/', '\\'])
+}
+
+fn strip_colors(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            for next in chars.by_ref() {
+                if next == ']' {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -193,6 +308,10 @@ mod tests {
         assert_eq!(map.name(), "Map");
         assert_eq!(map.author(), "Author");
         assert_eq!(map.description(), "unknown");
+        assert_eq!(map.high_score_key(), "hiscorefoo");
+        assert_eq!(map.steam_title(), "Map");
+        assert_eq!(map.steam_description(), "unknown");
+        assert_eq!(map.steam_tag(), "map");
         assert_eq!(map.preview_file("previews"), "previews/foo_v2.png");
         assert_eq!(map.cache_file("previews"), "previews/foo-cache_v2.dat");
     }
@@ -214,6 +333,7 @@ mod tests {
             map.cache_file("previews"),
             "previews/123-workshop-cache.dat"
         );
+        assert_eq!(map.create_steam_preview("previews"), "previews/map_v2.png");
     }
 
     #[test]
@@ -241,5 +361,51 @@ mod tests {
         assert_eq!(descriptor.author(), "Rust");
         assert_eq!(descriptor.version, 11);
         assert_eq!(descriptor.build, 1574);
+    }
+
+    #[test]
+    fn descriptor_plain_tags_steam_ids_rules_and_compare_follow_java_subset() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".into(), "[accent]Zeta[]".into());
+        tags.insert("author".into(), " [red]Alice[] ".into());
+        tags.insert("description".into(), "Desc".into());
+        tags.insert(
+            "rules".into(),
+            "{teams:{2:{infiniteAmmo:true}},wave:true}".into(),
+        );
+        let mut map = MapDescriptor::new("maps/zeta.msav", 10, 20, tags, true, 11, 157);
+        assert_eq!(map.plain_name(), "Zeta");
+        assert_eq!(map.plain_author(), " Alice ");
+        assert_eq!(map.plain_description(), "Desc");
+        assert!(map.has_tag("author"));
+        assert!(!map.has_tag("missing"));
+        assert_eq!(rules_tag_json(&map.tags), "{wave:true}");
+
+        map.add_steam_id("12345");
+        assert_eq!(map.steam_id(), Some("12345"));
+        assert_eq!(map.high_score_key(), "hiscorezeta12345");
+        map.remove_steam_id();
+        assert_eq!(map.steam_id(), None);
+        assert_eq!(map.create_steam_folder("tmp", "999"), "tmp/map_999");
+        assert_eq!(
+            map.create_steam_map_file("tmp", "999"),
+            "tmp/map_999/map.msav"
+        );
+        assert_eq!(map.extra_tags(true), vec!["attack"]);
+        assert_eq!(map.extra_tags(false), vec!["survival"]);
+
+        let alpha = MapDescriptor::new(
+            "maps/alpha.msav",
+            0,
+            0,
+            BTreeMap::from([(String::from("name"), String::from("Alpha"))]),
+            true,
+            11,
+            157,
+        );
+        assert_eq!(
+            compare_maps(&alpha, &map, false, false),
+            std::cmp::Ordering::Less
+        );
     }
 }
