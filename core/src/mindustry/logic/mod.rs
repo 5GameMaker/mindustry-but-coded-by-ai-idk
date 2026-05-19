@@ -455,6 +455,48 @@ pub enum LogicStatement {
         y: String,
         natural: String,
     },
+    SpawnBullet {
+        result: String,
+        from: String,
+        index: String,
+        x: String,
+        y: String,
+        rotation: String,
+        team: String,
+        owner: String,
+        damage: String,
+        velocity_scl: String,
+        life_scl: String,
+        aim_x: String,
+        aim_y: String,
+    },
+    WeatherSense {
+        to: String,
+        weather: String,
+    },
+    WeatherSet {
+        weather: String,
+        state: String,
+    },
+    Effect {
+        type_: String,
+        x: String,
+        y: String,
+        sizerot: String,
+        color: String,
+        data: String,
+    },
+    Explosion {
+        team: String,
+        x: String,
+        y: String,
+        radius: String,
+        damage: String,
+        air: String,
+        ground: String,
+        pierce: String,
+        effect: String,
+    },
 }
 
 impl LogicStatement {
@@ -715,6 +757,63 @@ impl LogicStatement {
         }
     }
 
+    pub fn spawn_bullet() -> Self {
+        Self::SpawnBullet {
+            result: "result".into(),
+            from: "@dagger".into(),
+            index: "0".into(),
+            x: "x".into(),
+            y: "y".into(),
+            rotation: "angle".into(),
+            team: "null".into(),
+            owner: "null".into(),
+            damage: "-1".into(),
+            velocity_scl: "1".into(),
+            life_scl: "1".into(),
+            aim_x: "-1".into(),
+            aim_y: "-1".into(),
+        }
+    }
+
+    pub fn weather_sense() -> Self {
+        Self::WeatherSense {
+            to: "result".into(),
+            weather: "@rain".into(),
+        }
+    }
+
+    pub fn weather_set() -> Self {
+        Self::WeatherSet {
+            weather: "@rain".into(),
+            state: "true".into(),
+        }
+    }
+
+    pub fn effect() -> Self {
+        Self::Effect {
+            type_: "warn".into(),
+            x: "0".into(),
+            y: "0".into(),
+            sizerot: "2".into(),
+            color: "%ffaaff".into(),
+            data: "".into(),
+        }
+    }
+
+    pub fn explosion() -> Self {
+        Self::Explosion {
+            team: "@crux".into(),
+            x: "0".into(),
+            y: "0".into(),
+            radius: "5".into(),
+            damage: "50".into(),
+            air: "true".into(),
+            ground: "true".into(),
+            pierce: "false".into(),
+            effect: "true".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -749,6 +848,11 @@ impl LogicStatement {
             LogicStatement::SpawnUnit { .. } => "spawn",
             LogicStatement::ApplyStatus { .. } => "status",
             LogicStatement::SpawnWave { .. } => "spawnwave",
+            LogicStatement::SpawnBullet { .. } => "bullet",
+            LogicStatement::WeatherSense { .. } => "weathersense",
+            LogicStatement::WeatherSet { .. } => "weatherset",
+            LogicStatement::Effect { .. } => "effect",
+            LogicStatement::Explosion { .. } => "explosion",
         }
     }
 
@@ -769,7 +873,12 @@ impl LogicStatement {
             | LogicStatement::SetBlock { .. }
             | LogicStatement::SpawnUnit { .. }
             | LogicStatement::ApplyStatus { .. }
-            | LogicStatement::SpawnWave { .. } => LCategory::by_name("world").unwrap(),
+            | LogicStatement::SpawnWave { .. }
+            | LogicStatement::SpawnBullet { .. }
+            | LogicStatement::WeatherSense { .. }
+            | LogicStatement::WeatherSet { .. }
+            | LogicStatement::Effect { .. }
+            | LogicStatement::Explosion { .. } => LCategory::by_name("world").unwrap(),
             LogicStatement::Set { .. }
             | LogicStatement::Operation { .. }
             | LogicStatement::Lookup { .. }
@@ -800,6 +909,11 @@ impl LogicStatement {
                 | LogicStatement::SpawnUnit { .. }
                 | LogicStatement::ApplyStatus { .. }
                 | LogicStatement::SpawnWave { .. }
+                | LogicStatement::SpawnBullet { .. }
+                | LogicStatement::WeatherSense { .. }
+                | LogicStatement::WeatherSet { .. }
+                | LogicStatement::Effect { .. }
+                | LogicStatement::Explosion { .. }
         )
     }
 
@@ -1032,6 +1146,80 @@ impl LogicStatement {
             LogicStatement::SpawnWave { x, y, natural } => {
                 vec!["spawnwave".into(), x.clone(), y.clone(), natural.clone()]
             }
+            LogicStatement::SpawnBullet {
+                result,
+                from,
+                index,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y,
+            } => vec![
+                "bullet".into(),
+                result.clone(),
+                from.clone(),
+                index.clone(),
+                x.clone(),
+                y.clone(),
+                rotation.clone(),
+                team.clone(),
+                owner.clone(),
+                damage.clone(),
+                velocity_scl.clone(),
+                life_scl.clone(),
+                aim_x.clone(),
+                aim_y.clone(),
+            ],
+            LogicStatement::WeatherSense { to, weather } => {
+                vec!["weathersense".into(), to.clone(), weather.clone()]
+            }
+            LogicStatement::WeatherSet { weather, state } => {
+                vec!["weatherset".into(), weather.clone(), state.clone()]
+            }
+            LogicStatement::Effect {
+                type_,
+                x,
+                y,
+                sizerot,
+                color,
+                data,
+            } => vec![
+                "effect".into(),
+                type_.clone(),
+                x.clone(),
+                y.clone(),
+                sizerot.clone(),
+                color.clone(),
+                data.clone(),
+            ],
+            LogicStatement::Explosion {
+                team,
+                x,
+                y,
+                radius,
+                damage,
+                air,
+                ground,
+                pierce,
+                effect,
+            } => vec![
+                "explosion".into(),
+                team.clone(),
+                x.clone(),
+                y.clone(),
+                radius.clone(),
+                damage.clone(),
+                air.clone(),
+                ground.clone(),
+                pierce.clone(),
+                effect.clone(),
+            ],
         }
     }
 
@@ -1561,6 +1749,166 @@ impl LogicStatement {
                     }
                     if tokens.len() > 3 {
                         *natural = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "bullet" => {
+                let mut statement = Self::spawn_bullet();
+                if let LogicStatement::SpawnBullet {
+                    result,
+                    from,
+                    index,
+                    x,
+                    y,
+                    rotation,
+                    team,
+                    owner,
+                    damage,
+                    velocity_scl,
+                    life_scl,
+                    aim_x,
+                    aim_y,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *result = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *from = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *index = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *x = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *y = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *rotation = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *team = tokens[7].clone();
+                    }
+                    if tokens.len() > 8 {
+                        *owner = tokens[8].clone();
+                    }
+                    if tokens.len() > 9 {
+                        *damage = tokens[9].clone();
+                    }
+                    if tokens.len() > 10 {
+                        *velocity_scl = tokens[10].clone();
+                    }
+                    if tokens.len() > 11 {
+                        *life_scl = tokens[11].clone();
+                    }
+                    if tokens.len() > 12 {
+                        *aim_x = tokens[12].clone();
+                    }
+                    if tokens.len() > 13 {
+                        *aim_y = tokens[13].clone();
+                    }
+                }
+                statement
+            }
+            "weathersense" => {
+                let mut statement = Self::weather_sense();
+                if let LogicStatement::WeatherSense { to, weather } = &mut statement {
+                    if tokens.len() > 1 {
+                        *to = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *weather = tokens[2].clone();
+                    }
+                }
+                statement
+            }
+            "weatherset" => {
+                let mut statement = Self::weather_set();
+                if let LogicStatement::WeatherSet { weather, state } = &mut statement {
+                    if tokens.len() > 1 {
+                        *weather = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *state = tokens[2].clone();
+                    }
+                }
+                statement
+            }
+            "effect" => {
+                let mut statement = Self::effect();
+                if let LogicStatement::Effect {
+                    type_,
+                    x,
+                    y,
+                    sizerot,
+                    color,
+                    data,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *x = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *y = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *sizerot = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *color = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *data = tokens[6].clone();
+                    }
+                }
+                statement
+            }
+            "explosion" => {
+                let mut statement = Self::explosion();
+                if let LogicStatement::Explosion {
+                    team,
+                    x,
+                    y,
+                    radius,
+                    damage,
+                    air,
+                    ground,
+                    pierce,
+                    effect,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *team = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *x = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *y = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *radius = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *damage = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *air = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *ground = tokens[7].clone();
+                    }
+                    if tokens.len() > 8 {
+                        *pierce = tokens[8].clone();
+                    }
+                    if tokens.len() > 9 {
+                        *effect = tokens[9].clone();
                     }
                 }
                 statement
@@ -4848,6 +5196,26 @@ mod tests {
             LogicStatement::spawn_wave().write_line(),
             "spawnwave 10 10 false"
         );
+        assert_eq!(
+            LogicStatement::spawn_bullet().write_line(),
+            "bullet result @dagger 0 x y angle null null -1 1 1 -1 -1"
+        );
+        assert_eq!(
+            LogicStatement::weather_sense().write_line(),
+            "weathersense result @rain"
+        );
+        assert_eq!(
+            LogicStatement::weather_set().write_line(),
+            "weatherset @rain true"
+        );
+        assert_eq!(
+            LogicStatement::effect().write_line(),
+            "effect warn 0 0 2 %ffaaff "
+        );
+        assert_eq!(
+            LogicStatement::explosion().write_line(),
+            "explosion @crux 0 0 5 50 true true false true"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
@@ -4868,6 +5236,11 @@ mod tests {
         assert_eq!(LogicStatement::spawn_unit().category().name, "world");
         assert_eq!(LogicStatement::apply_status().category().name, "world");
         assert_eq!(LogicStatement::spawn_wave().category().name, "world");
+        assert_eq!(LogicStatement::spawn_bullet().category().name, "world");
+        assert_eq!(LogicStatement::weather_sense().category().name, "world");
+        assert_eq!(LogicStatement::weather_set().category().name, "world");
+        assert_eq!(LogicStatement::effect().category().name, "world");
+        assert_eq!(LogicStatement::explosion().category().name, "world");
         assert!(!LogicStatement::read().privileged());
         assert!(!LogicStatement::operation().privileged());
         assert!(!LogicStatement::stop().privileged());
@@ -4886,6 +5259,11 @@ mod tests {
         assert!(LogicStatement::spawn_unit().privileged());
         assert!(LogicStatement::apply_status().privileged());
         assert!(LogicStatement::spawn_wave().privileged());
+        assert!(LogicStatement::spawn_bullet().privileged());
+        assert!(LogicStatement::weather_sense().privileged());
+        assert!(LogicStatement::weather_set().privileged());
+        assert!(LogicStatement::effect().privileged());
+        assert!(LogicStatement::explosion().privileged());
     }
 
     #[test]
@@ -5282,6 +5660,109 @@ mod tests {
                 x: "10".into(),
                 y: "10".into(),
                 natural: "false".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &[
+                    "bullet", "out", "@duo", "2", "10", "20", "90", "@sharded", "@unit", "50",
+                    "1.5", "0.5", "30", "40"
+                ]
+                .map(String::from)
+            ),
+            Some(LogicStatement::SpawnBullet {
+                result: "out".into(),
+                from: "@duo".into(),
+                index: "2".into(),
+                x: "10".into(),
+                y: "20".into(),
+                rotation: "90".into(),
+                team: "@sharded".into(),
+                owner: "@unit".into(),
+                damage: "50".into(),
+                velocity_scl: "1.5".into(),
+                life_scl: "0.5".into(),
+                aim_x: "30".into(),
+                aim_y: "40".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["bullet", "out", "@foreshadow"].map(String::from)),
+            Some(LogicStatement::SpawnBullet {
+                result: "out".into(),
+                from: "@foreshadow".into(),
+                index: "0".into(),
+                x: "x".into(),
+                y: "y".into(),
+                rotation: "angle".into(),
+                team: "null".into(),
+                owner: "null".into(),
+                damage: "-1".into(),
+                velocity_scl: "1".into(),
+                life_scl: "1".into(),
+                aim_x: "-1".into(),
+                aim_y: "-1".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["weathersense", "out", "@sandstorm"].map(String::from)),
+            Some(LogicStatement::WeatherSense {
+                to: "out".into(),
+                weather: "@sandstorm".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["weatherset", "@rain", "false"].map(String::from)),
+            Some(LogicStatement::WeatherSet {
+                weather: "@rain".into(),
+                state: "false".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["effect", "spark", "1", "2", "3", "%ffffff", "payload"].map(String::from)
+            ),
+            Some(LogicStatement::Effect {
+                type_: "spark".into(),
+                x: "1".into(),
+                y: "2".into(),
+                sizerot: "3".into(),
+                color: "%ffffff".into(),
+                data: "payload".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["effect", "smoke"].map(String::from))
+                .unwrap()
+                .write_line(),
+            "effect smoke 0 0 2 %ffaaff "
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &[
+                    "explosion",
+                    "@crux",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "false",
+                    "true",
+                    "true",
+                    "false"
+                ]
+                .map(String::from)
+            ),
+            Some(LogicStatement::Explosion {
+                team: "@crux".into(),
+                x: "5".into(),
+                y: "6".into(),
+                radius: "7".into(),
+                damage: "8".into(),
+                air: "false".into(),
+                ground: "true".into(),
+                pierce: "true".into(),
+                effect: "false".into()
             })
         );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
