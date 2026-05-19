@@ -6,5 +6,6 @@ pub mod legacy;
 pub mod liquid;
 pub mod logic;
 pub mod payloads;
+pub mod power;
 pub mod production;
 pub mod sandbox;
