@@ -3874,6 +3874,281 @@ impl fmt::Display for LVar {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicExecutor {
+    pub instructions: Vec<LogicInstruction>,
+    pub vars: Vec<LVar>,
+    pub counter: LVar,
+    pub yield_: bool,
+    pub text_buffer: String,
+}
+
+impl Default for LogicExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LogicExecutor {
+    pub const MAX_TEXT_BUFFER: usize = 400;
+
+    pub fn new() -> Self {
+        Self {
+            instructions: Vec::new(),
+            vars: Vec::new(),
+            counter: {
+                let mut counter = LVar::new("@counter");
+                counter.is_obj = false;
+                counter
+            },
+            yield_: false,
+            text_buffer: String::new(),
+        }
+    }
+
+    pub fn run_once(&mut self) {
+        if self.counter.numval >= self.instructions.len() as f64 || self.counter.numval < 0.0 {
+            self.counter.numval = 0.0;
+        }
+
+        if self.counter.numval < self.instructions.len() as f64 {
+            self.counter.is_obj = false;
+            let index = self.counter.numval as usize;
+            self.counter.numval += 1.0;
+            let mut instruction = self.instructions[index].clone();
+            instruction.run(self);
+            self.instructions[index] = instruction;
+        }
+    }
+
+    pub fn push_text_bounded(&mut self, value: &str) {
+        if self.text_buffer.len() >= Self::MAX_TEXT_BUFFER {
+            return;
+        }
+
+        let remaining = Self::MAX_TEXT_BUFFER - self.text_buffer.len();
+        if value.len() <= remaining {
+            self.text_buffer.push_str(value);
+            return;
+        }
+
+        let mut end = remaining;
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.text_buffer.push_str(&value[..end]);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicInstruction {
+    Set {
+        from: LVar,
+        to: LVar,
+    },
+    Op {
+        op: LogicOp,
+        a: LVar,
+        b: LVar,
+        dest: LVar,
+    },
+    Select {
+        op: ConditionOp,
+        result: LVar,
+        comp0: LVar,
+        comp1: LVar,
+        a: LVar,
+        b: LVar,
+    },
+    End,
+    Noop,
+    Print {
+        value: LVar,
+    },
+    PrintChar {
+        value: LVar,
+    },
+    Format {
+        value: LVar,
+    },
+    Jump {
+        op: ConditionOp,
+        value: LVar,
+        compare: LVar,
+        address: i32,
+    },
+    Wait {
+        value: LVar,
+        cur_time: f32,
+    },
+    Stop,
+}
+
+impl LogicInstruction {
+    pub fn run(&mut self, exec: &mut LogicExecutor) {
+        match self {
+            LogicInstruction::Set { from, to } => {
+                if !to.constant {
+                    to.set_from(from);
+                }
+            }
+            LogicInstruction::Op { op, a, b, dest } => {
+                if dest.constant {
+                    return;
+                }
+
+                if *op == LogicOp::StrictEqual {
+                    dest.set_num(logic_var_strict_equal(a, b) as u8 as f64);
+                } else if op.unary() {
+                    if let Some(value) = op.eval_unary(a.num()) {
+                        dest.set_num(value);
+                    }
+                } else if let Some(value) = op.eval_binary(a.num(), b.num()) {
+                    dest.set_num(value);
+                }
+            }
+            LogicInstruction::Select {
+                op,
+                result,
+                comp0,
+                comp1,
+                a,
+                b,
+            } => {
+                if result.constant {
+                    return;
+                }
+
+                if condition_op_test_vars(*op, comp0, comp1) {
+                    result.set_from(a);
+                } else {
+                    result.set_from(b);
+                }
+            }
+            LogicInstruction::End => {
+                exec.counter.numval = exec.instructions.len() as f64;
+            }
+            LogicInstruction::Noop => {}
+            LogicInstruction::Print { value } => {
+                let text = print_logic_value(value);
+                exec.push_text_bounded(&text);
+            }
+            LogicInstruction::PrintChar { value } => {
+                if exec.text_buffer.len() >= LogicExecutor::MAX_TEXT_BUFFER {
+                    return;
+                }
+
+                if value.is_obj {
+                    return;
+                }
+
+                let code = value.numval.floor() as u32;
+                if let Some(ch) = char::from_u32(code) {
+                    exec.push_text_bounded(&ch.to_string());
+                }
+            }
+            LogicInstruction::Format { value } => {
+                if exec.text_buffer.len() >= LogicExecutor::MAX_TEXT_BUFFER {
+                    return;
+                }
+
+                if let Some((index, _number)) = first_logic_placeholder(&exec.text_buffer) {
+                    let text = print_logic_value(value);
+                    exec.text_buffer.replace_range(index..index + 3, &text);
+                }
+            }
+            LogicInstruction::Jump {
+                op,
+                value,
+                compare,
+                address,
+            } => {
+                if *address != -1 && condition_op_test_vars(*op, value, compare) {
+                    exec.counter.numval = *address as f64;
+                }
+            }
+            LogicInstruction::Wait { value, cur_time } => {
+                let seconds = value.num();
+                if seconds <= 0.0 {
+                    exec.yield_ = true;
+                    *cur_time = 0.0;
+                } else if *cur_time as f64 >= seconds {
+                    *cur_time = 0.0;
+                } else {
+                    exec.counter.numval -= 1.0;
+                    exec.yield_ = true;
+                    *cur_time += 1.0 / 60.0;
+                }
+            }
+            LogicInstruction::Stop => {
+                exec.counter.numval -= 1.0;
+                exec.yield_ = true;
+            }
+        }
+    }
+}
+
+pub fn logic_var_strict_equal(a: &LVar, b: &LVar) -> bool {
+    a.is_obj == b.is_obj
+        && if a.is_obj {
+            a.objval == b.objval
+        } else {
+            a.numval == b.numval
+        }
+}
+
+pub fn condition_op_test_vars(op: ConditionOp, a: &LVar, b: &LVar) -> bool {
+    if a.is_obj {
+        if b.is_obj {
+            let left = a.objval.as_deref().unwrap_or("");
+            let right = b.objval.as_deref().unwrap_or("");
+            op.test_values(ConditionValue::Object(left), ConditionValue::Object(right))
+        } else {
+            op.test_values(
+                ConditionValue::Object(a.objval.as_deref().unwrap_or("")),
+                ConditionValue::Number(b.num()),
+            )
+        }
+    } else if b.is_obj {
+        op.test_values(
+            ConditionValue::Number(a.num()),
+            ConditionValue::Object(b.objval.as_deref().unwrap_or("")),
+        )
+    } else {
+        op.test_values(
+            ConditionValue::Number(a.num()),
+            ConditionValue::Number(b.num()),
+        )
+    }
+}
+
+pub fn print_logic_value(value: &LVar) -> String {
+    if value.is_obj {
+        value.objval.clone().unwrap_or_else(|| "null".into())
+    } else if (value.numval - value.numval.round()).abs() < 0.00001 {
+        (value.numval.round() as i64).to_string()
+    } else {
+        value.numval.to_string()
+    }
+}
+
+pub fn first_logic_placeholder(buffer: &str) -> Option<(usize, u8)> {
+    let bytes = buffer.as_bytes();
+    let mut best: Option<(usize, u8)> = None;
+    for index in 0..bytes.len().saturating_sub(2) {
+        if bytes[index] == b'{' && bytes[index + 2] == b'}' {
+            let digit = bytes[index + 1];
+            if digit.is_ascii_digit() {
+                let number = digit - b'0';
+                if best.is_none_or(|(_, best_number)| number < best_number) {
+                    best = Some((index, number));
+                }
+            }
+        }
+    }
+    best
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalVarEntry {
     pub name: &'static str,
@@ -7694,6 +7969,196 @@ mod tests {
         assert_eq!(LogicOp::Noise.eval_binary(1.0, 2.0), None);
         assert_eq!(LogicOp::Rand.eval_unary(10.0), None);
         assert_eq!(LogicOp::Add.to_string(), "+");
+    }
+
+    #[test]
+    fn basic_logic_executor_instructions_follow_java_l_executor_semantics() {
+        let mut set = LogicInstruction::Set {
+            from: {
+                let mut from = LVar::new("from");
+                from.set_num(7.0);
+                from
+            },
+            to: LVar::new("to"),
+        };
+        set.run(&mut LogicExecutor::new());
+        match set {
+            LogicInstruction::Set { to, .. } => assert_eq!(to.value(), LVarValue::Number(7.0)),
+            _ => unreachable!(),
+        }
+
+        let mut op = LogicInstruction::Op {
+            op: LogicOp::Add,
+            a: {
+                let mut value = LVar::new("a");
+                value.set_num(2.0);
+                value
+            },
+            b: {
+                let mut value = LVar::new("b");
+                value.set_num(3.0);
+                value
+            },
+            dest: LVar::new("dest"),
+        };
+        op.run(&mut LogicExecutor::new());
+        match op {
+            LogicInstruction::Op { dest, .. } => assert_eq!(dest.value(), LVarValue::Number(5.0)),
+            _ => unreachable!(),
+        }
+
+        let mut select = LogicInstruction::Select {
+            op: ConditionOp::GreaterThan,
+            result: LVar::new("result"),
+            comp0: {
+                let mut value = LVar::new("hp");
+                value.set_num(11.0);
+                value
+            },
+            comp1: {
+                let mut value = LVar::new("limit");
+                value.set_num(10.0);
+                value
+            },
+            a: {
+                let mut value = LVar::new("alive");
+                value.set_obj(Some("alive".into()));
+                value
+            },
+            b: {
+                let mut value = LVar::new("dead");
+                value.set_obj(Some("dead".into()));
+                value
+            },
+        };
+        select.run(&mut LogicExecutor::new());
+        match select {
+            LogicInstruction::Select { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Object(Some("alive".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        assert!(logic_var_strict_equal(
+            &{
+                let mut value = LVar::new("a");
+                value.set_obj(Some("same".into()));
+                value
+            },
+            &{
+                let mut value = LVar::new("b");
+                value.set_obj(Some("same".into()));
+                value
+            }
+        ));
+        assert!(!condition_op_test_vars(
+            ConditionOp::Equal,
+            &{
+                let mut value = LVar::new("a");
+                value.set_obj(Some("1".into()));
+                value
+            },
+            &{
+                let mut value = LVar::new("b");
+                value.set_num(1.0);
+                value
+            }
+        ));
+    }
+
+    #[test]
+    fn text_and_flow_logic_executor_instructions_follow_java_l_executor_semantics() {
+        let mut exec = LogicExecutor::new();
+        LogicInstruction::Print {
+            value: {
+                let mut value = LVar::new("n");
+                value.set_num(4.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        LogicInstruction::Print {
+            value: {
+                let mut value = LVar::new("s");
+                value.set_obj(Some(" frogs".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        LogicInstruction::PrintChar {
+            value: {
+                let mut value = LVar::new("bang");
+                value.set_num(33.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.text_buffer, "4 frogs!");
+
+        exec.text_buffer = "{1} before {0}".into();
+        LogicInstruction::Format {
+            value: {
+                let mut value = LVar::new("value");
+                value.set_obj(Some("first".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.text_buffer, "{1} before first");
+
+        assert_eq!(
+            print_logic_value(&{
+                let mut value = LVar::new("fraction");
+                value.set_num(1.25);
+                value
+            }),
+            "1.25"
+        );
+        assert_eq!(first_logic_placeholder("x {3} {1} {2}"), Some((6, 1)));
+
+        let mut jump_exec = LogicExecutor::new();
+        jump_exec.counter.set_num(1.0);
+        LogicInstruction::Jump {
+            op: ConditionOp::Always,
+            value: LVar::new("a"),
+            compare: LVar::new("b"),
+            address: 5,
+        }
+        .run(&mut jump_exec);
+        assert_eq!(jump_exec.counter.numval, 5.0);
+
+        let mut stop_exec = LogicExecutor::new();
+        stop_exec.counter.set_num(3.0);
+        LogicInstruction::Stop.run(&mut stop_exec);
+        assert_eq!(stop_exec.counter.numval, 2.0);
+        assert!(stop_exec.yield_);
+
+        let mut wait = LogicInstruction::Wait {
+            value: {
+                let mut value = LVar::new("seconds");
+                value.set_num(0.5);
+                value
+            },
+            cur_time: 0.0,
+        };
+        let mut wait_exec = LogicExecutor::new();
+        wait_exec.counter.set_num(2.0);
+        wait.run(&mut wait_exec);
+        assert_eq!(wait_exec.counter.numval, 1.0);
+        assert!(wait_exec.yield_);
+        match wait {
+            LogicInstruction::Wait { cur_time, .. } => {
+                assert!((cur_time - 1.0 / 60.0).abs() < 0.000001)
+            }
+            _ => unreachable!(),
+        }
+
+        let mut end_exec = LogicExecutor {
+            instructions: vec![LogicInstruction::Noop, LogicInstruction::Noop],
+            ..LogicExecutor::new()
+        };
+        LogicInstruction::End.run(&mut end_exec);
+        assert_eq!(end_exec.counter.numval, 2.0);
     }
 
     #[test]
