@@ -1,5 +1,7 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
+use std::fmt;
+
 /// Mirrors upstream `mindustry.logic.LAccess`.
 ///
 /// The declaration order is observable by logic scripts and generated
@@ -383,6 +385,370 @@ impl LAccess {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogicOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Idiv,
+    Mod,
+    Emod,
+    Pow,
+    Equal,
+    NotEqual,
+    Land,
+    LessThan,
+    LessThanEq,
+    GreaterThan,
+    GreaterThanEq,
+    StrictEqual,
+    Shl,
+    Shr,
+    Ushr,
+    Or,
+    And,
+    Xor,
+    Not,
+    Max,
+    Min,
+    Angle,
+    AngleDiff,
+    Len,
+    Noise,
+    Abs,
+    Sign,
+    Log,
+    Logn,
+    Log10,
+    Floor,
+    Ceil,
+    Round,
+    Sqrt,
+    Rand,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+}
+
+impl LogicOp {
+    pub const ALL: [LogicOp; 45] = [
+        LogicOp::Add,
+        LogicOp::Sub,
+        LogicOp::Mul,
+        LogicOp::Div,
+        LogicOp::Idiv,
+        LogicOp::Mod,
+        LogicOp::Emod,
+        LogicOp::Pow,
+        LogicOp::Equal,
+        LogicOp::NotEqual,
+        LogicOp::Land,
+        LogicOp::LessThan,
+        LogicOp::LessThanEq,
+        LogicOp::GreaterThan,
+        LogicOp::GreaterThanEq,
+        LogicOp::StrictEqual,
+        LogicOp::Shl,
+        LogicOp::Shr,
+        LogicOp::Ushr,
+        LogicOp::Or,
+        LogicOp::And,
+        LogicOp::Xor,
+        LogicOp::Not,
+        LogicOp::Max,
+        LogicOp::Min,
+        LogicOp::Angle,
+        LogicOp::AngleDiff,
+        LogicOp::Len,
+        LogicOp::Noise,
+        LogicOp::Abs,
+        LogicOp::Sign,
+        LogicOp::Log,
+        LogicOp::Logn,
+        LogicOp::Log10,
+        LogicOp::Floor,
+        LogicOp::Ceil,
+        LogicOp::Round,
+        LogicOp::Sqrt,
+        LogicOp::Rand,
+        LogicOp::Sin,
+        LogicOp::Cos,
+        LogicOp::Tan,
+        LogicOp::Asin,
+        LogicOp::Acos,
+        LogicOp::Atan,
+    ];
+
+    pub const SYMBOLS: [&'static str; 45] = [
+        "+",
+        "-",
+        "*",
+        "/",
+        "//",
+        "%",
+        "%%",
+        "^",
+        "==",
+        "not",
+        "and",
+        "<",
+        "<=",
+        ">",
+        ">=",
+        "===",
+        "<<",
+        ">>",
+        ">>>",
+        "or",
+        "b-and",
+        "xor",
+        "flip",
+        "max",
+        "min",
+        "angle",
+        "anglediff",
+        "len",
+        "noise",
+        "abs",
+        "sign",
+        "log",
+        "logn",
+        "log10",
+        "floor",
+        "ceil",
+        "round",
+        "sqrt",
+        "rand",
+        "sin",
+        "cos",
+        "tan",
+        "asin",
+        "acos",
+        "atan",
+    ];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn symbol(self) -> &'static str {
+        Self::SYMBOLS[self.ordinal() as usize]
+    }
+
+    pub const fn unary(self) -> bool {
+        matches!(
+            self,
+            LogicOp::Not
+                | LogicOp::Abs
+                | LogicOp::Sign
+                | LogicOp::Log
+                | LogicOp::Log10
+                | LogicOp::Floor
+                | LogicOp::Ceil
+                | LogicOp::Round
+                | LogicOp::Sqrt
+                | LogicOp::Rand
+                | LogicOp::Sin
+                | LogicOp::Cos
+                | LogicOp::Tan
+                | LogicOp::Asin
+                | LogicOp::Acos
+                | LogicOp::Atan
+        )
+    }
+
+    pub const fn func(self) -> bool {
+        matches!(
+            self,
+            LogicOp::Max
+                | LogicOp::Min
+                | LogicOp::Angle
+                | LogicOp::AngleDiff
+                | LogicOp::Len
+                | LogicOp::Noise
+        )
+    }
+
+    pub fn eval_binary(self, a: f64, b: f64) -> Option<f64> {
+        let value = match self {
+            LogicOp::Add => a + b,
+            LogicOp::Sub => a - b,
+            LogicOp::Mul => a * b,
+            LogicOp::Div => a / b,
+            LogicOp::Idiv => (a / b).floor(),
+            LogicOp::Mod => a % b,
+            LogicOp::Emod => ((a % b) + b) % b,
+            LogicOp::Pow => a.powf(b),
+            LogicOp::Equal => ((a - b).abs() < 0.000001) as u8 as f64,
+            LogicOp::NotEqual => ((a - b).abs() >= 0.000001) as u8 as f64,
+            LogicOp::Land => (a != 0.0 && b != 0.0) as u8 as f64,
+            LogicOp::LessThan => (a < b) as u8 as f64,
+            LogicOp::LessThanEq => (a <= b) as u8 as f64,
+            LogicOp::GreaterThan => (a > b) as u8 as f64,
+            LogicOp::GreaterThanEq => (a >= b) as u8 as f64,
+            LogicOp::StrictEqual => 0.0,
+            LogicOp::Shl => (java_long(a).wrapping_shl((java_long(b) as u32) & 63)) as f64,
+            LogicOp::Shr => (java_long(a).wrapping_shr((java_long(b) as u32) & 63)) as f64,
+            LogicOp::Ushr => {
+                ((java_long(a) as u64).wrapping_shr((java_long(b) as u32) & 63)) as f64
+            }
+            LogicOp::Or => (java_long(a) | java_long(b)) as f64,
+            LogicOp::And => (java_long(a) & java_long(b)) as f64,
+            LogicOp::Xor => (java_long(a) ^ java_long(b)) as f64,
+            LogicOp::Max => a.max(b),
+            LogicOp::Min => a.min(b),
+            LogicOp::Angle => java_angle(a, b),
+            LogicOp::AngleDiff => java_angle_diff(a, b),
+            LogicOp::Len => a.hypot(b),
+            LogicOp::Logn => a.ln() / b.ln(),
+            LogicOp::Noise => return None,
+            _ => return None,
+        };
+        Some(value)
+    }
+
+    pub fn eval_unary(self, a: f64) -> Option<f64> {
+        let value = match self {
+            LogicOp::Not => (!java_long(a)) as f64,
+            LogicOp::Abs => a.abs(),
+            LogicOp::Sign => a.signum(),
+            LogicOp::Log => a.ln(),
+            LogicOp::Log10 => a.log10(),
+            LogicOp::Floor => a.floor(),
+            LogicOp::Ceil => a.ceil(),
+            LogicOp::Round => (a + 0.5).floor(),
+            LogicOp::Sqrt => a.sqrt(),
+            LogicOp::Sin => a.to_radians().sin(),
+            LogicOp::Cos => a.to_radians().cos(),
+            LogicOp::Tan => a.to_radians().tan(),
+            LogicOp::Asin => a.asin().to_degrees(),
+            LogicOp::Acos => a.acos().to_degrees(),
+            LogicOp::Atan => a.atan().to_degrees(),
+            LogicOp::Rand => return None,
+            _ => return None,
+        };
+        Some(value)
+    }
+}
+
+impl fmt::Display for LogicOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.symbol())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ConditionValue<'a> {
+    Number(f64),
+    Object(&'a str),
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConditionOp {
+    Equal,
+    NotEqual,
+    LessThan,
+    LessThanEq,
+    GreaterThan,
+    GreaterThanEq,
+    StrictEqual,
+    Always,
+}
+
+impl ConditionOp {
+    pub const ALL: [ConditionOp; 8] = [
+        ConditionOp::Equal,
+        ConditionOp::NotEqual,
+        ConditionOp::LessThan,
+        ConditionOp::LessThanEq,
+        ConditionOp::GreaterThan,
+        ConditionOp::GreaterThanEq,
+        ConditionOp::StrictEqual,
+        ConditionOp::Always,
+    ];
+
+    pub const SYMBOLS: [&'static str; 8] = ["==", "not", "<", "<=", ">", ">=", "===", "always"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn symbol(self) -> &'static str {
+        Self::SYMBOLS[self.ordinal() as usize]
+    }
+
+    pub fn test_numbers(self, a: f64, b: f64) -> bool {
+        match self {
+            ConditionOp::Equal => (a - b).abs() < 0.000001,
+            ConditionOp::NotEqual => (a - b).abs() >= 0.000001,
+            ConditionOp::LessThan => a < b,
+            ConditionOp::LessThanEq => a <= b,
+            ConditionOp::GreaterThan => a > b,
+            ConditionOp::GreaterThanEq => a >= b,
+            ConditionOp::StrictEqual => a == b,
+            ConditionOp::Always => true,
+        }
+    }
+
+    pub fn test_values(self, a: ConditionValue<'_>, b: ConditionValue<'_>) -> bool {
+        match self {
+            ConditionOp::StrictEqual => a == b,
+            ConditionOp::Equal => match (a, b) {
+                (ConditionValue::Object(a), ConditionValue::Object(b)) => a == b,
+                (ConditionValue::Number(a), ConditionValue::Number(b)) => self.test_numbers(a, b),
+                _ => false,
+            },
+            ConditionOp::NotEqual => match (a, b) {
+                (ConditionValue::Object(a), ConditionValue::Object(b)) => a != b,
+                (ConditionValue::Number(a), ConditionValue::Number(b)) => self.test_numbers(a, b),
+                _ => true,
+            },
+            ConditionOp::Always => true,
+            _ => match (a, b) {
+                (ConditionValue::Number(a), ConditionValue::Number(b)) => self.test_numbers(a, b),
+                _ => false,
+            },
+        }
+    }
+}
+
+impl fmt::Display for ConditionOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.symbol())
+    }
+}
+
+fn java_long(value: f64) -> i64 {
+    value as i64
+}
+
+fn java_angle(x: f64, y: f64) -> f64 {
+    let angle = y.atan2(x).to_degrees();
+    if angle < 0.0 {
+        angle + 360.0
+    } else {
+        angle
+    }
+}
+
+fn java_angle_diff(a: f64, b: f64) -> f64 {
+    ((a - b + 180.0).rem_euclid(360.0) - 180.0).abs()
+}
+
 /// Mirrors upstream `mindustry.logic.LMarkerControl`.
 ///
 /// The declaration order is network-visible: Java `TypeIO.writeMarkerControl`
@@ -616,6 +982,129 @@ mod tests {
         assert!(!LAccess::Shoot.is_senseable());
         assert!(LAccess::Color.is_control());
         assert!(!LAccess::Health.is_control());
+    }
+
+    #[test]
+    fn logic_ops_match_java_order_symbols_flags_and_core_math() {
+        assert_eq!(LogicOp::ALL.len(), 45);
+        assert_eq!(LogicOp::Add.ordinal(), 0);
+        assert_eq!(LogicOp::StrictEqual.ordinal(), 15);
+        assert_eq!(LogicOp::Not.ordinal(), 22);
+        assert_eq!(LogicOp::Atan.ordinal(), 44);
+        assert_eq!(LogicOp::from_ordinal(44), Some(LogicOp::Atan));
+        assert_eq!(LogicOp::from_ordinal(45), None);
+
+        let symbols: Vec<_> = LogicOp::ALL.iter().map(|op| op.symbol()).collect();
+        assert_eq!(
+            symbols,
+            vec![
+                "+",
+                "-",
+                "*",
+                "/",
+                "//",
+                "%",
+                "%%",
+                "^",
+                "==",
+                "not",
+                "and",
+                "<",
+                "<=",
+                ">",
+                ">=",
+                "===",
+                "<<",
+                ">>",
+                ">>>",
+                "or",
+                "b-and",
+                "xor",
+                "flip",
+                "max",
+                "min",
+                "angle",
+                "anglediff",
+                "len",
+                "noise",
+                "abs",
+                "sign",
+                "log",
+                "logn",
+                "log10",
+                "floor",
+                "ceil",
+                "round",
+                "sqrt",
+                "rand",
+                "sin",
+                "cos",
+                "tan",
+                "asin",
+                "acos",
+                "atan"
+            ]
+        );
+
+        assert!(LogicOp::Not.unary());
+        assert!(LogicOp::Sin.unary());
+        assert!(!LogicOp::Add.unary());
+        assert!(LogicOp::Max.func());
+        assert!(LogicOp::Angle.func());
+        assert!(!LogicOp::Logn.func());
+
+        assert_eq!(LogicOp::Add.eval_binary(2.0, 3.0), Some(5.0));
+        assert_eq!(LogicOp::Idiv.eval_binary(7.0, 2.0), Some(3.0));
+        assert_eq!(LogicOp::Emod.eval_binary(-1.0, 5.0), Some(4.0));
+        assert_eq!(LogicOp::Equal.eval_binary(1.0, 1.0 + 0.0000005), Some(1.0));
+        assert_eq!(LogicOp::Land.eval_binary(1.0, 0.0), Some(0.0));
+        assert_eq!(LogicOp::Shl.eval_binary(3.0, 2.0), Some(12.0));
+        assert_eq!(LogicOp::And.eval_binary(6.0, 3.0), Some(2.0));
+        assert_eq!(LogicOp::Not.eval_unary(0.0), Some(-1.0));
+        assert_eq!(LogicOp::Abs.eval_unary(-3.5), Some(3.5));
+        assert!((LogicOp::Angle.eval_binary(0.0, 1.0).unwrap() - 90.0).abs() < 0.000001);
+        assert!((LogicOp::AngleDiff.eval_binary(350.0, 10.0).unwrap() - 20.0).abs() < 0.000001);
+        assert!((LogicOp::Len.eval_binary(3.0, 4.0).unwrap() - 5.0).abs() < 0.000001);
+        assert!((LogicOp::Sin.eval_unary(90.0).unwrap() - 1.0).abs() < 0.000001);
+        assert_eq!(LogicOp::Noise.eval_binary(1.0, 2.0), None);
+        assert_eq!(LogicOp::Rand.eval_unary(10.0), None);
+        assert_eq!(LogicOp::Add.to_string(), "+");
+    }
+
+    #[test]
+    fn condition_ops_match_java_order_symbols_and_tests() {
+        assert_eq!(ConditionOp::ALL.len(), 8);
+        assert_eq!(ConditionOp::Equal.ordinal(), 0);
+        assert_eq!(ConditionOp::StrictEqual.ordinal(), 6);
+        assert_eq!(ConditionOp::Always.ordinal(), 7);
+        assert_eq!(ConditionOp::from_ordinal(7), Some(ConditionOp::Always));
+        assert_eq!(ConditionOp::from_ordinal(8), None);
+
+        let symbols: Vec<_> = ConditionOp::ALL.iter().map(|op| op.symbol()).collect();
+        assert_eq!(
+            symbols,
+            vec!["==", "not", "<", "<=", ">", ">=", "===", "always"]
+        );
+
+        assert!(ConditionOp::Equal.test_numbers(1.0, 1.0 + 0.0000005));
+        assert!(!ConditionOp::NotEqual.test_numbers(1.0, 1.0 + 0.0000005));
+        assert!(ConditionOp::LessThan.test_numbers(1.0, 2.0));
+        assert!(ConditionOp::GreaterThanEq.test_numbers(2.0, 2.0));
+        assert!(ConditionOp::Always.test_numbers(f64::NAN, f64::NAN));
+
+        assert!(ConditionOp::StrictEqual
+            .test_values(ConditionValue::Number(2.0), ConditionValue::Number(2.0)));
+        assert!(!ConditionOp::StrictEqual
+            .test_values(ConditionValue::Number(2.0), ConditionValue::Object("2")));
+        assert!(ConditionOp::Equal.test_values(
+            ConditionValue::Object("core"),
+            ConditionValue::Object("core")
+        ));
+        assert!(ConditionOp::NotEqual.test_values(
+            ConditionValue::Object("core"),
+            ConditionValue::Object("vault")
+        ));
+        assert_eq!(ConditionOp::Always.to_string(), "always");
     }
 
     #[test]
