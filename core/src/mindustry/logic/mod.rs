@@ -1198,6 +1198,262 @@ impl TileLayer {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LUnitControl {
+    Idle,
+    Stop,
+    Move,
+    Approach,
+    Pathfind,
+    AutoPathfind,
+    Boost,
+    Target,
+    Targetp,
+    ItemDrop,
+    ItemTake,
+    PayDrop,
+    PayTake,
+    PayEnter,
+    Mine,
+    Flag,
+    Build,
+    Deconstruct,
+    GetBlock,
+    Within,
+    Unbind,
+}
+
+impl LUnitControl {
+    pub const ALL: [LUnitControl; 21] = [
+        LUnitControl::Idle,
+        LUnitControl::Stop,
+        LUnitControl::Move,
+        LUnitControl::Approach,
+        LUnitControl::Pathfind,
+        LUnitControl::AutoPathfind,
+        LUnitControl::Boost,
+        LUnitControl::Target,
+        LUnitControl::Targetp,
+        LUnitControl::ItemDrop,
+        LUnitControl::ItemTake,
+        LUnitControl::PayDrop,
+        LUnitControl::PayTake,
+        LUnitControl::PayEnter,
+        LUnitControl::Mine,
+        LUnitControl::Flag,
+        LUnitControl::Build,
+        LUnitControl::Deconstruct,
+        LUnitControl::GetBlock,
+        LUnitControl::Within,
+        LUnitControl::Unbind,
+    ];
+
+    pub const WIRE_NAMES: [&'static str; 21] = [
+        "idle",
+        "stop",
+        "move",
+        "approach",
+        "pathfind",
+        "autoPathfind",
+        "boost",
+        "target",
+        "targetp",
+        "itemDrop",
+        "itemTake",
+        "payDrop",
+        "payTake",
+        "payEnter",
+        "mine",
+        "flag",
+        "build",
+        "deconstruct",
+        "getBlock",
+        "within",
+        "unbind",
+    ];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub const fn params(self) -> &'static [&'static str] {
+        match self {
+            LUnitControl::Move => &["x", "y"],
+            LUnitControl::Approach => &["x", "y", "radius"],
+            LUnitControl::Pathfind => &["x", "y"],
+            LUnitControl::Boost => &["enable"],
+            LUnitControl::Target => &["x", "y", "shoot"],
+            LUnitControl::Targetp => &["unit", "shoot"],
+            LUnitControl::ItemDrop => &["to", "amount"],
+            LUnitControl::ItemTake => &["from", "item", "amount"],
+            LUnitControl::PayTake => &["takeUnits"],
+            LUnitControl::Mine => &["x", "y"],
+            LUnitControl::Flag => &["value"],
+            LUnitControl::Build => &["x", "y", "block", "rotation", "config"],
+            LUnitControl::Deconstruct => &["x", "y"],
+            LUnitControl::GetBlock => &["x", "y", "type", "building", "floor"],
+            LUnitControl::Within => &["x", "y", "radius", "result"],
+            _ => &[],
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LLocate {
+    Ore,
+    Building,
+    Spawn,
+    Damaged,
+}
+
+impl LLocate {
+    pub const ALL: [LLocate; 4] = [
+        LLocate::Ore,
+        LLocate::Building,
+        LLocate::Spawn,
+        LLocate::Damaged,
+    ];
+    pub const WIRE_NAMES: [&'static str; 4] = ["ore", "building", "spawn", "damaged"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LCategory {
+    pub id: u8,
+    pub name: &'static str,
+    pub color_rgba: u32,
+    pub icon: Option<&'static str>,
+}
+
+impl LCategory {
+    pub const ALL: [LCategory; 7] = [
+        LCategory {
+            id: 0,
+            name: "unknown",
+            color_rgba: 0x4c4c4cff,
+            icon: None,
+        },
+        LCategory {
+            id: 1,
+            name: "io",
+            color_rgba: 0xa08a8aff,
+            icon: Some("logicSmall"),
+        },
+        LCategory {
+            id: 2,
+            name: "block",
+            color_rgba: 0xd4816bff,
+            icon: Some("effectSmall"),
+        },
+        LCategory {
+            id: 3,
+            name: "operation",
+            color_rgba: 0x877badff,
+            icon: Some("settingsSmall"),
+        },
+        LCategory {
+            id: 4,
+            name: "control",
+            color_rgba: 0x6bb2b2ff,
+            icon: Some("rotateSmall"),
+        },
+        LCategory {
+            id: 5,
+            name: "unit",
+            color_rgba: 0xc7b59dff,
+            icon: Some("unitsSmall"),
+        },
+        LCategory {
+            id: 6,
+            name: "world",
+            color_rgba: 0x6b84d4ff,
+            icon: Some("terrainSmall"),
+        },
+    ];
+
+    pub fn by_name(name: &str) -> Option<&'static LCategory> {
+        Self::ALL.iter().find(|category| category.name == name)
+    }
+
+    pub fn localized_key(self) -> String {
+        format!("lcategory.{}", self.name)
+    }
+
+    pub fn description_key(self) -> String {
+        format!("lcategory.{}.description", self.name)
+    }
+}
+
+pub trait Controllable {
+    type Object;
+
+    fn control(&mut self, access: LAccess, p1: f64, p2: f64, p3: f64, p4: f64);
+    fn control_object(&mut self, access: LAccess, p1: Self::Object, p2: f64, p3: f64, p4: f64);
+    fn team(&self) -> u8;
+}
+
+pub trait LogicReadable<E, V> {
+    fn readable(&self, exec: &E) -> bool;
+    fn read(&self, position: &mut V, output: &mut V);
+}
+
+pub trait LogicWritable<E, V> {
+    fn writable(&self, exec: &E) -> bool;
+    fn write(&mut self, position: &mut V, value: &mut V);
+}
+
+pub trait Ranged {
+    fn x(&self) -> f32;
+    fn y(&self) -> f32;
+    fn team(&self) -> u8;
+    fn range(&self) -> f32;
+}
+
+pub trait Senseable {
+    type Content;
+    type Object;
+
+    fn sense(&self, sensor: LAccess) -> f64;
+
+    fn sense_content(&self, _content: &Self::Content) -> f64 {
+        0.0
+    }
+
+    fn sense_object(&self, _sensor: LAccess) -> Option<Self::Object> {
+        None
+    }
+}
+
+pub trait Settable {
+    type Content;
+    type Object;
+
+    fn set_prop(&mut self, prop: LAccess, value: f64);
+    fn set_prop_object(&mut self, prop: LAccess, value: Self::Object);
+    fn set_content_prop(&mut self, content: Self::Content, value: f64);
+}
+
 /// Mirrors upstream `mindustry.logic.LMarkerControl`.
 ///
 /// The declaration order is network-visible: Java `TypeIO.writeMarkerControl`
@@ -1734,6 +1990,108 @@ mod tests {
         assert!(TileLayer::Block.is_settable());
         assert!(!TileLayer::Building.is_settable());
         assert_eq!(TileLayer::Building.wire_name(), "building");
+    }
+
+    #[test]
+    fn unit_control_locate_and_categories_match_java_small_logic_files() {
+        assert_eq!(LUnitControl::ALL.len(), 21);
+        assert_eq!(LUnitControl::Idle.ordinal(), 0);
+        assert_eq!(LUnitControl::AutoPathfind.ordinal(), 5);
+        assert_eq!(LUnitControl::Unbind.ordinal(), 20);
+        assert_eq!(LUnitControl::from_ordinal(21), None);
+        assert_eq!(
+            LUnitControl::ALL
+                .iter()
+                .map(|value| value.wire_name())
+                .collect::<Vec<_>>(),
+            vec![
+                "idle",
+                "stop",
+                "move",
+                "approach",
+                "pathfind",
+                "autoPathfind",
+                "boost",
+                "target",
+                "targetp",
+                "itemDrop",
+                "itemTake",
+                "payDrop",
+                "payTake",
+                "payEnter",
+                "mine",
+                "flag",
+                "build",
+                "deconstruct",
+                "getBlock",
+                "within",
+                "unbind"
+            ]
+        );
+        assert_eq!(LUnitControl::Move.params(), ["x", "y"]);
+        assert_eq!(LUnitControl::Targetp.params(), ["unit", "shoot"]);
+        assert_eq!(
+            LUnitControl::Build.params(),
+            ["x", "y", "block", "rotation", "config"]
+        );
+        assert_eq!(
+            LUnitControl::GetBlock.params(),
+            ["x", "y", "type", "building", "floor"]
+        );
+        assert_eq!(
+            LUnitControl::Within.params(),
+            ["x", "y", "radius", "result"]
+        );
+        assert_eq!(LUnitControl::PayDrop.params(), [] as [&str; 0]);
+
+        assert_eq!(
+            LLocate::ALL,
+            [
+                LLocate::Ore,
+                LLocate::Building,
+                LLocate::Spawn,
+                LLocate::Damaged
+            ]
+        );
+        assert_eq!(
+            LLocate::ALL
+                .iter()
+                .map(|value| value.wire_name())
+                .collect::<Vec<_>>(),
+            vec!["ore", "building", "spawn", "damaged"]
+        );
+        assert_eq!(LLocate::Damaged.ordinal(), 3);
+        assert_eq!(LLocate::from_ordinal(4), None);
+
+        assert_eq!(LCategory::ALL.len(), 7);
+        assert_eq!(
+            LCategory::ALL
+                .iter()
+                .map(|category| (category.id, category.name, category.icon))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, "unknown", None),
+                (1, "io", Some("logicSmall")),
+                (2, "block", Some("effectSmall")),
+                (3, "operation", Some("settingsSmall")),
+                (4, "control", Some("rotateSmall")),
+                (5, "unit", Some("unitsSmall")),
+                (6, "world", Some("terrainSmall"))
+            ]
+        );
+        assert_eq!(LCategory::ALL[0].color_rgba, 0x4c4c4cff);
+        assert_eq!(LCategory::ALL[1].color_rgba, 0xa08a8aff);
+        assert_eq!(LCategory::ALL[2].color_rgba, 0xd4816bff);
+        assert_eq!(LCategory::ALL[3].color_rgba, 0x877badff);
+        assert_eq!(LCategory::ALL[4].color_rgba, 0x6bb2b2ff);
+        assert_eq!(LCategory::ALL[5].color_rgba, 0xc7b59dff);
+        assert_eq!(LCategory::ALL[6].color_rgba, 0x6b84d4ff);
+
+        let unit = LCategory::by_name("unit").unwrap();
+        assert_eq!(unit.id, 5);
+        assert_eq!(unit.localized_key(), "lcategory.unit");
+        assert_eq!(unit.description_key(), "lcategory.unit.description");
+        assert_eq!(LCategory::by_name("missing"), None);
     }
 
     #[test]
