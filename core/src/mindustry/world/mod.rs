@@ -1,6 +1,7 @@
 pub mod block;
 pub mod blocks;
 pub mod cached_tile;
+pub mod consumers;
 pub mod meta;
 pub mod modules;
 pub mod tile;
