@@ -26,6 +26,132 @@ pub trait ExplosionShield {
     fn absorb_explosion(&mut self, x: f32, y: f32, damage: f32) -> bool;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceMode {
+    None,
+    Bottom,
+    Top,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextureRegionShell {
+    pub x: f32,
+    pub width: f32,
+}
+
+pub fn autotiler_sliced_region(input: TextureRegionShell, mode: SliceMode) -> TextureRegionShell {
+    match mode {
+        SliceMode::None => input,
+        SliceMode::Bottom => TextureRegionShell {
+            x: input.x + input.width,
+            width: input.width / 2.0,
+        },
+        SliceMode::Top => TextureRegionShell {
+            x: input.x,
+            width: input.width / 2.0,
+        },
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutotilerBlendInput {
+    pub directional_blends: [bool; 4],
+    pub world_blends: [bool; 4],
+    pub non_square_world_neighbors: [bool; 4],
+}
+
+pub fn autotiler_transform_case(num: i32, bits: &mut [i32; 5]) {
+    match num {
+        0 => bits[0] = 3,
+        1 => bits[0] = 4,
+        2 => bits[0] = 2,
+        3 => {
+            bits[0] = 2;
+            bits[2] = -1;
+        }
+        4 => {
+            bits[0] = 1;
+            bits[2] = -1;
+        }
+        5 => bits[0] = 1,
+        _ => {}
+    }
+}
+
+pub fn autotiler_build_blending(input: AutotilerBlendInput, check_world: bool) -> [i32; 5] {
+    let blends = |direction: usize| {
+        input.directional_blends[direction] || (check_world && input.world_blends[direction])
+    };
+
+    let mut result = [0, 1, 1, 0, 0];
+    let num = if blends(2) && blends(1) && blends(3) {
+        0
+    } else if blends(1) && blends(3) {
+        1
+    } else if blends(1) && blends(2) {
+        2
+    } else if blends(3) && blends(2) {
+        3
+    } else if blends(1) {
+        4
+    } else if blends(3) {
+        5
+    } else {
+        -1
+    };
+    autotiler_transform_case(num, &mut result);
+
+    for i in 0..4 {
+        if blends(i) {
+            result[3] |= 1 << i;
+        }
+        if blends(i) && check_world && input.non_square_world_neighbors[i] {
+            result[4] |= 1 << i;
+        }
+    }
+
+    result
+}
+
+pub fn autotiler_direction(rotation: i32) -> (i32, i32) {
+    match rotation.rem_euclid(4) {
+        0 => (1, 0),
+        1 => (0, 1),
+        2 => (-1, 0),
+        _ => (0, -1),
+    }
+}
+
+pub fn autotiler_facing(x: i32, y: i32, rotation: i32, x2: i32, y2: i32) -> bool {
+    let (dx, dy) = autotiler_direction(rotation);
+    x + dx == x2 && y + dy == y2
+}
+
+pub fn autotiler_not_looking_at(
+    tile_x: i32,
+    tile_y: i32,
+    other_x: i32,
+    other_y: i32,
+    other_rot: i32,
+    other_rotated_output: bool,
+) -> bool {
+    !(other_rotated_output && autotiler_facing(other_x, other_y, other_rot, tile_x, tile_y))
+}
+
+pub fn autotiler_looking_at_either(
+    tile_x: i32,
+    tile_y: i32,
+    rotation: i32,
+    other_x: i32,
+    other_y: i32,
+    other_rot: i32,
+    other_rotated_output: bool,
+) -> bool {
+    autotiler_facing(tile_x, tile_y, rotation, other_x, other_y)
+        || !other_rotated_output
+        || autotiler_facing(other_x, other_y, other_rot, tile_x, tile_y)
+}
+
 pub const TILE_BITMASK_VALUES: [i32; 256] = [
     39, 36, 39, 36, 27, 16, 27, 24, 39, 36, 39, 36, 27, 16, 27, 24, 38, 37, 38, 37, 17, 41, 17, 43,
     38, 37, 38, 37, 26, 21, 26, 25, 39, 36, 39, 36, 27, 16, 27, 24, 39, 36, 39, 36, 27, 16, 27, 24,
@@ -185,6 +311,60 @@ mod tests {
         };
         assert!(shield.absorb_explosion(1.0, 2.0, 30.0));
         assert_eq!(shield.absorbed_damage, 30.0);
+    }
+
+    #[test]
+    fn autotiler_slice_transform_and_blending_follow_java_cases() {
+        let region = TextureRegionShell {
+            x: 10.0,
+            width: 64.0,
+        };
+        assert_eq!(autotiler_sliced_region(region, SliceMode::None), region);
+        assert_eq!(
+            autotiler_sliced_region(region, SliceMode::Top),
+            TextureRegionShell {
+                x: 10.0,
+                width: 32.0,
+            }
+        );
+        assert_eq!(
+            autotiler_sliced_region(region, SliceMode::Bottom),
+            TextureRegionShell {
+                x: 74.0,
+                width: 32.0,
+            }
+        );
+
+        let mut bits = [0, 1, 1, 0, 0];
+        autotiler_transform_case(3, &mut bits);
+        assert_eq!(bits, [2, 1, -1, 0, 0]);
+
+        let input = AutotilerBlendInput {
+            directional_blends: [false, true, true, false],
+            world_blends: [true, false, false, true],
+            non_square_world_neighbors: [true, false, false, true],
+        };
+        assert_eq!(autotiler_build_blending(input, false), [2, 1, 1, 0b0110, 0]);
+        assert_eq!(
+            autotiler_build_blending(input, true),
+            [3, 1, 1, 0b1111, 0b1001]
+        );
+    }
+
+    #[test]
+    fn autotiler_direction_and_look_checks_match_four_way_geometry() {
+        assert_eq!(autotiler_direction(0), (1, 0));
+        assert_eq!(autotiler_direction(1), (0, 1));
+        assert_eq!(autotiler_direction(2), (-1, 0));
+        assert_eq!(autotiler_direction(-1), (0, -1));
+
+        assert!(autotiler_facing(5, 5, 0, 6, 5));
+        assert!(!autotiler_facing(5, 5, 1, 6, 5));
+        assert!(!autotiler_not_looking_at(5, 5, 6, 5, 2, true));
+        assert!(autotiler_not_looking_at(5, 5, 6, 5, 1, true));
+        assert!(autotiler_looking_at_either(5, 5, 0, 6, 5, 1, true));
+        assert!(autotiler_looking_at_either(5, 5, 1, 6, 5, 1, false));
+        assert!(autotiler_looking_at_either(5, 5, 1, 6, 5, 2, true));
     }
 
     #[test]
