@@ -23,6 +23,7 @@ pub const LOGIC_PARSER_MAX_TOKENS: usize = 16;
 pub const LOGIC_PARSER_MAX_JUMPS: usize = 500;
 pub const LOGIC_CANVAS_INVALID_JUMP: i32 = i32::MAX;
 pub const LOGIC_TILE_SIZE: f32 = 8.0;
+pub const LOGIC_BUILDING_RANGE: f32 = 220.0;
 
 const INVALID_NUM_NEGATIVE: i64 = i64::MIN;
 const INVALID_NUM_POSITIVE: i64 = i64::MAX;
@@ -4160,6 +4161,117 @@ impl LogicUnitObject {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LogicBuildingObject {
+    pub block_name: String,
+    pub team: u8,
+    pub x: f32,
+    pub y: f32,
+    pub hit_size: f32,
+    pub valid: bool,
+    pub flags: BTreeSet<BlockFlag>,
+    pub damaged: bool,
+}
+
+impl LogicBuildingObject {
+    pub fn new(block_name: impl Into<String>, team: u8, x: f32, y: f32) -> Self {
+        Self {
+            block_name: block_name.into(),
+            team,
+            x,
+            y,
+            hit_size: LOGIC_TILE_SIZE,
+            valid: true,
+            flags: BTreeSet::new(),
+            damaged: false,
+        }
+    }
+
+    pub fn has_flag(&self, flag: BlockFlag) -> bool {
+        self.flags.contains(&flag)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicTileObject {
+    pub floor: Option<String>,
+    pub ore: Option<String>,
+    pub block: Option<String>,
+    pub building: Option<String>,
+    pub team: u8,
+    pub rotation: i32,
+}
+
+impl Default for LogicTileObject {
+    fn default() -> Self {
+        Self {
+            floor: Some("@air".into()),
+            ore: Some("@air".into()),
+            block: Some("@air".into()),
+            building: None,
+            team: RadarTarget::DERELICT_TEAM,
+            rotation: 0,
+        }
+    }
+}
+
+impl LogicTileObject {
+    pub fn get_layer(&self, layer: TileLayer) -> Option<String> {
+        match layer {
+            TileLayer::Floor => self.floor.clone(),
+            TileLayer::Ore => self.ore.clone(),
+            TileLayer::Block => self.block.clone(),
+            TileLayer::Building => self.building.clone(),
+        }
+    }
+
+    pub fn set_layer(&mut self, layer: TileLayer, value: Option<String>, team: u8, rotation: i32) {
+        match layer {
+            TileLayer::Floor => self.floor = value,
+            TileLayer::Ore => self.ore = value,
+            TileLayer::Block => {
+                self.block = value;
+                self.team = team;
+                self.rotation = rotation.clamp(0, 3);
+            }
+            TileLayer::Building => {}
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicWorldObject {
+    pub tiles: BTreeMap<(i32, i32), LogicTileObject>,
+    pub spawns: Vec<(f32, f32)>,
+}
+
+impl Default for LogicWorldObject {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LogicWorldObject {
+    pub fn new() -> Self {
+        Self {
+            tiles: BTreeMap::new(),
+            spawns: Vec::new(),
+        }
+    }
+
+    pub fn tile(&self, x: i32, y: i32) -> Option<&LogicTileObject> {
+        self.tiles.get(&(x, y))
+    }
+
+    pub fn tile_mut(&mut self, x: i32, y: i32) -> Option<&mut LogicTileObject> {
+        self.tiles.get_mut(&(x, y))
+    }
+
+    pub fn set_tile(&mut self, x: i32, y: i32, tile: LogicTileObject) {
+        self.tiles.insert((x, y), tile);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum LogicRuntimeObject {
     Text(String),
     Sequence(Vec<LVarValue>),
@@ -4168,6 +4280,8 @@ pub enum LogicRuntimeObject {
     Controllable(LogicControllableObject),
     RadarSource(LogicRadarSource),
     Unit(LogicUnitObject),
+    Building(LogicBuildingObject),
+    QueryResult(Vec<String>),
 }
 
 impl LogicRuntimeObject {
@@ -4198,7 +4312,20 @@ impl LogicRuntimeObject {
             LogicRuntimeObject::Senseable(_) => false,
             LogicRuntimeObject::Controllable(_)
             | LogicRuntimeObject::RadarSource(_)
-            | LogicRuntimeObject::Unit(_) => false,
+            | LogicRuntimeObject::Unit(_)
+            | LogicRuntimeObject::Building(_) => false,
+            LogicRuntimeObject::QueryResult(values) => {
+                read_logic_sequence(
+                    &values
+                        .iter()
+                        .cloned()
+                        .map(|value| LVarValue::Object(Some(value)))
+                        .collect::<Vec<_>>(),
+                    position,
+                    output,
+                );
+                true
+            }
         }
     }
 
@@ -4251,6 +4378,21 @@ impl LogicRuntimeObject {
             },
             LogicRuntimeObject::RadarSource(_) => None,
             LogicRuntimeObject::Unit(unit) => unit.sense_access(access),
+            LogicRuntimeObject::Building(building) => match access {
+                LAccess::Health => Some(LVarValue::Number((!building.damaged) as u8 as f64)),
+                LAccess::X => Some(LVarValue::Number(logic_conv(building.x) as f64)),
+                LAccess::Y => Some(LVarValue::Number(logic_conv(building.y) as f64)),
+                LAccess::Team => Some(LVarValue::Number(building.team as f64)),
+                LAccess::Type => Some(LVarValue::Object(Some(logic_object_name(
+                    &building.block_name,
+                )))),
+                LAccess::Dead => Some(LVarValue::Number((!building.valid) as u8 as f64)),
+                _ => None,
+            },
+            LogicRuntimeObject::QueryResult(values) => match access {
+                LAccess::Size => Some(LVarValue::Number(values.len() as f64)),
+                _ => None,
+            },
         }
     }
 
@@ -4260,6 +4402,7 @@ impl LogicRuntimeObject {
                 Some(*senseable.content_senses.get(content_name).unwrap_or(&0.0))
             }
             LogicRuntimeObject::Unit(_) => Some(0.0),
+            LogicRuntimeObject::Building(_) | LogicRuntimeObject::QueryResult(_) => Some(0.0),
             _ => None,
         }
     }
@@ -4276,6 +4419,9 @@ pub struct LogicExecutor {
     pub links: Vec<String>,
     pub objects: BTreeMap<String, LogicRuntimeObject>,
     pub radar_units: BTreeMap<String, RadarUnitView>,
+    pub world: LogicWorldObject,
+    pub query_result: Option<String>,
+    pub objective_flags: BTreeSet<String>,
     pub bound_unit: Option<String>,
     pub unit_binds: BTreeMap<String, usize>,
     pub logic_unit_control: bool,
@@ -4309,6 +4455,9 @@ impl LogicExecutor {
             links: Vec::new(),
             objects: BTreeMap::new(),
             radar_units: BTreeMap::new(),
+            world: LogicWorldObject::new(),
+            query_result: Some("@query".into()),
+            objective_flags: BTreeSet::new(),
             bound_unit: None,
             unit_binds: BTreeMap::new(),
             logic_unit_control: true,
@@ -4509,6 +4658,54 @@ pub enum LogicInstruction {
         output: LVar,
         last_target: Option<String>,
     },
+    UnitLocate {
+        locate: LLocate,
+        flag: BlockFlag,
+        enemy: LVar,
+        ore: LVar,
+        out_x: LVar,
+        out_y: LVar,
+        out_found: LVar,
+        out_build: LVar,
+    },
+    Query {
+        shape: QueryShape,
+        type_: QueryType,
+        team: LVar,
+        x: LVar,
+        y: LVar,
+        w: LVar,
+        h: LVar,
+    },
+    GetBlock {
+        layer: TileLayer,
+        result: LVar,
+        x: LVar,
+        y: LVar,
+    },
+    SetBlock {
+        layer: TileLayer,
+        block: LVar,
+        x: LVar,
+        y: LVar,
+        team: LVar,
+        rotation: LVar,
+    },
+    Fetch {
+        type_: FetchType,
+        result: LVar,
+        team: LVar,
+        index: LVar,
+        extra: LVar,
+    },
+    GetFlag {
+        result: LVar,
+        flag: LVar,
+    },
+    SetFlag {
+        flag: LVar,
+        value: LVar,
+    },
     Set {
         from: LVar,
         to: LVar,
@@ -4669,6 +4866,64 @@ impl LogicInstruction {
                     exec_unit_radar_runtime(exec, *target1, *target2, *target3, *sort, sort_order);
                 *last_target = targeted.clone();
                 output.set_obj(targeted);
+            }
+            LogicInstruction::UnitLocate {
+                locate,
+                flag,
+                enemy,
+                ore,
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+            } => {
+                exec_unit_locate_runtime(
+                    exec, *locate, *flag, enemy, ore, out_x, out_y, out_found, out_build,
+                );
+            }
+            LogicInstruction::Query {
+                shape,
+                type_,
+                team,
+                x,
+                y,
+                w,
+                h,
+            } => {
+                exec_query_runtime(exec, *shape, *type_, team, x, y, w, h);
+            }
+            LogicInstruction::GetBlock {
+                layer,
+                result,
+                x,
+                y,
+            } => {
+                exec_get_block_runtime(exec, *layer, result, x, y);
+            }
+            LogicInstruction::SetBlock {
+                layer,
+                block,
+                x,
+                y,
+                team,
+                rotation,
+            } => {
+                exec_set_block_runtime(exec, *layer, block, x, y, team, rotation);
+            }
+            LogicInstruction::Fetch {
+                type_,
+                result,
+                team,
+                index,
+                extra,
+            } => {
+                exec_fetch_runtime(exec, *type_, result, team, index, extra);
+            }
+            LogicInstruction::GetFlag { result, flag } => {
+                exec_get_flag_runtime(exec, result, flag);
+            }
+            LogicInstruction::SetFlag { flag, value } => {
+                exec_set_flag_runtime(exec, flag, value);
             }
             LogicInstruction::Set { from, to } => {
                 if !to.constant {
@@ -5212,6 +5467,250 @@ pub fn exec_unit_radar_runtime(
     )
 }
 
+pub fn exec_unit_locate_runtime(
+    exec: &mut LogicExecutor,
+    locate: LLocate,
+    flag: BlockFlag,
+    enemy: &LVar,
+    ore: &LVar,
+    out_x: &mut LVar,
+    out_y: &mut LVar,
+    out_found: &mut LVar,
+    out_build: &mut LVar,
+) {
+    if !exec.privileged && !exec.logic_unit_control {
+        return;
+    }
+
+    let Some(unit) = exec.bound_unit.as_deref().and_then(|name| {
+        let LogicRuntimeObject::Unit(unit) = exec.objects.get(name)? else {
+            return None;
+        };
+        unit.controllable_by(exec.privileged, exec.team)
+            .then_some(unit)
+    }) else {
+        out_found.set_bool(false);
+        return;
+    };
+
+    let result = match locate {
+        LLocate::Ore => find_closest_ore(exec, unit, ore.obj()),
+        LLocate::Building => find_closest_flagged_building(exec, unit, flag, enemy.bool()),
+        LLocate::Spawn => find_closest_spawn(exec, unit),
+        LLocate::Damaged => find_closest_damaged_building(exec, unit),
+    };
+
+    if let Some(result) = result {
+        out_x.set_num(logic_conv(result.x) as f64);
+        out_y.set_num(logic_conv(result.y) as f64);
+        out_found.set_bool(true);
+        out_build.set_obj(result.building);
+    } else {
+        out_found.set_bool(false);
+        out_build.set_obj(None);
+    }
+}
+
+pub fn exec_query_runtime(
+    exec: &mut LogicExecutor,
+    shape: QueryShape,
+    type_: QueryType,
+    team: &LVar,
+    x: &LVar,
+    y: &LVar,
+    w: &LVar,
+    h: &LVar,
+) {
+    if type_ == QueryType::Bullet {
+        return;
+    }
+
+    let Some(query_result_name) = exec.query_result.clone() else {
+        return;
+    };
+
+    let team_filter = logic_team_from_var(team);
+    let mut x = logic_unconv(x.numf());
+    let mut y = logic_unconv(y.numf());
+    let mut w = logic_unconv(w.numf());
+    let mut h = logic_unconv(h.numf());
+    let mut radius = w;
+    let circle_x = x;
+    let circle_y = y;
+    let circle = shape == QueryShape::Circle;
+    if circle {
+        x -= radius;
+        y -= radius;
+        w = radius * 2.0;
+        h = radius * 2.0;
+    } else {
+        radius = 0.0;
+    }
+
+    let mut results = Vec::new();
+    match type_ {
+        QueryType::Unit => {
+            for (name, object) in &exec.objects {
+                let LogicRuntimeObject::Unit(unit) = object else {
+                    continue;
+                };
+                if !unit.valid || team_filter.is_some_and(|team| unit.team != team) {
+                    continue;
+                }
+                if !logic_rect_contains(unit.x, unit.y, x, y, w, h) {
+                    continue;
+                }
+                if circle && !logic_circle_contains(unit.x, unit.y, circle_x, circle_y, radius, 0.0)
+                {
+                    continue;
+                }
+                results.push(name.clone());
+            }
+        }
+        QueryType::Building => {
+            for (name, object) in &exec.objects {
+                let LogicRuntimeObject::Building(building) = object else {
+                    continue;
+                };
+                if !building.valid || team_filter.is_some_and(|team| building.team != team) {
+                    continue;
+                }
+                if !logic_rect_contains(building.x, building.y, x, y, w, h) {
+                    continue;
+                }
+                if circle
+                    && !logic_circle_contains(
+                        building.x,
+                        building.y,
+                        circle_x,
+                        circle_y,
+                        radius,
+                        building.hit_size / 2.0,
+                    )
+                {
+                    continue;
+                }
+                results.push(name.clone());
+            }
+        }
+        QueryType::Bullet => {}
+    }
+
+    exec.objects
+        .insert(query_result_name, LogicRuntimeObject::QueryResult(results));
+}
+
+pub fn exec_get_block_runtime(
+    exec: &LogicExecutor,
+    layer: TileLayer,
+    result: &mut LVar,
+    x: &LVar,
+    y: &LVar,
+) {
+    let x = x.numf().round() as i32;
+    let y = y.numf().round() as i32;
+    result.set_obj(exec.world.tile(x, y).and_then(|tile| tile.get_layer(layer)));
+}
+
+pub fn exec_set_block_runtime(
+    exec: &mut LogicExecutor,
+    layer: TileLayer,
+    block: &LVar,
+    x: &LVar,
+    y: &LVar,
+    team: &LVar,
+    rotation: &LVar,
+) {
+    if layer == TileLayer::Building {
+        return;
+    }
+
+    let x = x.numi();
+    let y = y.numi();
+    let Some(block_name) = block.obj().map(logic_object_name) else {
+        return;
+    };
+    let Some(tile) = exec.world.tile_mut(x, y) else {
+        return;
+    };
+
+    let team = logic_team_from_var(team).unwrap_or(RadarTarget::DERELICT_TEAM);
+    tile.set_layer(layer, Some(block_name), team, rotation.numi());
+}
+
+pub fn exec_fetch_runtime(
+    exec: &LogicExecutor,
+    type_: FetchType,
+    result: &mut LVar,
+    team: &LVar,
+    index: &LVar,
+    extra: &LVar,
+) {
+    let Some(team) = logic_team_from_var(team) else {
+        return;
+    };
+    let index = index.numi();
+
+    match type_ {
+        FetchType::Unit | FetchType::Player => {
+            let units = fetch_units(exec, team, extra.obj());
+            if matches!(type_, FetchType::Player) {
+                let players: Vec<_> = units
+                    .into_iter()
+                    .filter(|name| {
+                        matches!(exec.objects.get(name), Some(LogicRuntimeObject::Unit(unit)) if unit.is_player)
+                    })
+                    .collect();
+                result.set_obj(logic_index_name(&players, index));
+            } else {
+                result.set_obj(logic_index_name(&units, index));
+            }
+        }
+        FetchType::Core | FetchType::Build => {
+            let builds = fetch_buildings(exec, team, extra.obj(), matches!(type_, FetchType::Core));
+            result.set_obj(logic_index_name(&builds, index));
+        }
+        FetchType::UnitCount => {
+            result.set_num(fetch_units(exec, team, extra.obj()).len() as f64);
+        }
+        FetchType::PlayerCount => {
+            result.set_num(
+                fetch_units(exec, team, None)
+                    .into_iter()
+                    .filter(|name| {
+                        matches!(exec.objects.get(name), Some(LogicRuntimeObject::Unit(unit)) if unit.is_player)
+                    })
+                    .count() as f64,
+            );
+        }
+        FetchType::CoreCount => {
+            result.set_num(fetch_buildings(exec, team, None, true).len() as f64);
+        }
+        FetchType::BuildCount => {
+            result.set_num(fetch_buildings(exec, team, extra.obj(), false).len() as f64);
+        }
+    }
+}
+
+pub fn exec_get_flag_runtime(exec: &LogicExecutor, result: &mut LVar, flag: &LVar) {
+    if let Some(flag) = flag.obj() {
+        result.set_bool(exec.objective_flags.contains(flag));
+    } else {
+        result.set_obj(None);
+    }
+}
+
+pub fn exec_set_flag_runtime(exec: &mut LogicExecutor, flag: &LVar, value: &LVar) {
+    let Some(flag) = flag.obj() else {
+        return;
+    };
+    if value.bool() {
+        exec.objective_flags.insert(flag.to_string());
+    } else {
+        exec.objective_flags.remove(flag);
+    }
+}
+
 fn radar_units_with_runtime_units(exec: &LogicExecutor) -> Vec<(String, RadarUnitView)> {
     let mut units: BTreeMap<String, RadarUnitView> = exec
         .radar_units
@@ -5289,6 +5788,203 @@ pub fn logic_unconv(coord: f32) -> f32 {
 
 pub fn logic_conv(coord: f32) -> f32 {
     coord / LOGIC_TILE_SIZE
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicLocateResult {
+    pub x: f32,
+    pub y: f32,
+    pub building: Option<String>,
+}
+
+fn find_closest_ore(
+    exec: &LogicExecutor,
+    unit: &LogicUnitObject,
+    ore: Option<&str>,
+) -> Option<LogicLocateResult> {
+    let ore = ore.map(logic_object_name)?;
+    exec.world
+        .tiles
+        .iter()
+        .filter(|(_, tile)| tile.ore.as_deref() == Some(ore.as_str()))
+        .map(|((x, y), _)| LogicLocateResult {
+            x: logic_tile_world(*x),
+            y: logic_tile_world(*y),
+            building: None,
+        })
+        .min_by(|a, b| {
+            logic_distance_sq(unit.x, unit.y, a.x, a.y)
+                .total_cmp(&logic_distance_sq(unit.x, unit.y, b.x, b.y))
+        })
+}
+
+fn find_closest_flagged_building(
+    exec: &LogicExecutor,
+    unit: &LogicUnitObject,
+    flag: BlockFlag,
+    enemy: bool,
+) -> Option<LogicLocateResult> {
+    exec.objects
+        .iter()
+        .filter_map(|(name, object)| {
+            let LogicRuntimeObject::Building(building) = object else {
+                return None;
+            };
+            if !building.valid || !building.has_flag(flag) {
+                return None;
+            }
+            if enemy == (building.team == unit.team || building.team == RadarTarget::DERELICT_TEAM)
+            {
+                return None;
+            }
+            Some((name, building))
+        })
+        .map(|(name, building)| LogicLocateResult {
+            x: building.x,
+            y: building.y,
+            building: locate_building_visible(unit, name, building),
+        })
+        .min_by(|a, b| {
+            logic_distance_sq(unit.x, unit.y, a.x, a.y)
+                .total_cmp(&logic_distance_sq(unit.x, unit.y, b.x, b.y))
+        })
+}
+
+fn find_closest_spawn(exec: &LogicExecutor, unit: &LogicUnitObject) -> Option<LogicLocateResult> {
+    exec.world
+        .spawns
+        .iter()
+        .map(|(x, y)| LogicLocateResult {
+            x: *x,
+            y: *y,
+            building: None,
+        })
+        .min_by(|a, b| {
+            logic_distance_sq(unit.x, unit.y, a.x, a.y)
+                .total_cmp(&logic_distance_sq(unit.x, unit.y, b.x, b.y))
+        })
+}
+
+fn find_closest_damaged_building(
+    exec: &LogicExecutor,
+    unit: &LogicUnitObject,
+) -> Option<LogicLocateResult> {
+    exec.objects
+        .iter()
+        .filter_map(|(name, object)| {
+            let LogicRuntimeObject::Building(building) = object else {
+                return None;
+            };
+            (building.valid && building.damaged && building.team == unit.team)
+                .then_some((name, building))
+        })
+        .map(|(name, building)| LogicLocateResult {
+            x: building.x,
+            y: building.y,
+            building: locate_building_visible(unit, name, building),
+        })
+        .min_by(|a, b| {
+            logic_distance_sq(unit.x, unit.y, a.x, a.y)
+                .total_cmp(&logic_distance_sq(unit.x, unit.y, b.x, b.y))
+        })
+}
+
+fn locate_building_visible(
+    unit: &LogicUnitObject,
+    name: &str,
+    building: &LogicBuildingObject,
+) -> Option<String> {
+    let range = unit.range.max(LOGIC_BUILDING_RANGE);
+    (building.team == unit.team
+        || logic_distance_sq(unit.x, unit.y, building.x, building.y) <= range * range)
+        .then(|| name.to_string())
+}
+
+fn fetch_units(exec: &LogicExecutor, team: u8, type_name: Option<&str>) -> Vec<String> {
+    let type_name = type_name.map(logic_unwrap_object_name);
+    exec.objects
+        .iter()
+        .filter_map(|(name, object)| {
+            let LogicRuntimeObject::Unit(unit) = object else {
+                return None;
+            };
+            if unit.team != team || type_name.is_some_and(|type_name| unit.type_name != type_name) {
+                return None;
+            }
+            Some(name.clone())
+        })
+        .collect()
+}
+
+fn fetch_buildings(
+    exec: &LogicExecutor,
+    team: u8,
+    block_name: Option<&str>,
+    core_only: bool,
+) -> Vec<String> {
+    let block_name = block_name.map(logic_unwrap_object_name);
+    exec.objects
+        .iter()
+        .filter_map(|(name, object)| {
+            let LogicRuntimeObject::Building(building) = object else {
+                return None;
+            };
+            if building.team != team
+                || block_name.is_some_and(|block_name| building.block_name != block_name)
+                || (core_only && !building.has_flag(BlockFlag::Core))
+            {
+                return None;
+            }
+            Some(name.clone())
+        })
+        .collect()
+}
+
+fn logic_index_name(values: &[String], index: i32) -> Option<String> {
+    (index >= 0)
+        .then(|| values.get(index as usize).cloned())
+        .flatten()
+}
+
+fn logic_rect_contains(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32) -> bool {
+    px >= x && py >= y && px <= x + w && py <= y + h
+}
+
+fn logic_circle_contains(px: f32, py: f32, x: f32, y: f32, radius: f32, extra: f32) -> bool {
+    logic_distance_sq(px, py, x, y) <= (radius + extra) * (radius + extra)
+}
+
+fn logic_distance_sq(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    let dx = x1 - x2;
+    let dy = y1 - y2;
+    dx * dx + dy * dy
+}
+
+fn logic_tile_world(coord: i32) -> f32 {
+    coord as f32 * LOGIC_TILE_SIZE
+}
+
+pub fn logic_team_from_var(var: &LVar) -> Option<u8> {
+    if var.is_obj {
+        var.obj().and_then(logic_team_from_name)
+    } else {
+        let value = var.numi();
+        (0..=255).contains(&value).then_some(value as u8)
+    }
+}
+
+pub fn logic_team_from_name(name: &str) -> Option<u8> {
+    let name = logic_unwrap_object_name(name);
+    match name {
+        "derelict" => Some(0),
+        "sharded" => Some(1),
+        "crux" => Some(2),
+        "malis" => Some(3),
+        "green" => Some(4),
+        "blue" => Some(5),
+        "neoplastic" => Some(6),
+        _ => name.parse::<u8>().ok(),
+    }
 }
 
 pub fn logic_access_from_object_name(name: &str) -> Option<LAccess> {
@@ -10509,6 +11205,417 @@ mod tests {
         }
         .run(&mut exec);
         assert_eq!(exec.bound_unit, Some("unit-b".into()));
+    }
+
+    #[test]
+    fn world_query_fetch_locate_and_flag_executor_instructions_follow_java_l_executor_semantics() {
+        let mut exec = LogicExecutor::new();
+        exec.team = 1;
+        exec.world.set_tile(
+            2,
+            3,
+            LogicTileObject {
+                floor: Some("@stone".into()),
+                ore: Some("@copper".into()),
+                block: Some("@conveyor".into()),
+                building: Some("core-a".into()),
+                team: 1,
+                rotation: 1,
+            },
+        );
+        exec.world.set_tile(
+            8,
+            8,
+            LogicTileObject {
+                ore: Some("@thorium".into()),
+                ..LogicTileObject::default()
+            },
+        );
+        exec.world.spawns.push((80.0, 16.0));
+
+        let mut unit = LogicUnitObject::new("dagger", 1, 16.0, 24.0);
+        unit.range = 96.0;
+        exec.register_object("unit-a", LogicRuntimeObject::Unit(unit));
+        let mut player = LogicUnitObject::new("flare", 1, 40.0, 24.0);
+        player.is_player = true;
+        exec.register_object("player-a", LogicRuntimeObject::Unit(player));
+        exec.register_object(
+            "enemy-unit",
+            LogicRuntimeObject::Unit(LogicUnitObject::new("crawler", 2, 200.0, 200.0)),
+        );
+
+        let mut core = LogicBuildingObject::new("core-shard", 1, 16.0, 24.0);
+        core.flags.insert(BlockFlag::Core);
+        exec.register_object("core-a", LogicRuntimeObject::Building(core));
+        let mut enemy_core = LogicBuildingObject::new("core-shard", 2, 56.0, 24.0);
+        enemy_core.flags.insert(BlockFlag::Core);
+        exec.register_object("enemy-core", LogicRuntimeObject::Building(enemy_core));
+        let mut damaged = LogicBuildingObject::new("duo", 1, 24.0, 24.0);
+        damaged.flags.insert(BlockFlag::Turret);
+        damaged.damaged = true;
+        exec.register_object("damaged-turret", LogicRuntimeObject::Building(damaged));
+
+        let mut get_block = LogicInstruction::GetBlock {
+            layer: TileLayer::Block,
+            result: LVar::new("result"),
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.2);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(2.8);
+                value
+            },
+        };
+        get_block.run(&mut exec);
+        match get_block {
+            LogicInstruction::GetBlock { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Object(Some("@conveyor".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::SetBlock {
+            layer: TileLayer::Block,
+            block: {
+                let mut value = LVar::new("block");
+                value.set_obj(Some("@duo".into()));
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(3.0);
+                value
+            },
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@crux".into()));
+                value
+            },
+            rotation: {
+                let mut value = LVar::new("rotation");
+                value.set_num(9.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        let tile = exec.world.tile(2, 3).unwrap();
+        assert_eq!(tile.block, Some("@duo".into()));
+        assert_eq!(tile.team, 2);
+        assert_eq!(tile.rotation, 3);
+
+        LogicInstruction::SetBlock {
+            layer: TileLayer::Ore,
+            block: {
+                let mut value = LVar::new("block");
+                value.set_obj(Some("@scrap".into()));
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(3.0);
+                value
+            },
+            team: LVar::new("team"),
+            rotation: LVar::new("rotation"),
+        }
+        .run(&mut exec);
+        assert_eq!(exec.world.tile(2, 3).unwrap().ore, Some("@scrap".into()));
+
+        LogicInstruction::Query {
+            shape: QueryShape::Circle,
+            type_: QueryType::Unit,
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@sharded".into()));
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(3.0);
+                value
+            },
+            w: {
+                let mut value = LVar::new("radius");
+                value.set_num(4.0);
+                value
+            },
+            h: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("@query").unwrap() {
+            LogicRuntimeObject::QueryResult(values) => {
+                assert_eq!(values, &vec!["player-a".to_string(), "unit-a".to_string()]);
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::Query {
+            shape: QueryShape::Rect,
+            type_: QueryType::Building,
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@sharded".into()));
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(1.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(2.0);
+                value
+            },
+            w: {
+                let mut value = LVar::new("w");
+                value.set_num(4.0);
+                value
+            },
+            h: {
+                let mut value = LVar::new("h");
+                value.set_num(2.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        match exec.objects.get("@query").unwrap() {
+            LogicRuntimeObject::QueryResult(values) => {
+                assert_eq!(
+                    values,
+                    &vec!["core-a".to_string(), "damaged-turret".to_string()]
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        let mut fetch_unit_count = LogicInstruction::Fetch {
+            type_: FetchType::UnitCount,
+            result: LVar::new("result"),
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@sharded".into()));
+                value
+            },
+            index: LVar::new("index"),
+            extra: {
+                let mut value = LVar::new("extra");
+                value.set_obj(Some("@dagger".into()));
+                value
+            },
+        };
+        fetch_unit_count.run(&mut exec);
+        match fetch_unit_count {
+            LogicInstruction::Fetch { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Number(1.0));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut fetch_player = LogicInstruction::Fetch {
+            type_: FetchType::Player,
+            result: LVar::new("result"),
+            team: {
+                let mut value = LVar::new("team");
+                value.set_num(1.0);
+                value
+            },
+            index: {
+                let mut value = LVar::new("index");
+                value.set_num(0.0);
+                value
+            },
+            extra: LVar::new("extra"),
+        };
+        fetch_player.run(&mut exec);
+        match fetch_player {
+            LogicInstruction::Fetch { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Object(Some("player-a".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut fetch_core = LogicInstruction::Fetch {
+            type_: FetchType::Core,
+            result: LVar::new("result"),
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(Some("@sharded".into()));
+                value
+            },
+            index: {
+                let mut value = LVar::new("index");
+                value.set_num(0.0);
+                value
+            },
+            extra: LVar::new("extra"),
+        };
+        fetch_core.run(&mut exec);
+        match fetch_core {
+            LogicInstruction::Fetch { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Object(Some("core-a".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitBind {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("unit-a".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+
+        let mut locate_enemy_core = LogicInstruction::UnitLocate {
+            locate: LLocate::Building,
+            flag: BlockFlag::Core,
+            enemy: {
+                let mut value = LVar::new("enemy");
+                value.set_num(1.0);
+                value
+            },
+            ore: LVar::new("ore"),
+            out_x: LVar::new("x"),
+            out_y: LVar::new("y"),
+            out_found: LVar::new("found"),
+            out_build: LVar::new("build"),
+        };
+        locate_enemy_core.run(&mut exec);
+        match locate_enemy_core {
+            LogicInstruction::UnitLocate {
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+                ..
+            } => {
+                assert_eq!(out_x.value(), LVarValue::Number(7.0));
+                assert_eq!(out_y.value(), LVarValue::Number(3.0));
+                assert_eq!(out_found.value(), LVarValue::Number(1.0));
+                assert_eq!(
+                    out_build.value(),
+                    LVarValue::Object(Some("enemy-core".into()))
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        let mut locate_ore = LogicInstruction::UnitLocate {
+            locate: LLocate::Ore,
+            flag: BlockFlag::Core,
+            enemy: LVar::new("enemy"),
+            ore: {
+                let mut value = LVar::new("ore");
+                value.set_obj(Some("@thorium".into()));
+                value
+            },
+            out_x: LVar::new("x"),
+            out_y: LVar::new("y"),
+            out_found: LVar::new("found"),
+            out_build: LVar::new("build"),
+        };
+        locate_ore.run(&mut exec);
+        match locate_ore {
+            LogicInstruction::UnitLocate {
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+                ..
+            } => {
+                assert_eq!(out_x.value(), LVarValue::Number(8.0));
+                assert_eq!(out_y.value(), LVarValue::Number(8.0));
+                assert_eq!(out_found.value(), LVarValue::Number(1.0));
+                assert_eq!(out_build.value(), LVarValue::Object(None));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut locate_damaged = LogicInstruction::UnitLocate {
+            locate: LLocate::Damaged,
+            flag: BlockFlag::Core,
+            enemy: LVar::new("enemy"),
+            ore: LVar::new("ore"),
+            out_x: LVar::new("x"),
+            out_y: LVar::new("y"),
+            out_found: LVar::new("found"),
+            out_build: LVar::new("build"),
+        };
+        locate_damaged.run(&mut exec);
+        match locate_damaged {
+            LogicInstruction::UnitLocate {
+                out_found,
+                out_build,
+                ..
+            } => {
+                assert_eq!(out_found.value(), LVarValue::Number(1.0));
+                assert_eq!(
+                    out_build.value(),
+                    LVarValue::Object(Some("damaged-turret".into()))
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::SetFlag {
+            flag: {
+                let mut value = LVar::new("flag");
+                value.set_obj(Some("sector-clear".into()));
+                value
+            },
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        let mut get_flag = LogicInstruction::GetFlag {
+            result: LVar::new("result"),
+            flag: {
+                let mut value = LVar::new("flag");
+                value.set_obj(Some("sector-clear".into()));
+                value
+            },
+        };
+        get_flag.run(&mut exec);
+        match get_flag {
+            LogicInstruction::GetFlag { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Number(1.0));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut missing_flag = LogicInstruction::GetFlag {
+            result: LVar::new("result"),
+            flag: LVar::new("flag"),
+        };
+        missing_flag.run(&mut exec);
+        match missing_flag {
+            LogicInstruction::GetFlag { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Object(None));
+            }
+            _ => unreachable!(),
+        }
     }
 
     #[test]
