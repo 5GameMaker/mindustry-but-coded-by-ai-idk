@@ -136,6 +136,7 @@ pub struct ItemProperties {
     pub flammability: f32,
     pub explosiveness: f32,
     pub radioactivity: f32,
+    pub charge: f32,
 }
 
 pub fn consume_item_flammable_filter(item: ItemProperties, min_flammability: f32) -> bool {
@@ -148,6 +149,28 @@ pub fn consume_item_explosive_filter(item: ItemProperties, min_explosiveness: f3
 
 pub fn consume_item_radioactive_filter(item: ItemProperties, min_radioactivity: f32) -> bool {
     item.radioactivity >= min_radioactivity
+}
+
+pub fn consume_item_charged_filter(item: ItemProperties, min_charge: f32) -> bool {
+    item.charge >= min_charge
+}
+
+pub fn consume_item_explode_chance(
+    reactor_explosions: bool,
+    delta: f32,
+    base_chance: f32,
+    explosiveness: f32,
+    threshold: f32,
+) -> f32 {
+    if reactor_explosions {
+        delta * base_chance * (explosiveness - threshold).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+pub fn consume_item_explode_should_damage(chance: f32, random: f32) -> bool {
+    random < chance
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -257,6 +280,129 @@ pub fn consume_liquid_flammable_filter(liquid: LiquidProperties, min_flammabilit
     liquid.flammability >= min_flammability
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PayloadStackSpec {
+    pub content_id: i16,
+    pub amount: i32,
+}
+
+pub fn consume_item_dynamic_efficiency(
+    stacks: &[ItemStackSpec],
+    multiplier: f32,
+    trigger_valid: bool,
+    has_item: impl Fn(i16, i32) -> bool,
+) -> f32 {
+    consume_items_efficiency(stacks, multiplier, trigger_valid, has_item)
+}
+
+pub fn consume_item_dynamic_trigger_amounts(
+    stacks: &[ItemStackSpec],
+    multiplier: f32,
+) -> Vec<(i16, i32)> {
+    stacks
+        .iter()
+        .map(|stack| {
+            (
+                stack.item_id,
+                consume_items_trigger_amount(stack.amount, multiplier),
+            )
+        })
+        .collect()
+}
+
+pub fn consume_liquids_dynamic_update_amounts(
+    stacks: &[LiquidStackSpec],
+    edelta: f32,
+    multiplier: f32,
+) -> Vec<(i16, f32)> {
+    stacks
+        .iter()
+        .map(|stack| (stack.liquid_id, stack.amount * edelta * multiplier))
+        .collect()
+}
+
+pub fn consume_liquids_dynamic_efficiency(
+    stacks: &[LiquidStackSpec],
+    edelta: f32,
+    multiplier: f32,
+    get_liquid: impl Fn(i16) -> f32,
+) -> f32 {
+    if edelta <= 0.00000001 {
+        return 0.0;
+    }
+    stacks.iter().fold(1.0, |min, stack| {
+        min.min(get_liquid(stack.liquid_id) / (stack.amount * edelta * multiplier))
+    })
+}
+
+pub fn consume_payloads_efficiency(
+    stacks: &[PayloadStackSpec],
+    multiplier: f32,
+    contains_payload: impl Fn(i16, i32) -> bool,
+) -> f32 {
+    if stacks.iter().all(|stack| {
+        contains_payload(
+            stack.content_id,
+            (stack.amount as f32 * multiplier).round() as i32,
+        )
+    }) {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+pub fn consume_payloads_trigger_amounts(
+    stacks: &[PayloadStackSpec],
+    multiplier: f32,
+) -> Vec<(i16, i32)> {
+    stacks
+        .iter()
+        .map(|stack| {
+            (
+                stack.content_id,
+                (stack.amount as f32 * multiplier).round() as i32,
+            )
+        })
+        .collect()
+}
+
+pub fn consume_payload_filter_efficiency(
+    fitting_content_ids: &[i16],
+    contains_payload: impl Fn(i16, i32) -> bool,
+) -> f32 {
+    if fitting_content_ids
+        .iter()
+        .any(|content_id| contains_payload(*content_id, 1))
+    {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+pub fn consume_payload_filter_get_consumed(
+    fitting_content_ids: &[i16],
+    contains_payload: impl Fn(i16, i32) -> bool,
+) -> Option<i16> {
+    fitting_content_ids
+        .iter()
+        .copied()
+        .find(|content_id| contains_payload(*content_id, 1))
+}
+
+pub fn consume_power_dynamic_requested(usage: f32) -> f32 {
+    usage
+}
+
+pub fn consume_power_dynamic_display_per_second(displayed_power_usage: f32) -> Option<f32> {
+    if displayed_power_usage != 0.0 {
+        Some(displayed_power_usage * 60.0)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,10 +455,17 @@ mod tests {
             flammability: 0.3,
             explosiveness: 0.4,
             radioactivity: 0.1,
+            charge: 0.5,
         };
         assert!(consume_item_flammable_filter(item, 0.2));
         assert!(consume_item_explosive_filter(item, 0.2));
         assert!(!consume_item_radioactive_filter(item, 0.2));
+        assert!(consume_item_charged_filter(item, 0.2));
+        assert_eq!(
+            consume_item_explode_chance(true, 2.0, 0.06, 0.75, 0.5),
+            0.03
+        );
+        assert!(consume_item_explode_should_damage(0.5, 0.49));
     }
 
     #[test]
@@ -378,5 +531,73 @@ mod tests {
             },
             0.2
         ));
+    }
+
+    #[test]
+    fn dynamic_payload_and_power_consumers_follow_upstream_rules() {
+        let item_stacks = [ItemStackSpec {
+            item_id: 3,
+            amount: 4,
+        }];
+        assert_eq!(
+            consume_item_dynamic_trigger_amounts(&item_stacks, 1.25),
+            vec![(3, 5)]
+        );
+        assert_eq!(
+            consume_item_dynamic_efficiency(&item_stacks, 1.25, false, |id, amount| {
+                id == 3 && amount == 5
+            }),
+            1.0
+        );
+
+        let liquid_stacks = [LiquidStackSpec {
+            liquid_id: 2,
+            amount: 3.0,
+        }];
+        assert_eq!(
+            consume_liquids_dynamic_update_amounts(&liquid_stacks, 2.0, 0.5),
+            vec![(2, 3.0)]
+        );
+        assert_eq!(
+            consume_liquids_dynamic_efficiency(&liquid_stacks, 2.0, 0.5, |id| if id == 2 {
+                1.5
+            } else {
+                0.0
+            }),
+            0.5
+        );
+
+        let payloads = [
+            PayloadStackSpec {
+                content_id: 10,
+                amount: 2,
+            },
+            PayloadStackSpec {
+                content_id: 11,
+                amount: 1,
+            },
+        ];
+        assert_eq!(
+            consume_payloads_efficiency(&payloads, 1.5, |id, amount| {
+                (id == 10 && amount == 3) || (id == 11 && amount == 2)
+            }),
+            1.0
+        );
+        assert_eq!(
+            consume_payloads_trigger_amounts(&payloads, 1.5),
+            vec![(10, 3), (11, 2)]
+        );
+        assert_eq!(
+            consume_payload_filter_get_consumed(&[5, 6, 7], |id, amount| id == 6 && amount == 1),
+            Some(6)
+        );
+        assert_eq!(
+            consume_payload_filter_efficiency(&[5, 6, 7], |id, _| id == 4),
+            0.0
+        );
+
+        assert_eq!(consume_power_dynamic_requested(12.0), 12.0);
+        assert_eq!(consume_power_dynamic_display_per_second(2.0), Some(120.0));
+        assert_eq!(consume_power_dynamic_display_per_second(0.0), None);
     }
 }
