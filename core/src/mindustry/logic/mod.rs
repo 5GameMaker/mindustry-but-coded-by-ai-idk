@@ -3889,11 +3889,165 @@ impl fmt::Display for LVar {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LogicMemoryObject {
+    pub memory: Vec<f64>,
+    pub team: u8,
+    pub block_privileged: bool,
+    pub valid: bool,
+}
+
+impl LogicMemoryObject {
+    pub fn new(capacity: usize, team: u8) -> Self {
+        Self {
+            memory: vec![0.0; capacity],
+            team,
+            block_privileged: false,
+            valid: true,
+        }
+    }
+
+    pub fn readable_by(&self, exec_privileged: bool, exec_team: u8) -> bool {
+        self.valid && (exec_privileged || (self.team == exec_team && !self.block_privileged))
+    }
+
+    pub fn read(&self, position: &LVar, output: &mut LVar) {
+        let address = position.numi();
+        if address < 0 || address as usize >= self.memory.len() {
+            output.set_num(f64::NAN);
+        } else {
+            output.set_num(self.memory[address as usize]);
+        }
+    }
+
+    pub fn write(&mut self, position: &LVar, value: &LVar) {
+        let address = position.numi();
+        if address < 0 || address as usize >= self.memory.len() {
+            return;
+        }
+        self.memory[address as usize] = value.num();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicSenseObject {
+    pub numeric_senses: BTreeMap<LAccess, f64>,
+    pub object_senses: BTreeMap<LAccess, Option<String>>,
+    pub content_senses: BTreeMap<String, f64>,
+}
+
+impl Default for LogicSenseObject {
+    fn default() -> Self {
+        Self {
+            numeric_senses: BTreeMap::new(),
+            object_senses: BTreeMap::new(),
+            content_senses: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicRuntimeObject {
+    Text(String),
+    Sequence(Vec<LVarValue>),
+    Memory(LogicMemoryObject),
+    Senseable(LogicSenseObject),
+}
+
+impl LogicRuntimeObject {
+    fn read_runtime(
+        &self,
+        exec_privileged: bool,
+        exec_team: u8,
+        position: &LVar,
+        output: &mut LVar,
+    ) -> bool {
+        match self {
+            LogicRuntimeObject::Text(value) => {
+                read_logic_text(value, position, output);
+                true
+            }
+            LogicRuntimeObject::Sequence(values) => {
+                read_logic_sequence(values, position, output);
+                true
+            }
+            LogicRuntimeObject::Memory(memory) => {
+                if memory.readable_by(exec_privileged, exec_team) {
+                    memory.read(position, output);
+                } else {
+                    output.set_obj(None);
+                }
+                true
+            }
+            LogicRuntimeObject::Senseable(_) => false,
+        }
+    }
+
+    fn write_runtime(
+        &mut self,
+        exec_privileged: bool,
+        exec_team: u8,
+        position: &LVar,
+        value: &LVar,
+    ) -> bool {
+        match self {
+            LogicRuntimeObject::Memory(memory) => {
+                if memory.readable_by(exec_privileged, exec_team) {
+                    memory.write(position, value);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn sense_access(&self, access: LAccess) -> Option<LVarValue> {
+        match self {
+            LogicRuntimeObject::Text(value) => match access {
+                LAccess::Size | LAccess::BufferSize => {
+                    Some(LVarValue::Number(logic_utf16_len(value) as f64))
+                }
+                _ => None,
+            },
+            LogicRuntimeObject::Sequence(values) => match access {
+                LAccess::Size | LAccess::BufferSize => Some(LVarValue::Number(values.len() as f64)),
+                _ => None,
+            },
+            LogicRuntimeObject::Memory(memory) => match access {
+                LAccess::MemoryCapacity => Some(LVarValue::Number(memory.memory.len() as f64)),
+                _ => None,
+            },
+            LogicRuntimeObject::Senseable(senseable) => {
+                if let Some(value) = senseable.object_senses.get(&access) {
+                    Some(LVarValue::Object(value.clone()))
+                } else {
+                    Some(LVarValue::Number(
+                        *senseable.numeric_senses.get(&access).unwrap_or(&0.0),
+                    ))
+                }
+            }
+        }
+    }
+
+    fn sense_content(&self, content_name: &str) -> Option<f64> {
+        match self {
+            LogicRuntimeObject::Senseable(senseable) => {
+                Some(*senseable.content_senses.get(content_name).unwrap_or(&0.0))
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicExecutor {
     pub instructions: Vec<LogicInstruction>,
     pub vars: Vec<LVar>,
     pub counter: LVar,
     pub yield_: bool,
+    pub privileged: bool,
+    pub team: u8,
+    pub links: Vec<String>,
+    pub objects: BTreeMap<String, LogicRuntimeObject>,
     pub headless: bool,
     pub graphics_buffer: Vec<u64>,
     pub text_buffer: String,
@@ -3919,6 +4073,10 @@ impl LogicExecutor {
                 counter
             },
             yield_: false,
+            privileged: false,
+            team: 0,
+            links: Vec::new(),
+            objects: BTreeMap::new(),
             headless: false,
             graphics_buffer: Vec::new(),
             text_buffer: String::new(),
@@ -3956,6 +4114,10 @@ impl LogicExecutor {
             end -= 1;
         }
         self.text_buffer.push_str(&value[..end]);
+    }
+
+    pub fn register_object(&mut self, name: impl Into<String>, object: LogicRuntimeObject) {
+        self.objects.insert(name.into(), object);
     }
 }
 
@@ -4110,6 +4272,25 @@ pub enum LogicInstruction {
         cur_time: f32,
     },
     Stop,
+    GetLink {
+        output: LVar,
+        index: LVar,
+    },
+    Read {
+        target: LVar,
+        position: LVar,
+        output: LVar,
+    },
+    Write {
+        target: LVar,
+        position: LVar,
+        value: LVar,
+    },
+    Sense {
+        from: LVar,
+        to: LVar,
+        type_: LVar,
+    },
     Lookup {
         dest: LVar,
         from: LVar,
@@ -4256,6 +4437,31 @@ impl LogicInstruction {
                 exec.counter.numval -= 1.0;
                 exec.yield_ = true;
             }
+            LogicInstruction::GetLink { output, index } => {
+                let address = index.numi();
+                output.set_obj(
+                    (address >= 0)
+                        .then(|| exec.links.get(address as usize).cloned())
+                        .flatten(),
+                );
+            }
+            LogicInstruction::Read {
+                target,
+                position,
+                output,
+            } => {
+                exec_read_runtime(exec, target, position, output);
+            }
+            LogicInstruction::Write {
+                target,
+                position,
+                value,
+            } => {
+                exec_write_runtime(exec, target, position, value);
+            }
+            LogicInstruction::Sense { from, to, type_ } => {
+                exec_sense_runtime(exec, from, type_, to);
+            }
             LogicInstruction::Lookup { dest, from, type_ } => {
                 let value = lookup_logic_content_name(*type_, from.numi());
                 dest.set_obj(value.map(str::to_string));
@@ -4338,6 +4544,103 @@ pub fn first_logic_placeholder(buffer: &str) -> Option<(usize, u8)> {
         }
     }
     best
+}
+
+pub fn logic_utf16_len(value: &str) -> usize {
+    value.encode_utf16().count()
+}
+
+pub fn logic_utf16_char_code_at(value: &str, index: i32) -> Option<u16> {
+    if index < 0 {
+        return None;
+    }
+    value.encode_utf16().nth(index as usize)
+}
+
+pub fn set_lvar_value(target: &mut LVar, value: &LVarValue) {
+    match value {
+        LVarValue::Number(value) => target.set_num(*value),
+        LVarValue::Object(value) => target.set_obj(value.clone()),
+    }
+}
+
+pub fn read_logic_text(value: &str, position: &LVar, output: &mut LVar) {
+    if let Some(code) = logic_utf16_char_code_at(value, position.numi()) {
+        output.set_num(code as f64);
+    } else {
+        output.set_num(f64::NAN);
+    }
+}
+
+pub fn read_logic_sequence(values: &[LVarValue], position: &LVar, output: &mut LVar) {
+    let address = position.numi();
+    if address < 0 || address as usize >= values.len() {
+        output.set_obj(None);
+    } else {
+        set_lvar_value(output, &values[address as usize]);
+    }
+}
+
+pub fn exec_read_runtime(exec: &LogicExecutor, target: &LVar, position: &LVar, output: &mut LVar) {
+    if let Some(name) = target.obj() {
+        if let Some(object) = exec.objects.get(name) {
+            if object.read_runtime(exec.privileged, exec.team, position, output) {
+                return;
+            }
+        }
+    }
+
+    output.set_obj(None);
+}
+
+pub fn exec_write_runtime(exec: &mut LogicExecutor, target: &LVar, position: &LVar, value: &LVar) {
+    let privileged = exec.privileged;
+    let team = exec.team;
+    if let Some(name) = target.obj() {
+        if let Some(object) = exec.objects.get_mut(name) {
+            object.write_runtime(privileged, team, position, value);
+        }
+    }
+}
+
+pub fn exec_sense_runtime(exec: &LogicExecutor, from: &LVar, type_: &LVar, to: &mut LVar) {
+    let target_name = from.obj();
+    let sense_obj = type_.obj();
+
+    if target_name.is_none() && sense_obj == Some("@dead") {
+        to.set_num(1.0);
+        return;
+    }
+
+    if let Some(name) = target_name {
+        if let Some(object) = exec.objects.get(name) {
+            if let Some(access) = sense_obj.and_then(logic_access_from_object_name) {
+                if let Some(value) = object.sense_access(access) {
+                    set_lvar_value(to, &value);
+                } else {
+                    to.set_obj(None);
+                }
+                return;
+            }
+
+            if let Some(content_name) = sense_obj.and_then(logic_content_name_from_object_name) {
+                if let Some(value) = object.sense_content(content_name) {
+                    to.set_num(value);
+                    return;
+                }
+            }
+        }
+    }
+
+    to.set_obj(None);
+}
+
+pub fn logic_access_from_object_name(name: &str) -> Option<LAccess> {
+    name.strip_prefix('@').and_then(LAccess::by_wire_name)
+}
+
+pub fn logic_content_name_from_object_name(name: &str) -> Option<&str> {
+    name.strip_prefix('@')
 }
 
 pub fn logic_color_channel_to_byte(value: f64) -> u8 {
@@ -4457,7 +4760,7 @@ impl GlobalVarSnapshot {
 /// The declaration order is observable by logic scripts and generated
 /// processors, so keep it identical to Java `values()`.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LAccess {
     TotalItems,
     FirstItem,
@@ -8547,6 +8850,354 @@ mod tests {
         match lookup {
             LogicInstruction::Lookup { dest, .. } => {
                 assert_eq!(dest.value(), LVarValue::Object(Some("copper".into())));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn linked_read_write_and_sense_executor_instructions_follow_java_l_executor_semantics() {
+        let mut exec = LogicExecutor::new();
+        exec.team = 1;
+        exec.links = vec!["cell1".into(), "message1".into()];
+        exec.register_object(
+            "cell1",
+            LogicRuntimeObject::Memory(LogicMemoryObject::new(4, 1)),
+        );
+        exec.register_object(
+            "enemy-cell",
+            LogicRuntimeObject::Memory(LogicMemoryObject::new(2, 2)),
+        );
+        exec.register_object("message1", LogicRuntimeObject::Text("ab💥".into()));
+        exec.register_object(
+            "seq1",
+            LogicRuntimeObject::Sequence(vec![
+                LVarValue::Object(Some("copper".into())),
+                LVarValue::Number(7.0),
+            ]),
+        );
+        let mut sensor = LogicSenseObject::default();
+        sensor.numeric_senses.insert(LAccess::Health, 12.5);
+        sensor
+            .object_senses
+            .insert(LAccess::CurrentAmmoType, Some("copper".into()));
+        sensor.content_senses.insert("copper".into(), 42.0);
+        exec.register_object("turret", LogicRuntimeObject::Senseable(sensor));
+
+        let mut getlink = LogicInstruction::GetLink {
+            output: LVar::new("out"),
+            index: {
+                let mut value = LVar::new("index");
+                value.set_num(1.0);
+                value
+            },
+        };
+        getlink.run(&mut exec);
+        match getlink {
+            LogicInstruction::GetLink { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(Some("message1".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut missing_link = LogicInstruction::GetLink {
+            output: {
+                let mut value = LVar::new("out");
+                value.set_obj(Some("old".into()));
+                value
+            },
+            index: {
+                let mut value = LVar::new("index");
+                value.set_num(-1.0);
+                value
+            },
+        };
+        missing_link.run(&mut exec);
+        match missing_link {
+            LogicInstruction::GetLink { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(None));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut write = LogicInstruction::Write {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("cell1".into()));
+                value
+            },
+            position: {
+                let mut value = LVar::new("position");
+                value.set_num(2.0);
+                value
+            },
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(9.0);
+                value
+            },
+        };
+        write.run(&mut exec);
+        assert_eq!(
+            match exec.objects.get("cell1").unwrap() {
+                LogicRuntimeObject::Memory(memory) => memory.memory[2],
+                _ => unreachable!(),
+            },
+            9.0
+        );
+
+        let mut read_memory = LogicInstruction::Read {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("cell1".into()));
+                value
+            },
+            position: {
+                let mut value = LVar::new("position");
+                value.set_num(2.0);
+                value
+            },
+            output: LVar::new("output"),
+        };
+        read_memory.run(&mut exec);
+        match read_memory {
+            LogicInstruction::Read { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Number(9.0));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut read_oob = LogicInstruction::Read {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("cell1".into()));
+                value
+            },
+            position: {
+                let mut value = LVar::new("position");
+                value.set_num(99.0);
+                value
+            },
+            output: LVar::new("output"),
+        };
+        read_oob.run(&mut exec);
+        match read_oob {
+            LogicInstruction::Read { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(None));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut read_denied = LogicInstruction::Read {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("enemy-cell".into()));
+                value
+            },
+            position: {
+                let mut value = LVar::new("position");
+                value.set_num(0.0);
+                value
+            },
+            output: {
+                let mut value = LVar::new("output");
+                value.set_num(1.0);
+                value
+            },
+        };
+        read_denied.run(&mut exec);
+        match read_denied {
+            LogicInstruction::Read { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(None));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut read_text = LogicInstruction::Read {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("message1".into()));
+                value
+            },
+            position: {
+                let mut value = LVar::new("position");
+                value.set_num(1.0);
+                value
+            },
+            output: LVar::new("output"),
+        };
+        read_text.run(&mut exec);
+        match read_text {
+            LogicInstruction::Read { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Number('b' as u32 as f64));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut read_text_oob = LogicInstruction::Read {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("message1".into()));
+                value
+            },
+            position: {
+                let mut value = LVar::new("position");
+                value.set_num(4.0);
+                value
+            },
+            output: LVar::new("output"),
+        };
+        read_text_oob.run(&mut exec);
+        match read_text_oob {
+            LogicInstruction::Read { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(None));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut read_seq = LogicInstruction::Read {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("seq1".into()));
+                value
+            },
+            position: {
+                let mut value = LVar::new("position");
+                value.set_num(0.0);
+                value
+            },
+            output: LVar::new("output"),
+        };
+        read_seq.run(&mut exec);
+        match read_seq {
+            LogicInstruction::Read { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(Some("copper".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut sense_dead = LogicInstruction::Sense {
+            from: {
+                let mut value = LVar::new("from");
+                value.set_obj(None);
+                value
+            },
+            to: LVar::new("to"),
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@dead".into()));
+                value
+            },
+        };
+        sense_dead.run(&mut exec);
+        match sense_dead {
+            LogicInstruction::Sense { to, .. } => {
+                assert_eq!(to.value(), LVarValue::Number(1.0));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut sense_text_size = LogicInstruction::Sense {
+            from: {
+                let mut value = LVar::new("from");
+                value.set_obj(Some("message1".into()));
+                value
+            },
+            to: LVar::new("to"),
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@size".into()));
+                value
+            },
+        };
+        sense_text_size.run(&mut exec);
+        match sense_text_size {
+            LogicInstruction::Sense { to, .. } => {
+                assert_eq!(to.value(), LVarValue::Number(4.0));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut sense_memory_capacity = LogicInstruction::Sense {
+            from: {
+                let mut value = LVar::new("from");
+                value.set_obj(Some("cell1".into()));
+                value
+            },
+            to: LVar::new("to"),
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@memoryCapacity".into()));
+                value
+            },
+        };
+        sense_memory_capacity.run(&mut exec);
+        match sense_memory_capacity {
+            LogicInstruction::Sense { to, .. } => {
+                assert_eq!(to.value(), LVarValue::Number(4.0));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut sense_numeric = LogicInstruction::Sense {
+            from: {
+                let mut value = LVar::new("from");
+                value.set_obj(Some("turret".into()));
+                value
+            },
+            to: LVar::new("to"),
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@health".into()));
+                value
+            },
+        };
+        sense_numeric.run(&mut exec);
+        match sense_numeric {
+            LogicInstruction::Sense { to, .. } => {
+                assert_eq!(to.value(), LVarValue::Number(12.5));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut sense_object = LogicInstruction::Sense {
+            from: {
+                let mut value = LVar::new("from");
+                value.set_obj(Some("turret".into()));
+                value
+            },
+            to: LVar::new("to"),
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@currentAmmoType".into()));
+                value
+            },
+        };
+        sense_object.run(&mut exec);
+        match sense_object {
+            LogicInstruction::Sense { to, .. } => {
+                assert_eq!(to.value(), LVarValue::Object(Some("copper".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut sense_content = LogicInstruction::Sense {
+            from: {
+                let mut value = LVar::new("from");
+                value.set_obj(Some("turret".into()));
+                value
+            },
+            to: LVar::new("to"),
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@copper".into()));
+                value
+            },
+        };
+        sense_content.run(&mut exec);
+        match sense_content {
+            LogicInstruction::Sense { to, .. } => {
+                assert_eq!(to.value(), LVarValue::Number(42.0));
             }
             _ => unreachable!(),
         }
