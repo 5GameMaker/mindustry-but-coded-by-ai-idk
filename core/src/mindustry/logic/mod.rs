@@ -3946,11 +3946,83 @@ impl Default for LogicSenseObject {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum LogicControlCall {
+    Numeric {
+        access: LAccess,
+        p1: f64,
+        p2: f64,
+        p3: f64,
+        p4: f64,
+    },
+    Object {
+        access: LAccess,
+        p1: Option<String>,
+        p2: f64,
+        p3: f64,
+        p4: f64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicControllableObject {
+    pub team: u8,
+    pub valid_link: bool,
+    pub enabled: bool,
+    pub no_sleep_calls: usize,
+    pub disabled_by_processor: bool,
+    pub calls: Vec<LogicControlCall>,
+}
+
+impl LogicControllableObject {
+    pub fn new(team: u8) -> Self {
+        Self {
+            team,
+            valid_link: true,
+            enabled: true,
+            no_sleep_calls: 0,
+            disabled_by_processor: false,
+            calls: Vec::new(),
+        }
+    }
+
+    pub fn controllable_by(&self, exec_privileged: bool) -> bool {
+        exec_privileged || self.valid_link
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicRadarSource {
+    pub x: f32,
+    pub y: f32,
+    pub team: u8,
+    pub range: f32,
+    pub block_privileged: bool,
+}
+
+impl LogicRadarSource {
+    pub const fn new(x: f32, y: f32, team: u8, range: f32) -> Self {
+        Self {
+            x,
+            y,
+            team,
+            range,
+            block_privileged: false,
+        }
+    }
+
+    pub fn usable_by(&self, exec_privileged: bool, exec_team: u8) -> bool {
+        (exec_privileged || self.team == exec_team) && (!self.block_privileged || exec_privileged)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum LogicRuntimeObject {
     Text(String),
     Sequence(Vec<LVarValue>),
     Memory(LogicMemoryObject),
     Senseable(LogicSenseObject),
+    Controllable(LogicControllableObject),
+    RadarSource(LogicRadarSource),
 }
 
 impl LogicRuntimeObject {
@@ -3979,6 +4051,7 @@ impl LogicRuntimeObject {
                 true
             }
             LogicRuntimeObject::Senseable(_) => false,
+            LogicRuntimeObject::Controllable(_) | LogicRuntimeObject::RadarSource(_) => false,
         }
     }
 
@@ -4025,6 +4098,11 @@ impl LogicRuntimeObject {
                     ))
                 }
             }
+            LogicRuntimeObject::Controllable(controllable) => match access {
+                LAccess::Enabled => Some(LVarValue::Number(controllable.enabled as u8 as f64)),
+                _ => None,
+            },
+            LogicRuntimeObject::RadarSource(_) => None,
         }
     }
 
@@ -4048,6 +4126,7 @@ pub struct LogicExecutor {
     pub team: u8,
     pub links: Vec<String>,
     pub objects: BTreeMap<String, LogicRuntimeObject>,
+    pub radar_units: BTreeMap<String, RadarUnitView>,
     pub headless: bool,
     pub graphics_buffer: Vec<u64>,
     pub text_buffer: String,
@@ -4077,6 +4156,7 @@ impl LogicExecutor {
             team: 0,
             links: Vec::new(),
             objects: BTreeMap::new(),
+            radar_units: BTreeMap::new(),
             headless: false,
             graphics_buffer: Vec::new(),
             text_buffer: String::new(),
@@ -4118,6 +4198,10 @@ impl LogicExecutor {
 
     pub fn register_object(&mut self, name: impl Into<String>, object: LogicRuntimeObject) {
         self.objects.insert(name.into(), object);
+    }
+
+    pub fn register_radar_unit(&mut self, name: impl Into<String>, unit: RadarUnitView) {
+        self.radar_units.insert(name.into(), unit);
     }
 }
 
@@ -4232,6 +4316,24 @@ pub enum LogicInstruction {
         p3: LVar,
         p4: LVar,
     },
+    Control {
+        type_: LAccess,
+        target: LVar,
+        p1: LVar,
+        p2: LVar,
+        p3: LVar,
+        p4: LVar,
+    },
+    Radar {
+        target1: RadarTarget,
+        target2: RadarTarget,
+        target3: RadarTarget,
+        sort: RadarSort,
+        radar: LVar,
+        sort_order: LVar,
+        output: LVar,
+        last_target: Option<String>,
+    },
     Set {
         from: LVar,
         to: LVar,
@@ -4339,6 +4441,32 @@ impl LogicInstruction {
                 {
                     exec.graphics_buffer.push(command);
                 }
+            }
+            LogicInstruction::Control {
+                type_,
+                target,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                exec_control_runtime(exec, *type_, target, p1, p2, p3, p4);
+            }
+            LogicInstruction::Radar {
+                target1,
+                target2,
+                target3,
+                sort,
+                radar,
+                sort_order,
+                output,
+                last_target,
+            } => {
+                let targeted = exec_radar_runtime(
+                    exec, *target1, *target2, *target3, *sort, radar, sort_order,
+                );
+                *last_target = targeted.clone();
+                output.set_obj(targeted);
             }
             LogicInstruction::Set { from, to } => {
                 if !to.constant {
@@ -4633,6 +4761,100 @@ pub fn exec_sense_runtime(exec: &LogicExecutor, from: &LVar, type_: &LVar, to: &
     }
 
     to.set_obj(None);
+}
+
+pub fn exec_control_runtime(
+    exec: &mut LogicExecutor,
+    type_: LAccess,
+    target: &LVar,
+    p1: &LVar,
+    p2: &LVar,
+    p3: &LVar,
+    p4: &LVar,
+) {
+    let privileged = exec.privileged;
+    let Some(name) = target.obj() else {
+        return;
+    };
+    let Some(LogicRuntimeObject::Controllable(controllable)) = exec.objects.get_mut(name) else {
+        return;
+    };
+    if !controllable.controllable_by(privileged) {
+        return;
+    }
+
+    if type_ == LAccess::Enabled {
+        if p1.bool() {
+            controllable.no_sleep_calls += 1;
+        } else {
+            controllable.disabled_by_processor = true;
+        }
+        controllable.enabled = p1.bool();
+    }
+
+    if type_.is_obj() && p1.is_obj {
+        controllable.calls.push(LogicControlCall::Object {
+            access: type_,
+            p1: p1.objval.clone(),
+            p2: p2.num(),
+            p3: p3.num(),
+            p4: p4.num(),
+        });
+    } else {
+        controllable.calls.push(LogicControlCall::Numeric {
+            access: type_,
+            p1: p1.num(),
+            p2: p2.num(),
+            p3: p3.num(),
+            p4: p4.num(),
+        });
+    }
+}
+
+pub fn exec_radar_runtime(
+    exec: &LogicExecutor,
+    target1: RadarTarget,
+    target2: RadarTarget,
+    target3: RadarTarget,
+    sort: RadarSort,
+    radar: &LVar,
+    sort_order: &LVar,
+) -> Option<String> {
+    let source_name = radar.obj()?;
+    let LogicRuntimeObject::RadarSource(source) = exec.objects.get(source_name)? else {
+        return None;
+    };
+    if !source.usable_by(exec.privileged, exec.team) {
+        return None;
+    }
+
+    let sort_dir = if sort_order.bool() { 1.0 } else { -1.0 };
+    let range_sq = source.range * source.range;
+    let mut best: Option<(&String, f32)> = None;
+
+    for (name, unit) in &exec.radar_units {
+        if !unit.targetable {
+            continue;
+        }
+        let dx = source.x - unit.x;
+        let dy = source.y - unit.y;
+        if dx * dx + dy * dy > range_sq {
+            continue;
+        }
+        if !target1.matches(source.team, unit)
+            || !target2.matches(source.team, unit)
+            || !target3.matches(source.team, unit)
+        {
+            continue;
+        }
+
+        let value = sort.score(source.x, source.y, unit) * sort_dir;
+        if best.is_none_or(|(_, best_value)| value > best_value) {
+            best = Some((name, value));
+        }
+    }
+
+    best.map(|(name, _)| name.clone())
 }
 
 pub fn logic_access_from_object_name(name: &str) -> Option<LAccess> {
@@ -5655,6 +5877,7 @@ pub struct RadarUnitView {
     pub is_flying: bool,
     pub is_boss: bool,
     pub is_grounded: bool,
+    pub targetable: bool,
 }
 
 impl RadarUnitView {
@@ -5672,6 +5895,7 @@ impl RadarUnitView {
             is_flying: false,
             is_boss: false,
             is_grounded: false,
+            targetable: true,
         }
     }
 }
@@ -9198,6 +9422,259 @@ mod tests {
         match sense_content {
             LogicInstruction::Sense { to, .. } => {
                 assert_eq!(to.value(), LVarValue::Number(42.0));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn control_and_radar_executor_instructions_follow_java_l_executor_semantics() {
+        let mut exec = LogicExecutor::new();
+        exec.team = 1;
+        exec.register_object(
+            "switch1",
+            LogicRuntimeObject::Controllable(LogicControllableObject::new(1)),
+        );
+        exec.register_object(
+            "turret1",
+            LogicRuntimeObject::RadarSource(LogicRadarSource::new(0.0, 0.0, 1, 10.0)),
+        );
+
+        let mut enable = LogicInstruction::Control {
+            type_: LAccess::Enabled,
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("switch1".into()));
+                value
+            },
+            p1: {
+                let mut value = LVar::new("p1");
+                value.set_num(1.0);
+                value
+            },
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        };
+        enable.run(&mut exec);
+        match exec.objects.get("switch1").unwrap() {
+            LogicRuntimeObject::Controllable(control) => {
+                assert!(control.enabled);
+                assert_eq!(control.no_sleep_calls, 1);
+                assert_eq!(
+                    control.calls,
+                    vec![LogicControlCall::Numeric {
+                        access: LAccess::Enabled,
+                        p1: 1.0,
+                        p2: 0.0,
+                        p3: 0.0,
+                        p4: 0.0
+                    }]
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::Control {
+            type_: LAccess::Config,
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("switch1".into()));
+                value
+            },
+            p1: {
+                let mut value = LVar::new("p1");
+                value.set_obj(Some("copper".into()));
+                value
+            },
+            p2: {
+                let mut value = LVar::new("p2");
+                value.set_num(2.0);
+                value
+            },
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("switch1").unwrap() {
+            LogicRuntimeObject::Controllable(control) => {
+                assert_eq!(
+                    control.calls.last(),
+                    Some(&LogicControlCall::Object {
+                        access: LAccess::Config,
+                        p1: Some("copper".into()),
+                        p2: 2.0,
+                        p3: 0.0,
+                        p4: 0.0
+                    })
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        if let Some(LogicRuntimeObject::Controllable(control)) = exec.objects.get_mut("switch1") {
+            control.valid_link = false;
+        }
+        LogicInstruction::Control {
+            type_: LAccess::Enabled,
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("switch1".into()));
+                value
+            },
+            p1: {
+                let mut value = LVar::new("p1");
+                value.set_num(0.0);
+                value
+            },
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+            p4: LVar::new("p4"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("switch1").unwrap() {
+            LogicRuntimeObject::Controllable(control) => {
+                assert!(control.enabled);
+                assert!(!control.disabled_by_processor);
+                assert_eq!(control.calls.len(), 2);
+            }
+            _ => unreachable!(),
+        }
+
+        let mut close_enemy = RadarUnitView::new(3.0, 0.0, 2);
+        close_enemy.health = 10.0;
+        close_enemy.is_grounded = true;
+        let mut far_enemy = RadarUnitView::new(8.0, 0.0, 2);
+        far_enemy.health = 100.0;
+        far_enemy.is_grounded = true;
+        let mut ally = RadarUnitView::new(1.0, 0.0, 1);
+        ally.health = 1000.0;
+        ally.is_grounded = true;
+        let mut out_of_range = RadarUnitView::new(20.0, 0.0, 2);
+        out_of_range.health = 5000.0;
+        out_of_range.is_grounded = true;
+        exec.register_radar_unit("close", close_enemy);
+        exec.register_radar_unit("far", far_enemy);
+        exec.register_radar_unit("ally", ally);
+        exec.register_radar_unit("outside", out_of_range);
+
+        let mut radar_nearest = LogicInstruction::Radar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Ground,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Distance,
+            radar: {
+                let mut value = LVar::new("radar");
+                value.set_obj(Some("turret1".into()));
+                value
+            },
+            sort_order: {
+                let mut value = LVar::new("sort");
+                value.set_num(1.0);
+                value
+            },
+            output: LVar::new("output"),
+            last_target: None,
+        };
+        radar_nearest.run(&mut exec);
+        match radar_nearest {
+            LogicInstruction::Radar {
+                output,
+                last_target,
+                ..
+            } => {
+                assert_eq!(output.value(), LVarValue::Object(Some("close".into())));
+                assert_eq!(last_target, Some("close".into()));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut radar_farthest = LogicInstruction::Radar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Any,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Distance,
+            radar: {
+                let mut value = LVar::new("radar");
+                value.set_obj(Some("turret1".into()));
+                value
+            },
+            sort_order: {
+                let mut value = LVar::new("sort");
+                value.set_num(0.0);
+                value
+            },
+            output: LVar::new("output"),
+            last_target: None,
+        };
+        radar_farthest.run(&mut exec);
+        match radar_farthest {
+            LogicInstruction::Radar { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(Some("far".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut radar_health = LogicInstruction::Radar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Any,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Health,
+            radar: {
+                let mut value = LVar::new("radar");
+                value.set_obj(Some("turret1".into()));
+                value
+            },
+            sort_order: {
+                let mut value = LVar::new("sort");
+                value.set_num(1.0);
+                value
+            },
+            output: LVar::new("output"),
+            last_target: None,
+        };
+        radar_health.run(&mut exec);
+        match radar_health {
+            LogicInstruction::Radar { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(Some("far".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        if let Some(LogicRuntimeObject::RadarSource(source)) = exec.objects.get_mut("turret1") {
+            source.team = 2;
+        }
+        let mut denied_radar = LogicInstruction::Radar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Any,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Health,
+            radar: {
+                let mut value = LVar::new("radar");
+                value.set_obj(Some("turret1".into()));
+                value
+            },
+            sort_order: {
+                let mut value = LVar::new("sort");
+                value.set_num(1.0);
+                value
+            },
+            output: {
+                let mut value = LVar::new("output");
+                value.set_obj(Some("old".into()));
+                value
+            },
+            last_target: Some("old".into()),
+        };
+        denied_radar.run(&mut exec);
+        match denied_radar {
+            LogicInstruction::Radar {
+                output,
+                last_target,
+                ..
+            } => {
+                assert_eq!(output.value(), LVarValue::Object(None));
+                assert_eq!(last_target, None);
             }
             _ => unreachable!(),
         }
