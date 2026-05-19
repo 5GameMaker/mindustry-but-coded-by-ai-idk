@@ -93,6 +93,86 @@ pub struct DrawLiquidOutputParams {
     pub rotation: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawArcSmeltParams {
+    pub alpha: f32,
+    pub middle_radius: f32,
+    pub circle_radius: f32,
+    pub circle_stroke: f32,
+    pub particle_stroke: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawArcSmeltParticleParams {
+    pub fin: f32,
+    pub fout: f32,
+    pub angle: f32,
+    pub length: f32,
+    pub line_length: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawPistonParams {
+    pub region_variant: usize,
+    pub x: f32,
+    pub y: f32,
+    pub angle: f32,
+    pub flip_y: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawWeaveParams {
+    pub rotation: f32,
+    pub line_x: f32,
+    pub line_length: f32,
+    pub alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawMultiWeaveParams {
+    pub first_rotation: f32,
+    pub second_rotation: f32,
+    pub weave_alpha: f32,
+    pub glow_alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawSoftParticleParams {
+    pub fin: f32,
+    pub fout: f32,
+    pub alpha: f32,
+    pub angle: f32,
+    pub length: f32,
+    pub size: f32,
+    pub color_t: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrawTurretRegionNames {
+    pub preview: String,
+    pub outline: String,
+    pub liquid: String,
+    pub top: String,
+    pub heat: String,
+    pub base: String,
+    pub mod_base_fallback: Option<String>,
+    pub vanilla_base_fallback: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawTurretParams {
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawTurretShadowParams {
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+}
+
 pub fn draw_block_final_icons(
     block_name: &str,
     icon_override: Option<&[String]>,
@@ -698,6 +778,280 @@ pub fn draw_liquid_output_params(
         .collect()
 }
 
+pub fn draw_arc_smelt_params(
+    warmup: f32,
+    flame_alpha: f32,
+    alpha: f32,
+    flame_rad: f32,
+    circle_space: f32,
+    circle_stroke: f32,
+    particle_stroke: f32,
+    absin: f32,
+) -> Option<DrawArcSmeltParams> {
+    if warmup <= 0.0 || flame_alpha <= 0.001 {
+        return None;
+    }
+    Some(DrawArcSmeltParams {
+        alpha: alpha * warmup,
+        middle_radius: flame_rad + absin,
+        circle_radius: (flame_rad + circle_space + absin) * warmup,
+        circle_stroke: circle_stroke * warmup,
+        particle_stroke: particle_stroke * warmup,
+    })
+}
+
+pub fn draw_arc_smelt_particle_params(
+    time: f32,
+    particle_life: f32,
+    random_life: f32,
+    random_angle: f32,
+    particle_rad: f32,
+    particle_len: f32,
+    warmup: f32,
+) -> DrawArcSmeltParticleParams {
+    let fin = (random_life + time / particle_life) % 1.0;
+    let fout = 1.0 - fin;
+    DrawArcSmeltParticleParams {
+        fin,
+        fout,
+        angle: random_angle,
+        length: particle_rad * pow2_out(fin),
+        line_length: particle_len * fout * warmup,
+    }
+}
+
+pub fn draw_cultivator_middle_name(block_name: &str) -> String {
+    draw_cells_middle_name(block_name)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn draw_piston_params(
+    total_progress: f32,
+    sin_offset: f32,
+    side_offset: f32,
+    sin_scl: f32,
+    sin_mag: f32,
+    len_offset: f32,
+    hori_offset: f32,
+    angle_offset: f32,
+    sides: i32,
+    side_index: i32,
+) -> DrawPistonParams {
+    let len = absin_time(
+        total_progress + sin_offset + side_offset * sin_scl * side_index as f32,
+        sin_scl,
+        sin_mag,
+    ) + len_offset;
+    let angle = angle_offset + side_index as f32 * 360.0 / sides as f32;
+    let region_variant = if approx_eq(angle, 315.0) || approx_eq(angle, 135.0) {
+        2
+    } else if (135.0..315.0).contains(&angle) {
+        1
+    } else {
+        0
+    };
+    let radians = angle.to_radians();
+    DrawPistonParams {
+        region_variant,
+        x: radians.cos() * len + (angle + 90.0).to_radians().cos() * -hori_offset,
+        y: radians.sin() * len + (angle + 90.0).to_radians().sin() * -hori_offset,
+        angle,
+        flip_y: approx_eq(angle, 315.0),
+    }
+}
+
+pub fn draw_piston_region_names(block_name: &str, suffix: &str) -> [String; 4] {
+    [
+        format!("{block_name}{suffix}0"),
+        format!("{block_name}{suffix}1"),
+        format!("{block_name}{suffix}-t"),
+        format!("{block_name}{suffix}-icon"),
+    ]
+}
+
+pub fn draw_weave_name(block_name: &str) -> String {
+    format!("{block_name}-weave")
+}
+
+pub fn draw_weave_params(
+    total_progress: f32,
+    warmup: f32,
+    block_size: i32,
+    tilesize: f32,
+    x: f32,
+) -> DrawWeaveParams {
+    DrawWeaveParams {
+        rotation: total_progress,
+        line_x: x + sin_time(total_progress, 6.0, tilesize / 3.0 * block_size as f32),
+        line_length: block_size as f32 * tilesize / 2.0,
+        alpha: warmup,
+    }
+}
+
+pub fn draw_multi_weave_region_names(block_name: &str) -> (String, String) {
+    (
+        format!("{block_name}-weave"),
+        format!("{block_name}-weave-glow"),
+    )
+}
+
+pub fn draw_multi_weave_params(
+    total_progress: f32,
+    warmup: f32,
+    rotate_speed: f32,
+    rotate_speed2: f32,
+    fade_weave: bool,
+    glow_alpha: f32,
+    pulse: f32,
+    absin: f32,
+) -> DrawMultiWeaveParams {
+    DrawMultiWeaveParams {
+        first_rotation: total_progress * rotate_speed,
+        second_rotation: total_progress * rotate_speed * rotate_speed2,
+        weave_alpha: if fade_weave { warmup } else { 1.0 },
+        glow_alpha: warmup * (glow_alpha * (1.0 - pulse + absin)),
+    }
+}
+
+pub fn draw_multi_weave_icons(fade_weave: bool, weave_region: &str) -> Vec<String> {
+    if fade_weave {
+        Vec::new()
+    } else {
+        vec![weave_region.to_string()]
+    }
+}
+
+pub fn draw_soft_particle_region_name() -> &'static str {
+    "circle-shadow"
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn draw_soft_particle_params(
+    warmup: f32,
+    color_alpha: f32,
+    alpha: f32,
+    time: f32,
+    particle_life: f32,
+    random_life: f32,
+    random_angle: f32,
+    random_color: f32,
+    rotate_scl: f32,
+    particle_rad: f32,
+    particle_size: f32,
+    fade_margin: f32,
+) -> Option<DrawSoftParticleParams> {
+    if warmup <= 0.0 || color_alpha <= 0.001 {
+        return None;
+    }
+    let raw_fin = (random_life + time / particle_life) % 1.0;
+    let raw_fout = 1.0 - raw_fin;
+    let fin = 1.0 - raw_fin;
+    let fout = 1.0 - raw_fout;
+    Some(DrawSoftParticleParams {
+        fin,
+        fout,
+        alpha: alpha * warmup * (1.0 - curve(fin, 1.0 - fade_margin, 1.0)),
+        angle: random_angle + (time / rotate_scl) % 360.0,
+        length: particle_rad * pow_in(fout, 1.5),
+        size: particle_size * fin * warmup * 2.0,
+        color_t: random_color,
+    })
+}
+
+pub fn draw_turret_region_names(
+    block_name: &str,
+    block_size: i32,
+    base_prefix: &str,
+    mod_name: Option<&str>,
+) -> DrawTurretRegionNames {
+    DrawTurretRegionNames {
+        preview: format!("{block_name}-preview"),
+        outline: format!("{block_name}-outline"),
+        liquid: format!("{block_name}-liquid"),
+        top: format!("{block_name}-top"),
+        heat: format!("{block_name}-heat"),
+        base: format!("{block_name}-base"),
+        mod_base_fallback: mod_name.map(|name| format!("{name}-{base_prefix}block-{block_size}")),
+        vanilla_base_fallback: format!("{base_prefix}block-{block_size}"),
+    }
+}
+
+pub fn draw_turret_plan_rotation(block_rotate: bool, plan_rotation: i32) -> f32 {
+    if block_rotate {
+        plan_rotation as f32 * 90.0 - 90.0
+    } else {
+        0.0
+    }
+}
+
+pub fn draw_turret_icons(base: &str, preview: &str, top: Option<&str>) -> Vec<String> {
+    let mut icons = vec![base.to_string(), preview.to_string()];
+    if let Some(top) = top {
+        icons.push(top.to_string());
+    }
+    icons
+}
+
+pub fn draw_turret_recoiled(
+    x: f32,
+    y: f32,
+    recoil_x: f32,
+    recoil_y: f32,
+    rotation: f32,
+) -> DrawTurretParams {
+    DrawTurretParams {
+        x: x + recoil_x,
+        y: y + recoil_y,
+        rotation,
+    }
+}
+
+pub fn draw_turret_shadow(
+    x: f32,
+    y: f32,
+    recoil_x: f32,
+    recoil_y: f32,
+    elevation: f32,
+    rotation: f32,
+) -> DrawTurretShadowParams {
+    DrawTurretShadowParams {
+        x: x + recoil_x - elevation,
+        y: y + recoil_y - elevation,
+        rotation,
+    }
+}
+
+pub fn draw_turret_liquid_fraction(stored: f32, liquid_capacity: f32) -> f32 {
+    stored / liquid_capacity
+}
+
+pub fn draw_turret_should_draw_heat(heat: f32, heat_region_found: bool) -> bool {
+    heat > 0.00001 && heat_region_found
+}
+
+pub fn draw_turret_part_params(
+    warmup: f32,
+    progress: f32,
+    heat: f32,
+    recoil: f32,
+    charge: f32,
+    x: f32,
+    y: f32,
+    rotation: f32,
+) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+    (
+        warmup,
+        1.0 - progress,
+        1.0 - progress,
+        heat,
+        recoil,
+        charge,
+        x,
+        y,
+        rotation,
+    )
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -708,6 +1062,10 @@ fn pow3_in_lerp(start: f32, end: f32, t: f32) -> f32 {
 
 fn pow_in(value: f32, power: f32) -> f32 {
     value.powf(power)
+}
+
+fn pow2_out(value: f32) -> f32 {
+    1.0 - (1.0 - value).powi(2)
 }
 
 fn slope(value: f32) -> f32 {
@@ -722,6 +1080,18 @@ fn curve(value: f32, start: f32, end: f32) -> f32 {
     } else {
         (value - start) / (end - start)
     }
+}
+
+fn sin_time(time: f32, scl: f32, mag: f32) -> f32 {
+    (time / scl).sin() * mag
+}
+
+fn absin_time(time: f32, scl: f32, mag: f32) -> f32 {
+    sin_time(time, scl, mag).abs()
+}
+
+fn approx_eq(left: f32, right: f32) -> bool {
+    (left - right).abs() <= 0.00001
 }
 
 #[cfg(test)]
@@ -976,6 +1346,131 @@ mod tests {
                     rotation: 270.0
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn draw_arc_smelt_pistons_and_weaves_follow_upstream_formulae() {
+        let arc = draw_arc_smelt_params(0.5, 1.0, 0.68, 1.0, 2.0, 1.5, 1.1, 0.3).unwrap();
+        assert!((arc.alpha - 0.34).abs() < 0.00001);
+        assert!((arc.middle_radius - 1.3).abs() < 0.00001);
+        assert!((arc.circle_radius - 1.65).abs() < 0.00001);
+        assert!((arc.circle_stroke - 0.75).abs() < 0.00001);
+        assert!((arc.particle_stroke - 0.55).abs() < 0.00001);
+        let arc_particle = draw_arc_smelt_particle_params(20.0, 40.0, 0.25, 90.0, 7.0, 3.0, 0.5);
+        assert!((arc_particle.fin - 0.75).abs() < 0.00001);
+        assert!((arc_particle.fout - 0.25).abs() < 0.00001);
+        assert!((arc_particle.length - 6.5625).abs() < 0.00001);
+        assert!((arc_particle.line_length - 0.375).abs() < 0.00001);
+
+        assert_eq!(
+            draw_cultivator_middle_name("cultivator"),
+            "cultivator-middle"
+        );
+        assert_eq!(
+            draw_piston_region_names("press", "-piston"),
+            [
+                String::from("press-piston0"),
+                String::from("press-piston1"),
+                String::from("press-piston-t"),
+                String::from("press-piston-icon")
+            ]
+        );
+        let piston = draw_piston_params(0.0, 0.0, 0.0, 6.0, 4.0, -1.0, 2.0, 0.0, 4, 1);
+        assert_eq!(piston.region_variant, 0);
+        assert!((piston.x - 2.0).abs() < 0.00001);
+        assert!((piston.y + 1.0).abs() < 0.00001);
+        assert_eq!(piston.angle, 90.0);
+        assert!(!piston.flip_y);
+        let piston_t = draw_piston_params(0.0, 0.0, 0.0, 6.0, 4.0, -1.0, 0.0, 45.0, 4, 1);
+        assert_eq!(piston_t.region_variant, 2);
+        assert_eq!(piston_t.angle, 135.0);
+
+        assert_eq!(draw_weave_name("kiln"), "kiln-weave");
+        let weave = draw_weave_params(0.0, 0.75, 3, 8.0, 1.0);
+        assert_eq!(weave.rotation, 0.0);
+        assert_eq!(weave.line_x, 1.0);
+        assert_eq!(weave.line_length, 12.0);
+        assert_eq!(weave.alpha, 0.75);
+        assert_eq!(
+            draw_multi_weave_region_names("phase-weaver"),
+            (
+                String::from("phase-weaver-weave"),
+                String::from("phase-weaver-weave-glow")
+            )
+        );
+        let multi = draw_multi_weave_params(10.0, 0.5, 1.0, -0.9, true, 0.8, 0.3, 0.1);
+        assert_eq!(multi.first_rotation, 10.0);
+        assert_eq!(multi.second_rotation, -9.0);
+        assert_eq!(multi.weave_alpha, 0.5);
+        assert!((multi.glow_alpha - 0.32).abs() < 0.00001);
+        assert!(draw_multi_weave_icons(true, "phase-weaver-weave").is_empty());
+        assert_eq!(
+            draw_multi_weave_icons(false, "phase-weaver-weave"),
+            vec!["phase-weaver-weave"]
+        );
+    }
+
+    #[test]
+    fn draw_soft_particles_and_turret_shells_follow_upstream() {
+        assert_eq!(draw_soft_particle_region_name(), "circle-shadow");
+        let soft = draw_soft_particle_params(
+            0.5, 1.0, 0.5, 35.0, 70.0, 0.25, 90.0, 0.4, 1.5, 7.0, 3.0, 0.4,
+        )
+        .unwrap();
+        assert!((soft.fin - 0.25).abs() < 0.00001);
+        assert!((soft.fout - 0.75).abs() < 0.00001);
+        assert!((soft.alpha - 0.25).abs() < 0.00001);
+        assert!((soft.angle - 113.333336).abs() < 0.00001);
+        assert!((soft.length - 4.546633).abs() < 0.00001);
+        assert!((soft.size - 0.75).abs() < 0.00001);
+        assert_eq!(soft.color_t, 0.4);
+
+        let names = draw_turret_region_names("duo", 2, "reinforced-", Some("erekir"));
+        assert_eq!(names.preview, "duo-preview");
+        assert_eq!(names.outline, "duo-outline");
+        assert_eq!(names.liquid, "duo-liquid");
+        assert_eq!(names.top, "duo-top");
+        assert_eq!(names.heat, "duo-heat");
+        assert_eq!(names.base, "duo-base");
+        assert_eq!(
+            names.mod_base_fallback,
+            Some(String::from("erekir-reinforced-block-2"))
+        );
+        assert_eq!(names.vanilla_base_fallback, "reinforced-block-2");
+        assert_eq!(draw_turret_plan_rotation(true, 2), 90.0);
+        assert_eq!(draw_turret_plan_rotation(false, 2), 0.0);
+        assert_eq!(
+            draw_turret_icons("block-2", "duo-preview", Some("duo-top")),
+            vec!["block-2", "duo-preview", "duo-top"]
+        );
+        assert_eq!(
+            draw_turret_icons("block-2", "duo-preview", None),
+            vec!["block-2", "duo-preview"]
+        );
+        assert_eq!(
+            draw_turret_recoiled(10.0, 20.0, 1.0, -2.0, 90.0),
+            DrawTurretParams {
+                x: 11.0,
+                y: 18.0,
+                rotation: 90.0
+            }
+        );
+        assert_eq!(
+            draw_turret_shadow(10.0, 20.0, 1.0, -2.0, 3.0, 90.0),
+            DrawTurretShadowParams {
+                x: 8.0,
+                y: 15.0,
+                rotation: 90.0
+            }
+        );
+        assert_eq!(draw_turret_liquid_fraction(5.0, 20.0), 0.25);
+        assert!(!draw_turret_should_draw_heat(0.00001, true));
+        assert!(!draw_turret_should_draw_heat(0.1, false));
+        assert!(draw_turret_should_draw_heat(0.1, true));
+        assert_eq!(
+            draw_turret_part_params(0.5, 0.25, 0.8, 1.2, 0.3, 11.0, 18.0, 90.0),
+            (0.5, 0.75, 0.75, 0.8, 1.2, 0.3, 11.0, 18.0, 90.0)
         );
     }
 }
