@@ -500,6 +500,352 @@ pub fn turret_read_child<R: Read>(read: &mut R, revision: u8) -> io::Result<Turr
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemAmmoEntry {
+    pub item_id: i16,
+    pub amount: i16,
+}
+
+pub fn item_turret_accept_stack(
+    ammo_multiplier: Option<f32>,
+    max_ammo: i32,
+    total_ammo: i32,
+    amount: i32,
+) -> i32 {
+    ammo_multiplier
+        .map(|multiplier| (((max_ammo - total_ammo) as f32 / multiplier) as i32).min(amount))
+        .unwrap_or(0)
+}
+
+pub fn item_turret_accept_item(
+    ammo_multiplier: Option<f32>,
+    total_ammo: i32,
+    max_ammo: i32,
+) -> bool {
+    ammo_multiplier
+        .map(|multiplier| total_ammo as f32 + multiplier <= max_ammo as f32)
+        .unwrap_or(false)
+}
+
+pub fn item_turret_handle_item(
+    entries: &mut Vec<ItemAmmoEntry>,
+    total_ammo: &mut i32,
+    item_id: i16,
+    ammo_multiplier: i16,
+) {
+    *total_ammo += ammo_multiplier as i32;
+    if let Some(index) = entries.iter().position(|entry| entry.item_id == item_id) {
+        entries[index].amount += ammo_multiplier;
+        let entry = entries.remove(index);
+        entries.push(entry);
+    } else {
+        entries.push(ItemAmmoEntry {
+            item_id,
+            amount: ammo_multiplier,
+        });
+    }
+}
+
+pub fn item_turret_consumer_efficiency(top_amount: i32, ammo_per_shot: i32, cheating: bool) -> f32 {
+    if top_amount >= ammo_per_shot || cheating {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+pub fn item_turret_write_ammo<W: Write>(
+    write: &mut W,
+    entries: &[ItemAmmoEntry],
+) -> io::Result<()> {
+    write.write_all(&[entries.len() as u8])?;
+    for entry in entries {
+        write_i16(write, entry.item_id)?;
+        write_i16(write, entry.amount)?;
+    }
+    Ok(())
+}
+
+pub fn item_turret_read_ammo<R: Read>(
+    read: &mut R,
+    revision: u8,
+    max_ammo: i32,
+    is_valid_ammo: impl Fn(i16) -> bool,
+) -> io::Result<(Vec<ItemAmmoEntry>, i32)> {
+    let mut len = [0; 1];
+    read.read_exact(&mut len)?;
+    let mut entries = Vec::new();
+    let mut total = 0;
+    for _ in 0..len[0] {
+        let item_id = if revision < 2 {
+            let mut id = [0; 1];
+            read.read_exact(&mut id)?;
+            id[0] as i16
+        } else {
+            read_i16(read)?
+        };
+        let amount = read_i16(read)?.min(max_ammo as i16);
+        if is_valid_ammo(item_id) {
+            total += amount as i32;
+            entries.push(ItemAmmoEntry { item_id, amount });
+        }
+    }
+    Ok((entries, total))
+}
+
+pub fn liquid_turret_has_ammo(ammo_multiplier: Option<f32>, current_amount: f32) -> bool {
+    ammo_multiplier
+        .map(|multiplier| current_amount >= 1.0 / multiplier)
+        .unwrap_or(false)
+}
+
+pub fn liquid_turret_accept_liquid(
+    incoming_is_ammo: bool,
+    same_liquid: bool,
+    current_is_ammo: bool,
+    current_amount: f32,
+    current_ammo_multiplier: f32,
+) -> bool {
+    incoming_is_ammo
+        && (same_liquid
+            || (!current_is_ammo || current_amount <= 1.0 / current_ammo_multiplier + 0.001))
+}
+
+pub fn liquid_turret_use_ammo(current_amount: f32, ammo_multiplier: f32, cheating: bool) -> f32 {
+    if cheating {
+        current_amount
+    } else {
+        (current_amount - 1.0 / ammo_multiplier).max(0.0)
+    }
+}
+
+pub fn liquid_turret_unit_ammo_fraction(current_amount: f32, liquid_capacity: f32) -> f32 {
+    current_amount / liquid_capacity
+}
+
+pub fn power_turret_sense_ammo(power_status: Option<f32>) -> f32 {
+    power_status.unwrap_or(0.0)
+}
+
+pub fn power_turret_unit_ammo(power_status: Option<f32>, unit_ammo_capacity: f32) -> f32 {
+    power_turret_sense_ammo(power_status) * unit_ammo_capacity
+}
+
+pub fn power_turret_has_ammo() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContinuousTurretState {
+    pub last_length: f32,
+    pub bullets: usize,
+}
+
+impl ContinuousTurretState {
+    pub fn new(size: i32) -> Self {
+        Self {
+            last_length: size as f32 * 4.0,
+            bullets: 0,
+        }
+    }
+}
+
+pub fn continuous_turret_estimate_dps(damage: f32, damage_interval: Option<f32>) -> f32 {
+    damage * 60.0 / damage_interval.unwrap_or(5.0)
+}
+
+pub fn continuous_turret_has_ammo(can_consume: bool) -> bool {
+    can_consume
+}
+
+pub fn continuous_turret_should_consume(is_shooting: bool) -> bool {
+    is_shooting
+}
+
+pub fn continuous_turret_ammo_fraction(
+    efficiency: f32,
+    liquid_amount: Option<f32>,
+    liquid_capacity: f32,
+) -> f32 {
+    liquid_amount
+        .map(|amount| efficiency.min(amount / liquid_capacity))
+        .unwrap_or(efficiency)
+}
+
+pub fn continuous_turret_update_length(
+    cur_length: f32,
+    target_distance: f32,
+    range: f32,
+    aim_change_speed: f32,
+) -> f32 {
+    approach_delta(cur_length, target_distance.min(range), aim_change_speed)
+}
+
+pub fn continuous_turret_keepalive_time(
+    bullet_lifetime: f32,
+    optimal_life_fraction: f32,
+    shoot_warmup: f32,
+    efficiency: f32,
+) -> f32 {
+    bullet_lifetime * optimal_life_fraction * shoot_warmup.min(efficiency)
+}
+
+pub fn continuous_turret_scaled_damage(
+    base_damage: f32,
+    damage_multiplier: f32,
+    efficiency: f32,
+    time_scale: f32,
+    scale_damage_efficiency: bool,
+) -> f32 {
+    if scale_damage_efficiency {
+        base_damage * efficiency.min(1.0) * time_scale * damage_multiplier
+    } else {
+        base_damage
+    }
+}
+
+pub fn continuous_turret_should_active_sound(bullets_any: bool) -> bool {
+    bullets_any
+}
+
+pub fn continuous_turret_write_child<W: Write>(
+    write: &mut W,
+    state: &ContinuousTurretState,
+) -> io::Result<()> {
+    write_f32(write, state.last_length)
+}
+
+pub fn continuous_turret_read_child<R: Read>(
+    read: &mut R,
+    revision: u8,
+    size: i32,
+) -> io::Result<ContinuousTurretState> {
+    let mut state = ContinuousTurretState::new(size);
+    if revision >= 3 {
+        state.last_length = read_f32(read)?;
+    }
+    Ok(state)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContinuousLiquidTurretState {
+    pub activated: bool,
+}
+
+pub fn continuous_liquid_update_activation(
+    activated: bool,
+    current_amount: f32,
+    liquid_consumed: f32,
+) -> bool {
+    if current_amount >= liquid_consumed * 4.0 {
+        true
+    } else if current_amount < liquid_consumed {
+        false
+    } else {
+        activated
+    }
+}
+
+pub fn continuous_liquid_has_ammo(
+    correct_ammo: bool,
+    current_is_ammo: bool,
+    current_amount: f32,
+    activated: bool,
+) -> bool {
+    correct_ammo && current_is_ammo && current_amount > 0.0 && activated
+}
+
+pub fn continuous_liquid_should_consume(parent_should_consume: bool, activated: bool) -> bool {
+    parent_should_consume && activated
+}
+
+pub fn continuous_liquid_consume_multiplier(ammo_multiplier: Option<f32>) -> f32 {
+    ammo_multiplier.map(|value| 1.0 / value).unwrap_or(1.0)
+}
+
+pub fn laser_turret_placed_reload(reload: f32) -> f32 {
+    reload
+}
+
+pub fn laser_turret_should_consume(bullets_any: bool, active: bool, shooting: bool) -> bool {
+    bullets_any || active || shooting
+}
+
+pub fn laser_turret_progress(reload_counter: f32, reload: f32) -> f32 {
+    1.0 - (reload_counter / reload).clamp(0.0, 1.0)
+}
+
+pub fn laser_turret_update_reload_counter(
+    reload_counter: f32,
+    bullets_any: bool,
+    coolant_amount_available: Option<f32>,
+    coolant_amount: f32,
+    delta: f32,
+    edelta: f32,
+    heat_capacity: f32,
+    coolant_multiplier: f32,
+    cheating: bool,
+) -> (f32, f32) {
+    if bullets_any || reload_counter <= 0.0 {
+        return (reload_counter, 0.0);
+    }
+    if let Some(available) = coolant_amount_available {
+        let max_used = coolant_amount;
+        let used = if cheating {
+            max_used
+        } else {
+            available.min(max_used)
+        } * delta;
+        (
+            reload_counter - used * heat_capacity * coolant_multiplier,
+            used,
+        )
+    } else {
+        (reload_counter - edelta, 0.0)
+    }
+}
+
+pub fn laser_turret_update_bullet_life(
+    life: f32,
+    delta: f32,
+    time_scale: f32,
+    efficiency: f32,
+) -> f32 {
+    life - delta * time_scale / efficiency.max(0.00001)
+}
+
+pub fn laser_turret_turn_speed(
+    efficiency: f32,
+    rotate_speed: f32,
+    delta: f32,
+    bullets_any: bool,
+    firing_move_fraction: f32,
+) -> f32 {
+    efficiency
+        * rotate_speed
+        * delta
+        * if bullets_any {
+            firing_move_fraction
+        } else {
+            1.0
+        }
+}
+
+pub fn laser_turret_ready_to_shoot(
+    bullets_any: bool,
+    reload_counter: f32,
+    efficiency: f32,
+    charging: bool,
+    shoot_warmup: f32,
+    min_warmup: f32,
+) -> bool {
+    !bullets_any
+        && reload_counter <= 0.0
+        && efficiency > 0.0
+        && !charging
+        && shoot_warmup >= min_warmup
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
     from + (to - from) * alpha
 }
@@ -520,6 +866,16 @@ fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
     let mut buf = [0; 4];
     read.read_exact(&mut buf)?;
     Ok(f32::from_be_bytes(buf))
+}
+
+fn write_i16<W: Write>(write: &mut W, value: i16) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
+    let mut buf = [0; 2];
+    read.read_exact(&mut buf)?;
+    Ok(i16::from_be_bytes(buf))
 }
 
 #[cfg(test)]
@@ -636,5 +992,127 @@ mod tests {
             turret_read_child(&mut [].as_slice(), 0).unwrap(),
             TurretState::default()
         );
+    }
+
+    #[test]
+    fn item_liquid_and_power_turret_helpers_follow_upstream_ammo_rules() {
+        assert_eq!(item_turret_accept_stack(Some(2.0), 30, 20, 9), 5);
+        assert_eq!(item_turret_accept_stack(None, 30, 20, 9), 0);
+        assert!(item_turret_accept_item(Some(2.0), 28, 30));
+        assert!(!item_turret_accept_item(Some(3.0), 28, 30));
+
+        let mut entries = vec![ItemAmmoEntry {
+            item_id: 1,
+            amount: 2,
+        }];
+        let mut total = 2;
+        item_turret_handle_item(&mut entries, &mut total, 2, 3);
+        item_turret_handle_item(&mut entries, &mut total, 1, 3);
+        assert_eq!(total, 8);
+        assert_eq!(
+            entries,
+            vec![
+                ItemAmmoEntry {
+                    item_id: 2,
+                    amount: 3
+                },
+                ItemAmmoEntry {
+                    item_id: 1,
+                    amount: 5
+                }
+            ]
+        );
+        assert_eq!(item_turret_consumer_efficiency(1, 2, false), 0.0);
+        assert_eq!(item_turret_consumer_efficiency(1, 2, true), 1.0);
+
+        let mut bytes = Vec::new();
+        item_turret_write_ammo(&mut bytes, &entries).unwrap();
+        assert_eq!(bytes, vec![2, 0, 2, 0, 3, 0, 1, 0, 5]);
+        let (restored, restored_total) =
+            item_turret_read_ammo(&mut bytes.as_slice(), 2, 30, |id| id == 1).unwrap();
+        assert_eq!(
+            restored,
+            vec![ItemAmmoEntry {
+                item_id: 1,
+                amount: 5
+            }]
+        );
+        assert_eq!(restored_total, 5);
+
+        assert!(liquid_turret_has_ammo(Some(2.0), 0.5));
+        assert!(!liquid_turret_has_ammo(Some(2.0), 0.49));
+        assert!(liquid_turret_accept_liquid(true, false, false, 5.0, 2.0));
+        assert!(liquid_turret_accept_liquid(true, false, true, 0.501, 2.0));
+        assert!(!liquid_turret_accept_liquid(true, false, true, 0.6, 2.0));
+        assert_eq!(liquid_turret_use_ammo(2.0, 4.0, false), 1.75);
+        assert_eq!(liquid_turret_unit_ammo_fraction(5.0, 20.0), 0.25);
+
+        assert_eq!(power_turret_sense_ammo(Some(0.75)), 0.75);
+        assert_eq!(power_turret_unit_ammo(Some(0.5), 10.0), 5.0);
+        assert!(power_turret_has_ammo());
+    }
+
+    #[test]
+    fn continuous_and_laser_turret_helpers_follow_upstream_runtime_edges() {
+        let state = ContinuousTurretState::new(3);
+        assert_eq!(state.last_length, 12.0);
+        assert_eq!(continuous_turret_estimate_dps(10.0, Some(5.0)), 120.0);
+        assert!(continuous_turret_has_ammo(true));
+        assert!(continuous_turret_should_consume(true));
+        assert_eq!(continuous_turret_ammo_fraction(0.8, Some(4.0), 20.0), 0.2);
+        assert_eq!(continuous_turret_update_length(5.0, 20.0, 10.0, 3.0), 8.0);
+        assert_eq!(continuous_turret_keepalive_time(100.0, 0.8, 0.5, 1.0), 40.0);
+        assert_eq!(
+            continuous_turret_scaled_damage(20.0, 1.5, 0.5, 2.0, true),
+            30.0
+        );
+        assert!(continuous_turret_should_active_sound(true));
+        let mut bytes = Vec::new();
+        continuous_turret_write_child(&mut bytes, &state).unwrap();
+        assert_eq!(
+            continuous_turret_read_child(&mut bytes.as_slice(), 3, 3)
+                .unwrap()
+                .last_length,
+            12.0
+        );
+        assert_eq!(
+            continuous_turret_read_child(&mut [].as_slice(), 2, 4)
+                .unwrap()
+                .last_length,
+            16.0
+        );
+
+        assert!(continuous_liquid_update_activation(false, 4.0, 1.0));
+        assert!(!continuous_liquid_update_activation(true, 0.5, 1.0));
+        assert!(continuous_liquid_has_ammo(true, true, 0.1, true));
+        assert!(continuous_liquid_should_consume(true, true));
+        assert_eq!(continuous_liquid_consume_multiplier(Some(4.0)), 0.25);
+
+        assert_eq!(laser_turret_placed_reload(90.0), 90.0);
+        assert!(laser_turret_should_consume(true, false, false));
+        assert_eq!(laser_turret_progress(45.0, 90.0), 0.5);
+        assert_eq!(
+            laser_turret_update_reload_counter(
+                10.0,
+                false,
+                Some(3.0),
+                2.0,
+                1.0,
+                1.0,
+                0.5,
+                1.0,
+                false
+            ),
+            (9.0, 2.0)
+        );
+        assert_eq!(
+            laser_turret_update_reload_counter(10.0, false, None, 2.0, 1.0, 3.0, 0.5, 1.0, false),
+            (7.0, 0.0)
+        );
+        assert_eq!(laser_turret_update_bullet_life(100.0, 1.0, 2.0, 0.5), 96.0);
+        assert_eq!(laser_turret_turn_speed(1.0, 5.0, 2.0, true, 0.25), 2.5);
+        assert!(laser_turret_ready_to_shoot(
+            false, 0.0, 1.0, false, 1.0, 0.0
+        ));
     }
 }
