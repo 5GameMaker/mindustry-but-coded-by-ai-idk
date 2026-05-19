@@ -3,6 +3,40 @@ pub struct DrawBlockSpec {
     pub icon_override: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawLiquidTilePadding {
+    pub left: f32,
+    pub right: f32,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawPulseShapeParams {
+    pub f: f32,
+    pub radius: f32,
+    pub stroke: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawPulseDiamondPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawCircleParams {
+    pub life: f32,
+    pub stroke: f32,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawSpikeLayerParams {
+    pub rotation: f32,
+    pub speed: f32,
+}
+
 pub fn draw_block_final_icons(
     block_name: &str,
     icon_override: Option<&[String]>,
@@ -157,6 +191,198 @@ pub fn draw_blur_spin_rotation(total_progress: f32, rotate_speed: f32, rotation:
     total_progress * rotate_speed + rotation
 }
 
+pub fn draw_default_icons(block_region: &str) -> Vec<String> {
+    vec![block_region.to_string()]
+}
+
+pub fn draw_side_region_names(block_name: &str) -> (String, String) {
+    (format!("{block_name}-top1"), format!("{block_name}-top2"))
+}
+
+pub fn draw_side_region_index(rotation: i32) -> usize {
+    if rotation > 1 {
+        1
+    } else {
+        0
+    }
+}
+
+pub fn draw_side_region_plan_rotation(plan_rotation: i32) -> f32 {
+    plan_rotation as f32 * 90.0
+}
+
+pub fn draw_liquid_tile_padding(
+    padding: f32,
+    pad_left: f32,
+    pad_right: f32,
+    pad_top: f32,
+    pad_bottom: f32,
+) -> DrawLiquidTilePadding {
+    DrawLiquidTilePadding {
+        left: if pad_left < 0.0 { padding } else { pad_left },
+        right: if pad_right < 0.0 { padding } else { pad_right },
+        top: if pad_top < 0.0 { padding } else { pad_top },
+        bottom: if pad_bottom < 0.0 {
+            padding
+        } else {
+            pad_bottom
+        },
+    }
+}
+
+pub fn draw_liquid_tile_selected<'a>(
+    draw_liquid: Option<&'a str>,
+    current_liquid: &'a str,
+) -> &'a str {
+    draw_liquid.unwrap_or(current_liquid)
+}
+
+pub fn draw_liquid_tile_fraction(liquid_amount: f32, liquid_capacity: f32, alpha: f32) -> f32 {
+    liquid_amount / liquid_capacity * alpha
+}
+
+pub fn draw_block_parts_preview_name(block_name: &str) -> String {
+    format!("{block_name}-preview")
+}
+
+pub fn draw_block_parts_plan_rotation(block_rotate: bool, plan_rotation: i32) -> f32 {
+    if block_rotate {
+        plan_rotation as f32 * 90.0 - 90.0
+    } else {
+        0.0
+    }
+}
+
+pub fn draw_block_parts_params(
+    warmup: f32,
+    progress: f32,
+    x: f32,
+    y: f32,
+    rotation_degrees: f32,
+) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+    (
+        warmup,
+        1.0 - progress,
+        1.0 - progress,
+        0.0,
+        0.0,
+        0.0,
+        x,
+        y,
+        rotation_degrees,
+    )
+}
+
+pub fn draw_shape_radius(radius: f32, warmup: f32, use_warmup_radius: bool) -> f32 {
+    if use_warmup_radius {
+        radius * warmup
+    } else {
+        radius
+    }
+}
+
+pub fn draw_shape_rotation(total_progress: f32, time_scl: f32) -> f32 {
+    total_progress * time_scl
+}
+
+pub fn draw_pulse_shape_params(
+    time: f32,
+    time_scl: f32,
+    block_size: i32,
+    tilesize: f32,
+    radius_scl: f32,
+    stroke: f32,
+    min_stroke: f32,
+    warmup: f32,
+) -> DrawPulseShapeParams {
+    let f = 1.0 - (time / time_scl) % 1.0;
+    let radius = block_size as f32 * tilesize / 2.0 * radius_scl;
+    DrawPulseShapeParams {
+        f,
+        radius,
+        stroke: (stroke * f + min_stroke) * warmup,
+    }
+}
+
+pub fn draw_pulse_shape_square_radius(f: f32, radius: f32) -> f32 {
+    (1.0 + (1.0 - f) * radius).min(radius)
+}
+
+pub fn draw_pulse_shape_diamond_points(f: f32, radius: f32) -> Vec<DrawPulseDiamondPoint> {
+    let r = (clamp01(2.0 - f * 2.0) * radius - f - 0.2).max(0.0);
+    let w = clamp01(0.5 - f) * radius * 2.0;
+    let directions = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+    let mut points = Vec::with_capacity(if f < 0.5 { 8 } else { 4 });
+    for (dx, dy) in directions {
+        points.push(DrawPulseDiamondPoint {
+            x: dx * r + dy * w,
+            y: dy * r - dx * w,
+        });
+        if f < 0.5 {
+            points.push(DrawPulseDiamondPoint {
+                x: dx * r - dy * w,
+                y: dy * r + dx * w,
+            });
+        }
+    }
+    points
+}
+
+pub fn draw_circles_params(
+    time: f32,
+    amount: i32,
+    warmup: f32,
+    stroke_max: f32,
+    stroke_min: f32,
+    time_scl: f32,
+    radius: f32,
+    radius_offset: f32,
+) -> Vec<DrawCircleParams> {
+    if amount <= 0 {
+        return Vec::new();
+    }
+    (0..amount)
+        .map(|index| {
+            let life = (time / time_scl + index as f32 / amount as f32) % 1.0;
+            DrawCircleParams {
+                life,
+                stroke: warmup * pow3_in_lerp(stroke_max, stroke_min, life),
+                radius: radius_offset + life * radius,
+            }
+        })
+        .collect()
+}
+
+pub fn draw_spikes_layers(
+    warmup: f32,
+    layers: i32,
+    total_progress: f32,
+    rotate_speed: f32,
+    layer_speed: f32,
+) -> Vec<DrawSpikeLayerParams> {
+    if warmup <= 0.001 || layers <= 0 {
+        return Vec::new();
+    }
+    let mut cur_speed = 1.0;
+    let mut out = Vec::with_capacity(layers as usize);
+    for _ in 0..layers {
+        out.push(DrawSpikeLayerParams {
+            rotation: total_progress * rotate_speed * cur_speed,
+            speed: cur_speed,
+        });
+        cur_speed *= layer_speed;
+    }
+    out
+}
+
+fn clamp01(value: f32) -> f32 {
+    value.clamp(0.0, 1.0)
+}
+
+fn pow3_in_lerp(start: f32, end: f32, t: f32) -> f32 {
+    start + (end - start) * t.powi(3)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +434,85 @@ mod tests {
             vec!["a", "b", "c"]
         );
         assert_eq!(draw_pump_liquid_fraction(4.0, 16.0), 0.25);
+    }
+
+    #[test]
+    fn draw_default_side_liquid_tile_and_parts_follow_upstream_shells() {
+        assert_eq!(draw_default_icons("router"), vec!["router"]);
+        assert_eq!(
+            draw_side_region_names("separator"),
+            ("separator-top1".into(), "separator-top2".into())
+        );
+        assert_eq!(draw_side_region_index(0), 0);
+        assert_eq!(draw_side_region_index(1), 0);
+        assert_eq!(draw_side_region_index(2), 1);
+        assert_eq!(draw_side_region_plan_rotation(3), 270.0);
+
+        assert_eq!(
+            draw_liquid_tile_padding(2.0, -1.0, 3.0, -0.5, 4.0),
+            DrawLiquidTilePadding {
+                left: 2.0,
+                right: 3.0,
+                top: 2.0,
+                bottom: 4.0
+            }
+        );
+        assert_eq!(draw_liquid_tile_selected(Some("slag"), "water"), "slag");
+        assert_eq!(draw_liquid_tile_selected(None, "water"), "water");
+        assert_eq!(draw_liquid_tile_fraction(5.0, 20.0, 0.5), 0.125);
+
+        assert_eq!(draw_block_parts_preview_name("melter"), "melter-preview");
+        assert_eq!(draw_block_parts_plan_rotation(true, 2), 90.0);
+        assert_eq!(draw_block_parts_plan_rotation(false, 2), 0.0);
+        assert_eq!(
+            draw_block_parts_params(0.75, 0.2, 10.0, 20.0, 180.0),
+            (0.75, 0.8, 0.8, 0.0, 0.0, 0.0, 10.0, 20.0, 180.0)
+        );
+    }
+
+    #[test]
+    fn draw_shape_pulse_circles_and_spikes_follow_upstream_formulae() {
+        assert_eq!(draw_shape_radius(4.0, 0.25, false), 4.0);
+        assert_eq!(draw_shape_radius(4.0, 0.25, true), 1.0);
+        assert_eq!(draw_shape_rotation(12.0, 1.5), 18.0);
+
+        let pulse = draw_pulse_shape_params(25.0, 100.0, 3, 8.0, 1.25, 2.0, 0.2, 0.5);
+        assert!((pulse.f - 0.75).abs() < 0.00001);
+        assert!((pulse.radius - 15.0).abs() < 0.00001);
+        assert!((pulse.stroke - 0.85).abs() < 0.00001);
+        assert_eq!(draw_pulse_shape_square_radius(0.75, 15.0), 4.75);
+        let diamond = draw_pulse_shape_diamond_points(0.25, 10.0);
+        assert_eq!(diamond.len(), 8);
+        assert_eq!(diamond[0], DrawPulseDiamondPoint { x: 9.55, y: -5.0 });
+        assert_eq!(diamond[1], DrawPulseDiamondPoint { x: 9.55, y: 5.0 });
+
+        let circles = draw_circles_params(80.0, 4, 0.5, 2.0, 0.2, 160.0, 12.0, 1.0);
+        assert_eq!(circles.len(), 4);
+        assert!((circles[0].life - 0.5).abs() < 0.00001);
+        assert!((circles[0].stroke - 0.8875).abs() < 0.00001);
+        assert_eq!(circles[0].radius, 7.0);
+        assert!((circles[2].life - 0.0).abs() < 0.00001);
+        assert_eq!(circles[2].stroke, 1.0);
+        assert_eq!(circles[2].radius, 1.0);
+
+        assert!(draw_spikes_layers(0.001, 3, 10.0, 0.8, -1.0).is_empty());
+        let spikes = draw_spikes_layers(0.5, 3, 10.0, 0.8, -1.0);
+        assert_eq!(
+            spikes,
+            vec![
+                DrawSpikeLayerParams {
+                    rotation: 8.0,
+                    speed: 1.0
+                },
+                DrawSpikeLayerParams {
+                    rotation: -8.0,
+                    speed: -1.0
+                },
+                DrawSpikeLayerParams {
+                    rotation: 8.0,
+                    speed: 1.0
+                }
+            ]
+        );
     }
 }
