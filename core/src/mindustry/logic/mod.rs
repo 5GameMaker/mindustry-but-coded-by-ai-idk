@@ -749,6 +749,148 @@ fn java_angle_diff(a: f64, b: f64) -> f64 {
     ((a - b + 180.0).rem_euclid(360.0) - 180.0).abs()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadarUnitView {
+    pub x: f32,
+    pub y: f32,
+    pub health: f32,
+    pub shield: f32,
+    pub armor: f32,
+    pub max_health: f32,
+    pub team: u8,
+    pub is_player: bool,
+    pub can_shoot: bool,
+    pub is_flying: bool,
+    pub is_boss: bool,
+    pub is_grounded: bool,
+}
+
+impl RadarUnitView {
+    pub const fn new(x: f32, y: f32, team: u8) -> Self {
+        Self {
+            x,
+            y,
+            health: 0.0,
+            shield: 0.0,
+            armor: 0.0,
+            max_health: 0.0,
+            team,
+            is_player: false,
+            can_shoot: false,
+            is_flying: false,
+            is_boss: false,
+            is_grounded: false,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RadarSort {
+    Distance,
+    Health,
+    Shield,
+    Armor,
+    MaxHealth,
+}
+
+impl RadarSort {
+    pub const ALL: [RadarSort; 5] = [
+        RadarSort::Distance,
+        RadarSort::Health,
+        RadarSort::Shield,
+        RadarSort::Armor,
+        RadarSort::MaxHealth,
+    ];
+
+    pub const WIRE_NAMES: [&'static str; 5] =
+        ["distance", "health", "shield", "armor", "maxHealth"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn score(self, origin_x: f32, origin_y: f32, other: &RadarUnitView) -> f32 {
+        match self {
+            RadarSort::Distance => {
+                let dx = origin_x - other.x;
+                let dy = origin_y - other.y;
+                -(dx * dx + dy * dy)
+            }
+            RadarSort::Health => other.health,
+            RadarSort::Shield => other.shield,
+            RadarSort::Armor => other.armor,
+            RadarSort::MaxHealth => other.max_health,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RadarTarget {
+    Any,
+    Enemy,
+    Ally,
+    Player,
+    Attacker,
+    Flying,
+    Boss,
+    Ground,
+}
+
+impl RadarTarget {
+    /// Upstream Team.derelict has id 0.
+    pub const DERELICT_TEAM: u8 = 0;
+
+    pub const ALL: [RadarTarget; 8] = [
+        RadarTarget::Any,
+        RadarTarget::Enemy,
+        RadarTarget::Ally,
+        RadarTarget::Player,
+        RadarTarget::Attacker,
+        RadarTarget::Flying,
+        RadarTarget::Boss,
+        RadarTarget::Ground,
+    ];
+
+    pub const WIRE_NAMES: [&'static str; 8] = [
+        "any", "enemy", "ally", "player", "attacker", "flying", "boss", "ground",
+    ];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn matches(self, team: u8, other: &RadarUnitView) -> bool {
+        match self {
+            RadarTarget::Any => true,
+            RadarTarget::Enemy => team != other.team && other.team != Self::DERELICT_TEAM,
+            RadarTarget::Ally => team == other.team,
+            RadarTarget::Player => other.is_player,
+            RadarTarget::Attacker => other.can_shoot,
+            RadarTarget::Flying => other.is_flying,
+            RadarTarget::Boss => other.is_boss,
+            RadarTarget::Ground => other.is_grounded,
+        }
+    }
+}
+
 /// Mirrors upstream `mindustry.logic.LMarkerControl`.
 ///
 /// The declaration order is network-visible: Java `TypeIO.writeMarkerControl`
@@ -1105,6 +1247,82 @@ mod tests {
             ConditionValue::Object("vault")
         ));
         assert_eq!(ConditionOp::Always.to_string(), "always");
+    }
+
+    #[test]
+    fn radar_sort_and_target_match_java_order_and_predicates() {
+        assert_eq!(RadarSort::ALL.len(), 5);
+        assert_eq!(
+            RadarSort::ALL,
+            [
+                RadarSort::Distance,
+                RadarSort::Health,
+                RadarSort::Shield,
+                RadarSort::Armor,
+                RadarSort::MaxHealth
+            ]
+        );
+        assert_eq!(
+            RadarSort::ALL
+                .iter()
+                .map(|sort| sort.wire_name())
+                .collect::<Vec<_>>(),
+            vec!["distance", "health", "shield", "armor", "maxHealth"]
+        );
+        assert_eq!(RadarSort::MaxHealth.ordinal(), 4);
+        assert_eq!(RadarSort::from_ordinal(5), None);
+
+        let mut unit = RadarUnitView::new(3.0, 4.0, 2);
+        unit.health = 10.0;
+        unit.shield = 5.0;
+        unit.armor = 2.5;
+        unit.max_health = 30.0;
+        assert_eq!(RadarSort::Distance.score(0.0, 0.0, &unit), -25.0);
+        assert_eq!(RadarSort::Health.score(0.0, 0.0, &unit), 10.0);
+        assert_eq!(RadarSort::Shield.score(0.0, 0.0, &unit), 5.0);
+        assert_eq!(RadarSort::Armor.score(0.0, 0.0, &unit), 2.5);
+        assert_eq!(RadarSort::MaxHealth.score(0.0, 0.0, &unit), 30.0);
+
+        assert_eq!(RadarTarget::ALL.len(), 8);
+        assert_eq!(
+            RadarTarget::ALL,
+            [
+                RadarTarget::Any,
+                RadarTarget::Enemy,
+                RadarTarget::Ally,
+                RadarTarget::Player,
+                RadarTarget::Attacker,
+                RadarTarget::Flying,
+                RadarTarget::Boss,
+                RadarTarget::Ground
+            ]
+        );
+        assert_eq!(
+            RadarTarget::ALL
+                .iter()
+                .map(|target| target.wire_name())
+                .collect::<Vec<_>>(),
+            vec!["any", "enemy", "ally", "player", "attacker", "flying", "boss", "ground"]
+        );
+        assert_eq!(RadarTarget::Ground.ordinal(), 7);
+        assert_eq!(RadarTarget::from_ordinal(8), None);
+
+        assert!(RadarTarget::Any.matches(1, &unit));
+        assert!(RadarTarget::Enemy.matches(1, &unit));
+        assert!(!RadarTarget::Enemy.matches(1, &RadarUnitView::new(0.0, 0.0, 0)));
+        assert!(RadarTarget::Ally.matches(2, &unit));
+        assert!(!RadarTarget::Ally.matches(1, &unit));
+
+        unit.is_player = true;
+        unit.can_shoot = true;
+        unit.is_flying = true;
+        unit.is_boss = true;
+        unit.is_grounded = false;
+        assert!(RadarTarget::Player.matches(1, &unit));
+        assert!(RadarTarget::Attacker.matches(1, &unit));
+        assert!(RadarTarget::Flying.matches(1, &unit));
+        assert!(RadarTarget::Boss.matches(1, &unit));
+        assert!(!RadarTarget::Ground.matches(1, &unit));
     }
 
     #[test]
