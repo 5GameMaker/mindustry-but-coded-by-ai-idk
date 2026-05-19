@@ -22,6 +22,7 @@ pub const LOOKABLE_CONTENT_TYPES: [ContentType; 5] = [
 pub const LOGIC_PARSER_MAX_TOKENS: usize = 16;
 pub const LOGIC_PARSER_MAX_JUMPS: usize = 500;
 pub const LOGIC_CANVAS_INVALID_JUMP: i32 = i32::MAX;
+pub const LOGIC_TILE_SIZE: f32 = 8.0;
 
 const INVALID_NUM_NEGATIVE: i64 = i64::MIN;
 const INVALID_NUM_POSITIVE: i64 = i64::MAX;
@@ -4016,6 +4017,149 @@ impl LogicRadarSource {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LogicUnitObject {
+    pub type_name: String,
+    pub logic_controllable: bool,
+    pub team: u8,
+    pub valid: bool,
+    pub x: f32,
+    pub y: f32,
+    pub range: f32,
+    pub health: f32,
+    pub shield: f32,
+    pub armor: f32,
+    pub max_health: f32,
+    pub is_player: bool,
+    pub can_shoot: bool,
+    pub is_flying: bool,
+    pub is_boss: bool,
+    pub is_grounded: bool,
+    pub targetable: bool,
+    pub control: Option<LUnitControl>,
+    pub move_x: f32,
+    pub move_y: f32,
+    pub move_rad: f32,
+    pub aim_control: Option<LUnitControl>,
+    pub target_x: f32,
+    pub target_y: f32,
+    pub main_target: Option<String>,
+    pub shoot: bool,
+    pub boost: bool,
+    pub flag: f64,
+    pub mine_x: Option<f32>,
+    pub mine_y: Option<f32>,
+    pub mine_cleared: bool,
+    pub building_cleared: bool,
+    pub controller_reset: bool,
+    pub control_timer_refreshed: bool,
+}
+
+impl LogicUnitObject {
+    pub fn new(type_name: impl Into<String>, team: u8, x: f32, y: f32) -> Self {
+        Self {
+            type_name: type_name.into(),
+            logic_controllable: true,
+            team,
+            valid: true,
+            x,
+            y,
+            range: 0.0,
+            health: 0.0,
+            shield: 0.0,
+            armor: 0.0,
+            max_health: 0.0,
+            is_player: false,
+            can_shoot: false,
+            is_flying: false,
+            is_boss: false,
+            is_grounded: false,
+            targetable: true,
+            control: None,
+            move_x: 0.0,
+            move_y: 0.0,
+            move_rad: 0.0,
+            aim_control: None,
+            target_x: 0.0,
+            target_y: 0.0,
+            main_target: None,
+            shoot: false,
+            boost: false,
+            flag: 0.0,
+            mine_x: None,
+            mine_y: None,
+            mine_cleared: false,
+            building_cleared: false,
+            controller_reset: false,
+            control_timer_refreshed: false,
+        }
+    }
+
+    pub fn controllable_by(&self, exec_privileged: bool, exec_team: u8) -> bool {
+        self.valid && self.logic_controllable && (exec_privileged || self.team == exec_team)
+    }
+
+    pub fn radar_source(&self) -> LogicRadarSource {
+        LogicRadarSource::new(self.x, self.y, self.team, self.range)
+    }
+
+    pub fn radar_view(&self) -> RadarUnitView {
+        RadarUnitView {
+            x: self.x,
+            y: self.y,
+            health: self.health,
+            shield: self.shield,
+            armor: self.armor,
+            max_health: self.max_health,
+            team: self.team,
+            is_player: self.is_player,
+            can_shoot: self.can_shoot,
+            is_flying: self.is_flying,
+            is_boss: self.is_boss,
+            is_grounded: self.is_grounded,
+            targetable: self.valid && self.targetable,
+        }
+    }
+
+    pub fn clear_unit_action(&mut self) {
+        self.mine_x = None;
+        self.mine_y = None;
+        self.mine_cleared = true;
+        self.building_cleared = true;
+    }
+
+    fn sense_access(&self, access: LAccess) -> Option<LVarValue> {
+        match access {
+            LAccess::Health => Some(LVarValue::Number(self.health as f64)),
+            LAccess::MaxHealth => Some(LVarValue::Number(self.max_health as f64)),
+            LAccess::Shield => Some(LVarValue::Number(self.shield as f64)),
+            LAccess::Armor => Some(LVarValue::Number(self.armor as f64)),
+            LAccess::X => Some(LVarValue::Number(logic_conv(self.x) as f64)),
+            LAccess::Y => Some(LVarValue::Number(logic_conv(self.y) as f64)),
+            LAccess::Dead => Some(LVarValue::Number((!self.valid) as u8 as f64)),
+            LAccess::Range => Some(LVarValue::Number(logic_conv(self.range) as f64)),
+            LAccess::Shooting => Some(LVarValue::Number(self.shoot as u8 as f64)),
+            LAccess::Boosting => Some(LVarValue::Number(self.boost as u8 as f64)),
+            LAccess::Team => Some(LVarValue::Number(self.team as f64)),
+            LAccess::Type => Some(LVarValue::Object(Some(logic_object_name(&self.type_name)))),
+            LAccess::Flag => Some(LVarValue::Number(self.flag)),
+            LAccess::Controlled => Some(LVarValue::Number(
+                self.control_timer_refreshed as u8 as f64 * LOGIC_CTRL_PROCESSOR as f64,
+            )),
+            LAccess::MineX => Some(LVarValue::Number(
+                self.mine_x.map_or(-1.0, |value| logic_conv(value)) as f64,
+            )),
+            LAccess::MineY => Some(LVarValue::Number(
+                self.mine_y.map_or(-1.0, |value| logic_conv(value)) as f64,
+            )),
+            LAccess::Mining => Some(LVarValue::Number(
+                (self.mine_x.is_some() && self.mine_y.is_some()) as u8 as f64,
+            )),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum LogicRuntimeObject {
     Text(String),
     Sequence(Vec<LVarValue>),
@@ -4023,6 +4167,7 @@ pub enum LogicRuntimeObject {
     Senseable(LogicSenseObject),
     Controllable(LogicControllableObject),
     RadarSource(LogicRadarSource),
+    Unit(LogicUnitObject),
 }
 
 impl LogicRuntimeObject {
@@ -4051,7 +4196,9 @@ impl LogicRuntimeObject {
                 true
             }
             LogicRuntimeObject::Senseable(_) => false,
-            LogicRuntimeObject::Controllable(_) | LogicRuntimeObject::RadarSource(_) => false,
+            LogicRuntimeObject::Controllable(_)
+            | LogicRuntimeObject::RadarSource(_)
+            | LogicRuntimeObject::Unit(_) => false,
         }
     }
 
@@ -4103,6 +4250,7 @@ impl LogicRuntimeObject {
                 _ => None,
             },
             LogicRuntimeObject::RadarSource(_) => None,
+            LogicRuntimeObject::Unit(unit) => unit.sense_access(access),
         }
     }
 
@@ -4111,6 +4259,7 @@ impl LogicRuntimeObject {
             LogicRuntimeObject::Senseable(senseable) => {
                 Some(*senseable.content_senses.get(content_name).unwrap_or(&0.0))
             }
+            LogicRuntimeObject::Unit(_) => Some(0.0),
             _ => None,
         }
     }
@@ -4127,6 +4276,9 @@ pub struct LogicExecutor {
     pub links: Vec<String>,
     pub objects: BTreeMap<String, LogicRuntimeObject>,
     pub radar_units: BTreeMap<String, RadarUnitView>,
+    pub bound_unit: Option<String>,
+    pub unit_binds: BTreeMap<String, usize>,
+    pub logic_unit_control: bool,
     pub headless: bool,
     pub graphics_buffer: Vec<u64>,
     pub text_buffer: String,
@@ -4157,6 +4309,9 @@ impl LogicExecutor {
             links: Vec::new(),
             objects: BTreeMap::new(),
             radar_units: BTreeMap::new(),
+            bound_unit: None,
+            unit_binds: BTreeMap::new(),
+            logic_unit_control: true,
             headless: false,
             graphics_buffer: Vec::new(),
             text_buffer: String::new(),
@@ -4334,6 +4489,26 @@ pub enum LogicInstruction {
         output: LVar,
         last_target: Option<String>,
     },
+    UnitBind {
+        type_: LVar,
+    },
+    UnitControl {
+        type_: LUnitControl,
+        p1: LVar,
+        p2: LVar,
+        p3: LVar,
+        p4: LVar,
+        p5: LVar,
+    },
+    UnitRadar {
+        target1: RadarTarget,
+        target2: RadarTarget,
+        target3: RadarTarget,
+        sort: RadarSort,
+        sort_order: LVar,
+        output: LVar,
+        last_target: Option<String>,
+    },
     Set {
         from: LVar,
         to: LVar,
@@ -4465,6 +4640,33 @@ impl LogicInstruction {
                 let targeted = exec_radar_runtime(
                     exec, *target1, *target2, *target3, *sort, radar, sort_order,
                 );
+                *last_target = targeted.clone();
+                output.set_obj(targeted);
+            }
+            LogicInstruction::UnitBind { type_ } => {
+                exec_unit_bind_runtime(exec, type_);
+            }
+            LogicInstruction::UnitControl {
+                type_,
+                p1,
+                p2,
+                p3,
+                p4,
+                p5,
+            } => {
+                exec_unit_control_runtime(exec, *type_, p1, p2, p3, p4, p5);
+            }
+            LogicInstruction::UnitRadar {
+                target1,
+                target2,
+                target3,
+                sort,
+                sort_order,
+                output,
+                last_target,
+            } => {
+                let targeted =
+                    exec_unit_radar_runtime(exec, *target1, *target2, *target3, *sort, sort_order);
                 *last_target = targeted.clone();
                 output.set_obj(targeted);
             }
@@ -4827,13 +5029,222 @@ pub fn exec_radar_runtime(
     if !source.usable_by(exec.privileged, exec.team) {
         return None;
     }
+    find_radar_target(
+        source,
+        target1,
+        target2,
+        target3,
+        sort,
+        sort_order,
+        exec.radar_units
+            .iter()
+            .map(|(name, unit)| (name.clone(), *unit)),
+        None,
+    )
+}
 
+pub fn exec_unit_bind_runtime(exec: &mut LogicExecutor, type_: &LVar) {
+    if !exec.privileged && !exec.logic_unit_control {
+        return;
+    }
+
+    let Some(requested) = type_.obj() else {
+        exec.bound_unit = None;
+        return;
+    };
+
+    if let Some(LogicRuntimeObject::Unit(unit)) = exec.objects.get(requested) {
+        exec.bound_unit = unit
+            .controllable_by(exec.privileged, exec.team)
+            .then(|| requested.to_string());
+        return;
+    }
+
+    let type_name = logic_unwrap_object_name(requested);
+    let mut candidates: Vec<String> = exec
+        .objects
+        .iter()
+        .filter_map(|(name, object)| match object {
+            LogicRuntimeObject::Unit(unit)
+                if unit.type_name == type_name
+                    && unit.controllable_by(exec.privileged, exec.team) =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect();
+
+    candidates.sort();
+    if candidates.is_empty() {
+        exec.bound_unit = None;
+        return;
+    }
+
+    let bind_index = exec.unit_binds.entry(type_name.to_string()).or_default();
+    *bind_index %= candidates.len();
+    exec.bound_unit = Some(candidates[*bind_index].clone());
+    *bind_index += 1;
+}
+
+pub fn exec_unit_control_runtime(
+    exec: &mut LogicExecutor,
+    type_: LUnitControl,
+    p1: &LVar,
+    p2: &LVar,
+    p3: &mut LVar,
+    p4: &mut LVar,
+    p5: &mut LVar,
+) {
+    if !exec.privileged && !exec.logic_unit_control {
+        return;
+    }
+
+    let Some(bound_name) = exec.bound_unit.clone() else {
+        return;
+    };
+    let Some(LogicRuntimeObject::Unit(unit)) = exec.objects.get_mut(&bound_name) else {
+        exec.bound_unit = None;
+        return;
+    };
+    if !unit.controllable_by(exec.privileged, exec.team) {
+        return;
+    }
+
+    unit.control_timer_refreshed = true;
+    let x1 = logic_unconv(p1.numf());
+    let y1 = logic_unconv(p2.numf());
+    let d1 = logic_unconv(p3.numf());
+
+    match type_ {
+        LUnitControl::Idle | LUnitControl::AutoPathfind => {
+            unit.control = Some(type_);
+        }
+        LUnitControl::Move
+        | LUnitControl::Stop
+        | LUnitControl::Approach
+        | LUnitControl::Pathfind => {
+            unit.control = Some(type_);
+            unit.move_x = x1;
+            unit.move_y = y1;
+            if type_ == LUnitControl::Approach {
+                unit.move_rad = d1;
+            }
+            if type_ == LUnitControl::Stop {
+                unit.clear_unit_action();
+            }
+        }
+        LUnitControl::Unbind => {
+            unit.controller_reset = true;
+            exec.bound_unit = None;
+        }
+        LUnitControl::Within => {
+            let dx = unit.x - x1;
+            let dy = unit.y - y1;
+            p4.set_num((dx * dx + dy * dy <= d1 * d1) as u8 as f64);
+        }
+        LUnitControl::Target => {
+            unit.target_x = x1;
+            unit.target_y = y1;
+            unit.aim_control = Some(type_);
+            unit.main_target = None;
+            unit.shoot = p3.bool();
+        }
+        LUnitControl::Targetp => {
+            unit.aim_control = Some(type_);
+            unit.main_target = p1.obj().map(str::to_string);
+            unit.shoot = p2.bool();
+        }
+        LUnitControl::Boost => {
+            unit.boost = p1.bool();
+        }
+        LUnitControl::Flag => {
+            unit.flag = p1.num();
+        }
+        LUnitControl::Mine => {
+            unit.mine_x = Some(x1);
+            unit.mine_y = Some(y1);
+        }
+        LUnitControl::GetBlock => {
+            let dx = unit.x - x1;
+            let dy = unit.y - y1;
+            let range = unit.range.max(LOGIC_TILE_SIZE);
+            if dx * dx + dy * dy > range * range {
+                p3.set_obj(None);
+                p4.set_obj(None);
+                p5.set_obj(None);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn exec_unit_radar_runtime(
+    exec: &LogicExecutor,
+    target1: RadarTarget,
+    target2: RadarTarget,
+    target3: RadarTarget,
+    sort: RadarSort,
+    sort_order: &LVar,
+) -> Option<String> {
+    if !exec.privileged && !exec.logic_unit_control {
+        return None;
+    }
+
+    let source_name = exec.bound_unit.as_deref()?;
+    let LogicRuntimeObject::Unit(source_unit) = exec.objects.get(source_name)? else {
+        return None;
+    };
+    if !source_unit.controllable_by(exec.privileged, exec.team) {
+        return None;
+    }
+
+    let source = source_unit.radar_source();
+    find_radar_target(
+        &source,
+        target1,
+        target2,
+        target3,
+        sort,
+        sort_order,
+        radar_units_with_runtime_units(exec),
+        Some(source_name),
+    )
+}
+
+fn radar_units_with_runtime_units(exec: &LogicExecutor) -> Vec<(String, RadarUnitView)> {
+    let mut units: BTreeMap<String, RadarUnitView> = exec
+        .radar_units
+        .iter()
+        .map(|(name, unit)| (name.clone(), *unit))
+        .collect();
+    for (name, object) in &exec.objects {
+        if let LogicRuntimeObject::Unit(unit) = object {
+            units.insert(name.clone(), unit.radar_view());
+        }
+    }
+    units.into_iter().collect()
+}
+
+fn find_radar_target<I>(
+    source: &LogicRadarSource,
+    target1: RadarTarget,
+    target2: RadarTarget,
+    target3: RadarTarget,
+    sort: RadarSort,
+    sort_order: &LVar,
+    units: I,
+    exclude_name: Option<&str>,
+) -> Option<String>
+where
+    I: IntoIterator<Item = (String, RadarUnitView)>,
+{
     let sort_dir = if sort_order.bool() { 1.0 } else { -1.0 };
     let range_sq = source.range * source.range;
-    let mut best: Option<(&String, f32)> = None;
+    let mut best: Option<(String, f32)> = None;
 
-    for (name, unit) in &exec.radar_units {
-        if !unit.targetable {
+    for (name, unit) in units {
+        if exclude_name == Some(name.as_str()) || !unit.targetable {
             continue;
         }
         let dx = source.x - unit.x;
@@ -4841,20 +5252,43 @@ pub fn exec_radar_runtime(
         if dx * dx + dy * dy > range_sq {
             continue;
         }
-        if !target1.matches(source.team, unit)
-            || !target2.matches(source.team, unit)
-            || !target3.matches(source.team, unit)
+        if !target1.matches(source.team, &unit)
+            || !target2.matches(source.team, &unit)
+            || !target3.matches(source.team, &unit)
         {
             continue;
         }
 
-        let value = sort.score(source.x, source.y, unit) * sort_dir;
-        if best.is_none_or(|(_, best_value)| value > best_value) {
+        let value = sort.score(source.x, source.y, &unit) * sort_dir;
+        if best
+            .as_ref()
+            .is_none_or(|(_, best_value)| value > *best_value)
+        {
             best = Some((name, value));
         }
     }
 
-    best.map(|(name, _)| name.clone())
+    best.map(|(name, _)| name)
+}
+
+pub fn logic_unwrap_object_name(name: &str) -> &str {
+    name.strip_prefix('@').unwrap_or(name)
+}
+
+pub fn logic_object_name(name: &str) -> String {
+    if name.starts_with('@') {
+        name.to_string()
+    } else {
+        format!("@{name}")
+    }
+}
+
+pub fn logic_unconv(coord: f32) -> f32 {
+    coord * LOGIC_TILE_SIZE
+}
+
+pub fn logic_conv(coord: f32) -> f32 {
+    coord / LOGIC_TILE_SIZE
 }
 
 pub fn logic_access_from_object_name(name: &str) -> Option<LAccess> {
@@ -9678,6 +10112,403 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn unit_bind_control_and_radar_executor_instructions_follow_java_l_executor_semantics() {
+        let mut exec = LogicExecutor::new();
+        exec.team = 1;
+
+        let mut unit_a = LogicUnitObject::new("dagger", 1, 8.0, 8.0);
+        unit_a.range = 96.0;
+        unit_a.health = 50.0;
+        unit_a.is_grounded = true;
+        let mut unit_b = LogicUnitObject::new("dagger", 1, 16.0, 8.0);
+        unit_b.range = 96.0;
+        unit_b.health = 60.0;
+        unit_b.is_grounded = true;
+        let mut enemy_close = LogicUnitObject::new("crawler", 2, 24.0, 8.0);
+        enemy_close.health = 25.0;
+        enemy_close.max_health = 30.0;
+        enemy_close.is_grounded = true;
+        let mut enemy_far = LogicUnitObject::new("crawler", 2, 64.0, 8.0);
+        enemy_far.health = 5.0;
+        enemy_far.max_health = 30.0;
+        enemy_far.is_grounded = true;
+        let enemy_unreachable = LogicUnitObject::new("crawler", 2, 200.0, 8.0);
+        let mut enemy_unclickable = LogicUnitObject::new("crawler", 2, 24.0, 16.0);
+        enemy_unclickable.targetable = false;
+        let mut ally_other_type = LogicUnitObject::new("flare", 1, 32.0, 8.0);
+        ally_other_type.logic_controllable = false;
+        exec.register_object("unit-a", LogicRuntimeObject::Unit(unit_a));
+        exec.register_object("unit-b", LogicRuntimeObject::Unit(unit_b));
+        exec.register_object("enemy-close", LogicRuntimeObject::Unit(enemy_close));
+        exec.register_object("enemy-far", LogicRuntimeObject::Unit(enemy_far));
+        exec.register_object(
+            "enemy-unreachable",
+            LogicRuntimeObject::Unit(enemy_unreachable),
+        );
+        exec.register_object(
+            "enemy-unclickable",
+            LogicRuntimeObject::Unit(enemy_unclickable),
+        );
+        exec.register_object("ally-other-type", LogicRuntimeObject::Unit(ally_other_type));
+
+        let mut bind_dagger = LogicInstruction::UnitBind {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@dagger".into()));
+                value
+            },
+        };
+        bind_dagger.run(&mut exec);
+        assert_eq!(exec.bound_unit, Some("unit-a".into()));
+        bind_dagger.run(&mut exec);
+        assert_eq!(exec.bound_unit, Some("unit-b".into()));
+        bind_dagger.run(&mut exec);
+        assert_eq!(exec.bound_unit, Some("unit-a".into()));
+
+        let mut move_control = LogicInstruction::UnitControl {
+            type_: LUnitControl::Move,
+            p1: {
+                let mut value = LVar::new("x");
+                value.set_num(3.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("y");
+                value.set_num(4.0);
+                value
+            },
+            p3: LVar::new("radius"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        };
+        move_control.run(&mut exec);
+        match exec.objects.get("unit-a").unwrap() {
+            LogicRuntimeObject::Unit(unit) => {
+                assert_eq!(unit.control, Some(LUnitControl::Move));
+                assert_eq!(unit.move_x, 24.0);
+                assert_eq!(unit.move_y, 32.0);
+                assert!(unit.control_timer_refreshed);
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Approach,
+            p1: {
+                let mut value = LVar::new("x");
+                value.set_num(5.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("y");
+                value.set_num(6.0);
+                value
+            },
+            p3: {
+                let mut value = LVar::new("radius");
+                value.set_num(2.0);
+                value
+            },
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("unit-a").unwrap() {
+            LogicRuntimeObject::Unit(unit) => {
+                assert_eq!(unit.control, Some(LUnitControl::Approach));
+                assert_eq!(unit.move_x, 40.0);
+                assert_eq!(unit.move_y, 48.0);
+                assert_eq!(unit.move_rad, 16.0);
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Mine,
+            p1: {
+                let mut value = LVar::new("x");
+                value.set_num(7.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("y");
+                value.set_num(8.0);
+                value
+            },
+            p3: LVar::new("radius"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Stop,
+            p1: LVar::new("x"),
+            p2: LVar::new("y"),
+            p3: LVar::new("radius"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("unit-a").unwrap() {
+            LogicRuntimeObject::Unit(unit) => {
+                assert_eq!(unit.control, Some(LUnitControl::Stop));
+                assert!(unit.mine_x.is_none());
+                assert!(unit.mine_y.is_none());
+                assert!(unit.mine_cleared);
+                assert!(unit.building_cleared);
+            }
+            _ => unreachable!(),
+        }
+
+        let mut within = LogicInstruction::UnitControl {
+            type_: LUnitControl::Within,
+            p1: {
+                let mut value = LVar::new("x");
+                value.set_num(1.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("y");
+                value.set_num(1.0);
+                value
+            },
+            p3: {
+                let mut value = LVar::new("radius");
+                value.set_num(1.0);
+                value
+            },
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        };
+        within.run(&mut exec);
+        match within {
+            LogicInstruction::UnitControl { p4, .. } => {
+                assert_eq!(p4.value(), LVarValue::Number(1.0));
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Target,
+            p1: {
+                let mut value = LVar::new("x");
+                value.set_num(10.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("y");
+                value.set_num(11.0);
+                value
+            },
+            p3: {
+                let mut value = LVar::new("shoot");
+                value.set_num(1.0);
+                value
+            },
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("unit-a").unwrap() {
+            LogicRuntimeObject::Unit(unit) => {
+                assert_eq!(unit.aim_control, Some(LUnitControl::Target));
+                assert_eq!(unit.target_x, 80.0);
+                assert_eq!(unit.target_y, 88.0);
+                assert_eq!(unit.main_target, None);
+                assert!(unit.shoot);
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Targetp,
+            p1: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("enemy-close".into()));
+                value
+            },
+            p2: {
+                let mut value = LVar::new("shoot");
+                value.set_num(0.0);
+                value
+            },
+            p3: LVar::new("unused"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("unit-a").unwrap() {
+            LogicRuntimeObject::Unit(unit) => {
+                assert_eq!(unit.aim_control, Some(LUnitControl::Targetp));
+                assert_eq!(unit.main_target, Some("enemy-close".into()));
+                assert!(!unit.shoot);
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Boost,
+            p1: {
+                let mut value = LVar::new("boost");
+                value.set_num(1.0);
+                value
+            },
+            p2: LVar::new("unused"),
+            p3: LVar::new("unused"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Flag,
+            p1: {
+                let mut value = LVar::new("flag");
+                value.set_num(42.0);
+                value
+            },
+            p2: LVar::new("unused"),
+            p3: LVar::new("unused"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        match exec.objects.get("unit-a").unwrap() {
+            LogicRuntimeObject::Unit(unit) => {
+                assert!(unit.boost);
+                assert_eq!(unit.flag, 42.0);
+            }
+            _ => unreachable!(),
+        }
+
+        let mut unit_radar_nearest = LogicInstruction::UnitRadar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Ground,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Distance,
+            sort_order: {
+                let mut value = LVar::new("sort");
+                value.set_num(1.0);
+                value
+            },
+            output: LVar::new("output"),
+            last_target: None,
+        };
+        unit_radar_nearest.run(&mut exec);
+        match unit_radar_nearest {
+            LogicInstruction::UnitRadar {
+                output,
+                last_target,
+                ..
+            } => {
+                assert_eq!(
+                    output.value(),
+                    LVarValue::Object(Some("enemy-close".into()))
+                );
+                assert_eq!(last_target, Some("enemy-close".into()));
+            }
+            _ => unreachable!(),
+        }
+
+        let mut unit_radar_lowest_health = LogicInstruction::UnitRadar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Any,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Health,
+            sort_order: {
+                let mut value = LVar::new("sort");
+                value.set_num(0.0);
+                value
+            },
+            output: LVar::new("output"),
+            last_target: None,
+        };
+        unit_radar_lowest_health.run(&mut exec);
+        match unit_radar_lowest_health {
+            LogicInstruction::UnitRadar { output, .. } => {
+                assert_eq!(output.value(), LVarValue::Object(Some("enemy-far".into())));
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Unbind,
+            p1: LVar::new("unused"),
+            p2: LVar::new("unused"),
+            p3: LVar::new("unused"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        assert_eq!(exec.bound_unit, None);
+        match exec.objects.get("unit-a").unwrap() {
+            LogicRuntimeObject::Unit(unit) => assert!(unit.controller_reset),
+            _ => unreachable!(),
+        }
+
+        let mut unit_radar_unbound = LogicInstruction::UnitRadar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Any,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Distance,
+            sort_order: {
+                let mut value = LVar::new("sort");
+                value.set_num(1.0);
+                value
+            },
+            output: {
+                let mut value = LVar::new("output");
+                value.set_obj(Some("old".into()));
+                value
+            },
+            last_target: Some("old".into()),
+        };
+        unit_radar_unbound.run(&mut exec);
+        match unit_radar_unbound {
+            LogicInstruction::UnitRadar {
+                output,
+                last_target,
+                ..
+            } => {
+                assert_eq!(output.value(), LVarValue::Object(None));
+                assert_eq!(last_target, None);
+            }
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::UnitBind {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@flare".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.bound_unit, None);
+
+        LogicInstruction::UnitBind {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("unit-b".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.bound_unit, Some("unit-b".into()));
+
+        exec.logic_unit_control = false;
+        LogicInstruction::UnitControl {
+            type_: LUnitControl::Unbind,
+            p1: LVar::new("unused"),
+            p2: LVar::new("unused"),
+            p3: LVar::new("unused"),
+            p4: LVar::new("result"),
+            p5: LVar::new("unused"),
+        }
+        .run(&mut exec);
+        assert_eq!(exec.bound_unit, Some("unit-b".into()));
     }
 
     #[test]
