@@ -1,3 +1,5 @@
+pub mod turrets;
+
 use std::io::{self, Read, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
