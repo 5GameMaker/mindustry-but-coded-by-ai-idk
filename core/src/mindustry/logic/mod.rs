@@ -422,6 +422,39 @@ pub enum LogicStatement {
         out_found: String,
         out_build: String,
     },
+    GetBlock {
+        layer: TileLayer,
+        result: String,
+        x: String,
+        y: String,
+    },
+    SetBlock {
+        layer: TileLayer,
+        block: String,
+        x: String,
+        y: String,
+        team: String,
+        rotation: String,
+    },
+    SpawnUnit {
+        type_: String,
+        x: String,
+        y: String,
+        rotation: String,
+        team: String,
+        result: String,
+    },
+    ApplyStatus {
+        clear: bool,
+        effect: String,
+        unit: String,
+        duration: String,
+    },
+    SpawnWave {
+        x: String,
+        y: String,
+        natural: String,
+    },
 }
 
 impl LogicStatement {
@@ -634,6 +667,54 @@ impl LogicStatement {
         }
     }
 
+    pub fn get_block() -> Self {
+        Self::GetBlock {
+            layer: TileLayer::Block,
+            result: "result".into(),
+            x: "0".into(),
+            y: "0".into(),
+        }
+    }
+
+    pub fn set_block() -> Self {
+        Self::SetBlock {
+            layer: TileLayer::Block,
+            block: "@air".into(),
+            x: "0".into(),
+            y: "0".into(),
+            team: "@derelict".into(),
+            rotation: "0".into(),
+        }
+    }
+
+    pub fn spawn_unit() -> Self {
+        Self::SpawnUnit {
+            type_: "@dagger".into(),
+            x: "10".into(),
+            y: "10".into(),
+            rotation: "90".into(),
+            team: "@sharded".into(),
+            result: "result".into(),
+        }
+    }
+
+    pub fn apply_status() -> Self {
+        Self::ApplyStatus {
+            clear: false,
+            effect: "wet".into(),
+            unit: "unit".into(),
+            duration: "10".into(),
+        }
+    }
+
+    pub fn spawn_wave() -> Self {
+        Self::SpawnWave {
+            x: "10".into(),
+            y: "10".into(),
+            natural: "false".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -663,6 +744,11 @@ impl LogicStatement {
             LogicStatement::UnitControl { .. } => "ucontrol",
             LogicStatement::UnitRadar { .. } => "uradar",
             LogicStatement::UnitLocate { .. } => "ulocate",
+            LogicStatement::GetBlock { .. } => "getblock",
+            LogicStatement::SetBlock { .. } => "setblock",
+            LogicStatement::SpawnUnit { .. } => "spawn",
+            LogicStatement::ApplyStatus { .. } => "status",
+            LogicStatement::SpawnWave { .. } => "spawnwave",
         }
     }
 
@@ -678,7 +764,12 @@ impl LogicStatement {
             | LogicStatement::GetLink { .. } => LCategory::by_name("block").unwrap(),
             LogicStatement::SetRate { .. }
             | LogicStatement::Sync { .. }
-            | LogicStatement::LocalePrint { .. } => LCategory::by_name("world").unwrap(),
+            | LogicStatement::LocalePrint { .. }
+            | LogicStatement::GetBlock { .. }
+            | LogicStatement::SetBlock { .. }
+            | LogicStatement::SpawnUnit { .. }
+            | LogicStatement::ApplyStatus { .. }
+            | LogicStatement::SpawnWave { .. } => LCategory::by_name("world").unwrap(),
             LogicStatement::Set { .. }
             | LogicStatement::Operation { .. }
             | LogicStatement::Lookup { .. }
@@ -704,6 +795,11 @@ impl LogicStatement {
             LogicStatement::SetRate { .. }
                 | LogicStatement::Sync { .. }
                 | LogicStatement::LocalePrint { .. }
+                | LogicStatement::GetBlock { .. }
+                | LogicStatement::SetBlock { .. }
+                | LogicStatement::SpawnUnit { .. }
+                | LogicStatement::ApplyStatus { .. }
+                | LogicStatement::SpawnWave { .. }
         )
     }
 
@@ -877,6 +973,65 @@ impl LogicStatement {
                 out_found.clone(),
                 out_build.clone(),
             ],
+            LogicStatement::GetBlock {
+                layer,
+                result,
+                x,
+                y,
+            } => vec![
+                "getblock".into(),
+                layer.wire_name().into(),
+                result.clone(),
+                x.clone(),
+                y.clone(),
+            ],
+            LogicStatement::SetBlock {
+                layer,
+                block,
+                x,
+                y,
+                team,
+                rotation,
+            } => vec![
+                "setblock".into(),
+                layer.wire_name().into(),
+                block.clone(),
+                x.clone(),
+                y.clone(),
+                team.clone(),
+                rotation.clone(),
+            ],
+            LogicStatement::SpawnUnit {
+                type_,
+                x,
+                y,
+                rotation,
+                team,
+                result,
+            } => vec![
+                "spawn".into(),
+                type_.clone(),
+                x.clone(),
+                y.clone(),
+                rotation.clone(),
+                team.clone(),
+                result.clone(),
+            ],
+            LogicStatement::ApplyStatus {
+                clear,
+                effect,
+                unit,
+                duration,
+            } => vec![
+                "status".into(),
+                clear.to_string(),
+                effect.clone(),
+                unit.clone(),
+                duration.clone(),
+            ],
+            LogicStatement::SpawnWave { x, y, natural } => {
+                vec!["spawnwave".into(), x.clone(), y.clone(), natural.clone()]
+            }
         }
     }
 
@@ -1283,6 +1438,133 @@ impl LogicStatement {
                 }
                 statement
             }
+            "getblock" => {
+                let mut statement = Self::get_block();
+                if let LogicStatement::GetBlock {
+                    layer,
+                    result,
+                    x,
+                    y,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *layer = TileLayer::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *result = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *x = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *y = tokens[4].clone();
+                    }
+                }
+                statement
+            }
+            "setblock" => {
+                let mut statement = Self::set_block();
+                if let LogicStatement::SetBlock {
+                    layer,
+                    block,
+                    x,
+                    y,
+                    team,
+                    rotation,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *layer = TileLayer::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *block = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *x = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *y = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *team = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *rotation = tokens[6].clone();
+                    }
+                }
+                statement
+            }
+            "spawn" => {
+                let mut statement = Self::spawn_unit();
+                if let LogicStatement::SpawnUnit {
+                    type_,
+                    x,
+                    y,
+                    rotation,
+                    team,
+                    result,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *x = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *y = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *rotation = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *team = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *result = tokens[6].clone();
+                    }
+                }
+                statement
+            }
+            "status" => {
+                let mut statement = Self::apply_status();
+                if let LogicStatement::ApplyStatus {
+                    clear,
+                    effect,
+                    unit,
+                    duration,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *clear = java_boolean_value_of(&tokens[1]);
+                    }
+                    if tokens.len() > 2 {
+                        *effect = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *unit = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *duration = tokens[4].clone();
+                    }
+                }
+                statement
+            }
+            "spawnwave" => {
+                let mut statement = Self::spawn_wave();
+                if let LogicStatement::SpawnWave { x, y, natural } = &mut statement {
+                    if tokens.len() > 1 {
+                        *x = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *y = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *natural = tokens[3].clone();
+                    }
+                }
+                statement
+            }
             _ => return None,
         })
     }
@@ -1466,6 +1748,10 @@ pub fn check_logic_tokens(tokens: &mut [String]) {
 
 fn can_parse_i32(value: &str) -> bool {
     value.parse::<i32>().is_ok()
+}
+
+fn java_boolean_value_of(value: &str) -> bool {
+    value.eq_ignore_ascii_case("true")
 }
 
 fn java_modified_utf_char_len(c: char) -> usize {
@@ -3833,6 +4119,13 @@ impl TileLayer {
         Self::WIRE_NAMES[self.ordinal() as usize]
     }
 
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
+
     pub const fn is_settable(self) -> bool {
         matches!(self, TileLayer::Floor | TileLayer::Ore | TileLayer::Block)
     }
@@ -4535,6 +4828,26 @@ mod tests {
             LogicStatement::unit_locate().write_line(),
             "ulocate building core true @copper outx outy found building"
         );
+        assert_eq!(
+            LogicStatement::get_block().write_line(),
+            "getblock block result 0 0"
+        );
+        assert_eq!(
+            LogicStatement::set_block().write_line(),
+            "setblock block @air 0 0 @derelict 0"
+        );
+        assert_eq!(
+            LogicStatement::spawn_unit().write_line(),
+            "spawn @dagger 10 10 90 @sharded result"
+        );
+        assert_eq!(
+            LogicStatement::apply_status().write_line(),
+            "status false wet unit 10"
+        );
+        assert_eq!(
+            LogicStatement::spawn_wave().write_line(),
+            "spawnwave 10 10 false"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
@@ -4550,6 +4863,11 @@ mod tests {
         assert_eq!(LogicStatement::unit_control().category().name, "unit");
         assert_eq!(LogicStatement::unit_radar().category().name, "unit");
         assert_eq!(LogicStatement::unit_locate().category().name, "unit");
+        assert_eq!(LogicStatement::get_block().category().name, "world");
+        assert_eq!(LogicStatement::set_block().category().name, "world");
+        assert_eq!(LogicStatement::spawn_unit().category().name, "world");
+        assert_eq!(LogicStatement::apply_status().category().name, "world");
+        assert_eq!(LogicStatement::spawn_wave().category().name, "world");
         assert!(!LogicStatement::read().privileged());
         assert!(!LogicStatement::operation().privileged());
         assert!(!LogicStatement::stop().privileged());
@@ -4563,6 +4881,11 @@ mod tests {
         assert!(LogicStatement::set_rate().privileged());
         assert!(LogicStatement::sync().privileged());
         assert!(LogicStatement::locale_print().privileged());
+        assert!(LogicStatement::get_block().privileged());
+        assert!(LogicStatement::set_block().privileged());
+        assert!(LogicStatement::spawn_unit().privileged());
+        assert!(LogicStatement::apply_status().privileged());
+        assert!(LogicStatement::spawn_wave().privileged());
     }
 
     #[test]
@@ -4848,6 +5171,118 @@ mod tests {
                 .map(String::from)
             ),
             None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["getblock", "ore", "oreOut", "4", "5"].map(String::from)),
+            Some(LogicStatement::GetBlock {
+                layer: TileLayer::Ore,
+                result: "oreOut".into(),
+                x: "4".into(),
+                y: "5".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["getblock", "floor"].map(String::from)),
+            Some(LogicStatement::GetBlock {
+                layer: TileLayer::Floor,
+                result: "result".into(),
+                x: "0".into(),
+                y: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["getblock", "missing"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["setblock", "floor", "@sand", "1", "2", "@blue", "3"].map(String::from)
+            ),
+            Some(LogicStatement::SetBlock {
+                layer: TileLayer::Floor,
+                block: "@sand".into(),
+                x: "1".into(),
+                y: "2".into(),
+                team: "@blue".into(),
+                rotation: "3".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setblock", "ore", "@thorium"].map(String::from)),
+            Some(LogicStatement::SetBlock {
+                layer: TileLayer::Ore,
+                block: "@thorium".into(),
+                x: "0".into(),
+                y: "0".into(),
+                team: "@derelict".into(),
+                rotation: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["spawn", "@flare", "7", "8", "45", "@crux", "spawned"].map(String::from)
+            ),
+            Some(LogicStatement::SpawnUnit {
+                type_: "@flare".into(),
+                x: "7".into(),
+                y: "8".into(),
+                rotation: "45".into(),
+                team: "@crux".into(),
+                result: "spawned".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["spawn", "@mono"].map(String::from)),
+            Some(LogicStatement::SpawnUnit {
+                type_: "@mono".into(),
+                x: "10".into(),
+                y: "10".into(),
+                rotation: "90".into(),
+                team: "@sharded".into(),
+                result: "result".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["status", "true", "burning", "@unit", "3"].map(String::from)
+            ),
+            Some(LogicStatement::ApplyStatus {
+                clear: true,
+                effect: "burning".into(),
+                unit: "@unit".into(),
+                duration: "3".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["status", "1"].map(String::from)),
+            Some(LogicStatement::ApplyStatus {
+                clear: false,
+                effect: "wet".into(),
+                unit: "unit".into(),
+                duration: "10".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["status", "TRUE"].map(String::from))
+                .unwrap()
+                .write_line(),
+            "status true wet unit 10"
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["spawnwave", "20", "30", "true"].map(String::from)),
+            Some(LogicStatement::SpawnWave {
+                x: "20".into(),
+                y: "30".into(),
+                natural: "true".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["spawnwave"].map(String::from)),
+            Some(LogicStatement::SpawnWave {
+                x: "10".into(),
+                y: "10".into(),
+                natural: "false".into()
+            })
         );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
     }
