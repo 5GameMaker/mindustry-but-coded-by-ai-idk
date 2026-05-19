@@ -716,6 +716,233 @@ pub fn read_unit_cargo_unload_state<R: Read>(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RepairTurretState {
+    pub target_present: bool,
+    pub strength: f32,
+    pub rotation: f32,
+}
+
+impl Default for RepairTurretState {
+    fn default() -> Self {
+        Self {
+            target_present: false,
+            strength: 0.0,
+            rotation: 90.0,
+        }
+    }
+}
+
+pub fn repair_turret_multiplier(
+    accept_coolant: bool,
+    heat_capacity: f32,
+    coolant_multiplier: f32,
+    optional_efficiency: f32,
+) -> f32 {
+    if accept_coolant {
+        1.0 + heat_capacity * coolant_multiplier * optional_efficiency
+    } else {
+        1.0
+    }
+}
+
+pub fn repair_turret_target_valid(
+    target_present: bool,
+    target_dead: bool,
+    target_distance: f32,
+    target_hit_size: f32,
+    repair_radius: f32,
+    target_health: f32,
+    target_max_health: f32,
+) -> bool {
+    target_present
+        && !target_dead
+        && target_distance - target_hit_size / 2.0 <= repair_radius
+        && target_health < target_max_health
+}
+
+pub fn repair_turret_heal_amount(
+    repair_speed: f32,
+    strength: f32,
+    edelta: f32,
+    multiplier: f32,
+    angle_dist: f32,
+) -> f32 {
+    if angle_dist < 30.0 {
+        repair_speed * strength * edelta * multiplier
+    } else {
+        0.0
+    }
+}
+
+pub fn repair_turret_update_strength(strength: f32, healed: bool, delta: f32) -> f32 {
+    lerp_delta(strength, if healed { 1.0 } else { 0.0 }, 0.08 * delta)
+}
+
+pub fn repair_turret_should_consume(target_present: bool, enabled: bool) -> bool {
+    target_present && enabled
+}
+
+pub fn write_repair_turret_state<W: Write>(
+    write: &mut W,
+    state: &RepairTurretState,
+) -> io::Result<()> {
+    write_f32(write, state.rotation)
+}
+
+pub fn read_repair_turret_state<R: Read>(
+    read: &mut R,
+    revision: i32,
+) -> io::Result<RepairTurretState> {
+    Ok(RepairTurretState {
+        rotation: if revision >= 1 { read_f32(read)? } else { 90.0 },
+        ..RepairTurretState::default()
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DroneCenterState {
+    pub read_units: Vec<i32>,
+    pub read_target: i32,
+    pub units: Vec<i32>,
+    pub target: Option<i32>,
+    pub drone_progress: f32,
+    pub drone_warmup: f32,
+    pub total_drone_progress: f32,
+}
+
+impl Default for DroneCenterState {
+    fn default() -> Self {
+        Self {
+            read_units: Vec::new(),
+            read_target: -1,
+            units: Vec::new(),
+            target: None,
+            drone_progress: 0.0,
+            drone_warmup: 0.0,
+            total_drone_progress: 0.0,
+        }
+    }
+}
+
+pub fn drone_center_update(
+    state: &mut DroneCenterState,
+    units_spawned: usize,
+    efficiency: f32,
+    edelta: f32,
+    delta: f32,
+    drone_construct_time: f32,
+) -> bool {
+    if !state.read_units.is_empty() {
+        state.units = state.read_units.clone();
+        state.read_units.clear();
+    }
+    state.drone_warmup = lerp_delta(
+        state.drone_warmup,
+        if state.units.len() < units_spawned {
+            efficiency
+        } else {
+            0.0
+        },
+        0.1,
+    );
+    state.total_drone_progress += state.drone_warmup * delta;
+
+    if state.units.len() < units_spawned {
+        state.drone_progress += edelta / drone_construct_time;
+        if state.drone_progress >= 1.0 {
+            state.drone_progress = 0.0;
+            return true;
+        }
+    }
+    false
+}
+
+pub fn drone_center_apply_status(
+    within_range: bool,
+    drone_range: f32,
+    target_hit_size: f32,
+    distance: f32,
+) -> bool {
+    within_range || distance <= drone_range + target_hit_size
+}
+
+pub fn write_drone_center_state<W: Write>(
+    write: &mut W,
+    target_id: Option<i32>,
+    unit_ids: &[i32],
+) -> io::Result<()> {
+    write_i32(write, target_id.unwrap_or(-1))?;
+    write_i16(write, unit_ids.len() as i16)?;
+    for id in unit_ids {
+        write_i32(write, *id)?;
+    }
+    Ok(())
+}
+
+pub fn read_drone_center_state<R: Read>(read: &mut R) -> io::Result<DroneCenterState> {
+    let target = read_i32(read)?;
+    let count = read_i16(read)? as usize;
+    let mut read_units = Vec::with_capacity(count);
+    for _ in 0..count {
+        read_units.push(read_i32(read)?);
+    }
+    Ok(DroneCenterState {
+        read_target: target,
+        read_units,
+        ..DroneCenterState::default()
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnitAssemblerModuleState {
+    pub linked: bool,
+    pub last_change: i32,
+    pub has_payload: bool,
+}
+
+impl Default for UnitAssemblerModuleState {
+    fn default() -> Self {
+        Self {
+            linked: false,
+            last_change: -2,
+            has_payload: false,
+        }
+    }
+}
+
+pub fn assembler_module_should_find_link(last_change: i32, world_tile_changes: i32) -> bool {
+    last_change != world_tile_changes
+}
+
+pub fn assembler_module_can_place(has_link: bool) -> bool {
+    has_link
+}
+
+pub fn assembler_module_accept_payload(
+    linked: bool,
+    has_payload: bool,
+    linked_accepts_payload: bool,
+) -> bool {
+    linked && !has_payload && linked_accepts_payload
+}
+
+pub fn assembler_module_transfer_payload(
+    moved_in_payload: bool,
+    linked: bool,
+    module_fits: bool,
+    link_was_occupied: bool,
+    link_accepts_payload: bool,
+    efficiency: f32,
+) -> bool {
+    moved_in_payload
+        && linked
+        && module_fits
+        && !link_was_occupied
+        && link_accepts_payload
+        && efficiency > 0.0
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
     from + (to - from) * alpha
 }
@@ -1057,5 +1284,81 @@ mod tests {
                 .item_id,
             Some(5)
         );
+    }
+
+    #[test]
+    fn repair_turret_formulae_and_rotation_state_follow_upstream() {
+        assert_eq!(repair_turret_multiplier(false, 2.0, 3.0, 0.5), 1.0);
+        assert_eq!(repair_turret_multiplier(true, 2.0, 3.0, 0.5), 4.0);
+        assert!(repair_turret_target_valid(
+            true, false, 50.0, 10.0, 45.0, 9.0, 10.0
+        ));
+        assert!(!repair_turret_target_valid(
+            true, false, 51.0, 10.0, 45.0, 9.0, 10.0
+        ));
+        assert_eq!(repair_turret_heal_amount(0.3, 0.5, 2.0, 4.0, 20.0), 1.2);
+        assert_eq!(repair_turret_heal_amount(0.3, 0.5, 2.0, 4.0, 30.0), 0.0);
+        assert_eq!(repair_turret_update_strength(0.0, true, 1.0), 0.08);
+        assert!(repair_turret_should_consume(true, true));
+
+        let state = RepairTurretState {
+            rotation: 135.0,
+            ..RepairTurretState::default()
+        };
+        let mut bytes = Vec::new();
+        write_repair_turret_state(&mut bytes, &state).unwrap();
+        assert_eq!(
+            read_repair_turret_state(&mut bytes.as_slice(), 1).unwrap(),
+            state
+        );
+        assert_eq!(
+            read_repair_turret_state(&mut bytes.as_slice(), 0)
+                .unwrap()
+                .rotation,
+            90.0
+        );
+    }
+
+    #[test]
+    fn drone_center_update_and_state_order_follow_upstream() {
+        let mut state = DroneCenterState {
+            read_units: vec![1, 2],
+            read_target: -1,
+            units: Vec::new(),
+            target: None,
+            drone_progress: 0.9,
+            drone_warmup: 0.0,
+            total_drone_progress: 0.0,
+        };
+        assert!(!drone_center_update(&mut state, 4, 1.0, 6.0, 1.0, 180.0));
+        assert_eq!(state.units, vec![1, 2]);
+        assert_eq!(state.drone_warmup, 0.1);
+        assert!((state.drone_progress - 0.93333334).abs() < 0.00001);
+        assert!(drone_center_apply_status(false, 50.0, 12.0, 62.0));
+
+        let mut bytes = Vec::new();
+        write_drone_center_state(&mut bytes, Some(9), &[1, 2, 3]).unwrap();
+        let restored = read_drone_center_state(&mut bytes.as_slice()).unwrap();
+        assert_eq!(restored.read_target, 9);
+        assert_eq!(restored.read_units, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn assembler_module_link_payload_rules_follow_upstream() {
+        assert!(assembler_module_should_find_link(-2, 10));
+        assert!(!assembler_module_should_find_link(10, 10));
+        assert!(assembler_module_can_place(true));
+        assert!(!assembler_module_can_place(false));
+        assert!(assembler_module_accept_payload(true, false, true));
+        assert!(!assembler_module_accept_payload(true, true, true));
+        assert!(assembler_module_transfer_payload(
+            true, true, true, false, true, 1.0
+        ));
+        assert!(!assembler_module_transfer_payload(
+            true, true, true, true, true, 1.0
+        ));
+        assert!(!assembler_module_transfer_payload(
+            true, true, true, false, true, 0.0
+        ));
     }
 }
