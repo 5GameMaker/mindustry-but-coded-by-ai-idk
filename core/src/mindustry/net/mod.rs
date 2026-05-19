@@ -12,6 +12,7 @@ pub mod validate_exception;
 
 pub use administration::{
     ActionFilter, ActionType, Administration, Config, ConfigValue, PlayerAction, PlayerInfo,
+    TraceInfo,
 };
 pub use arc_net_provider::{FrameworkMessage, PacketEnvelope, PacketSerializer};
 pub use host::Host;

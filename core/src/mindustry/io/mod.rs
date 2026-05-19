@@ -14,7 +14,8 @@ pub use save::{
 };
 pub use type_io::{
     read_action, read_java_utf, read_kick, read_marker_control, read_object, read_point2,
-    read_point2_packed, read_string, read_team_id, read_vec2, write_action, write_java_utf,
-    write_kick, write_marker_control, write_object, write_point2, write_point2_packed,
-    write_string, write_team_id, write_vec2, Point2, TeamId, TypeValue, Vec2,
+    read_point2_packed, read_string, read_team_id, read_trace_info, read_vec2, write_action,
+    write_java_utf, write_kick, write_marker_control, write_object, write_point2,
+    write_point2_packed, write_string, write_team_id, write_trace_info, write_vec2, Point2, TeamId,
+    TypeValue, Vec2,
 };

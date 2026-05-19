@@ -297,6 +297,47 @@ impl PlayerInfo {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceInfo {
+    pub ip: Option<String>,
+    pub uuid: Option<String>,
+    pub locale: Option<String>,
+    pub modded: bool,
+    pub mobile: bool,
+    pub times_joined: i32,
+    pub times_kicked: i32,
+    pub ips: Vec<Option<String>>,
+    pub names: Vec<Option<String>>,
+}
+
+impl TraceInfo {
+    pub const MAX_HISTORY_LEN: usize = 12;
+
+    pub fn new(
+        ip: Option<String>,
+        uuid: Option<String>,
+        locale: Option<String>,
+        modded: bool,
+        mobile: bool,
+        times_joined: i32,
+        times_kicked: i32,
+        ips: Vec<Option<String>>,
+        names: Vec<Option<String>>,
+    ) -> Self {
+        Self {
+            ip,
+            uuid,
+            locale,
+            modded,
+            mobile,
+            times_joined,
+            times_kicked,
+            ips,
+            names,
+        }
+    }
+}
+
 pub type ActionFilter = Box<dyn Fn(&PlayerAction) -> bool + Send + Sync>;
 
 #[derive(Debug, Clone, PartialEq)]

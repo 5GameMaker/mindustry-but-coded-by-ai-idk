@@ -1,7 +1,7 @@
 use std::io::{self, Read, Write};
 
 use crate::mindustry::logic::LMarkerControl;
-use crate::mindustry::net::{AdminAction, KickReason};
+use crate::mindustry::net::{AdminAction, KickReason, TraceInfo};
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const MAX_ARRAY_SIZE: usize = 1000;
@@ -772,6 +772,44 @@ pub fn read_bytebuffer_string<R: Read>(read: &mut R) -> io::Result<Option<String
     read_string_data(read)
 }
 
+pub fn write_trace_info<W: Write>(write: &mut W, trace: &TraceInfo) -> io::Result<()> {
+    write_string(write, trace.ip.as_deref())?;
+    write_string(write, trace.uuid.as_deref())?;
+    write_string(write, trace.locale.as_deref())?;
+    write_u8(write, trace.modded as u8)?;
+    write_u8(write, trace.mobile as u8)?;
+    write_i32(write, trace.times_joined)?;
+    write_i32(write, trace.times_kicked)?;
+    write_strings_limited(
+        write,
+        &borrow_optional_strings(&trace.ips),
+        TraceInfo::MAX_HISTORY_LEN,
+    )?;
+    write_strings_limited(
+        write,
+        &borrow_optional_strings(&trace.names),
+        TraceInfo::MAX_HISTORY_LEN,
+    )
+}
+
+pub fn read_trace_info<R: Read>(read: &mut R) -> io::Result<TraceInfo> {
+    Ok(TraceInfo {
+        ip: read_string(read)?,
+        uuid: read_string(read)?,
+        locale: read_string(read)?,
+        modded: read_u8(read)? == 1,
+        mobile: read_u8(read)? == 1,
+        times_joined: read_i32(read)?,
+        times_kicked: read_i32(read)?,
+        ips: read_strings(read)?,
+        names: read_strings(read)?,
+    })
+}
+
+fn borrow_optional_strings(values: &[Option<String>]) -> Vec<Option<&str>> {
+    values.iter().map(|value| value.as_deref()).collect()
+}
+
 fn invalid_input(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -1050,5 +1088,55 @@ mod tests {
         );
         assert!(read_action(&mut [0x05].as_slice()).is_err());
         assert!(read_action(&mut [0xff].as_slice()).is_err());
+    }
+
+    #[test]
+    fn trace_info_matches_java_field_order_and_caps_history() {
+        let trace = TraceInfo::new(
+            Some("127.0.0.1".into()),
+            Some("uuid".into()),
+            None,
+            true,
+            false,
+            7,
+            2,
+            (0..13).map(|index| Some(format!("ip{index}"))).collect(),
+            vec![Some("alpha".into()), None, Some("gamma".into())],
+        );
+
+        let mut bytes = Vec::new();
+        write_trace_info(&mut bytes, &trace).unwrap();
+
+        let mut expected = Vec::new();
+        write_string(&mut expected, Some("127.0.0.1")).unwrap();
+        write_string(&mut expected, Some("uuid")).unwrap();
+        write_string(&mut expected, None).unwrap();
+        expected.extend_from_slice(&[1, 0]);
+        expected.extend_from_slice(&7i32.to_be_bytes());
+        expected.extend_from_slice(&2i32.to_be_bytes());
+        expected.push(12);
+        for index in 0..12 {
+            write_string(&mut expected, Some(&format!("ip{index}"))).unwrap();
+        }
+        expected.push(3);
+        write_string(&mut expected, Some("alpha")).unwrap();
+        write_string(&mut expected, None).unwrap();
+        write_string(&mut expected, Some("gamma")).unwrap();
+        assert_eq!(bytes, expected);
+
+        let decoded = read_trace_info(&mut bytes.as_slice()).unwrap();
+        assert_eq!(decoded.ip.as_deref(), Some("127.0.0.1"));
+        assert_eq!(decoded.uuid.as_deref(), Some("uuid"));
+        assert_eq!(decoded.locale, None);
+        assert!(decoded.modded);
+        assert!(!decoded.mobile);
+        assert_eq!(decoded.times_joined, 7);
+        assert_eq!(decoded.times_kicked, 2);
+        assert_eq!(decoded.ips.len(), TraceInfo::MAX_HISTORY_LEN);
+        assert_eq!(decoded.ips[11].as_deref(), Some("ip11"));
+        assert_eq!(
+            decoded.names,
+            vec![Some("alpha".into()), None, Some("gamma".into())]
+        );
     }
 }
