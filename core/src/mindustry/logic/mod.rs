@@ -305,7 +305,19 @@ pub enum LogicStatement {
         target: String,
         address: String,
     },
+    Draw {
+        type_: GraphicsType,
+        x: String,
+        y: String,
+        p1: String,
+        p2: String,
+        p3: String,
+        p4: String,
+    },
     Print {
+        value: String,
+    },
+    PrintChar {
         value: String,
     },
     Format {
@@ -337,6 +349,14 @@ pub enum LogicStatement {
     Operation {
         op: LogicOp,
         dest: String,
+        a: String,
+        b: String,
+    },
+    Select {
+        result: String,
+        op: ConditionOp,
+        comp0: String,
+        comp1: String,
         a: String,
         b: String,
     },
@@ -421,6 +441,15 @@ pub enum LogicStatement {
         out_y: String,
         out_found: String,
         out_build: String,
+    },
+    Query {
+        shape: QueryShape,
+        type_: QueryType,
+        team: String,
+        x: String,
+        y: String,
+        w: String,
+        h: String,
     },
     GetBlock {
         layer: TileLayer,
@@ -589,10 +618,26 @@ impl LogicStatement {
         }
     }
 
+    pub fn draw() -> Self {
+        Self::Draw {
+            type_: GraphicsType::Clear,
+            x: "0".into(),
+            y: "0".into(),
+            p1: "0".into(),
+            p2: "0".into(),
+            p3: "0".into(),
+            p4: "0".into(),
+        }
+    }
+
     pub fn print() -> Self {
         Self::Print {
             value: "\"frog\"".into(),
         }
+    }
+
+    pub fn print_char() -> Self {
+        Self::PrintChar { value: "65".into() }
     }
 
     pub fn format() -> Self {
@@ -649,6 +694,17 @@ impl LogicStatement {
         Self::Operation {
             op: LogicOp::Add,
             dest: "result".into(),
+            a: "a".into(),
+            b: "b".into(),
+        }
+    }
+
+    pub fn select() -> Self {
+        Self::Select {
+            result: "result".into(),
+            op: ConditionOp::NotEqual,
+            comp0: "x".into(),
+            comp1: "false".into(),
             a: "a".into(),
             b: "b".into(),
         }
@@ -775,6 +831,18 @@ impl LogicStatement {
             out_y: "outy".into(),
             out_found: "found".into(),
             out_build: "building".into(),
+        }
+    }
+
+    pub fn query() -> Self {
+        Self::Query {
+            shape: QueryShape::Circle,
+            type_: QueryType::Unit,
+            team: "null".into(),
+            x: "0".into(),
+            y: "0".into(),
+            w: "10".into(),
+            h: "10".into(),
         }
     }
 
@@ -990,7 +1058,9 @@ impl LogicStatement {
             LogicStatement::Invalid => "noop",
             LogicStatement::Read { .. } => "read",
             LogicStatement::Write { .. } => "write",
+            LogicStatement::Draw { .. } => "draw",
             LogicStatement::Print { .. } => "print",
+            LogicStatement::PrintChar { .. } => "printchar",
             LogicStatement::Format { .. } => "format",
             LogicStatement::LocalePrint { .. } => "localeprint",
             LogicStatement::DrawFlush { .. } => "drawflush",
@@ -1000,6 +1070,7 @@ impl LogicStatement {
             LogicStatement::Sync { .. } => "sync",
             LogicStatement::Set { .. } => "set",
             LogicStatement::Operation { .. } => "op",
+            LogicStatement::Select { .. } => "select",
             LogicStatement::Wait { .. } => "wait",
             LogicStatement::Stop => "stop",
             LogicStatement::End => "end",
@@ -1014,6 +1085,7 @@ impl LogicStatement {
             LogicStatement::UnitControl { .. } => "ucontrol",
             LogicStatement::UnitRadar { .. } => "uradar",
             LogicStatement::UnitLocate { .. } => "ulocate",
+            LogicStatement::Query { .. } => "query",
             LogicStatement::GetBlock { .. } => "getblock",
             LogicStatement::SetBlock { .. } => "setblock",
             LogicStatement::SpawnUnit { .. } => "spawn",
@@ -1043,7 +1115,9 @@ impl LogicStatement {
             LogicStatement::Invalid => LCategory::by_name("unknown").unwrap(),
             LogicStatement::Read { .. }
             | LogicStatement::Write { .. }
+            | LogicStatement::Draw { .. }
             | LogicStatement::Print { .. }
+            | LogicStatement::PrintChar { .. }
             | LogicStatement::Format { .. } => LCategory::by_name("io").unwrap(),
             LogicStatement::DrawFlush { .. }
             | LogicStatement::PrintFlush { .. }
@@ -1051,6 +1125,7 @@ impl LogicStatement {
             LogicStatement::SetRate { .. }
             | LogicStatement::Sync { .. }
             | LogicStatement::LocalePrint { .. }
+            | LogicStatement::Query { .. }
             | LogicStatement::GetBlock { .. }
             | LogicStatement::SetBlock { .. }
             | LogicStatement::SpawnUnit { .. }
@@ -1074,6 +1149,7 @@ impl LogicStatement {
             | LogicStatement::MakeMarker { .. } => LCategory::by_name("world").unwrap(),
             LogicStatement::Set { .. }
             | LogicStatement::Operation { .. }
+            | LogicStatement::Select { .. }
             | LogicStatement::Lookup { .. }
             | LogicStatement::PackColor { .. }
             | LogicStatement::UnpackColor { .. } => LCategory::by_name("operation").unwrap(),
@@ -1097,6 +1173,7 @@ impl LogicStatement {
             LogicStatement::SetRate { .. }
                 | LogicStatement::Sync { .. }
                 | LogicStatement::LocalePrint { .. }
+                | LogicStatement::Query { .. }
                 | LogicStatement::GetBlock { .. }
                 | LogicStatement::SetBlock { .. }
                 | LogicStatement::SpawnUnit { .. }
@@ -1144,7 +1221,26 @@ impl LogicStatement {
                 target.clone(),
                 address.clone(),
             ],
+            LogicStatement::Draw {
+                type_,
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => vec![
+                "draw".into(),
+                type_.wire_name().into(),
+                x.clone(),
+                y.clone(),
+                p1.clone(),
+                p2.clone(),
+                p3.clone(),
+                p4.clone(),
+            ],
             LogicStatement::Print { value } => vec!["print".into(), value.clone()],
+            LogicStatement::PrintChar { value } => vec!["printchar".into(), value.clone()],
             LogicStatement::Format { value } => vec!["format".into(), value.clone()],
             LogicStatement::LocalePrint { value } => vec!["localeprint".into(), value.clone()],
             LogicStatement::DrawFlush { target } => vec!["drawflush".into(), target.clone()],
@@ -1159,6 +1255,22 @@ impl LogicStatement {
                 "op".into(),
                 op.java_name().into(),
                 dest.clone(),
+                a.clone(),
+                b.clone(),
+            ],
+            LogicStatement::Select {
+                result,
+                op,
+                comp0,
+                comp1,
+                a,
+                b,
+            } => vec![
+                "select".into(),
+                result.clone(),
+                op.java_name().into(),
+                comp0.clone(),
+                comp1.clone(),
                 a.clone(),
                 b.clone(),
             ],
@@ -1290,6 +1402,24 @@ impl LogicStatement {
                 out_y.clone(),
                 out_found.clone(),
                 out_build.clone(),
+            ],
+            LogicStatement::Query {
+                shape,
+                type_,
+                team,
+                x,
+                y,
+                w,
+                h,
+            } => vec![
+                "query".into(),
+                shape.wire_name().into(),
+                type_.wire_name().into(),
+                team.clone(),
+                x.clone(),
+                y.clone(),
+                w.clone(),
+                h.clone(),
             ],
             LogicStatement::GetBlock {
                 layer,
@@ -1596,8 +1726,55 @@ impl LogicStatement {
                 }
                 statement
             }
+            "draw" => {
+                let mut statement = Self::draw();
+                if let LogicStatement::Draw {
+                    type_,
+                    x,
+                    y,
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = GraphicsType::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *x = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *y = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *p1 = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *p2 = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *p3 = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *p4 = tokens[7].clone();
+                    }
+
+                    if *type_ == GraphicsType::Color && p2 == "0" {
+                        *p2 = "255".into();
+                    }
+
+                    if *type_ == GraphicsType::Print && LogicAlign::by_name(p1).is_some() {
+                        p1.insert(0, '@');
+                    }
+                }
+                statement
+            }
             "print" => Self::Print {
                 value: tokens.get(1).cloned().unwrap_or_else(|| "\"frog\"".into()),
+            },
+            "printchar" => Self::PrintChar {
+                value: tokens.get(1).cloned().unwrap_or_else(|| "65".into()),
             },
             "format" => Self::Format {
                 value: tokens.get(1).cloned().unwrap_or_else(|| "\"frog\"".into()),
@@ -1655,6 +1832,38 @@ impl LogicStatement {
                     }
                     if tokens.len() > 4 {
                         *b = tokens[4].clone();
+                    }
+                }
+                statement
+            }
+            "select" => {
+                let mut statement = Self::select();
+                if let LogicStatement::Select {
+                    result,
+                    op,
+                    comp0,
+                    comp1,
+                    a,
+                    b,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *result = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *op = ConditionOp::by_java_name(&tokens[2])?;
+                    }
+                    if tokens.len() > 3 {
+                        *comp0 = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *comp1 = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *a = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *b = tokens[6].clone();
                     }
                 }
                 statement
@@ -1947,6 +2156,42 @@ impl LogicStatement {
                     }
                     if tokens.len() > 8 {
                         *out_build = tokens[8].clone();
+                    }
+                }
+                statement
+            }
+            "query" => {
+                let mut statement = Self::query();
+                if let LogicStatement::Query {
+                    shape,
+                    type_,
+                    team,
+                    x,
+                    y,
+                    w,
+                    h,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *shape = QueryShape::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *type_ = QueryType::by_wire_name(&tokens[2])?;
+                    }
+                    if tokens.len() > 3 {
+                        *team = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *x = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *y = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *w = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *h = tokens[7].clone();
                     }
                 }
                 statement
@@ -4963,6 +5208,86 @@ impl QueryType {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GraphicsType {
+    Clear,
+    Color,
+    Col,
+    Stroke,
+    Line,
+    Rect,
+    LineRect,
+    Poly,
+    LinePoly,
+    Triangle,
+    Image,
+    Print,
+    Translate,
+    Scale,
+    Rotate,
+    Reset,
+}
+
+impl GraphicsType {
+    pub const ALL: [GraphicsType; 16] = [
+        GraphicsType::Clear,
+        GraphicsType::Color,
+        GraphicsType::Col,
+        GraphicsType::Stroke,
+        GraphicsType::Line,
+        GraphicsType::Rect,
+        GraphicsType::LineRect,
+        GraphicsType::Poly,
+        GraphicsType::LinePoly,
+        GraphicsType::Triangle,
+        GraphicsType::Image,
+        GraphicsType::Print,
+        GraphicsType::Translate,
+        GraphicsType::Scale,
+        GraphicsType::Rotate,
+        GraphicsType::Reset,
+    ];
+
+    pub const WIRE_NAMES: [&'static str; 16] = [
+        "clear",
+        "color",
+        "col",
+        "stroke",
+        "line",
+        "rect",
+        "lineRect",
+        "poly",
+        "linePoly",
+        "triangle",
+        "image",
+        "print",
+        "translate",
+        "scale",
+        "rotate",
+        "reset",
+    ];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QueryShape {
     Circle,
     Rect,
@@ -5747,7 +6072,12 @@ mod tests {
         assert_eq!(LogicStatement::invalid().write_line(), "noop");
         assert_eq!(LogicStatement::read().write_line(), "read result cell1 0");
         assert_eq!(LogicStatement::write().write_line(), "write result cell1 0");
+        assert_eq!(
+            LogicStatement::draw().write_line(),
+            "draw clear 0 0 0 0 0 0"
+        );
         assert_eq!(LogicStatement::print().write_line(), "print \"frog\"");
+        assert_eq!(LogicStatement::print_char().write_line(), "printchar 65");
         assert_eq!(LogicStatement::format().write_line(), "format \"frog\"");
         assert_eq!(
             LogicStatement::locale_print().write_line(),
@@ -5768,6 +6098,10 @@ mod tests {
         assert_eq!(
             LogicStatement::operation().write_line(),
             "op add result a b"
+        );
+        assert_eq!(
+            LogicStatement::select().write_line(),
+            "select result notEqual x false a b"
         );
         assert_eq!(LogicStatement::wait().write_line(), "wait 0.5");
         assert_eq!(LogicStatement::stop().write_line(), "stop");
@@ -5812,6 +6146,10 @@ mod tests {
         assert_eq!(
             LogicStatement::unit_locate().write_line(),
             "ulocate building core true @copper outx outy found building"
+        );
+        assert_eq!(
+            LogicStatement::query().write_line(),
+            "query circle unit null 0 0 10 10"
         );
         assert_eq!(
             LogicStatement::get_block().write_line(),
@@ -5899,9 +6237,12 @@ mod tests {
         );
 
         assert_eq!(LogicStatement::read().category().name, "io");
+        assert_eq!(LogicStatement::draw().category().name, "io");
+        assert_eq!(LogicStatement::print_char().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
         assert_eq!(LogicStatement::set_rate().category().name, "world");
         assert_eq!(LogicStatement::operation().category().name, "operation");
+        assert_eq!(LogicStatement::select().category().name, "operation");
         assert_eq!(LogicStatement::lookup().category().name, "operation");
         assert_eq!(LogicStatement::wait().category().name, "control");
         assert_eq!(LogicStatement::jump().category().name, "control");
@@ -5912,6 +6253,7 @@ mod tests {
         assert_eq!(LogicStatement::unit_control().category().name, "unit");
         assert_eq!(LogicStatement::unit_radar().category().name, "unit");
         assert_eq!(LogicStatement::unit_locate().category().name, "unit");
+        assert_eq!(LogicStatement::query().category().name, "world");
         assert_eq!(LogicStatement::get_block().category().name, "world");
         assert_eq!(LogicStatement::set_block().category().name, "world");
         assert_eq!(LogicStatement::spawn_unit().category().name, "world");
@@ -5934,7 +6276,10 @@ mod tests {
         assert_eq!(LogicStatement::set_marker().category().name, "world");
         assert_eq!(LogicStatement::make_marker().category().name, "world");
         assert!(!LogicStatement::read().privileged());
+        assert!(!LogicStatement::draw().privileged());
+        assert!(!LogicStatement::print_char().privileged());
         assert!(!LogicStatement::operation().privileged());
+        assert!(!LogicStatement::select().privileged());
         assert!(!LogicStatement::stop().privileged());
         assert!(!LogicStatement::lookup().privileged());
         assert!(!LogicStatement::jump().privileged());
@@ -5943,6 +6288,7 @@ mod tests {
         assert!(!LogicStatement::unit_control().privileged());
         assert!(!LogicStatement::unit_radar().privileged());
         assert!(!LogicStatement::unit_locate().privileged());
+        assert!(LogicStatement::query().privileged());
         assert!(LogicStatement::set_rate().privileged());
         assert!(LogicStatement::sync().privileged());
         assert!(LogicStatement::locale_print().privileged());
@@ -5994,10 +6340,46 @@ mod tests {
             "write value cell3 2"
         );
         assert_eq!(
+            LogicStatement::read_tokens(
+                &["draw", "line", "1", "2", "3", "4", "5", "6"].map(String::from)
+            ),
+            Some(LogicStatement::Draw {
+                type_: GraphicsType::Line,
+                x: "1".into(),
+                y: "2".into(),
+                p1: "3".into(),
+                p2: "4".into(),
+                p3: "5".into(),
+                p4: "6".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["draw", "color", "1", "2", "3", "0"].map(String::from))
+                .unwrap()
+                .write_line(),
+            "draw color 1 2 3 255 0 0"
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["draw", "print", "1", "2", "bottomLeft"].map(String::from)
+            )
+            .unwrap()
+            .write_line(),
+            "draw print 1 2 @bottomLeft 0 0 0"
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["draw", "missing"].map(String::from)),
+            None
+        );
+        assert_eq!(
             LogicStatement::read_tokens(&["print", "\"hello world\""].map(String::from))
                 .unwrap()
                 .tokens(),
             vec!["print".to_string(), "\"hello world\"".to_string()]
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["printchar", "97"].map(String::from)),
+            Some(LogicStatement::PrintChar { value: "97".into() })
         );
         assert_eq!(
             LogicStatement::read_tokens(&["format", "\"x=%d\""].map(String::from)),
@@ -6069,6 +6451,43 @@ mod tests {
         );
         assert_eq!(
             LogicStatement::read_tokens(&["op", "missing", "out", "a", "b"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &[
+                    "select",
+                    "out",
+                    "greaterThanEq",
+                    "hp",
+                    "10",
+                    "alive",
+                    "dead"
+                ]
+                .map(String::from)
+            ),
+            Some(LogicStatement::Select {
+                result: "out".into(),
+                op: ConditionOp::GreaterThanEq,
+                comp0: "hp".into(),
+                comp1: "10".into(),
+                a: "alive".into(),
+                b: "dead".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["select", "out"].map(String::from)),
+            Some(LogicStatement::Select {
+                result: "out".into(),
+                op: ConditionOp::NotEqual,
+                comp0: "x".into(),
+                comp1: "false".into(),
+                a: "a".into(),
+                b: "b".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["select", "out", "missing"].map(String::from)),
             None
         );
         assert_eq!(
@@ -6251,6 +6670,36 @@ mod tests {
                 ]
                 .map(String::from)
             ),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["query", "rect", "building", "@sharded", "1", "2", "3", "4"].map(String::from)
+            ),
+            Some(LogicStatement::Query {
+                shape: QueryShape::Rect,
+                type_: QueryType::Building,
+                team: "@sharded".into(),
+                x: "1".into(),
+                y: "2".into(),
+                w: "3".into(),
+                h: "4".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["query", "circle", "bullet"].map(String::from)),
+            Some(LogicStatement::Query {
+                shape: QueryShape::Circle,
+                type_: QueryType::Bullet,
+                team: "null".into(),
+                x: "0".into(),
+                y: "0".into(),
+                w: "10".into(),
+                h: "10".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["query", "missing"].map(String::from)),
             None
         );
         assert_eq!(
@@ -7426,6 +7875,19 @@ mod tests {
         assert_eq!(QueryType::QUERYABLE, [QueryType::Unit, QueryType::Building]);
         assert_eq!(QueryType::Bullet.wire_name(), "bullet");
         assert_eq!(QueryType::from_ordinal(3), None);
+
+        assert_eq!(GraphicsType::ALL.len(), 16);
+        assert_eq!(GraphicsType::Clear.ordinal(), 0);
+        assert_eq!(GraphicsType::LineRect.ordinal(), 6);
+        assert_eq!(GraphicsType::Reset.ordinal(), 15);
+        assert_eq!(GraphicsType::from_ordinal(15), Some(GraphicsType::Reset));
+        assert_eq!(GraphicsType::from_ordinal(16), None);
+        assert_eq!(GraphicsType::LineRect.wire_name(), "lineRect");
+        assert_eq!(
+            GraphicsType::by_wire_name("triangle"),
+            Some(GraphicsType::Triangle)
+        );
+        assert_eq!(GraphicsType::by_wire_name("missing"), None);
 
         assert_eq!(QueryShape::ALL, [QueryShape::Circle, QueryShape::Rect]);
         assert_eq!(
