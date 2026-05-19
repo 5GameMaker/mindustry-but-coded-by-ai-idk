@@ -173,6 +173,12 @@ pub struct DrawTurretShadowParams {
     pub rotation: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawBlurSpinParams<'a> {
+    pub region: &'a str,
+    pub rotation: f32,
+}
+
 pub fn draw_block_final_icons(
     block_name: &str,
     icon_override: Option<&[String]>,
@@ -220,8 +226,31 @@ pub fn draw_region_plan_rotation(building_rotate: bool, plan_rotation: i32, rota
     }
 }
 
+pub fn draw_region_icons(region: &str) -> Vec<String> {
+    vec![region.to_string()]
+}
+
 pub fn draw_liquid_region_fraction(stored: f32, liquid_capacity: f32, alpha: f32) -> f32 {
     stored / liquid_capacity * alpha
+}
+
+pub fn draw_liquid_region_name(block_name: &str, suffix: &str) -> String {
+    format!("{block_name}{suffix}")
+}
+
+pub fn draw_liquid_region_requires_liquids(has_liquids: bool) -> Result<(), &'static str> {
+    if has_liquids {
+        Ok(())
+    } else {
+        Err("DrawLiquidRegion requires block.hasLiquids")
+    }
+}
+
+pub fn draw_liquid_region_selected<'a>(
+    draw_liquid: Option<&'a str>,
+    current_liquid: &'a str,
+) -> &'a str {
+    draw_liquid.unwrap_or(current_liquid)
 }
 
 pub fn draw_heat_alpha(
@@ -234,12 +263,24 @@ pub fn draw_heat_alpha(
     (heat / heat_requirement).clamp(0.0, 1.0) * (color_alpha * (1.0 - pulse + absin))
 }
 
+pub fn draw_heat_region_name(block_name: &str, suffix: &str) -> String {
+    format!("{block_name}{suffix}")
+}
+
 pub fn draw_fade_alpha(total_progress_absin: f32, warmup: f32) -> f32 {
     total_progress_absin * warmup
 }
 
+pub fn draw_fade_region_name(block_name: &str, suffix: &str) -> String {
+    format!("{block_name}{suffix}")
+}
+
 pub fn draw_warmup_region_alpha(warmup: f32, sin_mag: f32, absin: f32) -> f32 {
     warmup * (1.0 - sin_mag) + absin * warmup
+}
+
+pub fn draw_warmup_region_name(block_name: &str) -> String {
+    format!("{block_name}-top")
 }
 
 pub fn draw_frames_index(
@@ -265,6 +306,14 @@ pub fn draw_frames_region_names(block_name: &str, frames: i32) -> Vec<String> {
         .collect()
 }
 
+pub fn draw_frames_icons(region_names: &[String]) -> Vec<String> {
+    region_names
+        .first()
+        .cloned()
+        .into_iter()
+        .collect::<Vec<_>>()
+}
+
 pub fn draw_glow_alpha(absin: f32, glow_intensity: f32, warmup: f32, alpha: f32) -> f32 {
     (absin * glow_intensity + 1.0 - glow_intensity) * warmup * alpha
 }
@@ -276,6 +325,10 @@ pub fn draw_glow_rotation(
     rotdeg: f32,
 ) -> f32 {
     total_progress * rotate_speed + if rotate { rotdeg } else { 0.0 }
+}
+
+pub fn draw_glow_region_name(block_name: &str, suffix: &str) -> String {
+    format!("{block_name}{suffix}")
 }
 
 pub fn draw_heat_input_side_alphas(
@@ -292,6 +345,10 @@ pub fn draw_heat_input_side_alphas(
             0.0
         }
     })
+}
+
+pub fn draw_heat_input_region_name(block_name: &str, suffix: &str) -> String {
+    format!("{block_name}{suffix}")
 }
 
 pub fn draw_heat_output_rotation(rotation: i32, rot_offset: i32) -> f32 {
@@ -315,6 +372,15 @@ pub fn draw_heat_output_alpha(
     heat_frac * (color_alpha * (1.0 - heat_pulse + absin))
 }
 
+pub fn draw_heat_output_region_names(block_name: &str) -> [String; 4] {
+    [
+        format!("{block_name}-heat"),
+        format!("{block_name}-glow"),
+        format!("{block_name}-top1"),
+        format!("{block_name}-top2"),
+    ]
+}
+
 pub fn draw_multi_icons(drawer_icons: &[Vec<String>]) -> Vec<String> {
     drawer_icons.iter().flatten().cloned().collect()
 }
@@ -323,8 +389,41 @@ pub fn draw_pump_liquid_fraction(liquid_amount: f32, liquid_capacity: f32) -> f3
     liquid_amount / liquid_capacity
 }
 
+pub fn draw_pump_liquid_region_name(block_name: &str) -> String {
+    format!("{block_name}-liquid")
+}
+
+pub fn draw_pump_liquid_should_draw(is_pump_build: bool, liquid_drop_present: bool) -> bool {
+    is_pump_build && liquid_drop_present
+}
+
+pub fn draw_blur_spin_region_names(block_name: &str, suffix: &str) -> (String, String) {
+    (
+        format!("{block_name}{suffix}"),
+        format!("{block_name}{suffix}-blur"),
+    )
+}
+
 pub fn draw_blur_spin_rotation(total_progress: f32, rotate_speed: f32, rotation: f32) -> f32 {
     total_progress * rotate_speed + rotation
+}
+
+pub fn draw_blur_spin_params<'a>(
+    warmup: f32,
+    blur_thresh: f32,
+    region: &'a str,
+    blur_region: &'a str,
+    total_progress: f32,
+    rotate_speed: f32,
+) -> DrawBlurSpinParams<'a> {
+    DrawBlurSpinParams {
+        region: if warmup > blur_thresh {
+            blur_region
+        } else {
+            region
+        },
+        rotation: total_progress * rotate_speed,
+    }
 }
 
 pub fn draw_default_icons(block_region: &str) -> Vec<String> {
@@ -1107,26 +1206,50 @@ mod tests {
         assert_eq!(draw_block_final_icons("x", None, &[]), vec!["error"]);
         assert_eq!(draw_region_name("kiln", "-top", None), "kiln-top");
         assert_eq!(draw_region_name("kiln", "-top", Some("custom")), "custom");
+        assert_eq!(draw_region_icons("kiln-top"), vec!["kiln-top"]);
         assert_eq!(draw_region_rotation(10.0, 2.0, 5.0, true, 90.0), 115.0);
         assert_eq!(draw_region_plan_rotation(true, 2, 15.0), 180.0);
         assert_eq!(draw_region_plan_rotation(false, 2, 15.0), 15.0);
+        assert_eq!(draw_liquid_region_name("tank", "-liquid"), "tank-liquid");
+        assert!(draw_liquid_region_requires_liquids(true).is_ok());
+        assert!(draw_liquid_region_requires_liquids(false).is_err());
+        assert_eq!(draw_liquid_region_selected(Some("oil"), "water"), "oil");
+        assert_eq!(draw_liquid_region_selected(None, "water"), "water");
         assert_eq!(draw_liquid_region_fraction(5.0, 20.0, 0.8), 0.2);
+        assert_eq!(draw_heat_region_name("kiln", "-glow"), "kiln-glow");
         assert!((draw_heat_alpha(5.0, 10.0, 0.8, 0.3, 0.1) - 0.32).abs() < 0.00001);
     }
 
     #[test]
     fn draw_animation_helpers_follow_upstream_formulae() {
         assert_eq!(draw_fade_alpha(0.4, 0.5), 0.2);
+        assert_eq!(draw_fade_region_name("press", "-top"), "press-top");
         assert!((draw_warmup_region_alpha(0.5, 0.6, 0.2) - 0.3).abs() < 0.00001);
+        assert_eq!(draw_warmup_region_name("press"), "press-top");
         assert_eq!(draw_frames_index(16.0, 5.0, 3, false, 0.0), 0);
         assert_eq!(draw_frames_index(16.0, 5.0, 3, true, 1.9), 1);
-        assert_eq!(
-            draw_frames_region_names("press", 3),
-            vec!["press-frame0", "press-frame1", "press-frame2"]
-        );
+        let frames = draw_frames_region_names("press", 3);
+        assert_eq!(frames, vec!["press-frame0", "press-frame1", "press-frame2"]);
+        assert_eq!(draw_frames_icons(&frames), vec!["press-frame0"]);
         assert_eq!(draw_glow_alpha(0.5, 0.5, 0.8, 0.9), 0.54);
         assert_eq!(draw_glow_rotation(10.0, 2.0, true, 90.0), 110.0);
+        assert_eq!(draw_glow_region_name("press", "-glow"), "press-glow");
         assert_eq!(draw_blur_spin_rotation(3.0, 10.0, 15.0), 45.0);
+        assert_eq!(
+            draw_blur_spin_region_names("separator", "-rotator"),
+            ("separator-rotator".into(), "separator-rotator-blur".into())
+        );
+        assert_eq!(
+            draw_blur_spin_params(0.8, 0.7, "fan", "fan-blur", 5.0, 2.0),
+            DrawBlurSpinParams {
+                region: "fan-blur",
+                rotation: 10.0
+            }
+        );
+        assert_eq!(
+            draw_blur_spin_params(0.7, 0.7, "fan", "fan-blur", 5.0, 2.0).region,
+            "fan"
+        );
     }
 
     #[test]
@@ -1136,14 +1259,31 @@ mod tests {
         assert_eq!(alphas[1], 0.0);
         assert!((alphas[2] - 0.32).abs() < 0.00001);
         assert!((alphas[3] - 0.64).abs() < 0.00001);
+        assert_eq!(
+            draw_heat_input_region_name("heater", "-heat"),
+            "heater-heat"
+        );
         assert_eq!(draw_heat_output_rotation(1, 2), 270.0);
         assert_eq!(draw_heat_output_top_index(0, 0), 1);
         assert_eq!(draw_heat_output_top_index(2, 0), 2);
+        assert_eq!(
+            draw_heat_output_region_names("heater"),
+            [
+                String::from("heater-heat"),
+                String::from("heater-glow"),
+                String::from("heater-top1"),
+                String::from("heater-top2")
+            ]
+        );
         assert!((draw_heat_output_alpha(0.5, 0.8, 0.3, 0.1) - 0.32).abs() < 0.00001);
         assert_eq!(
             draw_multi_icons(&[vec!["a".into(), "b".into()], vec!["c".into()]]),
             vec!["a", "b", "c"]
         );
+        assert_eq!(draw_pump_liquid_region_name("pump"), "pump-liquid");
+        assert!(draw_pump_liquid_should_draw(true, true));
+        assert!(!draw_pump_liquid_should_draw(true, false));
+        assert!(!draw_pump_liquid_should_draw(false, true));
         assert_eq!(draw_pump_liquid_fraction(4.0, 16.0), 0.25);
     }
 
