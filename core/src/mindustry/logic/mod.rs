@@ -497,6 +497,34 @@ pub enum LogicStatement {
         pierce: String,
         effect: String,
     },
+    SetRule {
+        rule: LogicRule,
+        value: String,
+        p1: String,
+        p2: String,
+        p3: String,
+        p4: String,
+    },
+    Fetch {
+        type_: FetchType,
+        result: String,
+        team: String,
+        index: String,
+        extra: String,
+    },
+    GetFlag {
+        result: String,
+        flag: String,
+    },
+    SetFlag {
+        flag: String,
+        value: String,
+    },
+    SetProp {
+        type_: String,
+        of: String,
+        value: String,
+    },
 }
 
 impl LogicStatement {
@@ -814,6 +842,49 @@ impl LogicStatement {
         }
     }
 
+    pub fn set_rule() -> Self {
+        Self::SetRule {
+            rule: LogicRule::WaveSpacing,
+            value: "10".into(),
+            p1: "0".into(),
+            p2: "0".into(),
+            p3: "100".into(),
+            p4: "100".into(),
+        }
+    }
+
+    pub fn fetch() -> Self {
+        Self::Fetch {
+            type_: FetchType::Unit,
+            result: "result".into(),
+            team: "@sharded".into(),
+            index: "0".into(),
+            extra: "@conveyor".into(),
+        }
+    }
+
+    pub fn get_flag() -> Self {
+        Self::GetFlag {
+            result: "result".into(),
+            flag: "\"flag\"".into(),
+        }
+    }
+
+    pub fn set_flag() -> Self {
+        Self::SetFlag {
+            flag: "\"flag\"".into(),
+            value: "true".into(),
+        }
+    }
+
+    pub fn set_prop() -> Self {
+        Self::SetProp {
+            type_: "@copper".into(),
+            of: "block1".into(),
+            value: "0".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -853,6 +924,11 @@ impl LogicStatement {
             LogicStatement::WeatherSet { .. } => "weatherset",
             LogicStatement::Effect { .. } => "effect",
             LogicStatement::Explosion { .. } => "explosion",
+            LogicStatement::SetRule { .. } => "setrule",
+            LogicStatement::Fetch { .. } => "fetch",
+            LogicStatement::GetFlag { .. } => "getflag",
+            LogicStatement::SetFlag { .. } => "setflag",
+            LogicStatement::SetProp { .. } => "setprop",
         }
     }
 
@@ -878,7 +954,12 @@ impl LogicStatement {
             | LogicStatement::WeatherSense { .. }
             | LogicStatement::WeatherSet { .. }
             | LogicStatement::Effect { .. }
-            | LogicStatement::Explosion { .. } => LCategory::by_name("world").unwrap(),
+            | LogicStatement::Explosion { .. }
+            | LogicStatement::SetRule { .. }
+            | LogicStatement::Fetch { .. }
+            | LogicStatement::GetFlag { .. }
+            | LogicStatement::SetFlag { .. }
+            | LogicStatement::SetProp { .. } => LCategory::by_name("world").unwrap(),
             LogicStatement::Set { .. }
             | LogicStatement::Operation { .. }
             | LogicStatement::Lookup { .. }
@@ -914,6 +995,11 @@ impl LogicStatement {
                 | LogicStatement::WeatherSet { .. }
                 | LogicStatement::Effect { .. }
                 | LogicStatement::Explosion { .. }
+                | LogicStatement::SetRule { .. }
+                | LogicStatement::Fetch { .. }
+                | LogicStatement::GetFlag { .. }
+                | LogicStatement::SetFlag { .. }
+                | LogicStatement::SetProp { .. }
         )
     }
 
@@ -1220,6 +1306,45 @@ impl LogicStatement {
                 pierce.clone(),
                 effect.clone(),
             ],
+            LogicStatement::SetRule {
+                rule,
+                value,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => vec![
+                "setrule".into(),
+                rule.wire_name().into(),
+                value.clone(),
+                p1.clone(),
+                p2.clone(),
+                p3.clone(),
+                p4.clone(),
+            ],
+            LogicStatement::Fetch {
+                type_,
+                result,
+                team,
+                index,
+                extra,
+            } => vec![
+                "fetch".into(),
+                type_.wire_name().into(),
+                result.clone(),
+                team.clone(),
+                index.clone(),
+                extra.clone(),
+            ],
+            LogicStatement::GetFlag { result, flag } => {
+                vec!["getflag".into(), result.clone(), flag.clone()]
+            }
+            LogicStatement::SetFlag { flag, value } => {
+                vec!["setflag".into(), flag.clone(), value.clone()]
+            }
+            LogicStatement::SetProp { type_, of, value } => {
+                vec!["setprop".into(), type_.clone(), of.clone(), value.clone()]
+            }
         }
     }
 
@@ -1909,6 +2034,105 @@ impl LogicStatement {
                     }
                     if tokens.len() > 9 {
                         *effect = tokens[9].clone();
+                    }
+                }
+                statement
+            }
+            "setrule" => {
+                let mut statement = Self::set_rule();
+                if let LogicStatement::SetRule {
+                    rule,
+                    value,
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *rule = LogicRule::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *value = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *p1 = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *p2 = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *p3 = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *p4 = tokens[6].clone();
+                    }
+                }
+                statement
+            }
+            "fetch" => {
+                let mut statement = Self::fetch();
+                if let LogicStatement::Fetch {
+                    type_,
+                    result,
+                    team,
+                    index,
+                    extra,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = FetchType::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *result = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *team = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *index = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *extra = tokens[5].clone();
+                    }
+                }
+                statement
+            }
+            "getflag" => {
+                let mut statement = Self::get_flag();
+                if let LogicStatement::GetFlag { result, flag } = &mut statement {
+                    if tokens.len() > 1 {
+                        *result = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *flag = tokens[2].clone();
+                    }
+                }
+                statement
+            }
+            "setflag" => {
+                let mut statement = Self::set_flag();
+                if let LogicStatement::SetFlag { flag, value } = &mut statement {
+                    if tokens.len() > 1 {
+                        *flag = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *value = tokens[2].clone();
+                    }
+                }
+                statement
+            }
+            "setprop" => {
+                let mut statement = Self::set_prop();
+                if let LogicStatement::SetProp { type_, of, value } = &mut statement {
+                    if tokens.len() > 1 {
+                        *type_ = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *of = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *value = tokens[3].clone();
                     }
                 }
                 statement
@@ -4275,6 +4499,13 @@ impl LogicRule {
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
     }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
 }
 
 #[repr(u8)]
@@ -4323,6 +4554,13 @@ impl FetchType {
 
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
     }
 }
 
@@ -5216,6 +5454,26 @@ mod tests {
             LogicStatement::explosion().write_line(),
             "explosion @crux 0 0 5 50 true true false true"
         );
+        assert_eq!(
+            LogicStatement::set_rule().write_line(),
+            "setrule waveSpacing 10 0 0 100 100"
+        );
+        assert_eq!(
+            LogicStatement::fetch().write_line(),
+            "fetch unit result @sharded 0 @conveyor"
+        );
+        assert_eq!(
+            LogicStatement::get_flag().write_line(),
+            "getflag result \"flag\""
+        );
+        assert_eq!(
+            LogicStatement::set_flag().write_line(),
+            "setflag \"flag\" true"
+        );
+        assert_eq!(
+            LogicStatement::set_prop().write_line(),
+            "setprop @copper block1 0"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
@@ -5241,6 +5499,11 @@ mod tests {
         assert_eq!(LogicStatement::weather_set().category().name, "world");
         assert_eq!(LogicStatement::effect().category().name, "world");
         assert_eq!(LogicStatement::explosion().category().name, "world");
+        assert_eq!(LogicStatement::set_rule().category().name, "world");
+        assert_eq!(LogicStatement::fetch().category().name, "world");
+        assert_eq!(LogicStatement::get_flag().category().name, "world");
+        assert_eq!(LogicStatement::set_flag().category().name, "world");
+        assert_eq!(LogicStatement::set_prop().category().name, "world");
         assert!(!LogicStatement::read().privileged());
         assert!(!LogicStatement::operation().privileged());
         assert!(!LogicStatement::stop().privileged());
@@ -5264,6 +5527,11 @@ mod tests {
         assert!(LogicStatement::weather_set().privileged());
         assert!(LogicStatement::effect().privileged());
         assert!(LogicStatement::explosion().privileged());
+        assert!(LogicStatement::set_rule().privileged());
+        assert!(LogicStatement::fetch().privileged());
+        assert!(LogicStatement::get_flag().privileged());
+        assert!(LogicStatement::set_flag().privileged());
+        assert!(LogicStatement::set_prop().privileged());
     }
 
     #[test]
@@ -5763,6 +6031,90 @@ mod tests {
                 ground: "true".into(),
                 pierce: "true".into(),
                 effect: "false".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["setrule", "mapArea", "1", "2", "3", "4", "5"].map(String::from)
+            ),
+            Some(LogicStatement::SetRule {
+                rule: LogicRule::MapArea,
+                value: "1".into(),
+                p1: "2".into(),
+                p2: "3".into(),
+                p3: "4".into(),
+                p4: "5".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setrule", "unitCost"].map(String::from)),
+            Some(LogicStatement::SetRule {
+                rule: LogicRule::UnitCost,
+                value: "10".into(),
+                p1: "0".into(),
+                p2: "0".into(),
+                p3: "100".into(),
+                p4: "100".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setrule", "missing"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["fetch", "build", "out", "@crux", "2", "@duo"].map(String::from)
+            ),
+            Some(LogicStatement::Fetch {
+                type_: FetchType::Build,
+                result: "out".into(),
+                team: "@crux".into(),
+                index: "2".into(),
+                extra: "@duo".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["fetch", "unitCount", "count"].map(String::from)),
+            Some(LogicStatement::Fetch {
+                type_: FetchType::UnitCount,
+                result: "count".into(),
+                team: "@sharded".into(),
+                index: "0".into(),
+                extra: "@conveyor".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["fetch", "missing"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["getflag", "out", "\"waves\""].map(String::from)),
+            Some(LogicStatement::GetFlag {
+                result: "out".into(),
+                flag: "\"waves\"".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setflag", "\"done\"", "false"].map(String::from)),
+            Some(LogicStatement::SetFlag {
+                flag: "\"done\"".into(),
+                value: "false".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setprop", "@health", "@unit", "100"].map(String::from)),
+            Some(LogicStatement::SetProp {
+                type_: "@health".into(),
+                of: "@unit".into(),
+                value: "100".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setprop", "@x"].map(String::from)),
+            Some(LogicStatement::SetProp {
+                type_: "@x".into(),
+                of: "block1".into(),
+                value: "0".into()
             })
         );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
