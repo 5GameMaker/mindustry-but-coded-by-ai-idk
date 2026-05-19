@@ -1073,6 +1073,30 @@ impl AdminAction {
         AdminAction::Wave,
         AdminAction::SwitchTeam,
     ];
+
+    pub const fn ordinal(self) -> u8 {
+        match self {
+            AdminAction::Kick => 0,
+            AdminAction::Ban => 1,
+            AdminAction::Trace => 2,
+            AdminAction::Wave => 3,
+            AdminAction::SwitchTeam => 4,
+        }
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            AdminAction::Kick => "kick",
+            AdminAction::Ban => "ban",
+            AdminAction::Trace => "trace",
+            AdminAction::Wave => "wave",
+            AdminAction::SwitchTeam => "switchTeam",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

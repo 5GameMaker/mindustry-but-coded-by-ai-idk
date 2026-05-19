@@ -1,7 +1,7 @@
 use std::io::{self, Read, Write};
 
 use crate::mindustry::logic::LMarkerControl;
-use crate::mindustry::net::KickReason;
+use crate::mindustry::net::{AdminAction, KickReason};
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const MAX_ARRAY_SIZE: usize = 1000;
@@ -590,6 +590,20 @@ pub fn read_marker_control<R: Read>(read: &mut R) -> io::Result<LMarkerControl> 
     })
 }
 
+pub fn write_action<W: Write>(write: &mut W, action: AdminAction) -> io::Result<()> {
+    write_u8(write, action.ordinal())
+}
+
+pub fn read_action<R: Read>(read: &mut R) -> io::Result<AdminAction> {
+    let ordinal = read_u8(read)?;
+    AdminAction::from_ordinal(ordinal).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid AdminAction ordinal {ordinal}"),
+        )
+    })
+}
+
 pub fn write_bytes_short<W: Write>(write: &mut W, values: &[u8]) -> io::Result<()> {
     if values.len() > i16::MAX as usize {
         return Err(invalid_input("byte block too large"));
@@ -1010,5 +1024,31 @@ mod tests {
         );
         assert!(read_marker_control(&mut [0x19].as_slice()).is_err());
         assert!(read_marker_control(&mut [0xff].as_slice()).is_err());
+    }
+
+    #[test]
+    fn admin_action_matches_java_ordinal_bytes() {
+        assert_eq!(AdminAction::ALL.len(), 5);
+        assert_eq!(AdminAction::Kick.ordinal(), 0);
+        assert_eq!(AdminAction::SwitchTeam.ordinal(), 4);
+        assert_eq!(AdminAction::SwitchTeam.wire_name(), "switchTeam");
+
+        let mut bytes = Vec::new();
+        write_action(&mut bytes, AdminAction::Kick).unwrap();
+        assert_eq!(bytes, vec![0x00]);
+        assert_eq!(
+            read_action(&mut bytes.as_slice()).unwrap(),
+            AdminAction::Kick
+        );
+
+        bytes.clear();
+        write_action(&mut bytes, AdminAction::SwitchTeam).unwrap();
+        assert_eq!(bytes, vec![0x04]);
+        assert_eq!(
+            read_action(&mut bytes.as_slice()).unwrap(),
+            AdminAction::SwitchTeam
+        );
+        assert!(read_action(&mut [0x05].as_slice()).is_err());
+        assert!(read_action(&mut [0xff].as_slice()).is_err());
     }
 }
