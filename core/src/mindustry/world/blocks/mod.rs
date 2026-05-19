@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::mindustry::world::meta::Attribute;
 
 pub mod campaign;
+pub mod defense;
 pub mod distribution;
 pub mod environment;
 pub mod heat;
