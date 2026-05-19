@@ -321,6 +321,35 @@ pub enum LogicStatement {
     Sync {
         variable: String,
     },
+    Set {
+        to: String,
+        from: String,
+    },
+    Operation {
+        op: LogicOp,
+        dest: String,
+        a: String,
+        b: String,
+    },
+    Wait {
+        value: String,
+    },
+    Stop,
+    End,
+    PackColor {
+        result: String,
+        r: String,
+        g: String,
+        b: String,
+        a: String,
+    },
+    UnpackColor {
+        r: String,
+        g: String,
+        b: String,
+        a: String,
+        value: String,
+    },
 }
 
 impl LogicStatement {
@@ -393,6 +422,56 @@ impl LogicStatement {
         }
     }
 
+    pub fn set() -> Self {
+        Self::Set {
+            to: "result".into(),
+            from: "0".into(),
+        }
+    }
+
+    pub fn operation() -> Self {
+        Self::Operation {
+            op: LogicOp::Add,
+            dest: "result".into(),
+            a: "a".into(),
+            b: "b".into(),
+        }
+    }
+
+    pub fn wait() -> Self {
+        Self::Wait {
+            value: "0.5".into(),
+        }
+    }
+
+    pub fn stop() -> Self {
+        Self::Stop
+    }
+
+    pub fn end() -> Self {
+        Self::End
+    }
+
+    pub fn pack_color() -> Self {
+        Self::PackColor {
+            result: "result".into(),
+            r: "1".into(),
+            g: "0".into(),
+            b: "0".into(),
+            a: "1".into(),
+        }
+    }
+
+    pub fn unpack_color() -> Self {
+        Self::UnpackColor {
+            r: "r".into(),
+            g: "g".into(),
+            b: "b".into(),
+            a: "a".into(),
+            value: "color".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -406,6 +485,13 @@ impl LogicStatement {
             LogicStatement::GetLink { .. } => "getlink",
             LogicStatement::SetRate { .. } => "setrate",
             LogicStatement::Sync { .. } => "sync",
+            LogicStatement::Set { .. } => "set",
+            LogicStatement::Operation { .. } => "op",
+            LogicStatement::Wait { .. } => "wait",
+            LogicStatement::Stop => "stop",
+            LogicStatement::End => "end",
+            LogicStatement::PackColor { .. } => "packcolor",
+            LogicStatement::UnpackColor { .. } => "unpackcolor",
         }
     }
 
@@ -422,6 +508,13 @@ impl LogicStatement {
             LogicStatement::SetRate { .. }
             | LogicStatement::Sync { .. }
             | LogicStatement::LocalePrint { .. } => LCategory::by_name("world").unwrap(),
+            LogicStatement::Set { .. }
+            | LogicStatement::Operation { .. }
+            | LogicStatement::PackColor { .. }
+            | LogicStatement::UnpackColor { .. } => LCategory::by_name("operation").unwrap(),
+            LogicStatement::Wait { .. } | LogicStatement::Stop | LogicStatement::End => {
+                LCategory::by_name("control").unwrap()
+            }
         }
     }
 
@@ -467,6 +560,33 @@ impl LogicStatement {
             }
             LogicStatement::SetRate { amount } => vec!["setrate".into(), amount.clone()],
             LogicStatement::Sync { variable } => vec!["sync".into(), variable.clone()],
+            LogicStatement::Set { to, from } => vec!["set".into(), to.clone(), from.clone()],
+            LogicStatement::Operation { op, dest, a, b } => vec![
+                "op".into(),
+                op.java_name().into(),
+                dest.clone(),
+                a.clone(),
+                b.clone(),
+            ],
+            LogicStatement::Wait { value } => vec!["wait".into(), value.clone()],
+            LogicStatement::Stop => vec!["stop".into()],
+            LogicStatement::End => vec!["end".into()],
+            LogicStatement::PackColor { result, r, g, b, a } => vec![
+                "packcolor".into(),
+                result.clone(),
+                r.clone(),
+                g.clone(),
+                b.clone(),
+                a.clone(),
+            ],
+            LogicStatement::UnpackColor { r, g, b, a, value } => vec![
+                "unpackcolor".into(),
+                r.clone(),
+                g.clone(),
+                b.clone(),
+                a.clone(),
+                value.clone(),
+            ],
         }
     }
 
@@ -551,6 +671,83 @@ impl LogicStatement {
             "sync" => Self::Sync {
                 variable: tokens.get(1).cloned().unwrap_or_else(|| "var".into()),
             },
+            "set" => {
+                let mut statement = Self::set();
+                if let LogicStatement::Set { to, from } = &mut statement {
+                    if tokens.len() > 1 {
+                        *to = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *from = tokens[2].clone();
+                    }
+                }
+                statement
+            }
+            "op" => {
+                let mut statement = Self::operation();
+                if let LogicStatement::Operation { op, dest, a, b } = &mut statement {
+                    if tokens.len() > 1 {
+                        *op = LogicOp::by_java_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *dest = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *a = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *b = tokens[4].clone();
+                    }
+                }
+                statement
+            }
+            "wait" => Self::Wait {
+                value: tokens.get(1).cloned().unwrap_or_else(|| "0.5".into()),
+            },
+            "stop" => Self::Stop,
+            "end" => Self::End,
+            "packcolor" => {
+                let mut statement = Self::pack_color();
+                if let LogicStatement::PackColor { result, r, g, b, a } = &mut statement {
+                    if tokens.len() > 1 {
+                        *result = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *r = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *g = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *b = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *a = tokens[5].clone();
+                    }
+                }
+                statement
+            }
+            "unpackcolor" => {
+                let mut statement = Self::unpack_color();
+                if let LogicStatement::UnpackColor { r, g, b, a, value } = &mut statement {
+                    if tokens.len() > 1 {
+                        *r = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *g = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *b = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *a = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *value = tokens[5].clone();
+                    }
+                }
+                statement
+            }
             _ => return None,
         })
     }
@@ -2287,6 +2484,54 @@ impl LogicOp {
         "atan",
     ];
 
+    pub const JAVA_NAMES: [&'static str; 45] = [
+        "add",
+        "sub",
+        "mul",
+        "div",
+        "idiv",
+        "mod",
+        "emod",
+        "pow",
+        "equal",
+        "notEqual",
+        "land",
+        "lessThan",
+        "lessThanEq",
+        "greaterThan",
+        "greaterThanEq",
+        "strictEqual",
+        "shl",
+        "shr",
+        "ushr",
+        "or",
+        "and",
+        "xor",
+        "not",
+        "max",
+        "min",
+        "angle",
+        "angleDiff",
+        "len",
+        "noise",
+        "abs",
+        "sign",
+        "log",
+        "logn",
+        "log10",
+        "floor",
+        "ceil",
+        "round",
+        "sqrt",
+        "rand",
+        "sin",
+        "cos",
+        "tan",
+        "asin",
+        "acos",
+        "atan",
+    ];
+
     pub const fn ordinal(self) -> u8 {
         self as u8
     }
@@ -2297,6 +2542,61 @@ impl LogicOp {
 
     pub fn symbol(self) -> &'static str {
         Self::SYMBOLS[self.ordinal() as usize]
+    }
+
+    pub fn java_name(self) -> &'static str {
+        Self::JAVA_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_java_name(name: &str) -> Option<Self> {
+        match name {
+            "add" => Some(LogicOp::Add),
+            "sub" => Some(LogicOp::Sub),
+            "mul" => Some(LogicOp::Mul),
+            "div" => Some(LogicOp::Div),
+            "idiv" => Some(LogicOp::Idiv),
+            "mod" => Some(LogicOp::Mod),
+            "emod" => Some(LogicOp::Emod),
+            "pow" => Some(LogicOp::Pow),
+            "equal" => Some(LogicOp::Equal),
+            "notEqual" => Some(LogicOp::NotEqual),
+            "land" => Some(LogicOp::Land),
+            "lessThan" => Some(LogicOp::LessThan),
+            "lessThanEq" => Some(LogicOp::LessThanEq),
+            "greaterThan" => Some(LogicOp::GreaterThan),
+            "greaterThanEq" => Some(LogicOp::GreaterThanEq),
+            "strictEqual" => Some(LogicOp::StrictEqual),
+            "shl" => Some(LogicOp::Shl),
+            "shr" => Some(LogicOp::Shr),
+            "ushr" => Some(LogicOp::Ushr),
+            "or" => Some(LogicOp::Or),
+            "and" => Some(LogicOp::And),
+            "xor" => Some(LogicOp::Xor),
+            "not" => Some(LogicOp::Not),
+            "max" => Some(LogicOp::Max),
+            "min" => Some(LogicOp::Min),
+            "angle" => Some(LogicOp::Angle),
+            "angleDiff" => Some(LogicOp::AngleDiff),
+            "len" => Some(LogicOp::Len),
+            "noise" => Some(LogicOp::Noise),
+            "abs" => Some(LogicOp::Abs),
+            "sign" => Some(LogicOp::Sign),
+            "log" => Some(LogicOp::Log),
+            "logn" => Some(LogicOp::Logn),
+            "log10" => Some(LogicOp::Log10),
+            "floor" => Some(LogicOp::Floor),
+            "ceil" => Some(LogicOp::Ceil),
+            "round" => Some(LogicOp::Round),
+            "sqrt" => Some(LogicOp::Sqrt),
+            "rand" => Some(LogicOp::Rand),
+            "sin" => Some(LogicOp::Sin),
+            "cos" => Some(LogicOp::Cos),
+            "tan" => Some(LogicOp::Tan),
+            "asin" => Some(LogicOp::Asin),
+            "acos" => Some(LogicOp::Acos),
+            "atan" => Some(LogicOp::Atan),
+            _ => None,
+        }
     }
 
     pub const fn unary(self) -> bool {
@@ -3587,11 +3887,31 @@ mod tests {
         assert_eq!(LogicStatement::get_link().write_line(), "getlink result 0");
         assert_eq!(LogicStatement::set_rate().write_line(), "setrate 10");
         assert_eq!(LogicStatement::sync().write_line(), "sync var");
+        assert_eq!(LogicStatement::set().write_line(), "set result 0");
+        assert_eq!(
+            LogicStatement::operation().write_line(),
+            "op add result a b"
+        );
+        assert_eq!(LogicStatement::wait().write_line(), "wait 0.5");
+        assert_eq!(LogicStatement::stop().write_line(), "stop");
+        assert_eq!(LogicStatement::end().write_line(), "end");
+        assert_eq!(
+            LogicStatement::pack_color().write_line(),
+            "packcolor result 1 0 0 1"
+        );
+        assert_eq!(
+            LogicStatement::unpack_color().write_line(),
+            "unpackcolor r g b a color"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
         assert_eq!(LogicStatement::set_rate().category().name, "world");
+        assert_eq!(LogicStatement::operation().category().name, "operation");
+        assert_eq!(LogicStatement::wait().category().name, "control");
         assert!(!LogicStatement::read().privileged());
+        assert!(!LogicStatement::operation().privileged());
+        assert!(!LogicStatement::stop().privileged());
         assert!(LogicStatement::set_rate().privileged());
         assert!(LogicStatement::sync().privileged());
         assert!(LogicStatement::locale_print().privileged());
@@ -3668,6 +3988,69 @@ mod tests {
             LogicStatement::read_tokens(&["sync", "flag"].map(String::from)),
             Some(LogicStatement::Sync {
                 variable: "flag".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["set", "x"].map(String::from)),
+            Some(LogicStatement::Set {
+                to: "x".into(),
+                from: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["op", "lessThanEq", "out", "a", "b"].map(String::from)),
+            Some(LogicStatement::Operation {
+                op: LogicOp::LessThanEq,
+                dest: "out".into(),
+                a: "a".into(),
+                b: "b".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["op", "angleDiff", "result", "x"].map(String::from)),
+            Some(LogicStatement::Operation {
+                op: LogicOp::AngleDiff,
+                dest: "result".into(),
+                a: "x".into(),
+                b: "b".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["op", "missing", "out", "a", "b"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["wait", "2"].map(String::from)),
+            Some(LogicStatement::Wait { value: "2".into() })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["stop".into()]),
+            Some(LogicStatement::Stop)
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["end".into()]),
+            Some(LogicStatement::End)
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["packcolor", "c", "0.1", "0.2"].map(String::from)),
+            Some(LogicStatement::PackColor {
+                result: "c".into(),
+                r: "0.1".into(),
+                g: "0.2".into(),
+                b: "0".into(),
+                a: "1".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["unpackcolor", "red", "green", "blue", "alpha", "packed"].map(String::from)
+            ),
+            Some(LogicStatement::UnpackColor {
+                r: "red".into(),
+                g: "green".into(),
+                b: "blue".into(),
+                a: "alpha".into(),
+                value: "packed".into()
             })
         );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
@@ -4129,6 +4512,12 @@ mod tests {
         assert_eq!(LogicOp::Atan.ordinal(), 44);
         assert_eq!(LogicOp::from_ordinal(44), Some(LogicOp::Atan));
         assert_eq!(LogicOp::from_ordinal(45), None);
+        assert_eq!(LogicOp::Add.java_name(), "add");
+        assert_eq!(LogicOp::NotEqual.java_name(), "notEqual");
+        assert_eq!(LogicOp::AngleDiff.java_name(), "angleDiff");
+        assert_eq!(LogicOp::by_java_name("lessThan"), Some(LogicOp::LessThan));
+        assert_eq!(LogicOp::by_java_name("angleDiff"), Some(LogicOp::AngleDiff));
+        assert_eq!(LogicOp::by_java_name("+"), None);
 
         let symbols: Vec<_> = LogicOp::ALL.iter().map(|op| op.symbol()).collect();
         assert_eq!(
