@@ -113,6 +113,63 @@ impl FloorData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct OverlayFloorData {
+    pub floor: FloorData,
+}
+
+impl OverlayFloorData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut floor = FloorData::new(id, name);
+        floor.overlay_floor = true;
+        floor.base.use_color = false;
+        Self { floor }
+    }
+
+    pub fn can_place_on(&self, tile_block_solid: bool) -> bool {
+        !self.floor.wall_ore || tile_block_solid
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpawnBlockData {
+    pub overlay: OverlayFloorData,
+}
+
+impl SpawnBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut overlay = OverlayFloorData::new(id, name);
+        overlay.floor.base.variants = 0;
+        overlay.floor.needs_surface = false;
+        Self { overlay }
+    }
+
+    pub fn should_draw_base(is_editor_tile: bool) -> bool {
+        is_editor_tile
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmptyFloorData {
+    pub floor: FloorData,
+}
+
+impl EmptyFloorData {
+    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
+        let mut floor = FloorData::new(id, name);
+        floor.base.variants = 0;
+        floor.can_shadow = false;
+        floor.base.placeable_on = false;
+        floor.base.solid = true;
+        floor.draw_edge_out = false;
+        Self { floor }
+    }
+
+    pub fn should_draw_overlay_base(overlay_is_air: bool, overlay_is_self: bool) -> bool {
+        !overlay_is_air && !overlay_is_self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StaticWallData {
     pub base: Block,
     pub large_region: Option<String>,
@@ -406,6 +463,35 @@ mod tests {
         floor.init_links(None, None);
         assert_eq!(floor.wall, 0);
         assert_eq!(floor.decoration, 0);
+    }
+
+    #[test]
+    fn overlay_spawn_and_empty_floor_defaults_match_upstream_subset() {
+        let overlay = OverlayFloorData::new(20, "ore-copper");
+        assert!(overlay.floor.overlay_floor);
+        assert!(!overlay.floor.base.use_color);
+        assert!(overlay.can_place_on(false));
+
+        let mut wall_ore = overlay.clone();
+        wall_ore.floor.wall_ore = true;
+        assert!(!wall_ore.can_place_on(false));
+        assert!(wall_ore.can_place_on(true));
+
+        let spawn = SpawnBlockData::new(21, "spawn");
+        assert_eq!(spawn.overlay.floor.base.variants, 0);
+        assert!(!spawn.overlay.floor.needs_surface);
+        assert!(SpawnBlockData::should_draw_base(true));
+        assert!(!SpawnBlockData::should_draw_base(false));
+
+        let empty = EmptyFloorData::new(22, "empty");
+        assert_eq!(empty.floor.base.variants, 0);
+        assert!(!empty.floor.can_shadow);
+        assert!(!empty.floor.base.placeable_on);
+        assert!(empty.floor.base.solid);
+        assert!(!empty.floor.draw_edge_out);
+        assert!(EmptyFloorData::should_draw_overlay_base(false, false));
+        assert!(!EmptyFloorData::should_draw_overlay_base(true, false));
+        assert!(!EmptyFloorData::should_draw_overlay_base(false, true));
     }
 
     #[test]
