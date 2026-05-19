@@ -41,6 +41,19 @@ impl Vec2 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RgbaColor(pub i32);
+
+impl RgbaColor {
+    pub const fn new(rgba: i32) -> Self {
+        Self(rgba)
+    }
+
+    pub const fn rgba(self) -> i32 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TeamId(pub u8);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -501,6 +514,12 @@ pub fn read_vec2<R: Read>(read: &mut R) -> io::Result<Vec2> {
     ))
 }
 
+pub fn read_vec2_into<R: Read>(read: &mut R, base: &mut Vec2) -> io::Result<()> {
+    base.x = f32::from_bits(read_u32(read)?);
+    base.y = f32::from_bits(read_u32(read)?);
+    Ok(())
+}
+
 pub fn write_vec_nullable<W: Write>(write: &mut W, value: Option<Vec2>) -> io::Result<()> {
     match value {
         Some(value) => write_vec2(write, value),
@@ -519,6 +538,14 @@ pub fn read_vec_nullable<R: Read>(read: &mut R) -> io::Result<Option<Vec2>> {
     } else {
         Ok(Some(Vec2::new(x, y)))
     }
+}
+
+pub fn write_color<W: Write>(write: &mut W, color: RgbaColor) -> io::Result<()> {
+    write_i32(write, color.rgba())
+}
+
+pub fn read_color<R: Read>(read: &mut R) -> io::Result<RgbaColor> {
+    Ok(RgbaColor::new(read_i32(read)?))
 }
 
 pub fn write_team_id<W: Write>(write: &mut W, value: TeamId) -> io::Result<()> {
@@ -689,6 +716,14 @@ pub fn read_string_data<R: Read>(read: &mut R) -> io::Result<Option<String>> {
         .map_err(|_| invalid_data("invalid UTF-8 string data"))
 }
 
+pub fn write_bytebuffer_string<W: Write>(write: &mut W, string: Option<&str>) -> io::Result<()> {
+    write_string_data(write, string)
+}
+
+pub fn read_bytebuffer_string<R: Read>(read: &mut R) -> io::Result<Option<String>> {
+    read_string_data(read)
+}
+
 fn invalid_input(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -813,6 +848,36 @@ mod tests {
             read_vec_nullable(&mut bytes.as_slice()).unwrap(),
             Some(Vec2::new(1.25, -2.5))
         );
+    }
+
+    #[test]
+    fn color_bytebuffer_string_and_vec2_base_follow_typeio_order() {
+        let mut bytes = Vec::new();
+        write_color(&mut bytes, RgbaColor::new(0x11223344)).unwrap();
+        assert_eq!(bytes, vec![0x11, 0x22, 0x33, 0x44]);
+        assert_eq!(
+            read_color(&mut bytes.as_slice()).unwrap(),
+            RgbaColor::new(0x11223344)
+        );
+
+        bytes.clear();
+        write_bytebuffer_string(&mut bytes, Some("Hi中")).unwrap();
+        assert_eq!(&bytes[0..2], &[0, 5]);
+        assert_eq!(
+            read_bytebuffer_string(&mut bytes.as_slice()).unwrap(),
+            Some("Hi中".into())
+        );
+
+        bytes.clear();
+        write_bytebuffer_string(&mut bytes, None).unwrap();
+        assert_eq!(bytes, vec![0xff, 0xff]);
+        assert_eq!(read_bytebuffer_string(&mut bytes.as_slice()).unwrap(), None);
+
+        bytes.clear();
+        write_vec2(&mut bytes, Vec2::new(-1.5, 3.25)).unwrap();
+        let mut base = Vec2::new(99.0, 88.0);
+        read_vec2_into(&mut bytes.as_slice(), &mut base).unwrap();
+        assert_eq!(base, Vec2::new(-1.5, 3.25));
     }
 
     #[test]
