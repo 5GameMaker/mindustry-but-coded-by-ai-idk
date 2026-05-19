@@ -613,6 +613,206 @@ fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PowerBattery {
+    pub status: f32,
+    pub capacity: f32,
+    pub enabled: bool,
+}
+
+pub fn power_graph_satisfaction(last_power_produced: f32, last_power_needed: f32) -> f32 {
+    if nearly(last_power_produced, 0.0, 0.0001) {
+        0.0
+    } else if nearly(last_power_needed, 0.0, 0.0001) {
+        1.0
+    } else {
+        (last_power_produced / last_power_needed).clamp(0.0, 1.0)
+    }
+}
+
+pub fn power_graph_power_produced(producers: &[(f32, f32)]) -> f32 {
+    producers
+        .iter()
+        .map(|(production, delta)| production * delta)
+        .sum()
+}
+
+pub fn power_graph_power_needed(consumers: &[(bool, f32, f32)]) -> f32 {
+    consumers
+        .iter()
+        .filter(|(should_consume, _, _)| *should_consume)
+        .map(|(_, requested_power, delta)| requested_power * delta)
+        .sum()
+}
+
+pub fn power_graph_battery_stored(batteries: &[PowerBattery]) -> f32 {
+    batteries
+        .iter()
+        .filter(|battery| battery.enabled)
+        .map(|battery| battery.status * battery.capacity)
+        .sum()
+}
+
+pub fn power_graph_battery_capacity(batteries: &[PowerBattery]) -> f32 {
+    batteries
+        .iter()
+        .filter(|battery| battery.enabled)
+        .map(|battery| (1.0 - battery.status) * battery.capacity)
+        .sum()
+}
+
+pub fn power_graph_total_battery_capacity(batteries: &[PowerBattery]) -> f32 {
+    batteries
+        .iter()
+        .filter(|battery| battery.enabled)
+        .map(|battery| battery.capacity)
+        .sum()
+}
+
+pub fn power_graph_use_batteries(batteries: &mut [PowerBattery], needed: f32) -> f32 {
+    let stored = power_graph_battery_stored(batteries);
+    if nearly(stored, 0.0, 0.0001) {
+        return 0.0;
+    }
+    let used = stored.min(needed);
+    let consumed_power_percentage = (needed / stored).min(1.0);
+    for battery in batteries.iter_mut().filter(|battery| battery.enabled) {
+        battery.status *= 1.0 - consumed_power_percentage;
+    }
+    used
+}
+
+pub fn power_graph_charge_batteries(batteries: &mut [PowerBattery], excess: f32) -> f32 {
+    let capacity = power_graph_battery_capacity(batteries);
+    let charged_percent = (excess / capacity).min(1.0);
+    if nearly(capacity, 0.0, 0.0001) {
+        return 0.0;
+    }
+    for battery in batteries
+        .iter_mut()
+        .filter(|battery| battery.enabled && battery.capacity > 0.0)
+    {
+        battery.status += (1.0 - battery.status) * charged_percent;
+    }
+    excess.min(capacity)
+}
+
+pub fn power_graph_coverage(
+    needed: f32,
+    produced: f32,
+    charged: bool,
+    last_power_stored: f32,
+) -> f32 {
+    if nearly(needed, 0.0, 0.0001)
+        && nearly(produced, 0.0, 0.0001)
+        && !charged
+        && nearly(last_power_stored, 0.0, 0.0001)
+    {
+        0.0
+    } else if nearly(needed, 0.0, 0.0001) {
+        1.0
+    } else {
+        (produced / needed).min(1.0)
+    }
+}
+
+pub fn power_graph_buffered_status(
+    current_status: f32,
+    requested_power: f32,
+    coverage: f32,
+    delta: f32,
+    capacity: f32,
+) -> f32 {
+    if nearly(capacity, 0.0, 0.0001) {
+        current_status
+    } else {
+        (current_status + requested_power * coverage * delta / capacity).clamp(0.0, 1.0)
+    }
+}
+
+pub fn power_graph_unbuffered_status(
+    should_consume_power: bool,
+    coverage: f32,
+    produced: f32,
+    needed: f32,
+    usage: f32,
+    delta: f32,
+) -> f32 {
+    if should_consume_power {
+        coverage
+    } else {
+        let status = (produced / (needed + usage * delta)).min(1.0);
+        if status.is_nan() {
+            0.0
+        } else {
+            status
+        }
+    }
+}
+
+pub fn power_graph_scaled_power_in(power_produced: f32, energy_delta: f32, delta: f32) -> f32 {
+    (power_produced + energy_delta) / delta
+}
+
+pub fn power_graph_scaled_power_out(power_needed: f32, delta: f32) -> f32 {
+    power_needed / delta
+}
+
+pub fn beam_node_update_clip_radius(range: i32, tilesize: f32) -> f32 {
+    (range + 1) as f32 * tilesize
+}
+
+pub fn beam_node_could_connect_scan_range(range: i32, size: i32) -> std::ops::RangeInclusive<i32> {
+    let range_offset = size / 2;
+    (1 + range_offset)..=(range + range_offset)
+}
+
+pub fn beam_node_within_target_rect(
+    other_x: i32,
+    other_y: i32,
+    target_x: i32,
+    target_y: i32,
+    target_size: i32,
+) -> bool {
+    let offset = -(target_size - 1) / 2;
+    let min_x = target_x + offset;
+    let min_y = target_y + offset;
+    let max_x = target_x + offset + target_size - 1;
+    let max_y = target_y + offset + target_size - 1;
+    other_x >= min_x && other_y >= min_y && other_x <= max_x && other_y <= max_y
+}
+
+pub fn beam_node_draw_laser_size_offset(
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    size1: i32,
+    size2: i32,
+    tilesize: f32,
+) -> f32 {
+    let dst = (x1 - x2).abs().max((y2 - y1).abs()) / tilesize;
+    dst * tilesize - (size1 + size2) as f32 * tilesize / 2.0
+}
+
+pub fn beam_node_should_draw_laser(dst_tiles: i32, size: i32) -> bool {
+    dst_tiles > 1 + size / 2
+}
+
+pub fn beam_node_status(power_balance: f32, last_power_stored: f32) -> PowerBlockStatus {
+    if power_balance > 0.0 {
+        PowerBlockStatus::Active
+    } else if power_balance < 0.0 && last_power_stored > 0.0 {
+        PowerBlockStatus::NoOutput
+    } else {
+        PowerBlockStatus::NoInput
+    }
+}
+
+pub fn long_power_node_warmup(warmup: f32, link_count: usize) -> f32 {
+    lerp_delta(warmup, if link_count > 0 { 1.0 } else { 0.0 }, 0.05)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -826,5 +1026,75 @@ mod tests {
             read_light_block_state(&mut bytes.as_slice()).unwrap(),
             light
         );
+    }
+
+    #[test]
+    fn power_graph_beam_and_long_node_helpers_follow_upstream() {
+        assert_eq!(power_graph_satisfaction(0.0, 10.0), 0.0);
+        assert_eq!(power_graph_satisfaction(10.0, 0.0), 1.0);
+        assert_eq!(power_graph_satisfaction(4.0, 8.0), 0.5);
+        assert_eq!(power_graph_power_produced(&[(2.0, 3.0), (4.0, 0.5)]), 8.0);
+        assert_eq!(
+            power_graph_power_needed(&[(true, 2.0, 3.0), (false, 10.0, 10.0)]),
+            6.0
+        );
+
+        let mut batteries = vec![
+            PowerBattery {
+                status: 0.5,
+                capacity: 100.0,
+                enabled: true,
+            },
+            PowerBattery {
+                status: 0.25,
+                capacity: 40.0,
+                enabled: true,
+            },
+            PowerBattery {
+                status: 1.0,
+                capacity: 1000.0,
+                enabled: false,
+            },
+        ];
+        assert_eq!(power_graph_battery_stored(&batteries), 60.0);
+        assert_eq!(power_graph_battery_capacity(&batteries), 80.0);
+        assert_eq!(power_graph_total_battery_capacity(&batteries), 140.0);
+        assert_eq!(power_graph_use_batteries(&mut batteries, 30.0), 30.0);
+        assert_eq!(batteries[0].status, 0.25);
+        assert_eq!(batteries[1].status, 0.125);
+        assert_eq!(power_graph_charge_batteries(&mut batteries, 20.0), 20.0);
+        assert!((batteries[0].status - 0.38636363).abs() < 0.00001);
+
+        assert_eq!(power_graph_coverage(0.0, 0.0, false, 0.0), 0.0);
+        assert_eq!(power_graph_coverage(0.0, 2.0, false, 0.0), 1.0);
+        assert_eq!(power_graph_coverage(10.0, 4.0, false, 0.0), 0.4);
+        assert_eq!(power_graph_buffered_status(0.2, 10.0, 0.5, 2.0, 100.0), 0.3);
+        assert_eq!(
+            power_graph_unbuffered_status(true, 0.4, 1.0, 2.0, 3.0, 4.0),
+            0.4
+        );
+        assert_eq!(
+            power_graph_unbuffered_status(false, 0.4, 6.0, 2.0, 1.0, 2.0),
+            1.0
+        );
+        assert_eq!(power_graph_scaled_power_in(6.0, 2.0, 4.0), 2.0);
+        assert_eq!(power_graph_scaled_power_out(6.0, 3.0), 2.0);
+
+        assert_eq!(beam_node_update_clip_radius(5, 8.0), 48.0);
+        assert_eq!(
+            beam_node_could_connect_scan_range(5, 2).collect::<Vec<_>>(),
+            vec![2, 3, 4, 5, 6]
+        );
+        assert!(beam_node_within_target_rect(10, 10, 10, 10, 2));
+        assert!(!beam_node_within_target_rect(12, 10, 10, 10, 2));
+        assert_eq!(
+            beam_node_draw_laser_size_offset(0.0, 0.0, 32.0, 0.0, 1, 2, 8.0),
+            20.0
+        );
+        assert!(beam_node_should_draw_laser(3, 2));
+        assert_eq!(beam_node_status(1.0, 0.0), PowerBlockStatus::Active);
+        assert_eq!(beam_node_status(-1.0, 1.0), PowerBlockStatus::NoOutput);
+        assert_eq!(beam_node_status(0.0, 0.0), PowerBlockStatus::NoInput);
+        assert_eq!(long_power_node_warmup(0.0, 1), 0.05);
     }
 }
