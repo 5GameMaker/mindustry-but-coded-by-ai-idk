@@ -175,6 +175,78 @@ impl MapTile {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TilePos {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl TilePos {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PostFilterTile {
+    pub pos: TilePos,
+    pub floor: MapBlock,
+    pub block: MapBlock,
+    pub overlay: MapBlock,
+    pub team: i32,
+    pub is_core: bool,
+    pub is_center: bool,
+    pub is_storage: bool,
+    pub synthetic: bool,
+    pub item_capacity: i32,
+}
+
+impl PostFilterTile {
+    pub fn new(pos: TilePos) -> Self {
+        Self {
+            pos,
+            floor: MapBlock::STONE,
+            block: MapBlock::AIR,
+            overlay: MapBlock::AIR,
+            team: 0,
+            is_core: false,
+            is_center: false,
+            is_storage: false,
+            synthetic: false,
+            item_capacity: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockWrite {
+    pub pos: TilePos,
+    pub block: MapBlock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemStackSpec {
+    pub item_id: i16,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemGrant {
+    pub pos: TilePos,
+    pub item_id: i16,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicFilterPlan {
+    pub code: Option<String>,
+    pub max_instructions: usize,
+    pub looped: bool,
+    pub update_logic_vars_first: bool,
+}
+
+pub const LOGIC_FILTER_MAX_INSTRUCTIONS_EXECUTION: usize = 500 * 500 * 25;
+
 pub fn filter_simple_name(class_name: &str) -> String {
     class_name.trim_end_matches("Filter").to_ascii_lowercase()
 }
@@ -519,6 +591,163 @@ pub fn ore_median_filter_apply<F>(
     input.overlay = overlays[index].1;
 }
 
+pub fn post_filter_trim_removals(
+    candidates: &[TilePos],
+    amount: usize,
+    shuffled_indices: &[usize],
+) -> Vec<TilePos> {
+    if amount >= candidates.len() {
+        return Vec::new();
+    }
+
+    let mut ordered = Vec::with_capacity(candidates.len());
+    let mut seen = vec![false; candidates.len()];
+
+    for &index in shuffled_indices {
+        if index < candidates.len() && !seen[index] {
+            seen[index] = true;
+            ordered.push(candidates[index]);
+        }
+    }
+
+    for (index, pos) in candidates.iter().enumerate() {
+        if !seen[index] {
+            ordered.push(*pos);
+        }
+    }
+
+    ordered.into_iter().skip(amount).collect()
+}
+
+pub fn core_spawn_filter_removals(
+    tiles: &[PostFilterTile],
+    default_team: i32,
+    amount: usize,
+    shuffled_indices: &[usize],
+) -> Vec<TilePos> {
+    let candidates: Vec<_> = tiles
+        .iter()
+        .filter(|tile| tile.team == default_team && tile.is_core && tile.is_center)
+        .map(|tile| tile.pos)
+        .collect();
+    post_filter_trim_removals(&candidates, amount, shuffled_indices)
+}
+
+pub fn enemy_spawn_filter_clears(
+    tiles: &[PostFilterTile],
+    amount: usize,
+    shuffled_indices: &[usize],
+) -> Vec<TilePos> {
+    let candidates: Vec<_> = tiles
+        .iter()
+        .filter(|tile| tile.overlay == MapBlock::SPAWN)
+        .map(|tile| tile.pos)
+        .collect();
+    post_filter_trim_removals(&candidates, amount, shuffled_indices)
+}
+
+pub fn spawn_path_filter_points(
+    tiles: &[PostFilterTile],
+    wave_team: i32,
+) -> (Vec<TilePos>, Vec<TilePos>) {
+    let mut cores = Vec::new();
+    let mut spawns = Vec::new();
+
+    for tile in tiles {
+        if tile.overlay == MapBlock::SPAWN {
+            spawns.push(tile.pos);
+        }
+        if tile.is_core && tile.team != wave_team {
+            cores.push(tile.pos);
+        }
+    }
+
+    (cores, spawns)
+}
+
+pub fn expand_spawn_path_walls<F>(
+    path: &[TilePos],
+    radius: i32,
+    width: i32,
+    height: i32,
+    block: MapBlock,
+    mut is_synthetic: F,
+) -> Vec<BlockWrite>
+where
+    F: FnMut(TilePos) -> bool,
+{
+    let mut writes = Vec::new();
+    let rad = radius.max(0);
+
+    for tile in path {
+        for x in -rad..=rad {
+            for y in -rad..=rad {
+                let pos = TilePos::new(tile.x + x, tile.y + y);
+                if in_bounds(pos, width, height)
+                    && within_radius_i32(x, y, rad)
+                    && !is_synthetic(pos)
+                {
+                    writes.push(BlockWrite { pos, block });
+                }
+            }
+        }
+    }
+
+    writes
+}
+
+pub fn random_item_filter_grants(
+    tiles: &[PostFilterTile],
+    drops: &[ItemStackSpec],
+    chance: f32,
+    rolls: &[(f32, i32)],
+) -> Vec<ItemGrant> {
+    let mut grants = Vec::new();
+    let mut roll_index = 0usize;
+
+    for tile in tiles {
+        if !tile.is_storage || tile.is_core {
+            continue;
+        }
+
+        for drop in drops {
+            let (chance_roll, amount_roll) = rolls.get(roll_index).copied().unwrap_or((1.0, 0));
+            roll_index += 1;
+
+            if random_item_chance_passes(chance_roll, chance) {
+                let amount = amount_roll.clamp(0, drop.amount.max(0));
+                let amount = amount.min(tile.item_capacity.max(0));
+                grants.push(ItemGrant {
+                    pos: tile.pos,
+                    item_id: drop.item_id,
+                    amount,
+                });
+            }
+        }
+    }
+
+    grants
+}
+
+pub fn random_item_chance_passes(roll: f32, chance: f32) -> bool {
+    if chance <= 0.0 {
+        false
+    } else if chance >= 1.0 {
+        true
+    } else {
+        roll < chance
+    }
+}
+
+pub fn logic_filter_plan(code: Option<&str>, looped: bool) -> LogicFilterPlan {
+    LogicFilterPlan {
+        code: code.map(ToOwned::to_owned),
+        max_instructions: LOGIC_FILTER_MAX_INSTRUCTIONS_EXECUTION,
+        looped,
+        update_logic_vars_first: true,
+    }
+}
+
 fn distance(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     ((x1 - x2).powi(2) + (y1 - y2).powi(2)).sqrt()
 }
@@ -530,6 +759,14 @@ fn vector_from_degrees(degrees: f32, length: f32) -> (f32, f32) {
 
 fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
     value.max(min).min(max)
+}
+
+fn in_bounds(pos: TilePos, width: i32, height: i32) -> bool {
+    pos.x >= 0 && pos.y >= 0 && pos.x < width && pos.y < height
+}
+
+fn within_radius_i32(x: i32, y: i32, radius: i32) -> bool {
+    x * x + y * y <= radius * radius
 }
 
 fn sample_tile<F>(width: i32, height: i32, x: i32, y: i32, tile_at: &mut F) -> MapTile
@@ -792,5 +1029,142 @@ mod tests {
             tile_for(x, y, MapBlock::AIR, MapBlock::AIR)
         });
         assert_eq!(input.overlay, ORE_LEAD);
+    }
+
+    #[test]
+    fn post_spawn_filters_trim_candidates_like_java_post_filters() {
+        fn tile(pos: TilePos) -> PostFilterTile {
+            PostFilterTile::new(pos)
+        }
+
+        let mut tiles = vec![
+            tile(TilePos::new(0, 0)),
+            tile(TilePos::new(1, 0)),
+            tile(TilePos::new(2, 0)),
+            tile(TilePos::new(3, 0)),
+            tile(TilePos::new(4, 0)),
+        ];
+
+        tiles[0].is_core = true;
+        tiles[0].is_center = true;
+        tiles[0].team = 1;
+        tiles[1].is_core = true;
+        tiles[1].is_center = false;
+        tiles[1].team = 1;
+        tiles[2].is_core = true;
+        tiles[2].is_center = true;
+        tiles[2].team = 2;
+        tiles[3].is_core = true;
+        tiles[3].is_center = true;
+        tiles[3].team = 1;
+        tiles[4].is_core = true;
+        tiles[4].is_center = true;
+        tiles[4].team = 1;
+
+        assert_eq!(
+            core_spawn_filter_removals(&tiles, 1, 1, &[2, 0, 1]),
+            vec![TilePos::new(0, 0), TilePos::new(3, 0)]
+        );
+        assert!(core_spawn_filter_removals(&tiles, 1, 3, &[2, 0, 1]).is_empty());
+
+        tiles[1].overlay = MapBlock::SPAWN;
+        tiles[3].overlay = MapBlock::SPAWN;
+        tiles[4].overlay = MapBlock::SPAWN;
+        assert_eq!(
+            enemy_spawn_filter_clears(&tiles, 2, &[1, 0, 2]),
+            vec![TilePos::new(4, 0)]
+        );
+        assert_eq!(
+            enemy_spawn_filter_clears(&tiles, 0, &[2, 0, 1]),
+            vec![TilePos::new(4, 0), TilePos::new(1, 0), TilePos::new(3, 0)]
+        );
+    }
+
+    #[test]
+    fn spawn_path_random_item_and_logic_post_rules_are_plannable() {
+        let mut tiles = vec![
+            PostFilterTile::new(TilePos::new(0, 0)),
+            PostFilterTile::new(TilePos::new(1, 1)),
+            PostFilterTile::new(TilePos::new(2, 2)),
+            PostFilterTile::new(TilePos::new(3, 3)),
+        ];
+        tiles[0].is_core = true;
+        tiles[0].team = 1;
+        tiles[1].is_core = true;
+        tiles[1].team = 2;
+        tiles[2].overlay = MapBlock::SPAWN;
+
+        let (cores, spawns) = spawn_path_filter_points(&tiles, 2);
+        assert_eq!(cores, vec![TilePos::new(0, 0)]);
+        assert_eq!(spawns, vec![TilePos::new(2, 2)]);
+
+        let writes = expand_spawn_path_walls(&[TilePos::new(1, 1)], 1, 3, 3, WALL, |pos| {
+            pos == TilePos::new(1, 0)
+        });
+        assert_eq!(
+            writes,
+            vec![
+                BlockWrite {
+                    pos: TilePos::new(0, 1),
+                    block: WALL
+                },
+                BlockWrite {
+                    pos: TilePos::new(1, 1),
+                    block: WALL
+                },
+                BlockWrite {
+                    pos: TilePos::new(1, 2),
+                    block: WALL
+                },
+                BlockWrite {
+                    pos: TilePos::new(2, 1),
+                    block: WALL
+                }
+            ]
+        );
+
+        let mut storage = PostFilterTile::new(TilePos::new(5, 5));
+        storage.is_storage = true;
+        storage.item_capacity = 4;
+        let mut core_storage = PostFilterTile::new(TilePos::new(6, 5));
+        core_storage.is_storage = true;
+        core_storage.is_core = true;
+        core_storage.item_capacity = 100;
+        let drops = [
+            ItemStackSpec {
+                item_id: 7,
+                amount: 10,
+            },
+            ItemStackSpec {
+                item_id: 8,
+                amount: 3,
+            },
+        ];
+        let grants = random_item_filter_grants(
+            &[storage, core_storage],
+            &drops,
+            0.5,
+            &[(0.49, 9), (0.51, 2)],
+        );
+        assert_eq!(
+            grants,
+            vec![ItemGrant {
+                pos: TilePos::new(5, 5),
+                item_id: 7,
+                amount: 4
+            }]
+        );
+        assert!(
+            random_item_filter_grants(&[storage], &drops, 0.0, &[(0.0, 1), (0.0, 1)]).is_empty()
+        );
+
+        let plan = logic_filter_plan(Some("print \"hi\""), true);
+        assert_eq!(plan.code.as_deref(), Some("print \"hi\""));
+        assert_eq!(
+            plan.max_instructions,
+            LOGIC_FILTER_MAX_INSTRUCTIONS_EXECUTION
+        );
+        assert!(plan.looped);
+        assert!(plan.update_logic_vars_first);
     }
 }
