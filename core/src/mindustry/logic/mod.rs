@@ -891,6 +891,313 @@ impl RadarTarget {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogicRule {
+    CurrentWaveTime,
+    WaveTimer,
+    Waves,
+    Wave,
+    WaveSpacing,
+    WaveSending,
+    AttackMode,
+    EnemyCoreBuildRadius,
+    DropZoneRadius,
+    UnitCap,
+    MapArea,
+    Lighting,
+    CanGameOver,
+    AmbientLight,
+    SolarMultiplier,
+    DragMultiplier,
+    Ban,
+    Unban,
+    PauseDisabled,
+    BuildSpeed,
+    UnitHealth,
+    UnitBuildSpeed,
+    UnitMineSpeed,
+    UnitCost,
+    UnitDamage,
+    BlockHealth,
+    BlockDamage,
+    RtsMinWeight,
+    RtsMinSquad,
+}
+
+impl LogicRule {
+    pub const ALL: [LogicRule; 29] = [
+        LogicRule::CurrentWaveTime,
+        LogicRule::WaveTimer,
+        LogicRule::Waves,
+        LogicRule::Wave,
+        LogicRule::WaveSpacing,
+        LogicRule::WaveSending,
+        LogicRule::AttackMode,
+        LogicRule::EnemyCoreBuildRadius,
+        LogicRule::DropZoneRadius,
+        LogicRule::UnitCap,
+        LogicRule::MapArea,
+        LogicRule::Lighting,
+        LogicRule::CanGameOver,
+        LogicRule::AmbientLight,
+        LogicRule::SolarMultiplier,
+        LogicRule::DragMultiplier,
+        LogicRule::Ban,
+        LogicRule::Unban,
+        LogicRule::PauseDisabled,
+        LogicRule::BuildSpeed,
+        LogicRule::UnitHealth,
+        LogicRule::UnitBuildSpeed,
+        LogicRule::UnitMineSpeed,
+        LogicRule::UnitCost,
+        LogicRule::UnitDamage,
+        LogicRule::BlockHealth,
+        LogicRule::BlockDamage,
+        LogicRule::RtsMinWeight,
+        LogicRule::RtsMinSquad,
+    ];
+
+    pub const WIRE_NAMES: [&'static str; 29] = [
+        "currentWaveTime",
+        "waveTimer",
+        "waves",
+        "wave",
+        "waveSpacing",
+        "waveSending",
+        "attackMode",
+        "enemyCoreBuildRadius",
+        "dropZoneRadius",
+        "unitCap",
+        "mapArea",
+        "lighting",
+        "canGameOver",
+        "ambientLight",
+        "solarMultiplier",
+        "dragMultiplier",
+        "ban",
+        "unban",
+        "pauseDisabled",
+        "buildSpeed",
+        "unitHealth",
+        "unitBuildSpeed",
+        "unitMineSpeed",
+        "unitCost",
+        "unitDamage",
+        "blockHealth",
+        "blockDamage",
+        "rtsMinWeight",
+        "rtsMinSquad",
+    ];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FetchType {
+    Unit,
+    UnitCount,
+    Player,
+    PlayerCount,
+    Core,
+    CoreCount,
+    Build,
+    BuildCount,
+}
+
+impl FetchType {
+    pub const ALL: [FetchType; 8] = [
+        FetchType::Unit,
+        FetchType::UnitCount,
+        FetchType::Player,
+        FetchType::PlayerCount,
+        FetchType::Core,
+        FetchType::CoreCount,
+        FetchType::Build,
+        FetchType::BuildCount,
+    ];
+
+    pub const WIRE_NAMES: [&'static str; 8] = [
+        "unit",
+        "unitCount",
+        "player",
+        "playerCount",
+        "core",
+        "coreCount",
+        "build",
+        "buildCount",
+    ];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QueryType {
+    Unit,
+    Building,
+    Bullet,
+}
+
+impl QueryType {
+    pub const ALL: [QueryType; 3] = [QueryType::Unit, QueryType::Building, QueryType::Bullet];
+    pub const QUERYABLE: [QueryType; 2] = [QueryType::Unit, QueryType::Building];
+    pub const WIRE_NAMES: [&'static str; 3] = ["unit", "building", "bullet"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QueryShape {
+    Circle,
+    Rect,
+}
+
+impl QueryShape {
+    pub const ALL: [QueryShape; 2] = [QueryShape::Circle, QueryShape::Rect];
+    pub const WIRE_NAMES: [&'static str; 2] = ["circle", "rect"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MessageType {
+    Notify,
+    Announce,
+    Toast,
+    Mission,
+}
+
+impl MessageType {
+    pub const ALL: [MessageType; 4] = [
+        MessageType::Notify,
+        MessageType::Announce,
+        MessageType::Toast,
+        MessageType::Mission,
+    ];
+    pub const WIRE_NAMES: [&'static str; 4] = ["notify", "announce", "toast", "mission"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CutsceneAction {
+    Pan,
+    Zoom,
+    Stop,
+}
+
+impl CutsceneAction {
+    pub const ALL: [CutsceneAction; 3] = [
+        CutsceneAction::Pan,
+        CutsceneAction::Zoom,
+        CutsceneAction::Stop,
+    ];
+    pub const WIRE_NAMES: [&'static str; 3] = ["pan", "zoom", "stop"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TileLayer {
+    Floor,
+    Ore,
+    Block,
+    Building,
+}
+
+impl TileLayer {
+    pub const ALL: [TileLayer; 4] = [
+        TileLayer::Floor,
+        TileLayer::Ore,
+        TileLayer::Block,
+        TileLayer::Building,
+    ];
+    pub const SETTABLE: [TileLayer; 3] = [TileLayer::Floor, TileLayer::Ore, TileLayer::Block];
+    pub const WIRE_NAMES: [&'static str; 4] = ["floor", "ore", "block", "building"];
+
+    pub const fn ordinal(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
+        Self::ALL.get(ordinal as usize).copied()
+    }
+
+    pub fn wire_name(self) -> &'static str {
+        Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub const fn is_settable(self) -> bool {
+        matches!(self, TileLayer::Floor | TileLayer::Ore | TileLayer::Block)
+    }
+}
+
 /// Mirrors upstream `mindustry.logic.LMarkerControl`.
 ///
 /// The declaration order is network-visible: Java `TypeIO.writeMarkerControl`
@@ -1323,6 +1630,110 @@ mod tests {
         assert!(RadarTarget::Flying.matches(1, &unit));
         assert!(RadarTarget::Boss.matches(1, &unit));
         assert!(!RadarTarget::Ground.matches(1, &unit));
+    }
+
+    #[test]
+    fn pure_logic_enums_match_java_order_and_sets() {
+        assert_eq!(LogicRule::ALL.len(), 29);
+        assert_eq!(LogicRule::CurrentWaveTime.ordinal(), 0);
+        assert_eq!(LogicRule::PauseDisabled.ordinal(), 18);
+        assert_eq!(
+            &LogicRule::ALL[LogicRule::ALL.len() - 2..],
+            [LogicRule::RtsMinWeight, LogicRule::RtsMinSquad]
+        );
+        assert_eq!(LogicRule::RtsMinWeight.wire_name(), "rtsMinWeight");
+        assert_eq!(LogicRule::from_ordinal(29), None);
+
+        assert_eq!(
+            FetchType::ALL,
+            [
+                FetchType::Unit,
+                FetchType::UnitCount,
+                FetchType::Player,
+                FetchType::PlayerCount,
+                FetchType::Core,
+                FetchType::CoreCount,
+                FetchType::Build,
+                FetchType::BuildCount
+            ]
+        );
+        assert_eq!(
+            FetchType::ALL
+                .iter()
+                .map(|value| value.wire_name())
+                .collect::<Vec<_>>(),
+            vec![
+                "unit",
+                "unitCount",
+                "player",
+                "playerCount",
+                "core",
+                "coreCount",
+                "build",
+                "buildCount"
+            ]
+        );
+        assert_eq!(FetchType::BuildCount.ordinal(), 7);
+        assert_eq!(FetchType::from_ordinal(8), None);
+
+        assert_eq!(
+            QueryType::ALL,
+            [QueryType::Unit, QueryType::Building, QueryType::Bullet]
+        );
+        assert_eq!(QueryType::QUERYABLE, [QueryType::Unit, QueryType::Building]);
+        assert_eq!(QueryType::Bullet.wire_name(), "bullet");
+        assert_eq!(QueryType::from_ordinal(3), None);
+
+        assert_eq!(QueryShape::ALL, [QueryShape::Circle, QueryShape::Rect]);
+        assert_eq!(
+            QueryShape::ALL
+                .iter()
+                .map(|value| value.wire_name())
+                .collect::<Vec<_>>(),
+            vec!["circle", "rect"]
+        );
+        assert_eq!(QueryShape::from_ordinal(2), None);
+
+        assert_eq!(
+            MessageType::ALL,
+            [
+                MessageType::Notify,
+                MessageType::Announce,
+                MessageType::Toast,
+                MessageType::Mission
+            ]
+        );
+        assert_eq!(MessageType::Mission.ordinal(), 3);
+        assert_eq!(MessageType::Toast.wire_name(), "toast");
+
+        assert_eq!(
+            CutsceneAction::ALL,
+            [
+                CutsceneAction::Pan,
+                CutsceneAction::Zoom,
+                CutsceneAction::Stop
+            ]
+        );
+        assert_eq!(CutsceneAction::Stop.wire_name(), "stop");
+        assert_eq!(CutsceneAction::from_ordinal(3), None);
+
+        assert_eq!(
+            TileLayer::ALL,
+            [
+                TileLayer::Floor,
+                TileLayer::Ore,
+                TileLayer::Block,
+                TileLayer::Building
+            ]
+        );
+        assert_eq!(
+            TileLayer::SETTABLE,
+            [TileLayer::Floor, TileLayer::Ore, TileLayer::Block]
+        );
+        assert!(TileLayer::Floor.is_settable());
+        assert!(TileLayer::Block.is_settable());
+        assert!(!TileLayer::Building.is_settable());
+        assert_eq!(TileLayer::Building.wire_name(), "building");
     }
 
     #[test]
