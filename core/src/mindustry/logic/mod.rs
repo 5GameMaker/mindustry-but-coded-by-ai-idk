@@ -2,6 +2,254 @@
 
 use std::fmt;
 
+pub const LOGIC_CTRL_PROCESSOR: i32 = 1;
+pub const LOGIC_CTRL_PLAYER: i32 = 2;
+pub const LOGIC_CTRL_COMMAND: i32 = 3;
+pub const LOOKABLE_CONTENT: [&str; 5] = ["block", "unit", "item", "liquid", "team"];
+pub const WRITABLE_LOOKABLE_CONTENT: [&str; 4] = ["block", "unit", "item", "liquid"];
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LVarValue {
+    Number(f64),
+    Object(Option<String>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LVar {
+    pub name: String,
+    pub id: i32,
+    pub is_obj: bool,
+    pub constant: bool,
+    pub objval: Option<String>,
+    pub numval: f64,
+    pub sync_time: i64,
+}
+
+impl LVar {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self::with_id(name, -1)
+    }
+
+    pub fn with_id(name: impl Into<String>, id: i32) -> Self {
+        Self::with_id_constant(name, id, false)
+    }
+
+    pub fn with_id_constant(name: impl Into<String>, id: i32, constant: bool) -> Self {
+        Self {
+            name: name.into(),
+            id,
+            is_obj: false,
+            constant,
+            objval: None,
+            numval: 0.0,
+            sync_time: 0,
+        }
+    }
+
+    pub const fn invalid(value: f64) -> bool {
+        value.is_nan() || value.is_infinite()
+    }
+
+    pub fn obj(&self) -> Option<&str> {
+        self.is_obj.then_some(self.objval.as_deref()).flatten()
+    }
+
+    pub fn bool(&self) -> bool {
+        if self.is_obj {
+            self.objval.is_some()
+        } else {
+            self.numval.abs() >= 0.00001
+        }
+    }
+
+    pub fn num(&self) -> f64 {
+        if self.is_obj {
+            self.objval.is_some() as u8 as f64
+        } else if Self::invalid(self.numval) {
+            0.0
+        } else {
+            self.numval
+        }
+    }
+
+    pub fn num_or_nan(&self) -> f64 {
+        if self.is_obj {
+            if self.objval.is_some() {
+                1.0
+            } else {
+                f64::NAN
+            }
+        } else if Self::invalid(self.numval) {
+            0.0
+        } else {
+            self.numval
+        }
+    }
+
+    pub fn numf(&self) -> f32 {
+        self.num() as f32
+    }
+
+    pub fn numf_or_nan(&self) -> f32 {
+        self.num_or_nan() as f32
+    }
+
+    pub fn numi(&self) -> i32 {
+        self.num() as i32
+    }
+
+    pub fn set_bool(&mut self, value: bool) {
+        self.set_num(if value { 1.0 } else { 0.0 });
+    }
+
+    pub fn set_num(&mut self, value: f64) {
+        if self.constant {
+            return;
+        }
+        if Self::invalid(value) {
+            self.objval = None;
+            self.is_obj = true;
+        } else {
+            self.numval = value;
+            self.objval = None;
+            self.is_obj = false;
+        }
+    }
+
+    pub fn set_obj(&mut self, value: Option<String>) {
+        if self.constant {
+            return;
+        }
+        self.objval = value;
+        self.is_obj = true;
+    }
+
+    pub fn set_const_obj(&mut self, value: Option<String>) {
+        self.objval = value;
+        self.is_obj = true;
+    }
+
+    pub fn set_from(&mut self, other: &LVar) {
+        self.is_obj = other.is_obj;
+        if self.is_obj {
+            self.objval = other.objval.clone();
+        } else {
+            self.numval = if Self::invalid(other.numval) {
+                0.0
+            } else {
+                other.numval
+            };
+        }
+    }
+
+    pub fn value(&self) -> LVarValue {
+        if self.is_obj {
+            LVarValue::Object(self.objval.clone())
+        } else {
+            LVarValue::Number(self.numval)
+        }
+    }
+}
+
+impl fmt::Display for LVar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_obj {
+            match &self.objval {
+                Some(value) => write!(f, "{}: {}", self.name, value)?,
+                None => write!(f, "{}: null", self.name)?,
+            }
+        } else {
+            write!(f, "{}: {}", self.name, self.numval)?;
+        }
+        if self.constant {
+            f.write_str(" [const]")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalVarEntry {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub icon: &'static str,
+    pub privileged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalVarSnapshot {
+    pub entries: Vec<GlobalVarEntry>,
+}
+
+impl GlobalVarSnapshot {
+    pub fn baseline() -> Self {
+        let mut entries = Vec::new();
+        for name in [
+            "sectionProcessor",
+            "@this",
+            "@thisx",
+            "@thisy",
+            "@links",
+            "@ipt",
+            "sectionGeneral",
+            "false",
+            "true",
+            "@pi",
+            "@e",
+            "@degToRad",
+            "@radToDeg",
+            "sectionMap",
+            "@time",
+            "@tick",
+            "@second",
+            "@minute",
+            "@waveNumber",
+            "@waveTime",
+            "@mapw",
+            "@maph",
+            "sectionNetwork",
+            "@server",
+            "@client",
+            "@clientLocale",
+            "@clientUnit",
+            "@clientName",
+            "@clientTeam",
+            "@clientMobile",
+            "sectionLookup",
+        ] {
+            let privileged = matches!(
+                name,
+                "@server"
+                    | "@client"
+                    | "@clientLocale"
+                    | "@clientUnit"
+                    | "@clientName"
+                    | "@clientTeam"
+                    | "@clientMobile"
+            );
+            entries.push(GlobalVarEntry {
+                name,
+                description: "",
+                icon: "",
+                privileged,
+            });
+        }
+        Self { entries }
+    }
+
+    pub fn names(&self) -> Vec<&'static str> {
+        self.entries.iter().map(|entry| entry.name).collect()
+    }
+
+    pub fn visible_to_privileged(&self, privileged: bool) -> Vec<&'static str> {
+        self.entries
+            .iter()
+            .filter(|entry| privileged || !entry.privileged)
+            .map(|entry| entry.name)
+            .collect()
+    }
+}
+
 /// Mirrors upstream `mindustry.logic.LAccess`.
 ///
 /// The declaration order is observable by logic scripts and generated
@@ -1615,6 +1863,124 @@ impl LMarkerControl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lvar_matches_java_numeric_object_and_constant_semantics() {
+        assert!(LVar::invalid(f64::NAN));
+        assert!(LVar::invalid(f64::INFINITY));
+        assert!(!LVar::invalid(42.0));
+
+        let mut var = LVar::with_id("value", 7);
+        assert_eq!(var.id, 7);
+        assert_eq!(var.num(), 0.0);
+        assert!(!var.bool());
+        assert_eq!(var.numi(), 0);
+
+        var.set_num(0.000001);
+        assert_eq!(var.num(), 0.000001);
+        assert!(!var.bool());
+        var.set_num(0.00001);
+        assert!(var.bool());
+
+        var.set_num(f64::NAN);
+        assert!(var.is_obj);
+        assert_eq!(var.obj(), None);
+        assert_eq!(var.num(), 0.0);
+        assert!(var.num_or_nan().is_nan());
+        assert_eq!(var.numf(), 0.0);
+        assert!(var.numf_or_nan().is_nan());
+
+        var.set_obj(Some("core".into()));
+        assert_eq!(var.obj(), Some("core"));
+        assert_eq!(var.num(), 1.0);
+        assert!(var.bool());
+        assert_eq!(var.value(), LVarValue::Object(Some("core".into())));
+
+        var.set_bool(false);
+        assert!(!var.is_obj);
+        assert_eq!(var.numval, 0.0);
+        assert_eq!(var.value(), LVarValue::Number(0.0));
+
+        let mut constant = LVar::with_id_constant("const", 1, true);
+        constant.set_num(9.0);
+        assert_eq!(constant.numval, 0.0);
+        constant.set_obj(Some("ignored".into()));
+        assert_eq!(constant.obj(), None);
+        constant.set_const_obj(Some("forced".into()));
+        assert_eq!(constant.obj(), Some("forced"));
+        assert_eq!(constant.to_string(), "const: forced [const]");
+
+        let mut source = LVar::new("source");
+        source.set_num(f64::INFINITY);
+        let mut target = LVar::new("@counter");
+        target.numval = 99.0;
+        target.set_from(&source);
+        assert!(target.is_obj);
+        assert_eq!(target.obj(), None);
+        assert_eq!(target.numval, 99.0);
+
+        source.set_obj(None);
+        target.numval = 77.0;
+        target.set_from(&source);
+        assert!(target.is_obj);
+        assert_eq!(target.obj(), None);
+        assert_eq!(target.numval, 77.0);
+        assert_eq!(target.to_string(), "@counter: null");
+    }
+
+    #[test]
+    fn global_vars_baseline_keeps_java_constants_and_entry_order() {
+        assert_eq!(LOGIC_CTRL_PROCESSOR, 1);
+        assert_eq!(LOGIC_CTRL_PLAYER, 2);
+        assert_eq!(LOGIC_CTRL_COMMAND, 3);
+        assert_eq!(
+            LOOKABLE_CONTENT,
+            ["block", "unit", "item", "liquid", "team"]
+        );
+        assert_eq!(
+            WRITABLE_LOOKABLE_CONTENT,
+            ["block", "unit", "item", "liquid"]
+        );
+
+        let snapshot = GlobalVarSnapshot::baseline();
+        let names = snapshot.names();
+        assert_eq!(
+            &names[..13],
+            [
+                "sectionProcessor",
+                "@this",
+                "@thisx",
+                "@thisy",
+                "@links",
+                "@ipt",
+                "sectionGeneral",
+                "false",
+                "true",
+                "@pi",
+                "@e",
+                "@degToRad",
+                "@radToDeg"
+            ]
+        );
+        assert!(names.contains(&"sectionMap"));
+        assert!(names.contains(&"sectionNetwork"));
+        assert_eq!(names.last(), Some(&"sectionLookup"));
+
+        let public_names = snapshot.visible_to_privileged(false);
+        assert!(!public_names.contains(&"@clientLocale"));
+        assert!(!public_names.contains(&"@clientUnit"));
+        assert!(snapshot
+            .visible_to_privileged(true)
+            .contains(&"@clientLocale"));
+        assert!(
+            snapshot
+                .entries
+                .iter()
+                .find(|entry| entry.name == "@server")
+                .unwrap()
+                .privileged
+        );
+    }
 
     #[test]
     fn l_access_matches_java_order_params_and_derived_sets() {
