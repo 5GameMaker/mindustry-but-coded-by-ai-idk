@@ -1,5 +1,7 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
+use crate::mindustry::ctype::ContentType;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -10,6 +12,13 @@ pub const LOGIC_CTRL_PLAYER: i32 = 2;
 pub const LOGIC_CTRL_COMMAND: i32 = 3;
 pub const LOOKABLE_CONTENT: [&str; 5] = ["block", "unit", "item", "liquid", "team"];
 pub const WRITABLE_LOOKABLE_CONTENT: [&str; 4] = ["block", "unit", "item", "liquid"];
+pub const LOOKABLE_CONTENT_TYPES: [ContentType; 5] = [
+    ContentType::Block,
+    ContentType::Unit,
+    ContentType::Item,
+    ContentType::Liquid,
+    ContentType::Team,
+];
 pub const LOGIC_PARSER_MAX_TOKENS: usize = 16;
 pub const LOGIC_PARSER_MAX_JUMPS: usize = 500;
 pub const LOGIC_CANVAS_INVALID_JUMP: i32 = i32::MAX;
@@ -350,6 +359,34 @@ pub enum LogicStatement {
         a: String,
         value: String,
     },
+    Lookup {
+        type_: ContentType,
+        result: String,
+        id: String,
+    },
+    Jump {
+        dest_index: i32,
+        op: ConditionOp,
+        value: String,
+        compare: String,
+    },
+    Control {
+        type_: LAccess,
+        target: String,
+        p1: String,
+        p2: String,
+        p3: String,
+        p4: String,
+    },
+    Radar {
+        target1: RadarTarget,
+        target2: RadarTarget,
+        target3: RadarTarget,
+        sort: RadarSort,
+        radar: String,
+        sort_order: String,
+        output: String,
+    },
 }
 
 impl LogicStatement {
@@ -472,6 +509,46 @@ impl LogicStatement {
         }
     }
 
+    pub fn lookup() -> Self {
+        Self::Lookup {
+            type_: ContentType::Item,
+            result: "result".into(),
+            id: "0".into(),
+        }
+    }
+
+    pub fn jump() -> Self {
+        Self::Jump {
+            dest_index: 0,
+            op: ConditionOp::NotEqual,
+            value: "x".into(),
+            compare: "false".into(),
+        }
+    }
+
+    pub fn control() -> Self {
+        Self::Control {
+            type_: LAccess::Enabled,
+            target: "block1".into(),
+            p1: "0".into(),
+            p2: "0".into(),
+            p3: "0".into(),
+            p4: "0".into(),
+        }
+    }
+
+    pub fn radar() -> Self {
+        Self::Radar {
+            target1: RadarTarget::Enemy,
+            target2: RadarTarget::Any,
+            target3: RadarTarget::Any,
+            sort: RadarSort::Distance,
+            radar: "turret1".into(),
+            sort_order: "1".into(),
+            output: "result".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -492,6 +569,10 @@ impl LogicStatement {
             LogicStatement::End => "end",
             LogicStatement::PackColor { .. } => "packcolor",
             LogicStatement::UnpackColor { .. } => "unpackcolor",
+            LogicStatement::Lookup { .. } => "lookup",
+            LogicStatement::Jump { .. } => "jump",
+            LogicStatement::Control { .. } => "control",
+            LogicStatement::Radar { .. } => "radar",
         }
     }
 
@@ -510,10 +591,15 @@ impl LogicStatement {
             | LogicStatement::LocalePrint { .. } => LCategory::by_name("world").unwrap(),
             LogicStatement::Set { .. }
             | LogicStatement::Operation { .. }
+            | LogicStatement::Lookup { .. }
             | LogicStatement::PackColor { .. }
             | LogicStatement::UnpackColor { .. } => LCategory::by_name("operation").unwrap(),
-            LogicStatement::Wait { .. } | LogicStatement::Stop | LogicStatement::End => {
-                LCategory::by_name("control").unwrap()
+            LogicStatement::Wait { .. }
+            | LogicStatement::Stop
+            | LogicStatement::End
+            | LogicStatement::Jump { .. } => LCategory::by_name("control").unwrap(),
+            LogicStatement::Control { .. } | LogicStatement::Radar { .. } => {
+                LCategory::by_name("block").unwrap()
             }
         }
     }
@@ -586,6 +672,58 @@ impl LogicStatement {
                 b.clone(),
                 a.clone(),
                 value.clone(),
+            ],
+            LogicStatement::Lookup { type_, result, id } => vec![
+                "lookup".into(),
+                type_.wire_name().into(),
+                result.clone(),
+                id.clone(),
+            ],
+            LogicStatement::Jump {
+                dest_index,
+                op,
+                value,
+                compare,
+            } => vec![
+                "jump".into(),
+                dest_index.to_string(),
+                op.java_name().into(),
+                value.clone(),
+                compare.clone(),
+            ],
+            LogicStatement::Control {
+                type_,
+                target,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => vec![
+                "control".into(),
+                type_.wire_name().into(),
+                target.clone(),
+                p1.clone(),
+                p2.clone(),
+                p3.clone(),
+                p4.clone(),
+            ],
+            LogicStatement::Radar {
+                target1,
+                target2,
+                target3,
+                sort,
+                radar,
+                sort_order,
+                output,
+            } => vec![
+                "radar".into(),
+                target1.wire_name().into(),
+                target2.wire_name().into(),
+                target3.wire_name().into(),
+                sort.wire_name().into(),
+                radar.clone(),
+                sort_order.clone(),
+                output.clone(),
             ],
         }
     }
@@ -744,6 +882,121 @@ impl LogicStatement {
                     }
                     if tokens.len() > 5 {
                         *value = tokens[5].clone();
+                    }
+                }
+                statement
+            }
+            "lookup" => {
+                let mut statement = Self::lookup();
+                if let LogicStatement::Lookup { type_, result, id } = &mut statement {
+                    if tokens.len() > 1 {
+                        let value = ContentType::from_wire_name(&tokens[1])?;
+                        if !LOOKABLE_CONTENT_TYPES.contains(&value) {
+                            return None;
+                        }
+                        *type_ = value;
+                    }
+                    if tokens.len() > 2 {
+                        *result = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *id = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "jump" => {
+                let mut statement = Self::jump();
+                if let LogicStatement::Jump {
+                    dest_index,
+                    op,
+                    value,
+                    compare,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *dest_index = tokens[1].parse().ok()?;
+                    }
+                    if tokens.len() > 2 {
+                        *op = ConditionOp::by_java_name(&tokens[2])?;
+                    }
+                    if tokens.len() > 3 {
+                        *value = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *compare = tokens[4].clone();
+                    }
+                }
+                statement
+            }
+            "control" => {
+                let mut statement = Self::control();
+                if let LogicStatement::Control {
+                    type_,
+                    target,
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        let value = LAccess::by_wire_name(&tokens[1])?;
+                        if !value.is_control() {
+                            return None;
+                        }
+                        *type_ = value;
+                    }
+                    if tokens.len() > 2 {
+                        *target = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *p1 = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *p2 = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *p3 = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *p4 = tokens[6].clone();
+                    }
+                }
+                statement
+            }
+            "radar" => {
+                let mut statement = Self::radar();
+                if let LogicStatement::Radar {
+                    target1,
+                    target2,
+                    target3,
+                    sort,
+                    radar,
+                    sort_order,
+                    output,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *target1 = RadarTarget::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *target2 = RadarTarget::by_wire_name(&tokens[2])?;
+                    }
+                    if tokens.len() > 3 {
+                        *target3 = RadarTarget::by_wire_name(&tokens[3])?;
+                    }
+                    if tokens.len() > 4 {
+                        *sort = RadarSort::by_wire_name(&tokens[4])?;
+                    }
+                    if tokens.len() > 5 {
+                        *radar = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *sort_order = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *output = tokens[7].clone();
                     }
                 }
                 statement
@@ -2313,6 +2566,13 @@ impl LAccess {
         Self::WIRE_NAMES[self.ordinal() as usize]
     }
 
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
+
     pub const fn params(self) -> &'static [&'static str] {
         match self {
             LAccess::Enabled => &["to"],
@@ -2734,6 +2994,17 @@ impl ConditionOp {
 
     pub const SYMBOLS: [&'static str; 8] = ["==", "not", "<", "<=", ">", ">=", "===", "always"];
 
+    pub const JAVA_NAMES: [&'static str; 8] = [
+        "equal",
+        "notEqual",
+        "lessThan",
+        "lessThanEq",
+        "greaterThan",
+        "greaterThanEq",
+        "strictEqual",
+        "always",
+    ];
+
     pub const fn ordinal(self) -> u8 {
         self as u8
     }
@@ -2744,6 +3015,24 @@ impl ConditionOp {
 
     pub fn symbol(self) -> &'static str {
         Self::SYMBOLS[self.ordinal() as usize]
+    }
+
+    pub fn java_name(self) -> &'static str {
+        Self::JAVA_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_java_name(name: &str) -> Option<Self> {
+        match name {
+            "equal" => Some(ConditionOp::Equal),
+            "notEqual" => Some(ConditionOp::NotEqual),
+            "lessThan" => Some(ConditionOp::LessThan),
+            "lessThanEq" => Some(ConditionOp::LessThanEq),
+            "greaterThan" => Some(ConditionOp::GreaterThan),
+            "greaterThanEq" => Some(ConditionOp::GreaterThanEq),
+            "strictEqual" => Some(ConditionOp::StrictEqual),
+            "always" => Some(ConditionOp::Always),
+            _ => None,
+        }
     }
 
     pub fn test_numbers(self, a: f64, b: f64) -> bool {
@@ -2873,6 +3162,13 @@ impl RadarSort {
         Self::WIRE_NAMES[self.ordinal() as usize]
     }
 
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
+
     pub fn score(self, origin_x: f32, origin_y: f32, other: &RadarUnitView) -> f32 {
         match self {
             RadarSort::Distance => {
@@ -2930,6 +3226,13 @@ impl RadarTarget {
 
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
     }
 
     pub fn matches(self, team: u8, other: &RadarUnitView) -> bool {
@@ -3903,15 +4206,37 @@ mod tests {
             LogicStatement::unpack_color().write_line(),
             "unpackcolor r g b a color"
         );
+        assert_eq!(
+            LogicStatement::lookup().write_line(),
+            "lookup item result 0"
+        );
+        assert_eq!(
+            LogicStatement::jump().write_line(),
+            "jump 0 notEqual x false"
+        );
+        assert_eq!(
+            LogicStatement::control().write_line(),
+            "control enabled block1 0 0 0 0"
+        );
+        assert_eq!(
+            LogicStatement::radar().write_line(),
+            "radar enemy any any distance turret1 1 result"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
         assert_eq!(LogicStatement::set_rate().category().name, "world");
         assert_eq!(LogicStatement::operation().category().name, "operation");
+        assert_eq!(LogicStatement::lookup().category().name, "operation");
         assert_eq!(LogicStatement::wait().category().name, "control");
+        assert_eq!(LogicStatement::jump().category().name, "control");
+        assert_eq!(LogicStatement::control().category().name, "block");
+        assert_eq!(LogicStatement::radar().category().name, "block");
         assert!(!LogicStatement::read().privileged());
         assert!(!LogicStatement::operation().privileged());
         assert!(!LogicStatement::stop().privileged());
+        assert!(!LogicStatement::lookup().privileged());
+        assert!(!LogicStatement::jump().privileged());
         assert!(LogicStatement::set_rate().privileged());
         assert!(LogicStatement::sync().privileged());
         assert!(LogicStatement::locale_print().privileged());
@@ -4051,6 +4376,70 @@ mod tests {
                 b: "blue".into(),
                 a: "alpha".into(),
                 value: "packed".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["lookup", "block", "out", "7"].map(String::from)),
+            Some(LogicStatement::Lookup {
+                type_: ContentType::Block,
+                result: "out".into(),
+                id: "7".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["lookup", "bullet", "out", "7"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["jump", "-1", "always", "ignored", "alsoIgnored"].map(String::from)
+            ),
+            Some(LogicStatement::Jump {
+                dest_index: -1,
+                op: ConditionOp::Always,
+                value: "ignored".into(),
+                compare: "alsoIgnored".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["control", "shootp", "turret", "@unit", "true"].map(String::from)
+            ),
+            Some(LogicStatement::Control {
+                type_: LAccess::Shootp,
+                target: "turret".into(),
+                p1: "@unit".into(),
+                p2: "true".into(),
+                p3: "0".into(),
+                p4: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["control", "health", "block1", "1"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &[
+                    "radar",
+                    "enemy",
+                    "flying",
+                    "boss",
+                    "maxHealth",
+                    "radar1",
+                    "-1",
+                    "target"
+                ]
+                .map(String::from)
+            ),
+            Some(LogicStatement::Radar {
+                target1: RadarTarget::Enemy,
+                target2: RadarTarget::Flying,
+                target3: RadarTarget::Boss,
+                sort: RadarSort::MaxHealth,
+                radar: "radar1".into(),
+                sort_order: "-1".into(),
+                output: "target".into()
             })
         );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
@@ -4441,6 +4830,12 @@ mod tests {
         assert_eq!(LAccess::Color.ordinal(), 75);
         assert_eq!(LAccess::from_ordinal(72), Some(LAccess::Shoot));
         assert_eq!(LAccess::from_ordinal(76), None);
+        assert_eq!(LAccess::by_wire_name("enabled"), Some(LAccess::Enabled));
+        assert_eq!(
+            LAccess::by_wire_name("currentAmmoType"),
+            Some(LAccess::CurrentAmmoType)
+        );
+        assert_eq!(LAccess::by_wire_name("missing"), None);
 
         assert_eq!(
             &LAccess::ALL[LAccess::ALL.len() - 5..],
@@ -4604,6 +4999,12 @@ mod tests {
         assert_eq!(ConditionOp::Always.ordinal(), 7);
         assert_eq!(ConditionOp::from_ordinal(7), Some(ConditionOp::Always));
         assert_eq!(ConditionOp::from_ordinal(8), None);
+        assert_eq!(ConditionOp::NotEqual.java_name(), "notEqual");
+        assert_eq!(
+            ConditionOp::by_java_name("lessThanEq"),
+            Some(ConditionOp::LessThanEq)
+        );
+        assert_eq!(ConditionOp::by_java_name("<="), None);
 
         let symbols: Vec<_> = ConditionOp::ALL.iter().map(|op| op.symbol()).collect();
         assert_eq!(
@@ -4654,6 +5055,11 @@ mod tests {
         );
         assert_eq!(RadarSort::MaxHealth.ordinal(), 4);
         assert_eq!(RadarSort::from_ordinal(5), None);
+        assert_eq!(
+            RadarSort::by_wire_name("maxHealth"),
+            Some(RadarSort::MaxHealth)
+        );
+        assert_eq!(RadarSort::by_wire_name("missing"), None);
 
         let mut unit = RadarUnitView::new(3.0, 4.0, 2);
         unit.health = 10.0;
@@ -4687,6 +5093,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["any", "enemy", "ally", "player", "attacker", "flying", "boss", "ground"]
         );
+        assert_eq!(
+            RadarTarget::by_wire_name("attacker"),
+            Some(RadarTarget::Attacker)
+        );
+        assert_eq!(RadarTarget::by_wire_name("missing"), None);
         assert_eq!(RadarTarget::Ground.ordinal(), 7);
         assert_eq!(RadarTarget::from_ordinal(8), None);
 
