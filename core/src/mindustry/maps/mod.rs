@@ -1,5 +1,7 @@
 use std::{collections::BTreeMap, io, io::Read, path::Path};
 
+pub mod filters;
+
 use crate::mindustry::{
     game::{rules::GamemodeApplier, Gamemode, Rules},
     io::{read_deflated_save_meta, SaveMeta},
