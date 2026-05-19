@@ -525,6 +525,33 @@ pub enum LogicStatement {
         of: String,
         value: String,
     },
+    FlushMessage {
+        type_: MessageType,
+        duration: String,
+        out_success: String,
+    },
+    Cutscene {
+        action: CutsceneAction,
+        p1: String,
+        p2: String,
+        p3: String,
+        p4: String,
+    },
+    ClientData {
+        channel: String,
+        value: String,
+        reliable: String,
+    },
+    PlaySound {
+        positional: bool,
+        id: String,
+        volume: String,
+        pitch: String,
+        pan: String,
+        x: String,
+        y: String,
+        limit: String,
+    },
 }
 
 impl LogicStatement {
@@ -885,6 +912,45 @@ impl LogicStatement {
         }
     }
 
+    pub fn flush_message() -> Self {
+        Self::FlushMessage {
+            type_: MessageType::Announce,
+            duration: "3".into(),
+            out_success: "@wait".into(),
+        }
+    }
+
+    pub fn cutscene() -> Self {
+        Self::Cutscene {
+            action: CutsceneAction::Pan,
+            p1: "100".into(),
+            p2: "100".into(),
+            p3: "0.06".into(),
+            p4: "0".into(),
+        }
+    }
+
+    pub fn client_data() -> Self {
+        Self::ClientData {
+            channel: "\"frog\"".into(),
+            value: "\"bar\"".into(),
+            reliable: "0".into(),
+        }
+    }
+
+    pub fn play_sound() -> Self {
+        Self::PlaySound {
+            positional: false,
+            id: "@sfx-shoot".into(),
+            volume: "1".into(),
+            pitch: "1".into(),
+            pan: "0".into(),
+            x: "@thisx".into(),
+            y: "@thisy".into(),
+            limit: "true".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -929,6 +995,10 @@ impl LogicStatement {
             LogicStatement::GetFlag { .. } => "getflag",
             LogicStatement::SetFlag { .. } => "setflag",
             LogicStatement::SetProp { .. } => "setprop",
+            LogicStatement::FlushMessage { .. } => "message",
+            LogicStatement::Cutscene { .. } => "cutscene",
+            LogicStatement::ClientData { .. } => "clientdata",
+            LogicStatement::PlaySound { .. } => "playsound",
         }
     }
 
@@ -959,7 +1029,11 @@ impl LogicStatement {
             | LogicStatement::Fetch { .. }
             | LogicStatement::GetFlag { .. }
             | LogicStatement::SetFlag { .. }
-            | LogicStatement::SetProp { .. } => LCategory::by_name("world").unwrap(),
+            | LogicStatement::SetProp { .. }
+            | LogicStatement::FlushMessage { .. }
+            | LogicStatement::Cutscene { .. }
+            | LogicStatement::ClientData { .. }
+            | LogicStatement::PlaySound { .. } => LCategory::by_name("world").unwrap(),
             LogicStatement::Set { .. }
             | LogicStatement::Operation { .. }
             | LogicStatement::Lookup { .. }
@@ -1000,6 +1074,10 @@ impl LogicStatement {
                 | LogicStatement::GetFlag { .. }
                 | LogicStatement::SetFlag { .. }
                 | LogicStatement::SetProp { .. }
+                | LogicStatement::FlushMessage { .. }
+                | LogicStatement::Cutscene { .. }
+                | LogicStatement::ClientData { .. }
+                | LogicStatement::PlaySound { .. }
         )
     }
 
@@ -1345,6 +1423,60 @@ impl LogicStatement {
             LogicStatement::SetProp { type_, of, value } => {
                 vec!["setprop".into(), type_.clone(), of.clone(), value.clone()]
             }
+            LogicStatement::FlushMessage {
+                type_,
+                duration,
+                out_success,
+            } => vec![
+                "message".into(),
+                type_.wire_name().into(),
+                duration.clone(),
+                out_success.clone(),
+            ],
+            LogicStatement::Cutscene {
+                action,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => vec![
+                "cutscene".into(),
+                action.wire_name().into(),
+                p1.clone(),
+                p2.clone(),
+                p3.clone(),
+                p4.clone(),
+            ],
+            LogicStatement::ClientData {
+                channel,
+                value,
+                reliable,
+            } => vec![
+                "clientdata".into(),
+                channel.clone(),
+                value.clone(),
+                reliable.clone(),
+            ],
+            LogicStatement::PlaySound {
+                positional,
+                id,
+                volume,
+                pitch,
+                pan,
+                x,
+                y,
+                limit,
+            } => vec![
+                "playsound".into(),
+                positional.to_string(),
+                id.clone(),
+                volume.clone(),
+                pitch.clone(),
+                pan.clone(),
+                x.clone(),
+                y.clone(),
+                limit.clone(),
+            ],
         }
     }
 
@@ -2133,6 +2265,114 @@ impl LogicStatement {
                     }
                     if tokens.len() > 3 {
                         *value = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "message" => {
+                let mut statement = Self::flush_message();
+                if let LogicStatement::FlushMessage {
+                    type_,
+                    duration,
+                    out_success,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = MessageType::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *duration = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *out_success = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "cutscene" => {
+                let mut statement = Self::cutscene();
+                if let LogicStatement::Cutscene {
+                    action,
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *action = CutsceneAction::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *p1 = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *p2 = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *p3 = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *p4 = tokens[5].clone();
+                    }
+                }
+                statement
+            }
+            "clientdata" => {
+                let mut statement = Self::client_data();
+                if let LogicStatement::ClientData {
+                    channel,
+                    value,
+                    reliable,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *channel = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *value = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *reliable = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "playsound" => {
+                let mut statement = Self::play_sound();
+                if let LogicStatement::PlaySound {
+                    positional,
+                    id,
+                    volume,
+                    pitch,
+                    pan,
+                    x,
+                    y,
+                    limit,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *positional = java_boolean_value_of(&tokens[1]);
+                    }
+                    if tokens.len() > 2 {
+                        *id = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *volume = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *pitch = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *pan = tokens[5].clone();
+                    }
+                    if tokens.len() > 6 {
+                        *x = tokens[6].clone();
+                    }
+                    if tokens.len() > 7 {
+                        *y = tokens[7].clone();
+                    }
+                    if tokens.len() > 8 {
+                        *limit = tokens[8].clone();
                     }
                 }
                 statement
@@ -4588,6 +4828,13 @@ impl QueryType {
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
     }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
 }
 
 #[repr(u8)]
@@ -4611,6 +4858,13 @@ impl QueryShape {
 
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
     }
 }
 
@@ -4643,6 +4897,13 @@ impl MessageType {
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
     }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
 }
 
 #[repr(u8)]
@@ -4671,6 +4932,13 @@ impl CutsceneAction {
 
     pub fn wire_name(self) -> &'static str {
         Self::WIRE_NAMES[self.ordinal() as usize]
+    }
+
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
     }
 }
 
@@ -5474,6 +5742,22 @@ mod tests {
             LogicStatement::set_prop().write_line(),
             "setprop @copper block1 0"
         );
+        assert_eq!(
+            LogicStatement::flush_message().write_line(),
+            "message announce 3 @wait"
+        );
+        assert_eq!(
+            LogicStatement::cutscene().write_line(),
+            "cutscene pan 100 100 0.06 0"
+        );
+        assert_eq!(
+            LogicStatement::client_data().write_line(),
+            "clientdata \"frog\" \"bar\" 0"
+        );
+        assert_eq!(
+            LogicStatement::play_sound().write_line(),
+            "playsound false @sfx-shoot 1 1 0 @thisx @thisy true"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
@@ -5504,6 +5788,10 @@ mod tests {
         assert_eq!(LogicStatement::get_flag().category().name, "world");
         assert_eq!(LogicStatement::set_flag().category().name, "world");
         assert_eq!(LogicStatement::set_prop().category().name, "world");
+        assert_eq!(LogicStatement::flush_message().category().name, "world");
+        assert_eq!(LogicStatement::cutscene().category().name, "world");
+        assert_eq!(LogicStatement::client_data().category().name, "world");
+        assert_eq!(LogicStatement::play_sound().category().name, "world");
         assert!(!LogicStatement::read().privileged());
         assert!(!LogicStatement::operation().privileged());
         assert!(!LogicStatement::stop().privileged());
@@ -5532,6 +5820,10 @@ mod tests {
         assert!(LogicStatement::get_flag().privileged());
         assert!(LogicStatement::set_flag().privileged());
         assert!(LogicStatement::set_prop().privileged());
+        assert!(LogicStatement::flush_message().privileged());
+        assert!(LogicStatement::cutscene().privileged());
+        assert!(LogicStatement::client_data().privileged());
+        assert!(LogicStatement::play_sound().privileged());
     }
 
     #[test]
@@ -6115,6 +6407,99 @@ mod tests {
                 type_: "@x".into(),
                 of: "block1".into(),
                 value: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["message", "toast", "5", "ok"].map(String::from)),
+            Some(LogicStatement::FlushMessage {
+                type_: MessageType::Toast,
+                duration: "5".into(),
+                out_success: "ok".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["message", "mission"].map(String::from)),
+            Some(LogicStatement::FlushMessage {
+                type_: MessageType::Mission,
+                duration: "3".into(),
+                out_success: "@wait".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["message", "missing"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["cutscene", "zoom", "2.5", "ignoredY", "0.1", "extra"].map(String::from)
+            ),
+            Some(LogicStatement::Cutscene {
+                action: CutsceneAction::Zoom,
+                p1: "2.5".into(),
+                p2: "ignoredY".into(),
+                p3: "0.1".into(),
+                p4: "extra".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["cutscene", "missing"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["clientdata", "\"chan\"", "\"payload\"", "1"].map(String::from)
+            ),
+            Some(LogicStatement::ClientData {
+                channel: "\"chan\"".into(),
+                value: "\"payload\"".into(),
+                reliable: "1".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["clientdata", "\"chan\""].map(String::from)),
+            Some(LogicStatement::ClientData {
+                channel: "\"chan\"".into(),
+                value: "\"bar\"".into(),
+                reliable: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &[
+                    "playsound",
+                    "true",
+                    "@sfx-explosion",
+                    "0.5",
+                    "2",
+                    "-1",
+                    "10",
+                    "20",
+                    "false"
+                ]
+                .map(String::from)
+            ),
+            Some(LogicStatement::PlaySound {
+                positional: true,
+                id: "@sfx-explosion".into(),
+                volume: "0.5".into(),
+                pitch: "2".into(),
+                pan: "-1".into(),
+                x: "10".into(),
+                y: "20".into(),
+                limit: "false".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["playsound", "1", "@sfx-pew"].map(String::from)),
+            Some(LogicStatement::PlaySound {
+                positional: false,
+                id: "@sfx-pew".into(),
+                volume: "1".into(),
+                pitch: "1".into(),
+                pan: "0".into(),
+                x: "@thisx".into(),
+                y: "@thisy".into(),
+                limit: "true".into()
             })
         );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
