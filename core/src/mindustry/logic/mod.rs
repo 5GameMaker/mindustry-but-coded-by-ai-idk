@@ -1,12 +1,595 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 pub const LOGIC_CTRL_PROCESSOR: i32 = 1;
 pub const LOGIC_CTRL_PLAYER: i32 = 2;
 pub const LOGIC_CTRL_COMMAND: i32 = 3;
 pub const LOOKABLE_CONTENT: [&str; 5] = ["block", "unit", "item", "liquid", "team"];
 pub const WRITABLE_LOOKABLE_CONTENT: [&str; 4] = ["block", "unit", "item", "liquid"];
+pub const LOGIC_PARSER_MAX_TOKENS: usize = 16;
+pub const LOGIC_PARSER_MAX_JUMPS: usize = 500;
+
+const INVALID_NUM_NEGATIVE: i64 = i64::MIN;
+const INVALID_NUM_POSITIVE: i64 = i64::MAX;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicValue {
+    Number(f64),
+    Object(Option<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicParseError {
+    pub message: String,
+}
+
+impl LogicParseError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for LogicParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid code. {}", self.message)
+    }
+}
+
+impl std::error::Error for LogicParseError {}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicAssembler {
+    pub privileged: bool,
+    pub vars: BTreeMap<String, LVar>,
+}
+
+impl Default for LogicAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LogicAssembler {
+    pub fn new() -> Self {
+        let mut assembler = Self {
+            privileged: false,
+            vars: BTreeMap::new(),
+        };
+        assembler.put_var("@counter").is_obj = false;
+        assembler.put_const("@unit", LogicValue::Object(None));
+        assembler.put_const("@this", LogicValue::Object(None));
+        assembler
+    }
+
+    pub fn var(&mut self, symbol: &str) -> &mut LVar {
+        let mut symbol = symbol.trim().to_string();
+
+        if symbol.starts_with('"') && symbol.ends_with('"') && !symbol.is_empty() {
+            let value = symbol[1..symbol.len() - 1].replace("\\n", "\n");
+            return self.put_const(format!("___{}", symbol), LogicValue::Object(Some(value)));
+        }
+
+        symbol = symbol.replace(' ', "_");
+        let value = parse_logic_double(&symbol);
+
+        if value.is_nan() {
+            self.put_var(symbol)
+        } else {
+            self.put_const(
+                format!("___{}", if value.is_infinite() { 0.0 } else { value }),
+                LogicValue::Number(if value.is_infinite() { 0.0 } else { value }),
+            )
+        }
+    }
+
+    pub fn put_const(&mut self, name: impl Into<String>, value: LogicValue) -> &mut LVar {
+        let var = self.put_var(name);
+        match value {
+            LogicValue::Number(value) => {
+                var.is_obj = false;
+                var.numval = value;
+                var.objval = None;
+            }
+            LogicValue::Object(value) => {
+                var.is_obj = true;
+                var.objval = value;
+            }
+        }
+        var.constant = true;
+        var
+    }
+
+    pub fn put_var(&mut self, name: impl Into<String>) -> &mut LVar {
+        let name = name.into();
+        self.vars.entry(name.clone()).or_insert_with(|| {
+            let mut var = LVar::new(name);
+            var.is_obj = true;
+            var
+        })
+    }
+
+    pub fn get_var(&self, name: &str) -> Option<&LVar> {
+        self.vars.get(name)
+    }
+}
+
+pub fn parse_logic_double(symbol: &str) -> f64 {
+    if symbol.starts_with("0b") {
+        return parse_logic_long(false, symbol, 2, 2, symbol.len());
+    }
+    if symbol.starts_with("+0b") {
+        return parse_logic_long(false, symbol, 2, 3, symbol.len());
+    }
+    if symbol.starts_with("-0b") {
+        return parse_logic_long(true, symbol, 2, 3, symbol.len());
+    }
+    if symbol.starts_with("0x") {
+        return parse_logic_long(false, symbol, 16, 2, symbol.len());
+    }
+    if symbol.starts_with("+0x") {
+        return parse_logic_long(false, symbol, 16, 3, symbol.len());
+    }
+    if symbol.starts_with("-0x") {
+        return parse_logic_long(true, symbol, 16, 3, symbol.len());
+    }
+    if symbol.starts_with("%[") && symbol.ends_with(']') && symbol.len() > 3 {
+        return parse_named_logic_color(symbol);
+    }
+    if symbol.starts_with('%') && (symbol.len() == 7 || symbol.len() == 9) {
+        return parse_logic_color(symbol);
+    }
+
+    parse_arc_double(symbol).unwrap_or(f64::NAN)
+}
+
+pub fn parse_logic_long(negative: bool, s: &str, radix: u32, start: usize, end: usize) -> f64 {
+    let used_invalid = if negative {
+        INVALID_NUM_POSITIVE
+    } else {
+        INVALID_NUM_NEGATIVE
+    };
+    let Some(slice) = s.get(start..end) else {
+        return f64::NAN;
+    };
+    match i64::from_str_radix(slice, radix) {
+        Ok(value) if value != used_invalid => {
+            if negative {
+                -(value as f64)
+            } else {
+                value as f64
+            }
+        }
+        _ => f64::NAN,
+    }
+}
+
+pub fn parse_logic_color(symbol: &str) -> f64 {
+    let r = parse_hex_byte_or_zero(symbol, 1, 3);
+    let g = parse_hex_byte_or_zero(symbol, 3, 5);
+    let b = parse_hex_byte_or_zero(symbol, 5, 7);
+    let a = if symbol.len() == 9 {
+        parse_hex_byte_or_zero(symbol, 7, 9)
+    } else {
+        255
+    };
+
+    rgba_to_double_bits(r, g, b, a)
+}
+
+pub fn parse_named_logic_color(symbol: &str) -> f64 {
+    let name = &symbol[2..symbol.len() - 1];
+    named_logic_color_rgba(name)
+        .map(rgba_u32_to_double_bits)
+        .unwrap_or(f64::NAN)
+}
+
+pub fn rgba_to_double_bits(r: u8, g: u8, b: u8, a: u8) -> f64 {
+    let bits = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32;
+    rgba_u32_to_double_bits(bits)
+}
+
+pub fn rgba_u32_to_double_bits(rgba: u32) -> f64 {
+    f64::from_bits(rgba as u64)
+}
+
+fn parse_hex_byte_or_zero(symbol: &str, start: usize, end: usize) -> u8 {
+    symbol
+        .get(start..end)
+        .and_then(|slice| u8::from_str_radix(slice, 16).ok())
+        .unwrap_or(0)
+}
+
+fn parse_arc_double(symbol: &str) -> Option<f64> {
+    if symbol.is_empty() || symbol.eq_ignore_ascii_case("nan") || symbol.contains("Infinity") {
+        return None;
+    }
+    symbol.parse::<f64>().ok()
+}
+
+pub fn named_logic_color_rgba(name: &str) -> Option<u32> {
+    let normalized = name.replace('_', "").to_ascii_lowercase();
+    match normalized.as_str() {
+        "clear" => Some(0x00000000),
+        "black" => Some(0x000000ff),
+        "white" => Some(0xffffffff),
+        "lightgray" | "lightgrey" => Some(0xbfbfbfff),
+        "gray" | "grey" => Some(0x7f7f7fff),
+        "darkgray" | "darkgrey" => Some(0x3f3f3fff),
+        "blue" => Some(0x4169e1ff),
+        "navy" => Some(0x00007fff),
+        "royal" => Some(0x4169e1ff),
+        "slate" => Some(0x708090ff),
+        "sky" => Some(0x87ceebff),
+        "cyan" => Some(0x00ffffff),
+        "teal" => Some(0x007f7fff),
+        "green" => Some(0x00ff00ff),
+        "acid" => Some(0x7fff00ff),
+        "lime" => Some(0x32cd32ff),
+        "forest" => Some(0x228b22ff),
+        "olive" => Some(0x6b8e23ff),
+        "yellow" => Some(0xffff00ff),
+        "gold" => Some(0xffd700ff),
+        "goldenrod" => Some(0xdaa520ff),
+        "orange" => Some(0xffa500ff),
+        "brown" => Some(0x8b4513ff),
+        "tan" => Some(0xd2b48cff),
+        "brick" => Some(0xb22222ff),
+        "red" => Some(0xff0000ff),
+        "scarlet" => Some(0xff341cff),
+        "crimson" => Some(0xdc143cff),
+        "coral" => Some(0xff7f50ff),
+        "salmon" => Some(0xfa8072ff),
+        "pink" => Some(0xff69b4ff),
+        "magenta" => Some(0xff00ffff),
+        "purple" => Some(0xa020f0ff),
+        "violet" => Some(0xee82eeff),
+        "maroon" => Some(0xb03060ff),
+        "accent" | "stat" => Some(0xffd37fff),
+        "unlaunched" => Some(0x8982edff),
+        "negstat" => Some(0xe55454ff),
+        // `highlight` is Pal.accent lerped 30% toward white in UI.loadColors().
+        "highlight" => Some(0xffdea5ff),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogicStatementKind {
+    Label {
+        name: String,
+        line: usize,
+    },
+    Instruction {
+        tokens: Vec<String>,
+        line: usize,
+        jump_label: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicParserOutput {
+    pub statements: Vec<LogicStatementKind>,
+    pub jump_locations: BTreeMap<String, usize>,
+}
+
+pub fn parse_logic_statements(text: &str) -> Result<LogicParserOutput, LogicParseError> {
+    LogicParser::new(text).parse()
+}
+
+struct LogicParser<'a> {
+    chars: Vec<char>,
+    pos: usize,
+    line: usize,
+    statements: Vec<LogicStatementKind>,
+    jump_locations: BTreeMap<String, usize>,
+    _marker: std::marker::PhantomData<&'a str>,
+}
+
+impl<'a> LogicParser<'a> {
+    fn new(text: &'a str) -> Self {
+        Self {
+            chars: text.chars().collect(),
+            pos: 0,
+            line: 0,
+            statements: Vec::new(),
+            jump_locations: BTreeMap::new(),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn parse(mut self) -> Result<LogicParserOutput, LogicParseError> {
+        while self.pos < self.chars.len() {
+            match self.chars[self.pos] {
+                '\n' | ';' | ' ' => self.pos += 1,
+                '\r' => self.pos = (self.pos + 2).min(self.chars.len()),
+                _ => self.statement()?,
+            }
+        }
+
+        Ok(LogicParserOutput {
+            statements: self.statements,
+            jump_locations: self.jump_locations,
+        })
+    }
+
+    fn statement(&mut self) -> Result<(), LogicParseError> {
+        let mut expect_next = false;
+        let mut tokens = Vec::new();
+
+        while self.pos < self.chars.len() {
+            let c = self.chars[self.pos];
+            if tokens.len() >= LOGIC_PARSER_MAX_TOKENS {
+                return Err(LogicParseError::new(format!(
+                    "Line too long; may only contain {} tokens",
+                    LOGIC_PARSER_MAX_TOKENS
+                )));
+            }
+            if c == '\n' || c == ';' {
+                break;
+            }
+            if expect_next && c != ' ' && c != '#' && c != '\t' {
+                return Err(LogicParseError::new("Expected space after string/token."));
+            }
+
+            expect_next = false;
+            if c == '#' {
+                self.comment();
+                break;
+            } else if c == '"' {
+                tokens.push(self.string()?);
+                expect_next = true;
+            } else if c != ' ' && c != '\t' {
+                tokens.push(self.token());
+                expect_next = true;
+            } else {
+                self.pos += 1;
+            }
+        }
+
+        if !tokens.is_empty() {
+            check_logic_tokens(&mut tokens);
+            if tokens.len() == 1 && tokens[0].ends_with(':') {
+                if self.jump_locations.len() >= LOGIC_PARSER_MAX_JUMPS {
+                    return Err(LogicParseError::new(format!(
+                        "Too many jump locations. Max jumps: {}",
+                        LOGIC_PARSER_MAX_JUMPS
+                    )));
+                }
+                let label = tokens[0][..tokens[0].len() - 1].to_string();
+                self.jump_locations.insert(label.clone(), self.line);
+                self.statements.push(LogicStatementKind::Label {
+                    name: label,
+                    line: self.line,
+                });
+            } else {
+                let mut jump_label = None;
+                if tokens[0] == "jump" && tokens.len() > 1 && !can_parse_i32(&tokens[1]) {
+                    jump_label = Some(tokens[1].clone());
+                    tokens[1] = "-1".to_string();
+                }
+
+                for token in tokens.iter_mut().skip(1) {
+                    if token == "@configure" {
+                        *token = "@config".to_string();
+                    }
+                    if token == "configure" {
+                        *token = "config".to_string();
+                    }
+                }
+
+                self.statements.push(LogicStatementKind::Instruction {
+                    tokens,
+                    line: self.line,
+                    jump_label,
+                });
+                self.line += 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn comment(&mut self) {
+        while self.pos < self.chars.len() {
+            let c = self.chars[self.pos];
+            self.pos += 1;
+            if c == '\n' {
+                break;
+            }
+        }
+    }
+
+    fn string(&mut self) -> Result<String, LogicParseError> {
+        let from = self.pos;
+        let mut utflen = 0usize;
+
+        self.pos += 1;
+        while self.pos < self.chars.len() {
+            let c = self.chars[self.pos];
+            if c == '\n' {
+                return Err(LogicParseError::new(
+                    "Missing closing quote \" before end of line.",
+                ));
+            } else if c == '"' {
+                break;
+            }
+            utflen += java_modified_utf_char_len(c);
+            self.pos += 1;
+        }
+
+        if self.pos >= self.chars.len() || self.chars[self.pos] != '"' {
+            return Err(LogicParseError::new(
+                "Missing closing quote \" before end of file.",
+            ));
+        }
+        if utflen > 65535 {
+            return Err(LogicParseError::new("String value too long."));
+        }
+
+        self.pos += 1;
+        Ok(self.chars[from..self.pos].iter().collect())
+    }
+
+    fn token(&mut self) -> String {
+        let from = self.pos;
+        while self.pos < self.chars.len() {
+            let c = self.chars[self.pos];
+            if c == '\n' || c == ' ' || c == '#' || c == '\t' || c == ';' {
+                break;
+            }
+            self.pos += 1;
+        }
+        self.chars[from..self.pos].iter().collect()
+    }
+}
+
+pub fn check_logic_tokens(tokens: &mut [String]) {
+    if tokens.first().is_some_and(|token| token == "op") && tokens.len() > 1 {
+        if tokens[1] == "atan2" {
+            tokens[1] = "angle".to_string();
+        } else if tokens[1] == "dst" {
+            tokens[1] = "len".to_string();
+        }
+    }
+}
+
+fn can_parse_i32(value: &str) -> bool {
+    value.parse::<i32>().is_ok()
+}
+
+fn java_modified_utf_char_len(c: char) -> usize {
+    let code = c as u32;
+    if code != 0 && code <= 0x7f {
+        1
+    } else if code <= 0x7ff {
+        2
+    } else if code <= 0xffff {
+        3
+    } else {
+        // Java source parser works with UTF-16 chars. A supplementary Unicode scalar
+        // is two surrogate chars, each encoded as three bytes by modified UTF-8.
+        6
+    }
+}
+
+pub fn sanitize_logic_value(value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    } else if value.chars().count() == 1 {
+        let c = value.chars().next().unwrap();
+        if c == '"' || c == ';' || c == ' ' {
+            return "invalid".to_string();
+        }
+    } else {
+        let mut res = String::with_capacity(value.len());
+        if value.starts_with('"') && value.ends_with('"') {
+            res.push('"');
+            for c in value[1..value.len() - 1].chars() {
+                res.push(if c == '"' { '\'' } else { c });
+            }
+            res.push('"');
+        } else {
+            for c in value.chars() {
+                res.push(match c {
+                    ';' => 's',
+                    '"' => '\'',
+                    ' ' => '_',
+                    _ => c,
+                });
+            }
+        }
+        return res;
+    }
+
+    value.to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogicAlign {
+    Center,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl LogicAlign {
+    pub const ALL: [LogicAlign; 9] = [
+        LogicAlign::TopLeft,
+        LogicAlign::Top,
+        LogicAlign::TopRight,
+        LogicAlign::Left,
+        LogicAlign::Center,
+        LogicAlign::Right,
+        LogicAlign::BottomLeft,
+        LogicAlign::Bottom,
+        LogicAlign::BottomRight,
+    ];
+
+    pub const fn java_bits(self) -> i32 {
+        match self {
+            LogicAlign::Center => 1,
+            LogicAlign::Top => 2,
+            LogicAlign::Bottom => 4,
+            LogicAlign::Left => 8,
+            LogicAlign::Right => 16,
+            LogicAlign::TopLeft => 10,
+            LogicAlign::TopRight => 18,
+            LogicAlign::BottomLeft => 12,
+            LogicAlign::BottomRight => 20,
+        }
+    }
+
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            LogicAlign::Center => "center",
+            LogicAlign::Top => "top",
+            LogicAlign::Bottom => "bottom",
+            LogicAlign::Left => "left",
+            LogicAlign::Right => "right",
+            LogicAlign::TopLeft => "topLeft",
+            LogicAlign::TopRight => "topRight",
+            LogicAlign::BottomLeft => "bottomLeft",
+            LogicAlign::BottomRight => "bottomRight",
+        }
+    }
+
+    pub fn by_name(name: &str) -> Option<Self> {
+        match name {
+            "center" => Some(LogicAlign::Center),
+            "top" => Some(LogicAlign::Top),
+            "bottom" => Some(LogicAlign::Bottom),
+            "left" => Some(LogicAlign::Left),
+            "right" => Some(LogicAlign::Right),
+            "topLeft" => Some(LogicAlign::TopLeft),
+            "topRight" => Some(LogicAlign::TopRight),
+            "bottomLeft" => Some(LogicAlign::BottomLeft),
+            "bottomRight" => Some(LogicAlign::BottomRight),
+            _ => None,
+        }
+    }
+
+    pub fn by_java_bits(bits: i32) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|align| align.java_bits() == bits)
+    }
+
+    pub const fn is_center_horizontal(self) -> bool {
+        self.java_bits() & 8 == 0 && self.java_bits() & 16 == 0
+    }
+
+    pub const fn is_center_vertical(self) -> bool {
+        self.java_bits() & 2 == 0 && self.java_bits() & 4 == 0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LVarValue {
@@ -1863,6 +2446,241 @@ impl LMarkerControl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assembler_parse_double_matches_java_numeric_and_color_rules() {
+        assert_eq!(parse_logic_double("0b101"), 5.0);
+        assert_eq!(parse_logic_double("+0b101"), 5.0);
+        assert_eq!(parse_logic_double("-0b101"), -5.0);
+        assert_eq!(parse_logic_double("0x10"), 16.0);
+        assert_eq!(parse_logic_double("+0x10"), 16.0);
+        assert_eq!(parse_logic_double("-0x10"), -16.0);
+        assert_eq!(parse_logic_double("1e3"), 1000.0);
+        assert!(parse_logic_double("NaN").is_nan());
+        assert!(parse_logic_double("Infinity").is_nan());
+        assert!(parse_logic_double("0b102").is_nan());
+        assert!(parse_logic_double("0xg1").is_nan());
+
+        assert_eq!(
+            rgba_to_double_bits(0xff, 0x00, 0xaa, 0xff).to_bits(),
+            0xff00aaff
+        );
+        assert_eq!(parse_logic_color("%ff00aa").to_bits(), 0xff00aaff);
+        assert_eq!(parse_logic_color("%ff00aa80").to_bits(), 0xff00aa80);
+        // Arc Strings.parseInt(..., default=0, ...) falls back to 0 for invalid slices.
+        assert_eq!(parse_logic_color("%zz00aa").to_bits(), 0x0000aaff);
+
+        assert_eq!(parse_named_logic_color("%[scarlet]").to_bits(), 0xff341cff);
+        assert_eq!(
+            parse_named_logic_color("%[LIGHT_GRAY]").to_bits(),
+            0xbfbfbfff
+        );
+        assert_eq!(parse_named_logic_color("%[accent]").to_bits(), 0xffd37fff);
+        assert!(parse_named_logic_color("%[missing]").is_nan());
+    }
+
+    #[test]
+    fn assembler_var_put_var_and_put_const_follow_java_rules() {
+        let mut asm = LogicAssembler::new();
+        assert_eq!(
+            asm.get_var("@counter").unwrap().value(),
+            LVarValue::Number(0.0)
+        );
+        assert_eq!(
+            asm.get_var("@unit").unwrap().value(),
+            LVarValue::Object(None)
+        );
+        assert_eq!(
+            asm.get_var("@this").unwrap().value(),
+            LVarValue::Object(None)
+        );
+
+        let text = asm.var("\"hello\\nworld\"");
+        assert_eq!(text.name, "___\"hello\\nworld\"");
+        assert_eq!(text.value(), LVarValue::Object(Some("hello\nworld".into())));
+        assert!(text.constant);
+
+        let spaced = asm.var(" a b ");
+        assert_eq!(spaced.name, "a_b");
+        assert!(spaced.is_obj);
+        assert_eq!(spaced.value(), LVarValue::Object(None));
+        assert!(!spaced.constant);
+
+        let number = asm.var("0x10");
+        assert_eq!(number.name, "___16");
+        assert_eq!(number.value(), LVarValue::Number(16.0));
+        assert!(number.constant);
+
+        let overflow = asm.var("1e309");
+        assert_eq!(overflow.name, "___0");
+        assert_eq!(overflow.value(), LVarValue::Number(0.0));
+        assert!(overflow.constant);
+
+        let existing = asm.put_var("same") as *mut LVar;
+        asm.put_var("same").set_num(5.0);
+        assert_eq!(asm.get_var("same").unwrap().numval, 5.0);
+        assert_eq!(existing, asm.put_var("same") as *mut LVar);
+    }
+
+    #[test]
+    fn parser_tokenizes_comments_strings_labels_and_legacy_names_like_java() {
+        let parsed = parse_logic_statements(
+            "start:\n\
+             op atan2 result x y; op dst d x y\n\
+             jump start equal a b\n\
+             set message \"hello world\" # trailing comment\n\
+             control configure block 1\n\
+             sensor @configure cell enabled\n",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.jump_locations.get("start"), Some(&0));
+        assert_eq!(
+            parsed.statements[0],
+            LogicStatementKind::Label {
+                name: "start".into(),
+                line: 0
+            }
+        );
+        assert_eq!(
+            parsed.statements[1],
+            LogicStatementKind::Instruction {
+                tokens: vec!["op", "angle", "result", "x", "y"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                line: 0,
+                jump_label: None
+            }
+        );
+        assert_eq!(
+            parsed.statements[2],
+            LogicStatementKind::Instruction {
+                tokens: vec!["op", "len", "d", "x", "y"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                line: 1,
+                jump_label: None
+            }
+        );
+        assert_eq!(
+            parsed.statements[3],
+            LogicStatementKind::Instruction {
+                tokens: vec!["jump", "-1", "equal", "a", "b"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                line: 2,
+                jump_label: Some("start".into())
+            }
+        );
+        assert_eq!(
+            parsed.statements[4],
+            LogicStatementKind::Instruction {
+                tokens: vec!["set", "message", "\"hello world\""]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                line: 3,
+                jump_label: None
+            }
+        );
+        assert_eq!(
+            parsed.statements[5],
+            LogicStatementKind::Instruction {
+                tokens: vec!["control", "config", "block", "1"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                line: 4,
+                jump_label: None
+            }
+        );
+        assert_eq!(
+            parsed.statements[6],
+            LogicStatementKind::Instruction {
+                tokens: vec!["sensor", "@config", "cell", "enabled"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                line: 5,
+                jump_label: None
+            }
+        );
+    }
+
+    #[test]
+    fn parser_reports_java_style_string_and_token_errors() {
+        assert!(parse_logic_statements("set a \"unterminated")
+            .unwrap_err()
+            .message
+            .contains("Missing closing quote \" before end of file."));
+        assert!(parse_logic_statements("set a \"unterminated\n")
+            .unwrap_err()
+            .message
+            .contains("Missing closing quote \" before end of line."));
+        assert!(parse_logic_statements("set a \"ok\"next")
+            .unwrap_err()
+            .message
+            .contains("Expected space after string/token."));
+
+        let too_long = format!("print \"{}\"", "a".repeat(65_536));
+        assert!(parse_logic_statements(&too_long)
+            .unwrap_err()
+            .message
+            .contains("String value too long."));
+
+        let many_tokens = (0..17)
+            .map(|i| format!("t{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(parse_logic_statements(&many_tokens)
+            .unwrap_err()
+            .message
+            .contains("Line too long"));
+    }
+
+    #[test]
+    fn statement_sanitize_and_align_tables_match_java_helpers() {
+        assert_eq!(sanitize_logic_value(""), "");
+        assert_eq!(sanitize_logic_value("\""), "invalid");
+        assert_eq!(sanitize_logic_value(";"), "invalid");
+        assert_eq!(sanitize_logic_value(" "), "invalid");
+        assert_eq!(sanitize_logic_value("a b;c\"d"), "a_bsc'd");
+        assert_eq!(sanitize_logic_value("\"a\"b;c\""), "\"a'b;c\"");
+
+        assert_eq!(
+            LogicAlign::ALL
+                .iter()
+                .map(|align| align.wire_name())
+                .collect::<Vec<_>>(),
+            vec![
+                "topLeft",
+                "top",
+                "topRight",
+                "left",
+                "center",
+                "right",
+                "bottomLeft",
+                "bottom",
+                "bottomRight"
+            ]
+        );
+        assert_eq!(LogicAlign::Center.java_bits(), 1);
+        assert_eq!(LogicAlign::Top.java_bits(), 2);
+        assert_eq!(LogicAlign::Bottom.java_bits(), 4);
+        assert_eq!(LogicAlign::Left.java_bits(), 8);
+        assert_eq!(LogicAlign::Right.java_bits(), 16);
+        assert_eq!(LogicAlign::TopLeft.java_bits(), 10);
+        assert_eq!(LogicAlign::BottomRight.java_bits(), 20);
+        assert_eq!(LogicAlign::by_name("topRight"), Some(LogicAlign::TopRight));
+        assert_eq!(LogicAlign::by_java_bits(12), Some(LogicAlign::BottomLeft));
+        assert!(LogicAlign::Top.is_center_horizontal());
+        assert!(!LogicAlign::TopLeft.is_center_horizontal());
+        assert!(LogicAlign::Left.is_center_vertical());
+        assert!(!LogicAlign::BottomLeft.is_center_vertical());
+    }
 
     #[test]
     fn lvar_matches_java_numeric_object_and_constant_semantics() {
