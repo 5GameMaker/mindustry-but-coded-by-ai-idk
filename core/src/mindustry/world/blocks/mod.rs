@@ -14,6 +14,7 @@ pub mod power;
 pub mod production;
 pub mod sandbox;
 pub mod storage;
+pub mod units;
 
 pub trait UnitTetherBlock {
     fn spawned(&mut self, id: i32);
