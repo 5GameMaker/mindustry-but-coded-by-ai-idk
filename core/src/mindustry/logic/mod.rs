@@ -552,6 +552,20 @@ pub enum LogicStatement {
         y: String,
         limit: String,
     },
+    SetMarker {
+        type_: LMarkerControl,
+        id: String,
+        p1: String,
+        p2: String,
+        p3: String,
+    },
+    MakeMarker {
+        type_: String,
+        id: String,
+        x: String,
+        y: String,
+        replace: String,
+    },
 }
 
 impl LogicStatement {
@@ -951,6 +965,26 @@ impl LogicStatement {
         }
     }
 
+    pub fn set_marker() -> Self {
+        Self::SetMarker {
+            type_: LMarkerControl::Pos,
+            id: "0".into(),
+            p1: "0".into(),
+            p2: "0".into(),
+            p3: "0".into(),
+        }
+    }
+
+    pub fn make_marker() -> Self {
+        Self::MakeMarker {
+            type_: "shape".into(),
+            id: "0".into(),
+            x: "0".into(),
+            y: "0".into(),
+            replace: "true".into(),
+        }
+    }
+
     pub fn opcode(&self) -> &'static str {
         match self {
             LogicStatement::Invalid => "noop",
@@ -999,6 +1033,8 @@ impl LogicStatement {
             LogicStatement::Cutscene { .. } => "cutscene",
             LogicStatement::ClientData { .. } => "clientdata",
             LogicStatement::PlaySound { .. } => "playsound",
+            LogicStatement::SetMarker { .. } => "setmarker",
+            LogicStatement::MakeMarker { .. } => "makemarker",
         }
     }
 
@@ -1033,7 +1069,9 @@ impl LogicStatement {
             | LogicStatement::FlushMessage { .. }
             | LogicStatement::Cutscene { .. }
             | LogicStatement::ClientData { .. }
-            | LogicStatement::PlaySound { .. } => LCategory::by_name("world").unwrap(),
+            | LogicStatement::PlaySound { .. }
+            | LogicStatement::SetMarker { .. }
+            | LogicStatement::MakeMarker { .. } => LCategory::by_name("world").unwrap(),
             LogicStatement::Set { .. }
             | LogicStatement::Operation { .. }
             | LogicStatement::Lookup { .. }
@@ -1078,6 +1116,8 @@ impl LogicStatement {
                 | LogicStatement::Cutscene { .. }
                 | LogicStatement::ClientData { .. }
                 | LogicStatement::PlaySound { .. }
+                | LogicStatement::SetMarker { .. }
+                | LogicStatement::MakeMarker { .. }
         )
     }
 
@@ -1476,6 +1516,34 @@ impl LogicStatement {
                 x.clone(),
                 y.clone(),
                 limit.clone(),
+            ],
+            LogicStatement::SetMarker {
+                type_,
+                id,
+                p1,
+                p2,
+                p3,
+            } => vec![
+                "setmarker".into(),
+                type_.wire_name().into(),
+                id.clone(),
+                p1.clone(),
+                p2.clone(),
+                p3.clone(),
+            ],
+            LogicStatement::MakeMarker {
+                type_,
+                id,
+                x,
+                y,
+                replace,
+            } => vec![
+                "makemarker".into(),
+                type_.clone(),
+                id.clone(),
+                x.clone(),
+                y.clone(),
+                replace.clone(),
             ],
         }
     }
@@ -2373,6 +2441,62 @@ impl LogicStatement {
                     }
                     if tokens.len() > 8 {
                         *limit = tokens[8].clone();
+                    }
+                }
+                statement
+            }
+            "setmarker" => {
+                let mut statement = Self::set_marker();
+                if let LogicStatement::SetMarker {
+                    type_,
+                    id,
+                    p1,
+                    p2,
+                    p3,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = LMarkerControl::by_wire_name(&tokens[1])?;
+                    }
+                    if tokens.len() > 2 {
+                        *id = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *p1 = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *p2 = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *p3 = tokens[5].clone();
+                    }
+                }
+                statement
+            }
+            "makemarker" => {
+                let mut statement = Self::make_marker();
+                if let LogicStatement::MakeMarker {
+                    type_,
+                    id,
+                    x,
+                    y,
+                    replace,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *type_ = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *id = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *x = tokens[3].clone();
+                    }
+                    if tokens.len() > 4 {
+                        *y = tokens[4].clone();
+                    }
+                    if tokens.len() > 5 {
+                        *replace = tokens[5].clone();
                     }
                 }
                 statement
@@ -5352,6 +5476,13 @@ impl LMarkerControl {
         Self::ALL.get(ordinal as usize).copied()
     }
 
+    pub fn by_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|value| value.wire_name() == name)
+    }
+
     pub const fn wire_name(self) -> &'static str {
         match self {
             LMarkerControl::Remove => "remove",
@@ -5758,6 +5889,14 @@ mod tests {
             LogicStatement::play_sound().write_line(),
             "playsound false @sfx-shoot 1 1 0 @thisx @thisy true"
         );
+        assert_eq!(
+            LogicStatement::set_marker().write_line(),
+            "setmarker pos 0 0 0 0"
+        );
+        assert_eq!(
+            LogicStatement::make_marker().write_line(),
+            "makemarker shape 0 0 0 true"
+        );
 
         assert_eq!(LogicStatement::read().category().name, "io");
         assert_eq!(LogicStatement::draw_flush().category().name, "block");
@@ -5792,6 +5931,8 @@ mod tests {
         assert_eq!(LogicStatement::cutscene().category().name, "world");
         assert_eq!(LogicStatement::client_data().category().name, "world");
         assert_eq!(LogicStatement::play_sound().category().name, "world");
+        assert_eq!(LogicStatement::set_marker().category().name, "world");
+        assert_eq!(LogicStatement::make_marker().category().name, "world");
         assert!(!LogicStatement::read().privileged());
         assert!(!LogicStatement::operation().privileged());
         assert!(!LogicStatement::stop().privileged());
@@ -5824,6 +5965,8 @@ mod tests {
         assert!(LogicStatement::cutscene().privileged());
         assert!(LogicStatement::client_data().privileged());
         assert!(LogicStatement::play_sound().privileged());
+        assert!(LogicStatement::set_marker().privileged());
+        assert!(LogicStatement::make_marker().privileged());
     }
 
     #[test]
@@ -6502,6 +6645,54 @@ mod tests {
                 limit: "true".into()
             })
         );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["setmarker", "color", "7", "%ff00aa", "0", "0"].map(String::from)
+            ),
+            Some(LogicStatement::SetMarker {
+                type_: LMarkerControl::Color,
+                id: "7".into(),
+                p1: "%ff00aa".into(),
+                p2: "0".into(),
+                p3: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setmarker", "shape"].map(String::from)),
+            Some(LogicStatement::SetMarker {
+                type_: LMarkerControl::Shape,
+                id: "0".into(),
+                p1: "0".into(),
+                p2: "0".into(),
+                p3: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setmarker", "missing"].map(String::from)),
+            None
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(
+                &["makemarker", "text", "3", "10", "20", "false"].map(String::from)
+            ),
+            Some(LogicStatement::MakeMarker {
+                type_: "text".into(),
+                id: "3".into(),
+                x: "10".into(),
+                y: "20".into(),
+                replace: "false".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["makemarker", "line"].map(String::from)),
+            Some(LogicStatement::MakeMarker {
+                type_: "line".into(),
+                id: "0".into(),
+                x: "0".into(),
+                y: "0".into(),
+                replace: "true".into()
+            })
+        );
         assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
     }
 
@@ -6544,6 +6735,11 @@ mod tests {
         assert!(!LogicAlign::TopLeft.is_center_horizontal());
         assert!(LogicAlign::Left.is_center_vertical());
         assert!(!LogicAlign::BottomLeft.is_center_vertical());
+        assert_eq!(
+            LMarkerControl::by_wire_name("drawLayer"),
+            Some(LMarkerControl::DrawLayer)
+        );
+        assert_eq!(LMarkerControl::by_wire_name("missing"), None);
     }
 
     #[test]
