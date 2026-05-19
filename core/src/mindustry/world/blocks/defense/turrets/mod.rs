@@ -846,6 +846,239 @@ pub fn laser_turret_ready_to_shoot(
         && shoot_warmup >= min_warmup
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointDefenseState {
+    pub reload: ReloadTurretState,
+    pub rotation: f32,
+    pub has_target: bool,
+}
+
+impl Default for PointDefenseState {
+    fn default() -> Self {
+        Self {
+            reload: ReloadTurretState::default(),
+            rotation: 90.0,
+            has_target: false,
+        }
+    }
+}
+
+pub fn point_defense_real_damage(bullet_damage: f32, block_damage_multiplier: f32) -> f32 {
+    bullet_damage * block_damage_multiplier
+}
+
+pub fn point_defense_apply_damage(target_damage: f32, real_damage: f32) -> Option<f32> {
+    if target_damage > real_damage {
+        Some(target_damage - real_damage)
+    } else {
+        None
+    }
+}
+
+pub fn point_defense_ready(
+    angle_within_cone: bool,
+    reload_counter: f32,
+    reload: f32,
+    has_valid_target: bool,
+) -> bool {
+    has_valid_target && angle_within_cone && reload_counter >= reload
+}
+
+pub fn point_defense_should_consume(parent_should_consume: bool, has_target: bool) -> bool {
+    parent_should_consume && has_target
+}
+
+pub fn point_defense_write_child<W: Write>(
+    write: &mut W,
+    state: &PointDefenseState,
+) -> io::Result<()> {
+    write_f32(write, state.rotation)
+}
+
+pub fn point_defense_read_child<R: Read>(read: &mut R) -> io::Result<PointDefenseState> {
+    Ok(PointDefenseState {
+        rotation: read_f32(read)?,
+        ..PointDefenseState::default()
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TractorBeamState {
+    pub rotation: f32,
+    pub last_x: f32,
+    pub last_y: f32,
+    pub strength: f32,
+    pub any: bool,
+    pub coolant_multiplier: f32,
+}
+
+impl Default for TractorBeamState {
+    fn default() -> Self {
+        Self {
+            rotation: 90.0,
+            last_x: 0.0,
+            last_y: 0.0,
+            strength: 0.0,
+            any: false,
+            coolant_multiplier: 1.0,
+        }
+    }
+}
+
+pub fn tractor_beam_effective_delta(efficiency: f32, coolant_multiplier: f32, delta: f32) -> f32 {
+    efficiency * coolant_multiplier * delta
+}
+
+pub fn tractor_beam_coolant_step(
+    current_amount: f32,
+    coolant_amount: f32,
+    delta: f32,
+    heat_capacity: f32,
+    coolant_multiplier_field: f32,
+) -> (f32, f32) {
+    let used = current_amount
+        .min(coolant_amount * delta)
+        .min(((1.0 / coolant_multiplier_field) / heat_capacity).max(0.0));
+    (used, 1.0 + used * heat_capacity * coolant_multiplier_field)
+}
+
+pub fn tractor_beam_target_valid(
+    target_within: bool,
+    enemy_team: bool,
+    target_matches_filter: bool,
+    efficiency: f32,
+) -> bool {
+    target_within && enemy_team && target_matches_filter && efficiency > 0.02
+}
+
+pub fn tractor_beam_update_strength(strength: f32, valid_target: bool) -> f32 {
+    lerp_delta(strength, if valid_target { 1.0 } else { 0.0 }, 0.1)
+}
+
+pub fn tractor_beam_damage_per_tick(
+    damage: f32,
+    effective_efficiency: f32,
+    time_scale: f32,
+    block_damage_multiplier: f32,
+) -> f32 {
+    damage * effective_efficiency * time_scale * block_damage_multiplier
+}
+
+pub fn tractor_beam_impulse_limit(
+    force: f32,
+    scaled_force: f32,
+    distance: f32,
+    range: f32,
+    effective_delta: f32,
+) -> f32 {
+    (force + (1.0 - distance / range) * scaled_force) * effective_delta
+}
+
+pub fn tractor_beam_estimate_dps(
+    any: bool,
+    damage: f32,
+    efficiency: f32,
+    coolant_multiplier: f32,
+) -> f32 {
+    if !any || damage <= 0.0 {
+        0.0
+    } else {
+        damage * 60.0 * efficiency * coolant_multiplier
+    }
+}
+
+pub fn tractor_beam_should_consume(parent_should_consume: bool, has_target: bool) -> bool {
+    parent_should_consume && has_target
+}
+
+pub fn tractor_beam_laser_width(strength: f32, efficiency: f32, laser_width: f32) -> f32 {
+    strength * efficiency * laser_width
+}
+
+pub fn tractor_beam_write_child<W: Write>(
+    write: &mut W,
+    state: &TractorBeamState,
+) -> io::Result<()> {
+    write_f32(write, state.rotation)
+}
+
+pub fn tractor_beam_read_child<R: Read>(read: &mut R) -> io::Result<TractorBeamState> {
+    Ok(TractorBeamState {
+        rotation: read_f32(read)?,
+        ..TractorBeamState::default()
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PayloadAmmoEntry {
+    pub content_id: i16,
+    pub amount: i16,
+}
+
+pub fn payload_ammo_limit_lifetime(range: f32, margin: f32, speed: f32) -> f32 {
+    (range + margin) / speed
+}
+
+pub fn payload_ammo_current(entries: &[PayloadAmmoEntry], ammo_keys: &[i16]) -> Option<i16> {
+    ammo_keys.iter().copied().find(|key| {
+        entries
+            .iter()
+            .any(|entry| entry.content_id == *key && entry.amount > 0)
+    })
+}
+
+pub fn payload_ammo_accept_payload(
+    total_payloads: i32,
+    max_ammo: i32,
+    content_has_ammo: bool,
+) -> bool {
+    total_payloads < max_ammo && content_has_ammo
+}
+
+pub fn payload_ammo_handle_payload(entries: &mut Vec<PayloadAmmoEntry>, content_id: i16) {
+    if let Some(entry) = entries
+        .iter_mut()
+        .find(|entry| entry.content_id == content_id)
+    {
+        entry.amount += 1;
+    } else {
+        entries.push(PayloadAmmoEntry {
+            content_id,
+            amount: 1,
+        });
+    }
+}
+
+pub fn payload_ammo_total(entries: &[PayloadAmmoEntry]) -> i32 {
+    entries.iter().map(|entry| entry.amount as i32).sum()
+}
+
+pub fn payload_ammo_has_ammo(entries: &[PayloadAmmoEntry]) -> bool {
+    payload_ammo_total(entries) > 0
+}
+
+pub fn payload_ammo_use(entries: &mut Vec<PayloadAmmoEntry>, ammo_keys: &[i16]) -> Option<i16> {
+    let content = payload_ammo_current(entries, ammo_keys)?;
+    if let Some(index) = entries.iter().position(|entry| entry.content_id == content) {
+        entries[index].amount -= 1;
+        if entries[index].amount <= 0 {
+            entries.remove(index);
+        }
+    }
+    Some(content)
+}
+
+pub fn payload_ammo_unit_fraction(total_ammo: i32, max_ammo: i32) -> f32 {
+    total_ammo as f32 / max_ammo as f32
+}
+
+pub fn payload_ammo_filter_invalid(
+    entries: &mut Vec<PayloadAmmoEntry>,
+    is_valid: impl Fn(i16) -> bool,
+) {
+    entries.retain(|entry| is_valid(entry.content_id));
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
     from + (to - from) * alpha
 }
@@ -1114,5 +1347,81 @@ mod tests {
         assert!(laser_turret_ready_to_shoot(
             false, 0.0, 1.0, false, 1.0, 0.0
         ));
+    }
+
+    #[test]
+    fn point_defense_tractor_and_payload_turrets_follow_upstream_edges() {
+        assert_eq!(point_defense_real_damage(10.0, 1.5), 15.0);
+        assert_eq!(point_defense_apply_damage(20.0, 15.0), Some(5.0));
+        assert_eq!(point_defense_apply_damage(10.0, 15.0), None);
+        assert!(point_defense_ready(true, 30.0, 30.0, true));
+        assert!(point_defense_should_consume(true, true));
+        let point = PointDefenseState {
+            rotation: 135.0,
+            ..PointDefenseState::default()
+        };
+        let mut bytes = Vec::new();
+        point_defense_write_child(&mut bytes, &point).unwrap();
+        assert_eq!(
+            point_defense_read_child(&mut bytes.as_slice())
+                .unwrap()
+                .rotation,
+            135.0
+        );
+
+        assert_eq!(tractor_beam_effective_delta(0.5, 2.0, 3.0), 3.0);
+        assert_eq!(
+            tractor_beam_coolant_step(10.0, 2.0, 1.0, 0.5, 1.0),
+            (2.0, 2.0)
+        );
+        assert!(tractor_beam_target_valid(true, true, true, 0.5));
+        assert_eq!(tractor_beam_update_strength(0.0, true), 0.1);
+        assert_eq!(tractor_beam_damage_per_tick(4.0, 2.0, 3.0, 0.5), 12.0);
+        assert_eq!(tractor_beam_impulse_limit(0.3, 0.7, 50.0, 100.0, 2.0), 1.3);
+        assert_eq!(tractor_beam_estimate_dps(true, 2.0, 0.5, 3.0), 180.0);
+        assert!(tractor_beam_should_consume(true, true));
+        assert_eq!(tractor_beam_laser_width(0.5, 0.8, 0.6), 0.24000001);
+        let tractor = TractorBeamState {
+            rotation: 225.0,
+            ..TractorBeamState::default()
+        };
+        let mut bytes = Vec::new();
+        tractor_beam_write_child(&mut bytes, &tractor).unwrap();
+        assert_eq!(
+            tractor_beam_read_child(&mut bytes.as_slice())
+                .unwrap()
+                .rotation,
+            225.0
+        );
+
+        assert_eq!(payload_ammo_limit_lifetime(80.0, 1.0, 3.0), 27.0);
+        let mut payloads = vec![
+            PayloadAmmoEntry {
+                content_id: 2,
+                amount: 1,
+            },
+            PayloadAmmoEntry {
+                content_id: 5,
+                amount: 2,
+            },
+        ];
+        assert_eq!(payload_ammo_current(&payloads, &[5, 2]), Some(5));
+        assert!(payload_ammo_accept_payload(2, 3, true));
+        payload_ammo_handle_payload(&mut payloads, 2);
+        assert_eq!(payload_ammo_total(&payloads), 4);
+        assert!(payload_ammo_has_ammo(&payloads));
+        assert_eq!(payload_ammo_use(&mut payloads, &[5, 2]), Some(5));
+        assert_eq!(
+            payload_ammo_unit_fraction(payload_ammo_total(&payloads), 3),
+            1.0
+        );
+        payload_ammo_filter_invalid(&mut payloads, |id| id == 2);
+        assert_eq!(
+            payloads,
+            vec![PayloadAmmoEntry {
+                content_id: 2,
+                amount: 2
+            }]
+        );
     }
 }
