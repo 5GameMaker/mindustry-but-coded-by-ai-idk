@@ -438,6 +438,473 @@ pub fn regen_projector_heal_amount(
     amount.min(missing_health)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BaseShieldState {
+    pub broken: bool,
+    pub hit: f32,
+    pub smooth_radius: f32,
+}
+
+impl Default for BaseShieldState {
+    fn default() -> Self {
+        Self {
+            broken: false,
+            hit: 0.0,
+            smooth_radius: 0.0,
+        }
+    }
+}
+
+pub fn base_shield_update(state: &mut BaseShieldState, radius: f32, efficiency: f32) -> f32 {
+    state.smooth_radius = lerp_delta(state.smooth_radius, radius * efficiency, 0.05);
+    state.smooth_radius
+}
+
+pub fn base_shield_should_interact(radius: f32) -> bool {
+    radius > 1.0
+}
+
+pub fn base_shield_unit_overlap(unit_hit_size: f32, shield_radius: f32, distance: f32) -> f32 {
+    (unit_hit_size / 2.0 + shield_radius) - distance
+}
+
+pub fn base_shield_unit_action(
+    unit_hit_size: f32,
+    shield_radius: f32,
+    distance: f32,
+) -> ShieldUnitAction {
+    let overlap = base_shield_unit_overlap(unit_hit_size, shield_radius, distance);
+    if overlap <= 0.0 {
+        ShieldUnitAction::None
+    } else if overlap > unit_hit_size * 1.5 {
+        ShieldUnitAction::Kill
+    } else {
+        ShieldUnitAction::Repel {
+            distance: overlap + 0.01,
+        }
+    }
+}
+
+pub fn write_base_shield_state<W: Write>(write: &mut W, state: &BaseShieldState) -> io::Result<()> {
+    write_f32(write, state.smooth_radius)?;
+    write.write_all(&[state.broken as u8])
+}
+
+pub fn read_base_shield_state<R: Read>(read: &mut R, revision: u8) -> io::Result<BaseShieldState> {
+    if revision < 1 {
+        return Ok(BaseShieldState::default());
+    }
+    Ok(BaseShieldState {
+        smooth_radius: read_f32(read)?,
+        broken: read_bool(read)?,
+        hit: 0.0,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShieldUnitAction {
+    None,
+    Repel { distance: f32 },
+    Kill,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldWallState {
+    pub shield: f32,
+    pub shield_radius: f32,
+    pub break_timer: f32,
+    pub hit: f32,
+}
+
+impl ShieldWallState {
+    pub fn new(shield_health: f32) -> Self {
+        Self {
+            shield: shield_health,
+            shield_radius: 0.0,
+            break_timer: 0.0,
+            hit: 0.0,
+        }
+    }
+}
+
+pub fn shield_wall_broken(state: &ShieldWallState, can_consume: bool) -> bool {
+    state.break_timer > 0.0 || !can_consume
+}
+
+pub fn shield_wall_update(
+    state: &mut ShieldWallState,
+    can_consume: bool,
+    delta: f32,
+    edelta: f32,
+    shield_health: f32,
+    regen_speed: f32,
+) {
+    if state.break_timer > 0.0 {
+        state.break_timer -= delta;
+    } else {
+        state.shield = (state.shield + regen_speed * edelta).clamp(0.0, shield_health);
+    }
+    state.hit = wall_draw_hit_decay(state.hit, delta, false);
+    state.shield_radius = lerp_delta(
+        state.shield_radius,
+        if shield_wall_broken(state, can_consume) {
+            0.0
+        } else {
+            1.0
+        },
+        0.12,
+    );
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldWallDamage {
+    pub shield_taken: f32,
+    pub passthrough_damage: f32,
+    pub broke_now: bool,
+}
+
+pub fn shield_wall_damage(
+    state: &mut ShieldWallState,
+    can_consume: bool,
+    damage: f32,
+    break_cooldown: f32,
+) -> ShieldWallDamage {
+    let shield_taken = if shield_wall_broken(state, can_consume) {
+        0.0
+    } else {
+        state.shield.min(damage)
+    };
+    state.shield -= shield_taken;
+    if shield_taken > 0.0 {
+        state.hit = 1.0;
+    }
+    let broke_now = state.shield <= 0.00001 && shield_taken > 0.0;
+    if broke_now {
+        state.break_timer = break_cooldown;
+    }
+    ShieldWallDamage {
+        shield_taken,
+        passthrough_damage: (damage - shield_taken).max(0.0),
+        broke_now,
+    }
+}
+
+pub fn shield_wall_pickup(state: &mut ShieldWallState) {
+    state.shield_radius = 0.0;
+}
+
+pub fn write_shield_wall_state<W: Write>(write: &mut W, state: &ShieldWallState) -> io::Result<()> {
+    write_f32(write, state.shield)
+}
+
+pub fn read_shield_wall_state<R: Read>(read: &mut R) -> io::Result<ShieldWallState> {
+    let shield = read_f32(read)?;
+    Ok(ShieldWallState {
+        shield,
+        shield_radius: if shield > 0.0 { 1.0 } else { 0.0 },
+        break_timer: 0.0,
+        hit: 0.0,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorState {
+    pub broken: bool,
+    pub buildup: f32,
+    pub hit: f32,
+    pub warmup: f32,
+    pub shield_radius: f32,
+}
+
+impl Default for DirectionalForceProjectorState {
+    fn default() -> Self {
+        Self {
+            broken: true,
+            buildup: 0.0,
+            hit: 0.0,
+            warmup: 0.0,
+            shield_radius: 0.0,
+        }
+    }
+}
+
+pub fn directional_force_projector_update(
+    state: &mut DirectionalForceProjectorState,
+    efficiency: f32,
+    delta: f32,
+    width: f32,
+    shield_health: f32,
+) -> bool {
+    state.shield_radius = lerp_delta(
+        state.shield_radius,
+        if state.broken {
+            0.0
+        } else {
+            state.warmup * width
+        },
+        0.05,
+    );
+    state.warmup = lerp_delta(state.warmup, efficiency, 0.1);
+    if state.broken && state.buildup <= 0.0 {
+        state.broken = false;
+    }
+    let broke_now = state.buildup >= shield_health && !state.broken;
+    if broke_now {
+        state.broken = true;
+        state.buildup = shield_health;
+    }
+    if state.hit > 0.0 {
+        state.hit -= 1.0 / 5.0 * delta;
+    }
+    broke_now
+}
+
+pub fn directional_force_projector_picked_up(state: &mut DirectionalForceProjectorState) {
+    state.shield_radius = 0.0;
+    state.warmup = 0.0;
+}
+
+pub fn directional_force_projector_segment(
+    origin_x: f32,
+    origin_y: f32,
+    length: f32,
+    shield_radius: f32,
+    rotation_degrees: f32,
+) -> ((f32, f32), (f32, f32)) {
+    (
+        rotate_add(length, shield_radius, rotation_degrees, origin_x, origin_y),
+        rotate_add(length, -shield_radius, rotation_degrees, origin_x, origin_y),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn directional_force_projector_absorb_bullet(
+    state: &mut DirectionalForceProjectorState,
+    enemy_team: bool,
+    absorbable: bool,
+    bullet_x: f32,
+    bullet_y: f32,
+    bullet_vel_x: f32,
+    bullet_vel_y: f32,
+    bullet_damage: f32,
+    delta: f32,
+    projector_x: f32,
+    projector_y: f32,
+    length: f32,
+    rotation_degrees: f32,
+) -> bool {
+    if state.shield_radius <= 0.0 || state.broken || !enemy_team || !absorbable {
+        return false;
+    }
+    let ((x1, y1), (x2, y2)) = directional_force_projector_segment(
+        projector_x,
+        projector_y,
+        length,
+        state.shield_radius,
+        rotation_degrees,
+    );
+    if segments_intersect(
+        (bullet_x, bullet_y),
+        (
+            bullet_x + bullet_vel_x * (delta + 1.1),
+            bullet_y + bullet_vel_y * (delta + 1.1),
+        ),
+        (x1, y1),
+        (x2, y2),
+    ) {
+        state.hit = 1.0;
+        state.buildup += bullet_damage;
+        true
+    } else {
+        false
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadarState {
+    pub progress: f32,
+    pub last_radius: f32,
+    pub smooth_efficiency: f32,
+    pub total_progress: f32,
+}
+
+impl Default for RadarState {
+    fn default() -> Self {
+        Self {
+            progress: 0.0,
+            last_radius: 0.0,
+            smooth_efficiency: 1.0,
+            total_progress: 0.0,
+        }
+    }
+}
+
+pub fn radar_fog_radius(fog_radius: f32, progress: f32, smooth_efficiency: f32) -> f32 {
+    fog_radius * progress * smooth_efficiency
+}
+
+pub fn radar_update(
+    state: &mut RadarState,
+    efficiency: f32,
+    edelta: f32,
+    fog_radius: f32,
+    discovery_time: f32,
+) -> bool {
+    state.smooth_efficiency = lerp_delta(state.smooth_efficiency, efficiency, 0.05);
+    let radius = radar_fog_radius(fog_radius, state.progress, state.smooth_efficiency);
+    let force_update = (radius - state.last_radius).abs() >= 0.5;
+    if force_update {
+        state.last_radius = radius;
+    }
+    state.progress = (state.progress + edelta / discovery_time).clamp(0.0, 1.0);
+    state.total_progress += efficiency * edelta;
+    force_update
+}
+
+pub fn write_radar_state<W: Write>(write: &mut W, state: &RadarState) -> io::Result<()> {
+    write_f32(write, state.progress)
+}
+
+pub fn read_radar_state<R: Read>(read: &mut R) -> io::Result<RadarState> {
+    Ok(RadarState {
+        progress: read_f32(read)?,
+        ..RadarState::default()
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildTurretState {
+    pub rotation: f32,
+    pub warmup: f32,
+    pub raw_plans: Vec<u8>,
+}
+
+impl Default for BuildTurretState {
+    fn default() -> Self {
+        Self {
+            rotation: 90.0,
+            warmup: 0.0,
+            raw_plans: Vec::new(),
+        }
+    }
+}
+
+pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
+    if configured < 0.0 {
+        size as f32 / 2.0
+    } else {
+        configured
+    }
+}
+
+pub fn build_turret_warmup_update(warmup: f32, actively_building: bool, efficiency: f32) -> f32 {
+    lerp_delta(
+        warmup,
+        if actively_building { efficiency } else { 0.0 },
+        0.1,
+    )
+}
+
+pub fn build_turret_should_consume(plan_count: usize, heal_suppressed: bool) -> bool {
+    plan_count > 0 && !heal_suppressed
+}
+
+pub fn build_turret_write_child<W: Write>(
+    write: &mut W,
+    state: &BuildTurretState,
+) -> io::Result<()> {
+    write_f32(write, state.rotation)?;
+    write.write_all(&state.raw_plans)
+}
+
+pub fn build_turret_read_child<R: Read>(read: &mut R) -> io::Result<BuildTurretState> {
+    let rotation = read_f32(read)?;
+    let mut raw_plans = Vec::new();
+    read.read_to_end(&mut raw_plans)?;
+    Ok(BuildTurretState {
+        rotation,
+        raw_plans,
+        warmup: 0.0,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockwaveTowerState {
+    pub reload_counter: f32,
+    pub heat: f32,
+}
+
+impl ShockwaveTowerState {
+    pub fn new(initial_reload_counter: f32) -> Self {
+        Self {
+            reload_counter: initial_reload_counter,
+            heat: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockwaveTowerFire {
+    pub fired: bool,
+    pub wave_damage: f32,
+    pub removed_targets: usize,
+}
+
+pub fn shockwave_tower_update(
+    state: &mut ShockwaveTowerState,
+    potential_efficiency: f32,
+    edelta: f32,
+    delta: f32,
+    reload: f32,
+    bullet_damage: f32,
+    falloff_count: f32,
+    target_damages: &mut [f32],
+    timer_ready: bool,
+    cooldown_multiplier: f32,
+) -> ShockwaveTowerFire {
+    let mut fire = ShockwaveTowerFire {
+        fired: false,
+        wave_damage: 0.0,
+        removed_targets: 0,
+    };
+    if potential_efficiency > 0.0 {
+        state.reload_counter += edelta;
+    }
+    if potential_efficiency > 0.0
+        && state.reload_counter >= reload
+        && timer_ready
+        && !target_damages.is_empty()
+    {
+        state.heat = 1.0;
+        state.reload_counter = 0.0;
+        fire.fired = true;
+        fire.wave_damage =
+            bullet_damage.min(bullet_damage * falloff_count / target_damages.len() as f32);
+        for damage in target_damages {
+            if *damage > fire.wave_damage {
+                *damage -= fire.wave_damage;
+            } else {
+                *damage = 0.0;
+                fire.removed_targets += 1;
+            }
+        }
+    }
+    state.heat = (state.heat - delta / reload * cooldown_multiplier).clamp(0.0, 1.0);
+    fire
+}
+
+pub fn shockwave_tower_progress(reload_counter: f32, reload: f32) -> f32 {
+    reload_counter / reload
+}
+
+pub fn shockwave_tower_should_consume(reload_counter: f32, reload: f32) -> bool {
+    reload_counter < reload
+}
+
+pub fn thruster_top_rotation(rotation: i32) -> f32 {
+    rotation as f32 * 90.0
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
     from + (to - from) * alpha
 }
@@ -454,6 +921,30 @@ fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
     let mut buf = [0; 4];
     read.read_exact(&mut buf)?;
     Ok(f32::from_be_bytes(buf))
+}
+
+fn read_bool<R: Read>(read: &mut R) -> io::Result<bool> {
+    let mut buf = [0; 1];
+    read.read_exact(&mut buf)?;
+    Ok(buf[0] != 0)
+}
+
+fn rotate_add(x: f32, y: f32, degrees: f32, add_x: f32, add_y: f32) -> (f32, f32) {
+    let radians = degrees.to_radians();
+    let cos = radians.cos();
+    let sin = radians.sin();
+    (x * cos - y * sin + add_x, x * sin + y * cos + add_y)
+}
+
+fn segments_intersect(a1: (f32, f32), a2: (f32, f32), b1: (f32, f32), b2: (f32, f32)) -> bool {
+    fn cross(a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> f32 {
+        (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+    }
+    let d1 = cross(a1, a2, b1);
+    let d2 = cross(a1, a2, b2);
+    let d3 = cross(b1, b2, a1);
+    let d4 = cross(b1, b2, a2);
+    d1.signum() != d2.signum() && d3.signum() != d4.signum()
 }
 
 #[cfg(test)]
@@ -577,5 +1068,154 @@ mod tests {
             regen_projector_heal_amount(1.0, 2.0, 12.0, 1.0, 1000.0, 20.0),
             20.0
         );
+    }
+
+    #[test]
+    fn base_and_shield_wall_helpers_follow_upstream_state_order() {
+        let mut base = BaseShieldState::default();
+        assert_eq!(base_shield_update(&mut base, 200.0, 0.5), 5.0);
+        assert!(base_shield_should_interact(5.0));
+        assert_eq!(
+            base_shield_unit_action(10.0, 20.0, 18.0),
+            ShieldUnitAction::Repel { distance: 7.01 }
+        );
+        assert_eq!(
+            base_shield_unit_action(10.0, 20.0, 5.0),
+            ShieldUnitAction::Kill
+        );
+
+        let mut bytes = Vec::new();
+        base.broken = true;
+        write_base_shield_state(&mut bytes, &base).unwrap();
+        assert_eq!(
+            read_base_shield_state(&mut bytes.as_slice(), 1).unwrap(),
+            base
+        );
+        assert_eq!(
+            read_base_shield_state(&mut [].as_slice(), 0).unwrap(),
+            BaseShieldState::default()
+        );
+
+        let mut wall = ShieldWallState {
+            shield: 15.0,
+            shield_radius: 1.0,
+            break_timer: 0.0,
+            hit: 0.8,
+        };
+        let damage = shield_wall_damage(&mut wall, true, 20.0, 600.0);
+        assert_eq!(damage.shield_taken, 15.0);
+        assert_eq!(damage.passthrough_damage, 5.0);
+        assert!(damage.broke_now);
+        assert_eq!(wall.break_timer, 600.0);
+        shield_wall_update(&mut wall, true, 10.0, 10.0, 900.0, 2.0);
+        assert_eq!(wall.break_timer, 590.0);
+        assert_eq!(wall.hit, 0.0);
+        shield_wall_pickup(&mut wall);
+        assert_eq!(wall.shield_radius, 0.0);
+
+        let mut bytes = Vec::new();
+        write_shield_wall_state(&mut bytes, &wall).unwrap();
+        let restored = read_shield_wall_state(&mut bytes.as_slice()).unwrap();
+        assert_eq!(restored.shield, wall.shield);
+        assert_eq!(restored.shield_radius, 0.0);
+    }
+
+    #[test]
+    fn directional_force_projector_radar_build_turret_and_thruster_follow_upstream() {
+        let mut directional = DirectionalForceProjectorState {
+            broken: false,
+            warmup: 1.0,
+            shield_radius: 10.0,
+            ..DirectionalForceProjectorState::default()
+        };
+        assert!(!directional_force_projector_update(
+            &mut directional,
+            0.5,
+            1.0,
+            30.0,
+            3000.0
+        ));
+        assert!((directional.warmup - 0.95).abs() < 0.00001);
+        let segment = directional_force_projector_segment(0.0, 0.0, 40.0, 10.0, 0.0);
+        assert_eq!(segment, ((40.0, 10.0), (40.0, -10.0)));
+        assert!(directional_force_projector_absorb_bullet(
+            &mut directional,
+            true,
+            true,
+            30.0,
+            0.0,
+            10.0,
+            0.0,
+            50.0,
+            1.0,
+            0.0,
+            0.0,
+            40.0,
+            0.0
+        ));
+        assert_eq!(directional.hit, 1.0);
+        assert!(directional.buildup >= 50.0);
+        directional_force_projector_picked_up(&mut directional);
+        assert_eq!(directional.shield_radius, 0.0);
+
+        let mut radar = RadarState::default();
+        assert!(!radar_update(&mut radar, 1.0, 60.0, 10.0, 600.0));
+        assert_eq!(radar.progress, 0.1);
+        assert_eq!(
+            radar_fog_radius(10.0, radar.progress, radar.smooth_efficiency),
+            1.0
+        );
+        assert!(radar_update(&mut radar, 1.0, 60.0, 10.0, 600.0));
+        let mut bytes = Vec::new();
+        write_radar_state(&mut bytes, &radar).unwrap();
+        assert_eq!(
+            read_radar_state(&mut bytes.as_slice()).unwrap().progress,
+            radar.progress
+        );
+
+        assert_eq!(build_turret_elevation(-1.0, 3), 1.5);
+        assert_eq!(build_turret_warmup_update(0.0, true, 0.8), 0.080000006);
+        assert!(build_turret_should_consume(1, false));
+        let build = BuildTurretState {
+            rotation: 45.0,
+            warmup: 0.6,
+            raw_plans: vec![0, 2, 7, 9],
+        };
+        let mut bytes = Vec::new();
+        build_turret_write_child(&mut bytes, &build).unwrap();
+        let restored = build_turret_read_child(&mut bytes.as_slice()).unwrap();
+        assert_eq!(restored.rotation, 45.0);
+        assert_eq!(restored.raw_plans, vec![0, 2, 7, 9]);
+
+        assert_eq!(thruster_top_rotation(3), 270.0);
+    }
+
+    #[test]
+    fn shockwave_tower_update_matches_java_damage_edges() {
+        let mut tower = ShockwaveTowerState {
+            reload_counter: 90.0,
+            heat: 0.0,
+        };
+        let mut targets = [100.0, 500.0, 10.0, 200.0];
+        let fire = shockwave_tower_update(
+            &mut tower,
+            1.0,
+            1.0,
+            1.0,
+            90.0,
+            160.0,
+            20.0,
+            &mut targets,
+            true,
+            1.0,
+        );
+        assert!(fire.fired);
+        assert_eq!(fire.wave_damage, 160.0);
+        assert_eq!(fire.removed_targets, 2);
+        assert_eq!(targets, [0.0, 340.0, 0.0, 40.0]);
+        assert_eq!(tower.reload_counter, 0.0);
+        assert!(tower.heat < 1.0);
+        assert_eq!(shockwave_tower_progress(45.0, 90.0), 0.5);
+        assert!(shockwave_tower_should_consume(45.0, 90.0));
     }
 }
