@@ -283,6 +283,279 @@ pub fn parse_logic_statements(text: &str) -> Result<LogicParserOutput, LogicPars
     LogicParser::new(text).parse()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogicStatement {
+    Invalid,
+    Read {
+        output: String,
+        target: String,
+        address: String,
+    },
+    Write {
+        input: String,
+        target: String,
+        address: String,
+    },
+    Print {
+        value: String,
+    },
+    Format {
+        value: String,
+    },
+    LocalePrint {
+        value: String,
+    },
+    DrawFlush {
+        target: String,
+    },
+    PrintFlush {
+        target: String,
+    },
+    GetLink {
+        output: String,
+        address: String,
+    },
+    SetRate {
+        amount: String,
+    },
+    Sync {
+        variable: String,
+    },
+}
+
+impl LogicStatement {
+    pub fn invalid() -> Self {
+        Self::Invalid
+    }
+
+    pub fn read() -> Self {
+        Self::Read {
+            output: "result".into(),
+            target: "cell1".into(),
+            address: "0".into(),
+        }
+    }
+
+    pub fn write() -> Self {
+        Self::Write {
+            input: "result".into(),
+            target: "cell1".into(),
+            address: "0".into(),
+        }
+    }
+
+    pub fn print() -> Self {
+        Self::Print {
+            value: "\"frog\"".into(),
+        }
+    }
+
+    pub fn format() -> Self {
+        Self::Format {
+            value: "\"frog\"".into(),
+        }
+    }
+
+    pub fn locale_print() -> Self {
+        Self::LocalePrint {
+            value: "\"name\"".into(),
+        }
+    }
+
+    pub fn draw_flush() -> Self {
+        Self::DrawFlush {
+            target: "display1".into(),
+        }
+    }
+
+    pub fn print_flush() -> Self {
+        Self::PrintFlush {
+            target: "message1".into(),
+        }
+    }
+
+    pub fn get_link() -> Self {
+        Self::GetLink {
+            output: "result".into(),
+            address: "0".into(),
+        }
+    }
+
+    pub fn set_rate() -> Self {
+        Self::SetRate {
+            amount: "10".into(),
+        }
+    }
+
+    pub fn sync() -> Self {
+        Self::Sync {
+            variable: "var".into(),
+        }
+    }
+
+    pub fn opcode(&self) -> &'static str {
+        match self {
+            LogicStatement::Invalid => "noop",
+            LogicStatement::Read { .. } => "read",
+            LogicStatement::Write { .. } => "write",
+            LogicStatement::Print { .. } => "print",
+            LogicStatement::Format { .. } => "format",
+            LogicStatement::LocalePrint { .. } => "localeprint",
+            LogicStatement::DrawFlush { .. } => "drawflush",
+            LogicStatement::PrintFlush { .. } => "printflush",
+            LogicStatement::GetLink { .. } => "getlink",
+            LogicStatement::SetRate { .. } => "setrate",
+            LogicStatement::Sync { .. } => "sync",
+        }
+    }
+
+    pub fn category(&self) -> &'static LCategory {
+        match self {
+            LogicStatement::Invalid => LCategory::by_name("unknown").unwrap(),
+            LogicStatement::Read { .. }
+            | LogicStatement::Write { .. }
+            | LogicStatement::Print { .. }
+            | LogicStatement::Format { .. } => LCategory::by_name("io").unwrap(),
+            LogicStatement::DrawFlush { .. }
+            | LogicStatement::PrintFlush { .. }
+            | LogicStatement::GetLink { .. } => LCategory::by_name("block").unwrap(),
+            LogicStatement::SetRate { .. }
+            | LogicStatement::Sync { .. }
+            | LogicStatement::LocalePrint { .. } => LCategory::by_name("world").unwrap(),
+        }
+    }
+
+    pub fn privileged(&self) -> bool {
+        matches!(
+            self,
+            LogicStatement::SetRate { .. }
+                | LogicStatement::Sync { .. }
+                | LogicStatement::LocalePrint { .. }
+        )
+    }
+
+    pub fn tokens(&self) -> Vec<String> {
+        match self {
+            LogicStatement::Invalid => vec!["noop".into()],
+            LogicStatement::Read {
+                output,
+                target,
+                address,
+            } => vec![
+                "read".into(),
+                output.clone(),
+                target.clone(),
+                address.clone(),
+            ],
+            LogicStatement::Write {
+                input,
+                target,
+                address,
+            } => vec![
+                "write".into(),
+                input.clone(),
+                target.clone(),
+                address.clone(),
+            ],
+            LogicStatement::Print { value } => vec!["print".into(), value.clone()],
+            LogicStatement::Format { value } => vec!["format".into(), value.clone()],
+            LogicStatement::LocalePrint { value } => vec!["localeprint".into(), value.clone()],
+            LogicStatement::DrawFlush { target } => vec!["drawflush".into(), target.clone()],
+            LogicStatement::PrintFlush { target } => vec!["printflush".into(), target.clone()],
+            LogicStatement::GetLink { output, address } => {
+                vec!["getlink".into(), output.clone(), address.clone()]
+            }
+            LogicStatement::SetRate { amount } => vec!["setrate".into(), amount.clone()],
+            LogicStatement::Sync { variable } => vec!["sync".into(), variable.clone()],
+        }
+    }
+
+    pub fn write_line(&self) -> String {
+        self.tokens().join(" ")
+    }
+
+    pub fn read_tokens(tokens: &[String]) -> Option<Self> {
+        let opcode = tokens.first()?.as_str();
+        Some(match opcode {
+            "noop" => Self::Invalid,
+            "read" => {
+                let mut statement = Self::read();
+                if let LogicStatement::Read {
+                    output,
+                    target,
+                    address,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *output = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *target = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *address = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "write" => {
+                let mut statement = Self::write();
+                if let LogicStatement::Write {
+                    input,
+                    target,
+                    address,
+                } = &mut statement
+                {
+                    if tokens.len() > 1 {
+                        *input = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *target = tokens[2].clone();
+                    }
+                    if tokens.len() > 3 {
+                        *address = tokens[3].clone();
+                    }
+                }
+                statement
+            }
+            "print" => Self::Print {
+                value: tokens.get(1).cloned().unwrap_or_else(|| "\"frog\"".into()),
+            },
+            "format" => Self::Format {
+                value: tokens.get(1).cloned().unwrap_or_else(|| "\"frog\"".into()),
+            },
+            "localeprint" => Self::LocalePrint {
+                value: tokens.get(1).cloned().unwrap_or_else(|| "\"name\"".into()),
+            },
+            "drawflush" => Self::DrawFlush {
+                target: tokens.get(1).cloned().unwrap_or_else(|| "display1".into()),
+            },
+            "printflush" => Self::PrintFlush {
+                target: tokens.get(1).cloned().unwrap_or_else(|| "message1".into()),
+            },
+            "getlink" => {
+                let mut statement = Self::get_link();
+                if let LogicStatement::GetLink { output, address } = &mut statement {
+                    if tokens.len() > 1 {
+                        *output = tokens[1].clone();
+                    }
+                    if tokens.len() > 2 {
+                        *address = tokens[2].clone();
+                    }
+                }
+                statement
+            }
+            "setrate" => Self::SetRate {
+                amount: tokens.get(1).cloned().unwrap_or_else(|| "10".into()),
+            },
+            "sync" => Self::Sync {
+                variable: tokens.get(1).cloned().unwrap_or_else(|| "var".into()),
+            },
+            _ => return None,
+        })
+    }
+}
+
 struct LogicParser<'a> {
     chars: Vec<char>,
     pos: usize,
@@ -3290,6 +3563,114 @@ mod tests {
             .unwrap_err()
             .message
             .contains("Line too long"));
+    }
+
+    #[test]
+    fn simple_logic_statements_keep_java_generated_field_order_defaults_and_privilege() {
+        assert_eq!(LogicStatement::invalid().write_line(), "noop");
+        assert_eq!(LogicStatement::read().write_line(), "read result cell1 0");
+        assert_eq!(LogicStatement::write().write_line(), "write result cell1 0");
+        assert_eq!(LogicStatement::print().write_line(), "print \"frog\"");
+        assert_eq!(LogicStatement::format().write_line(), "format \"frog\"");
+        assert_eq!(
+            LogicStatement::locale_print().write_line(),
+            "localeprint \"name\""
+        );
+        assert_eq!(
+            LogicStatement::draw_flush().write_line(),
+            "drawflush display1"
+        );
+        assert_eq!(
+            LogicStatement::print_flush().write_line(),
+            "printflush message1"
+        );
+        assert_eq!(LogicStatement::get_link().write_line(), "getlink result 0");
+        assert_eq!(LogicStatement::set_rate().write_line(), "setrate 10");
+        assert_eq!(LogicStatement::sync().write_line(), "sync var");
+
+        assert_eq!(LogicStatement::read().category().name, "io");
+        assert_eq!(LogicStatement::draw_flush().category().name, "block");
+        assert_eq!(LogicStatement::set_rate().category().name, "world");
+        assert!(!LogicStatement::read().privileged());
+        assert!(LogicStatement::set_rate().privileged());
+        assert!(LogicStatement::sync().privileged());
+        assert!(LogicStatement::locale_print().privileged());
+    }
+
+    #[test]
+    fn simple_logic_statements_parse_tokens_like_generated_logic_io() {
+        assert_eq!(
+            LogicStatement::read_tokens(&["read", "out", "cell2", "7"].map(String::from)),
+            Some(LogicStatement::Read {
+                output: "out".into(),
+                target: "cell2".into(),
+                address: "7".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["read", "out"].map(String::from)),
+            Some(LogicStatement::Read {
+                output: "out".into(),
+                target: "cell1".into(),
+                address: "0".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["write", "value", "cell3", "2"].map(String::from))
+                .unwrap()
+                .write_line(),
+            "write value cell3 2"
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["print", "\"hello world\""].map(String::from))
+                .unwrap()
+                .tokens(),
+            vec!["print".to_string(), "\"hello world\"".to_string()]
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["format", "\"x=%d\""].map(String::from)),
+            Some(LogicStatement::Format {
+                value: "\"x=%d\"".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["localeprint", "\"unit.name\""].map(String::from)),
+            Some(LogicStatement::LocalePrint {
+                value: "\"unit.name\"".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["drawflush", "display2"].map(String::from)),
+            Some(LogicStatement::DrawFlush {
+                target: "display2".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["printflush", "message2"].map(String::from)),
+            Some(LogicStatement::PrintFlush {
+                target: "message2".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["getlink", "linked", "3"].map(String::from)),
+            Some(LogicStatement::GetLink {
+                output: "linked".into(),
+                address: "3".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["setrate", "20"].map(String::from)),
+            Some(LogicStatement::SetRate {
+                amount: "20".into()
+            })
+        );
+        assert_eq!(
+            LogicStatement::read_tokens(&["sync", "flag"].map(String::from)),
+            Some(LogicStatement::Sync {
+                variable: "flag".into()
+            })
+        );
+        assert_eq!(LogicStatement::read_tokens(&["missing".into()]), None);
     }
 
     #[test]
