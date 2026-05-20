@@ -5,6 +5,7 @@ use crate::mindustry::{content::ContentCatalog, ctype::ContentType, world::meta:
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
+    sync::OnceLock,
 };
 
 pub const LOGIC_CTRL_PROCESSOR: i32 = 1;
@@ -85,6 +86,14 @@ impl LogicAssembler {
 
     pub fn var(&mut self, symbol: &str) -> &mut LVar {
         let mut symbol = symbol.trim().to_string();
+
+        if self.vars.contains_key(&symbol) {
+            return self.vars.get_mut(&symbol).expect("checked above");
+        }
+
+        if let Some(value) = logic_global_value(&symbol, self.privileged) {
+            return self.put_const(symbol, value);
+        }
 
         if symbol.starts_with('"') && symbol.ends_with('"') && !symbol.is_empty() {
             let value = symbol[1..symbol.len() - 1].replace("\\n", "\n");
@@ -291,6 +300,88 @@ pub fn named_logic_color_rgba(name: &str) -> Option<u32> {
         "highlight" => Some(0xffdea5ff),
         _ => None,
     }
+}
+
+pub fn logic_global_value(symbol: &str, privileged: bool) -> Option<LogicValue> {
+    if matches!(
+        symbol,
+        "@server"
+            | "@client"
+            | "@clientLocale"
+            | "@clientUnit"
+            | "@clientName"
+            | "@clientTeam"
+            | "@clientMobile"
+    ) && !privileged
+    {
+        return Some(LogicValue::Object(None));
+    }
+
+    match symbol {
+        "the end" | "null" | "@wait" => Some(LogicValue::Object(None)),
+        "@queries" if privileged => Some(LogicValue::Object(None)),
+        "false" => Some(LogicValue::Number(0.0)),
+        "true" => Some(LogicValue::Number(1.0)),
+        "@pi" | "蟺" => Some(LogicValue::Number(std::f64::consts::PI)),
+        "@e" => Some(LogicValue::Number(std::f64::consts::E)),
+        "@degToRad" => Some(LogicValue::Number(std::f64::consts::PI / 180.0)),
+        "@radToDeg" => Some(LogicValue::Number(180.0 / std::f64::consts::PI)),
+        "@ctrlProcessor" => Some(LogicValue::Number(LOGIC_CTRL_PROCESSOR as f64)),
+        "@ctrlPlayer" => Some(LogicValue::Number(LOGIC_CTRL_PLAYER as f64)),
+        "@ctrlCommand" => Some(LogicValue::Number(LOGIC_CTRL_COMMAND as f64)),
+        "@thisx" | "@thisy" | "@links" | "@ipt" | "@time" | "@tick" | "@second" | "@minute"
+        | "@waveNumber" | "@waveTime" | "@mapw" | "@maph" | "@server" | "@client"
+        | "@clientTeam" | "@clientMobile" => Some(LogicValue::Number(0.0)),
+        "@clientLocale" | "@clientUnit" | "@clientName" => Some(LogicValue::Object(None)),
+        _ => {
+            if let Some(color_name) = symbol.strip_prefix("@color") {
+                if !color_name.is_empty() {
+                    if let Some(rgba) = named_logic_color_rgba(color_name) {
+                        return Some(LogicValue::Number(rgba_u32_to_double_bits(rgba)));
+                    }
+                }
+            }
+
+            if let Some(name) = symbol.strip_prefix('@') {
+                if LAccess::by_wire_name(name).is_some() || LogicAlign::by_name(name).is_some() {
+                    return Some(LogicValue::Object(Some(symbol.to_string())));
+                }
+
+                if logic_known_global_content_name(name) || symbol.starts_with("@sfx-") {
+                    return Some(LogicValue::Object(Some(symbol.to_string())));
+                }
+            }
+
+            None
+        }
+    }
+}
+
+pub fn logic_known_global_content_name(name: &str) -> bool {
+    static CATALOG: OnceLock<ContentCatalog> = OnceLock::new();
+    const UNIT_NAMES: [&str; 58] = [
+        "dagger", "mace", "fortress", "scepter", "reign", "nova", "pulsar", "quasar", "vela",
+        "corvus", "crawler", "atrax", "spiroct", "arkyid", "toxopid", "flare", "horizon", "zenith",
+        "antumbra", "eclipse", "mono", "poly", "mega", "quad", "oct", "risso", "minke", "bryde",
+        "sei", "omura", "retusa", "oxynoe", "cyerce", "aegires", "navanax", "stell", "locus",
+        "precept", "vanquish", "conquer", "merui", "cleroi", "anthicus", "tecta", "collaris",
+        "elude", "avert", "obviate", "quell", "disrupt", "evoke", "incite", "emanate", "alpha",
+        "beta", "gamma", "renale", "latum",
+    ];
+    const WEATHER_NAMES: [&str; 5] = ["rain", "snow", "sandstorm", "sporestorm", "fog"];
+
+    if logic_team_from_name(name).is_some()
+        || UNIT_NAMES.contains(&name)
+        || WEATHER_NAMES.contains(&name)
+    {
+        return true;
+    }
+
+    let catalog = CATALOG.get_or_init(ContentCatalog::load_base_content);
+    catalog.item_by_name(name).is_some()
+        || catalog.liquid_by_name(name).is_some()
+        || catalog.status_effect_by_name(name).is_some()
+        || catalog.blocks.get_by_name(name).is_some()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3261,6 +3352,53 @@ impl LogicStatement {
     }
 }
 
+pub fn assemble_logic_source(
+    source: &str,
+    privileged: bool,
+) -> Result<(LogicAssembler, Vec<LogicInstruction>), LogicParseError> {
+    let parsed = parse_logic_statements(source)?;
+    let mut assembler = LogicAssembler::new();
+    assembler.privileged = privileged;
+    let mut instructions = Vec::new();
+
+    for statement in parsed.statements {
+        let LogicStatementKind::Instruction {
+            mut tokens,
+            line,
+            jump_label,
+        } = statement
+        else {
+            continue;
+        };
+
+        if let Some(label) = jump_label {
+            let Some(address) = parsed.jump_locations.get(&label) else {
+                return Err(LogicParseError::new(format!(
+                    "Unknown jump location '{}' on line {}.",
+                    label,
+                    line + 1
+                )));
+            };
+
+            if tokens.len() > 1 {
+                tokens[1] = address.to_string();
+            }
+        }
+
+        let Some(statement) = LogicStatement::read_tokens(&tokens) else {
+            return Err(LogicParseError::new(format!(
+                "Unknown instruction '{}' on line {}.",
+                tokens.first().map(String::as_str).unwrap_or(""),
+                line + 1
+            )));
+        };
+
+        instructions.push(statement.to_instruction(&mut assembler));
+    }
+
+    Ok((assembler, instructions))
+}
+
 struct LogicParser<'a> {
     chars: Vec<char>,
     pos: usize,
@@ -5387,6 +5525,85 @@ impl LogicExecutor {
         }
     }
 
+    pub fn from_source(source: &str, privileged: bool) -> Result<Self, LogicParseError> {
+        let (assembler, instructions) = assemble_logic_source(source, privileged)?;
+        let mut exec = Self::new();
+        exec.load_assembled(assembler, instructions);
+        Ok(exec)
+    }
+
+    pub fn load_assembled(
+        &mut self,
+        assembler: LogicAssembler,
+        instructions: Vec<LogicInstruction>,
+    ) {
+        self.privileged = assembler.privileged;
+        self.vars = assembler
+            .vars
+            .into_values()
+            .filter(|var| !var.constant)
+            .collect();
+        for (id, var) in self.vars.iter_mut().enumerate() {
+            var.id = id as i32;
+        }
+        if let Some(counter) = self.vars.iter().find(|var| var.name == "@counter") {
+            self.counter = counter.clone();
+        }
+        self.instructions = instructions;
+        self.sync_instructions_from_vars();
+    }
+
+    pub fn run_steps(&mut self, max_steps: usize) -> usize {
+        let mut steps = 0;
+        while steps < max_steps
+            && !self.yield_
+            && self.counter.numval >= 0.0
+            && self.counter.numval < self.instructions.len() as f64
+        {
+            self.run_once();
+            steps += 1;
+        }
+        steps
+    }
+
+    pub fn var_by_name(&self, name: &str) -> Option<&LVar> {
+        if name == "@counter" {
+            return Some(&self.counter);
+        }
+        self.vars.iter().find(|var| var.name == name)
+    }
+
+    pub fn var_by_name_mut(&mut self, name: &str) -> Option<&mut LVar> {
+        if name == "@counter" {
+            return Some(&mut self.counter);
+        }
+        self.vars.iter_mut().find(|var| var.name == name)
+    }
+
+    fn upsert_runtime_var(&mut self, var: &LVar) {
+        if var.name == "@counter" {
+            self.counter = var.clone();
+        }
+
+        if let Some(shared) = self.vars.iter_mut().find(|shared| shared.name == var.name) {
+            *shared = var.clone();
+        } else {
+            let id = self.vars.len() as i32;
+            self.vars.push(var.clone());
+            if let Some(last) = self.vars.last_mut() {
+                last.id = id;
+            }
+        }
+    }
+
+    fn sync_instructions_from_vars(&mut self) {
+        let vars = self.vars.clone();
+        let counter = self.counter.clone();
+        for instruction in &mut self.instructions {
+            instruction.load_shared_vars_from(&vars, &counter);
+        }
+    }
+
     pub fn run_once(&mut self) {
         if self.counter.numval >= self.instructions.len() as f64 || self.counter.numval < 0.0 {
             self.counter.numval = 0.0;
@@ -5397,7 +5614,9 @@ impl LogicExecutor {
             let index = self.counter.numval as usize;
             self.counter.numval += 1.0;
             let mut instruction = self.instructions[index].clone();
+            instruction.load_shared_vars(self);
             instruction.run(self);
+            instruction.store_shared_vars(self);
             self.instructions[index] = instruction;
         }
     }
@@ -5836,7 +6055,491 @@ pub enum LogicInstruction {
     },
 }
 
+macro_rules! visit_lvars {
+    ($visitor:expr $(, $var:expr)* $(,)?) => {
+        {
+            $(
+                $visitor($var);
+            )*
+        }
+    };
+}
+
 impl LogicInstruction {
+    fn for_each_var_mut(&mut self, visitor: &mut impl FnMut(&mut LVar)) {
+        match self {
+            LogicInstruction::Draw {
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => visit_lvars!(visitor, x, y, p1, p2, p3, p4),
+            LogicInstruction::Control {
+                target,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => visit_lvars!(visitor, target, p1, p2, p3, p4),
+            LogicInstruction::Radar {
+                radar,
+                sort_order,
+                output,
+                ..
+            } => visit_lvars!(visitor, radar, sort_order, output),
+            LogicInstruction::UnitBind { type_ } => visit_lvars!(visitor, type_),
+            LogicInstruction::UnitControl {
+                p1, p2, p3, p4, p5, ..
+            } => {
+                visit_lvars!(visitor, p1, p2, p3, p4, p5)
+            }
+            LogicInstruction::UnitRadar {
+                sort_order, output, ..
+            } => visit_lvars!(visitor, sort_order, output),
+            LogicInstruction::UnitLocate {
+                enemy,
+                ore,
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+                ..
+            } => visit_lvars!(visitor, enemy, ore, out_x, out_y, out_found, out_build),
+            LogicInstruction::Query {
+                team, x, y, w, h, ..
+            } => {
+                visit_lvars!(visitor, team, x, y, w, h)
+            }
+            LogicInstruction::GetBlock { result, x, y, .. } => {
+                visit_lvars!(visitor, result, x, y)
+            }
+            LogicInstruction::SetBlock {
+                block,
+                x,
+                y,
+                team,
+                rotation,
+                ..
+            } => visit_lvars!(visitor, block, x, y, team, rotation),
+            LogicInstruction::Fetch {
+                result,
+                team,
+                index,
+                extra,
+                ..
+            } => visit_lvars!(visitor, result, team, index, extra),
+            LogicInstruction::GetFlag { result, flag } => visit_lvars!(visitor, result, flag),
+            LogicInstruction::SetFlag { flag, value } => visit_lvars!(visitor, flag, value),
+            LogicInstruction::SpawnUnit {
+                type_,
+                x,
+                y,
+                rotation,
+                team,
+                result,
+            } => visit_lvars!(visitor, type_, x, y, rotation, team, result),
+            LogicInstruction::ApplyStatus { unit, duration, .. } => {
+                visit_lvars!(visitor, unit, duration)
+            }
+            LogicInstruction::SpawnWave { x, y, natural } => {
+                visit_lvars!(visitor, x, y, natural)
+            }
+            LogicInstruction::Effect {
+                x,
+                y,
+                rotation,
+                color,
+                data,
+                ..
+            } => visit_lvars!(visitor, x, y, rotation, color, data),
+            LogicInstruction::Explosion {
+                team,
+                x,
+                y,
+                radius,
+                damage,
+                air,
+                ground,
+                pierce,
+                effect,
+            } => visit_lvars!(visitor, team, x, y, radius, damage, air, ground, pierce, effect),
+            LogicInstruction::SetRule {
+                value,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => visit_lvars!(visitor, value, p1, p2, p3, p4),
+            LogicInstruction::FlushMessage {
+                duration,
+                out_success,
+                ..
+            } => visit_lvars!(visitor, duration, out_success),
+            LogicInstruction::Cutscene { p1, p2, p3, p4, .. } => {
+                visit_lvars!(visitor, p1, p2, p3, p4)
+            }
+            LogicInstruction::LocalePrint { value }
+            | LogicInstruction::SetRate { amount: value }
+            | LogicInstruction::Sync { variable: value }
+            | LogicInstruction::Print { value }
+            | LogicInstruction::PrintChar { value }
+            | LogicInstruction::Format { value }
+            | LogicInstruction::Wait { value, .. } => visit_lvars!(visitor, value),
+            LogicInstruction::DrawFlush { target } | LogicInstruction::PrintFlush { target } => {
+                visit_lvars!(visitor, target)
+            }
+            LogicInstruction::SpawnBullet {
+                result,
+                from,
+                weapon,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y,
+            } => visit_lvars!(
+                visitor,
+                result,
+                from,
+                weapon,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y
+            ),
+            LogicInstruction::WeatherSense { to, weather } => visit_lvars!(visitor, to, weather),
+            LogicInstruction::WeatherSet { weather, state } => {
+                visit_lvars!(visitor, weather, state)
+            }
+            LogicInstruction::SetProp { type_, of, value } => {
+                visit_lvars!(visitor, type_, of, value)
+            }
+            LogicInstruction::ClientData {
+                channel,
+                value,
+                reliable,
+            } => visit_lvars!(visitor, channel, value, reliable),
+            LogicInstruction::PlaySound {
+                id,
+                volume,
+                pitch,
+                pan,
+                x,
+                y,
+                limit,
+                ..
+            } => visit_lvars!(visitor, id, volume, pitch, pan, x, y, limit),
+            LogicInstruction::SetMarker { id, p1, p2, p3, .. } => {
+                visit_lvars!(visitor, id, p1, p2, p3)
+            }
+            LogicInstruction::MakeMarker {
+                id, x, y, replace, ..
+            } => visit_lvars!(visitor, id, x, y, replace),
+            LogicInstruction::Set { from, to } => visit_lvars!(visitor, from, to),
+            LogicInstruction::Op { a, b, dest, .. } => visit_lvars!(visitor, a, b, dest),
+            LogicInstruction::Select {
+                result,
+                comp0,
+                comp1,
+                a,
+                b,
+                ..
+            } => visit_lvars!(visitor, result, comp0, comp1, a, b),
+            LogicInstruction::Jump { value, compare, .. } => {
+                visit_lvars!(visitor, value, compare)
+            }
+            LogicInstruction::GetLink { output, index } => visit_lvars!(visitor, output, index),
+            LogicInstruction::Read {
+                target,
+                position,
+                output,
+            } => visit_lvars!(visitor, target, position, output),
+            LogicInstruction::Write {
+                target,
+                position,
+                value,
+            } => visit_lvars!(visitor, target, position, value),
+            LogicInstruction::Sense { from, to, type_ } => visit_lvars!(visitor, from, to, type_),
+            LogicInstruction::Lookup { dest, from, .. } => visit_lvars!(visitor, dest, from),
+            LogicInstruction::PackColor { result, r, g, b, a } => {
+                visit_lvars!(visitor, result, r, g, b, a)
+            }
+            LogicInstruction::UnpackColor { r, g, b, a, value } => {
+                visit_lvars!(visitor, r, g, b, a, value)
+            }
+            LogicInstruction::End | LogicInstruction::Noop | LogicInstruction::Stop => {}
+        }
+    }
+
+    fn for_each_var(&self, visitor: &mut impl FnMut(&LVar)) {
+        match self {
+            LogicInstruction::Draw {
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => visit_lvars!(visitor, x, y, p1, p2, p3, p4),
+            LogicInstruction::Control {
+                target,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => visit_lvars!(visitor, target, p1, p2, p3, p4),
+            LogicInstruction::Radar {
+                radar,
+                sort_order,
+                output,
+                ..
+            } => visit_lvars!(visitor, radar, sort_order, output),
+            LogicInstruction::UnitBind { type_ } => visit_lvars!(visitor, type_),
+            LogicInstruction::UnitControl {
+                p1, p2, p3, p4, p5, ..
+            } => {
+                visit_lvars!(visitor, p1, p2, p3, p4, p5)
+            }
+            LogicInstruction::UnitRadar {
+                sort_order, output, ..
+            } => visit_lvars!(visitor, sort_order, output),
+            LogicInstruction::UnitLocate {
+                enemy,
+                ore,
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+                ..
+            } => visit_lvars!(visitor, enemy, ore, out_x, out_y, out_found, out_build),
+            LogicInstruction::Query {
+                team, x, y, w, h, ..
+            } => {
+                visit_lvars!(visitor, team, x, y, w, h)
+            }
+            LogicInstruction::GetBlock { result, x, y, .. } => {
+                visit_lvars!(visitor, result, x, y)
+            }
+            LogicInstruction::SetBlock {
+                block,
+                x,
+                y,
+                team,
+                rotation,
+                ..
+            } => visit_lvars!(visitor, block, x, y, team, rotation),
+            LogicInstruction::Fetch {
+                result,
+                team,
+                index,
+                extra,
+                ..
+            } => visit_lvars!(visitor, result, team, index, extra),
+            LogicInstruction::GetFlag { result, flag } => visit_lvars!(visitor, result, flag),
+            LogicInstruction::SetFlag { flag, value } => visit_lvars!(visitor, flag, value),
+            LogicInstruction::SpawnUnit {
+                type_,
+                x,
+                y,
+                rotation,
+                team,
+                result,
+            } => visit_lvars!(visitor, type_, x, y, rotation, team, result),
+            LogicInstruction::ApplyStatus { unit, duration, .. } => {
+                visit_lvars!(visitor, unit, duration)
+            }
+            LogicInstruction::SpawnWave { x, y, natural } => {
+                visit_lvars!(visitor, x, y, natural)
+            }
+            LogicInstruction::Effect {
+                x,
+                y,
+                rotation,
+                color,
+                data,
+                ..
+            } => visit_lvars!(visitor, x, y, rotation, color, data),
+            LogicInstruction::Explosion {
+                team,
+                x,
+                y,
+                radius,
+                damage,
+                air,
+                ground,
+                pierce,
+                effect,
+            } => visit_lvars!(visitor, team, x, y, radius, damage, air, ground, pierce, effect),
+            LogicInstruction::SetRule {
+                value,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => visit_lvars!(visitor, value, p1, p2, p3, p4),
+            LogicInstruction::FlushMessage {
+                duration,
+                out_success,
+                ..
+            } => visit_lvars!(visitor, duration, out_success),
+            LogicInstruction::Cutscene { p1, p2, p3, p4, .. } => {
+                visit_lvars!(visitor, p1, p2, p3, p4)
+            }
+            LogicInstruction::LocalePrint { value }
+            | LogicInstruction::SetRate { amount: value }
+            | LogicInstruction::Sync { variable: value }
+            | LogicInstruction::Print { value }
+            | LogicInstruction::PrintChar { value }
+            | LogicInstruction::Format { value }
+            | LogicInstruction::Wait { value, .. } => visit_lvars!(visitor, value),
+            LogicInstruction::DrawFlush { target } | LogicInstruction::PrintFlush { target } => {
+                visit_lvars!(visitor, target)
+            }
+            LogicInstruction::SpawnBullet {
+                result,
+                from,
+                weapon,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y,
+            } => visit_lvars!(
+                visitor,
+                result,
+                from,
+                weapon,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y
+            ),
+            LogicInstruction::WeatherSense { to, weather } => visit_lvars!(visitor, to, weather),
+            LogicInstruction::WeatherSet { weather, state } => {
+                visit_lvars!(visitor, weather, state)
+            }
+            LogicInstruction::SetProp { type_, of, value } => {
+                visit_lvars!(visitor, type_, of, value)
+            }
+            LogicInstruction::ClientData {
+                channel,
+                value,
+                reliable,
+            } => visit_lvars!(visitor, channel, value, reliable),
+            LogicInstruction::PlaySound {
+                id,
+                volume,
+                pitch,
+                pan,
+                x,
+                y,
+                limit,
+                ..
+            } => visit_lvars!(visitor, id, volume, pitch, pan, x, y, limit),
+            LogicInstruction::SetMarker { id, p1, p2, p3, .. } => {
+                visit_lvars!(visitor, id, p1, p2, p3)
+            }
+            LogicInstruction::MakeMarker {
+                id, x, y, replace, ..
+            } => visit_lvars!(visitor, id, x, y, replace),
+            LogicInstruction::Set { from, to } => visit_lvars!(visitor, from, to),
+            LogicInstruction::Op { a, b, dest, .. } => visit_lvars!(visitor, a, b, dest),
+            LogicInstruction::Select {
+                result,
+                comp0,
+                comp1,
+                a,
+                b,
+                ..
+            } => visit_lvars!(visitor, result, comp0, comp1, a, b),
+            LogicInstruction::Jump { value, compare, .. } => {
+                visit_lvars!(visitor, value, compare)
+            }
+            LogicInstruction::GetLink { output, index } => visit_lvars!(visitor, output, index),
+            LogicInstruction::Read {
+                target,
+                position,
+                output,
+            } => visit_lvars!(visitor, target, position, output),
+            LogicInstruction::Write {
+                target,
+                position,
+                value,
+            } => visit_lvars!(visitor, target, position, value),
+            LogicInstruction::Sense { from, to, type_ } => visit_lvars!(visitor, from, to, type_),
+            LogicInstruction::Lookup { dest, from, .. } => visit_lvars!(visitor, dest, from),
+            LogicInstruction::PackColor { result, r, g, b, a } => {
+                visit_lvars!(visitor, result, r, g, b, a)
+            }
+            LogicInstruction::UnpackColor { r, g, b, a, value } => {
+                visit_lvars!(visitor, r, g, b, a, value)
+            }
+            LogicInstruction::End | LogicInstruction::Noop | LogicInstruction::Stop => {}
+        }
+    }
+
+    fn load_shared_vars(&mut self, exec: &LogicExecutor) {
+        self.for_each_var_mut(&mut |var| {
+            if var.constant {
+                return;
+            }
+            if let Some(shared) = exec.var_by_name(&var.name) {
+                *var = shared.clone();
+            }
+        });
+    }
+
+    fn load_shared_vars_from(&mut self, vars: &[LVar], counter: &LVar) {
+        self.for_each_var_mut(&mut |var| {
+            if var.constant {
+                return;
+            }
+            if var.name == "@counter" {
+                *var = counter.clone();
+            } else if let Some(shared) = vars.iter().find(|shared| shared.name == var.name) {
+                *var = shared.clone();
+            }
+        });
+    }
+
+    fn store_shared_vars(&self, exec: &mut LogicExecutor) {
+        self.for_each_var(&mut |var| {
+            if !var.constant {
+                exec.upsert_runtime_var(var);
+            }
+        });
+    }
+
     pub fn run(&mut self, exec: &mut LogicExecutor) {
         match self {
             LogicInstruction::Draw {
@@ -14519,6 +15222,57 @@ mod tests {
         .to_instruction(&mut assembler)
         .run(&mut exec);
         assert_eq!(exec.markers[&5].text, "from statement");
+    }
+
+    #[test]
+    fn assembler_resolves_java_global_constants_for_runtime_scripts() {
+        let mut assembler = LogicAssembler::new();
+
+        assert_eq!(assembler.instruction_var("false").num(), 0.0);
+        assert_eq!(assembler.instruction_var("true").num(), 1.0);
+        assert_eq!(
+            assembler.instruction_var("null").value(),
+            LVarValue::Object(None)
+        );
+        assert_eq!(assembler.instruction_var("@ctrlProcessor").numi(), 1);
+        assert_eq!(assembler.instruction_var("@health").obj(), Some("@health"));
+        assert_eq!(
+            assembler.instruction_var("@sharded").obj(),
+            Some("@sharded")
+        );
+        assert_eq!(assembler.instruction_var("@dagger").obj(), Some("@dagger"));
+        assert_eq!(
+            assembler.instruction_var("@sandstorm").obj(),
+            Some("@sandstorm")
+        );
+        assert!(assembler.instruction_var("@pi").num() > 3.14);
+
+        let unknown = assembler.instruction_var("@notAJavaGlobal");
+        assert_eq!(unknown.value(), LVarValue::Object(None));
+        assert!(!unknown.constant);
+    }
+
+    #[test]
+    fn executor_from_source_shares_vars_and_resolves_jump_labels() {
+        let mut exec = LogicExecutor::from_source("set a 1\nop add b a 2\nprint b", false).unwrap();
+
+        assert_eq!(exec.instructions.len(), 3);
+        assert_eq!(exec.run_steps(10), 3);
+        assert_eq!(exec.text_buffer, "3");
+        assert_eq!(exec.var_by_name("a").unwrap().num(), 1.0);
+        assert_eq!(exec.var_by_name("b").unwrap().num(), 3.0);
+
+        let mut loop_exec = LogicExecutor::from_source(
+            "set a 0\nloop:\nop add a a 1\njump loop lessThan a 3\nprint a",
+            false,
+        )
+        .unwrap();
+        assert_eq!(loop_exec.run_steps(20), 8);
+        assert_eq!(loop_exec.text_buffer, "3");
+        assert_eq!(loop_exec.var_by_name("a").unwrap().num(), 3.0);
+
+        let missing = LogicExecutor::from_source("jump nowhere always x false", false).unwrap_err();
+        assert!(missing.message.contains("Unknown jump location 'nowhere'"));
     }
 
     #[test]
