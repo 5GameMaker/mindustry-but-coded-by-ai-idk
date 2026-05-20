@@ -1,5 +1,8 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rules {
+    pub static_fog: bool,
+    pub fog: bool,
+    pub show_spawns: bool,
     pub wave_timer: bool,
     pub waves: bool,
     pub infinite_resources: bool,
@@ -8,10 +11,14 @@ pub struct Rules {
     pub pvp: bool,
     pub editor: bool,
     pub instant_build: bool,
+    pub random_wave_ai: bool,
+    pub pause_disabled: bool,
     pub enemy_core_build_radius: f32,
     pub build_cost_multiplier: f32,
     pub build_speed_multiplier: f32,
     pub unit_build_speed_multiplier: f32,
+    pub unit_cost_multiplier: f32,
+    pub objective_timer_multiplier: f32,
     pub wave_spacing: f32,
     pub wave_team: i32,
     pub teams: TeamRules,
@@ -20,6 +27,9 @@ pub struct Rules {
 impl Default for Rules {
     fn default() -> Self {
         Self {
+            static_fog: true,
+            fog: false,
+            show_spawns: false,
             wave_timer: false,
             waves: false,
             infinite_resources: false,
@@ -28,10 +38,14 @@ impl Default for Rules {
             pvp: false,
             editor: false,
             instant_build: false,
+            random_wave_ai: false,
+            pause_disabled: false,
             enemy_core_build_radius: 400.0,
             build_cost_multiplier: 1.0,
             build_speed_multiplier: 1.0,
             unit_build_speed_multiplier: 1.0,
+            unit_cost_multiplier: 1.0,
+            objective_timer_multiplier: 1.0,
             wave_spacing: 2.0 * 60.0 * 60.0,
             wave_team: 1,
             teams: TeamRules::new(256),
@@ -45,10 +59,13 @@ pub struct TeamRule {
     pub respawn: bool,
     pub unit_damage_multiplier: f32,
     pub unit_health_multiplier: f32,
+    pub unit_cost_multiplier: f32,
+    pub unit_build_speed_multiplier: f32,
     pub block_damage_multiplier: f32,
     pub block_health_multiplier: f32,
     pub build_speed_multiplier: f32,
     pub rts_ai: bool,
+    pub rts_max_squad: i32,
 }
 
 impl Default for TeamRule {
@@ -58,10 +75,13 @@ impl Default for TeamRule {
             respawn: true,
             unit_damage_multiplier: 1.0,
             unit_health_multiplier: 1.0,
+            unit_cost_multiplier: 1.0,
+            unit_build_speed_multiplier: 1.0,
             block_damage_multiplier: 1.0,
             block_health_multiplier: 1.0,
             build_speed_multiplier: 1.0,
             rts_ai: false,
+            rts_max_squad: 50,
         }
     }
 }
