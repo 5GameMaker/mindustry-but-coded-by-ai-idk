@@ -2,8 +2,10 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::core::content_loader::{ContentLoader, ContentRecord};
 use crate::mindustry::ctype::{ContentId, ContentType};
+use crate::mindustry::entities::units::StatusEntry;
 use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{AdminAction, KickReason, TraceInfo};
+use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const MAX_ARRAY_SIZE: usize = 1000;
@@ -621,6 +623,404 @@ pub fn read_content_ref_resolved<'a, R: Read>(
     Ok(read_content_ref(read)?.resolve(loader))
 }
 
+pub fn write_nullable_content_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io::Result<()> {
+    write_i16(write, id.unwrap_or(-1))
+}
+
+pub fn read_nullable_content_id<R: Read>(read: &mut R) -> io::Result<Option<ContentId>> {
+    let id = read_i16(read)?;
+    if id == -1 {
+        Ok(None)
+    } else {
+        Ok(Some(id))
+    }
+}
+
+pub fn write_content_id<W: Write>(
+    write: &mut W,
+    content_type: ContentType,
+    id: Option<ContentId>,
+) -> io::Result<()> {
+    if id.is_some_and(|id| id < 0) {
+        return Err(invalid_input("negative content id"));
+    }
+    let _ = content_type;
+    write_nullable_content_id(write, id)
+}
+
+pub fn read_content_id<R: Read>(read: &mut R) -> io::Result<Option<ContentId>> {
+    read_nullable_content_id(read)
+}
+
+pub fn write_content_by_name<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    content_type: ContentType,
+    name: Option<&str>,
+) -> io::Result<()> {
+    let id = match name {
+        Some(name) => Some(
+            loader
+                .get_by_name(content_type, name)
+                .ok_or_else(|| invalid_input("unknown content name"))?
+                .id,
+        ),
+        None => None,
+    };
+    write_content_id(write, content_type, id)
+}
+
+pub fn read_content_name<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+    content_type: ContentType,
+) -> io::Result<Option<String>> {
+    let Some(id) = read_content_id(read)? else {
+        return Ok(None);
+    };
+    loader
+        .get_by_id(content_type, id)
+        .and_then(|record| record.name().map(str::to_string))
+        .map(Some)
+        .ok_or_else(|| invalid_data("unknown content id"))
+}
+
+pub fn write_block<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    block: Option<&str>,
+) -> io::Result<()> {
+    write_content_by_name(write, loader, ContentType::Block, block)
+}
+
+pub fn read_block<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<Option<String>> {
+    read_content_name(read, loader, ContentType::Block)
+}
+
+pub fn write_item<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    item: Option<&str>,
+) -> io::Result<()> {
+    write_content_by_name(write, loader, ContentType::Item, item)
+}
+
+pub fn read_item<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<Option<String>> {
+    read_content_name(read, loader, ContentType::Item)
+}
+
+pub fn write_liquid<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    liquid: Option<&str>,
+) -> io::Result<()> {
+    write_content_by_name(write, loader, ContentType::Liquid, liquid)
+}
+
+pub fn read_liquid<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<Option<String>> {
+    read_content_name(read, loader, ContentType::Liquid)
+}
+
+pub fn write_weather<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    weather: Option<&str>,
+) -> io::Result<()> {
+    write_content_by_name(write, loader, ContentType::Weather, weather)
+}
+
+pub fn read_weather<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<Option<String>> {
+    read_content_name(read, loader, ContentType::Weather)
+}
+
+pub fn write_unit_type<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    unit: &str,
+) -> io::Result<()> {
+    write_content_by_name(write, loader, ContentType::Unit, Some(unit))
+}
+
+pub fn read_unit_type<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<String> {
+    read_content_name(read, loader, ContentType::Unit)?
+        .ok_or_else(|| invalid_data("null unit type id"))
+}
+
+pub fn write_bullet_type_id<W: Write>(write: &mut W, id: ContentId) -> io::Result<()> {
+    if id < 0 {
+        return Err(invalid_input("negative bullet id"));
+    }
+    write_i16(write, id)
+}
+
+pub fn read_bullet_type_id<R: Read>(read: &mut R) -> io::Result<ContentId> {
+    let id = read_i16(read)?;
+    if id < 0 {
+        Err(invalid_data("negative bullet id"))
+    } else {
+        Ok(id)
+    }
+}
+
+pub fn write_command_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io::Result<()> {
+    write_optional_byte_id(write, id)
+}
+
+pub fn read_command_id<R: Read>(read: &mut R) -> io::Result<Option<ContentId>> {
+    read_optional_byte_id(read)
+}
+
+pub fn read_command<'a, R: Read>(
+    read: &mut R,
+    loader: &'a ContentLoader,
+) -> io::Result<Option<&'a crate::mindustry::ai::unit_command::UnitCommand>> {
+    Ok(match read_command_id(read)? {
+        Some(id) => loader.unit_command(id),
+        None => None,
+    })
+}
+
+pub fn write_stance_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io::Result<()> {
+    write_optional_byte_id(write, id)
+}
+
+pub fn read_stance_id_or_stop<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<ContentId> {
+    let raw = read_u8(read)?;
+    if raw == u8::MAX || loader.unit_stance(raw as ContentId).is_none() {
+        Ok(0)
+    } else {
+        Ok(raw as ContentId)
+    }
+}
+
+pub fn read_stance<'a, R: Read>(
+    read: &mut R,
+    loader: &'a ContentLoader,
+) -> io::Result<&'a crate::mindustry::ai::unit_stance::UnitStance> {
+    let id = read_stance_id_or_stop(read, loader)?;
+    loader
+        .unit_stance(id)
+        .ok_or_else(|| invalid_data("missing stop stance"))
+}
+
+fn write_optional_byte_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io::Result<()> {
+    let value = match id {
+        Some(id) if (0..=254).contains(&id) => id as u8,
+        Some(_) => return Err(invalid_input("byte content id out of range")),
+        None => u8::MAX,
+    };
+    write_u8(write, value)
+}
+
+fn read_optional_byte_id<R: Read>(read: &mut R) -> io::Result<Option<ContentId>> {
+    let value = read_u8(read)?;
+    if value == u8::MAX {
+        Ok(None)
+    } else {
+        Ok(Some(value as ContentId))
+    }
+}
+
+pub fn write_items<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    stack: &ItemStack,
+) -> io::Result<()> {
+    write_item(write, loader, Some(&stack.item))?;
+    write_i32(write, stack.amount)
+}
+
+pub fn read_items<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<ItemStack> {
+    let item = read_item(read, loader)?.ok_or_else(|| invalid_data("null item stack item"))?;
+    Ok(ItemStack::new(item, read_i32(read)?))
+}
+
+pub fn write_item_stacks<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    stacks: &[ItemStack],
+) -> io::Result<()> {
+    if stacks.len() > i16::MAX as usize {
+        return Err(invalid_input("item stack array too large"));
+    }
+    write_i16(write, stacks.len() as i16)?;
+    for stack in stacks {
+        write_items(write, loader, stack)?;
+    }
+    Ok(())
+}
+
+pub fn read_item_stacks<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Vec<ItemStack>> {
+    let count = read_i16(read)?;
+    if count < 0 || count as usize > MAX_ARRAY_SIZE {
+        return Err(invalid_data("invalid item stack count"));
+    }
+    let mut stacks = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        stacks.push(read_items(read, loader)?);
+    }
+    Ok(stacks)
+}
+
+pub fn write_liquid_stack<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    stack: &LiquidStack,
+) -> io::Result<()> {
+    write_liquid(write, loader, Some(&stack.liquid))?;
+    write_u32(write, stack.amount.to_bits())
+}
+
+pub fn read_liquid_stack<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<LiquidStack> {
+    let liquid =
+        read_liquid(read, loader)?.ok_or_else(|| invalid_data("null liquid stack liquid"))?;
+    Ok(LiquidStack::new(liquid, f32::from_bits(read_u32(read)?)))
+}
+
+pub fn write_liquid_stacks<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    stacks: &[LiquidStack],
+) -> io::Result<()> {
+    if stacks.len() > i16::MAX as usize {
+        return Err(invalid_input("liquid stack array too large"));
+    }
+    write_i16(write, stacks.len() as i16)?;
+    for stack in stacks {
+        write_liquid_stack(write, loader, stack)?;
+    }
+    Ok(())
+}
+
+pub fn read_liquid_stacks<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Vec<LiquidStack>> {
+    let count = read_i16(read)?;
+    if count < 0 || count as usize > MAX_ARRAY_SIZE {
+        return Err(invalid_data("invalid liquid stack count"));
+    }
+    let mut stacks = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        stacks.push(read_liquid_stack(read, loader)?);
+    }
+    Ok(stacks)
+}
+
+pub fn write_status<W: Write>(write: &mut W, entry: &StatusEntry) -> io::Result<()> {
+    let effect = entry
+        .effect
+        .as_ref()
+        .ok_or_else(|| invalid_input("status entry missing effect"))?;
+    write_i16(write, effect.base.mappable.base.id)?;
+    write_u32(write, entry.time.to_bits())?;
+
+    if effect.dynamic {
+        let flags = dynamic_status_flags(entry);
+        write_u8(write, flags)?;
+        if flags & (1 << 0) != 0 {
+            write_u32(write, entry.damage_multiplier.to_bits())?;
+        }
+        if flags & (1 << 1) != 0 {
+            write_u32(write, entry.health_multiplier.to_bits())?;
+        }
+        if flags & (1 << 2) != 0 {
+            write_u32(write, entry.speed_multiplier.to_bits())?;
+        }
+        if flags & (1 << 3) != 0 {
+            write_u32(write, entry.reload_multiplier.to_bits())?;
+        }
+        if flags & (1 << 4) != 0 {
+            write_u32(write, entry.build_speed_multiplier.to_bits())?;
+        }
+        if flags & (1 << 5) != 0 {
+            write_u32(write, entry.drag_multiplier.to_bits())?;
+        }
+        if flags & (1 << 6) != 0 {
+            write_u32(write, entry.armor_override.to_bits())?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn read_status<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<StatusEntry> {
+    let id = read_i16(read)?;
+    let time = f32::from_bits(read_u32(read)?);
+    let effect = loader
+        .catalog()
+        .status_effect_by_id(id)
+        .cloned()
+        .ok_or_else(|| invalid_data("unknown status effect id"))?;
+    let dynamic = effect.dynamic;
+    let mut entry = StatusEntry::new(effect, time);
+
+    if dynamic {
+        let flags = read_u8(read)?;
+        if flags & (1 << 0) != 0 {
+            entry.damage_multiplier = f32::from_bits(read_u32(read)?);
+        }
+        if flags & (1 << 1) != 0 {
+            entry.health_multiplier = f32::from_bits(read_u32(read)?);
+        }
+        if flags & (1 << 2) != 0 {
+            entry.speed_multiplier = f32::from_bits(read_u32(read)?);
+        }
+        if flags & (1 << 3) != 0 {
+            entry.reload_multiplier = f32::from_bits(read_u32(read)?);
+        }
+        if flags & (1 << 4) != 0 {
+            entry.build_speed_multiplier = f32::from_bits(read_u32(read)?);
+        }
+        if flags & (1 << 5) != 0 {
+            entry.drag_multiplier = f32::from_bits(read_u32(read)?);
+        }
+        if flags & (1 << 6) != 0 {
+            entry.armor_override = f32::from_bits(read_u32(read)?);
+        }
+    }
+
+    Ok(entry)
+}
+
+pub fn dynamic_status_flags(entry: &StatusEntry) -> u8 {
+    (if entry.damage_multiplier != 1.0 {
+        1 << 0
+    } else {
+        0
+    }) | (if entry.health_multiplier != 1.0 {
+        1 << 1
+    } else {
+        0
+    }) | (if entry.speed_multiplier != 1.0 {
+        1 << 2
+    } else {
+        0
+    }) | (if entry.reload_multiplier != 1.0 {
+        1 << 3
+    } else {
+        0
+    }) | (if entry.build_speed_multiplier != 1.0 {
+        1 << 4
+    } else {
+        0
+    }) | (if entry.drag_multiplier != 1.0 {
+        1 << 5
+    } else {
+        0
+    }) | (if entry.armor_override >= 0.0 {
+        1 << 6
+    } else {
+        0
+    })
+}
+
 pub fn write_kick<W: Write>(write: &mut W, reason: KickReason) -> io::Result<()> {
     write_u8(write, reason.ordinal())
 }
@@ -966,6 +1366,169 @@ mod tests {
         );
 
         assert!(read_content_ref(&mut [0xff, 0, 1].as_slice()).is_err());
+    }
+
+    #[test]
+    fn typed_content_helpers_match_java_short_and_byte_sentinels() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let mut bytes = Vec::new();
+
+        write_block(&mut bytes, &loader, Some("router")).unwrap();
+        assert_eq!(
+            bytes,
+            loader
+                .get_by_name(ContentType::Block, "router")
+                .unwrap()
+                .id
+                .to_be_bytes()
+        );
+        assert_eq!(
+            read_block(&mut bytes.as_slice(), &loader).unwrap(),
+            Some("router".into())
+        );
+
+        bytes.clear();
+        write_item(&mut bytes, &loader, Some("copper")).unwrap();
+        assert_eq!(bytes, vec![0, 0]);
+        assert_eq!(
+            read_item(&mut bytes.as_slice(), &loader).unwrap(),
+            Some("copper".into())
+        );
+
+        bytes.clear();
+        write_liquid(&mut bytes, &loader, None).unwrap();
+        assert_eq!(bytes, vec![0xff, 0xff]);
+        assert_eq!(read_liquid(&mut bytes.as_slice(), &loader).unwrap(), None);
+
+        bytes.clear();
+        write_unit_type(&mut bytes, &loader, "flare").unwrap();
+        assert_eq!(bytes, vec![0, 15]);
+        assert_eq!(
+            read_unit_type(&mut bytes.as_slice(), &loader).unwrap(),
+            "flare"
+        );
+
+        bytes.clear();
+        write_bullet_type_id(&mut bytes, 5).unwrap();
+        assert_eq!(bytes, vec![0, 5]);
+        assert_eq!(read_bullet_type_id(&mut bytes.as_slice()).unwrap(), 5);
+
+        bytes.clear();
+        write_command_id(&mut bytes, None).unwrap();
+        write_command_id(&mut bytes, Some(4)).unwrap();
+        assert_eq!(bytes, vec![0xff, 4]);
+        let mut slice = bytes.as_slice();
+        assert_eq!(read_command_id(&mut slice).unwrap(), None);
+        assert_eq!(
+            read_command(&mut slice, &loader).unwrap().unwrap().name(),
+            "mine"
+        );
+
+        bytes.clear();
+        write_stance_id(&mut bytes, Some(7)).unwrap();
+        assert_eq!(bytes, vec![7]);
+        assert_eq!(
+            read_stance(&mut bytes.as_slice(), &loader).unwrap().name(),
+            "mineauto"
+        );
+        assert_eq!(
+            read_stance(&mut [0xff].as_slice(), &loader).unwrap().name(),
+            "stop"
+        );
+        assert_eq!(
+            read_stance(&mut [0xfe].as_slice(), &loader).unwrap().name(),
+            "stop"
+        );
+    }
+
+    #[test]
+    fn item_and_liquid_stacks_match_java_typeio_layout() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let mut bytes = Vec::new();
+
+        let stack = ItemStack::new("copper", 123);
+        write_items(&mut bytes, &loader, &stack).unwrap();
+        assert_eq!(bytes, vec![0, 0, 0, 0, 0, 123]);
+        assert_eq!(read_items(&mut bytes.as_slice(), &loader).unwrap(), stack);
+
+        bytes.clear();
+        let stacks = vec![ItemStack::new("lead", 1), ItemStack::new("scrap", 2)];
+        write_item_stacks(&mut bytes, &loader, &stacks).unwrap();
+        assert_eq!(&bytes[0..2], &[0, 2]);
+        assert_eq!(
+            read_item_stacks(&mut bytes.as_slice(), &loader).unwrap(),
+            stacks
+        );
+
+        bytes.clear();
+        let liquid = LiquidStack::new("water", 2.5);
+        write_liquid_stack(&mut bytes, &loader, &liquid).unwrap();
+        assert_eq!(&bytes[0..2], &[0, 0]);
+        assert_eq!(&bytes[2..6], &2.5f32.to_bits().to_be_bytes());
+        assert_eq!(
+            read_liquid_stack(&mut bytes.as_slice(), &loader).unwrap(),
+            liquid
+        );
+
+        bytes.clear();
+        let liquids = vec![
+            LiquidStack::new("water", 1.0),
+            LiquidStack::new("slag", 3.25),
+        ];
+        write_liquid_stacks(&mut bytes, &loader, &liquids).unwrap();
+        assert_eq!(&bytes[0..2], &[0, 2]);
+        assert_eq!(
+            read_liquid_stacks(&mut bytes.as_slice(), &loader).unwrap(),
+            liquids
+        );
+    }
+
+    #[test]
+    fn status_entry_serialization_keeps_dynamic_flag_order() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let dynamic = loader
+            .catalog()
+            .status_effect_by_name("dynamic")
+            .unwrap()
+            .clone();
+        let dynamic_id = dynamic.base.mappable.base.id;
+        let mut entry = StatusEntry::new(dynamic, 12.5);
+        entry.damage_multiplier = 2.0;
+        entry.speed_multiplier = 0.5;
+        entry.drag_multiplier = 3.0;
+        entry.armor_override = 8.0;
+
+        assert_eq!(
+            dynamic_status_flags(&entry),
+            (1 << 0) | (1 << 2) | (1 << 5) | (1 << 6)
+        );
+
+        let mut bytes = Vec::new();
+        write_status(&mut bytes, &entry).unwrap();
+        assert_eq!(&bytes[0..2], &dynamic_id.to_be_bytes());
+        assert_eq!(&bytes[2..6], &12.5f32.to_bits().to_be_bytes());
+        assert_eq!(bytes[6], dynamic_status_flags(&entry));
+
+        let decoded = read_status(&mut bytes.as_slice(), &loader).unwrap();
+        assert_eq!(decoded.time, 12.5);
+        assert_eq!(decoded.effect.as_ref().unwrap().name(), "dynamic");
+        assert_eq!(decoded.damage_multiplier, 2.0);
+        assert_eq!(decoded.speed_multiplier, 0.5);
+        assert_eq!(decoded.drag_multiplier, 3.0);
+        assert_eq!(decoded.armor_override, 8.0);
+
+        let wet = loader
+            .catalog()
+            .status_effect_by_name("wet")
+            .unwrap()
+            .clone();
+        let normal = StatusEntry::new(wet, 4.0);
+        bytes.clear();
+        write_status(&mut bytes, &normal).unwrap();
+        assert_eq!(bytes.len(), 6);
+        let decoded = read_status(&mut bytes.as_slice(), &loader).unwrap();
+        assert_eq!(decoded.effect.as_ref().unwrap().name(), "wet");
+        assert_eq!(decoded.time, 4.0);
     }
 
     #[test]
