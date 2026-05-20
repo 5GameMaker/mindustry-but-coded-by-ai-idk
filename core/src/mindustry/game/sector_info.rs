@@ -6,6 +6,50 @@ pub const VALUE_WINDOW: usize = 60;
 pub const REFRESH_PERIOD: f32 = 60.0;
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SectorImportSnapshot {
+    pub id: String,
+    pub has_base: bool,
+    pub destination: Option<String>,
+    pub export: HashMap<String, ExportStat>,
+}
+
+impl SectorImportSnapshot {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            has_base: false,
+            destination: None,
+            export: HashMap::new(),
+        }
+    }
+
+    pub fn with_base(mut self, has_base: bool) -> Self {
+        self.has_base = has_base;
+        self
+    }
+
+    pub fn with_destination(mut self, destination: impl Into<String>) -> Self {
+        self.destination = Some(destination.into());
+        self
+    }
+
+    pub fn with_export(mut self, item: impl Into<String>, mean: f32) -> Self {
+        self.export.insert(
+            item.into(),
+            ExportStat {
+                mean,
+                ..ExportStat::new()
+            },
+        );
+        self
+    }
+
+    pub fn any_exports(&self) -> bool {
+        any_exports_in(&self.export)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExportStat {
     pub counter: f32,
     pub means: Vec<f32>,
@@ -182,7 +226,117 @@ impl SectorInfo {
     }
 
     pub fn any_exports(&self) -> bool {
-        !self.export.is_empty() && self.export.values().map(|stat| stat.mean).sum::<f32>() >= 0.01
+        any_exports_in(&self.export)
+    }
+
+    pub fn imported_sector_ids<'a>(
+        &self,
+        self_id: &str,
+        sectors: &'a [SectorImportSnapshot],
+    ) -> Vec<&'a str> {
+        sectors
+            .iter()
+            .filter(|sector| {
+                sector.has_base
+                    && sector.id != self_id
+                    && sector.destination.as_deref() == Some(self_id)
+                    && sector.any_exports()
+            })
+            .map(|sector| sector.id.as_str())
+            .collect()
+    }
+
+    pub fn import_stats_from(
+        &self,
+        self_id: &str,
+        sectors: &[SectorImportSnapshot],
+    ) -> HashMap<String, ExportStat> {
+        let mut imports: HashMap<String, ExportStat> = HashMap::new();
+        for sector in sectors.iter().filter(|sector| {
+            sector.has_base
+                && sector.id != self_id
+                && sector.destination.as_deref() == Some(self_id)
+                && sector.any_exports()
+        }) {
+            for (item, stat) in &sector.export {
+                imports.entry(item.clone()).or_default().mean += stat.mean;
+            }
+        }
+        imports
+    }
+
+    pub fn refresh_import_rates<I, S>(
+        &mut self,
+        self_id: &str,
+        items: I,
+        sectors: &[SectorImportSnapshot],
+    ) where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let names: Vec<String> = items
+            .into_iter()
+            .map(|item| item.as_ref().to_string())
+            .collect();
+        let mut cache = vec![0.0; names.len()];
+        let by_name: HashMap<&str, usize> = names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (name.as_str(), index))
+            .collect();
+
+        for sector in sectors.iter().filter(|sector| {
+            sector.has_base
+                && sector.id != self_id
+                && sector.destination.as_deref() == Some(self_id)
+                && sector.any_exports()
+        }) {
+            for (item, stat) in &sector.export {
+                if let Some(index) = by_name.get(item.as_str()) {
+                    cache[*index] += stat.mean;
+                }
+            }
+        }
+
+        self.import_rate_cache = Some(cache);
+    }
+
+    pub fn get_import_rates<I, S>(
+        &mut self,
+        self_id: &str,
+        items: I,
+        sectors: &[SectorImportSnapshot],
+    ) -> &[f32]
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        if self.import_rate_cache.is_none() {
+            self.refresh_import_rates(self_id, items, sectors);
+        }
+        self.import_rate_cache.as_deref().unwrap_or(&[])
+    }
+
+    pub fn get_import_rate<I, S>(
+        &mut self,
+        self_id: &str,
+        items: I,
+        sectors: &[SectorImportSnapshot],
+        item: &str,
+    ) -> f32
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let names: Vec<String> = items
+            .into_iter()
+            .map(|item| item.as_ref().to_string())
+            .collect();
+        let index = names.iter().position(|name| name == item);
+        let rates = self.get_import_rates(self_id, names.iter().map(String::as_str), sectors);
+        index
+            .and_then(|index| rates.get(index).copied())
+            .unwrap_or(0.0)
     }
 
     pub fn refresh_throughput<I, S>(&mut self, known_items: I, import_rates: &HashMap<String, f32>)
@@ -261,6 +415,10 @@ fn raw_mean(values: &[f32]) -> f32 {
     } else {
         values.iter().sum::<f32>() / values.len() as f32
     }
+}
+
+fn any_exports_in(export: &HashMap<String, ExportStat>) -> bool {
+    !export.is_empty() && export.values().map(|stat| stat.mean).sum::<f32>() >= 0.01
 }
 
 #[cfg(test)]
@@ -376,5 +534,72 @@ mod tests {
         assert_approx_eq(info.production["copper"].mean, -0.5);
         assert_approx_eq(info.raw_production["copper"].mean, 0.0);
         assert_approx_eq(info.get_export("copper"), 0.5);
+    }
+
+    #[test]
+    fn import_snapshot_filters_sources_like_each_import() {
+        let info = SectorInfo::default();
+        let sectors = vec![
+            SectorImportSnapshot::new("source-a")
+                .with_base(true)
+                .with_destination("target")
+                .with_export("copper", 1.0),
+            SectorImportSnapshot::new("source-b")
+                .with_base(true)
+                .with_destination("target")
+                .with_export("lead", 0.009),
+            SectorImportSnapshot::new("source-c")
+                .with_base(false)
+                .with_destination("target")
+                .with_export("graphite", 2.0),
+            SectorImportSnapshot::new("target")
+                .with_base(true)
+                .with_destination("target")
+                .with_export("silicon", 3.0),
+            SectorImportSnapshot::new("other")
+                .with_base(true)
+                .with_destination("elsewhere")
+                .with_export("titanium", 4.0),
+        ];
+
+        assert_eq!(
+            info.imported_sector_ids("target", &sectors),
+            vec!["source-a"]
+        );
+    }
+
+    #[test]
+    fn import_stats_and_rate_cache_sum_matching_source_exports() {
+        let mut info = SectorInfo::default();
+        let sectors = vec![
+            SectorImportSnapshot::new("source-a")
+                .with_base(true)
+                .with_destination("target")
+                .with_export("copper", 1.0)
+                .with_export("lead", 2.0),
+            SectorImportSnapshot::new("source-b")
+                .with_base(true)
+                .with_destination("target")
+                .with_export("copper", 3.0),
+            SectorImportSnapshot::new("source-c")
+                .with_base(true)
+                .with_destination("target")
+                .with_export("graphite", 0.0),
+        ];
+
+        let stats = info.import_stats_from("target", &sectors);
+        assert_approx_eq(stats["copper"].mean, 4.0);
+        assert_approx_eq(stats["lead"].mean, 2.0);
+        assert!(!stats.contains_key("graphite"));
+
+        info.refresh_import_rates("target", ["copper", "lead", "graphite"], &sectors);
+        assert_eq!(
+            info.import_rate_cache.as_ref().unwrap(),
+            &vec![4.0, 2.0, 0.0]
+        );
+        assert_approx_eq(
+            info.get_import_rate("target", ["copper", "lead", "graphite"], &sectors, "lead"),
+            2.0,
+        );
     }
 }

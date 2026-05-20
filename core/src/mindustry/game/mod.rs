@@ -43,7 +43,7 @@ pub use schematic::{
     write_schematic, write_schematic_base64, Schematic, SchematicBlockInfo, SchematicTile,
     MAX_SCHEMATIC_SIZE, SCHEMATIC_HEADER, SCHEMATIC_VERSION,
 };
-pub use sector_info::{ExportStat, SectorInfo};
+pub use sector_info::{ExportStat, SectorImportSnapshot, SectorInfo};
 pub use spawn_group::SpawnGroup;
 pub use team::{
     vanilla_teams, Team, TeamRegistry, BASE_TEAM_COUNT, TEAM_BLUE, TEAM_COUNT, TEAM_CRUX,
