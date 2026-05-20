@@ -1,6 +1,7 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{self, Read, Write},
+    path::{Path, PathBuf},
 };
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
@@ -23,6 +24,9 @@ pub const SAVE_REGION_ENTITIES: &str = "entities";
 pub const SAVE_REGION_MARKERS: &str = "markers";
 pub const SAVE_REGION_CUSTOM: &str = "custom";
 pub const CUSTOM_CHUNK_STATIC_FOG_DATA: &str = "static-fog-data";
+pub const SAVE_EXTENSION: &str = "msav";
+pub const LAST_SECTOR_SAVE_SETTING: &str = "last-sector-save";
+pub const SAVE_SLOT_SETTING_PREFIX: &str = "save-";
 
 pub const SAVE_REGION_MANIFEST: &[&str] = &[
     SAVE_REGION_META,
@@ -33,6 +37,194 @@ pub const SAVE_REGION_MANIFEST: &[&str] = &[
     SAVE_REGION_MARKERS,
     SAVE_REGION_CUSTOM,
 ];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavePathLayout {
+    pub save_dir: PathBuf,
+    pub save_extension: String,
+}
+
+impl SavePathLayout {
+    pub fn new(save_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            save_dir: save_dir.into(),
+            save_extension: SAVE_EXTENSION.into(),
+        }
+    }
+
+    pub fn with_extension(save_dir: impl Into<PathBuf>, save_extension: impl Into<String>) -> Self {
+        Self {
+            save_dir: save_dir.into(),
+            save_extension: save_extension.into(),
+        }
+    }
+
+    pub fn file_for_slot(&self, slot: i32) -> PathBuf {
+        self.save_dir
+            .join(format!("{}.{}", slot, self.save_extension))
+    }
+
+    pub fn sector_file(&self, planet: &str, sector_id: i32) -> PathBuf {
+        self.save_dir.join(sector_file_name_with_extension(
+            planet,
+            sector_id,
+            &self.save_extension,
+        ))
+    }
+
+    pub fn backup_file_for(&self, file: impl AsRef<Path>) -> PathBuf {
+        backup_file_for_path(file)
+    }
+
+    pub fn next_slot_file<I, P>(&self, existing: I) -> PathBuf
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let names: Vec<String> = existing
+            .into_iter()
+            .filter_map(|path| file_name_string(path.as_ref()))
+            .collect();
+        self.save_dir.join(next_slot_file_name_with_extension(
+            names,
+            &self.save_extension,
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveSlotKind {
+    Numbered(i32),
+    Sector { planet: String, id: i32 },
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaveSlotRecord {
+    pub file: PathBuf,
+    pub meta: Option<SaveMeta>,
+}
+
+impl SaveSlotRecord {
+    pub fn new(file: impl Into<PathBuf>) -> Self {
+        Self {
+            file: file.into(),
+            meta: None,
+        }
+    }
+
+    pub fn with_meta(file: impl Into<PathBuf>, meta: SaveMeta) -> Self {
+        Self {
+            file: file.into(),
+            meta: Some(meta),
+        }
+    }
+
+    pub fn index(&self) -> String {
+        file_stem_string(&self.file)
+            .unwrap_or_else(|| file_name_string(&self.file).unwrap_or_default())
+    }
+
+    pub fn kind(&self) -> SaveSlotKind {
+        save_slot_kind_from_file_name(&self.index())
+    }
+
+    pub fn name_setting_key(&self) -> String {
+        format!("{SAVE_SLOT_SETTING_PREFIX}{}-name", self.index())
+    }
+
+    pub fn autosave_setting_key(&self) -> String {
+        format!("{SAVE_SLOT_SETTING_PREFIX}{}-autosave", self.index())
+    }
+
+    pub fn preview_file(&self, preview_dir: impl AsRef<Path>) -> PathBuf {
+        preview_dir
+            .as_ref()
+            .join(format!("save_slot_{}.png", self.index()))
+    }
+
+    pub fn load_preview_file(&self, preview_dir: impl AsRef<Path>) -> PathBuf {
+        let preview = self.preview_file(preview_dir);
+        let name = file_name_string(&preview).unwrap_or_default();
+        preview.with_file_name(format!("{name}.spreview"))
+    }
+
+    pub fn is_sector_file(&self) -> bool {
+        matches!(self.kind(), SaveSlotKind::Sector { .. })
+    }
+
+    pub fn timestamp(&self) -> i64 {
+        self.meta.as_ref().map_or(0, |meta| meta.timestamp)
+    }
+
+    pub fn time_played(&self) -> i64 {
+        self.meta.as_ref().map_or(0, |meta| meta.time_played)
+    }
+}
+
+pub fn slot_file_name(slot: i32) -> String {
+    slot_file_name_with_extension(slot, SAVE_EXTENSION)
+}
+
+pub fn slot_file_name_with_extension(slot: i32, extension: &str) -> String {
+    format!("{slot}.{extension}")
+}
+
+pub fn sector_file_name(planet: &str, sector_id: i32) -> String {
+    sector_file_name_with_extension(planet, sector_id, SAVE_EXTENSION)
+}
+
+pub fn sector_file_name_with_extension(planet: &str, sector_id: i32, extension: &str) -> String {
+    format!("sector-{planet}-{sector_id}.{extension}")
+}
+
+pub fn backup_file_name_for(file_name: &str) -> String {
+    let extension = file_name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .unwrap_or_default();
+    format!("{file_name}-backup.{extension}")
+}
+
+pub fn backup_file_for_path(file: impl AsRef<Path>) -> PathBuf {
+    let file = file.as_ref();
+    let name = file_name_string(file).unwrap_or_default();
+    let backup = backup_file_name_for(&name);
+    file.parent()
+        .map(|parent| parent.join(&backup))
+        .unwrap_or_else(|| PathBuf::from(backup))
+}
+
+pub fn is_backup_save_name(name: &str) -> bool {
+    name.contains("backup")
+}
+
+pub fn next_slot_file_name<I, S>(existing_names: I) -> String
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    next_slot_file_name_with_extension(existing_names, SAVE_EXTENSION)
+}
+
+pub fn next_slot_file_name_with_extension<I, S>(existing_names: I, extension: &str) -> String
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let existing: BTreeSet<String> = existing_names
+        .into_iter()
+        .map(|name| name.as_ref().to_string())
+        .collect();
+    let mut slot = 0;
+    loop {
+        let candidate = slot_file_name_with_extension(slot, extension);
+        if !existing.contains(&candidate) {
+            return candidate;
+        }
+        slot += 1;
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveRegion {
@@ -270,6 +462,22 @@ pub fn read_deflated_raw_save_envelope<R: Read>(read: R) -> io::Result<RawSaveEn
     read_raw_save_envelope(&mut decoder)
 }
 
+pub fn read_deflated_raw_save_envelope_with_backup(
+    primary: &[u8],
+    backup: Option<&[u8]>,
+) -> io::Result<RawSaveEnvelope> {
+    match read_deflated_raw_save_envelope(primary) {
+        Ok(envelope) => Ok(envelope),
+        Err(primary_error) => {
+            if let Some(backup) = backup {
+                read_deflated_raw_save_envelope(backup)
+            } else {
+                Err(primary_error)
+            }
+        }
+    }
+}
+
 /// Reads the Java save metadata prefix from an already-inflated stream.
 ///
 /// This mirrors `SaveIO.getMeta(DataInputStream)`: it reads `MSAV`, the save
@@ -327,6 +535,10 @@ pub fn read_deflated_save_meta_with_backup(
 
 pub fn is_deflated_save_valid<R: Read>(read: R) -> bool {
     read_deflated_save_meta(read).is_ok()
+}
+
+pub fn is_deflated_save_valid_with_backup(primary: &[u8], backup: Option<&[u8]>) -> bool {
+    read_deflated_save_meta_with_backup(primary, backup).is_ok()
 }
 
 pub fn write_chunk<W, F>(write: &mut W, f: F) -> io::Result<()>
@@ -581,6 +793,38 @@ fn parse_i32(map: &BTreeMap<String, String>, key: &str) -> i32 {
         .unwrap_or_default()
 }
 
+fn save_slot_kind_from_file_name(stem: &str) -> SaveSlotKind {
+    if let Ok(slot) = stem.parse::<i32>() {
+        return SaveSlotKind::Numbered(slot);
+    }
+
+    let Some(rest) = stem.strip_prefix("sector-") else {
+        return SaveSlotKind::Other;
+    };
+    let Some((planet, id)) = rest.rsplit_once('-') else {
+        return SaveSlotKind::Other;
+    };
+    let Ok(id) = id.parse::<i32>() else {
+        return SaveSlotKind::Other;
+    };
+    SaveSlotKind::Sector {
+        planet: planet.into(),
+        id,
+    }
+}
+
+fn file_name_string(path: &Path) -> Option<String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+}
+
+fn file_stem_string(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+}
+
 fn parse_i64(map: &BTreeMap<String, String>, key: &str) -> i64 {
     map.get(key)
         .and_then(|v| v.parse().ok())
@@ -811,6 +1055,94 @@ mod tests {
         assert_eq!(meta.map_name.as_deref(), Some("backup-map"));
 
         assert!(read_deflated_save_meta_with_backup(b"not a save", None).is_err());
+    }
+
+    #[test]
+    fn save_path_layout_matches_java_slot_sector_and_backup_names() {
+        let layout = SavePathLayout::new("saves");
+
+        assert_eq!(slot_file_name(0), "0.msav");
+        assert_eq!(layout.file_for_slot(2), PathBuf::from("saves/2.msav"));
+        assert_eq!(sector_file_name("serpulo", 173), "sector-serpulo-173.msav");
+        assert_eq!(
+            layout.sector_file("erekir", 12),
+            PathBuf::from("saves/sector-erekir-12.msav")
+        );
+
+        assert_eq!(backup_file_name_for("0.msav"), "0.msav-backup.msav");
+        assert_eq!(
+            backup_file_for_path("saves/0.msav"),
+            PathBuf::from("saves/0.msav-backup.msav")
+        );
+        assert!(is_backup_save_name("0.msav-backup.msav"));
+    }
+
+    #[test]
+    fn next_slot_file_uses_first_missing_number_like_saves_get_next_slot_file() {
+        let layout = SavePathLayout::new("saves");
+        let existing = [
+            PathBuf::from("saves/0.msav"),
+            PathBuf::from("saves/1.msav"),
+            PathBuf::from("saves/3.msav"),
+            PathBuf::from("saves/2.msav-backup.msav"),
+        ];
+
+        assert_eq!(
+            next_slot_file_name(["0.msav", "1.msav", "3.msav", "2.msav-backup.msav"]),
+            "2.msav"
+        );
+        assert_eq!(
+            layout.next_slot_file(existing),
+            PathBuf::from("saves/2.msav")
+        );
+    }
+
+    #[test]
+    fn save_slot_record_derives_java_settings_and_preview_keys() {
+        let numbered = SaveSlotRecord::new("saves/7.msav");
+        assert_eq!(numbered.index(), "7");
+        assert_eq!(numbered.kind(), SaveSlotKind::Numbered(7));
+        assert_eq!(numbered.name_setting_key(), "save-7-name");
+        assert_eq!(numbered.autosave_setting_key(), "save-7-autosave");
+        assert_eq!(
+            numbered.preview_file("previews"),
+            PathBuf::from("previews/save_slot_7.png")
+        );
+        assert_eq!(
+            numbered.load_preview_file("previews"),
+            PathBuf::from("previews/save_slot_7.png.spreview")
+        );
+
+        let sector = SaveSlotRecord::new("saves/sector-serpulo-85.msav");
+        assert_eq!(
+            sector.kind(),
+            SaveSlotKind::Sector {
+                planet: "serpulo".into(),
+                id: 85
+            }
+        );
+        assert!(sector.is_sector_file());
+        assert_eq!(LAST_SECTOR_SAVE_SETTING, "last-sector-save");
+    }
+
+    #[test]
+    fn deflated_raw_save_envelope_falls_back_to_backup_like_save_io_load() {
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), "157".into());
+        tags.insert("mapname".into(), "backup-envelope".into());
+        let mut meta_payload = Vec::new();
+        write_string_map(&mut meta_payload, &tags).unwrap();
+
+        let mut backup_envelope = RawSaveEnvelope::new(LATEST_SAVE_VERSION);
+        backup_envelope.set(SaveRegion::Meta, meta_payload).unwrap();
+        let mut backup = Vec::new();
+        write_deflated_raw_save_envelope(&mut backup, &backup_envelope).unwrap();
+
+        let decoded = read_deflated_raw_save_envelope_with_backup(b"broken", Some(&backup))
+            .expect("backup envelope should load when primary is invalid");
+        assert_eq!(decoded, backup_envelope);
+        assert!(is_deflated_save_valid_with_backup(b"broken", Some(&backup)));
+        assert!(read_deflated_raw_save_envelope_with_backup(b"broken", None).is_err());
     }
 
     #[test]

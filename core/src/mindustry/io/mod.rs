@@ -2,16 +2,21 @@ pub mod save;
 pub mod type_io;
 
 pub use save::{
-    read_chunk, read_content_header_snapshot, read_deflated_raw_save_envelope,
-    read_deflated_save_meta, read_deflated_save_meta_with_backup, read_header, read_meta_payload,
-    read_meta_region, read_raw_save_envelope, read_region, read_save_meta, read_string_map,
-    write_chunk, write_content_header_snapshot, write_deflated_raw_save_envelope,
+    backup_file_for_path, backup_file_name_for, is_backup_save_name, is_deflated_save_valid,
+    is_deflated_save_valid_with_backup, next_slot_file_name, read_chunk,
+    read_content_header_snapshot, read_deflated_raw_save_envelope,
+    read_deflated_raw_save_envelope_with_backup, read_deflated_save_meta,
+    read_deflated_save_meta_with_backup, read_header, read_meta_payload, read_meta_region,
+    read_raw_save_envelope, read_region, read_save_meta, read_string_map, sector_file_name,
+    slot_file_name, write_chunk, write_content_header_snapshot, write_deflated_raw_save_envelope,
     write_deflated_save_meta_prefix, write_header, write_meta_region, write_raw_save_envelope,
     write_region, write_save_meta_prefix, write_string_map, ContentHeaderEntry,
     ContentHeaderSnapshot, CustomChunk, CustomChunkSet, RawSaveEnvelope, RawSaveRegion, SaveMeta,
-    SaveRegion, CUSTOM_CHUNK_STATIC_FOG_DATA, LATEST_SAVE_VERSION, SAVE_HEADER,
+    SavePathLayout, SaveRegion, SaveSlotKind, SaveSlotRecord, CUSTOM_CHUNK_STATIC_FOG_DATA,
+    LAST_SECTOR_SAVE_SETTING, LATEST_SAVE_VERSION, SAVE_EXTENSION, SAVE_HEADER,
     SAVE_REGION_CONTENT, SAVE_REGION_CUSTOM, SAVE_REGION_ENTITIES, SAVE_REGION_MANIFEST,
     SAVE_REGION_MAP, SAVE_REGION_MARKERS, SAVE_REGION_META, SAVE_REGION_PATCHES,
+    SAVE_SLOT_SETTING_PREFIX,
 };
 pub use type_io::{
     read_action, read_java_utf, read_kick, read_marker_control, read_object, read_point2,
