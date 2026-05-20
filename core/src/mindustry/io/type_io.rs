@@ -1,5 +1,7 @@
 use std::io::{self, Read, Write};
 
+use crate::mindustry::core::content_loader::{ContentLoader, ContentRecord};
+use crate::mindustry::ctype::{ContentId, ContentType};
 use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{AdminAction, KickReason, TraceInfo};
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
@@ -58,6 +60,22 @@ impl RgbaColor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TeamId(pub u8);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentRef {
+    pub content_type: ContentType,
+    pub id: ContentId,
+}
+
+impl ContentRef {
+    pub const fn new(content_type: ContentType, id: ContentId) -> Self {
+        Self { content_type, id }
+    }
+
+    pub fn resolve<'a>(&self, loader: &'a ContentLoader) -> Option<&'a ContentRecord> {
+        loader.get_by_id(self.content_type, self.id)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeValue {
     Null,
@@ -65,11 +83,14 @@ pub enum TypeValue {
     Long(i64),
     Float(f32),
     String(String),
+    Content(ContentRef),
+    TechNode(ContentRef),
     Bool(bool),
     Double(f64),
     Point2(Point2),
     Vec2(Vec2),
     Team(u8),
+    UnitCommand(ContentId),
     IntSeq(Vec<i32>),
     IntArray(Vec<i32>),
     ByteArray(Vec<u8>),
@@ -205,6 +226,10 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write.write_all(&[4])?;
             write_string(write, Some(value))
         }
+        TypeValue::Content(value) => {
+            write.write_all(&[5])?;
+            write_content_ref(write, *value)
+        }
         TypeValue::Bool(value) => {
             write.write_all(&[10])?;
             write.write_all(&[*value as u8])
@@ -217,6 +242,10 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write.write_all(&[7])?;
             write_i32(write, value.x)?;
             write_i32(write, value.y)
+        }
+        TypeValue::TechNode(value) => {
+            write.write_all(&[9])?;
+            write_content_ref(write, *value)
         }
         TypeValue::IntSeq(values) => {
             if values.len() > MAX_ARRAY_SIZE || values.len() > i16::MAX as usize {
@@ -279,6 +308,10 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write.write_all(&[20])?;
             write.write_all(&[*value])
         }
+        TypeValue::UnitCommand(value) => {
+            write.write_all(&[23])?;
+            write_i16(write, *value)
+        }
         TypeValue::IntArray(values) => {
             if values.len() > MAX_ARRAY_SIZE || values.len() > i16::MAX as usize {
                 return Err(invalid_input("int array too large"));
@@ -319,12 +352,14 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
             Some(value) => TypeValue::String(value),
             None => TypeValue::Null,
         }),
+        5 => Ok(TypeValue::Content(read_content_ref(read)?)),
         10 => Ok(TypeValue::Bool(read_u8(read)? != 0)),
         11 => Ok(TypeValue::Double(f64::from_bits(read_u64(read)?))),
         7 => Ok(TypeValue::Point2(Point2::new(
             read_i32(read)?,
             read_i32(read)?,
         ))),
+        9 => Ok(TypeValue::TechNode(read_content_ref(read)?)),
         6 => {
             ensure_arrays_allowed(allow_arrays)?;
             let len = read_i16(read)?;
@@ -409,6 +444,7 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
             }
             Ok(TypeValue::ObjectArray(values))
         }
+        23 => Ok(TypeValue::UnitCommand(read_i16(read)?)),
         _ => Err(invalid_data("unsupported TypeIO object tag")),
     }
 }
@@ -560,6 +596,29 @@ pub fn write_team_id<W: Write>(write: &mut W, value: TeamId) -> io::Result<()> {
 
 pub fn read_team_id<R: Read>(read: &mut R) -> io::Result<TeamId> {
     Ok(TeamId(read_u8(read)?))
+}
+
+pub fn write_content_ref<W: Write>(write: &mut W, value: ContentRef) -> io::Result<()> {
+    write_u8(write, value.content_type.ordinal())?;
+    write_i16(write, value.id)
+}
+
+pub fn read_content_ref<R: Read>(read: &mut R) -> io::Result<ContentRef> {
+    let ordinal = read_u8(read)?;
+    let content_type = ContentType::from_ordinal(ordinal).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid ContentType ordinal {ordinal}"),
+        )
+    })?;
+    Ok(ContentRef::new(content_type, read_i16(read)?))
+}
+
+pub fn read_content_ref_resolved<'a, R: Read>(
+    read: &mut R,
+    loader: &'a ContentLoader,
+) -> io::Result<Option<&'a ContentRecord>> {
+    Ok(read_content_ref(read)?.resolve(loader))
 }
 
 pub fn write_kick<W: Write>(write: &mut W, reason: KickReason) -> io::Result<()> {
@@ -862,6 +921,51 @@ mod tests {
         let ints = TypeValue::IntArray(vec![1, 2, 3]);
         write_object(&mut bytes, &ints).unwrap();
         assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), ints);
+    }
+
+    #[test]
+    fn content_and_unit_command_object_tags_match_java_typeio() {
+        let content = TypeValue::Content(ContentRef::new(ContentType::Block, 42));
+        let tech = TypeValue::TechNode(ContentRef::new(ContentType::Unit, 7));
+        let command = TypeValue::UnitCommand(9);
+
+        let mut bytes = Vec::new();
+        write_object(&mut bytes, &content).unwrap();
+        assert_eq!(bytes, vec![5, ContentType::Block.ordinal(), 0, 42]);
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), content);
+
+        bytes.clear();
+        write_object(&mut bytes, &tech).unwrap();
+        assert_eq!(bytes, vec![9, ContentType::Unit.ordinal(), 0, 7]);
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), tech);
+
+        bytes.clear();
+        write_object(&mut bytes, &command).unwrap();
+        assert_eq!(bytes, vec![23, 0, 9]);
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), command);
+    }
+
+    #[test]
+    fn content_ref_helpers_resolve_through_content_loader_and_reject_bad_type() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let value = ContentRef::new(ContentType::Block, 1);
+
+        let mut bytes = Vec::new();
+        write_content_ref(&mut bytes, value).unwrap();
+        assert_eq!(bytes, vec![ContentType::Block.ordinal(), 0, 1]);
+        assert_eq!(read_content_ref(&mut bytes.as_slice()).unwrap(), value);
+
+        let resolved = read_content_ref_resolved(&mut bytes.as_slice(), &loader)
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.content_type, ContentType::Block);
+        assert_eq!(resolved.id, 1);
+        assert_eq!(
+            resolved.name(),
+            loader.get_by_id(ContentType::Block, 1).unwrap().name()
+        );
+
+        assert!(read_content_ref(&mut [0xff, 0, 1].as_slice()).is_err());
     }
 
     #[test]
