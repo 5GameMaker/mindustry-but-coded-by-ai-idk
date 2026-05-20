@@ -2,6 +2,7 @@ pub mod blocks;
 pub mod items;
 pub mod liquids;
 pub mod status_effects;
+pub mod team_entries;
 pub mod unit_commands;
 pub mod unit_stances;
 pub mod unit_types;
@@ -11,7 +12,7 @@ use crate::mindustry::{
     ai::{unit_command::UnitCommand, unit_stance::UnitStance},
     ctype::{Content, ContentId, ContentType},
     io::save::{ContentHeaderEntry, ContentHeaderSnapshot},
-    r#type::{Item, Liquid, StatusEffect, UnitType},
+    r#type::{Item, Liquid, StatusEffect, TeamEntry, UnitType},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -22,6 +23,7 @@ pub struct ContentCatalog {
     pub status_effects: Vec<StatusEffect>,
     pub units: Vec<UnitType>,
     pub weathers: Vec<weathers::WeatherContent>,
+    pub team_entries: Vec<TeamEntry>,
     pub unit_commands: Vec<UnitCommand>,
     pub unit_stances: Vec<UnitStance>,
 }
@@ -40,6 +42,7 @@ impl ContentCatalog {
             status_effects: status_effects::load(),
             units: unit_types::load(),
             weathers: weathers::load(),
+            team_entries: team_entries::load(),
             unit_commands,
             unit_stances,
         }
@@ -150,6 +153,12 @@ impl ContentCatalog {
             .find(|command| command.base.name.as_str() == name)
     }
 
+    pub fn team_entry_by_name(&self, name: &str) -> Option<&TeamEntry> {
+        self.team_entries
+            .iter()
+            .find(|entry| entry.base.mappable.name.as_str() == name)
+    }
+
     pub fn unit_stance_by_name(&self, name: &str) -> Option<&UnitStance> {
         self.unit_stances
             .iter()
@@ -188,6 +197,12 @@ impl ContentCatalog {
         self.unit_commands
             .iter()
             .find(|command| command.base.base.id == id)
+    }
+
+    pub fn team_entry_by_id(&self, id: ContentId) -> Option<&TeamEntry> {
+        self.team_entries
+            .iter()
+            .find(|entry| entry.base.mappable.base.id == id)
     }
 
     pub fn unit_stance_by_id(&self, id: ContentId) -> Option<&UnitStance> {
@@ -235,6 +250,10 @@ mod tests {
         assert_eq!(snapshot.entries[5].names[0], "snowing");
         assert_eq!(snapshot.entries[6].names[0], "move");
         assert_eq!(snapshot.entries[7].names[0], "stop");
+        assert!(!snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.content_type == ContentType::Team.ordinal()));
     }
 
     #[test]
@@ -288,6 +307,9 @@ mod tests {
         assert_eq!(catalog.unit_by_name("flare").unwrap().id(), 15);
         assert_eq!(catalog.unit_by_id(60).unwrap().name(), "assembly-drone");
         assert!(catalog.unit_by_id(999).is_none());
+        assert!(catalog.team_entries.is_empty());
+        assert!(catalog.team_entry_by_name("crux").is_none());
+        assert!(catalog.team_entry_by_id(0).is_none());
         assert_eq!(catalog.unit_command_by_name("mine").unwrap().id(), 4);
         assert_eq!(catalog.unit_command_by_id(9).unwrap().name(), "loopPayload");
         assert!(catalog.unit_command_by_id(999).is_none());
