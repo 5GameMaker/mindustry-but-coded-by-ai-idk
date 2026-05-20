@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rules {
     pub static_fog: bool,
@@ -58,6 +60,15 @@ pub struct Rules {
     pub unit_cap: i32,
     pub disable_unit_cap: bool,
     pub drag_multiplier: f32,
+    pub env: u32,
+    pub block_whitelist: bool,
+    pub unit_whitelist: bool,
+    pub banned_blocks: BTreeSet<String>,
+    pub banned_units: BTreeSet<String>,
+    pub revealed_blocks: BTreeSet<String>,
+    pub researched: BTreeSet<String>,
+    pub objective_flags: BTreeSet<String>,
+    pub tags: BTreeMap<String, String>,
     pub core_incinerates: bool,
     pub border_darkness: bool,
     pub limit_map_area: bool,
@@ -148,6 +159,30 @@ impl Rules {
     pub fn build_speed(&self, team_id: usize) -> f32 {
         self.build_speed_multiplier * self.teams.get_or_default(team_id).build_speed_multiplier
     }
+
+    pub fn has_env(&self, env: u32) -> bool {
+        (self.env & env) != 0
+    }
+
+    pub fn is_block_banned(&self, block_name: &str) -> bool {
+        self.block_whitelist != self.banned_blocks.contains(block_name)
+    }
+
+    pub fn is_unit_banned(&self, unit_name: &str) -> bool {
+        self.unit_whitelist != self.banned_units.contains(unit_name)
+    }
+
+    pub fn reveal_block(&mut self, block_name: impl Into<String>) {
+        self.revealed_blocks.insert(block_name.into());
+    }
+
+    pub fn research_content(&mut self, content_name: impl Into<String>) {
+        self.researched.insert(content_name.into());
+    }
+
+    pub fn set_objective_flag(&mut self, flag: impl Into<String>) {
+        self.objective_flags.insert(flag.into());
+    }
 }
 
 impl Default for Rules {
@@ -211,6 +246,15 @@ impl Default for Rules {
             unit_cap: 0,
             disable_unit_cap: false,
             drag_multiplier: 1.0,
+            env: crate::mindustry::world::meta::Env::ANY,
+            block_whitelist: false,
+            unit_whitelist: false,
+            banned_blocks: BTreeSet::new(),
+            banned_units: BTreeSet::new(),
+            revealed_blocks: BTreeSet::new(),
+            researched: BTreeSet::new(),
+            objective_flags: BTreeSet::new(),
+            tags: BTreeMap::new(),
             core_incinerates: true,
             border_darkness: true,
             limit_map_area: false,
@@ -410,6 +454,15 @@ mod tests {
         assert_eq!(rules.win_wave, 0);
         assert_eq!(rules.unit_cap, 0);
         assert_eq!(rules.drag_multiplier, 1.0);
+        assert_eq!(rules.env, crate::mindustry::world::meta::Env::ANY);
+        assert!(!rules.block_whitelist);
+        assert!(!rules.unit_whitelist);
+        assert!(rules.banned_blocks.is_empty());
+        assert!(rules.banned_units.is_empty());
+        assert!(rules.revealed_blocks.is_empty());
+        assert!(rules.researched.is_empty());
+        assert!(rules.objective_flags.is_empty());
+        assert!(rules.tags.is_empty());
         assert!(rules.core_incinerates);
         assert!(rules.border_darkness);
         assert!(!rules.limit_map_area);
@@ -522,5 +575,36 @@ mod tests {
             rules.build_radius(crate::mindustry::game::TEAM_DERELICT as usize),
             0.0
         );
+    }
+
+    #[test]
+    fn rules_env_and_banned_sets_follow_java_boolean_xor_semantics() {
+        let mut rules = Rules::default();
+        rules.env = crate::mindustry::world::meta::Env::TERRESTRIAL;
+        assert!(rules.has_env(crate::mindustry::world::meta::Env::TERRESTRIAL));
+        assert!(!rules.has_env(crate::mindustry::world::meta::Env::SPACE));
+
+        rules.banned_blocks.insert("router".into());
+        assert!(rules.is_block_banned("router"));
+        assert!(!rules.is_block_banned("duo"));
+        rules.block_whitelist = true;
+        assert!(!rules.is_block_banned("router"));
+        assert!(rules.is_block_banned("duo"));
+
+        rules.banned_units.insert("dagger".into());
+        assert!(rules.is_unit_banned("dagger"));
+        assert!(!rules.is_unit_banned("flare"));
+        rules.unit_whitelist = true;
+        assert!(!rules.is_unit_banned("dagger"));
+        assert!(rules.is_unit_banned("flare"));
+
+        rules.reveal_block("core-shard");
+        rules.research_content("copper");
+        rules.set_objective_flag("launch");
+        rules.tags.insert("author".into(), "rust".into());
+        assert!(rules.revealed_blocks.contains("core-shard"));
+        assert!(rules.researched.contains("copper"));
+        assert!(rules.objective_flags.contains("launch"));
+        assert_eq!(rules.tags.get("author").map(String::as_str), Some("rust"));
     }
 }
