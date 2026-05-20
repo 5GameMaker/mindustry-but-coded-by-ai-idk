@@ -3,8 +3,8 @@ use crc32fast::Hasher;
 use std::io::{Read, Write};
 
 use crate::mindustry::io::type_io::{
-    read_i32, read_i64, read_string, read_u32, read_u8, write_i32, write_i64, write_string,
-    write_u32,
+    read_bytes, read_i32, read_i64, read_kick, read_string, read_u32, read_u8, write_bytes,
+    write_i32, write_i64, write_kick, write_string, write_u32,
 };
 
 use super::packet::{PacketCodec, PacketPriority, PacketRuntime};
@@ -1321,15 +1321,7 @@ pub struct ClientBinaryPacketCallPacket {
 impl ClientBinaryPacketCallPacket {
     fn read_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
         let packet_type = read_string(read)?.unwrap_or_default();
-        let len = read_i16(read)?;
-        if len < 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "negative byte array length in client binary call packet",
-            ));
-        }
-        let mut contents = vec![0; len as usize];
-        read.read_exact(&mut contents)?;
+        let contents = read_bytes(read)?;
         Ok(Self {
             packet_type,
             contents,
@@ -1337,15 +1329,8 @@ impl ClientBinaryPacketCallPacket {
     }
 
     fn write_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
-        if self.contents.len() > i16::MAX as usize {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "client binary call packet contents exceed Java short length",
-            ));
-        }
         write_string(write, Some(&self.packet_type))?;
-        write_i16(write, self.contents.len() as i16)?;
-        write.write_all(&self.contents)
+        write_bytes(write, &self.contents)
     }
 }
 
@@ -1731,18 +1716,13 @@ pub struct KickCallPacket2 {
 
 impl PacketCodec for KickCallPacket2 {
     fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
-        let ordinal = read_u8(read)?;
-        let reason = KickReason::from_ordinal(ordinal).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("invalid KickReason ordinal {ordinal}"),
-            )
-        })?;
-        Ok(Self { reason })
+        Ok(Self {
+            reason: read_kick(read)?,
+        })
     }
 
     fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
-        write.write_all(&[self.reason.ordinal()])
+        write_kick(write, self.reason)
     }
 }
 
