@@ -104,6 +104,10 @@ impl LogicAssembler {
         }
     }
 
+    pub fn instruction_var(&mut self, symbol: &str) -> LVar {
+        self.var(symbol).clone()
+    }
+
     pub fn put_const(&mut self, name: impl Into<String>, value: LogicValue) -> &mut LVar {
         let var = self.put_var(name);
         match value {
@@ -2768,6 +2772,492 @@ impl LogicStatement {
             }
             _ => return None,
         })
+    }
+
+    pub fn to_instruction(&self, assembler: &mut LogicAssembler) -> LogicInstruction {
+        match self {
+            LogicStatement::Invalid => LogicInstruction::Noop,
+            LogicStatement::Read {
+                output,
+                target,
+                address,
+            } => LogicInstruction::Read {
+                target: assembler.instruction_var(target),
+                position: assembler.instruction_var(address),
+                output: assembler.instruction_var(output),
+            },
+            LogicStatement::Write {
+                input,
+                target,
+                address,
+            } => LogicInstruction::Write {
+                target: assembler.instruction_var(target),
+                position: assembler.instruction_var(address),
+                value: assembler.instruction_var(input),
+            },
+            LogicStatement::Draw {
+                type_,
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => LogicInstruction::Draw {
+                type_: *type_,
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                p1: assembler.instruction_var(p1),
+                p2: assembler.instruction_var(p2),
+                p3: assembler.instruction_var(p3),
+                p4: assembler.instruction_var(p4),
+            },
+            LogicStatement::Print { value } => LogicInstruction::Print {
+                value: assembler.instruction_var(value),
+            },
+            LogicStatement::PrintChar { value } => LogicInstruction::PrintChar {
+                value: assembler.instruction_var(value),
+            },
+            LogicStatement::Format { value } => LogicInstruction::Format {
+                value: assembler.instruction_var(value),
+            },
+            LogicStatement::LocalePrint { value } => LogicInstruction::LocalePrint {
+                value: assembler.instruction_var(value),
+            },
+            LogicStatement::DrawFlush { target } => LogicInstruction::DrawFlush {
+                target: assembler.instruction_var(target),
+            },
+            LogicStatement::PrintFlush { target } => LogicInstruction::PrintFlush {
+                target: assembler.instruction_var(target),
+            },
+            LogicStatement::GetLink { output, address } => LogicInstruction::GetLink {
+                output: assembler.instruction_var(output),
+                index: assembler.instruction_var(address),
+            },
+            LogicStatement::SetRate { amount } => LogicInstruction::SetRate {
+                amount: assembler.instruction_var(amount),
+            },
+            LogicStatement::Sync { variable } => LogicInstruction::Sync {
+                variable: assembler.instruction_var(variable),
+            },
+            LogicStatement::Set { to, from } => LogicInstruction::Set {
+                from: assembler.instruction_var(from),
+                to: assembler.instruction_var(to),
+            },
+            LogicStatement::Operation { op, dest, a, b } => LogicInstruction::Op {
+                op: *op,
+                a: assembler.instruction_var(a),
+                b: assembler.instruction_var(b),
+                dest: assembler.instruction_var(dest),
+            },
+            LogicStatement::Select {
+                result,
+                op,
+                comp0,
+                comp1,
+                a,
+                b,
+            } => LogicInstruction::Select {
+                op: *op,
+                result: assembler.instruction_var(result),
+                comp0: assembler.instruction_var(comp0),
+                comp1: assembler.instruction_var(comp1),
+                a: assembler.instruction_var(a),
+                b: assembler.instruction_var(b),
+            },
+            LogicStatement::Wait { value } => LogicInstruction::Wait {
+                value: assembler.instruction_var(value),
+                cur_time: 0.0,
+            },
+            LogicStatement::Stop => LogicInstruction::Stop,
+            LogicStatement::End => LogicInstruction::End,
+            LogicStatement::PackColor { result, r, g, b, a } => LogicInstruction::PackColor {
+                result: assembler.instruction_var(result),
+                r: assembler.instruction_var(r),
+                g: assembler.instruction_var(g),
+                b: assembler.instruction_var(b),
+                a: assembler.instruction_var(a),
+            },
+            LogicStatement::UnpackColor { r, g, b, a, value } => LogicInstruction::UnpackColor {
+                r: assembler.instruction_var(r),
+                g: assembler.instruction_var(g),
+                b: assembler.instruction_var(b),
+                a: assembler.instruction_var(a),
+                value: assembler.instruction_var(value),
+            },
+            LogicStatement::Lookup { type_, result, id } => LogicInstruction::Lookup {
+                dest: assembler.instruction_var(result),
+                from: assembler.instruction_var(id),
+                type_: *type_,
+            },
+            LogicStatement::Jump {
+                dest_index,
+                op,
+                value,
+                compare,
+            } => LogicInstruction::Jump {
+                op: *op,
+                value: assembler.instruction_var(value),
+                compare: assembler.instruction_var(compare),
+                address: *dest_index,
+            },
+            LogicStatement::Control {
+                type_,
+                target,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => LogicInstruction::Control {
+                type_: *type_,
+                target: assembler.instruction_var(target),
+                p1: assembler.instruction_var(p1),
+                p2: assembler.instruction_var(p2),
+                p3: assembler.instruction_var(p3),
+                p4: assembler.instruction_var(p4),
+            },
+            LogicStatement::Radar {
+                target1,
+                target2,
+                target3,
+                sort,
+                radar,
+                sort_order,
+                output,
+            } => LogicInstruction::Radar {
+                target1: *target1,
+                target2: *target2,
+                target3: *target3,
+                sort: *sort,
+                radar: assembler.instruction_var(radar),
+                sort_order: assembler.instruction_var(sort_order),
+                output: assembler.instruction_var(output),
+                last_target: None,
+            },
+            LogicStatement::Sensor { to, from, type_ } => LogicInstruction::Sense {
+                from: assembler.instruction_var(from),
+                to: assembler.instruction_var(to),
+                type_: assembler.instruction_var(type_),
+            },
+            LogicStatement::UnitBind { type_ } => LogicInstruction::UnitBind {
+                type_: assembler.instruction_var(type_),
+            },
+            LogicStatement::UnitControl {
+                type_,
+                p1,
+                p2,
+                p3,
+                p4,
+                p5,
+            } => LogicInstruction::UnitControl {
+                type_: *type_,
+                p1: assembler.instruction_var(p1),
+                p2: assembler.instruction_var(p2),
+                p3: assembler.instruction_var(p3),
+                p4: assembler.instruction_var(p4),
+                p5: assembler.instruction_var(p5),
+            },
+            LogicStatement::UnitRadar {
+                target1,
+                target2,
+                target3,
+                sort,
+                sort_order,
+                output,
+                ..
+            } => LogicInstruction::UnitRadar {
+                target1: *target1,
+                target2: *target2,
+                target3: *target3,
+                sort: *sort,
+                sort_order: assembler.instruction_var(sort_order),
+                output: assembler.instruction_var(output),
+                last_target: None,
+            },
+            LogicStatement::UnitLocate {
+                locate,
+                flag,
+                enemy,
+                ore,
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+            } => LogicInstruction::UnitLocate {
+                locate: *locate,
+                flag: *flag,
+                enemy: assembler.instruction_var(enemy),
+                ore: assembler.instruction_var(ore),
+                out_x: assembler.instruction_var(out_x),
+                out_y: assembler.instruction_var(out_y),
+                out_found: assembler.instruction_var(out_found),
+                out_build: assembler.instruction_var(out_build),
+            },
+            LogicStatement::Query {
+                shape,
+                type_,
+                team,
+                x,
+                y,
+                w,
+                h,
+            } => LogicInstruction::Query {
+                shape: *shape,
+                type_: *type_,
+                team: assembler.instruction_var(team),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                w: assembler.instruction_var(w),
+                h: assembler.instruction_var(h),
+            },
+            LogicStatement::GetBlock {
+                layer,
+                result,
+                x,
+                y,
+            } => LogicInstruction::GetBlock {
+                layer: *layer,
+                result: assembler.instruction_var(result),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+            },
+            LogicStatement::SetBlock {
+                layer,
+                block,
+                x,
+                y,
+                team,
+                rotation,
+            } => LogicInstruction::SetBlock {
+                layer: *layer,
+                block: assembler.instruction_var(block),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                team: assembler.instruction_var(team),
+                rotation: assembler.instruction_var(rotation),
+            },
+            LogicStatement::SpawnUnit {
+                type_,
+                x,
+                y,
+                rotation,
+                team,
+                result,
+            } => LogicInstruction::SpawnUnit {
+                type_: assembler.instruction_var(type_),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                rotation: assembler.instruction_var(rotation),
+                team: assembler.instruction_var(team),
+                result: assembler.instruction_var(result),
+            },
+            LogicStatement::ApplyStatus {
+                clear,
+                effect,
+                unit,
+                duration,
+            } => LogicInstruction::ApplyStatus {
+                clear: *clear,
+                effect: effect.clone(),
+                unit: assembler.instruction_var(unit),
+                duration: assembler.instruction_var(duration),
+            },
+            LogicStatement::SpawnWave { x, y, natural } => LogicInstruction::SpawnWave {
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                natural: assembler.instruction_var(natural),
+            },
+            LogicStatement::SpawnBullet {
+                result,
+                from,
+                index,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y,
+            } => LogicInstruction::SpawnBullet {
+                result: assembler.instruction_var(result),
+                from: assembler.instruction_var(from),
+                weapon: assembler.instruction_var(index),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                rotation: assembler.instruction_var(rotation),
+                team: assembler.instruction_var(team),
+                owner: assembler.instruction_var(owner),
+                damage: assembler.instruction_var(damage),
+                velocity_scl: assembler.instruction_var(velocity_scl),
+                life_scl: assembler.instruction_var(life_scl),
+                aim_x: assembler.instruction_var(aim_x),
+                aim_y: assembler.instruction_var(aim_y),
+            },
+            LogicStatement::WeatherSense { to, weather } => LogicInstruction::WeatherSense {
+                to: assembler.instruction_var(to),
+                weather: assembler.instruction_var(weather),
+            },
+            LogicStatement::WeatherSet { weather, state } => LogicInstruction::WeatherSet {
+                weather: assembler.instruction_var(weather),
+                state: assembler.instruction_var(state),
+            },
+            LogicStatement::Effect {
+                type_,
+                x,
+                y,
+                sizerot,
+                color,
+                data,
+            } => LogicInstruction::Effect {
+                type_name: type_.clone(),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                rotation: assembler.instruction_var(sizerot),
+                color: assembler.instruction_var(color),
+                data: assembler.instruction_var(data),
+            },
+            LogicStatement::Explosion {
+                team,
+                x,
+                y,
+                radius,
+                damage,
+                air,
+                ground,
+                pierce,
+                effect,
+            } => LogicInstruction::Explosion {
+                team: assembler.instruction_var(team),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                radius: assembler.instruction_var(radius),
+                damage: assembler.instruction_var(damage),
+                air: assembler.instruction_var(air),
+                ground: assembler.instruction_var(ground),
+                pierce: assembler.instruction_var(pierce),
+                effect: assembler.instruction_var(effect),
+            },
+            LogicStatement::SetRule {
+                rule,
+                value,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => LogicInstruction::SetRule {
+                rule: *rule,
+                value: assembler.instruction_var(value),
+                p1: assembler.instruction_var(p1),
+                p2: assembler.instruction_var(p2),
+                p3: assembler.instruction_var(p3),
+                p4: assembler.instruction_var(p4),
+            },
+            LogicStatement::Fetch {
+                type_,
+                result,
+                team,
+                index,
+                extra,
+            } => LogicInstruction::Fetch {
+                type_: *type_,
+                result: assembler.instruction_var(result),
+                team: assembler.instruction_var(team),
+                index: assembler.instruction_var(index),
+                extra: assembler.instruction_var(extra),
+            },
+            LogicStatement::GetFlag { result, flag } => LogicInstruction::GetFlag {
+                result: assembler.instruction_var(result),
+                flag: assembler.instruction_var(flag),
+            },
+            LogicStatement::SetFlag { flag, value } => LogicInstruction::SetFlag {
+                flag: assembler.instruction_var(flag),
+                value: assembler.instruction_var(value),
+            },
+            LogicStatement::SetProp { type_, of, value } => LogicInstruction::SetProp {
+                type_: assembler.instruction_var(type_),
+                of: assembler.instruction_var(of),
+                value: assembler.instruction_var(value),
+            },
+            LogicStatement::FlushMessage {
+                type_,
+                duration,
+                out_success,
+            } => LogicInstruction::FlushMessage {
+                type_: *type_,
+                duration: assembler.instruction_var(duration),
+                out_success: assembler.instruction_var(out_success),
+            },
+            LogicStatement::Cutscene {
+                action,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => LogicInstruction::Cutscene {
+                action: *action,
+                p1: assembler.instruction_var(p1),
+                p2: assembler.instruction_var(p2),
+                p3: assembler.instruction_var(p3),
+                p4: assembler.instruction_var(p4),
+            },
+            LogicStatement::ClientData {
+                channel,
+                value,
+                reliable,
+            } => LogicInstruction::ClientData {
+                channel: assembler.instruction_var(channel),
+                value: assembler.instruction_var(value),
+                reliable: assembler.instruction_var(reliable),
+            },
+            LogicStatement::PlaySound {
+                positional,
+                id,
+                volume,
+                pitch,
+                pan,
+                x,
+                y,
+                limit,
+            } => LogicInstruction::PlaySound {
+                positional: *positional,
+                id: assembler.instruction_var(id),
+                volume: assembler.instruction_var(volume),
+                pitch: assembler.instruction_var(pitch),
+                pan: assembler.instruction_var(pan),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                limit: assembler.instruction_var(limit),
+            },
+            LogicStatement::SetMarker {
+                type_,
+                id,
+                p1,
+                p2,
+                p3,
+            } => LogicInstruction::SetMarker {
+                type_: *type_,
+                id: assembler.instruction_var(id),
+                p1: assembler.instruction_var(p1),
+                p2: assembler.instruction_var(p2),
+                p3: assembler.instruction_var(p3),
+            },
+            LogicStatement::MakeMarker {
+                type_,
+                id,
+                x,
+                y,
+                replace,
+            } => LogicInstruction::MakeMarker {
+                type_name: type_.clone(),
+                id: assembler.instruction_var(id),
+                x: assembler.instruction_var(x),
+                y: assembler.instruction_var(y),
+                replace: assembler.instruction_var(replace),
+            },
+        }
     }
 }
 
@@ -13956,6 +14446,79 @@ mod tests {
             exec.marker_events.last(),
             Some(LogicMarkerEvent::Removed { id: 7 })
         ));
+    }
+
+    #[test]
+    fn logic_statements_convert_to_runtime_instructions_with_assembler_vars() {
+        let mut assembler = LogicAssembler::new();
+        let mut exec = LogicExecutor::new();
+        exec.max_ipt = 60;
+        exec.map_locales.insert("title".into(), "Localized".into());
+
+        LogicStatement::LocalePrint {
+            value: "\"title\"".into(),
+        }
+        .to_instruction(&mut assembler)
+        .run(&mut exec);
+        assert_eq!(exec.text_buffer, "Localized");
+
+        LogicStatement::SetRate {
+            amount: "120".into(),
+        }
+        .to_instruction(&mut assembler)
+        .run(&mut exec);
+        assert_eq!(exec.ipt, 60);
+
+        LogicStatement::ClientData {
+            channel: "\"chan\"".into(),
+            value: "\"payload\"".into(),
+            reliable: "1".into(),
+        }
+        .to_instruction(&mut assembler)
+        .run(&mut exec);
+        assert_eq!(exec.client_data_events[0].channel, "chan");
+        assert!(exec.client_data_events[0].reliable);
+
+        LogicStatement::PlaySound {
+            positional: true,
+            id: "3".into(),
+            volume: "0.5".into(),
+            pitch: "2".into(),
+            pan: "0".into(),
+            x: "2".into(),
+            y: "3".into(),
+            limit: "0".into(),
+        }
+        .to_instruction(&mut assembler)
+        .run(&mut exec);
+        assert_eq!(exec.sound_events[0].sound_id, 3);
+        assert_eq!(
+            (exec.sound_events[0].x, exec.sound_events[0].y),
+            (Some(16.0), Some(24.0))
+        );
+
+        LogicStatement::MakeMarker {
+            type_: "shape".into(),
+            id: "5".into(),
+            x: "2".into(),
+            y: "3".into(),
+            replace: "1".into(),
+        }
+        .to_instruction(&mut assembler)
+        .run(&mut exec);
+        assert!(exec.markers.contains_key(&5));
+
+        exec.text_buffer = "from statement".into();
+        LogicStatement::SetMarker {
+            type_: LMarkerControl::FlushText,
+            id: "5".into(),
+            p1: "1".into(),
+            p2: "0".into(),
+            p3: "0".into(),
+        }
+        .to_instruction(&mut assembler)
+        .run(&mut exec);
+        assert_eq!(exec.markers[&5].text, "from statement");
     }
 
     #[test]
