@@ -8,10 +8,11 @@ use super::packets::{
     ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
     CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
     CreateWeatherCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
-    HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
-    InfoPopupCallPacket2, InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2,
-    InfoToastCallPacket, KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
-    LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
+    EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket, HideFollowUpMenuCallPacket,
+    HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
+    InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket,
+    KickCallPacket2, LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket,
+    LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
     PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
     SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
     SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
@@ -44,6 +45,9 @@ pub enum PacketKind {
     CreateWeatherCallPacket(CreateWeatherCallPacket),
     DebugStatusClientCallPacket(DebugStatusClientCallPacket),
     DebugStatusClientUnreliableCallPacket(DebugStatusClientUnreliableCallPacket),
+    EffectCallPacket(EffectCallPacket),
+    EffectCallPacket2(EffectCallPacket2),
+    EffectReliableCallPacket(EffectReliableCallPacket),
     HideFollowUpMenuCallPacket(HideFollowUpMenuCallPacket),
     HideHudTextCallPacket(HideHudTextCallPacket),
     InfoMessageCallPacket(InfoMessageCallPacket),
@@ -104,6 +108,9 @@ impl PacketKind {
             | PacketKind::CreateBulletCallPacket(_)
             | PacketKind::CreateMarkerCallPacket(_)
             | PacketKind::CreateWeatherCallPacket(_)
+            | PacketKind::EffectCallPacket(_)
+            | PacketKind::EffectCallPacket2(_)
+            | PacketKind::EffectReliableCallPacket(_)
             | PacketKind::HideFollowUpMenuCallPacket(_)
             | PacketKind::HideHudTextCallPacket(_)
             | PacketKind::InfoMessageCallPacket(_)
@@ -163,6 +170,9 @@ impl PacketKind {
             | PacketKind::CreateBulletCallPacket(_)
             | PacketKind::CreateMarkerCallPacket(_)
             | PacketKind::CreateWeatherCallPacket(_)
+            | PacketKind::EffectCallPacket(_)
+            | PacketKind::EffectCallPacket2(_)
+            | PacketKind::EffectReliableCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
             | PacketKind::PingResponseCallPacket(_)

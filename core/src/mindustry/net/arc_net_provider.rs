@@ -9,7 +9,8 @@ use super::{
         ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
         CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
         CreateWeatherCallPacket, DebugStatusClientCallPacket,
-        DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
+        DebugStatusClientUnreliableCallPacket, EffectCallPacket, EffectCallPacket2,
+        EffectReliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
         InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
         InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
         KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
@@ -258,6 +259,18 @@ impl PacketSerializer {
             PacketKind::DebugStatusClientUnreliableCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::DEBUG_STATUS_CLIENT_UNRELIABLE_CALL_PACKET
+            }
+            PacketKind::EffectCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::EFFECT_CALL_PACKET
+            }
+            PacketKind::EffectCallPacket2(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::EFFECT_CALL_PACKET2
+            }
+            PacketKind::EffectReliableCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::EFFECT_RELIABLE_CALL_PACKET
             }
             PacketKind::HideFollowUpMenuCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -539,6 +552,17 @@ impl PacketSerializer {
                     packet_ids::DEBUG_STATUS_CLIENT_UNRELIABLE_CALL_PACKET => {
                         Ok(PacketKind::DebugStatusClientUnreliableCallPacket(
                             DebugStatusClientUnreliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::EFFECT_CALL_PACKET => Ok(PacketKind::EffectCallPacket(
+                        EffectCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::EFFECT_CALL_PACKET2 => Ok(PacketKind::EffectCallPacket2(
+                        EffectCallPacket2::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::EFFECT_RELIABLE_CALL_PACKET => {
+                        Ok(PacketKind::EffectReliableCallPacket(
+                            EffectReliableCallPacket::read_from(&mut cursor)?,
                         ))
                     }
                     packet_ids::HIDE_FOLLOW_UP_MENU_CALL_PACKET => {
@@ -1180,6 +1204,49 @@ mod tests {
         let bytes = PacketSerializer::write_packet_kind(&weather).unwrap();
         assert_eq!(bytes[0], packet_ids::CREATE_WEATHER_CALL_PACKET);
         assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), weather);
+
+        let effect = PacketKind::EffectCallPacket(EffectCallPacket {
+            effect_id: 0x1234,
+            x: 1.25,
+            y: -2.5,
+            rotation: 90.0,
+            color: crate::mindustry::io::type_io::RgbaColor::new(0x11223344),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&effect).unwrap();
+        assert_eq!(bytes[0], packet_ids::EFFECT_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), effect);
+
+        let effect_with_data = PacketKind::EffectCallPacket2(EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: 7,
+                x: 3.0,
+                y: 4.0,
+                rotation: 5.0,
+                color: crate::mindustry::io::type_io::RgbaColor::new(-1),
+            },
+            data: TypeValue::Int(42),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&effect_with_data).unwrap();
+        assert_eq!(bytes[0], packet_ids::EFFECT_CALL_PACKET2);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            effect_with_data
+        );
+
+        let reliable_effect =
+            PacketKind::EffectReliableCallPacket(EffectReliableCallPacket(EffectCallPacket {
+                effect_id: 8,
+                x: -1.0,
+                y: -2.0,
+                rotation: 180.0,
+                color: crate::mindustry::io::type_io::RgbaColor::new(0),
+            }));
+        let bytes = PacketSerializer::write_packet_kind(&reliable_effect).unwrap();
+        assert_eq!(bytes[0], packet_ids::EFFECT_RELIABLE_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            reliable_effect
+        );
 
         let debug = PacketKind::DebugStatusClientCallPacket(DebugStatusClientCallPacket {
             value: 1,
