@@ -1,6 +1,12 @@
 use crate::mindustry::{
     ctype::{Content, ContentId, ContentType},
-    r#type::{unit::erekir_unit_type::apply_erekir_unit_type_defaults, UnitType},
+    r#type::{
+        unit::{
+            erekir_unit_type::apply_erekir_unit_type_defaults,
+            tank_unit_type::apply_tank_unit_type_defaults,
+        },
+        UnitType,
+    },
     world::meta::Env,
 };
 
@@ -851,13 +857,7 @@ fn apply_kind_defaults(unit: &mut UnitType, kind: UnitKind) {
             apply_erekir_unit_type_defaults(unit);
         }
         UnitKind::Tank => {
-            apply_kind_defaults(unit, UnitKind::Erekir);
-            unit.square_shape = true;
-            unit.omni_movement = false;
-            unit.rotate_move_first = true;
-            unit.rotate_speed = 1.3;
-            unit.env_disabled = Env::NONE;
-            unit.speed = 0.8;
+            apply_tank_unit_type_defaults(unit);
         }
         UnitKind::Neoplasm => {
             unit.outline_color_rgba = 0x6b2b2bff;
