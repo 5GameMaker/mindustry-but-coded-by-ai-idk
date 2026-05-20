@@ -22,6 +22,7 @@ pub const SAVE_REGION_MAP: &str = "map";
 pub const SAVE_REGION_ENTITIES: &str = "entities";
 pub const SAVE_REGION_MARKERS: &str = "markers";
 pub const SAVE_REGION_CUSTOM: &str = "custom";
+pub const CUSTOM_CHUNK_STATIC_FOG_DATA: &str = "static-fog-data";
 
 pub const SAVE_REGION_MANIFEST: &[&str] = &[
     SAVE_REGION_META,
@@ -269,20 +270,63 @@ pub fn read_deflated_raw_save_envelope<R: Read>(read: R) -> io::Result<RawSaveEn
     read_raw_save_envelope(&mut decoder)
 }
 
+/// Reads the Java save metadata prefix from an already-inflated stream.
+///
+/// This mirrors `SaveIO.getMeta(DataInputStream)`: it reads `MSAV`, the save
+/// version integer, then only the first versioned region/chunk (`meta`). It does
+/// not require the map, entities, markers, or custom chunks to be present.
+pub fn read_save_meta<R: Read>(read: &mut R) -> io::Result<SaveMeta> {
+    let _save_version = read_header(read)?;
+    read_meta_region(read)
+}
+
+/// Writes the minimum inflated prefix consumed by Java `SaveIO.getMeta`.
+pub fn write_save_meta_prefix<W: Write>(
+    write: &mut W,
+    version: i32,
+    tags: &BTreeMap<String, String>,
+) -> io::Result<()> {
+    write_header(write, version)?;
+    write_meta_region(write, tags)
+}
+
+pub fn write_deflated_save_meta_prefix<W: Write>(
+    write: W,
+    version: i32,
+    tags: &BTreeMap<String, String>,
+) -> io::Result<()> {
+    let mut encoder = ZlibEncoder::new(write, Compression::default());
+    write_save_meta_prefix(&mut encoder, version, tags)?;
+    encoder.finish().map(|_| ())
+}
+
 pub fn read_meta_payload<R: Read>(read: &mut R) -> io::Result<SaveMeta> {
     read_string_map(read).map(SaveMeta::from_tags)
 }
 
 pub fn read_deflated_save_meta<R: Read>(read: R) -> io::Result<SaveMeta> {
-    let envelope = read_deflated_raw_save_envelope(read)?;
-    let meta = envelope.get(SaveRegion::Meta).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "deflated save does not contain a meta region",
-        )
-    })?;
-    let mut meta = meta;
-    read_meta_payload(&mut meta)
+    let mut decoder = ZlibDecoder::new(read);
+    read_save_meta(&mut decoder)
+}
+
+pub fn read_deflated_save_meta_with_backup(
+    primary: &[u8],
+    backup: Option<&[u8]>,
+) -> io::Result<SaveMeta> {
+    match read_deflated_save_meta(primary) {
+        Ok(meta) => Ok(meta),
+        Err(primary_error) => {
+            if let Some(backup) = backup {
+                read_deflated_save_meta(backup)
+            } else {
+                Err(primary_error)
+            }
+        }
+    }
+}
+
+pub fn is_deflated_save_valid<R: Read>(read: R) -> bool {
+    read_deflated_save_meta(read).is_ok()
 }
 
 pub fn write_chunk<W, F>(write: &mut W, f: F) -> io::Result<()>
@@ -472,6 +516,24 @@ pub struct CustomChunk {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CustomChunkSet {
     pub chunks: Vec<CustomChunk>,
+}
+
+impl CustomChunkSet {
+    pub fn get(&self, name: &str) -> Option<&[u8]> {
+        self.chunks
+            .iter()
+            .find(|chunk| chunk.name == name)
+            .map(|chunk| chunk.bytes.as_slice())
+    }
+
+    pub fn insert_or_replace(&mut self, name: impl Into<String>, bytes: Vec<u8>) {
+        let name = name.into();
+        if let Some(chunk) = self.chunks.iter_mut().find(|chunk| chunk.name == name) {
+            chunk.bytes = bytes;
+        } else {
+            self.chunks.push(CustomChunk { name, bytes });
+        }
+    }
 }
 
 pub fn write_custom_chunks<W: Write>(write: &mut W, chunks: &CustomChunkSet) -> io::Result<()> {
@@ -713,6 +775,45 @@ mod tests {
     }
 
     #[test]
+    fn deflated_save_meta_reader_matches_java_get_meta_prefix_only_behavior() {
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), "157".into());
+        tags.insert("build".into(), "1574".into());
+        tags.insert("saved".into(), "777".into());
+        tags.insert("playtime".into(), "888".into());
+        tags.insert("mapname".into(), "prefix-only".into());
+        tags.insert("wave".into(), "9".into());
+
+        let mut deflated = Vec::new();
+        write_deflated_save_meta_prefix(&mut deflated, LATEST_SAVE_VERSION, &tags).unwrap();
+
+        assert!(is_deflated_save_valid(deflated.as_slice()));
+        let meta = read_deflated_save_meta(deflated.as_slice()).unwrap();
+        assert_eq!(meta.map_name.as_deref(), Some("prefix-only"));
+        assert_eq!(meta.timestamp, 777);
+        assert_eq!(meta.time_played, 888);
+
+        // This is intentionally not a full envelope; full save parsing must reject it.
+        assert!(read_deflated_raw_save_envelope(deflated.as_slice()).is_err());
+    }
+
+    #[test]
+    fn deflated_save_meta_falls_back_to_backup_like_save_io() {
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), "157".into());
+        tags.insert("mapname".into(), "backup-map".into());
+
+        let mut backup = Vec::new();
+        write_deflated_save_meta_prefix(&mut backup, LATEST_SAVE_VERSION, &tags).unwrap();
+
+        let meta = read_deflated_save_meta_with_backup(b"not a save", Some(backup.as_slice()))
+            .expect("backup should be used when primary is invalid");
+        assert_eq!(meta.map_name.as_deref(), Some("backup-map"));
+
+        assert!(read_deflated_save_meta_with_backup(b"not a save", None).is_err());
+    }
+
+    #[test]
     fn raw_save_envelope_rejects_regions_not_present_for_version() {
         let mut envelope = RawSaveEnvelope::new(10);
         let err = envelope
@@ -774,21 +875,29 @@ mod tests {
 
     #[test]
     fn custom_chunks_roundtrip_and_preserve_unknown_payloads() {
-        let chunks = CustomChunkSet {
-            chunks: vec![
-                CustomChunk {
-                    name: "mod-a".into(),
-                    bytes: vec![1, 2, 3],
-                },
-                CustomChunk {
-                    name: "unknown".into(),
-                    bytes: b"payload".to_vec(),
-                },
-            ],
-        };
+        let mut chunks = CustomChunkSet::default();
+        chunks.insert_or_replace("mod-a", vec![1, 2, 3]);
+        chunks.insert_or_replace(CUSTOM_CHUNK_STATIC_FOG_DATA, vec![9]);
+        chunks.insert_or_replace("unknown", b"payload".to_vec());
+        chunks.insert_or_replace(CUSTOM_CHUNK_STATIC_FOG_DATA, vec![4, 5, 6]);
 
         let mut bytes = Vec::new();
         write_custom_chunks(&mut bytes, &chunks).unwrap();
-        assert_eq!(read_custom_chunks(&mut bytes.as_slice()).unwrap(), chunks);
+        let decoded = read_custom_chunks(&mut bytes.as_slice()).unwrap();
+        assert_eq!(decoded, chunks);
+        assert_eq!(decoded.get("mod-a"), Some(&[1, 2, 3][..]));
+        assert_eq!(
+            decoded.get(CUSTOM_CHUNK_STATIC_FOG_DATA),
+            Some(&[4, 5, 6][..])
+        );
+        assert_eq!(decoded.get("unknown"), Some(&b"payload"[..]));
+        assert_eq!(
+            decoded
+                .chunks
+                .iter()
+                .map(|chunk| chunk.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mod-a", CUSTOM_CHUNK_STATIC_FOG_DATA, "unknown"]
+        );
     }
 }
