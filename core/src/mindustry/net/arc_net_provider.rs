@@ -4,6 +4,7 @@ use super::{
         packet_ids, AnnounceCallPacket, ClearObjectivesCallPacket,
         ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
         ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
+        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         CompleteObjectiveCallPacket, ConnectCallPacket, ConnectPacket, CopyToClipboardCallPacket,
         DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
         HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket,
@@ -18,6 +19,7 @@ use super::{
     },
     PacketKind,
 };
+use crate::mindustry::core::content_loader::ContentLoader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrameworkMessage {
@@ -148,12 +150,36 @@ impl PacketSerializer {
         Ok(Self::write_envelope(&envelope))
     }
 
+    pub fn write_packet_kind_with_loader(
+        packet: &PacketKind,
+        loader: &ContentLoader,
+    ) -> Result<Vec<u8>, SerializerError> {
+        let envelope = Self::packet_kind_to_envelope_with_loader(packet, loader)?;
+        Ok(Self::write_envelope(&envelope))
+    }
+
     pub fn read_packet_kind(bytes: &[u8]) -> Result<PacketKind, SerializerError> {
         let envelope = Self::read_envelope(bytes)?;
         Self::packet_kind_from_envelope(&envelope)
     }
 
+    pub fn read_packet_kind_with_loader(
+        bytes: &[u8],
+        loader: &ContentLoader,
+    ) -> Result<PacketKind, SerializerError> {
+        let envelope = Self::read_envelope(bytes)?;
+        Self::packet_kind_from_envelope_with_loader(&envelope, loader)
+    }
+
     pub fn packet_kind_to_envelope(packet: &PacketKind) -> Result<PacketEnvelope, SerializerError> {
+        if matches!(
+            packet,
+            PacketKind::ClientPlanSnapshotCallPacket(_)
+                | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
+        ) {
+            return Err(SerializerError::RequiresContentLoader);
+        }
+
         let mut payload = Vec::new();
         let id = match packet {
             PacketKind::StreamBegin(packet) => {
@@ -328,9 +354,41 @@ impl PacketSerializer {
                 payload.extend_from_slice(&stream.stream);
                 packet_ids::WORLD_STREAM
             }
+            PacketKind::ClientPlanSnapshotCallPacket(_)
+            | PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => {
+                return Err(SerializerError::RequiresContentLoader);
+            }
             PacketKind::Other { id, .. } => return Err(SerializerError::UnsupportedPacketId(*id)),
         };
 
+        Self::packet_payload_to_envelope(packet, id, payload)
+    }
+
+    pub fn packet_kind_to_envelope_with_loader(
+        packet: &PacketKind,
+        loader: &ContentLoader,
+    ) -> Result<PacketEnvelope, SerializerError> {
+        let mut payload = Vec::new();
+        let id = match packet {
+            PacketKind::ClientPlanSnapshotCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET
+            }
+            PacketKind::ClientPlanSnapshotReceivedCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
+            }
+            _ => return Self::packet_kind_to_envelope(packet),
+        };
+
+        Self::packet_payload_to_envelope(packet, id, payload)
+    }
+
+    fn packet_payload_to_envelope(
+        packet: &PacketKind,
+        id: u8,
+        payload: Vec<u8>,
+    ) -> Result<PacketEnvelope, SerializerError> {
         Ok(PacketEnvelope::Packet {
             id,
             length: payload
@@ -351,6 +409,16 @@ impl PacketSerializer {
     pub fn packet_kind_from_envelope(
         envelope: &PacketEnvelope,
     ) -> Result<PacketKind, SerializerError> {
+        if let PacketEnvelope::Packet { id, .. } = envelope {
+            if matches!(
+                *id,
+                packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET
+                    | packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
+            ) {
+                return Err(SerializerError::RequiresContentLoader);
+            }
+        }
+
         match envelope {
             PacketEnvelope::Packet { id, payload, .. } => {
                 let mut cursor = payload.as_slice();
@@ -535,6 +603,38 @@ impl PacketSerializer {
             PacketEnvelope::Raw(_) => Err(SerializerError::ExpectedPacketEnvelope),
         }
     }
+
+    pub fn packet_kind_from_envelope_with_loader(
+        envelope: &PacketEnvelope,
+        loader: &ContentLoader,
+    ) -> Result<PacketKind, SerializerError> {
+        match envelope {
+            PacketEnvelope::Packet { id, payload, .. } => {
+                let mut cursor = payload.as_slice();
+                match *id {
+                    packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET => {
+                        Ok(PacketKind::ClientPlanSnapshotCallPacket(
+                            ClientPlanSnapshotCallPacket::read_from_with_loader(
+                                &mut cursor,
+                                loader,
+                            )?,
+                        ))
+                    }
+                    packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET => {
+                        Ok(PacketKind::ClientPlanSnapshotReceivedCallPacket(
+                            ClientPlanSnapshotReceivedCallPacket::read_from_with_loader(
+                                &mut cursor,
+                                loader,
+                            )?,
+                        ))
+                    }
+                    _ => Self::packet_kind_from_envelope(envelope),
+                }
+            }
+            PacketEnvelope::Framework(_) => Err(SerializerError::ExpectedPacketEnvelope),
+            PacketEnvelope::Raw(_) => Err(SerializerError::ExpectedPacketEnvelope),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -553,6 +653,8 @@ pub enum SerializerError {
     PayloadTooLarge(usize),
     #[error("expected normal packet envelope")]
     ExpectedPacketEnvelope,
+    #[error("packet codec requires ContentLoader")]
+    RequiresContentLoader,
     #[error("packet codec IO error: {0}")]
     Io(String),
 }
@@ -601,7 +703,15 @@ mod tests {
     use super::*;
     use base64::Engine;
 
-    use crate::mindustry::net::packets::{ClientBinaryPacketCallPacket, ClientPacketCallPacket};
+    use crate::mindustry::{
+        core::content_loader::ContentLoader,
+        ctype::ContentType,
+        io::{BuildPlanWire, ContentRef, TypeValue},
+        net::packets::{
+            ClientBinaryPacketCallPacket, ClientPacketCallPacket, ClientPlanSnapshotCallPacket,
+            ClientPlanSnapshotReceivedCallPacket,
+        },
+    };
 
     #[test]
     fn framework_ping_matches_java_layout() {
@@ -771,6 +881,53 @@ mod tests {
         assert_eq!(bytes[0], packet_ids::STREAM_CHUNK);
         assert_eq!(bytes[3], PacketSerializer::COMPRESSION_NONE);
         assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), packet);
+    }
+
+    #[test]
+    fn client_plan_snapshot_packets_roundtrip_with_content_loader() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let plans = vec![BuildPlanWire::new_place_config(
+            10,
+            20,
+            1,
+            "duo",
+            TypeValue::Content(ContentRef::new(ContentType::Item, 0)),
+        )];
+        let packet = PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+            group_id: 77,
+            plans: Some(plans.clone()),
+        });
+        assert_eq!(
+            PacketSerializer::write_packet_kind(&packet).unwrap_err(),
+            SerializerError::RequiresContentLoader
+        );
+        let bytes = PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap();
+        assert_eq!(bytes[0], packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap_err(),
+            SerializerError::RequiresContentLoader
+        );
+        assert_eq!(
+            PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
+            packet
+        );
+
+        let received = PacketKind::ClientPlanSnapshotReceivedCallPacket(
+            ClientPlanSnapshotReceivedCallPacket {
+                player_id: 123,
+                group_id: 78,
+                plans: Some(plans),
+            },
+        );
+        let bytes = PacketSerializer::write_packet_kind_with_loader(&received, &loader).unwrap();
+        assert_eq!(
+            bytes[0],
+            packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
+        );
+        assert_eq!(
+            PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
+            received
+        );
     }
 
     #[test]
