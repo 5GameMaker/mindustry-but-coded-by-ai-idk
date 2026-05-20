@@ -749,6 +749,14 @@ pub fn read_team_id<R: Read>(read: &mut R) -> io::Result<TeamId> {
     Ok(TeamId(read_u8(read)?))
 }
 
+pub fn write_team<W: Write>(write: &mut W, team: Option<TeamId>) -> io::Result<()> {
+    write_u8(write, team.map_or(0, |team| team.0))
+}
+
+pub fn read_team<R: Read>(read: &mut R) -> io::Result<TeamId> {
+    read_team_id(read)
+}
+
 pub fn write_content_ref<W: Write>(write: &mut W, value: ContentRef) -> io::Result<()> {
     write_u8(write, value.content_type.ordinal())?;
     write_i16(write, value.id)
@@ -897,6 +905,25 @@ pub fn write_unit_type<W: Write>(
 pub fn read_unit_type<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<String> {
     read_content_name(read, loader, ContentType::Unit)?
         .ok_or_else(|| invalid_data("null unit type id"))
+}
+
+pub fn write_effect_id<W: Write>(write: &mut W, id: i16) -> io::Result<()> {
+    if id < 0 {
+        return Err(invalid_input("negative effect id"));
+    }
+    write_i16(write, id)
+}
+
+pub fn read_effect_id<R: Read>(read: &mut R) -> io::Result<u16> {
+    read_u16(read)
+}
+
+pub fn write_sound_id<W: Write>(write: &mut W, id: i16) -> io::Result<()> {
+    write_i16(write, id)
+}
+
+pub fn read_sound_id<R: Read>(read: &mut R) -> io::Result<i16> {
+    read_i16(read)
 }
 
 pub fn write_bullet_type_id<W: Write>(write: &mut W, id: ContentId) -> io::Result<()> {
@@ -1817,6 +1844,14 @@ pub fn read_bytes_short<R: Read>(read: &mut R) -> io::Result<Vec<u8>> {
     let mut bytes = vec![0; len as usize];
     read.read_exact(&mut bytes)?;
     Ok(bytes)
+}
+
+pub fn write_bytes<W: Write>(write: &mut W, values: &[u8]) -> io::Result<()> {
+    write_bytes_short(write, values)
+}
+
+pub fn read_bytes<R: Read>(read: &mut R) -> io::Result<Vec<u8>> {
+    read_bytes_short(read)
 }
 
 pub fn write_ints<W: Write>(write: &mut W, values: &[i32]) -> io::Result<()> {
@@ -2744,6 +2779,40 @@ mod tests {
         assert_eq!(read_point2_packed(&mut slice).unwrap(), point);
         assert_eq!(read_vec2(&mut slice).unwrap(), vec);
         assert_eq!(read_team_id(&mut slice).unwrap(), team);
+    }
+
+    #[test]
+    fn team_effect_sound_and_bytes_match_java_typeio_layout() {
+        let mut bytes = Vec::new();
+
+        write_team(&mut bytes, None).unwrap();
+        write_team(&mut bytes, Some(TeamId(6))).unwrap();
+        assert_eq!(bytes, vec![0, 6]);
+        let mut slice = bytes.as_slice();
+        assert_eq!(read_team(&mut slice).unwrap(), TeamId(0));
+        assert_eq!(read_team(&mut slice).unwrap(), TeamId(6));
+
+        bytes.clear();
+        write_effect_id(&mut bytes, 258).unwrap();
+        assert_eq!(bytes, vec![0x01, 0x02]);
+        assert_eq!(read_effect_id(&mut bytes.as_slice()).unwrap(), 258);
+        assert!(write_effect_id(&mut Vec::new(), -1).is_err());
+
+        bytes.clear();
+        write_sound_id(&mut bytes, -1).unwrap();
+        write_sound_id(&mut bytes, 17).unwrap();
+        assert_eq!(bytes, vec![0xff, 0xff, 0x00, 0x11]);
+        let mut slice = bytes.as_slice();
+        assert_eq!(read_sound_id(&mut slice).unwrap(), -1);
+        assert_eq!(read_sound_id(&mut slice).unwrap(), 17);
+
+        bytes.clear();
+        write_bytes(&mut bytes, &[0xaa, 0xbb, 0xcc]).unwrap();
+        assert_eq!(bytes, vec![0, 3, 0xaa, 0xbb, 0xcc]);
+        assert_eq!(
+            read_bytes(&mut bytes.as_slice()).unwrap(),
+            vec![0xaa, 0xbb, 0xcc]
+        );
     }
 
     #[test]

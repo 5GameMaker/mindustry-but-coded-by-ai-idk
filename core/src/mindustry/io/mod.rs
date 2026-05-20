@@ -21,9 +21,10 @@ pub use save::{
     SAVE_SLOT_SETTING_PREFIX,
 };
 pub use type_io::{
-    read_action, read_java_utf, read_kick, read_marker_control, read_object, read_point2,
-    read_point2_packed, read_string, read_team_id, read_trace_info, read_vec2, write_action,
+    read_action, read_bytes, read_effect_id, read_java_utf, read_kick, read_marker_control,
+    read_object, read_point2, read_point2_packed, read_sound_id, read_string, read_team,
+    read_team_id, read_trace_info, read_vec2, write_action, write_bytes, write_effect_id,
     write_java_utf, write_kick, write_marker_control, write_object, write_point2,
-    write_point2_packed, write_string, write_team_id, write_trace_info, write_vec2, Point2, TeamId,
-    TypeValue, Vec2,
+    write_point2_packed, write_sound_id, write_string, write_team, write_team_id, write_trace_info,
+    write_vec2, Point2, TeamId, TypeValue, Vec2,
 };
