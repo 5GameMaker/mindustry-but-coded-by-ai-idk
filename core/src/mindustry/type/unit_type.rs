@@ -593,6 +593,170 @@ impl UnitType {
         }
     }
 
+    pub fn attack_range_plan(&self, margin: f32) -> UnitAttackRangePlan {
+        let mut range = self.range;
+        let mut max_range = self.max_range;
+
+        if range < 0.0 {
+            range = f32::MAX;
+            for weapon in self.weapons.iter().filter(|weapon| weapon.use_attack_range) {
+                let weapon_range = weapon.range() - margin;
+                range = range.min(weapon_range);
+                max_range = max_range.max(weapon_range);
+            }
+        }
+
+        if max_range < 0.0 {
+            max_range = 0.0_f32.max(range);
+            for weapon in self.weapons.iter().filter(|weapon| weapon.use_attack_range) {
+                max_range = max_range.max(weapon.range() - margin);
+            }
+        }
+
+        if !self.weapons.iter().any(|weapon| weapon.use_attack_range) {
+            if range < 0.0 || range == f32::MAX {
+                range = self.mine_range;
+            }
+            if max_range < 0.0 || max_range == f32::MAX {
+                max_range = self.mine_range;
+            }
+        }
+
+        UnitAttackRangePlan { range, max_range }
+    }
+
+    pub fn mirrored_weapons_plan(&self) -> Vec<Weapon> {
+        let mut mapped = Vec::new();
+        for weapon in &self.weapons {
+            let mut weapon = weapon.clone();
+            if weapon.recoil_time < 0.0 {
+                weapon.recoil_time = weapon.reload;
+            }
+
+            if weapon.mirror {
+                let mut copy = weapon.copy();
+                copy.flip();
+
+                weapon.recoil_time *= 2.0;
+                copy.recoil_time *= 2.0;
+                weapon.reload *= 2.0;
+                copy.reload *= 2.0;
+
+                weapon.other_side = mapped.len() as i32 + 1;
+                copy.other_side = mapped.len() as i32;
+                mapped.push(weapon);
+                mapped.push(copy);
+            } else {
+                mapped.push(weapon);
+            }
+        }
+        mapped
+    }
+
+    pub fn resolved_ammo_capacity(&self) -> i32 {
+        if self.ammo_capacity >= 0 {
+            return self.ammo_capacity;
+        }
+
+        let shots_per_second: f32 = self
+            .weapons
+            .iter()
+            .filter(|weapon| weapon.use_ammo && weapon.reload > 0.0)
+            .map(|weapon| 60.0 / weapon.reload)
+            .sum();
+        ((shots_per_second * 35.0) as i32).max(1)
+    }
+
+    pub fn estimate_dps_with(&mut self, weapon_dps: impl Fn(&Weapon) -> f32) -> f32 {
+        if self.dps_estimate < 0.0 {
+            self.dps_estimate = self.weapons.iter().map(weapon_dps).sum();
+        }
+        self.dps_estimate
+    }
+
+    pub fn pure_init_plan(&self) -> UnitTypePureInitPlan {
+        let light_radius = self.resolved_light_radius();
+        let weapons = self.mirrored_weapons_plan();
+        let has_attack_range_weapon = weapons.iter().any(|weapon| weapon.use_attack_range);
+        let mut range_unit = self.clone();
+        range_unit.weapons = weapons.clone();
+        let attack_range = range_unit.attack_range_plan(4.0);
+
+        UnitTypePureInitPlan {
+            env_enabled: if self.flying {
+                self.env_enabled | Env::SPACE
+            } else {
+                self.env_enabled
+            },
+            death_sound: if self.death_sound == "unset" {
+                if self.hit_size < 12.0 {
+                    "unitExplode1"
+                } else if self.hit_size < 22.0 {
+                    "unitExplode2"
+                } else {
+                    "unitExplode3"
+                }
+                .to_string()
+            } else {
+                self.death_sound.clone()
+            },
+            wreck_sound: if self.wreck_sound == "unset" {
+                if self.hit_size >= 22.0 {
+                    "wreckFallBig"
+                } else {
+                    "wreckFall"
+                }
+                .to_string()
+            } else {
+                self.wreck_sound.clone()
+            },
+            light_radius,
+            flying_layer: self.resolved_flying_layer(),
+            clip_size: self.clip_size.max(light_radius * 1.1),
+            single_target: self.single_target || (weapons.len() <= 1 && !self.force_multi_target),
+            item_capacity: self.resolved_item_capacity(),
+            range: attack_range.range,
+            max_range: attack_range.max_range,
+            fog_radius: self.resolved_fog_radius(),
+            mine_beam_offset: self.resolved_mine_beam_offset(),
+            segment_spacing: self.resolved_segment_spacing(),
+            aim_dst: if self.aim_dst >= 0.0 {
+                self.aim_dst
+            } else if weapons.iter().any(|weapon| !weapon.rotate) {
+                self.hit_size * 2.0
+            } else {
+                self.hit_size / 2.0
+            },
+            mech_stride: if self.mech_stride < 0.0 {
+                4.0 + (self.hit_size - 8.0) / 2.1
+            } else {
+                self.mech_stride
+            },
+            step_shake: if self.step_shake < 0.0 {
+                (self.hit_size - 11.0) / 9.0
+            } else {
+                self.step_shake
+            }
+            .round(),
+            mech_step_particles: self.mech_step_particles
+                || (self.step_shake < 0.0 && self.hit_size > 15.0),
+            engines: if self.engine_size > 0.0 && self.engines.is_empty() {
+                vec![UnitEngine::new(
+                    0.0,
+                    -self.engine_offset,
+                    self.engine_size,
+                    -90.0,
+                )]
+            } else {
+                self.engines.clone()
+            },
+            weapons,
+            can_attack: self.weapons.iter().any(|weapon| !weapon.no_attack),
+            ammo_capacity: self.resolved_ammo_capacity(),
+            has_attack_range_weapon,
+        }
+    }
+
     pub fn sense(&self, sensor: LAccess, payload_capable: bool, logic_id: i32) -> f64 {
         match sensor {
             LAccess::Health | LAccess::MaxHealth => self.health as f64,
@@ -638,6 +802,38 @@ pub struct UnitEngine {
     pub y: f32,
     pub radius: f32,
     pub rotation: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitAttackRangePlan {
+    pub range: f32,
+    pub max_range: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitTypePureInitPlan {
+    pub env_enabled: u32,
+    pub death_sound: String,
+    pub wreck_sound: String,
+    pub light_radius: f32,
+    pub flying_layer: f32,
+    pub clip_size: f32,
+    pub single_target: bool,
+    pub item_capacity: i32,
+    pub range: f32,
+    pub max_range: f32,
+    pub fog_radius: f32,
+    pub mine_beam_offset: f32,
+    pub segment_spacing: f32,
+    pub aim_dst: f32,
+    pub mech_stride: f32,
+    pub step_shake: f32,
+    pub mech_step_particles: bool,
+    pub engines: Vec<UnitEngine>,
+    pub weapons: Vec<Weapon>,
+    pub can_attack: bool,
+    pub ammo_capacity: i32,
+    pub has_attack_range_weapon: bool,
 }
 
 impl UnitEngine {
@@ -934,6 +1130,153 @@ mod tests {
         assert!(unit.sense(LAccess::Ammo, false, 99).is_nan());
         assert_eq!(unit.sense_object(LAccess::Name), Some("gamma"));
         assert_eq!(unit.sense_object(LAccess::Health), None);
+    }
+
+    #[test]
+    fn unit_type_attack_range_plan_matches_java_range_fallbacks() {
+        let mut unit = UnitType::new(0, "horizon");
+        unit.mine_range = 70.0;
+        assert_eq!(
+            unit.attack_range_plan(4.0),
+            UnitAttackRangePlan {
+                range: 70.0,
+                max_range: 70.0,
+            }
+        );
+
+        let mut short = Weapon::new("short");
+        short.shoot_cone = 120.0;
+        let mut long = Weapon::new("long");
+        long.shoot_cone = 200.0;
+        unit.weapons = vec![short, long];
+        assert_eq!(
+            unit.attack_range_plan(4.0),
+            UnitAttackRangePlan {
+                range: 116.0,
+                max_range: 196.0,
+            }
+        );
+
+        unit.range = 90.0;
+        unit.max_range = -1.0;
+        assert_eq!(
+            unit.attack_range_plan(4.0),
+            UnitAttackRangePlan {
+                range: 90.0,
+                max_range: 196.0,
+            }
+        );
+
+        unit.weapons[0].use_attack_range = false;
+        unit.weapons[1].use_attack_range = false;
+        unit.range = -1.0;
+        unit.max_range = -1.0;
+        assert_eq!(
+            unit.attack_range_plan(4.0),
+            UnitAttackRangePlan {
+                range: 70.0,
+                max_range: 70.0,
+            }
+        );
+    }
+
+    #[test]
+    fn unit_type_mirrored_weapons_plan_matches_java_copy_flip_and_reload_rules() {
+        let mut unit = UnitType::new(0, "duo");
+        let mut mirrored = Weapon::new("cannon");
+        mirrored.x = 6.0;
+        mirrored.shoot_x = 1.0;
+        mirrored.base_rotation = 15.0;
+        mirrored.reload = 20.0;
+        mirrored.recoil_time = -1.0;
+
+        let mut single = Weapon::new("center");
+        single.mirror = false;
+        single.reload = 10.0;
+        single.recoil_time = -1.0;
+        unit.weapons = vec![mirrored, single];
+
+        let planned = unit.mirrored_weapons_plan();
+        assert_eq!(planned.len(), 3);
+        assert_eq!(planned[0].x, 6.0);
+        assert_eq!(planned[0].shoot_x, 1.0);
+        assert_eq!(planned[0].base_rotation, 15.0);
+        assert_eq!(planned[0].reload, 40.0);
+        assert_eq!(planned[0].recoil_time, 40.0);
+        assert_eq!(planned[0].other_side, 1);
+
+        assert_eq!(planned[1].x, -6.0);
+        assert_eq!(planned[1].shoot_x, -1.0);
+        assert_eq!(planned[1].base_rotation, -15.0);
+        assert!(planned[1].flip_sprite);
+        assert_eq!(planned[1].reload, 40.0);
+        assert_eq!(planned[1].recoil_time, 40.0);
+        assert_eq!(planned[1].other_side, 0);
+
+        assert_eq!(planned[2].name, "center");
+        assert_eq!(planned[2].reload, 10.0);
+        assert_eq!(planned[2].recoil_time, 10.0);
+        assert_eq!(planned[2].other_side, -1);
+    }
+
+    #[test]
+    fn unit_type_ammo_capacity_and_dps_cache_follow_java_formulas() {
+        let mut unit = UnitType::new(0, "dagger");
+        assert_eq!(unit.resolved_ammo_capacity(), 1);
+
+        let mut a = Weapon::new("a");
+        a.reload = 30.0;
+        let mut b = Weapon::new("b");
+        b.reload = 60.0;
+        let mut ignored = Weapon::new("ignored");
+        ignored.use_ammo = false;
+        ignored.reload = 1.0;
+        unit.weapons = vec![a, b, ignored];
+        assert_eq!(unit.resolved_ammo_capacity(), 105);
+
+        assert_eq!(unit.estimate_dps_with(|weapon| weapon.reload), 91.0);
+        unit.weapons[0].reload = 999.0;
+        assert_eq!(unit.estimate_dps_with(|weapon| weapon.reload), 91.0);
+    }
+
+    #[test]
+    fn unit_type_pure_init_plan_matches_java_low_coupling_init_steps() {
+        let mut unit = UnitType::new(0, "flare");
+        unit.flying = true;
+        unit.hit_size = 24.0;
+        unit.low_altitude = true;
+        unit.force_multi_target = false;
+        unit.engine_size = 3.0;
+        unit.engine_offset = 7.0;
+        let mut weapon = Weapon::new("flare-gun");
+        weapon.rotate = false;
+        weapon.reload = 20.0;
+        weapon.shoot_cone = 160.0;
+        unit.weapons.push(weapon);
+
+        let plan = unit.pure_init_plan();
+        assert_eq!(plan.env_enabled, Env::TERRESTRIAL | Env::SPACE);
+        assert_eq!(plan.death_sound, "unitExplode3");
+        assert_eq!(plan.wreck_sound, "wreckFallBig");
+        assert_eq!(plan.light_radius, 60.0);
+        assert_eq!(plan.flying_layer, LAYER_FLYING_UNIT_LOW);
+        assert_eq!(plan.clip_size, 66.0);
+        assert!(!plan.single_target);
+        assert_eq!(plan.item_capacity, 100);
+        assert_eq!(plan.range, 156.0);
+        assert_eq!(plan.max_range, 156.0);
+        assert_eq!(plan.fog_radius, 21.75);
+        assert_eq!(plan.mine_beam_offset, 12.0);
+        assert_eq!(plan.segment_spacing, 24.0);
+        assert_eq!(plan.aim_dst, 48.0);
+        assert!((plan.mech_stride - 11.619_048).abs() < 0.0001);
+        assert_eq!(plan.step_shake, 1.0);
+        assert!(plan.mech_step_particles);
+        assert_eq!(plan.engines, vec![UnitEngine::new(0.0, -7.0, 3.0, -90.0)]);
+        assert_eq!(plan.weapons.len(), 2);
+        assert!(plan.can_attack);
+        assert_eq!(plan.ammo_capacity, 105);
+        assert!(plan.has_attack_range_weapon);
     }
 
     #[test]
