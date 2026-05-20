@@ -1,6 +1,6 @@
 use crate::mindustry::{
     ctype::{Content, ContentId, ContentType},
-    r#type::UnitType,
+    r#type::{unit::erekir_unit_type::apply_erekir_unit_type_defaults, UnitType},
     world::meta::Env,
 };
 
@@ -848,10 +848,7 @@ fn apply_kind_defaults(unit: &mut UnitType, kind: UnitKind) {
             }
         }
         UnitKind::Erekir => {
-            unit.outline_color_rgba = 0x2b2f36ff;
-            unit.env_disabled = Env::SPACE;
-            unit.ammo_type = "item:beryllium".into();
-            unit.research_cost_multiplier = 10.0;
+            apply_erekir_unit_type_defaults(unit);
         }
         UnitKind::Tank => {
             apply_kind_defaults(unit, UnitKind::Erekir);

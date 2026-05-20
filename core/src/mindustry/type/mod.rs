@@ -15,6 +15,7 @@ pub mod publishable;
 pub mod sector;
 pub mod status_effect;
 pub mod team_entry;
+pub mod unit;
 pub mod unit_type;
 pub mod weapon;
 pub mod weather;
