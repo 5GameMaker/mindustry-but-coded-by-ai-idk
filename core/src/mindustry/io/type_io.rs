@@ -1,15 +1,19 @@
 use std::io::{self, Read, Write};
 
+use crate::mindustry::content::blocks::BlockDef;
 use crate::mindustry::core::content_loader::{ContentLoader, ContentRecord};
 use crate::mindustry::ctype::{ContentId, ContentType};
-use crate::mindustry::entities::units::StatusEntry;
+use crate::mindustry::entities::units::{BuildPlan, StatusEntry};
 use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{AdminAction, KickReason, TraceInfo};
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
+use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const MAX_ARRAY_SIZE: usize = 1000;
 pub const MAX_BYTE_ARRAY_SIZE: usize = 40_000;
+pub const MAX_NET_BUILD_PLANS: usize = 20;
+pub const MAX_NET_BUILD_PLAN_CONFIG_CHARS: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Point2 {
@@ -100,6 +104,84 @@ pub enum TypeValue {
     BoolArray(Vec<bool>),
     Vec2Array(Vec<Vec2>),
     ObjectArray(Vec<TypeValue>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildPlanWire {
+    pub x: i32,
+    pub y: i32,
+    pub rotation: i32,
+    pub block: Option<String>,
+    pub breaking: bool,
+    pub config: TypeValue,
+}
+
+impl BuildPlanWire {
+    pub fn new_place(x: i32, y: i32, rotation: i32, block: impl Into<String>) -> Self {
+        Self {
+            x,
+            y,
+            rotation,
+            block: Some(block.into()),
+            breaking: false,
+            config: TypeValue::Null,
+        }
+    }
+
+    pub fn new_place_config(
+        x: i32,
+        y: i32,
+        rotation: i32,
+        block: impl Into<String>,
+        config: TypeValue,
+    ) -> Self {
+        Self {
+            config,
+            ..Self::new_place(x, y, rotation, block)
+        }
+    }
+
+    pub fn new_break(x: i32, y: i32) -> Self {
+        Self {
+            x,
+            y,
+            rotation: -1,
+            block: None,
+            breaking: true,
+            config: TypeValue::Null,
+        }
+    }
+
+    pub fn from_build_plan(plan: &BuildPlan) -> Self {
+        Self {
+            x: plan.x,
+            y: plan.y,
+            rotation: plan.rotation,
+            block: plan.block.clone(),
+            breaking: plan.breaking,
+            config: plan
+                .config
+                .as_ref()
+                .map(|config| TypeValue::String(config.clone()))
+                .unwrap_or(TypeValue::Null),
+        }
+    }
+
+    pub fn to_build_plan(&self) -> io::Result<BuildPlan> {
+        if self.breaking {
+            return Ok(BuildPlan::new_break(self.x, self.y));
+        }
+
+        let block = self
+            .block
+            .as_ref()
+            .ok_or_else(|| invalid_data("place plan missing block"))?;
+        let mut plan = BuildPlan::new_place(self.x, self.y, self.rotation, block.clone());
+        if let TypeValue::String(config) = &self.config {
+            plan.config = Some(config.clone());
+        }
+        Ok(plan)
+    }
 }
 
 pub fn write_string<W: Write>(write: &mut W, string: Option<&str>) -> io::Result<()> {
@@ -343,17 +425,38 @@ pub fn read_object<R: Read>(read: &mut R) -> io::Result<TypeValue> {
     read_object_inner(read, true)
 }
 
+pub fn read_object_safe<R: Read>(read: &mut R) -> io::Result<TypeValue> {
+    read_object_inner_limited(read, true, MAX_ARRAY_SIZE, Some(1000))
+}
+
 fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<TypeValue> {
+    read_object_inner_limited(read, allow_arrays, MAX_ARRAY_SIZE, None)
+}
+
+fn read_object_inner_limited<R: Read>(
+    read: &mut R,
+    allow_arrays: bool,
+    max_array_size: usize,
+    max_string_chars: Option<usize>,
+) -> io::Result<TypeValue> {
     let tag = read_u8(read)?;
     match tag {
         0 => Ok(TypeValue::Null),
         1 => Ok(TypeValue::Int(read_i32(read)?)),
         2 => Ok(TypeValue::Long(read_i64(read)?)),
         3 => Ok(TypeValue::Float(f32::from_bits(read_u32(read)?))),
-        4 => Ok(match read_string(read)? {
-            Some(value) => TypeValue::String(value),
-            None => TypeValue::Null,
-        }),
+        4 => {
+            let value = match read_string(read)? {
+                Some(value) => {
+                    if max_string_chars.is_some_and(|max| value.chars().count() > max) {
+                        return Err(invalid_data("safe string too long"));
+                    }
+                    TypeValue::String(value)
+                }
+                None => TypeValue::Null,
+            };
+            Ok(value)
+        }
         5 => Ok(TypeValue::Content(read_content_ref(read)?)),
         10 => Ok(TypeValue::Bool(read_u8(read)? != 0)),
         11 => Ok(TypeValue::Double(f64::from_bits(read_u64(read)?))),
@@ -365,7 +468,7 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
         6 => {
             ensure_arrays_allowed(allow_arrays)?;
             let len = read_i16(read)?;
-            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+            if len < 0 || len as usize > max_array_size {
                 return Err(invalid_data("invalid int seq length"));
             }
             let mut values = Vec::with_capacity(len as usize);
@@ -396,7 +499,7 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
         16 => {
             ensure_arrays_allowed(allow_arrays)?;
             let len = read_i32(read)?;
-            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+            if len < 0 || len as usize > max_array_size {
                 return Err(invalid_data("invalid bool array length"));
             }
             let mut values = Vec::with_capacity(len as usize);
@@ -408,7 +511,7 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
         18 => {
             ensure_arrays_allowed(allow_arrays)?;
             let len = read_i16(read)?;
-            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+            if len < 0 || len as usize > max_array_size {
                 return Err(invalid_data("invalid vec2 array length"));
             }
             let mut values = Vec::with_capacity(len as usize);
@@ -425,7 +528,7 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
         21 => {
             ensure_arrays_allowed(allow_arrays)?;
             let len = read_i16(read)?;
-            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+            if len < 0 || len as usize > max_array_size {
                 return Err(invalid_data("invalid int array length"));
             }
             let mut values = Vec::with_capacity(len as usize);
@@ -437,12 +540,17 @@ fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<Ty
         22 => {
             ensure_arrays_allowed(allow_arrays)?;
             let len = read_i32(read)?;
-            if len < 0 || len as usize > MAX_ARRAY_SIZE {
+            if len < 0 || len as usize > max_array_size {
                 return Err(invalid_data("invalid object array length"));
             }
             let mut values = Vec::with_capacity(len as usize);
             for _ in 0..len {
-                values.push(read_object_inner(read, false)?);
+                values.push(read_object_inner_limited(
+                    read,
+                    false,
+                    max_array_size,
+                    max_string_chars,
+                )?);
             }
             Ok(TypeValue::ObjectArray(values))
         }
@@ -697,6 +805,10 @@ pub fn read_block<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<O
     read_content_name(read, loader, ContentType::Block)
 }
 
+fn read_required_block_name<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<String> {
+    read_block(read, loader)?.ok_or_else(|| invalid_data("null block id"))
+}
+
 pub fn write_item<W: Write>(
     write: &mut W,
     loader: &ContentLoader,
@@ -911,6 +1023,358 @@ pub fn read_liquid_stacks<R: Read>(
         stacks.push(read_liquid_stack(read, loader)?);
     }
     Ok(stacks)
+}
+
+pub fn get_max_plans(plans: &[BuildPlanWire]) -> usize {
+    let mut used = plans.len().min(MAX_NET_BUILD_PLANS);
+    let mut total_length = 0usize;
+
+    for (index, plan) in plans.iter().take(used).enumerate() {
+        total_length += build_plan_config_wire_len(&plan.config);
+        if total_length > MAX_NET_BUILD_PLAN_CONFIG_CHARS {
+            used = index + 1;
+            break;
+        }
+    }
+
+    used
+}
+
+pub fn get_max_build_plans(plans: &[BuildPlan]) -> usize {
+    let mut used = plans.len().min(MAX_NET_BUILD_PLANS);
+    let mut total_length = 0usize;
+
+    for (index, plan) in plans.iter().take(used).enumerate() {
+        if let Some(config) = &plan.config {
+            total_length += config.chars().count();
+        }
+        if total_length > MAX_NET_BUILD_PLAN_CONFIG_CHARS {
+            used = index + 1;
+            break;
+        }
+    }
+
+    used
+}
+
+pub fn write_plan<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    plan: &BuildPlanWire,
+) -> io::Result<()> {
+    write_u8(write, plan.breaking as u8)?;
+    write_i32(write, point2_pack(plan.x, plan.y))?;
+    if !plan.breaking {
+        let block = plan
+            .block
+            .as_deref()
+            .ok_or_else(|| invalid_input("place plan missing block"))?;
+        write_block(write, loader, Some(block))?;
+        write_u8(write, plan.rotation as u8)?;
+        write_u8(write, 1)?;
+        write_object(write, &plan.config)?;
+    }
+    Ok(())
+}
+
+pub fn read_plan<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<BuildPlanWire> {
+    let plan_type = read_u8(read)?;
+    let position = read_i32(read)?;
+    let x = point2_x(position) as i32;
+    let y = point2_y(position) as i32;
+
+    if plan_type == 1 {
+        return Ok(BuildPlanWire::new_break(x, y));
+    }
+
+    let block = read_required_block_name(read, loader)?;
+    let rotation = read_u8(read)? as i32;
+    let has_config = read_u8(read)? == 1;
+    let config = read_object_safe(read)?;
+    Ok(BuildPlanWire {
+        x,
+        y,
+        rotation,
+        block: Some(block),
+        breaking: false,
+        config: if has_config { config } else { TypeValue::Null },
+    })
+}
+
+pub fn write_build_plan<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    plan: &BuildPlan,
+) -> io::Result<()> {
+    write_plan(write, loader, &BuildPlanWire::from_build_plan(plan))
+}
+
+pub fn read_build_plan<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<BuildPlan> {
+    read_plan(read, loader)?.to_build_plan()
+}
+
+pub fn write_plans<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    plans: Option<&[BuildPlanWire]>,
+) -> io::Result<()> {
+    let Some(plans) = plans else {
+        return write_i16(write, -1);
+    };
+    if plans.len() > i16::MAX as usize {
+        return Err(invalid_input("build plan array too large"));
+    }
+    write_i16(write, plans.len() as i16)?;
+    for plan in plans {
+        write_plan(write, loader, plan)?;
+    }
+    Ok(())
+}
+
+pub fn read_plans<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Option<Vec<BuildPlanWire>>> {
+    let count = read_i16(read)?;
+    if count == -1 {
+        return Ok(None);
+    }
+    if count < -1 || count as usize > MAX_ARRAY_SIZE {
+        return Err(invalid_data("invalid build plan count"));
+    }
+    let mut plans = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        plans.push(read_plan(read, loader)?);
+    }
+    Ok(Some(plans))
+}
+
+pub fn write_build_plans<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    plans: Option<&[BuildPlan]>,
+) -> io::Result<()> {
+    let Some(plans) = plans else {
+        return write_i16(write, -1);
+    };
+    if plans.len() > i16::MAX as usize {
+        return Err(invalid_input("build plan array too large"));
+    }
+    write_i16(write, plans.len() as i16)?;
+    for plan in plans {
+        write_build_plan(write, loader, plan)?;
+    }
+    Ok(())
+}
+
+pub fn read_build_plans<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Option<Vec<BuildPlan>>> {
+    let Some(plans) = read_plans(read, loader)? else {
+        return Ok(None);
+    };
+    plans
+        .iter()
+        .map(BuildPlanWire::to_build_plan)
+        .collect::<io::Result<Vec<_>>>()
+        .map(Some)
+}
+
+pub fn write_plans_queue_net<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    plans: Option<&[BuildPlanWire]>,
+) -> io::Result<()> {
+    let Some(plans) = plans else {
+        return write_i32(write, -1);
+    };
+    let used = get_max_plans(plans);
+    write_i32(write, used as i32)?;
+    for plan in plans.iter().take(used) {
+        write_plan(write, loader, plan)?;
+    }
+    Ok(())
+}
+
+pub fn read_plans_queue<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Option<Vec<BuildPlanWire>>> {
+    let used = read_i32(read)?;
+    if used == -1 {
+        return Ok(None);
+    }
+    if used < -1 || used as usize >= MAX_ARRAY_SIZE {
+        return Err(invalid_data("build plan queue too long"));
+    }
+    let mut out = Vec::with_capacity(used as usize);
+    for _ in 0..used {
+        out.push(read_plan(read, loader)?);
+    }
+    Ok(Some(out))
+}
+
+pub fn write_build_plans_queue_net<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    plans: Option<&[BuildPlan]>,
+) -> io::Result<()> {
+    let Some(plans) = plans else {
+        return write_i32(write, -1);
+    };
+    let used = get_max_build_plans(plans);
+    write_i32(write, used as i32)?;
+    for plan in plans.iter().take(used) {
+        write_build_plan(write, loader, plan)?;
+    }
+    Ok(())
+}
+
+pub fn read_build_plans_queue<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Option<Vec<BuildPlan>>> {
+    let Some(plans) = read_plans_queue(read, loader)? else {
+        return Ok(None);
+    };
+    plans
+        .iter()
+        .map(BuildPlanWire::to_build_plan)
+        .collect::<io::Result<Vec<_>>>()
+        .map(Some)
+}
+
+pub fn write_client_plans<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    plans: Option<&[BuildPlanWire]>,
+) -> io::Result<()> {
+    let Some(plans) = plans else {
+        return write_i16(write, 0);
+    };
+    if plans.len() > i16::MAX as usize {
+        return Err(invalid_input("client plan array too large"));
+    }
+    write_i16(write, plans.len() as i16)?;
+    for plan in plans {
+        if plan.breaking {
+            return Err(invalid_input("breaking client plan"));
+        }
+        write_i32(write, point2_pack(plan.x, plan.y))?;
+        let block_name = plan
+            .block
+            .as_deref()
+            .ok_or_else(|| invalid_input("client plan missing block"))?;
+        write_block(write, loader, Some(block_name))?;
+        if block_rotates(loader, block_name)? {
+            write_u8(write, plan.rotation as u8)?;
+        }
+        if valid_client_plan_config(&plan.config) {
+            write_object(write, &plan.config)?;
+        } else {
+            write_object(write, &TypeValue::Null)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn read_client_plans<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Option<Vec<BuildPlanWire>>> {
+    let amount = read_i16(read)?;
+    if amount == 0 {
+        return Ok(None);
+    }
+    if amount < 0 || amount as usize > MAX_PLAYER_PREVIEW_PLANS {
+        return Err(invalid_data("too many client plans"));
+    }
+
+    let mut result = Vec::with_capacity(amount as usize);
+    for _ in 0..amount {
+        let position = read_i32(read)?;
+        let x = point2_x(position) as i32;
+        let y = point2_y(position) as i32;
+        let block = read_required_block_name(read, loader)?;
+        let rotation = if block_rotates(loader, &block)? {
+            read_u8(read)? as i32
+        } else {
+            0
+        };
+        let config = read_client_plan_config(read)?;
+        result.push(BuildPlanWire {
+            x,
+            y,
+            rotation,
+            block: Some(block),
+            breaking: false,
+            config,
+        });
+    }
+
+    Ok(Some(result))
+}
+
+pub fn read_client_plan_config<R: Read>(read: &mut R) -> io::Result<TypeValue> {
+    let tag = read_u8(read)?;
+    match tag {
+        0 => Ok(TypeValue::Null),
+        1 => Ok(TypeValue::Int(read_i32(read)?)),
+        2 => Ok(TypeValue::Long(read_i64(read)?)),
+        3 => Ok(TypeValue::Float(f32::from_bits(read_u32(read)?))),
+        5 => Ok(TypeValue::Content(read_content_ref(read)?)),
+        10 => Ok(TypeValue::Bool(read_u8(read)? != 0)),
+        11 => Ok(TypeValue::Double(f64::from_bits(read_u64(read)?))),
+        _ => Err(invalid_data("unknown client plan config object type")),
+    }
+}
+
+pub fn valid_client_plan_config(value: &TypeValue) -> bool {
+    matches!(
+        value,
+        TypeValue::Null
+            | TypeValue::Int(_)
+            | TypeValue::Long(_)
+            | TypeValue::Float(_)
+            | TypeValue::Double(_)
+            | TypeValue::Bool(_)
+            | TypeValue::Content(_)
+    )
+}
+
+fn build_plan_config_wire_len(value: &TypeValue) -> usize {
+    match value {
+        TypeValue::String(value) => value.encode_utf16().count(),
+        TypeValue::ByteArray(value) => value.len(),
+        _ => 0,
+    }
+}
+
+fn block_rotates(loader: &ContentLoader, block_name: &str) -> io::Result<bool> {
+    let block = loader
+        .catalog()
+        .blocks
+        .get_by_name(block_name)
+        .ok_or_else(|| invalid_data("unknown block name"))?;
+    Ok(match block {
+        BlockDef::Production(block) => block.rotate,
+        BlockDef::Turret(block) => block.rotate,
+        BlockDef::Distribution(block) => block.rotate,
+        BlockDef::Liquid(block) => block.rotate,
+        BlockDef::Power(block) => block.rotate,
+        BlockDef::Crafting(block) => block.rotate,
+        BlockDef::UnitFactory(block) => block.rotate,
+        BlockDef::UnitAssembler(block) => block.rotate,
+        BlockDef::UnitAssemblerModule(block) => block.rotate,
+        BlockDef::Payload(block) => block.rotate,
+        BlockDef::PayloadMassDriver(block) => block.rotate,
+        BlockDef::PayloadDeconstructor(block) => block.rotate,
+        BlockDef::PayloadConstructor(block) => block.rotate,
+        BlockDef::PayloadLoader(block) => block.rotate,
+        BlockDef::Sandbox(block) => block.rotate,
+        _ => false,
+    })
 }
 
 pub fn write_status<W: Write>(write: &mut W, entry: &StatusEntry) -> io::Result<()> {
@@ -1481,6 +1945,149 @@ mod tests {
             read_liquid_stacks(&mut bytes.as_slice(), &loader).unwrap(),
             liquids
         );
+    }
+
+    #[test]
+    fn build_plan_wire_matches_java_typeio_layout() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let block_id = loader
+            .get_by_name(ContentType::Block, "router")
+            .unwrap()
+            .id
+            .to_be_bytes();
+        let plan =
+            BuildPlanWire::new_place_config(3, 4, 2, "router", TypeValue::String("cfg".into()));
+        let mut bytes = Vec::new();
+
+        write_plan(&mut bytes, &loader, &plan).unwrap();
+        let mut expected = vec![0];
+        expected.extend_from_slice(&point2_pack(3, 4).to_be_bytes());
+        expected.extend_from_slice(&block_id);
+        expected.extend_from_slice(&[2, 1, 4, 1, 0, 3, b'c', b'f', b'g']);
+        assert_eq!(bytes, expected);
+        assert_eq!(read_plan(&mut bytes.as_slice(), &loader).unwrap(), plan);
+
+        bytes.clear();
+        let breaking = BuildPlanWire::new_break(-1, 2);
+        write_plan(&mut bytes, &loader, &breaking).unwrap();
+        let mut expected = vec![1];
+        expected.extend_from_slice(&point2_pack(-1, 2).to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(read_plan(&mut bytes.as_slice(), &loader).unwrap(), breaking);
+    }
+
+    #[test]
+    fn build_plan_arrays_and_net_queue_use_java_sentinels_and_caps() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let plan =
+            BuildPlanWire::new_place_config(1, 2, 0, "router", TypeValue::String("A".into()));
+        let mut bytes = Vec::new();
+
+        write_plans(&mut bytes, &loader, None).unwrap();
+        assert_eq!(bytes, vec![0xff, 0xff]);
+        assert_eq!(read_plans(&mut bytes.as_slice(), &loader).unwrap(), None);
+
+        bytes.clear();
+        write_plans(&mut bytes, &loader, Some(std::slice::from_ref(&plan))).unwrap();
+        assert_eq!(&bytes[0..2], &[0, 1]);
+        assert_eq!(
+            read_plans(&mut bytes.as_slice(), &loader).unwrap(),
+            Some(vec![plan.clone()])
+        );
+
+        bytes.clear();
+        write_plans_queue_net(&mut bytes, &loader, None).unwrap();
+        assert_eq!(bytes, (-1i32).to_be_bytes());
+        assert_eq!(
+            read_plans_queue(&mut bytes.as_slice(), &loader).unwrap(),
+            None
+        );
+
+        let many: Vec<_> = (0..25)
+            .map(|index| BuildPlanWire::new_place(index, index + 1, 0, "router"))
+            .collect();
+        assert_eq!(get_max_plans(&many), MAX_NET_BUILD_PLANS);
+        bytes.clear();
+        write_plans_queue_net(&mut bytes, &loader, Some(&many)).unwrap();
+        assert_eq!(&bytes[0..4], &(MAX_NET_BUILD_PLANS as i32).to_be_bytes());
+        assert_eq!(
+            read_plans_queue(&mut bytes.as_slice(), &loader)
+                .unwrap()
+                .unwrap()
+                .len(),
+            MAX_NET_BUILD_PLANS
+        );
+
+        let capped = vec![
+            BuildPlanWire::new_place_config(0, 0, 0, "router", TypeValue::String("a".repeat(250))),
+            BuildPlanWire::new_place_config(1, 1, 0, "router", TypeValue::ByteArray(vec![0; 251])),
+            BuildPlanWire::new_place(2, 2, 0, "router"),
+        ];
+        assert_eq!(get_max_plans(&capped), 2);
+    }
+
+    #[test]
+    fn client_plans_filter_configs_and_elide_non_rotating_rotation() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let router_id = loader
+            .get_by_name(ContentType::Block, "router")
+            .unwrap()
+            .id
+            .to_be_bytes();
+        let duo_id = loader
+            .get_by_name(ContentType::Block, "duo")
+            .unwrap()
+            .id
+            .to_be_bytes();
+        let plans = vec![
+            BuildPlanWire::new_place_config(3, 4, 2, "router", TypeValue::String("drop".into())),
+            BuildPlanWire::new_place_config(
+                5,
+                6,
+                1,
+                "duo",
+                TypeValue::Content(ContentRef::new(ContentType::Item, 0)),
+            ),
+        ];
+        let mut bytes = Vec::new();
+
+        write_client_plans(&mut bytes, &loader, Some(&plans)).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&2i16.to_be_bytes());
+        expected.extend_from_slice(&point2_pack(3, 4).to_be_bytes());
+        expected.extend_from_slice(&router_id);
+        expected.push(0);
+        expected.extend_from_slice(&point2_pack(5, 6).to_be_bytes());
+        expected.extend_from_slice(&duo_id);
+        expected.push(1);
+        expected.extend_from_slice(&[5, ContentType::Item.ordinal(), 0, 0]);
+        assert_eq!(bytes, expected);
+
+        let decoded = read_client_plans(&mut bytes.as_slice(), &loader)
+            .unwrap()
+            .unwrap();
+        assert_eq!(decoded[0].rotation, 0);
+        assert_eq!(decoded[0].config, TypeValue::Null);
+        assert_eq!(decoded[1].rotation, 1);
+        assert_eq!(
+            decoded[1].config,
+            TypeValue::Content(ContentRef::new(ContentType::Item, 0))
+        );
+
+        bytes.clear();
+        write_client_plans(&mut bytes, &loader, None).unwrap();
+        assert_eq!(bytes, vec![0, 0]);
+        assert_eq!(
+            read_client_plans(&mut bytes.as_slice(), &loader).unwrap(),
+            None
+        );
+        assert!(write_client_plans(
+            &mut Vec::new(),
+            &loader,
+            Some(&[BuildPlanWire::new_break(1, 2)])
+        )
+        .is_err());
+        assert!(read_client_plan_config(&mut [4, 1, 0, 1, b'x'].as_slice()).is_err());
     }
 
     #[test]
