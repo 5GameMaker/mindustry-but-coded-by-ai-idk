@@ -26,6 +26,7 @@ pub const SAVE_REGION_CUSTOM: &str = "custom";
 pub const CUSTOM_CHUNK_STATIC_FOG_DATA: &str = "static-fog-data";
 pub const SAVE_EXTENSION: &str = "msav";
 pub const LAST_SECTOR_SAVE_SETTING: &str = "last-sector-save";
+pub const LAST_SECTOR_SAVE_FALLBACK: &str = "<none>";
 pub const SAVE_SLOT_SETTING_PREFIX: &str = "save-";
 
 pub const SAVE_REGION_MANIFEST: &[&str] = &[
@@ -153,12 +154,58 @@ impl SaveSlotRecord {
         matches!(self.kind(), SaveSlotKind::Sector { .. })
     }
 
+    pub fn is_sector(&self) -> bool {
+        self.meta.as_ref().is_some_and(SaveMeta::has_sector)
+    }
+
     pub fn timestamp(&self) -> i64 {
         self.meta.as_ref().map_or(0, |meta| meta.timestamp)
     }
 
     pub fn time_played(&self) -> i64 {
         self.meta.as_ref().map_or(0, |meta| meta.time_played)
+    }
+
+    pub fn delete_targets(&self) -> [PathBuf; 2] {
+        [backup_file_for_path(&self.file), self.file.clone()]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeflatedSaveFile {
+    pub file: PathBuf,
+    pub bytes: Vec<u8>,
+    pub backup_bytes: Option<Vec<u8>>,
+}
+
+impl DeflatedSaveFile {
+    pub fn new(file: impl Into<PathBuf>, bytes: Vec<u8>) -> Self {
+        Self {
+            file: file.into(),
+            bytes,
+            backup_bytes: None,
+        }
+    }
+
+    pub fn with_backup(file: impl Into<PathBuf>, bytes: Vec<u8>, backup_bytes: Vec<u8>) -> Self {
+        Self {
+            file: file.into(),
+            bytes,
+            backup_bytes: Some(backup_bytes),
+        }
+    }
+
+    pub fn read_meta(&self) -> io::Result<SaveMeta> {
+        read_deflated_save_meta_with_backup(&self.bytes, self.backup_bytes.as_deref())
+    }
+
+    pub fn is_valid(&self) -> bool {
+        is_deflated_save_valid_with_backup(&self.bytes, self.backup_bytes.as_deref())
+    }
+
+    pub fn slot_record(&self) -> io::Result<SaveSlotRecord> {
+        self.read_meta()
+            .map(|meta| SaveSlotRecord::with_meta(self.file.clone(), meta))
     }
 }
 
@@ -197,6 +244,58 @@ pub fn backup_file_for_path(file: impl AsRef<Path>) -> PathBuf {
 
 pub fn is_backup_save_name(name: &str) -> bool {
     name.contains("backup")
+}
+
+pub fn should_scan_save_file(file: impl AsRef<Path>) -> bool {
+    file_name_string(file.as_ref()).is_some_and(|name| !is_backup_save_name(&name))
+}
+
+pub fn collect_valid_save_slot_records<I, P, F>(files: I, mut read_meta: F) -> Vec<SaveSlotRecord>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+    F: FnMut(&Path) -> io::Result<SaveMeta>,
+{
+    let mut slots = Vec::new();
+    for file in files {
+        let file = file.as_ref();
+        if !should_scan_save_file(file) {
+            continue;
+        }
+        if let Ok(meta) = read_meta(file) {
+            slots.push(SaveSlotRecord::with_meta(file.to_path_buf(), meta));
+        }
+    }
+    slots
+}
+
+pub fn collect_valid_deflated_save_slots<'a, I>(files: I) -> Vec<SaveSlotRecord>
+where
+    I: IntoIterator<Item = &'a DeflatedSaveFile>,
+{
+    let mut slots = Vec::new();
+    for file in files {
+        if !should_scan_save_file(&file.file) {
+            continue;
+        }
+        if let Ok(slot) = file.slot_record() {
+            slots.push(slot);
+        }
+    }
+    slots
+}
+
+pub fn find_last_sector_save<'a, F>(
+    slots: &'a [SaveSlotRecord],
+    stored_name: &str,
+    mut name_for_slot: F,
+) -> Option<&'a SaveSlotRecord>
+where
+    F: FnMut(&SaveSlotRecord) -> String,
+{
+    slots
+        .iter()
+        .find(|slot| slot.is_sector() && name_for_slot(slot) == stored_name)
 }
 
 pub fn next_slot_file_name<I, S>(existing_names: I) -> String
@@ -389,6 +488,10 @@ impl SaveMeta {
             tags,
             mods,
         }
+    }
+
+    pub fn has_sector(&self) -> bool {
+        json_field_is_non_null(&self.rules_json, "sector")
     }
 }
 
@@ -793,6 +896,20 @@ fn parse_i32(map: &BTreeMap<String, String>, key: &str) -> i32 {
         .unwrap_or_default()
 }
 
+fn json_field_is_non_null(json: &str, key: &str) -> bool {
+    let quoted_key = format!("\"{key}\"");
+    let Some(key_index) = json.find(&quoted_key) else {
+        return false;
+    };
+    let after_key = &json[key_index + quoted_key.len()..];
+    let Some(colon_index) = after_key.find(':') else {
+        return false;
+    };
+    !after_key[colon_index + 1..]
+        .trim_start()
+        .starts_with("null")
+}
+
 fn save_slot_kind_from_file_name(stem: &str) -> SaveSlotKind {
     if let Ok(slot) = stem.parse::<i32>() {
         return SaveSlotKind::Numbered(slot);
@@ -1146,12 +1263,94 @@ mod tests {
     }
 
     #[test]
+    fn saves_load_scan_skips_backups_and_keeps_valid_slots_only() {
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), "157".into());
+        tags.insert("mapname".into(), "primary".into());
+        tags.insert("saved".into(), "11".into());
+        let primary = deflated_meta_bytes(&tags);
+
+        let mut backup_tags = BTreeMap::new();
+        backup_tags.insert("version".into(), "157".into());
+        backup_tags.insert("mapname".into(), "backup".into());
+        backup_tags.insert("saved".into(), "22".into());
+        let backup = deflated_meta_bytes(&backup_tags);
+
+        let files = vec![
+            DeflatedSaveFile::new("saves/0.msav", primary),
+            DeflatedSaveFile::with_backup("saves/1.msav", b"broken".to_vec(), backup),
+            DeflatedSaveFile::new("saves/2.msav-backup.msav", deflated_meta_bytes(&tags)),
+            DeflatedSaveFile::new("saves/3.msav", b"broken".to_vec()),
+        ];
+
+        let slots = collect_valid_deflated_save_slots(&files);
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].index(), "0");
+        assert_eq!(
+            slots[0].meta.as_ref().unwrap().map_name.as_deref(),
+            Some("primary")
+        );
+        assert_eq!(slots[1].index(), "1");
+        assert_eq!(slots[1].timestamp(), 22);
+        assert_eq!(
+            slots[1].meta.as_ref().unwrap().map_name.as_deref(),
+            Some("backup")
+        );
+    }
+
+    #[test]
+    fn last_sector_save_matches_java_name_setting_value() {
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), "157".into());
+        tags.insert("rules".into(), r#"{"sector":{"id":10}}"#.into());
+        let sector = SaveSlotRecord::with_meta("saves/1.msav", SaveMeta::from_tags(tags));
+
+        let mut non_sector_tags = BTreeMap::new();
+        non_sector_tags.insert("version".into(), "157".into());
+        non_sector_tags.insert("rules".into(), r#"{"sector":null}"#.into());
+        let normal = SaveSlotRecord::with_meta(
+            "saves/sector-serpulo-10.msav",
+            SaveMeta::from_tags(non_sector_tags),
+        );
+        let slots = vec![normal, sector];
+        assert!(slots[0].is_sector_file());
+        assert!(!slots[0].is_sector());
+        assert!(!slots[1].is_sector_file());
+        assert!(slots[1].is_sector());
+
+        let last = find_last_sector_save(&slots, "1", |slot| slot.index())
+            .expect("sector slot should match by stored setting name");
+        assert_eq!(last.index(), "1");
+        assert_eq!(LAST_SECTOR_SAVE_FALLBACK, "<none>");
+
+        assert!(find_last_sector_save(&slots, "sector-serpulo-10", |slot| slot.index()).is_none());
+    }
+
+    #[test]
+    fn save_slot_delete_targets_delete_backup_before_primary_like_java() {
+        let slot = SaveSlotRecord::new("saves/4.msav");
+        assert_eq!(
+            slot.delete_targets(),
+            [
+                PathBuf::from("saves/4.msav-backup.msav"),
+                PathBuf::from("saves/4.msav")
+            ]
+        );
+    }
+
+    #[test]
     fn raw_save_envelope_rejects_regions_not_present_for_version() {
         let mut envelope = RawSaveEnvelope::new(10);
         let err = envelope
             .set(SaveRegion::Patches, vec![1])
             .expect_err("patches region should not exist before save v11");
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    fn deflated_meta_bytes(tags: &BTreeMap<String, String>) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut bytes, LATEST_SAVE_VERSION, tags).unwrap();
+        bytes
     }
 
     #[test]
