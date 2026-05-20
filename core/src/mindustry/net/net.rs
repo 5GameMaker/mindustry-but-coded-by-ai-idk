@@ -5,12 +5,12 @@ use super::packets::{
     ClientBinaryPacketUnreliableCallPacket, ClientPacketReliableCallPacket,
     ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CompleteObjectiveCallPacket,
-    ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, CopyToClipboardCallPacket,
-    DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket,
-    HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
-    InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket,
-    KickCallPacket2, LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket,
-    LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
+    ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
+    CopyToClipboardCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
+    InfoPopupCallPacket2, InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2,
+    InfoToastCallPacket, KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
+    LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
     PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
     SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
     SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
@@ -36,6 +36,7 @@ pub enum PacketKind {
     CompleteObjectiveCallPacket(CompleteObjectiveCallPacket),
     ConnectCallPacket(ConnectCallPacket),
     ConnectConfirmCallPacket(ConnectConfirmCallPacket),
+    ConstructFinishCallPacket(ConstructFinishCallPacket),
     CopyToClipboardCallPacket(CopyToClipboardCallPacket),
     DebugStatusClientCallPacket(DebugStatusClientCallPacket),
     DebugStatusClientUnreliableCallPacket(DebugStatusClientUnreliableCallPacket),
@@ -94,6 +95,7 @@ impl PacketKind {
             | PacketKind::ClientPacketUnreliableCallPacket(_)
             | PacketKind::CompleteObjectiveCallPacket(_)
             | PacketKind::ConnectCallPacket(_)
+            | PacketKind::ConstructFinishCallPacket(_)
             | PacketKind::CopyToClipboardCallPacket(_)
             | PacketKind::HideFollowUpMenuCallPacket(_)
             | PacketKind::HideHudTextCallPacket(_)
@@ -150,6 +152,7 @@ impl PacketKind {
             | PacketKind::RemoveMarkerCallPacket(_)
             | PacketKind::WorldDataBeginCallPacket(_) => true,
             PacketKind::ConnectCallPacket(_)
+            | PacketKind::ConstructFinishCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
             | PacketKind::PingResponseCallPacket(_)
