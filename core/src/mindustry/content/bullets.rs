@@ -1,0 +1,234 @@
+use crate::mindustry::{
+    content::blocks::{BulletKind, BulletSpec},
+    ctype::{Content, ContentBase, ContentId, ContentType},
+};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BulletContent {
+    pub base: ContentBase,
+    pub name: String,
+    pub spec: BulletSpec,
+}
+
+impl BulletContent {
+    pub fn new(id: ContentId, name: impl Into<String>, spec: BulletSpec) -> Self {
+        Self {
+            base: ContentBase::new(id, ContentType::Bullet),
+            name: name.into(),
+            spec,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Content for BulletContent {
+    fn id(&self) -> ContentId {
+        self.base.id
+    }
+
+    fn content_type(&self) -> ContentType {
+        ContentType::Bullet
+    }
+}
+
+pub fn load() -> Vec<BulletContent> {
+    let mut next_id = 0;
+
+    let mut placeholder = basic_bullet(2.5, 9.0);
+    placeholder.sprite = "ohno".into();
+    placeholder.width = 7.0;
+    placeholder.height = 9.0;
+    placeholder.lifetime = 60.0;
+    placeholder.ammo_multiplier = 2.0;
+
+    let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
+    damage_lightning.lifetime = 10.0;
+    damage_lightning.hit_effect = "hitLancer".into();
+    damage_lightning.despawn_effect = "none".into();
+    damage_lightning.status = "shocked".into();
+    damage_lightning.status_duration = 10.0;
+    damage_lightning.hittable = false;
+    damage_lightning.light_color = "ffffffff".into();
+
+    let mut damage_lightning_ground = damage_lightning.clone();
+    damage_lightning_ground.collides_air = false;
+
+    let mut damage_lightning_air = damage_lightning.clone();
+    damage_lightning_air.collides_ground = false;
+    damage_lightning_air.collides_tiles = false;
+
+    let mut fireball = BulletSpec::new(BulletKind::Generic, 1.0, 4.0);
+    fireball.pierce = true;
+    fireball.collides_tiles = false;
+    fireball.collides = false;
+    fireball.drag = 0.03;
+    fireball.hit_effect = "none".into();
+    fireball.despawn_effect = "none".into();
+    fireball.trail_effect = "fireballsmoke".into();
+    fireball.hittable = false;
+
+    let mut space_liquid = BulletSpec::new(BulletKind::Liquid, 3.5, 0.0);
+    space_liquid.collides = false;
+    space_liquid.lifetime = 90.0;
+    space_liquid.despawn_effect = "none".into();
+    space_liquid.hit_effect = "none".into();
+    space_liquid.smoke_effect = "none".into();
+    space_liquid.shoot_effect = "none".into();
+    space_liquid.drag = 0.01;
+    space_liquid.hittable = false;
+    space_liquid.orb_size = 5.5;
+    space_liquid.knockback = 0.7;
+
+    vec![
+        make_bullet(&mut next_id, "placeholder", placeholder),
+        make_bullet(&mut next_id, "damageLightning", damage_lightning),
+        make_bullet(
+            &mut next_id,
+            "damageLightningGround",
+            damage_lightning_ground,
+        ),
+        make_bullet(&mut next_id, "damageLightningAir", damage_lightning_air),
+        make_bullet(&mut next_id, "fireball", fireball),
+        make_bullet(&mut next_id, "spaceLiquid", space_liquid),
+    ]
+}
+
+fn make_bullet(next_id: &mut ContentId, name: &'static str, spec: BulletSpec) -> BulletContent {
+    let bullet = BulletContent::new(*next_id, name, spec);
+    *next_id += 1;
+    bullet
+}
+
+fn basic_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Basic, speed, damage);
+    bullet.width = 5.0;
+    bullet.height = 7.0;
+    bullet.shrink_y = 0.5;
+    bullet.sprite = "bullet".into();
+    bullet.back_color = "bulletYellowBack".into();
+    bullet.front_color = "bulletYellow".into();
+    bullet.hit_effect = "hitBulletSmall".into();
+    bullet.despawn_effect = "hitBulletSmall".into();
+    bullet
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn by_name<'a>(bullets: &'a [BulletContent], name: &str) -> &'a BulletContent {
+        bullets
+            .iter()
+            .find(|bullet| bullet.name() == name)
+            .unwrap_or_else(|| panic!("missing bullet {name}"))
+    }
+
+    #[test]
+    fn vanilla_internal_bullet_order_matches_upstream_load_order() {
+        let bullets = load();
+        let names: Vec<_> = bullets.iter().map(|bullet| bullet.name()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "placeholder",
+                "damageLightning",
+                "damageLightningGround",
+                "damageLightningAir",
+                "fireball",
+                "spaceLiquid",
+            ]
+        );
+
+        for (index, bullet) in bullets.iter().enumerate() {
+            assert_eq!(bullet.id(), index as ContentId);
+            assert_eq!(bullet.content_type(), ContentType::Bullet);
+        }
+    }
+
+    #[test]
+    fn placeholder_bullet_keeps_basic_constructor_and_overrides() {
+        let bullets = load();
+        let placeholder = &by_name(&bullets, "placeholder").spec;
+
+        assert_eq!(placeholder.kind, BulletKind::Basic);
+        assert_eq!(placeholder.speed, 2.5);
+        assert_eq!(placeholder.damage, 9.0);
+        assert_eq!(placeholder.sprite, "ohno");
+        assert_eq!(placeholder.width, 7.0);
+        assert_eq!(placeholder.height, 9.0);
+        assert_eq!(placeholder.lifetime, 60.0);
+        assert_eq!(placeholder.ammo_multiplier, 2.0);
+        assert_eq!(placeholder.hit_effect, "hitBulletSmall");
+        assert_eq!(placeholder.despawn_effect, "hitBulletSmall");
+    }
+
+    #[test]
+    fn lightning_bullets_keep_copy_overrides() {
+        let bullets = load();
+        let base = &by_name(&bullets, "damageLightning").spec;
+
+        assert_eq!(base.kind, BulletKind::Generic);
+        assert_eq!(base.speed, 0.0001);
+        assert_eq!(base.damage, 0.0);
+        assert_eq!(base.lifetime, 10.0);
+        assert_eq!(base.hit_effect, "hitLancer");
+        assert_eq!(base.despawn_effect, "none");
+        assert_eq!(base.status, "shocked");
+        assert_eq!(base.status_duration, 10.0);
+        assert!(!base.hittable);
+        assert_eq!(base.light_color, "ffffffff");
+        assert!(base.collides_air);
+        assert!(base.collides_ground);
+        assert!(base.collides_tiles);
+
+        let ground = &by_name(&bullets, "damageLightningGround").spec;
+        assert!(!ground.collides_air);
+        assert!(ground.collides_ground);
+        assert!(ground.collides_tiles);
+        assert_eq!(ground.status, base.status);
+        assert_eq!(ground.hit_effect, base.hit_effect);
+
+        let air = &by_name(&bullets, "damageLightningAir").spec;
+        assert!(air.collides_air);
+        assert!(!air.collides_ground);
+        assert!(!air.collides_tiles);
+        assert_eq!(air.status, base.status);
+        assert_eq!(air.hit_effect, base.hit_effect);
+    }
+
+    #[test]
+    fn fireball_and_space_liquid_match_special_type_defaults() {
+        let bullets = load();
+
+        let fireball = &by_name(&bullets, "fireball").spec;
+        assert_eq!(fireball.kind, BulletKind::Generic);
+        assert_eq!(fireball.speed, 1.0);
+        assert_eq!(fireball.damage, 4.0);
+        assert!(fireball.pierce);
+        assert!(!fireball.collides_tiles);
+        assert!(!fireball.collides);
+        assert_eq!(fireball.drag, 0.03);
+        assert_eq!(fireball.hit_effect, "none");
+        assert_eq!(fireball.despawn_effect, "none");
+        assert_eq!(fireball.trail_effect, "fireballsmoke");
+        assert!(!fireball.hittable);
+
+        let space_liquid = &by_name(&bullets, "spaceLiquid").spec;
+        assert_eq!(space_liquid.kind, BulletKind::Liquid);
+        assert_eq!(space_liquid.speed, 3.5);
+        assert_eq!(space_liquid.damage, 0.0);
+        assert!(!space_liquid.collides);
+        assert_eq!(space_liquid.lifetime, 90.0);
+        assert_eq!(space_liquid.despawn_effect, "none");
+        assert_eq!(space_liquid.hit_effect, "none");
+        assert_eq!(space_liquid.smoke_effect, "none");
+        assert_eq!(space_liquid.shoot_effect, "none");
+        assert_eq!(space_liquid.drag, 0.01);
+        assert!(!space_liquid.hittable);
+        assert_eq!(space_liquid.orb_size, 5.5);
+        assert_eq!(space_liquid.knockback, 0.7);
+    }
+}

@@ -1,4 +1,5 @@
 pub mod blocks;
+pub mod bullets;
 pub mod items;
 pub mod liquids;
 pub mod loadouts;
@@ -21,6 +22,7 @@ use crate::mindustry::{
 #[derive(Debug, Clone, Default)]
 pub struct ContentCatalog {
     pub blocks: blocks::BlockRegistry,
+    pub bullets: Vec<bullets::BulletContent>,
     pub items: Vec<Item>,
     pub liquids: Vec<Liquid>,
     pub status_effects: Vec<StatusEffect>,
@@ -43,6 +45,7 @@ impl ContentCatalog {
         let unit_stances = unit_stances::load(&items);
         Self {
             blocks,
+            bullets: bullets::load(),
             items,
             liquids,
             status_effects: status_effects::load(),
@@ -156,6 +159,10 @@ impl ContentCatalog {
             .find(|liquid| liquid.base.mappable.name.as_str() == name)
     }
 
+    pub fn bullet_by_name(&self, name: &str) -> Option<&bullets::BulletContent> {
+        self.bullets.iter().find(|bullet| bullet.name() == name)
+    }
+
     pub fn status_effect_by_name(&self, name: &str) -> Option<&StatusEffect> {
         self.status_effects
             .iter()
@@ -212,6 +219,10 @@ impl ContentCatalog {
         self.liquids
             .iter()
             .find(|liquid| liquid.base.mappable.base.id == id)
+    }
+
+    pub fn bullet_by_id(&self, id: ContentId) -> Option<&bullets::BulletContent> {
+        self.bullets.iter().find(|bullet| bullet.id() == id)
     }
 
     pub fn status_effect_by_id(&self, id: ContentId) -> Option<&StatusEffect> {
@@ -303,6 +314,10 @@ mod tests {
             .entries
             .iter()
             .any(|entry| entry.content_type == ContentType::Team.ordinal()));
+        assert!(!snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.content_type == ContentType::Bullet.ordinal()));
     }
 
     #[test]
@@ -340,6 +355,9 @@ mod tests {
             catalog.liquid_by_id(0).unwrap().base.mappable.name.as_str(),
             "water"
         );
+        assert_eq!(catalog.bullet_by_name("fireball").unwrap().id(), 4);
+        assert_eq!(catalog.bullet_by_id(5).unwrap().name(), "spaceLiquid");
+        assert!(catalog.bullet_by_id(999).is_none());
         assert_eq!(
             catalog
                 .status_effect_by_name("wet")
