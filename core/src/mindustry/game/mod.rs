@@ -3,6 +3,7 @@ pub mod campaign_rules;
 pub mod campaign_stats;
 pub mod difficulty;
 pub mod event_type;
+pub mod fog_control;
 pub mod game_stats;
 pub mod gamemode;
 pub mod map_markers;
@@ -22,6 +23,7 @@ pub use campaign_rules::{CampaignPlanetRules, CampaignRules, CampaignRulesApplyR
 pub use campaign_stats::CampaignStats;
 pub use difficulty::Difficulty;
 pub use event_type::Trigger;
+pub use fog_control::{circle, hline, FogBits, FogControl, FogData, FogEvent};
 pub use game_stats::GameStats;
 pub use gamemode::Gamemode;
 pub use map_markers::MapMarkers;
