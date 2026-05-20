@@ -2,10 +2,13 @@ pub mod blocks;
 pub mod items;
 pub mod liquids;
 pub mod status_effects;
+pub mod unit_commands;
+pub mod unit_stances;
 pub mod unit_types;
 pub mod weathers;
 
 use crate::mindustry::{
+    ai::{unit_command::UnitCommand, unit_stance::UnitStance},
     ctype::{Content, ContentId, ContentType},
     io::save::{ContentHeaderEntry, ContentHeaderSnapshot},
     r#type::{Item, Liquid, StatusEffect, UnitType},
@@ -19,6 +22,8 @@ pub struct ContentCatalog {
     pub status_effects: Vec<StatusEffect>,
     pub units: Vec<UnitType>,
     pub weathers: Vec<weathers::WeatherContent>,
+    pub unit_commands: Vec<UnitCommand>,
+    pub unit_stances: Vec<UnitStance>,
 }
 
 impl ContentCatalog {
@@ -26,6 +31,8 @@ impl ContentCatalog {
         let items = items::load();
         let liquids = liquids::load();
         let blocks = blocks::load(&items, &liquids);
+        let unit_commands = unit_commands::load();
+        let unit_stances = unit_stances::load(&items);
         Self {
             blocks,
             items,
@@ -33,6 +40,8 @@ impl ContentCatalog {
             status_effects: status_effects::load(),
             units: unit_types::load(),
             weathers: weathers::load(),
+            unit_commands,
+            unit_stances,
         }
     }
 
@@ -87,6 +96,22 @@ impl ContentCatalog {
                         .map(|weather| weather.name().to_string())
                         .collect(),
                 },
+                ContentHeaderEntry {
+                    content_type: ContentType::UnitCommand.ordinal(),
+                    names: self
+                        .unit_commands
+                        .iter()
+                        .map(|command| command.base.name.clone())
+                        .collect(),
+                },
+                ContentHeaderEntry {
+                    content_type: ContentType::UnitStance.ordinal(),
+                    names: self
+                        .unit_stances
+                        .iter()
+                        .map(|stance| stance.base.name.clone())
+                        .collect(),
+                },
             ],
         }
     }
@@ -119,6 +144,18 @@ impl ContentCatalog {
             .find(|unit| unit.base.mappable.name.as_str() == name)
     }
 
+    pub fn unit_command_by_name(&self, name: &str) -> Option<&UnitCommand> {
+        self.unit_commands
+            .iter()
+            .find(|command| command.base.name.as_str() == name)
+    }
+
+    pub fn unit_stance_by_name(&self, name: &str) -> Option<&UnitStance> {
+        self.unit_stances
+            .iter()
+            .find(|stance| stance.base.name.as_str() == name)
+    }
+
     pub fn item_by_id(&self, id: ContentId) -> Option<&Item> {
         self.items
             .iter()
@@ -145,6 +182,18 @@ impl ContentCatalog {
         self.units
             .iter()
             .find(|unit| unit.base.mappable.base.id == id)
+    }
+
+    pub fn unit_command_by_id(&self, id: ContentId) -> Option<&UnitCommand> {
+        self.unit_commands
+            .iter()
+            .find(|command| command.base.base.id == id)
+    }
+
+    pub fn unit_stance_by_id(&self, id: ContentId) -> Option<&UnitStance> {
+        self.unit_stances
+            .iter()
+            .find(|stance| stance.base.base.id == id)
     }
 }
 
@@ -174,6 +223,8 @@ mod tests {
                 ContentType::Status.ordinal(),
                 ContentType::Unit.ordinal(),
                 ContentType::Weather.ordinal(),
+                ContentType::UnitCommand.ordinal(),
+                ContentType::UnitStance.ordinal(),
             ]
         );
         assert_eq!(snapshot.entries[0].names[0], "scrap");
@@ -182,6 +233,8 @@ mod tests {
         assert_eq!(snapshot.entries[3].names[0], "none");
         assert_eq!(snapshot.entries[4].names[0], "dagger");
         assert_eq!(snapshot.entries[5].names[0], "snowing");
+        assert_eq!(snapshot.entries[6].names[0], "move");
+        assert_eq!(snapshot.entries[7].names[0], "stop");
     }
 
     #[test]
@@ -235,5 +288,11 @@ mod tests {
         assert_eq!(catalog.unit_by_name("flare").unwrap().id(), 15);
         assert_eq!(catalog.unit_by_id(60).unwrap().name(), "assembly-drone");
         assert!(catalog.unit_by_id(999).is_none());
+        assert_eq!(catalog.unit_command_by_name("mine").unwrap().id(), 4);
+        assert_eq!(catalog.unit_command_by_id(9).unwrap().name(), "loopPayload");
+        assert!(catalog.unit_command_by_id(999).is_none());
+        assert_eq!(catalog.unit_stance_by_name("mineauto").unwrap().id(), 7);
+        assert_eq!(catalog.unit_stance_by_id(8).unwrap().name(), "item-scrap");
+        assert!(catalog.unit_stance_by_id(999).is_none());
     }
 }
