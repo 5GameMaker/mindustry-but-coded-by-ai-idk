@@ -14,6 +14,7 @@ pub mod sector_info;
 pub mod spawn_group;
 pub mod team;
 pub mod teams;
+pub mod universe;
 pub mod waves;
 
 pub use attack_indicators::{AttackIndicator, AttackIndicators, ATTACK_INDICATOR_DURATION};
@@ -41,4 +42,9 @@ pub use team::{
     TEAM_DERELICT, TEAM_GREEN, TEAM_MALIS, TEAM_NEOPLASTIC, TEAM_SHARDED,
 };
 pub use teams::{BlockPlan, CoreInfo, TeamData, Teams};
+pub use universe::{
+    file_stem_like_java, last_loadout_key, Universe, UniverseSettings, UniverseTurn,
+    UniverseUpdate, DEFAULT_LOADOUT_CORES, LAST_LOADOUT_PREFIX, LAUNCH_RESOURCES_KEY,
+    UNIVERSE_SECONDS_KEY, UNIVERSE_TURN_KEY,
+};
 pub use waves::{default_spawn_groups, generate, generate_with_seed, Waves, WAVE_VERSION};
