@@ -22,7 +22,9 @@ pub use attack_indicators::{AttackIndicator, AttackIndicators, ATTACK_INDICATOR_
 pub use campaign_rules::{CampaignPlanetRules, CampaignRules, CampaignRulesApplyResult};
 pub use campaign_stats::CampaignStats;
 pub use difficulty::Difficulty;
-pub use event_type::Trigger;
+pub use event_type::{
+    ClientChatEvent, ClientServerConnectEvent, ContentPatchLoadEvent, SaveLoadEvent, Trigger,
+};
 pub use fog_control::{circle, hline, FogBits, FogControl, FogData, FogEvent};
 pub use game_stats::GameStats;
 pub use gamemode::Gamemode;
