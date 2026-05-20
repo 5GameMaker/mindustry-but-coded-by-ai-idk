@@ -37,8 +37,9 @@ pub use objectives::{
 };
 pub use rules::{Rules, TeamRule, TeamRules};
 pub use schematic::{
-    read_schematic, read_schematic_base64, write_schematic, write_schematic_base64, Schematic,
-    SchematicTile, MAX_SCHEMATIC_SIZE, SCHEMATIC_HEADER, SCHEMATIC_VERSION,
+    read_schematic, read_schematic_base64, rotate_schematic, rotate_schematic_with_block_info,
+    write_schematic, write_schematic_base64, Schematic, SchematicBlockInfo, SchematicTile,
+    MAX_SCHEMATIC_SIZE, SCHEMATIC_HEADER, SCHEMATIC_VERSION,
 };
 pub use sector_info::{ExportStat, SectorInfo};
 pub use spawn_group::SpawnGroup;

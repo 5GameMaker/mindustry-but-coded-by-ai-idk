@@ -6,8 +6,9 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 
 use crate::mindustry::io::type_io::{
     read_i16, read_i32, read_java_utf, read_object, read_u8, write_i16, write_i32, write_java_utf,
-    write_object, write_u8, TypeValue,
+    write_object, write_u8, Point2, TypeValue,
 };
+use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const SCHEMATIC_HEADER: &[u8; 4] = b"msch";
@@ -112,6 +113,31 @@ impl SchematicTile {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SchematicBlockInfo {
+    pub size: i32,
+    pub offset: f32,
+}
+
+impl SchematicBlockInfo {
+    pub fn new(size: i32, offset: f32) -> Self {
+        Self { size, offset }
+    }
+
+    pub fn for_size(size: i32) -> Self {
+        Self {
+            size,
+            offset: ((size + 1).rem_euclid(2)) as f32 * TILE_SIZE as f32 / 2.0,
+        }
+    }
+}
+
+impl Default for SchematicBlockInfo {
+    fn default() -> Self {
+        Self::for_size(1)
+    }
+}
+
 pub fn write_schematic(schematic: &Schematic) -> io::Result<Vec<u8>> {
     let mut out = Vec::new();
     out.extend_from_slice(SCHEMATIC_HEADER);
@@ -156,6 +182,31 @@ pub fn read_schematic_base64(schematic: &str) -> io::Result<Schematic> {
         .decode(schematic.trim())
         .map_err(|_| invalid_data("invalid schematic base64"))?;
     read_schematic(&bytes)
+}
+
+pub fn rotate_schematic(schematic: &Schematic, times: i32) -> Schematic {
+    rotate_schematic_with_block_info(schematic, times, |_| SchematicBlockInfo::default())
+}
+
+pub fn rotate_schematic_with_block_info<F>(
+    schematic: &Schematic,
+    times: i32,
+    mut block_info: F,
+) -> Schematic
+where
+    F: FnMut(&str) -> SchematicBlockInfo,
+{
+    let mut result = schematic.clone();
+    let turns = times % 4;
+    if turns == 0 {
+        return result;
+    }
+
+    let direction = turns.signum();
+    for _ in 0..turns.abs() {
+        result = rotated_once(&result, direction, &mut block_info);
+    }
+    result
 }
 
 fn write_schematic_body<W: Write>(write: &mut W, schematic: &Schematic) -> io::Result<()> {
@@ -393,6 +444,64 @@ fn labels_from_json(json: &str) -> io::Result<Vec<String>> {
     Ok(labels)
 }
 
+fn rotated_once<F>(input: &Schematic, direction: i32, block_info: &mut F) -> Schematic
+where
+    F: FnMut(&str) -> SchematicBlockInfo,
+{
+    let mut schematic = input.clone();
+    let ox = input.width / 2;
+    let oy = input.height / 2;
+
+    for tile in &mut schematic.tiles {
+        let info = block_info(&tile.block);
+        tile.config = rotate_point_config(&tile.config, direction);
+
+        let mut wx = (tile.x as i32 - ox) as f32 * TILE_SIZE as f32 + info.offset;
+        let mut wy = (tile.y as i32 - oy) as f32 * TILE_SIZE as f32 + info.offset;
+        let previous_x = wx;
+        if direction >= 0 {
+            wx = -wy;
+            wy = previous_x;
+        } else {
+            wx = wy;
+            wy = -previous_x;
+        }
+
+        tile.x = (world_to_tile(wx - info.offset) + ox) as i16;
+        tile.y = (world_to_tile(wy - info.offset) + oy) as i16;
+        tile.rotation = (tile.rotation as i32 + direction).rem_euclid(4) as u8;
+    }
+
+    schematic.width = input.height;
+    schematic.height = input.width;
+    schematic
+}
+
+fn rotate_point_config(config: &TypeValue, direction: i32) -> TypeValue {
+    match config {
+        TypeValue::Point2(point) => TypeValue::Point2(rotate_point(*point, direction)),
+        TypeValue::Point2Array(points) => TypeValue::Point2Array(
+            points
+                .iter()
+                .map(|point| rotate_point(*point, direction))
+                .collect(),
+        ),
+        _ => config.clone(),
+    }
+}
+
+fn rotate_point(point: Point2, direction: i32) -> Point2 {
+    if direction >= 0 {
+        Point2::new(-point.y, point.x)
+    } else {
+        Point2::new(point.y, -point.x)
+    }
+}
+
+fn world_to_tile(coord: f32) -> i32 {
+    (coord / TILE_SIZE as f32 + 0.5).floor() as i32
+}
+
 fn invalid_data(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
@@ -486,5 +595,76 @@ mod tests {
         let json = labels_to_json(&labels);
         assert_eq!(labels_from_json(&json).unwrap(), labels);
         assert_eq!(labels_from_json("[]").unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn schematic_rotate_matches_java_counter_clockwise_steps() {
+        let schematic = Schematic::new(
+            vec![
+                SchematicTile::with_config_value(
+                    "duo",
+                    0,
+                    1,
+                    TypeValue::Point2(Point2::new(2, -1)),
+                    3,
+                ),
+                SchematicTile::with_config_value(
+                    "router",
+                    2,
+                    1,
+                    TypeValue::Point2Array(vec![Point2::new(1, 0), Point2::new(0, -2)]),
+                    0,
+                ),
+            ],
+            HashMap::new(),
+            3,
+            3,
+        );
+
+        let rotated = rotate_schematic(&schematic, 1);
+        assert_eq!((rotated.width, rotated.height), (3, 3));
+        assert_eq!(
+            rotated.tiles[0],
+            SchematicTile::with_config_value("duo", 1, 0, TypeValue::Point2(Point2::new(1, 2)), 0)
+        );
+        assert_eq!(
+            rotated.tiles[1],
+            SchematicTile::with_config_value(
+                "router",
+                1,
+                2,
+                TypeValue::Point2Array(vec![Point2::new(0, 1), Point2::new(2, 0)]),
+                1
+            )
+        );
+
+        let unrotated = rotate_schematic(&rotated, -1);
+        assert_eq!(unrotated, schematic);
+    }
+
+    #[test]
+    fn schematic_rotate_uses_java_multiblock_offsets() {
+        let schematic = Schematic::new(
+            vec![SchematicTile::with_config_value(
+                "large",
+                2,
+                1,
+                TypeValue::Null,
+                1,
+            )],
+            HashMap::new(),
+            4,
+            4,
+        );
+
+        let rotated = rotate_schematic_with_block_info(&schematic, 1, |name| {
+            assert_eq!(name, "large");
+            SchematicBlockInfo::for_size(2)
+        });
+
+        assert_eq!((rotated.width, rotated.height), (4, 4));
+        assert_eq!(rotated.tiles[0].x, 2);
+        assert_eq!(rotated.tiles[0].y, 2);
+        assert_eq!(rotated.tiles[0].rotation, 2);
     }
 }
