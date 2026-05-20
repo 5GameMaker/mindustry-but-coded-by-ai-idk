@@ -1,6 +1,7 @@
 pub mod blocks;
 pub mod items;
 pub mod liquids;
+pub mod loadouts;
 pub mod planets;
 pub mod sector_presets;
 pub mod status_effects;
@@ -27,6 +28,7 @@ pub struct ContentCatalog {
     pub weathers: Vec<weathers::WeatherContent>,
     pub sectors: Vec<SectorPreset>,
     pub planets: Vec<planets::PlanetContent>,
+    pub loadouts: Vec<loadouts::Loadout>,
     pub team_entries: Vec<TeamEntry>,
     pub unit_commands: Vec<UnitCommand>,
     pub unit_stances: Vec<UnitStance>,
@@ -48,6 +50,7 @@ impl ContentCatalog {
             weathers: weathers::load(),
             sectors: sector_presets::load(),
             planets: planets::load(),
+            loadouts: loadouts::load_or_panic(),
             team_entries: team_entries::load(),
             unit_commands,
             unit_stances,
@@ -175,6 +178,10 @@ impl ContentCatalog {
 
     pub fn planet_by_name(&self, name: &str) -> Option<&planets::PlanetContent> {
         self.planets.iter().find(|planet| planet.name() == name)
+    }
+
+    pub fn loadout_by_name(&self, name: &str) -> Option<&loadouts::Loadout> {
+        self.loadouts.iter().find(|loadout| loadout.name == name)
     }
 
     pub fn unit_command_by_name(&self, name: &str) -> Option<&UnitCommand> {
@@ -352,6 +359,15 @@ mod tests {
         assert_eq!(catalog.planet_by_name("serpulo").unwrap().id(), 5);
         assert_eq!(catalog.planet_by_id(1).unwrap().name(), "erekir");
         assert!(catalog.planet_by_id(999).is_none());
+        assert_eq!(
+            catalog
+                .loadout_by_name("basicBastion")
+                .unwrap()
+                .core_block_name(),
+            Some("core-bastion")
+        );
+        assert!(catalog.blocks.get_by_name("core-bastion").is_some());
+        assert!(catalog.loadout_by_name("missing").is_none());
         assert_eq!(catalog.unit_by_name("flare").unwrap().id(), 15);
         assert_eq!(catalog.unit_by_id(60).unwrap().name(), "assembly-drone");
         assert!(catalog.unit_by_id(999).is_none());
