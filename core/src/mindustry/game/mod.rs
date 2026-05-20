@@ -7,6 +7,7 @@ pub mod game_stats;
 pub mod gamemode;
 pub mod map_markers;
 pub mod map_objectives;
+pub mod objectives;
 pub mod rules;
 pub mod schematic;
 pub mod sector_info;
@@ -24,6 +25,9 @@ pub use map_objectives::{
     marker_type_by_java_name, CompleteObjectiveEvent, MapObjective, MapObjectiveCommon,
     MapObjectiveContext, MapObjectiveKind, MapObjectives, MarkerCommon, ObjectiveMarker, Point2,
     Vec2,
+};
+pub use objectives::{
+    Objective, ObjectiveContent, ObjectiveKind, PlanetObjectiveState, SectorObjectiveState,
 };
 pub use rules::{Rules, TeamRule, TeamRules};
 pub use schematic::{Schematic, SchematicTile};
