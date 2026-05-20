@@ -36,7 +36,10 @@ pub use objectives::{
     Objective, ObjectiveContent, ObjectiveKind, PlanetObjectiveState, SectorObjectiveState,
 };
 pub use rules::{Rules, TeamRule, TeamRules};
-pub use schematic::{Schematic, SchematicTile};
+pub use schematic::{
+    read_schematic, read_schematic_base64, write_schematic, write_schematic_base64, Schematic,
+    SchematicTile, MAX_SCHEMATIC_SIZE, SCHEMATIC_HEADER, SCHEMATIC_VERSION,
+};
 pub use sector_info::{ExportStat, SectorInfo};
 pub use spawn_group::SpawnGroup;
 pub use team::{
