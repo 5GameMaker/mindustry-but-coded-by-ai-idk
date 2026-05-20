@@ -36,4 +36,4 @@ pub use sector::{Sector, SectorPlanetDefaults, SectorPreset, SectorRuntimeState}
 pub use status_effect::StatusEffect;
 pub use team_entry::TeamEntry;
 pub use weapon::Weapon;
-pub use weather::{Weather, WeatherEntry, WeatherState};
+pub use weather::{RainDrawPlan, RainWeather, SplashDrawPlan, Weather, WeatherEntry, WeatherState};

@@ -3,6 +3,9 @@ use crate::mindustry::{
     logic::{LogicWeatherEvent, LogicWeatherState, LOGIC_WEATHER_FADE_TIME},
 };
 
+pub mod rain_weather;
+pub use rain_weather::{RainDrawPlan, RainWeather, SplashDrawPlan};
+
 pub const TIME_TO_MINUTES: f32 = 60.0 * 60.0;
 pub const WEATHER_DEFAULT_DURATION: f32 = 10.0 * TIME_TO_MINUTES;
 pub const WEATHER_STATE_FADE_TIME: f32 = 60.0 * 4.0;
