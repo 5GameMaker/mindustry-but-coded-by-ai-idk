@@ -15,6 +15,7 @@ pub mod publishable;
 pub mod sector;
 pub mod status_effect;
 pub mod team_entry;
+pub mod unit_type;
 pub mod weapon;
 pub mod weather;
 
@@ -35,6 +36,7 @@ pub use publishable::Publishable;
 pub use sector::{Sector, SectorPlanetDefaults, SectorPreset, SectorRuntimeState};
 pub use status_effect::StatusEffect;
 pub use team_entry::TeamEntry;
+pub use unit_type::{UnitEngine, UnitType};
 pub use weapon::Weapon;
 pub use weather::{
     MagneticStorm, ParticleDrawParticlesPlan, ParticleDrawPlan, ParticleNoiseLayerPlan,
