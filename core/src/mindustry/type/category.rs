@@ -1,4 +1,4 @@
-﻿#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Category {
     Turret = 0,
@@ -31,6 +31,17 @@ impl Category {
         self as usize
     }
 
+    pub fn from_ordinal(ordinal: usize) -> Option<Self> {
+        Self::ALL.get(ordinal).copied()
+    }
+
+    pub fn from_wire_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|category| category.wire_name() == name)
+    }
+
     pub fn prev(self) -> Self {
         Self::ALL[(self.ordinal() + Self::ALL.len() - 1) % Self::ALL.len()]
     }
@@ -52,5 +63,59 @@ impl Category {
             Category::Effect => "effect",
             Category::Logic => "logic",
         }
+    }
+}
+
+impl std::fmt::Display for Category {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.wire_name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Category;
+
+    #[test]
+    fn category_order_and_wire_names_match_java_enum() {
+        let names: Vec<_> = Category::ALL
+            .iter()
+            .map(|category| category.wire_name())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "turret",
+                "production",
+                "distribution",
+                "liquid",
+                "power",
+                "defense",
+                "crafting",
+                "units",
+                "effect",
+                "logic"
+            ]
+        );
+
+        for (index, category) in Category::ALL.iter().copied().enumerate() {
+            assert_eq!(category.ordinal(), index);
+            assert_eq!(Category::from_ordinal(index), Some(category));
+            assert_eq!(
+                Category::from_wire_name(category.wire_name()),
+                Some(category)
+            );
+            assert_eq!(category.to_string(), category.wire_name());
+        }
+        assert_eq!(Category::from_ordinal(Category::ALL.len()), None);
+        assert_eq!(Category::from_wire_name("missing"), None);
+    }
+
+    #[test]
+    fn category_prev_and_next_wrap_like_java_modulo_helpers() {
+        assert_eq!(Category::Turret.prev(), Category::Logic);
+        assert_eq!(Category::Turret.next(), Category::Production);
+        assert_eq!(Category::Logic.next(), Category::Turret);
+        assert_eq!(Category::Logic.prev(), Category::Effect);
     }
 }

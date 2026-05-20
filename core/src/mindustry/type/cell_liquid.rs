@@ -39,6 +39,19 @@ impl CellLiquid {
         self.liquid.gas_color_rgba = color_rgba;
         self
     }
+
+    pub fn with_spread_target(mut self, target: impl Into<String>) -> Self {
+        self.spread_target = Some(target.into());
+        self
+    }
+
+    pub fn react(&self, other: &Liquid, amount: f32) -> f32 {
+        if self.spread_target.as_deref() == Some(other.name()) {
+            amount
+        } else {
+            0.0
+        }
+    }
 }
 
 impl From<Liquid> for CellLiquid {
@@ -54,5 +67,37 @@ impl From<Liquid> for CellLiquid {
             spread_damage: 0.11,
             remove_scaling: 0.25,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_liquid_defaults_match_java_field_initializers() {
+        let cell = CellLiquid::with_color("neoplasm", 0xff795eff);
+        assert_eq!(cell.liquid.name(), "neoplasm");
+        assert_eq!(cell.liquid.color_rgba, 0xff795eff);
+        assert_eq!(cell.liquid.gas_color_rgba, 0xff795eff);
+        assert_eq!(cell.color_from_rgba, 0xffffffff);
+        assert_eq!(cell.color_to_rgba, 0xffffffff);
+        assert_eq!(cell.cells, 6);
+        assert_eq!(cell.spread_target, None);
+        assert_eq!(cell.max_spread, 0.75);
+        assert_eq!(cell.spread_conversion, 1.2);
+        assert_eq!(cell.spread_damage, 0.11);
+        assert_eq!(cell.remove_scaling, 0.25);
+    }
+
+    #[test]
+    fn cell_liquid_react_consumes_only_the_configured_spread_target() {
+        let cell = CellLiquid::new("neoplasm").with_spread_target("water");
+        let water = Liquid::new(1, "water");
+        let oil = Liquid::new(2, "oil");
+
+        assert_eq!(cell.react(&water, 9.5), 9.5);
+        assert_eq!(cell.react(&oil, 9.5), 0.0);
+        assert_eq!(CellLiquid::new("neoplasm").react(&water, 9.5), 0.0);
     }
 }
