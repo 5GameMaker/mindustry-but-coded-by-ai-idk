@@ -27,6 +27,7 @@ pub const LOGIC_BUILDING_RANGE: f32 = 220.0;
 pub const LOGIC_WEATHER_FADE_TIME: f32 = 60.0 * 4.0;
 pub const LOGIC_DEFAULT_MAX_IPT: i32 = 1000;
 pub const LOGIC_SYNC_INTERVAL_MILLIS: i64 = 1000 / 20;
+pub const LOGIC_MAX_MARKERS: usize = 20_000;
 
 const INVALID_NUM_NEGATIVE: i64 = i64::MIN;
 const INVALID_NUM_POSITIVE: i64 = i64::MAX;
@@ -4409,6 +4410,89 @@ pub struct LogicSyncEvent {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LogicSoundEvent {
+    pub positional: bool,
+    pub sound_id: i32,
+    pub sound_name: Option<String>,
+    pub volume: f32,
+    pub pitch: f32,
+    pub pan: f32,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    pub limit: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicMarkerControlEvent {
+    pub id: i32,
+    pub control: LMarkerControl,
+    pub p1: f64,
+    pub p2: f64,
+    pub p3: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicMarkerEvent {
+    Created {
+        id: i32,
+        type_name: String,
+        x: f32,
+        y: f32,
+        replaced: bool,
+    },
+    Removed {
+        id: i32,
+    },
+    Controlled(LogicMarkerControlEvent),
+    Text {
+        id: i32,
+        text: String,
+        fetch: bool,
+    },
+    Texture {
+        id: i32,
+        texture: LVarValue,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicMarkerObject {
+    pub type_name: String,
+    pub x: f32,
+    pub y: f32,
+    pub text: String,
+    pub text_fetch: bool,
+    pub texture: LVarValue,
+    pub controls: Vec<LogicMarkerControlEvent>,
+}
+
+impl LogicMarkerObject {
+    pub fn new(type_name: impl Into<String>, x: f32, y: f32) -> Self {
+        Self {
+            type_name: type_name.into(),
+            x,
+            y,
+            text: String::new(),
+            text_fetch: false,
+            texture: LVarValue::Object(None),
+            controls: Vec::new(),
+        }
+    }
+
+    pub fn control(&mut self, event: LogicMarkerControlEvent) {
+        if event.control == LMarkerControl::Pos {
+            if !event.p1.is_nan() {
+                self.x = logic_unconv(event.p1 as f32);
+            }
+            if !event.p2.is_nan() {
+                self.y = logic_unconv(event.p2 as f32);
+            }
+        }
+        self.controls.push(event);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicBuildingObject {
     pub block_name: String,
     pub team: u8,
@@ -4738,6 +4822,9 @@ pub struct LogicExecutor {
     pub message_events: Vec<LogicMessageEvent>,
     pub client_data_events: Vec<LogicClientDataEvent>,
     pub sync_events: Vec<LogicSyncEvent>,
+    pub sound_events: Vec<LogicSoundEvent>,
+    pub markers: BTreeMap<i32, LogicMarkerObject>,
+    pub marker_events: Vec<LogicMarkerEvent>,
     pub map_locales: BTreeMap<String, String>,
     pub mobile: bool,
     pub message_state: LogicMessageState,
@@ -4793,6 +4880,9 @@ impl LogicExecutor {
             message_events: Vec::new(),
             client_data_events: Vec::new(),
             sync_events: Vec::new(),
+            sound_events: Vec::new(),
+            markers: BTreeMap::new(),
+            marker_events: Vec::new(),
             map_locales: BTreeMap::new(),
             mobile: false,
             message_state: LogicMessageState::default(),
@@ -5152,6 +5242,30 @@ pub enum LogicInstruction {
         value: LVar,
         reliable: LVar,
     },
+    PlaySound {
+        positional: bool,
+        id: LVar,
+        volume: LVar,
+        pitch: LVar,
+        pan: LVar,
+        x: LVar,
+        y: LVar,
+        limit: LVar,
+    },
+    SetMarker {
+        type_: LMarkerControl,
+        id: LVar,
+        p1: LVar,
+        p2: LVar,
+        p3: LVar,
+    },
+    MakeMarker {
+        type_name: String,
+        id: LVar,
+        x: LVar,
+        y: LVar,
+        replace: LVar,
+    },
     Set {
         from: LVar,
         to: LVar,
@@ -5505,6 +5619,36 @@ impl LogicInstruction {
                 reliable,
             } => {
                 exec_client_data_runtime(exec, channel, value, reliable);
+            }
+            LogicInstruction::PlaySound {
+                positional,
+                id,
+                volume,
+                pitch,
+                pan,
+                x,
+                y,
+                limit,
+            } => {
+                exec_play_sound_runtime(exec, *positional, id, volume, pitch, pan, x, y, limit);
+            }
+            LogicInstruction::SetMarker {
+                type_,
+                id,
+                p1,
+                p2,
+                p3,
+            } => {
+                exec_set_marker_runtime(exec, *type_, id, p1, p2, p3);
+            }
+            LogicInstruction::MakeMarker {
+                type_name,
+                id,
+                x,
+                y,
+                replace,
+            } => {
+                exec_make_marker_runtime(exec, type_name, id, x, y, replace);
             }
             LogicInstruction::Set { from, to } => {
                 if !to.constant {
@@ -6475,6 +6619,128 @@ pub fn exec_client_data_runtime(
             value: value.value(),
             reliable: reliable.bool(),
         });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn exec_play_sound_runtime(
+    exec: &mut LogicExecutor,
+    positional: bool,
+    id: &LVar,
+    volume: &LVar,
+    pitch: &LVar,
+    pan: &LVar,
+    x: &LVar,
+    y: &LVar,
+    limit: &LVar,
+) {
+    exec.sound_events.push(LogicSoundEvent {
+        positional,
+        sound_id: id.numi(),
+        sound_name: id.obj().map(str::to_string),
+        volume: volume.numf().min(2.0),
+        pitch: pitch.numf(),
+        pan: pan.numf(),
+        x: positional.then(|| logic_unconv(x.numf())),
+        y: positional.then(|| logic_unconv(y.numf())),
+        limit: limit.bool(),
+    });
+}
+
+pub fn logic_marker_type_known(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "ShapeText"
+            | "shapeText"
+            | "Point"
+            | "point"
+            | "Shape"
+            | "shape"
+            | "Text"
+            | "text"
+            | "Line"
+            | "line"
+            | "Texture"
+            | "texture"
+            | "Quad"
+            | "quad"
+            | "Minimap"
+            | "minimap"
+    )
+}
+
+pub fn exec_make_marker_runtime(
+    exec: &mut LogicExecutor,
+    type_name: &str,
+    id: &LVar,
+    x: &LVar,
+    y: &LVar,
+    replace: &LVar,
+) {
+    if !logic_marker_type_known(type_name) || exec.markers.len() >= LOGIC_MAX_MARKERS {
+        return;
+    }
+
+    let id = id.numi();
+    let replaced = exec.markers.contains_key(&id);
+    if replace.bool() || !replaced {
+        let marker =
+            LogicMarkerObject::new(type_name, logic_unconv(x.numf()), logic_unconv(y.numf()));
+        exec.markers.insert(id, marker);
+        exec.marker_events.push(LogicMarkerEvent::Created {
+            id,
+            type_name: type_name.to_string(),
+            x: logic_unconv(x.numf()),
+            y: logic_unconv(y.numf()),
+            replaced,
+        });
+    }
+}
+
+pub fn exec_set_marker_runtime(
+    exec: &mut LogicExecutor,
+    type_: LMarkerControl,
+    id: &LVar,
+    p1: &LVar,
+    p2: &LVar,
+    p3: &LVar,
+) {
+    let id = id.numi();
+    if type_ == LMarkerControl::Remove {
+        exec.markers.remove(&id);
+        exec.marker_events.push(LogicMarkerEvent::Removed { id });
+        return;
+    }
+
+    let Some(marker) = exec.markers.get_mut(&id) else {
+        return;
+    };
+    if type_ == LMarkerControl::FlushText {
+        let text = std::mem::take(&mut exec.text_buffer);
+        let fetch = p1.bool();
+        marker.text = text.clone();
+        marker.text_fetch = fetch;
+        exec.marker_events
+            .push(LogicMarkerEvent::Text { id, text, fetch });
+    } else if type_ == LMarkerControl::Texture {
+        let texture = if p1.bool() {
+            LVarValue::Object(Some(std::mem::take(&mut exec.text_buffer)))
+        } else {
+            p2.value()
+        };
+        marker.texture = texture.clone();
+        exec.marker_events
+            .push(LogicMarkerEvent::Texture { id, texture });
+    } else {
+        let event = LogicMarkerControlEvent {
+            id,
+            control: type_,
+            p1: p1.num_or_nan(),
+            p2: p2.num_or_nan(),
+            p3: p3.num_or_nan(),
+        };
+        marker.control(event.clone());
+        exec.marker_events.push(LogicMarkerEvent::Controlled(event));
     }
 }
 
@@ -13462,6 +13728,234 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn sound_and_marker_runtime_instructions_record_world_side_effects() {
+        let mut exec = LogicExecutor::new();
+        LogicInstruction::PlaySound {
+            positional: false,
+            id: {
+                let mut value = LVar::new("sound");
+                value.set_num(3.0);
+                value
+            },
+            volume: {
+                let mut value = LVar::new("volume");
+                value.set_num(5.0);
+                value
+            },
+            pitch: {
+                let mut value = LVar::new("pitch");
+                value.set_num(0.75);
+                value
+            },
+            pan: {
+                let mut value = LVar::new("pan");
+                value.set_num(-0.25);
+                value
+            },
+            x: LVar::new("x"),
+            y: LVar::new("y"),
+            limit: {
+                let mut value = LVar::new("limit");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(
+            exec.sound_events,
+            vec![LogicSoundEvent {
+                positional: false,
+                sound_id: 3,
+                sound_name: None,
+                volume: 2.0,
+                pitch: 0.75,
+                pan: -0.25,
+                x: None,
+                y: None,
+                limit: true,
+            }]
+        );
+
+        LogicInstruction::PlaySound {
+            positional: true,
+            id: {
+                let mut value = LVar::new("sound");
+                value.set_obj(Some("@sfx-explosion".into()));
+                value
+            },
+            volume: {
+                let mut value = LVar::new("volume");
+                value.set_num(0.5);
+                value
+            },
+            pitch: {
+                let mut value = LVar::new("pitch");
+                value.set_num(2.0);
+                value
+            },
+            pan: LVar::new("pan"),
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(3.0);
+                value
+            },
+            limit: LVar::new("limit"),
+        }
+        .run(&mut exec);
+        assert_eq!(
+            exec.sound_events[1].sound_name,
+            Some("@sfx-explosion".into())
+        );
+        assert_eq!(
+            (exec.sound_events[1].x, exec.sound_events[1].y),
+            (Some(16.0), Some(24.0))
+        );
+
+        LogicInstruction::MakeMarker {
+            type_name: "shape".into(),
+            id: {
+                let mut value = LVar::new("id");
+                value.set_num(7.0);
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(3.0);
+                value
+            },
+            replace: {
+                let mut value = LVar::new("replace");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!((exec.markers[&7].x, exec.markers[&7].y), (16.0, 24.0));
+        assert_eq!(
+            exec.marker_events[0],
+            LogicMarkerEvent::Created {
+                id: 7,
+                type_name: "shape".into(),
+                x: 16.0,
+                y: 24.0,
+                replaced: false,
+            }
+        );
+
+        LogicInstruction::MakeMarker {
+            type_name: "missing".into(),
+            id: {
+                let mut value = LVar::new("id");
+                value.set_num(8.0);
+                value
+            },
+            x: LVar::new("x"),
+            y: LVar::new("y"),
+            replace: {
+                let mut value = LVar::new("replace");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert!(!exec.markers.contains_key(&8));
+
+        LogicInstruction::SetMarker {
+            type_: LMarkerControl::Pos,
+            id: {
+                let mut value = LVar::new("id");
+                value.set_num(7.0);
+                value
+            },
+            p1: {
+                let mut value = LVar::new("p1");
+                value.set_num(5.0);
+                value
+            },
+            p2: {
+                let mut value = LVar::new("p2");
+                value.set_num(6.0);
+                value
+            },
+            p3: LVar::new("p3"),
+        }
+        .run(&mut exec);
+        assert_eq!((exec.markers[&7].x, exec.markers[&7].y), (40.0, 48.0));
+
+        exec.text_buffer = "marker text".into();
+        LogicInstruction::SetMarker {
+            type_: LMarkerControl::FlushText,
+            id: {
+                let mut value = LVar::new("id");
+                value.set_num(7.0);
+                value
+            },
+            p1: {
+                let mut value = LVar::new("fetch");
+                value.set_num(1.0);
+                value
+            },
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+        }
+        .run(&mut exec);
+        assert!(exec.text_buffer.is_empty());
+        assert_eq!(exec.markers[&7].text, "marker text");
+        assert!(exec.markers[&7].text_fetch);
+
+        exec.text_buffer = "texture-name".into();
+        LogicInstruction::SetMarker {
+            type_: LMarkerControl::Texture,
+            id: {
+                let mut value = LVar::new("id");
+                value.set_num(7.0);
+                value
+            },
+            p1: {
+                let mut value = LVar::new("flush");
+                value.set_num(1.0);
+                value
+            },
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+        }
+        .run(&mut exec);
+        assert_eq!(
+            exec.markers[&7].texture,
+            LVarValue::Object(Some("texture-name".into()))
+        );
+        assert!(exec.text_buffer.is_empty());
+
+        LogicInstruction::SetMarker {
+            type_: LMarkerControl::Remove,
+            id: {
+                let mut value = LVar::new("id");
+                value.set_num(7.0);
+                value
+            },
+            p1: LVar::new("p1"),
+            p2: LVar::new("p2"),
+            p3: LVar::new("p3"),
+        }
+        .run(&mut exec);
+        assert!(!exec.markers.contains_key(&7));
+        assert!(matches!(
+            exec.marker_events.last(),
+            Some(LogicMarkerEvent::Removed { id: 7 })
+        ));
     }
 
     #[test]
