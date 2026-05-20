@@ -1,5 +1,6 @@
 pub mod blocks;
 pub mod bullets;
+pub mod erekir_tech_tree;
 pub mod items;
 pub mod liquids;
 pub mod loadouts;
@@ -32,6 +33,7 @@ pub struct ContentCatalog {
     pub sectors: Vec<SectorPreset>,
     pub planets: Vec<planets::PlanetContent>,
     pub serpulo_tech_tree: crate::mindustry::game::TechTree,
+    pub erekir_tech_tree: crate::mindustry::game::TechTree,
     pub loadouts: Vec<loadouts::Loadout>,
     pub team_entries: Vec<TeamEntry>,
     pub unit_commands: Vec<UnitCommand>,
@@ -56,6 +58,7 @@ impl ContentCatalog {
             sectors: sector_presets::load(),
             planets: planets::load(),
             serpulo_tech_tree: serpulo_tech_tree::load(),
+            erekir_tech_tree: erekir_tech_tree::load(),
             loadouts: loadouts::load_or_panic(),
             team_entries: team_entries::load(),
             unit_commands,
@@ -388,6 +391,15 @@ mod tests {
                 .content
                 .name,
             "core-shard"
+        );
+        assert_eq!(
+            catalog
+                .erekir_tech_tree
+                .node(catalog.erekir_tech_tree.roots()[0])
+                .unwrap()
+                .content
+                .name,
+            "core-bastion"
         );
         assert_eq!(
             catalog
