@@ -4,9 +4,13 @@ use crate::mindustry::{
 };
 
 pub mod magnetic_storm;
+pub mod particle_weather;
 pub mod rain_weather;
 pub mod solar_flare;
 pub use magnetic_storm::MagneticStorm;
+pub use particle_weather::{
+    ParticleDrawParticlesPlan, ParticleDrawPlan, ParticleNoiseLayerPlan, ParticleWeather,
+};
 pub use rain_weather::{RainDrawPlan, RainWeather, SplashDrawPlan};
 pub use solar_flare::SolarFlare;
 
