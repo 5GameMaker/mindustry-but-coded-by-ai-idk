@@ -7,7 +7,8 @@ use super::{
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
         ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
-        CopyToClipboardCallPacket, CreateBulletCallPacket, DebugStatusClientCallPacket,
+        CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
+        CreateWeatherCallPacket, DebugStatusClientCallPacket,
         DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
         InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
         InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
@@ -241,6 +242,14 @@ impl PacketSerializer {
             PacketKind::CreateBulletCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::CREATE_BULLET_CALL_PACKET
+            }
+            PacketKind::CreateMarkerCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CREATE_MARKER_CALL_PACKET
+            }
+            PacketKind::CreateWeatherCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CREATE_WEATHER_CALL_PACKET
             }
             PacketKind::DebugStatusClientCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -510,6 +519,16 @@ impl PacketSerializer {
                     packet_ids::CREATE_BULLET_CALL_PACKET => {
                         Ok(PacketKind::CreateBulletCallPacket(
                             CreateBulletCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::CREATE_MARKER_CALL_PACKET => {
+                        Ok(PacketKind::CreateMarkerCallPacket(
+                            CreateMarkerCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::CREATE_WEATHER_CALL_PACKET => {
+                        Ok(PacketKind::CreateWeatherCallPacket(
+                            CreateWeatherCallPacket::read_from(&mut cursor)?,
                         ))
                     }
                     packet_ids::DEBUG_STATUS_CLIENT_CALL_PACKET => {
@@ -1142,6 +1161,25 @@ mod tests {
         let bytes = PacketSerializer::write_packet_kind(&bullet).unwrap();
         assert_eq!(bytes[0], packet_ids::CREATE_BULLET_CALL_PACKET);
         assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), bullet);
+
+        let marker = PacketKind::CreateMarkerCallPacket(CreateMarkerCallPacket {
+            id: 99,
+            marker_json: r#"{"type":"Point","x":4,"y":5}"#.into(),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&marker).unwrap();
+        assert_eq!(bytes[0], packet_ids::CREATE_MARKER_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), marker);
+
+        let weather = PacketKind::CreateWeatherCallPacket(CreateWeatherCallPacket {
+            weather_id: Some(1),
+            intensity: 0.8,
+            duration: 120.0,
+            wind_x: -0.25,
+            wind_y: 0.5,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&weather).unwrap();
+        assert_eq!(bytes[0], packet_ids::CREATE_WEATHER_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), weather);
 
         let debug = PacketKind::DebugStatusClientCallPacket(DebugStatusClientCallPacket {
             value: 1,

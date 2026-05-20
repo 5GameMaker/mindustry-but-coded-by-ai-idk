@@ -6,15 +6,16 @@ use super::packets::{
     ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CompleteObjectiveCallPacket,
     ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
-    CopyToClipboardCallPacket, CreateBulletCallPacket, DebugStatusClientCallPacket,
-    DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
-    InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
-    InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
-    LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
-    OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
-    RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
-    SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket,
-    StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
+    CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
+    CreateWeatherCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
+    InfoPopupCallPacket2, InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2,
+    InfoToastCallPacket, KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
+    LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
+    PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
+    SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
+    SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
+    StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -39,6 +40,8 @@ pub enum PacketKind {
     ConstructFinishCallPacket(ConstructFinishCallPacket),
     CopyToClipboardCallPacket(CopyToClipboardCallPacket),
     CreateBulletCallPacket(CreateBulletCallPacket),
+    CreateMarkerCallPacket(CreateMarkerCallPacket),
+    CreateWeatherCallPacket(CreateWeatherCallPacket),
     DebugStatusClientCallPacket(DebugStatusClientCallPacket),
     DebugStatusClientUnreliableCallPacket(DebugStatusClientUnreliableCallPacket),
     HideFollowUpMenuCallPacket(HideFollowUpMenuCallPacket),
@@ -99,6 +102,8 @@ impl PacketKind {
             | PacketKind::ConstructFinishCallPacket(_)
             | PacketKind::CopyToClipboardCallPacket(_)
             | PacketKind::CreateBulletCallPacket(_)
+            | PacketKind::CreateMarkerCallPacket(_)
+            | PacketKind::CreateWeatherCallPacket(_)
             | PacketKind::HideFollowUpMenuCallPacket(_)
             | PacketKind::HideHudTextCallPacket(_)
             | PacketKind::InfoMessageCallPacket(_)
@@ -156,6 +161,8 @@ impl PacketKind {
             PacketKind::ConnectCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
             | PacketKind::CreateBulletCallPacket(_)
+            | PacketKind::CreateMarkerCallPacket(_)
+            | PacketKind::CreateWeatherCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
             | PacketKind::PingResponseCallPacket(_)
