@@ -3,6 +3,7 @@ use crate::mindustry::{
     r#type::{
         unit::{
             erekir_unit_type::apply_erekir_unit_type_defaults,
+            missile_unit_type::missile_unit_type,
             neoplasm_unit_type::apply_neoplasm_unit_type_defaults,
             tank_unit_type::apply_tank_unit_type_defaults,
         },
@@ -827,6 +828,50 @@ pub fn load() -> Vec<UnitType> {
     units
 }
 
+pub fn load_nested_missiles() -> Vec<UnitType> {
+    vec![
+        nested_missile(-1, "anthicus-missile", |u| {
+            u.trail_color_rgba = Some(0x6bb6ffff);
+            u.engine_color_rgba = Some(0x6bb6ffff);
+            u.engine_size = 1.75;
+            u.engine_layer = LAYER_EFFECT;
+            u.speed = 3.35;
+            u.max_range = 6.0;
+            u.lifetime = 60.0 * 1.66;
+            u.health = 55.0;
+            u.low_altitude = true;
+            u.parts.push("FlarePart".into());
+        }),
+        nested_missile(-2, "quell-missile", |u| {
+            u.target_air = false;
+            u.speed = 4.3;
+            u.max_range = 6.0;
+            u.lifetime = 60.0 * (1.4 - 0.496);
+            u.engine_color_rgba = Some(0xbf92f9ff);
+            u.trail_color_rgba = Some(0xbf92f9ff);
+            u.engine_layer = LAYER_EFFECT;
+            u.health = 45.0;
+            u.loop_sound_volume = 0.1;
+            u.parts.push("shootOnDeathWeapon".into());
+        }),
+        nested_missile(-3, "disrupt-missile", |u| {
+            u.target_air = false;
+            u.speed = 4.6;
+            u.max_range = 5.0;
+            u.health = 70.0;
+            u.homing_delay = 10.0;
+            u.low_altitude = true;
+            u.engine_size = 3.0;
+            u.engine_color_rgba = Some(0xbf92f9ff);
+            u.trail_color_rgba = Some(0xbf92f9ff);
+            u.engine_layer = LAYER_EFFECT;
+            u.death_explosion_effect = "none".into();
+            u.loop_sound_volume = 0.1;
+            u.parts.push("ShapePart".into());
+        }),
+    ]
+}
+
 fn unit(
     next_id: &mut ContentId,
     name: &str,
@@ -876,6 +921,14 @@ const fn super_tile_payload() -> f32 {
     8.0 * 8.0
 }
 
+fn nested_missile(id: ContentId, name: &str, configure: impl FnOnce(&mut UnitType)) -> UnitType {
+    let mut unit = missile_unit_type(id, name);
+    configure(&mut unit);
+    unit
+}
+
+const LAYER_EFFECT: f32 = 110.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -889,6 +942,13 @@ mod tests {
             .iter()
             .find(|unit| unit.name() == name)
             .unwrap_or_else(|| panic!("missing unit: {name}"))
+    }
+
+    fn nested_missile_by_name<'a>(name: &str, missiles: &'a [UnitType]) -> &'a UnitType {
+        missiles
+            .iter()
+            .find(|unit| unit.name() == name)
+            .unwrap_or_else(|| panic!("missing nested missile: {name}"))
     }
 
     #[test]
@@ -1045,5 +1105,56 @@ mod tests {
         assert!(!assembly.use_unit_cap);
         assert!(!assembly.allowed_in_payloads);
         assert!(!assembly.create_wreck);
+    }
+
+    #[test]
+    fn nested_missile_units_match_upstream_spawn_unit_presets_without_main_registration() {
+        let missiles = load_nested_missiles();
+        assert_eq!(
+            names(&missiles),
+            vec!["anthicus-missile", "quell-missile", "disrupt-missile"]
+        );
+        assert_eq!(
+            missiles.iter().map(Content::id).collect::<Vec<_>>(),
+            vec![-1, -2, -3]
+        );
+
+        for missile in &missiles {
+            assert_eq!(missile.content_type(), ContentType::Unit);
+            assert!(missile.hidden);
+            assert!(missile.flying);
+            assert_eq!(missile.env_enabled, Env::ANY);
+            assert!(!missile.allowed_in_payloads);
+            assert!(!missile.physics);
+            assert!(!missile.draw_minimap);
+        }
+
+        let anthicus = nested_missile_by_name("anthicus-missile", &missiles);
+        assert_eq!(anthicus.speed, 3.35);
+        assert_eq!(anthicus.max_range, 6.0);
+        assert_eq!(anthicus.lifetime, 60.0 * 1.66);
+        assert_eq!(anthicus.health, 55.0);
+        assert!(anthicus.low_altitude);
+        assert_eq!(anthicus.engine_size, 1.75);
+        assert_eq!(anthicus.engine_layer, LAYER_EFFECT);
+        assert!(anthicus.parts.iter().any(|part| part == "FlarePart"));
+
+        let quell = nested_missile_by_name("quell-missile", &missiles);
+        assert!(!quell.target_air);
+        assert_eq!(quell.speed, 4.3);
+        assert!((quell.lifetime - 54.24).abs() < 0.001);
+        assert_eq!(quell.health, 45.0);
+        assert_eq!(quell.loop_sound_volume, 0.1);
+        assert!(quell.parts.iter().any(|part| part == "shootOnDeathWeapon"));
+
+        let disrupt = nested_missile_by_name("disrupt-missile", &missiles);
+        assert!(!disrupt.target_air);
+        assert_eq!(disrupt.speed, 4.6);
+        assert_eq!(disrupt.max_range, 5.0);
+        assert_eq!(disrupt.health, 70.0);
+        assert_eq!(disrupt.homing_delay, 10.0);
+        assert_eq!(disrupt.engine_size, 3.0);
+        assert_eq!(disrupt.death_explosion_effect, "none");
+        assert!(disrupt.parts.iter().any(|part| part == "ShapePart"));
     }
 }
