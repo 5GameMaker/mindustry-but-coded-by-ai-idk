@@ -8,11 +8,12 @@ use super::packets::{
     ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
     CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
     CreateWeatherCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
-    EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket, HideFollowUpMenuCallPacket,
-    HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
-    InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket,
-    KickCallPacket2, LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket,
-    LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
+    DropItemCallPacket, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
+    EntitySnapshotCallPacket, FollowUpMenuCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
+    HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
+    InfoPopupCallPacket2, InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2,
+    InfoToastCallPacket, KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
+    LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
     PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
     SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
     SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
@@ -45,9 +46,14 @@ pub enum PacketKind {
     CreateWeatherCallPacket(CreateWeatherCallPacket),
     DebugStatusClientCallPacket(DebugStatusClientCallPacket),
     DebugStatusClientUnreliableCallPacket(DebugStatusClientUnreliableCallPacket),
+    DropItemCallPacket(DropItemCallPacket),
     EffectCallPacket(EffectCallPacket),
     EffectCallPacket2(EffectCallPacket2),
     EffectReliableCallPacket(EffectReliableCallPacket),
+    EntitySnapshotCallPacket(EntitySnapshotCallPacket),
+    FollowUpMenuCallPacket(FollowUpMenuCallPacket),
+    GameOverCallPacket(GameOverCallPacket),
+    HiddenSnapshotCallPacket(HiddenSnapshotCallPacket),
     HideFollowUpMenuCallPacket(HideFollowUpMenuCallPacket),
     HideHudTextCallPacket(HideHudTextCallPacket),
     InfoMessageCallPacket(InfoMessageCallPacket),
@@ -94,7 +100,9 @@ impl PacketKind {
             | PacketKind::ClientSnapshotCallPacket(_)
             | PacketKind::ConnectConfirmCallPacket(_) => 2,
             PacketKind::ClientPlanSnapshotCallPacket(_)
-            | PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => 0,
+            | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
+            | PacketKind::EntitySnapshotCallPacket(_)
+            | PacketKind::HiddenSnapshotCallPacket(_) => 0,
             PacketKind::AnnounceCallPacket(_)
             | PacketKind::ClearObjectivesCallPacket(_)
             | PacketKind::ClientBinaryPacketReliableCallPacket(_)
@@ -108,9 +116,12 @@ impl PacketKind {
             | PacketKind::CreateBulletCallPacket(_)
             | PacketKind::CreateMarkerCallPacket(_)
             | PacketKind::CreateWeatherCallPacket(_)
+            | PacketKind::DropItemCallPacket(_)
             | PacketKind::EffectCallPacket(_)
             | PacketKind::EffectCallPacket2(_)
             | PacketKind::EffectReliableCallPacket(_)
+            | PacketKind::FollowUpMenuCallPacket(_)
+            | PacketKind::GameOverCallPacket(_)
             | PacketKind::HideFollowUpMenuCallPacket(_)
             | PacketKind::HideHudTextCallPacket(_)
             | PacketKind::InfoMessageCallPacket(_)
@@ -173,6 +184,10 @@ impl PacketKind {
             | PacketKind::EffectCallPacket(_)
             | PacketKind::EffectCallPacket2(_)
             | PacketKind::EffectReliableCallPacket(_)
+            | PacketKind::EntitySnapshotCallPacket(_)
+            | PacketKind::FollowUpMenuCallPacket(_)
+            | PacketKind::GameOverCallPacket(_)
+            | PacketKind::HiddenSnapshotCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
             | PacketKind::PingResponseCallPacket(_)
@@ -199,7 +214,8 @@ impl PacketKind {
             | PacketKind::ClientPacketUnreliableCallPacket(_)
             | PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientSnapshotCallPacket(_)
-            | PacketKind::ConnectConfirmCallPacket(_) => server,
+            | PacketKind::ConnectConfirmCallPacket(_)
+            | PacketKind::DropItemCallPacket(_) => server,
             PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => !server,
             PacketKind::Other {
                 allow_client,

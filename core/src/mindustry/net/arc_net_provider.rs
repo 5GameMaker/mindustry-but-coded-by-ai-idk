@@ -9,17 +9,18 @@ use super::{
         ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
         CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
         CreateWeatherCallPacket, DebugStatusClientCallPacket,
-        DebugStatusClientUnreliableCallPacket, EffectCallPacket, EffectCallPacket2,
-        EffectReliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
-        InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
-        InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
-        KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
-        LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket,
-        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
-        RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
-        SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
-        SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
-        WorldDataBeginCallPacket,
+        DebugStatusClientUnreliableCallPacket, DropItemCallPacket, EffectCallPacket,
+        EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
+        FollowUpMenuCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
+        HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket,
+        InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
+        InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
+        LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
+        OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
+        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
+        SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
+        SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket,
+        TextInputCallPacket2, WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -260,6 +261,10 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::DEBUG_STATUS_CLIENT_UNRELIABLE_CALL_PACKET
             }
+            PacketKind::DropItemCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::DROP_ITEM_CALL_PACKET
+            }
             PacketKind::EffectCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::EFFECT_CALL_PACKET
@@ -271,6 +276,22 @@ impl PacketSerializer {
             PacketKind::EffectReliableCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::EFFECT_RELIABLE_CALL_PACKET
+            }
+            PacketKind::EntitySnapshotCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::ENTITY_SNAPSHOT_CALL_PACKET
+            }
+            PacketKind::FollowUpMenuCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::FOLLOW_UP_MENU_CALL_PACKET
+            }
+            PacketKind::GameOverCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::GAME_OVER_CALL_PACKET
+            }
+            PacketKind::HiddenSnapshotCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::HIDDEN_SNAPSHOT_CALL_PACKET
             }
             PacketKind::HideFollowUpMenuCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -554,6 +575,9 @@ impl PacketSerializer {
                             DebugStatusClientUnreliableCallPacket::read_from(&mut cursor)?,
                         ))
                     }
+                    packet_ids::DROP_ITEM_CALL_PACKET => Ok(PacketKind::DropItemCallPacket(
+                        DropItemCallPacket::read_from(&mut cursor)?,
+                    )),
                     packet_ids::EFFECT_CALL_PACKET => Ok(PacketKind::EffectCallPacket(
                         EffectCallPacket::read_from(&mut cursor)?,
                     )),
@@ -563,6 +587,24 @@ impl PacketSerializer {
                     packet_ids::EFFECT_RELIABLE_CALL_PACKET => {
                         Ok(PacketKind::EffectReliableCallPacket(
                             EffectReliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::ENTITY_SNAPSHOT_CALL_PACKET => {
+                        Ok(PacketKind::EntitySnapshotCallPacket(
+                            EntitySnapshotCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::FOLLOW_UP_MENU_CALL_PACKET => {
+                        Ok(PacketKind::FollowUpMenuCallPacket(
+                            FollowUpMenuCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::GAME_OVER_CALL_PACKET => Ok(PacketKind::GameOverCallPacket(
+                        GameOverCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::HIDDEN_SNAPSHOT_CALL_PACKET => {
+                        Ok(PacketKind::HiddenSnapshotCallPacket(
+                            HiddenSnapshotCallPacket::read_from(&mut cursor)?,
                         ))
                     }
                     packet_ids::HIDE_FOLLOW_UP_MENU_CALL_PACKET => {
@@ -1246,6 +1288,56 @@ mod tests {
         assert_eq!(
             PacketSerializer::read_packet_kind(&bytes).unwrap(),
             reliable_effect
+        );
+
+        let drop_item = PacketKind::DropItemCallPacket(DropItemCallPacket { angle: -45.5 });
+        let bytes = PacketSerializer::write_packet_kind(&drop_item).unwrap();
+        assert_eq!(bytes[0], packet_ids::DROP_ITEM_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            drop_item
+        );
+
+        let entity_snapshot = PacketKind::EntitySnapshotCallPacket(EntitySnapshotCallPacket {
+            amount: 2,
+            data: vec![9, 8, 7],
+        });
+        let bytes = PacketSerializer::write_packet_kind(&entity_snapshot).unwrap();
+        assert_eq!(bytes[0], packet_ids::ENTITY_SNAPSHOT_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            entity_snapshot
+        );
+
+        let follow_up = PacketKind::FollowUpMenuCallPacket(FollowUpMenuCallPacket {
+            menu_id: 77,
+            title: Some("title".into()),
+            message: None,
+            options: vec![vec![Some("A".into()), Some("B".into())]],
+        });
+        let bytes = PacketSerializer::write_packet_kind(&follow_up).unwrap();
+        assert_eq!(bytes[0], packet_ids::FOLLOW_UP_MENU_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            follow_up
+        );
+
+        let game_over = PacketKind::GameOverCallPacket(GameOverCallPacket { winner: TeamId(6) });
+        let bytes = PacketSerializer::write_packet_kind(&game_over).unwrap();
+        assert_eq!(bytes[0], packet_ids::GAME_OVER_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            game_over
+        );
+
+        let hidden_snapshot = PacketKind::HiddenSnapshotCallPacket(HiddenSnapshotCallPacket {
+            ids: vec![3, -4, 5],
+        });
+        let bytes = PacketSerializer::write_packet_kind(&hidden_snapshot).unwrap();
+        assert_eq!(bytes[0], packet_ids::HIDDEN_SNAPSHOT_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            hidden_snapshot
         );
 
         let debug = PacketKind::DebugStatusClientCallPacket(DebugStatusClientCallPacket {
