@@ -757,6 +757,19 @@ pub fn read_team<R: Read>(read: &mut R) -> io::Result<TeamId> {
     read_team_id(read)
 }
 
+pub fn write_tile_pos<W: Write>(write: &mut W, tile_pos: Option<i32>) -> io::Result<()> {
+    write_i32(write, tile_pos.unwrap_or_else(|| point2_pack(-1, -1)))
+}
+
+pub fn read_tile_pos<R: Read>(read: &mut R) -> io::Result<Option<i32>> {
+    let pos = read_i32(read)?;
+    if pos == point2_pack(-1, -1) {
+        Ok(None)
+    } else {
+        Ok(Some(pos))
+    }
+}
+
 pub fn write_content_ref<W: Write>(write: &mut W, value: ContentRef) -> io::Result<()> {
     write_u8(write, value.content_type.ordinal())?;
     write_i16(write, value.id)

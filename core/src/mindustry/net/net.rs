@@ -4,8 +4,8 @@ use super::packets::{
     AnnounceCallPacket, ClearObjectivesCallPacket, ClientBinaryPacketReliableCallPacket,
     ClientBinaryPacketUnreliableCallPacket, ClientPacketReliableCallPacket,
     ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
-    ConnectPacket, CopyToClipboardCallPacket, DebugStatusClientCallPacket,
+    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CompleteObjectiveCallPacket,
+    ConnectCallPacket, ConnectPacket, CopyToClipboardCallPacket, DebugStatusClientCallPacket,
     DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
     InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
     InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
@@ -31,6 +31,7 @@ pub enum PacketKind {
     ClientPacketUnreliableCallPacket(ClientPacketUnreliableCallPacket),
     ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket),
     ClientPlanSnapshotReceivedCallPacket(ClientPlanSnapshotReceivedCallPacket),
+    ClientSnapshotCallPacket(ClientSnapshotCallPacket),
     CompleteObjectiveCallPacket(CompleteObjectiveCallPacket),
     ConnectCallPacket(ConnectCallPacket),
     CopyToClipboardCallPacket(CopyToClipboardCallPacket),
@@ -78,7 +79,8 @@ impl PacketKind {
             PacketKind::StreamBegin(_)
             | PacketKind::StreamChunk(_)
             | PacketKind::Streamable(_)
-            | PacketKind::ConnectPacket(_) => 2,
+            | PacketKind::ConnectPacket(_)
+            | PacketKind::ClientSnapshotCallPacket(_) => 2,
             PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => 0,
             PacketKind::AnnounceCallPacket(_)
@@ -169,7 +171,8 @@ impl PacketKind {
             | PacketKind::ClientBinaryPacketUnreliableCallPacket(_)
             | PacketKind::ClientPacketReliableCallPacket(_)
             | PacketKind::ClientPacketUnreliableCallPacket(_)
-            | PacketKind::ClientPlanSnapshotCallPacket(_) => server,
+            | PacketKind::ClientPlanSnapshotCallPacket(_)
+            | PacketKind::ClientSnapshotCallPacket(_) => server,
             PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => !server,
             PacketKind::Other {
                 allow_client,

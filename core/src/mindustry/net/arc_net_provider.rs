@@ -5,17 +5,18 @@ use super::{
         ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
         ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        CompleteObjectiveCallPacket, ConnectCallPacket, ConnectPacket, CopyToClipboardCallPacket,
-        DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
-        HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket,
-        InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
-        InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
-        LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
-        OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
-        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
-        SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
-        SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket,
-        TextInputCallPacket2, WorldDataBeginCallPacket,
+        ClientSnapshotCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket, ConnectPacket,
+        CopyToClipboardCallPacket, DebugStatusClientCallPacket,
+        DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
+        InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
+        InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
+        KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
+        LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket,
+        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
+        RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
+        SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
+        SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
+        WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -176,6 +177,7 @@ impl PacketSerializer {
             packet,
             PacketKind::ClientPlanSnapshotCallPacket(_)
                 | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
+                | PacketKind::ClientSnapshotCallPacket(_)
         ) {
             return Err(SerializerError::RequiresContentLoader);
         }
@@ -355,7 +357,8 @@ impl PacketSerializer {
                 packet_ids::WORLD_STREAM
             }
             PacketKind::ClientPlanSnapshotCallPacket(_)
-            | PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => {
+            | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
+            | PacketKind::ClientSnapshotCallPacket(_) => {
                 return Err(SerializerError::RequiresContentLoader);
             }
             PacketKind::Other { id, .. } => return Err(SerializerError::UnsupportedPacketId(*id)),
@@ -377,6 +380,10 @@ impl PacketSerializer {
             PacketKind::ClientPlanSnapshotReceivedCallPacket(packet) => {
                 packet.write_to_with_loader(&mut payload, loader)?;
                 packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
+            }
+            PacketKind::ClientSnapshotCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::CLIENT_SNAPSHOT_CALL_PACKET
             }
             _ => return Self::packet_kind_to_envelope(packet),
         };
@@ -414,6 +421,7 @@ impl PacketSerializer {
                 *id,
                 packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET
                     | packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
+                    | packet_ids::CLIENT_SNAPSHOT_CALL_PACKET
             ) {
                 return Err(SerializerError::RequiresContentLoader);
             }
@@ -628,6 +636,11 @@ impl PacketSerializer {
                             )?,
                         ))
                     }
+                    packet_ids::CLIENT_SNAPSHOT_CALL_PACKET => {
+                        Ok(PacketKind::ClientSnapshotCallPacket(
+                            ClientSnapshotCallPacket::read_from_with_loader(&mut cursor, loader)?,
+                        ))
+                    }
                     _ => Self::packet_kind_from_envelope(envelope),
                 }
             }
@@ -709,7 +722,7 @@ mod tests {
         io::{BuildPlanWire, ContentRef, TypeValue},
         net::packets::{
             ClientBinaryPacketCallPacket, ClientPacketCallPacket, ClientPlanSnapshotCallPacket,
-            ClientPlanSnapshotReceivedCallPacket,
+            ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
         },
     };
 
@@ -927,6 +940,50 @@ mod tests {
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
             received
+        );
+    }
+
+    #[test]
+    fn client_snapshot_packet_roundtrips_with_content_loader() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let packet = PacketKind::ClientSnapshotCallPacket(ClientSnapshotCallPacket {
+            snapshot_id: 11,
+            unit_id: 22,
+            dead: false,
+            x: 1.0,
+            y: 2.0,
+            pointer_x: 3.0,
+            pointer_y: 4.0,
+            rotation: 5.0,
+            base_rotation: 6.0,
+            x_velocity: 7.0,
+            y_velocity: 8.0,
+            mining: Some(crate::mindustry::world::point2_pack(9, 10)),
+            boosting: true,
+            shooting: false,
+            chatting: true,
+            building: false,
+            selected_block: Some("duo".into()),
+            selected_rotation: 1,
+            plans: Some(vec![BuildPlanWire::new_place(12, 13, 2, "router")]),
+            view_x: 14.0,
+            view_y: 15.0,
+            view_width: 16.0,
+            view_height: 17.0,
+        });
+        assert_eq!(
+            PacketSerializer::write_packet_kind(&packet).unwrap_err(),
+            SerializerError::RequiresContentLoader
+        );
+        let bytes = PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap();
+        assert_eq!(bytes[0], packet_ids::CLIENT_SNAPSHOT_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap_err(),
+            SerializerError::RequiresContentLoader
+        );
+        assert_eq!(
+            PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
+            packet
         );
     }
 

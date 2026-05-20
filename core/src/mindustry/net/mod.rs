@@ -26,7 +26,7 @@ pub use packets::{
     AnnounceCallPacket, ClearObjectivesCallPacket, ClientBinaryPacketCallPacket,
     ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
     ClientPacketCallPacket, ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
-    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
     CompleteObjectiveCallPacket, ConnectCallPacket, ConnectPacket, CopyToClipboardCallPacket,
     DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket,
     HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
