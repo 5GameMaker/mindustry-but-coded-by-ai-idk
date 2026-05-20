@@ -13,6 +13,7 @@ pub mod schematic;
 pub mod sector_info;
 pub mod spawn_group;
 pub mod team;
+pub mod teams;
 
 pub use attack_indicators::{AttackIndicator, AttackIndicators, ATTACK_INDICATOR_DURATION};
 pub use campaign_rules::{CampaignPlanetRules, CampaignRules, CampaignRulesApplyResult};
@@ -38,3 +39,4 @@ pub use team::{
     vanilla_teams, Team, TeamRegistry, BASE_TEAM_COUNT, TEAM_BLUE, TEAM_COUNT, TEAM_CRUX,
     TEAM_DERELICT, TEAM_GREEN, TEAM_MALIS, TEAM_NEOPLASTIC, TEAM_SHARDED,
 };
+pub use teams::{BlockPlan, CoreInfo, TeamData, Teams};
