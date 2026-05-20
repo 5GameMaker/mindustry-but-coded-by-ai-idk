@@ -2,9 +2,10 @@ pub mod blocks;
 pub mod items;
 pub mod liquids;
 pub mod status_effects;
+pub mod weathers;
 
 use crate::mindustry::{
-    ctype::{ContentId, ContentType},
+    ctype::{Content, ContentId, ContentType},
     io::save::{ContentHeaderEntry, ContentHeaderSnapshot},
     r#type::{Item, Liquid, StatusEffect},
 };
@@ -15,6 +16,7 @@ pub struct ContentCatalog {
     pub items: Vec<Item>,
     pub liquids: Vec<Liquid>,
     pub status_effects: Vec<StatusEffect>,
+    pub weathers: Vec<weathers::WeatherContent>,
 }
 
 impl ContentCatalog {
@@ -27,6 +29,7 @@ impl ContentCatalog {
             items,
             liquids,
             status_effects: status_effects::load(),
+            weathers: weathers::load(),
         }
     }
 
@@ -65,6 +68,14 @@ impl ContentCatalog {
                         .map(|status| status.base.mappable.name.clone())
                         .collect(),
                 },
+                ContentHeaderEntry {
+                    content_type: ContentType::Weather.ordinal(),
+                    names: self
+                        .weathers
+                        .iter()
+                        .map(|weather| weather.name().to_string())
+                        .collect(),
+                },
             ],
         }
     }
@@ -87,6 +98,10 @@ impl ContentCatalog {
             .find(|status| status.base.mappable.name.as_str() == name)
     }
 
+    pub fn weather_by_name(&self, name: &str) -> Option<&weathers::WeatherContent> {
+        self.weathers.iter().find(|weather| weather.name() == name)
+    }
+
     pub fn item_by_id(&self, id: ContentId) -> Option<&Item> {
         self.items
             .iter()
@@ -104,13 +119,17 @@ impl ContentCatalog {
             .iter()
             .find(|status| status.base.mappable.base.id == id)
     }
+
+    pub fn weather_by_id(&self, id: ContentId) -> Option<&weathers::WeatherContent> {
+        self.weathers.iter().find(|weather| weather.id() == id)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::ContentCatalog;
     use crate::mindustry::{
-        ctype::ContentType,
+        ctype::{Content, ContentType},
         io::save::{read_content_header_snapshot, write_content_header_snapshot},
     };
 
@@ -130,12 +149,14 @@ mod tests {
                 ContentType::Block.ordinal(),
                 ContentType::Liquid.ordinal(),
                 ContentType::Status.ordinal(),
+                ContentType::Weather.ordinal(),
             ]
         );
         assert_eq!(snapshot.entries[0].names[0], "scrap");
         assert_eq!(snapshot.entries[1].names[0], "air");
         assert_eq!(snapshot.entries[2].names[0], "water");
         assert_eq!(snapshot.entries[3].names[0], "none");
+        assert_eq!(snapshot.entries[4].names[0], "snowing");
     }
 
     #[test]
@@ -183,5 +204,8 @@ mod tests {
             "wet"
         );
         assert!(catalog.status_effect_by_id(999).is_none());
+        assert_eq!(catalog.weather_by_name("rain").unwrap().id(), 1);
+        assert_eq!(catalog.weather_by_id(2).unwrap().name(), "sandstorm");
+        assert!(catalog.weather_by_id(999).is_none());
     }
 }
