@@ -5,18 +5,18 @@ use super::{
         ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
         ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket, ConnectPacket,
-        CopyToClipboardCallPacket, DebugStatusClientCallPacket,
-        DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
-        InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
-        InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
-        KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
-        LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket,
-        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
-        RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
-        SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
-        SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
-        WorldDataBeginCallPacket,
+        ClientSnapshotCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
+        ConnectConfirmCallPacket, ConnectPacket, CopyToClipboardCallPacket,
+        DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+        HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket,
+        InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
+        InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
+        LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
+        OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
+        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
+        SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
+        SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket,
+        TextInputCallPacket2, WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -227,6 +227,10 @@ impl PacketSerializer {
             PacketKind::ConnectCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::CONNECT_CALL_PACKET
+            }
+            PacketKind::ConnectConfirmCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CONNECT_CONFIRM_CALL_PACKET
             }
             PacketKind::CopyToClipboardCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -481,6 +485,11 @@ impl PacketSerializer {
                     packet_ids::CONNECT_CALL_PACKET => Ok(PacketKind::ConnectCallPacket(
                         ConnectCallPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::CONNECT_CONFIRM_CALL_PACKET => {
+                        Ok(PacketKind::ConnectConfirmCallPacket(
+                            ConnectConfirmCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::COPY_TO_CLIPBOARD_CALL_PACKET => {
                         Ok(PacketKind::CopyToClipboardCallPacket(
                             CopyToClipboardCallPacket::read_from(&mut cursor)?,
@@ -1049,6 +1058,14 @@ mod tests {
         let bytes = PacketSerializer::write_packet_kind(&connect).unwrap();
         assert_eq!(bytes[0], packet_ids::CONNECT_CALL_PACKET);
         assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), connect);
+
+        let confirm = PacketKind::ConnectConfirmCallPacket(ConnectConfirmCallPacket);
+        let bytes = PacketSerializer::write_packet_kind(&confirm).unwrap();
+        assert_eq!(
+            bytes,
+            vec![packet_ids::CONNECT_CONFIRM_CALL_PACKET, 0, 0, 0]
+        );
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), confirm);
 
         let clipboard = PacketKind::CopyToClipboardCallPacket(CopyToClipboardCallPacket {
             text: "copied text".into(),

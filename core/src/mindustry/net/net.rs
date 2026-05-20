@@ -5,15 +5,16 @@ use super::packets::{
     ClientBinaryPacketUnreliableCallPacket, ClientPacketReliableCallPacket,
     ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CompleteObjectiveCallPacket,
-    ConnectCallPacket, ConnectPacket, CopyToClipboardCallPacket, DebugStatusClientCallPacket,
-    DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
-    InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
-    InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
-    LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
-    OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
-    RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
-    SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket,
-    StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
+    ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, CopyToClipboardCallPacket,
+    DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket,
+    HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
+    InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket,
+    KickCallPacket2, LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket,
+    LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
+    PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
+    SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
+    SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
+    StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -34,6 +35,7 @@ pub enum PacketKind {
     ClientSnapshotCallPacket(ClientSnapshotCallPacket),
     CompleteObjectiveCallPacket(CompleteObjectiveCallPacket),
     ConnectCallPacket(ConnectCallPacket),
+    ConnectConfirmCallPacket(ConnectConfirmCallPacket),
     CopyToClipboardCallPacket(CopyToClipboardCallPacket),
     DebugStatusClientCallPacket(DebugStatusClientCallPacket),
     DebugStatusClientUnreliableCallPacket(DebugStatusClientUnreliableCallPacket),
@@ -80,7 +82,8 @@ impl PacketKind {
             | PacketKind::StreamChunk(_)
             | PacketKind::Streamable(_)
             | PacketKind::ConnectPacket(_)
-            | PacketKind::ClientSnapshotCallPacket(_) => 2,
+            | PacketKind::ClientSnapshotCallPacket(_)
+            | PacketKind::ConnectConfirmCallPacket(_) => 2,
             PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => 0,
             PacketKind::AnnounceCallPacket(_)
@@ -172,7 +175,8 @@ impl PacketKind {
             | PacketKind::ClientPacketReliableCallPacket(_)
             | PacketKind::ClientPacketUnreliableCallPacket(_)
             | PacketKind::ClientPlanSnapshotCallPacket(_)
-            | PacketKind::ClientSnapshotCallPacket(_) => server,
+            | PacketKind::ClientSnapshotCallPacket(_)
+            | PacketKind::ConnectConfirmCallPacket(_) => server,
             PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => !server,
             PacketKind::Other {
                 allow_client,
