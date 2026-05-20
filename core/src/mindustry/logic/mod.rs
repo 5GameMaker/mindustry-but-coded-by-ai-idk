@@ -24,6 +24,9 @@ pub const LOGIC_PARSER_MAX_JUMPS: usize = 500;
 pub const LOGIC_CANVAS_INVALID_JUMP: i32 = i32::MAX;
 pub const LOGIC_TILE_SIZE: f32 = 8.0;
 pub const LOGIC_BUILDING_RANGE: f32 = 220.0;
+pub const LOGIC_WEATHER_FADE_TIME: f32 = 60.0 * 4.0;
+pub const LOGIC_DEFAULT_MAX_IPT: i32 = 1000;
+pub const LOGIC_SYNC_INTERVAL_MILLIS: i64 = 1000 / 20;
 
 const INVALID_NUM_NEGATIVE: i64 = i64::MIN;
 const INVALID_NUM_POSITIVE: i64 = i64::MAX;
@@ -4054,6 +4057,8 @@ pub struct LogicUnitObject {
     pub building_cleared: bool,
     pub controller_reset: bool,
     pub control_timer_refreshed: bool,
+    pub prop_values: BTreeMap<LAccess, LVarValue>,
+    pub content_props: BTreeMap<String, f64>,
 }
 
 impl LogicUnitObject {
@@ -4094,6 +4099,8 @@ impl LogicUnitObject {
             building_cleared: false,
             controller_reset: false,
             control_timer_refreshed: false,
+            prop_values: BTreeMap::new(),
+            content_props: BTreeMap::new(),
         }
     }
 
@@ -4157,8 +4164,43 @@ impl LogicUnitObject {
             LAccess::Mining => Some(LVarValue::Number(
                 (self.mine_x.is_some() && self.mine_y.is_some()) as u8 as f64,
             )),
-            _ => None,
+            _ => self.prop_values.get(&access).cloned(),
         }
+    }
+
+    fn sense_content(&self, content_name: &str) -> f64 {
+        *self.content_props.get(content_name).unwrap_or(&0.0)
+    }
+
+    fn set_prop(&mut self, access: LAccess, value: LVarValue) {
+        match (&access, &value) {
+            (LAccess::Health, LVarValue::Number(value)) => {
+                self.health = (*value as f32).clamp(0.0, self.max_health.max(0.0));
+                self.valid = self.health > 0.0 || self.max_health <= 0.0;
+            }
+            (LAccess::Shield, LVarValue::Number(value)) => self.shield = (*value as f32).max(0.0),
+            (LAccess::Armor, LVarValue::Number(value)) => self.armor = (*value as f32).max(0.0),
+            (LAccess::X, LVarValue::Number(value)) => self.x = logic_unconv(*value as f32),
+            (LAccess::Y, LVarValue::Number(value)) => self.y = logic_unconv(*value as f32),
+            (LAccess::Team, LVarValue::Number(value)) => {
+                if (0.0..=255.0).contains(value) {
+                    self.team = *value as u8;
+                }
+            }
+            (LAccess::Team, LVarValue::Object(Some(value))) => {
+                if let Some(team) = logic_team_from_name(value) {
+                    self.team = team;
+                }
+            }
+            (LAccess::Flag, LVarValue::Number(value)) => self.flag = *value,
+            _ => {}
+        }
+        self.prop_values.insert(access, value);
+    }
+
+    fn set_content_prop(&mut self, content_name: impl Into<String>, value: f64) {
+        self.content_props
+            .insert(logic_object_name(&content_name.into()), value);
     }
 }
 
@@ -4315,6 +4357,58 @@ pub struct LogicMessageState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LogicWeatherState {
+    pub active: bool,
+    pub life: f32,
+}
+
+impl Default for LogicWeatherState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            life: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicWeatherEvent {
+    pub weather_name: String,
+    pub active: bool,
+    pub life: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicBulletEvent {
+    pub bullet_name: String,
+    pub from_name: String,
+    pub weapon: LVarValue,
+    pub team: u8,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub owner: Option<String>,
+    pub damage: f32,
+    pub velocity_scl: f32,
+    pub life_scl: f32,
+    pub aim_x: f32,
+    pub aim_y: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicClientDataEvent {
+    pub channel: String,
+    pub value: LVarValue,
+    pub reliable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicSyncEvent {
+    pub variable_id: i32,
+    pub value: LVarValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicBuildingObject {
     pub block_name: String,
     pub team: u8,
@@ -4324,6 +4418,11 @@ pub struct LogicBuildingObject {
     pub valid: bool,
     pub flags: BTreeSet<BlockFlag>,
     pub damaged: bool,
+    pub block_privileged: bool,
+    pub display_commands: Vec<u64>,
+    pub message: String,
+    pub prop_values: BTreeMap<LAccess, LVarValue>,
+    pub content_props: BTreeMap<String, f64>,
 }
 
 impl LogicBuildingObject {
@@ -4337,11 +4436,58 @@ impl LogicBuildingObject {
             valid: true,
             flags: BTreeSet::new(),
             damaged: false,
+            block_privileged: false,
+            display_commands: Vec::new(),
+            message: String::new(),
+            prop_values: BTreeMap::new(),
+            content_props: BTreeMap::new(),
         }
     }
 
     pub fn has_flag(&self, flag: BlockFlag) -> bool {
         self.flags.contains(&flag)
+    }
+
+    fn sense_access(&self, access: LAccess) -> Option<LVarValue> {
+        match access {
+            LAccess::Health => Some(LVarValue::Number((!self.damaged) as u8 as f64)),
+            LAccess::X => Some(LVarValue::Number(logic_conv(self.x) as f64)),
+            LAccess::Y => Some(LVarValue::Number(logic_conv(self.y) as f64)),
+            LAccess::Team => Some(LVarValue::Number(self.team as f64)),
+            LAccess::Type => Some(LVarValue::Object(Some(logic_object_name(&self.block_name)))),
+            LAccess::Dead => Some(LVarValue::Number((!self.valid) as u8 as f64)),
+            _ => self.prop_values.get(&access).cloned(),
+        }
+    }
+
+    fn sense_content(&self, content_name: &str) -> f64 {
+        *self.content_props.get(content_name).unwrap_or(&0.0)
+    }
+
+    fn set_prop(&mut self, access: LAccess, value: LVarValue) {
+        match (&access, &value) {
+            (LAccess::Health, LVarValue::Number(value)) => {
+                self.damaged = *value <= 0.0;
+                self.valid = *value > 0.0;
+            }
+            (LAccess::Team, LVarValue::Number(value)) => {
+                if (0.0..=255.0).contains(value) {
+                    self.team = *value as u8;
+                }
+            }
+            (LAccess::Team, LVarValue::Object(Some(value))) => {
+                if let Some(team) = logic_team_from_name(value) {
+                    self.team = team;
+                }
+            }
+            _ => {}
+        }
+        self.prop_values.insert(access, value);
+    }
+
+    fn set_content_prop(&mut self, content_name: impl Into<String>, value: f64) {
+        self.content_props
+            .insert(logic_object_name(&content_name.into()), value);
     }
 }
 
@@ -4435,6 +4581,7 @@ pub enum LogicRuntimeObject {
     RadarSource(LogicRadarSource),
     Unit(LogicUnitObject),
     Building(LogicBuildingObject),
+    Bullet(LogicBulletEvent),
     QueryResult(Vec<String>),
 }
 
@@ -4467,7 +4614,8 @@ impl LogicRuntimeObject {
             LogicRuntimeObject::Controllable(_)
             | LogicRuntimeObject::RadarSource(_)
             | LogicRuntimeObject::Unit(_)
-            | LogicRuntimeObject::Building(_) => false,
+            | LogicRuntimeObject::Building(_)
+            | LogicRuntimeObject::Bullet(_) => false,
             LogicRuntimeObject::QueryResult(values) => {
                 read_logic_sequence(
                     &values
@@ -4532,15 +4680,14 @@ impl LogicRuntimeObject {
             },
             LogicRuntimeObject::RadarSource(_) => None,
             LogicRuntimeObject::Unit(unit) => unit.sense_access(access),
-            LogicRuntimeObject::Building(building) => match access {
-                LAccess::Health => Some(LVarValue::Number((!building.damaged) as u8 as f64)),
-                LAccess::X => Some(LVarValue::Number(logic_conv(building.x) as f64)),
-                LAccess::Y => Some(LVarValue::Number(logic_conv(building.y) as f64)),
-                LAccess::Team => Some(LVarValue::Number(building.team as f64)),
-                LAccess::Type => Some(LVarValue::Object(Some(logic_object_name(
-                    &building.block_name,
-                )))),
-                LAccess::Dead => Some(LVarValue::Number((!building.valid) as u8 as f64)),
+            LogicRuntimeObject::Building(building) => building.sense_access(access),
+            LogicRuntimeObject::Bullet(bullet) => match access {
+                LAccess::X => Some(LVarValue::Number(logic_conv(bullet.x) as f64)),
+                LAccess::Y => Some(LVarValue::Number(logic_conv(bullet.y) as f64)),
+                LAccess::Rotation => Some(LVarValue::Number(bullet.rotation as f64)),
+                LAccess::Team => Some(LVarValue::Number(bullet.team as f64)),
+                LAccess::Health => Some(LVarValue::Number(bullet.damage as f64)),
+                LAccess::BulletLifetime => Some(LVarValue::Number(bullet.life_scl as f64)),
                 _ => None,
             },
             LogicRuntimeObject::QueryResult(values) => match access {
@@ -4555,8 +4702,9 @@ impl LogicRuntimeObject {
             LogicRuntimeObject::Senseable(senseable) => {
                 Some(*senseable.content_senses.get(content_name).unwrap_or(&0.0))
             }
-            LogicRuntimeObject::Unit(_) => Some(0.0),
-            LogicRuntimeObject::Building(_) | LogicRuntimeObject::QueryResult(_) => Some(0.0),
+            LogicRuntimeObject::Unit(unit) => Some(unit.sense_content(content_name)),
+            LogicRuntimeObject::Building(building) => Some(building.sense_content(content_name)),
+            LogicRuntimeObject::Bullet(_) | LogicRuntimeObject::QueryResult(_) => Some(0.0),
             _ => None,
         }
     }
@@ -4578,10 +4726,20 @@ pub struct LogicExecutor {
     pub objective_flags: BTreeSet<String>,
     pub rules: LogicRulesState,
     pub is_client: bool,
+    pub ipt: i32,
+    pub max_ipt: i32,
+    pub current_time_millis: i64,
     pub spawn_events: Vec<LogicSpawnEvent>,
+    pub bullet_events: Vec<LogicBulletEvent>,
     pub effect_events: Vec<LogicEffectEvent>,
     pub explosion_events: Vec<LogicExplosionEvent>,
+    pub weather_states: BTreeMap<String, LogicWeatherState>,
+    pub weather_events: Vec<LogicWeatherEvent>,
     pub message_events: Vec<LogicMessageEvent>,
+    pub client_data_events: Vec<LogicClientDataEvent>,
+    pub sync_events: Vec<LogicSyncEvent>,
+    pub map_locales: BTreeMap<String, String>,
+    pub mobile: bool,
     pub message_state: LogicMessageState,
     pub cutscene: LogicCutsceneState,
     pub spawn_wave_events: Vec<(f32, f32, bool)>,
@@ -4623,10 +4781,20 @@ impl LogicExecutor {
             objective_flags: BTreeSet::new(),
             rules: LogicRulesState::default(),
             is_client: false,
+            ipt: 1,
+            max_ipt: LOGIC_DEFAULT_MAX_IPT,
+            current_time_millis: LOGIC_SYNC_INTERVAL_MILLIS,
             spawn_events: Vec::new(),
+            bullet_events: Vec::new(),
             effect_events: Vec::new(),
             explosion_events: Vec::new(),
+            weather_states: BTreeMap::new(),
+            weather_events: Vec::new(),
             message_events: Vec::new(),
+            client_data_events: Vec::new(),
+            sync_events: Vec::new(),
+            map_locales: BTreeMap::new(),
+            mobile: false,
             message_state: LogicMessageState::default(),
             cutscene: LogicCutsceneState::default(),
             spawn_wave_events: Vec::new(),
@@ -4936,6 +5104,54 @@ pub enum LogicInstruction {
         p3: LVar,
         p4: LVar,
     },
+    LocalePrint {
+        value: LVar,
+    },
+    DrawFlush {
+        target: LVar,
+    },
+    PrintFlush {
+        target: LVar,
+    },
+    SetRate {
+        amount: LVar,
+    },
+    Sync {
+        variable: LVar,
+    },
+    SpawnBullet {
+        result: LVar,
+        from: LVar,
+        weapon: LVar,
+        x: LVar,
+        y: LVar,
+        rotation: LVar,
+        team: LVar,
+        owner: LVar,
+        damage: LVar,
+        velocity_scl: LVar,
+        life_scl: LVar,
+        aim_x: LVar,
+        aim_y: LVar,
+    },
+    WeatherSense {
+        to: LVar,
+        weather: LVar,
+    },
+    WeatherSet {
+        weather: LVar,
+        state: LVar,
+    },
+    SetProp {
+        type_: LVar,
+        of: LVar,
+        value: LVar,
+    },
+    ClientData {
+        channel: LVar,
+        value: LVar,
+        reliable: LVar,
+    },
     Set {
         from: LVar,
         to: LVar,
@@ -5227,6 +5443,69 @@ impl LogicInstruction {
             } => {
                 exec_cutscene_runtime(exec, *action, p1, p2, p3, p4);
             }
+            LogicInstruction::LocalePrint { value } => {
+                exec_locale_print_runtime(exec, value);
+            }
+            LogicInstruction::DrawFlush { target } => {
+                exec_draw_flush_runtime(exec, target);
+            }
+            LogicInstruction::PrintFlush { target } => {
+                exec_print_flush_runtime(exec, target);
+            }
+            LogicInstruction::SetRate { amount } => {
+                exec_set_rate_runtime(exec, amount);
+            }
+            LogicInstruction::Sync { variable } => {
+                exec_sync_runtime(exec, variable);
+            }
+            LogicInstruction::SpawnBullet {
+                result,
+                from,
+                weapon,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y,
+            } => {
+                exec_spawn_bullet_runtime(
+                    exec,
+                    result,
+                    from,
+                    weapon,
+                    x,
+                    y,
+                    rotation,
+                    team,
+                    owner,
+                    damage,
+                    velocity_scl,
+                    life_scl,
+                    aim_x,
+                    aim_y,
+                );
+            }
+            LogicInstruction::WeatherSense { to, weather } => {
+                exec_weather_sense_runtime(exec, to, weather);
+            }
+            LogicInstruction::WeatherSet { weather, state } => {
+                exec_weather_set_runtime(exec, weather, state);
+            }
+            LogicInstruction::SetProp { type_, of, value } => {
+                exec_set_prop_runtime(exec, type_, of, value);
+            }
+            LogicInstruction::ClientData {
+                channel,
+                value,
+                reliable,
+            } => {
+                exec_client_data_runtime(exec, channel, value, reliable);
+            }
             LogicInstruction::Set { from, to } => {
                 if !to.constant {
                     to.set_from(from);
@@ -5449,6 +5728,10 @@ pub fn set_lvar_value(target: &mut LVar, value: &LVarValue) {
         LVarValue::Number(value) => target.set_num(*value),
         LVarValue::Object(value) => target.set_obj(value.clone()),
     }
+}
+
+pub fn lvar_value(value: &LVar) -> LVarValue {
+    value.value()
 }
 
 pub fn read_logic_text(value: &str, position: &LVar, output: &mut LVar) {
@@ -5991,6 +6274,207 @@ pub fn exec_fetch_runtime(
         FetchType::BuildCount => {
             result.set_num(fetch_buildings(exec, team, extra.obj(), false).len() as f64);
         }
+    }
+}
+
+pub fn exec_locale_print_runtime(exec: &mut LogicExecutor, value: &LVar) {
+    if exec.text_buffer.len() >= LogicExecutor::MAX_TEXT_BUFFER || !value.is_obj {
+        return;
+    }
+
+    let key = print_logic_value(value);
+    let localized = if exec.mobile {
+        exec.map_locales
+            .get(&format!("{key}.mobile"))
+            .or_else(|| exec.map_locales.get(&key))
+    } else {
+        exec.map_locales.get(&key)
+    };
+
+    if let Some(localized) = localized.cloned() {
+        exec.push_text_bounded(&localized);
+    }
+}
+
+pub fn exec_draw_flush_runtime(exec: &mut LogicExecutor, target: &LVar) {
+    let commands = std::mem::take(&mut exec.graphics_buffer);
+    let Some(target_name) = target.obj() else {
+        return;
+    };
+    let Some(LogicRuntimeObject::Building(building)) = exec.objects.get_mut(target_name) else {
+        return;
+    };
+    if building.valid && (building.team == exec.team || exec.privileged) {
+        building.display_commands = commands;
+    }
+}
+
+pub fn exec_print_flush_runtime(exec: &mut LogicExecutor, target: &LVar) {
+    let text = std::mem::take(&mut exec.text_buffer);
+    let Some(target_name) = target.obj() else {
+        return;
+    };
+    let Some(LogicRuntimeObject::Building(building)) = exec.objects.get_mut(target_name) else {
+        return;
+    };
+    if building.valid
+        && (exec.privileged || (building.team == exec.team && !building.block_privileged))
+    {
+        building.message = text.chars().take(LogicExecutor::MAX_TEXT_BUFFER).collect();
+    }
+}
+
+pub fn exec_set_rate_runtime(exec: &mut LogicExecutor, amount: &LVar) {
+    exec.ipt = amount.numi().clamp(1, exec.max_ipt.max(1));
+}
+
+pub fn exec_sync_runtime(exec: &mut LogicExecutor, variable: &mut LVar) {
+    if variable.constant
+        || exec.current_time_millis.saturating_sub(variable.sync_time) <= LOGIC_SYNC_INTERVAL_MILLIS
+    {
+        return;
+    }
+
+    variable.sync_time = exec.current_time_millis;
+    exec.sync_events.push(LogicSyncEvent {
+        variable_id: variable.id,
+        value: variable.value(),
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn exec_spawn_bullet_runtime(
+    exec: &mut LogicExecutor,
+    result: &mut LVar,
+    from: &LVar,
+    weapon: &LVar,
+    x: &LVar,
+    y: &LVar,
+    rotation: &LVar,
+    team: &LVar,
+    owner: &LVar,
+    damage: &LVar,
+    velocity_scl: &LVar,
+    life_scl: &LVar,
+    aim_x: &LVar,
+    aim_y: &LVar,
+) {
+    let Some(from_name) = from.obj().map(str::to_string) else {
+        return;
+    };
+    let owner_name = owner.obj().map(str::to_string);
+    let team = logic_team_from_var(team)
+        .or_else(|| {
+            owner_name
+                .as_deref()
+                .and_then(|name| exec.objects.get(name))
+                .and_then(|object| match object {
+                    LogicRuntimeObject::Unit(unit) => Some(unit.team),
+                    LogicRuntimeObject::Building(building) => Some(building.team),
+                    LogicRuntimeObject::Bullet(bullet) => Some(bullet.team),
+                    _ => None,
+                })
+        })
+        .unwrap_or(RadarTarget::DERELICT_TEAM);
+
+    let bullet_name = format!("bullet-{}", exec.bullet_events.len());
+    let event = LogicBulletEvent {
+        bullet_name: bullet_name.clone(),
+        from_name,
+        weapon: weapon.value(),
+        team,
+        x: logic_unconv(x.numf()),
+        y: logic_unconv(y.numf()),
+        rotation: rotation.numf(),
+        owner: owner_name,
+        damage: damage.numf(),
+        velocity_scl: velocity_scl.numf(),
+        life_scl: life_scl.numf(),
+        aim_x: logic_unconv(aim_x.numf()),
+        aim_y: logic_unconv(aim_y.numf()),
+    };
+    exec.register_object(
+        bullet_name.clone(),
+        LogicRuntimeObject::Bullet(event.clone()),
+    );
+    exec.bullet_events.push(event);
+    result.set_obj(Some(bullet_name));
+}
+
+pub fn exec_weather_sense_runtime(exec: &LogicExecutor, to: &mut LVar, weather: &LVar) {
+    let active = weather
+        .obj()
+        .and_then(|name| exec.weather_states.get(&logic_object_name(name)))
+        .is_some_and(|state| state.active);
+    to.set_bool(active);
+}
+
+pub fn exec_weather_set_runtime(exec: &mut LogicExecutor, weather: &LVar, state: &LVar) {
+    let Some(weather_name) = weather.obj().map(logic_object_name) else {
+        return;
+    };
+    let active = state.bool();
+    let weather_state = exec.weather_states.entry(weather_name.clone()).or_default();
+    if active {
+        weather_state.active = true;
+        weather_state.life = LOGIC_WEATHER_FADE_TIME;
+    } else if weather_state.active && weather_state.life > LOGIC_WEATHER_FADE_TIME {
+        weather_state.life = LOGIC_WEATHER_FADE_TIME;
+    }
+    exec.weather_events.push(LogicWeatherEvent {
+        weather_name,
+        active,
+        life: weather_state.life,
+    });
+}
+
+pub fn exec_set_prop_runtime(exec: &mut LogicExecutor, type_: &LVar, of: &LVar, value: &LVar) {
+    let Some(target_name) = of.obj() else {
+        return;
+    };
+    let Some(key) = type_.obj() else {
+        return;
+    };
+    let value = lvar_value(value);
+
+    let Some(object) = exec.objects.get_mut(target_name) else {
+        return;
+    };
+    if let Some(access) = logic_access_from_object_name(key) {
+        match object {
+            LogicRuntimeObject::Unit(unit) => unit.set_prop(access, value),
+            LogicRuntimeObject::Building(building) => building.set_prop(access, value),
+            _ => {}
+        }
+    } else {
+        let content_name = logic_object_name(key);
+        let amount = match value {
+            LVarValue::Number(value) => value,
+            LVarValue::Object(Some(_)) => 1.0,
+            LVarValue::Object(None) => 0.0,
+        };
+        match object {
+            LogicRuntimeObject::Unit(unit) => unit.set_content_prop(content_name, amount),
+            LogicRuntimeObject::Building(building) => {
+                building.set_content_prop(content_name, amount)
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn exec_client_data_runtime(
+    exec: &mut LogicExecutor,
+    channel: &LVar,
+    value: &LVar,
+    reliable: &LVar,
+) {
+    if let Some(channel) = channel.obj() {
+        exec.client_data_events.push(LogicClientDataEvent {
+            channel: channel.to_string(),
+            value: value.value(),
+            reliable: reliable.bool(),
+        });
     }
 }
 
@@ -11916,7 +12400,11 @@ mod tests {
                 value.set_num(3.0);
                 value
             },
-            team: LVar::new("team"),
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(None);
+                value
+            },
             rotation: LVar::new("rotation"),
         }
         .run(&mut exec);
@@ -12612,6 +13100,368 @@ mod tests {
         .run(&mut exec);
         assert_eq!(exec.rules.mission, "mission");
         assert!(exec.text_buffer.is_empty());
+    }
+
+    #[test]
+    fn remaining_runtime_logic_instructions_record_java_side_effects() {
+        let mut exec = LogicExecutor::new();
+        exec.team = 1;
+        exec.max_ipt = 120;
+        exec.map_locales
+            .insert("name".into(), "Desktop Name".into());
+        exec.map_locales
+            .insert("name.mobile".into(), "Mobile Name".into());
+
+        LogicInstruction::LocalePrint {
+            value: {
+                let mut value = LVar::new("key");
+                value.set_obj(Some("name".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.text_buffer, "Desktop Name");
+        exec.mobile = true;
+        LogicInstruction::LocalePrint {
+            value: {
+                let mut value = LVar::new("key");
+                value.set_obj(Some("name".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.text_buffer, "Desktop NameMobile Name");
+
+        exec.graphics_buffer = vec![LogicDisplayCommand::get(1, 2, 3, 4, 5, 6, 7)];
+        exec.register_object(
+            "display1",
+            LogicRuntimeObject::Building(LogicBuildingObject::new("logic-display", 1, 0.0, 0.0)),
+        );
+        LogicInstruction::DrawFlush {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("display1".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert!(exec.graphics_buffer.is_empty());
+        match exec.objects.get("display1").unwrap() {
+            LogicRuntimeObject::Building(building) => {
+                assert_eq!(building.display_commands.len(), 1);
+            }
+            _ => unreachable!(),
+        }
+
+        exec.text_buffer = "screen text".into();
+        exec.register_object(
+            "message1",
+            LogicRuntimeObject::Building(LogicBuildingObject::new("message", 1, 0.0, 0.0)),
+        );
+        LogicInstruction::PrintFlush {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("message1".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert!(exec.text_buffer.is_empty());
+        match exec.objects.get("message1").unwrap() {
+            LogicRuntimeObject::Building(building) => {
+                assert_eq!(building.message, "screen text");
+            }
+            _ => unreachable!(),
+        }
+
+        exec.text_buffer = "denied".into();
+        let mut blocked = LogicBuildingObject::new("message", 2, 0.0, 0.0);
+        blocked.block_privileged = true;
+        exec.register_object("blocked-message", LogicRuntimeObject::Building(blocked));
+        LogicInstruction::PrintFlush {
+            target: {
+                let mut value = LVar::new("target");
+                value.set_obj(Some("blocked-message".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        assert!(exec.text_buffer.is_empty());
+        match exec.objects.get("blocked-message").unwrap() {
+            LogicRuntimeObject::Building(building) => assert!(building.message.is_empty()),
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::SetRate {
+            amount: {
+                let mut value = LVar::new("amount");
+                value.set_num(999.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.ipt, 120);
+        LogicInstruction::SetRate {
+            amount: {
+                let mut value = LVar::new("amount");
+                value.set_num(-1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(exec.ipt, 1);
+
+        let mut sync = LogicInstruction::Sync {
+            variable: {
+                let mut value = LVar::with_id("shared", 7);
+                value.set_obj(Some("payload".into()));
+                value.sync_time = 0;
+                value
+            },
+        };
+        exec.current_time_millis = LOGIC_SYNC_INTERVAL_MILLIS + 1;
+        sync.run(&mut exec);
+        assert_eq!(
+            exec.sync_events,
+            vec![LogicSyncEvent {
+                variable_id: 7,
+                value: LVarValue::Object(Some("payload".into())),
+            }]
+        );
+        sync.run(&mut exec);
+        assert_eq!(exec.sync_events.len(), 1);
+
+        LogicInstruction::WeatherSet {
+            weather: {
+                let mut value = LVar::new("weather");
+                value.set_obj(Some("@rain".into()));
+                value
+            },
+            state: {
+                let mut value = LVar::new("state");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        let mut weather_sense = LogicInstruction::WeatherSense {
+            to: LVar::new("to"),
+            weather: {
+                let mut value = LVar::new("weather");
+                value.set_obj(Some("@rain".into()));
+                value
+            },
+        };
+        weather_sense.run(&mut exec);
+        match weather_sense {
+            LogicInstruction::WeatherSense { to, .. } => {
+                assert_eq!(to.value(), LVarValue::Number(1.0));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            exec.weather_events,
+            vec![LogicWeatherEvent {
+                weather_name: "@rain".into(),
+                active: true,
+                life: LOGIC_WEATHER_FADE_TIME,
+            }]
+        );
+
+        exec.register_object(
+            "owner",
+            LogicRuntimeObject::Unit(LogicUnitObject::new("dagger", 2, 0.0, 0.0)),
+        );
+        let mut bullet = LogicInstruction::SpawnBullet {
+            result: LVar::new("result"),
+            from: {
+                let mut value = LVar::new("from");
+                value.set_obj(Some("@dagger".into()));
+                value
+            },
+            weapon: {
+                let mut value = LVar::new("weapon");
+                value.set_num(0.0);
+                value
+            },
+            x: {
+                let mut value = LVar::new("x");
+                value.set_num(2.0);
+                value
+            },
+            y: {
+                let mut value = LVar::new("y");
+                value.set_num(3.0);
+                value
+            },
+            rotation: {
+                let mut value = LVar::new("rot");
+                value.set_num(45.0);
+                value
+            },
+            team: {
+                let mut value = LVar::new("team");
+                value.set_obj(None);
+                value
+            },
+            owner: {
+                let mut value = LVar::new("owner");
+                value.set_obj(Some("owner".into()));
+                value
+            },
+            damage: {
+                let mut value = LVar::new("damage");
+                value.set_num(12.0);
+                value
+            },
+            velocity_scl: {
+                let mut value = LVar::new("velocity");
+                value.set_num(1.5);
+                value
+            },
+            life_scl: {
+                let mut value = LVar::new("life");
+                value.set_num(0.5);
+                value
+            },
+            aim_x: {
+                let mut value = LVar::new("aimx");
+                value.set_num(4.0);
+                value
+            },
+            aim_y: {
+                let mut value = LVar::new("aimy");
+                value.set_num(5.0);
+                value
+            },
+        };
+        bullet.run(&mut exec);
+        match bullet {
+            LogicInstruction::SpawnBullet { result, .. } => {
+                assert_eq!(result.value(), LVarValue::Object(Some("bullet-0".into())));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(exec.bullet_events.len(), 1);
+        assert_eq!(exec.bullet_events[0].team, 2);
+        assert_eq!(
+            (exec.bullet_events[0].x, exec.bullet_events[0].y),
+            (16.0, 24.0)
+        );
+        assert!(matches!(
+            exec.objects.get("bullet-0"),
+            Some(LogicRuntimeObject::Bullet(_))
+        ));
+
+        LogicInstruction::ClientData {
+            channel: {
+                let mut value = LVar::new("channel");
+                value.set_obj(Some("frog".into()));
+                value
+            },
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(9.0);
+                value
+            },
+            reliable: {
+                let mut value = LVar::new("reliable");
+                value.set_num(1.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        assert_eq!(
+            exec.client_data_events,
+            vec![LogicClientDataEvent {
+                channel: "frog".into(),
+                value: LVarValue::Number(9.0),
+                reliable: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn set_prop_runtime_updates_unit_and_building_state_like_settable_subset() {
+        let mut exec = LogicExecutor::new();
+        let mut unit = LogicUnitObject::new("dagger", 1, 0.0, 0.0);
+        unit.max_health = 100.0;
+        exec.register_object("unit", LogicRuntimeObject::Unit(unit));
+        exec.register_object(
+            "build",
+            LogicRuntimeObject::Building(LogicBuildingObject::new("core-shard", 1, 0.0, 0.0)),
+        );
+
+        LogicInstruction::SetProp {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@health".into()));
+                value
+            },
+            of: {
+                let mut value = LVar::new("of");
+                value.set_obj(Some("unit".into()));
+                value
+            },
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(250.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        match exec.objects.get("unit").unwrap() {
+            LogicRuntimeObject::Unit(unit) => assert_eq!(unit.health, 100.0),
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::SetProp {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@team".into()));
+                value
+            },
+            of: {
+                let mut value = LVar::new("of");
+                value.set_obj(Some("build".into()));
+                value
+            },
+            value: {
+                let mut value = LVar::new("value");
+                value.set_obj(Some("@crux".into()));
+                value
+            },
+        }
+        .run(&mut exec);
+        match exec.objects.get("build").unwrap() {
+            LogicRuntimeObject::Building(building) => assert_eq!(building.team, 2),
+            _ => unreachable!(),
+        }
+
+        LogicInstruction::SetProp {
+            type_: {
+                let mut value = LVar::new("type");
+                value.set_obj(Some("@copper".into()));
+                value
+            },
+            of: {
+                let mut value = LVar::new("of");
+                value.set_obj(Some("build".into()));
+                value
+            },
+            value: {
+                let mut value = LVar::new("value");
+                value.set_num(30.0);
+                value
+            },
+        }
+        .run(&mut exec);
+        match exec.objects.get("build").unwrap() {
+            LogicRuntimeObject::Building(building) => {
+                assert_eq!(building.content_props.get("@copper"), Some(&30.0));
+            }
+            _ => unreachable!(),
+        }
     }
 
     #[test]
