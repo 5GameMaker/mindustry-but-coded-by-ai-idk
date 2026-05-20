@@ -17,7 +17,7 @@ pub mod status_effect;
 pub mod team_entry;
 pub mod weapon;
 
-pub use ammo_type::{AmmoType, AmmoUnit, BasicAmmoType};
+pub use ammo_type::{AmmoType, AmmoUnit, BasicAmmoType, ItemAmmoType, PowerAmmoType};
 pub use category::Category;
 pub use cell_liquid::CellLiquid;
 pub use error_content::ErrorContent;
