@@ -1,3 +1,4 @@
+pub mod attack_indicators;
 pub mod campaign_stats;
 pub mod difficulty;
 pub mod event_type;
@@ -10,6 +11,7 @@ pub mod schematic;
 pub mod sector_info;
 pub mod spawn_group;
 
+pub use attack_indicators::{AttackIndicator, AttackIndicators, ATTACK_INDICATOR_DURATION};
 pub use campaign_stats::CampaignStats;
 pub use difficulty::Difficulty;
 pub use event_type::Trigger;
