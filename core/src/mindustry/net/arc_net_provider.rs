@@ -7,7 +7,7 @@ use super::{
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
         ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
-        CopyToClipboardCallPacket, DebugStatusClientCallPacket,
+        CopyToClipboardCallPacket, CreateBulletCallPacket, DebugStatusClientCallPacket,
         DebugStatusClientUnreliableCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
         InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
         InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
@@ -237,6 +237,10 @@ impl PacketSerializer {
             PacketKind::CopyToClipboardCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::COPY_TO_CLIPBOARD_CALL_PACKET
+            }
+            PacketKind::CreateBulletCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CREATE_BULLET_CALL_PACKET
             }
             PacketKind::DebugStatusClientCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -501,6 +505,11 @@ impl PacketSerializer {
                     packet_ids::COPY_TO_CLIPBOARD_CALL_PACKET => {
                         Ok(PacketKind::CopyToClipboardCallPacket(
                             CopyToClipboardCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::CREATE_BULLET_CALL_PACKET => {
+                        Ok(PacketKind::CreateBulletCallPacket(
+                            CreateBulletCallPacket::read_from(&mut cursor)?,
                         ))
                     }
                     packet_ids::DEBUG_STATUS_CLIENT_CALL_PACKET => {
@@ -1119,6 +1128,20 @@ mod tests {
             PacketSerializer::read_packet_kind(&bytes).unwrap(),
             clipboard
         );
+
+        let bullet = PacketKind::CreateBulletCallPacket(CreateBulletCallPacket {
+            bullet_type_id: 12,
+            team: TeamId(6),
+            x: 10.0,
+            y: -20.5,
+            angle: 90.0,
+            damage: 35.25,
+            velocity_scl: 1.5,
+            lifetime_scl: 0.75,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&bullet).unwrap();
+        assert_eq!(bytes[0], packet_ids::CREATE_BULLET_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), bullet);
 
         let debug = PacketKind::DebugStatusClientCallPacket(DebugStatusClientCallPacket {
             value: 1,
