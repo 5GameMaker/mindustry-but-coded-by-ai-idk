@@ -3,6 +3,7 @@ use crate::mindustry::{
     r#type::{
         unit::{
             erekir_unit_type::apply_erekir_unit_type_defaults,
+            neoplasm_unit_type::apply_neoplasm_unit_type_defaults,
             tank_unit_type::apply_tank_unit_type_defaults,
         },
         UnitType,
@@ -860,16 +861,7 @@ fn apply_kind_defaults(unit: &mut UnitType, kind: UnitKind) {
             apply_tank_unit_type_defaults(unit);
         }
         UnitKind::Neoplasm => {
-            unit.outline_color_rgba = 0x6b2b2bff;
-            unit.immunities.push("burning".into());
-            unit.immunities.push("melting".into());
-            unit.env_disabled = Env::NONE;
-            unit.draw_cell = false;
-            unit.abilities.push("RegenAbility".into());
-            unit.abilities.push("LiquidExplodeAbility".into());
-            unit.abilities.push("LiquidRegenAbility".into());
-            unit.heal_flash = true;
-            unit.heal_color_rgba = 0xc33e2bff;
+            apply_neoplasm_unit_type_defaults(unit);
         }
     }
 }
@@ -1041,6 +1033,10 @@ mod tests {
         assert!(!renale.draw_cell);
         assert!(renale.immunities.iter().any(|entry| entry == "burning"));
         assert!(renale.immunities.iter().any(|entry| entry == "melting"));
+        assert!(renale
+            .abilities
+            .iter()
+            .any(|entry| entry == "LiquidExplodeAbility:neoplasm"));
 
         let flare = by_name(&units, "flare");
         assert_eq!(flare.env_enabled, Env::TERRESTRIAL | Env::SPACE);
