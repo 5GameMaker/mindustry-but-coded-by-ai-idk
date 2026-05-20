@@ -186,6 +186,45 @@ impl BuildPlanWire {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControllerTarget {
+    BuildingPos(i32),
+    UnitId(i32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CommandQueueEntry {
+    BuildingPos(i32),
+    UnitId(i32),
+    Point(Vec2),
+    Invalid,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CommandWire {
+    pub target_pos: Option<Vec2>,
+    pub attack_target: Option<ControllerTarget>,
+    pub command_id: Option<ContentId>,
+    pub command_queue: Vec<CommandQueueEntry>,
+    pub stances: Vec<ContentId>,
+}
+
+impl CommandWire {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControllerWire {
+    Player { player_id: i32 },
+    LegacyFormation { id: i32 },
+    Ground,
+    Logic { controller_pos: i32 },
+    Assembler,
+    Command(CommandWire),
+}
+
 pub fn write_string<W: Write>(write: &mut W, string: Option<&str>) -> io::Result<()> {
     match string {
         Some(string) => {
@@ -920,6 +959,166 @@ pub fn read_stance<'a, R: Read>(
         .ok_or_else(|| invalid_data("missing stop stance"))
 }
 
+pub fn write_controller<W: Write>(write: &mut W, controller: &ControllerWire) -> io::Result<()> {
+    match controller {
+        ControllerWire::Player { player_id } => {
+            write_u8(write, 0)?;
+            write_i32(write, *player_id)
+        }
+        ControllerWire::LegacyFormation { id } => {
+            write_u8(write, 1)?;
+            write_i32(write, *id)
+        }
+        ControllerWire::Ground => write_u8(write, 2),
+        ControllerWire::Logic { controller_pos } => {
+            write_u8(write, 3)?;
+            write_i32(write, *controller_pos)
+        }
+        ControllerWire::Assembler => write_u8(write, 5),
+        ControllerWire::Command(command) => write_command_controller(write, command),
+    }
+}
+
+pub fn read_controller<R: Read>(read: &mut R) -> io::Result<ControllerWire> {
+    let tag = read_u8(read)?;
+    match tag {
+        0 => Ok(ControllerWire::Player {
+            player_id: read_i32(read)?,
+        }),
+        1 => Ok(ControllerWire::LegacyFormation {
+            id: read_i32(read)?,
+        }),
+        3 => Ok(ControllerWire::Logic {
+            controller_pos: read_i32(read)?,
+        }),
+        4 | 6 | 7 | 8 | 9 => Ok(ControllerWire::Command(read_command_controller_body(
+            read, tag,
+        )?)),
+        5 => Ok(ControllerWire::Assembler),
+        2 => Ok(ControllerWire::Ground),
+        _ => Ok(ControllerWire::Ground),
+    }
+}
+
+fn write_command_controller<W: Write>(write: &mut W, command: &CommandWire) -> io::Result<()> {
+    write_u8(write, 9)?;
+    write_u8(write, command.attack_target.is_some() as u8)?;
+    write_u8(write, command.target_pos.is_some() as u8)?;
+
+    if let Some(target_pos) = command.target_pos {
+        write_vec2(write, target_pos)?;
+    }
+
+    if let Some(target) = command.attack_target {
+        match target {
+            ControllerTarget::BuildingPos(pos) => {
+                write_u8(write, 1)?;
+                write_i32(write, pos)?;
+            }
+            ControllerTarget::UnitId(id) => {
+                write_u8(write, 0)?;
+                write_i32(write, id)?;
+            }
+        }
+    }
+
+    write_optional_signed_byte_id(write, command.command_id)?;
+    if command.command_queue.len() > u8::MAX as usize {
+        return Err(invalid_input("command queue too large"));
+    }
+    write_u8(write, command.command_queue.len() as u8)?;
+    for entry in &command.command_queue {
+        match entry {
+            CommandQueueEntry::BuildingPos(pos) => {
+                write_u8(write, 0)?;
+                write_i32(write, *pos)?;
+            }
+            CommandQueueEntry::UnitId(id) => {
+                write_u8(write, 1)?;
+                write_i32(write, *id)?;
+            }
+            CommandQueueEntry::Point(point) => {
+                write_u8(write, 2)?;
+                write_vec2(write, *point)?;
+            }
+            CommandQueueEntry::Invalid => {
+                write_u8(write, 3)?;
+            }
+        }
+    }
+
+    if command.stances.len() > u8::MAX as usize {
+        return Err(invalid_input("stance list too large"));
+    }
+    write_u8(write, command.stances.len() as u8)?;
+    for stance in &command.stances {
+        write_stance_id(write, Some(*stance))?;
+    }
+    Ok(())
+}
+
+fn read_command_controller_body<R: Read>(read: &mut R, tag: u8) -> io::Result<CommandWire> {
+    let has_attack = read_u8(read)? != 0;
+    let has_pos = read_u8(read)? != 0;
+    let target_pos = if has_pos {
+        Some(read_vec2(read)?)
+    } else {
+        None
+    };
+    let attack_target = if has_attack {
+        let entity_type = read_u8(read)?;
+        let id = read_i32(read)?;
+        if entity_type == 1 {
+            Some(ControllerTarget::BuildingPos(id))
+        } else {
+            Some(ControllerTarget::UnitId(id))
+        }
+    } else {
+        None
+    };
+
+    let command_id = if matches!(tag, 6 | 7 | 8 | 9) {
+        read_optional_signed_byte_id(read)?
+    } else {
+        None
+    };
+
+    let mut command_queue = Vec::new();
+    if matches!(tag, 7 | 8 | 9) {
+        let len = read_u8(read)? as usize;
+        command_queue.reserve(len);
+        for _ in 0..len {
+            let command_type = read_u8(read)?;
+            let entry = match command_type {
+                0 => CommandQueueEntry::BuildingPos(read_i32(read)?),
+                1 => CommandQueueEntry::UnitId(read_i32(read)?),
+                2 => CommandQueueEntry::Point(read_vec2(read)?),
+                _ => CommandQueueEntry::Invalid,
+            };
+            command_queue.push(entry);
+        }
+    }
+
+    let mut stances = Vec::new();
+    if tag == 8 {
+        stances.push(read_u8(read)? as ContentId);
+    } else if tag == 9 {
+        let count = read_u8(read)? as usize;
+        stances.reserve(count);
+        for _ in 0..count {
+            stances.push(read_u8(read)? as ContentId);
+        }
+    }
+
+    Ok(CommandWire {
+        target_pos,
+        attack_target,
+        command_id,
+        command_queue,
+        stances,
+    })
+}
+
 fn write_optional_byte_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io::Result<()> {
     let value = match id {
         Some(id) if (0..=254).contains(&id) => id as u8,
@@ -929,9 +1128,27 @@ fn write_optional_byte_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io:
     write_u8(write, value)
 }
 
+fn write_optional_signed_byte_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io::Result<()> {
+    let value = match id {
+        Some(id) if (0..=127).contains(&id) => id as u8,
+        Some(_) => return Err(invalid_input("signed byte content id out of range")),
+        None => u8::MAX,
+    };
+    write_u8(write, value)
+}
+
 fn read_optional_byte_id<R: Read>(read: &mut R) -> io::Result<Option<ContentId>> {
     let value = read_u8(read)?;
     if value == u8::MAX {
+        Ok(None)
+    } else {
+        Ok(Some(value as ContentId))
+    }
+}
+
+fn read_optional_signed_byte_id<R: Read>(read: &mut R) -> io::Result<Option<ContentId>> {
+    let value = read_u8(read)? as i8;
+    if value < 0 {
         Ok(None)
     } else {
         Ok(Some(value as ContentId))
@@ -2145,6 +2362,187 @@ mod tests {
         )
         .is_err());
         assert!(read_client_plan_config(&mut [4, 1, 0, 1, b'x'].as_slice()).is_err());
+    }
+
+    #[test]
+    fn controller_wire_simple_tags_match_java_typeio_layout() {
+        let mut bytes = Vec::new();
+        write_controller(&mut bytes, &ControllerWire::Player { player_id: 123456 }).unwrap();
+        let mut expected = vec![0];
+        expected.extend_from_slice(&123456i32.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            read_controller(&mut bytes.as_slice()).unwrap(),
+            ControllerWire::Player { player_id: 123456 }
+        );
+
+        bytes.clear();
+        write_controller(
+            &mut bytes,
+            &ControllerWire::Logic {
+                controller_pos: 0x0102_0304,
+            },
+        )
+        .unwrap();
+        assert_eq!(bytes, vec![3, 1, 2, 3, 4]);
+        assert_eq!(
+            read_controller(&mut bytes.as_slice()).unwrap(),
+            ControllerWire::Logic {
+                controller_pos: 0x0102_0304
+            }
+        );
+
+        bytes.clear();
+        write_controller(&mut bytes, &ControllerWire::Ground).unwrap();
+        assert_eq!(bytes, vec![2]);
+        assert_eq!(
+            read_controller(&mut bytes.as_slice()).unwrap(),
+            ControllerWire::Ground
+        );
+
+        bytes.clear();
+        write_controller(&mut bytes, &ControllerWire::Assembler).unwrap();
+        assert_eq!(bytes, vec![5]);
+        assert_eq!(
+            read_controller(&mut bytes.as_slice()).unwrap(),
+            ControllerWire::Assembler
+        );
+
+        bytes.clear();
+        write_controller(&mut bytes, &ControllerWire::LegacyFormation { id: -77 }).unwrap();
+        assert_eq!(&bytes[0..1], &[1]);
+        assert_eq!(
+            read_controller(&mut bytes.as_slice()).unwrap(),
+            ControllerWire::LegacyFormation { id: -77 }
+        );
+
+        assert_eq!(
+            read_controller(&mut [0x7f].as_slice()).unwrap(),
+            ControllerWire::Ground
+        );
+    }
+
+    #[test]
+    fn command_controller_wire_current_tag_matches_java_layout() {
+        let mut bytes = Vec::new();
+        let minimal = ControllerWire::Command(CommandWire {
+            command_id: Some(7),
+            ..CommandWire::new()
+        });
+        write_controller(&mut bytes, &minimal).unwrap();
+        assert_eq!(bytes, vec![9, 0, 0, 7, 0, 0]);
+        assert_eq!(read_controller(&mut bytes.as_slice()).unwrap(), minimal);
+
+        bytes.clear();
+        let none_command = ControllerWire::Command(CommandWire::new());
+        write_controller(&mut bytes, &none_command).unwrap();
+        assert_eq!(bytes, vec![9, 0, 0, 0xff, 0, 0]);
+        assert_eq!(
+            read_controller(&mut bytes.as_slice()).unwrap(),
+            none_command
+        );
+
+        bytes.clear();
+        let full = ControllerWire::Command(CommandWire {
+            target_pos: Some(Vec2::new(1.5, -2.25)),
+            attack_target: Some(ControllerTarget::BuildingPos(42)),
+            command_id: Some(3),
+            command_queue: vec![
+                CommandQueueEntry::BuildingPos(10),
+                CommandQueueEntry::UnitId(11),
+                CommandQueueEntry::Point(Vec2::new(12.0, 13.0)),
+                CommandQueueEntry::Invalid,
+            ],
+            stances: vec![1, 7],
+        });
+        write_controller(&mut bytes, &full).unwrap();
+        let mut expected = vec![9, 1, 1];
+        expected.extend_from_slice(&1.5f32.to_bits().to_be_bytes());
+        expected.extend_from_slice(&(-2.25f32).to_bits().to_be_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&42i32.to_be_bytes());
+        expected.push(3);
+        expected.push(4);
+        expected.push(0);
+        expected.extend_from_slice(&10i32.to_be_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&11i32.to_be_bytes());
+        expected.push(2);
+        expected.extend_from_slice(&12.0f32.to_bits().to_be_bytes());
+        expected.extend_from_slice(&13.0f32.to_bits().to_be_bytes());
+        expected.push(3);
+        expected.push(2);
+        expected.extend_from_slice(&[1, 7]);
+        assert_eq!(bytes, expected);
+        assert_eq!(read_controller(&mut bytes.as_slice()).unwrap(), full);
+    }
+
+    #[test]
+    fn command_controller_legacy_tags_read_compatible_layouts() {
+        let mut tag4 = vec![4, 1, 1];
+        tag4.extend_from_slice(&5.0f32.to_bits().to_be_bytes());
+        tag4.extend_from_slice(&6.0f32.to_bits().to_be_bytes());
+        tag4.push(0);
+        tag4.extend_from_slice(&99i32.to_be_bytes());
+        assert_eq!(
+            read_controller(&mut tag4.as_slice()).unwrap(),
+            ControllerWire::Command(CommandWire {
+                target_pos: Some(Vec2::new(5.0, 6.0)),
+                attack_target: Some(ControllerTarget::UnitId(99)),
+                command_id: None,
+                command_queue: Vec::new(),
+                stances: Vec::new(),
+            })
+        );
+
+        let tag6 = [6, 0, 0, 0xff];
+        assert_eq!(
+            read_controller(&mut tag6.as_slice()).unwrap(),
+            ControllerWire::Command(CommandWire::new())
+        );
+
+        let mut tag7 = vec![7, 0, 0, 2, 2];
+        tag7.push(2);
+        tag7.extend_from_slice(&7.5f32.to_bits().to_be_bytes());
+        tag7.extend_from_slice(&8.5f32.to_bits().to_be_bytes());
+        tag7.push(99);
+        assert_eq!(
+            read_controller(&mut tag7.as_slice()).unwrap(),
+            ControllerWire::Command(CommandWire {
+                target_pos: None,
+                attack_target: None,
+                command_id: Some(2),
+                command_queue: vec![
+                    CommandQueueEntry::Point(Vec2::new(7.5, 8.5)),
+                    CommandQueueEntry::Invalid,
+                ],
+                stances: Vec::new(),
+            })
+        );
+
+        let tag8 = [8, 0, 0, 1, 0, 7];
+        assert_eq!(
+            read_controller(&mut tag8.as_slice()).unwrap(),
+            ControllerWire::Command(CommandWire {
+                target_pos: None,
+                attack_target: None,
+                command_id: Some(1),
+                command_queue: Vec::new(),
+                stances: vec![7],
+            })
+        );
+
+        let tag9_with_stop_sentinel = [9, 0, 0, 0xff, 0, 1, 0xff];
+        assert_eq!(
+            read_controller(&mut tag9_with_stop_sentinel.as_slice()).unwrap(),
+            ControllerWire::Command(CommandWire {
+                target_pos: None,
+                attack_target: None,
+                command_id: None,
+                command_queue: Vec::new(),
+                stances: vec![255],
+            })
+        );
     }
 
     #[test]
