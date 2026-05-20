@@ -75,6 +75,81 @@ pub struct Rules {
     pub teams: TeamRules,
 }
 
+impl Rules {
+    pub fn mode(&self) -> crate::mindustry::game::Gamemode {
+        if self.pvp {
+            crate::mindustry::game::Gamemode::Pvp
+        } else if self.editor {
+            crate::mindustry::game::Gamemode::Editor
+        } else if self.attack_mode {
+            crate::mindustry::game::Gamemode::Attack
+        } else if self.infinite_resources {
+            crate::mindustry::game::Gamemode::Sandbox
+        } else {
+            crate::mindustry::game::Gamemode::Survival
+        }
+    }
+
+    pub fn build_radius(&self, team_id: usize) -> f32 {
+        let team = self.teams.get_or_default(team_id);
+        if team.protect_cores {
+            self.enemy_core_build_radius + team.extra_core_build_radius
+        } else {
+            0.0
+        }
+    }
+
+    pub fn unit_build_speed(&self, team_id: usize) -> f32 {
+        self.unit_build_speed_multiplier
+            * self
+                .teams
+                .get_or_default(team_id)
+                .unit_build_speed_multiplier
+    }
+
+    pub fn unit_cost(&self, team_id: usize) -> f32 {
+        self.unit_cost_multiplier * self.teams.get_or_default(team_id).unit_cost_multiplier
+    }
+
+    pub fn unit_damage(&self, team_id: usize) -> f32 {
+        self.unit_damage_multiplier * self.teams.get_or_default(team_id).unit_damage_multiplier
+    }
+
+    pub fn unit_health(&self, team_id: usize) -> f32 {
+        (self.unit_health_multiplier * self.teams.get_or_default(team_id).unit_health_multiplier)
+            .max(0.000001)
+    }
+
+    pub fn unit_crash_damage(&self, team_id: usize) -> f32 {
+        self.unit_damage(team_id)
+            * self.unit_crash_damage_multiplier
+            * self
+                .teams
+                .get_or_default(team_id)
+                .unit_crash_damage_multiplier
+    }
+
+    pub fn unit_mine_speed(&self, team_id: usize) -> f32 {
+        self.unit_mine_speed_multiplier
+            * self
+                .teams
+                .get_or_default(team_id)
+                .unit_mine_speed_multiplier
+    }
+
+    pub fn block_health(&self, team_id: usize) -> f32 {
+        self.block_health_multiplier * self.teams.get_or_default(team_id).block_health_multiplier
+    }
+
+    pub fn block_damage(&self, team_id: usize) -> f32 {
+        self.block_damage_multiplier * self.teams.get_or_default(team_id).block_damage_multiplier
+    }
+
+    pub fn build_speed(&self, team_id: usize) -> f32 {
+        self.build_speed_multiplier * self.teams.get_or_default(team_id).build_speed_multiplier
+    }
+}
+
 impl Default for Rules {
     fn default() -> Self {
         Self {
@@ -157,34 +232,75 @@ impl Default for Rules {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TeamRule {
+    pub ai_core_spawn: bool,
+    pub protect_cores: bool,
+    pub check_placement: bool,
+    pub cheat: bool,
+    pub fill_items: bool,
     pub infinite_resources: bool,
+    pub infinite_ammo: bool,
+    pub prebuild_ai: bool,
+    pub build_ai: bool,
+    pub build_ai_tier: f32,
     pub respawn: bool,
     pub unit_damage_multiplier: f32,
     pub unit_health_multiplier: f32,
+    pub unit_crash_damage_multiplier: f32,
+    pub unit_mine_speed_multiplier: f32,
     pub unit_cost_multiplier: f32,
     pub unit_build_speed_multiplier: f32,
     pub block_damage_multiplier: f32,
     pub block_health_multiplier: f32,
     pub build_speed_multiplier: f32,
     pub rts_ai: bool,
+    pub rts_min_squad: i32,
     pub rts_max_squad: i32,
+    pub rts_min_weight: f32,
+    pub unit_factory_activation_delay: f32,
+    pub extra_core_build_radius: f32,
 }
 
 impl Default for TeamRule {
     fn default() -> Self {
         Self {
+            ai_core_spawn: true,
+            protect_cores: true,
+            check_placement: true,
+            cheat: false,
+            fill_items: false,
             infinite_resources: false,
+            infinite_ammo: false,
+            prebuild_ai: false,
+            build_ai: false,
+            build_ai_tier: 1.0,
             respawn: true,
             unit_damage_multiplier: 1.0,
             unit_health_multiplier: 1.0,
+            unit_crash_damage_multiplier: 1.0,
+            unit_mine_speed_multiplier: 1.0,
             unit_cost_multiplier: 1.0,
             unit_build_speed_multiplier: 1.0,
             block_damage_multiplier: 1.0,
             block_health_multiplier: 1.0,
             build_speed_multiplier: 1.0,
             rts_ai: false,
+            rts_min_squad: 4,
             rts_max_squad: 50,
+            rts_min_weight: 1.2,
+            unit_factory_activation_delay: 0.0,
+            extra_core_build_radius: 0.0,
         }
+    }
+}
+
+impl TeamRule {
+    pub fn for_team_id(team_id: usize) -> Self {
+        let mut rule = Self::default();
+        if team_id == crate::mindustry::game::TEAM_DERELICT as usize {
+            rule.protect_cores = false;
+            rule.check_placement = false;
+        }
+        rule
     }
 }
 
@@ -204,14 +320,14 @@ impl TeamRules {
         self.values
             .get(team_id)
             .and_then(Clone::clone)
-            .unwrap_or_default()
+            .unwrap_or_else(|| TeamRule::for_team_id(team_id))
     }
 
     pub fn get_or_insert(&mut self, team_id: usize) -> &mut TeamRule {
         if team_id >= self.values.len() {
             self.values.resize_with(team_id + 1, || None);
         }
-        self.values[team_id].get_or_insert_with(TeamRule::default)
+        self.values[team_id].get_or_insert_with(|| TeamRule::for_team_id(team_id))
     }
 }
 
@@ -335,5 +451,76 @@ mod tests {
         assert!(editor.editor);
         assert!(!editor.waves);
         assert!(!editor.wave_timer);
+    }
+
+    #[test]
+    fn team_rule_defaults_and_derelict_special_case_match_java_constructor() {
+        let rules = TeamRules::new(256);
+        let derelict = rules.get_or_default(crate::mindustry::game::TEAM_DERELICT as usize);
+        assert!(!derelict.protect_cores);
+        assert!(!derelict.check_placement);
+
+        let sharded = rules.get_or_default(crate::mindustry::game::TEAM_SHARDED as usize);
+        assert!(sharded.ai_core_spawn);
+        assert!(sharded.protect_cores);
+        assert!(sharded.check_placement);
+        assert_eq!(sharded.build_ai_tier, 1.0);
+        assert_eq!(sharded.rts_min_squad, 4);
+        assert_eq!(sharded.rts_max_squad, 50);
+        assert_eq!(sharded.rts_min_weight, 1.2);
+        assert_eq!(sharded.extra_core_build_radius, 0.0);
+    }
+
+    #[test]
+    fn rules_mode_and_team_multipliers_follow_java_formulas() {
+        let mut rules = Rules::default();
+        assert_eq!(rules.mode(), Gamemode::Survival);
+        rules.infinite_resources = true;
+        assert_eq!(rules.mode(), Gamemode::Sandbox);
+        rules.attack_mode = true;
+        assert_eq!(rules.mode(), Gamemode::Attack);
+        rules.editor = true;
+        assert_eq!(rules.mode(), Gamemode::Editor);
+        rules.pvp = true;
+        assert_eq!(rules.mode(), Gamemode::Pvp);
+
+        let team_id = crate::mindustry::game::TEAM_SHARDED as usize;
+        let team = rules.teams.get_or_insert(team_id);
+        team.unit_build_speed_multiplier = 2.0;
+        team.unit_cost_multiplier = 3.0;
+        team.unit_damage_multiplier = 4.0;
+        team.unit_health_multiplier = 0.0;
+        team.unit_crash_damage_multiplier = 5.0;
+        team.unit_mine_speed_multiplier = 6.0;
+        team.block_health_multiplier = 7.0;
+        team.block_damage_multiplier = 8.0;
+        team.build_speed_multiplier = 9.0;
+        team.extra_core_build_radius = 10.0;
+
+        rules.unit_build_speed_multiplier = 1.5;
+        rules.unit_cost_multiplier = 2.0;
+        rules.unit_damage_multiplier = 2.5;
+        rules.unit_health_multiplier = 0.0;
+        rules.unit_crash_damage_multiplier = 3.0;
+        rules.unit_mine_speed_multiplier = 3.5;
+        rules.block_health_multiplier = 4.0;
+        rules.block_damage_multiplier = 4.5;
+        rules.build_speed_multiplier = 5.0;
+        rules.enemy_core_build_radius = 400.0;
+
+        assert_eq!(rules.build_radius(team_id), 410.0);
+        assert_eq!(rules.unit_build_speed(team_id), 3.0);
+        assert_eq!(rules.unit_cost(team_id), 6.0);
+        assert_eq!(rules.unit_damage(team_id), 10.0);
+        assert_eq!(rules.unit_health(team_id), 0.000001);
+        assert_eq!(rules.unit_crash_damage(team_id), 150.0);
+        assert_eq!(rules.unit_mine_speed(team_id), 21.0);
+        assert_eq!(rules.block_health(team_id), 28.0);
+        assert_eq!(rules.block_damage(team_id), 36.0);
+        assert_eq!(rules.build_speed(team_id), 45.0);
+        assert_eq!(
+            rules.build_radius(crate::mindustry::game::TEAM_DERELICT as usize),
+            0.0
+        );
     }
 }
