@@ -93,7 +93,15 @@ impl MapLocales {
     }
 
     pub fn get_formatted(&self, key: &str, args: &[String]) -> String {
-        let mut result = self.get_property(key);
+        let locale = Self::current_locale();
+        self.get_formatted_for(&locale, key, args)
+    }
+
+    pub fn get_formatted_for(&self, locale: &str, key: &str, args: &[String]) -> String {
+        let mut result = self
+            .get_property_for(locale, key)
+            .or_else(|| self.get_property_for("en", key))
+            .unwrap_or_else(|| format!("???{key}???"));
 
         for arg in args {
             if let Some(index) = result.find('@') {
@@ -333,14 +341,19 @@ mod tests {
         let locales = sample_locales();
 
         assert_eq!(
-            locales.get_formatted("name", &[String::from("42"), String::from("ignored")]),
+            locales.get_formatted_for("en", "name", &[String::from("42"), String::from("ignored")]),
             "Sector 42"
+        );
+        assert_eq!(
+            locales.get_formatted_for("zh", "name", &[String::from("42")]),
+            "区域42"
         );
 
         let mut custom = MapLocales::new();
         custom.insert_locale("en", vec![("objective".into(), "@ captured @ of @".into())]);
         assert_eq!(
-            custom.get_formatted(
+            custom.get_formatted_for(
+                "en",
                 "objective",
                 &[String::from("alpha"), String::from("2"), String::from("3")]
             ),

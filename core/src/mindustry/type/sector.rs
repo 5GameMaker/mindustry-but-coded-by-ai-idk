@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 
-use crate::mindustry::game::SectorInfo;
+use crate::mindustry::{
+    ctype::{Content, ContentId, ContentType},
+    game::SectorInfo,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SectorPreset {
+    pub id: ContentId,
     pub name: String,
     pub localized_name: String,
     pub always_unlocked: bool,
@@ -31,6 +35,7 @@ impl SectorPreset {
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         Self {
+            id: -1,
             localized_name: name.clone(),
             name,
             always_unlocked: false,
@@ -63,6 +68,11 @@ impl SectorPreset {
         let mut preset = Self::new(name);
         preset.initialize(planet_name, sector, false);
         preset
+    }
+
+    pub fn with_id(mut self, id: ContentId) -> Self {
+        self.id = id;
+        self
     }
 
     pub fn with_file_planet_sector(
@@ -177,6 +187,16 @@ impl SectorPreset {
 
     pub fn generator_map_name(&self) -> &str {
         self.file_name.as_deref().unwrap_or(&self.name)
+    }
+}
+
+impl Content for SectorPreset {
+    fn id(&self) -> ContentId {
+        self.id
+    }
+
+    fn content_type(&self) -> ContentType {
+        ContentType::Sector
     }
 }
 
@@ -450,6 +470,8 @@ mod tests {
     fn sector_preset_defaults_match_java_field_initializers() {
         let preset = SectorPreset::new("groundZero");
 
+        assert_eq!(preset.id, -1);
+        assert_eq!(preset.id(), -1);
         assert_eq!(preset.name, "groundZero");
         assert_eq!(preset.localized_name, "groundZero");
         assert_eq!(preset.generator_map_name(), "groundZero");

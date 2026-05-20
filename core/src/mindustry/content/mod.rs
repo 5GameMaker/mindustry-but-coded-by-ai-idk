@@ -2,6 +2,7 @@ pub mod blocks;
 pub mod items;
 pub mod liquids;
 pub mod planets;
+pub mod sector_presets;
 pub mod status_effects;
 pub mod team_entries;
 pub mod unit_commands;
@@ -13,7 +14,7 @@ use crate::mindustry::{
     ai::{unit_command::UnitCommand, unit_stance::UnitStance},
     ctype::{Content, ContentId, ContentType},
     io::save::{ContentHeaderEntry, ContentHeaderSnapshot},
-    r#type::{Item, Liquid, StatusEffect, TeamEntry, UnitType},
+    r#type::{Item, Liquid, SectorPreset, StatusEffect, TeamEntry, UnitType},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -24,6 +25,7 @@ pub struct ContentCatalog {
     pub status_effects: Vec<StatusEffect>,
     pub units: Vec<UnitType>,
     pub weathers: Vec<weathers::WeatherContent>,
+    pub sectors: Vec<SectorPreset>,
     pub planets: Vec<planets::PlanetContent>,
     pub team_entries: Vec<TeamEntry>,
     pub unit_commands: Vec<UnitCommand>,
@@ -44,6 +46,7 @@ impl ContentCatalog {
             status_effects: status_effects::load(),
             units: unit_types::load(),
             weathers: weathers::load(),
+            sectors: sector_presets::load(),
             planets: planets::load(),
             team_entries: team_entries::load(),
             unit_commands,
@@ -103,6 +106,14 @@ impl ContentCatalog {
                         .collect(),
                 },
                 ContentHeaderEntry {
+                    content_type: ContentType::Sector.ordinal(),
+                    names: self
+                        .sectors
+                        .iter()
+                        .map(|sector| sector.name.clone())
+                        .collect(),
+                },
+                ContentHeaderEntry {
                     content_type: ContentType::Planet.ordinal(),
                     names: self
                         .planets
@@ -158,6 +169,10 @@ impl ContentCatalog {
             .find(|unit| unit.base.mappable.name.as_str() == name)
     }
 
+    pub fn sector_by_name(&self, name: &str) -> Option<&SectorPreset> {
+        self.sectors.iter().find(|sector| sector.name == name)
+    }
+
     pub fn planet_by_name(&self, name: &str) -> Option<&planets::PlanetContent> {
         self.planets.iter().find(|planet| planet.name() == name)
     }
@@ -206,6 +221,10 @@ impl ContentCatalog {
         self.units
             .iter()
             .find(|unit| unit.base.mappable.base.id == id)
+    }
+
+    pub fn sector_by_id(&self, id: ContentId) -> Option<&SectorPreset> {
+        self.sectors.iter().find(|sector| sector.id() == id)
     }
 
     pub fn planet_by_id(&self, id: ContentId) -> Option<&planets::PlanetContent> {
@@ -257,6 +276,7 @@ mod tests {
                 ContentType::Status.ordinal(),
                 ContentType::Unit.ordinal(),
                 ContentType::Weather.ordinal(),
+                ContentType::Sector.ordinal(),
                 ContentType::Planet.ordinal(),
                 ContentType::UnitCommand.ordinal(),
                 ContentType::UnitStance.ordinal(),
@@ -268,9 +288,10 @@ mod tests {
         assert_eq!(snapshot.entries[3].names[0], "none");
         assert_eq!(snapshot.entries[4].names[0], "dagger");
         assert_eq!(snapshot.entries[5].names[0], "snowing");
-        assert_eq!(snapshot.entries[6].names[0], "sun");
-        assert_eq!(snapshot.entries[7].names[0], "move");
-        assert_eq!(snapshot.entries[8].names[0], "stop");
+        assert_eq!(snapshot.entries[6].names[0], "groundZero");
+        assert_eq!(snapshot.entries[7].names[0], "sun");
+        assert_eq!(snapshot.entries[8].names[0], "move");
+        assert_eq!(snapshot.entries[9].names[0], "stop");
         assert!(!snapshot
             .entries
             .iter()
@@ -325,6 +346,9 @@ mod tests {
         assert_eq!(catalog.weather_by_name("rain").unwrap().id(), 1);
         assert_eq!(catalog.weather_by_id(2).unwrap().name(), "sandstorm");
         assert!(catalog.weather_by_id(999).is_none());
+        assert_eq!(catalog.sector_by_name("onset").unwrap().id(), 78);
+        assert_eq!(catalog.sector_by_id(94).unwrap().name, "origin");
+        assert!(catalog.sector_by_id(999).is_none());
         assert_eq!(catalog.planet_by_name("serpulo").unwrap().id(), 5);
         assert_eq!(catalog.planet_by_id(1).unwrap().name(), "erekir");
         assert!(catalog.planet_by_id(999).is_none());
