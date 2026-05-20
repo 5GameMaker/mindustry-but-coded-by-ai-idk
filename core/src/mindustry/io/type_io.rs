@@ -14,6 +14,8 @@ pub const MAX_ARRAY_SIZE: usize = 1000;
 pub const MAX_BYTE_ARRAY_SIZE: usize = 40_000;
 pub const MAX_NET_BUILD_PLANS: usize = 20;
 pub const MAX_NET_BUILD_PLAN_CONFIG_CHARS: usize = 500;
+pub const MAX_RULES_BYTES: usize = 100_000;
+pub const MAX_OBJECTIVES_BYTES: usize = 60_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Point2 {
@@ -1527,6 +1529,61 @@ pub fn read_action<R: Read>(read: &mut R) -> io::Result<AdminAction> {
     })
 }
 
+pub fn write_rules_json<W: Write>(write: &mut W, json: &str) -> io::Result<()> {
+    write_json_bytes(write, json)
+}
+
+pub fn read_rules_json<R: Read>(read: &mut R) -> io::Result<String> {
+    read_json_bytes(read, MAX_RULES_BYTES, false, "rules")
+}
+
+pub fn write_objectives_json<W: Write>(write: &mut W, json: &str) -> io::Result<()> {
+    write_json_bytes(write, json)
+}
+
+pub fn read_objectives_json<R: Read>(read: &mut R) -> io::Result<String> {
+    read_json_bytes(read, MAX_OBJECTIVES_BYTES, true, "objectives")
+}
+
+pub fn write_objective_marker_json<W: Write>(write: &mut W, json: &str) -> io::Result<()> {
+    write_json_bytes(write, json)
+}
+
+pub fn read_objective_marker_json<R: Read>(read: &mut R) -> io::Result<String> {
+    read_json_bytes(read, MAX_BYTE_ARRAY_SIZE, false, "objective marker")
+}
+
+fn write_json_bytes<W: Write>(write: &mut W, json: &str) -> io::Result<()> {
+    let bytes = json.as_bytes();
+    if bytes.len() > i32::MAX as usize {
+        return Err(invalid_input("json payload too large"));
+    }
+    write_i32(write, bytes.len() as i32)?;
+    write.write_all(bytes)
+}
+
+fn read_json_bytes<R: Read>(
+    read: &mut R,
+    max_len: usize,
+    reject_equal: bool,
+    label: &'static str,
+) -> io::Result<String> {
+    let len = read_i32(read)?;
+    if len < 0 {
+        return Err(invalid_data("negative json payload length"));
+    }
+    let len = len as usize;
+    if len > max_len || (reject_equal && len == max_len) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} json payload too long"),
+        ));
+    }
+    let mut bytes = vec![0; len];
+    read.read_exact(&mut bytes)?;
+    String::from_utf8(bytes).map_err(|_| invalid_data("invalid UTF-8 json payload"))
+}
+
 pub fn write_bytes_short<W: Write>(write: &mut W, values: &[u8]) -> io::Result<()> {
     if values.len() > i16::MAX as usize {
         return Err(invalid_input("byte block too large"));
@@ -2362,6 +2419,56 @@ mod tests {
         );
         assert!(read_action(&mut [0x05].as_slice()).is_err());
         assert!(read_action(&mut [0xff].as_slice()).is_err());
+    }
+
+    #[test]
+    fn rules_and_objective_json_use_java_int_length_utf8_layout() {
+        let mut bytes = Vec::new();
+        let rules = "{\"wave\":true,\"name\":\"中\"}";
+        write_rules_json(&mut bytes, rules).unwrap();
+        assert_eq!(&bytes[0..4], &(rules.len() as i32).to_be_bytes());
+        assert_eq!(&bytes[4..], rules.as_bytes());
+        assert_eq!(read_rules_json(&mut bytes.as_slice()).unwrap(), rules);
+
+        bytes.clear();
+        let objectives = "{\"all\":[]}";
+        write_objectives_json(&mut bytes, objectives).unwrap();
+        assert_eq!(&bytes[0..4], &(objectives.len() as i32).to_be_bytes());
+        assert_eq!(
+            read_objectives_json(&mut bytes.as_slice()).unwrap(),
+            objectives
+        );
+
+        bytes.clear();
+        let marker = "{\"type\":\"Point\",\"x\":4}";
+        write_objective_marker_json(&mut bytes, marker).unwrap();
+        assert_eq!(&bytes[0..4], &(marker.len() as i32).to_be_bytes());
+        assert_eq!(
+            read_objective_marker_json(&mut bytes.as_slice()).unwrap(),
+            marker
+        );
+    }
+
+    #[test]
+    fn json_payload_readers_enforce_java_length_limits() {
+        assert!(read_rules_json(&mut [0xff, 0xff, 0xff, 0xff].as_slice()).is_err());
+
+        let mut rules = Vec::new();
+        rules.extend_from_slice(&((MAX_RULES_BYTES as i32 + 1).to_be_bytes()));
+        assert!(read_rules_json(&mut rules.as_slice()).is_err());
+
+        let mut objectives = Vec::new();
+        objectives.extend_from_slice(&(MAX_OBJECTIVES_BYTES as i32).to_be_bytes());
+        assert!(read_objectives_json(&mut objectives.as_slice()).is_err());
+
+        let mut marker = Vec::new();
+        marker.extend_from_slice(&((MAX_BYTE_ARRAY_SIZE as i32 + 1).to_be_bytes()));
+        assert!(read_objective_marker_json(&mut marker.as_slice()).is_err());
+
+        let mut invalid_utf8 = Vec::new();
+        invalid_utf8.extend_from_slice(&1i32.to_be_bytes());
+        invalid_utf8.push(0xff);
+        assert!(read_rules_json(&mut invalid_utf8.as_slice()).is_err());
     }
 
     #[test]
