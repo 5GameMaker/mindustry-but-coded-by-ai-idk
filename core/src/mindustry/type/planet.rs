@@ -148,6 +148,55 @@ impl PlanetMeta {
             .launch_defaults(self.allow_launch_schematics, self.allow_launch_loadout)
             .sector_count(sector_count)
     }
+
+    pub fn update_base_coverage(
+        &self,
+        sectors: &mut [Sector],
+        neighbor_ids_by_index: &[Vec<usize>],
+        runtime: super::SectorRuntimeState,
+    ) {
+        let enemy_bases: Vec<bool> = sectors
+            .iter()
+            .map(|sector| sector.has_enemy_base(runtime))
+            .collect();
+        let generated_bases: Vec<bool> = sectors
+            .iter()
+            .map(|sector| sector.generate_enemy_base)
+            .collect();
+
+        for (index, sector) in sectors.iter_mut().enumerate() {
+            let mut sum: f32 = 1.0;
+            for neighbor in neighbor_ids_by_index
+                .get(index)
+                .into_iter()
+                .flatten()
+                .copied()
+            {
+                if generated_bases.get(neighbor).copied().unwrap_or(false) {
+                    sum += 0.9;
+                }
+            }
+
+            if enemy_bases.get(index).copied().unwrap_or(false) {
+                sum += 0.88;
+            }
+
+            sector.threat = if sector
+                .preset
+                .as_ref()
+                .is_none_or(|preset| !preset.require_unlock && preset.difficulty == 0.0)
+            {
+                (sum / 5.0).clamp(0.3_f32, 1.2_f32)
+            } else {
+                sector
+                    .preset
+                    .as_ref()
+                    .map(|preset| preset.difficulty / 10.0)
+                    .unwrap_or(0.0)
+                    .clamp(0.0, 1.0)
+            };
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -179,6 +228,7 @@ pub fn last_sector_key(planet_name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{SectorPreset, SectorRuntimeState};
     use super::*;
 
     #[test]
@@ -270,5 +320,44 @@ mod tests {
         assert!(!defaults.allow_launch_loadout);
         assert_eq!(defaults.sector_count, 10);
         assert_eq!(last_sector_key("serpulo"), "serpulo-last-sector");
+    }
+
+    #[test]
+    fn update_base_coverage_matches_java_threat_formula() {
+        let meta = PlanetMeta::new("serpulo", 3.0);
+        let runtime = super::super::SectorRuntimeState::default();
+        let mut sectors = vec![Sector::new(0), Sector::new(1), Sector::new(2)];
+        sectors[0].generate_enemy_base = true;
+        sectors[2].generate_enemy_base = true;
+        let neighbors = vec![vec![1, 2], vec![0], vec![0]];
+
+        meta.update_base_coverage(&mut sectors, &neighbors, runtime);
+
+        assert_eq!(sectors[0].threat, 0.556);
+        assert_eq!(sectors[1].threat, 0.38);
+        assert_eq!(sectors[2].threat, 0.556);
+    }
+
+    #[test]
+    fn update_base_coverage_uses_preset_difficulty_when_present() {
+        let meta = PlanetMeta::new("erekir", 3.0);
+        let mut sectors = vec![Sector::new(0), Sector::new(1), Sector::new(2)];
+        sectors[0].preset = Some(SectorPreset::new("hard").difficulty(7.5));
+        sectors[1].preset = Some(
+            SectorPreset::new("zero")
+                .difficulty(0.0)
+                .require_unlock(true),
+        );
+        sectors[2].preset = Some(SectorPreset::new("normal").difficulty(0.0));
+
+        meta.update_base_coverage(
+            &mut sectors,
+            &[vec![], vec![], vec![]],
+            SectorRuntimeState::default(),
+        );
+
+        assert_eq!(sectors[0].threat, 0.75);
+        assert_eq!(sectors[1].threat, 0.0);
+        assert_eq!(sectors[2].threat, 0.3);
     }
 }

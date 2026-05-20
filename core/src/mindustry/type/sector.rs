@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::mindustry::game::SectorInfo;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SectorPreset {
     pub name: String,
     pub localized_name: String,
@@ -13,6 +13,7 @@ pub struct SectorPreset {
     pub require_unlock: bool,
     pub show_hidden: bool,
     pub capture_wave: i32,
+    pub difficulty: f32,
     pub shield_sector_ids: Vec<i32>,
 }
 
@@ -29,6 +30,7 @@ impl SectorPreset {
             require_unlock: false,
             show_hidden: false,
             capture_wave: -1,
+            difficulty: 0.0,
             shield_sector_ids: Vec::new(),
         }
     }
@@ -66,6 +68,11 @@ impl SectorPreset {
 
     pub fn capture_wave(mut self, capture_wave: i32) -> Self {
         self.capture_wave = capture_wave;
+        self
+    }
+
+    pub fn difficulty(mut self, difficulty: f32) -> Self {
+        self.difficulty = difficulty;
         self
     }
 
