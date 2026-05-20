@@ -16,6 +16,7 @@ pub mod sector;
 pub mod status_effect;
 pub mod team_entry;
 pub mod weapon;
+pub mod weather;
 
 pub use ammo_type::{AmmoType, AmmoUnit, BasicAmmoType, ItemAmmoType, PowerAmmoType};
 pub use category::Category;
@@ -35,3 +36,4 @@ pub use sector::{Sector, SectorPlanetDefaults, SectorPreset, SectorRuntimeState}
 pub use status_effect::StatusEffect;
 pub use team_entry::TeamEntry;
 pub use weapon::Weapon;
+pub use weather::{Weather, WeatherEntry, WeatherState};
