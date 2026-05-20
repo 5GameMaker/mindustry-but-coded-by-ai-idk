@@ -39,6 +39,14 @@ pub struct Rules {
     pub disable_world_processors: bool,
     pub pause_disabled: bool,
     pub enemy_core_build_radius: f32,
+    pub polygon_core_protection: bool,
+    pub place_range_check: bool,
+    pub cleanup_dead_teams: bool,
+    pub only_deposit_core: bool,
+    pub allow_core_unloaders: bool,
+    pub core_destroy_clear: bool,
+    pub hide_banned_blocks: bool,
+    pub allow_environment_deconstruct: bool,
     pub solar_multiplier: f32,
     pub build_cost_multiplier: f32,
     pub build_speed_multiplier: f32,
@@ -69,6 +77,13 @@ pub struct Rules {
     pub researched: BTreeSet<String>,
     pub objective_flags: BTreeSet<String>,
     pub tags: BTreeMap<String, String>,
+    pub lighting: bool,
+    pub static_color: [f32; 4],
+    pub dynamic_color: [f32; 4],
+    pub ambient_light: [f32; 4],
+    pub cloud_color: [f32; 4],
+    pub mode_name: Option<String>,
+    pub mission: Option<String>,
     pub core_incinerates: bool,
     pub border_darkness: bool,
     pub limit_map_area: bool,
@@ -81,12 +96,20 @@ pub struct Rules {
     pub background_scl: f32,
     pub background_offset_x: f32,
     pub background_offset_y: f32,
+    pub custom_background_callback: Option<String>,
+    pub background_texture: Option<String>,
+    pub planet: String,
     pub allow_logic_data: bool,
+    pub default_team: i32,
     pub wave_team: i32,
     pub teams: TeamRules,
 }
 
 impl Rules {
+    pub fn copy(&self) -> Self {
+        self.clone()
+    }
+
     pub fn mode(&self) -> crate::mindustry::game::Gamemode {
         if self.pvp {
             crate::mindustry::game::Gamemode::Pvp
@@ -225,6 +248,14 @@ impl Default for Rules {
             disable_world_processors: false,
             pause_disabled: false,
             enemy_core_build_radius: 400.0,
+            polygon_core_protection: false,
+            place_range_check: false,
+            cleanup_dead_teams: true,
+            only_deposit_core: false,
+            allow_core_unloaders: true,
+            core_destroy_clear: false,
+            hide_banned_blocks: false,
+            allow_environment_deconstruct: false,
             solar_multiplier: 1.0,
             build_cost_multiplier: 1.0,
             build_speed_multiplier: 1.0,
@@ -255,6 +286,13 @@ impl Default for Rules {
             researched: BTreeSet::new(),
             objective_flags: BTreeSet::new(),
             tags: BTreeMap::new(),
+            lighting: false,
+            static_color: [0.0, 0.0, 0.0, 1.0],
+            dynamic_color: [0.0, 0.0, 0.0, 0.5],
+            ambient_light: [0.01, 0.01, 0.04, 0.99],
+            cloud_color: [0.0, 0.0, 0.0, 0.0],
+            mode_name: None,
+            mission: None,
             core_incinerates: true,
             border_darkness: true,
             limit_map_area: false,
@@ -267,8 +305,12 @@ impl Default for Rules {
             background_scl: 1.0,
             background_offset_x: 0.1,
             background_offset_y: 0.1,
+            custom_background_callback: None,
+            background_texture: None,
+            planet: "serpulo".into(),
             allow_logic_data: false,
-            wave_team: 1,
+            default_team: crate::mindustry::game::TEAM_SHARDED as i32,
+            wave_team: crate::mindustry::game::TEAM_CRUX as i32,
             teams: TeamRules::new(256),
         }
     }
@@ -446,6 +488,14 @@ mod tests {
         assert!(rules.logic_unit_control);
         assert!(rules.logic_unit_build);
         assert!(!rules.logic_unit_deconstruct);
+        assert!(!rules.polygon_core_protection);
+        assert!(!rules.place_range_check);
+        assert!(rules.cleanup_dead_teams);
+        assert!(!rules.only_deposit_core);
+        assert!(rules.allow_core_unloaders);
+        assert!(!rules.core_destroy_clear);
+        assert!(!rules.hide_banned_blocks);
+        assert!(!rules.allow_environment_deconstruct);
         assert_eq!(rules.solar_multiplier, 1.0);
         assert_eq!(rules.deconstruct_refund_multiplier, 0.5);
         assert_eq!(rules.item_deposit_cooldown, 0.5);
@@ -463,6 +513,13 @@ mod tests {
         assert!(rules.researched.is_empty());
         assert!(rules.objective_flags.is_empty());
         assert!(rules.tags.is_empty());
+        assert!(!rules.lighting);
+        assert_eq!(rules.static_color, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(rules.dynamic_color, [0.0, 0.0, 0.0, 0.5]);
+        assert_eq!(rules.ambient_light, [0.01, 0.01, 0.04, 0.99]);
+        assert_eq!(rules.cloud_color, [0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(rules.mode_name, None);
+        assert_eq!(rules.mission, None);
         assert!(rules.core_incinerates);
         assert!(rules.border_darkness);
         assert!(!rules.limit_map_area);
@@ -480,7 +537,37 @@ mod tests {
         assert_eq!(rules.background_scl, 1.0);
         assert_eq!(rules.background_offset_x, 0.1);
         assert_eq!(rules.background_offset_y, 0.1);
+        assert_eq!(rules.custom_background_callback, None);
+        assert_eq!(rules.background_texture, None);
+        assert_eq!(rules.planet, "serpulo");
         assert!(!rules.allow_logic_data);
+        assert_eq!(
+            rules.default_team,
+            crate::mindustry::game::TEAM_SHARDED as i32
+        );
+        assert_eq!(rules.wave_team, crate::mindustry::game::TEAM_CRUX as i32);
+    }
+
+    #[test]
+    fn rules_copy_is_a_deep_clone_for_owned_lightweight_fields() {
+        let mut rules = Rules::default();
+        rules.mode_name = Some("custom".into());
+        rules.mission = Some("survive".into());
+        rules.background_texture = Some("sprites/space.png".into());
+        rules.tags.insert("author".into(), "java".into());
+        rules.banned_blocks.insert("router".into());
+
+        let mut copied = rules.copy();
+        copied.mode_name = Some("changed".into());
+        copied.tags.insert("author".into(), "rust".into());
+        copied.banned_blocks.insert("duo".into());
+
+        assert_eq!(rules.mode_name.as_deref(), Some("custom"));
+        assert_eq!(rules.tags.get("author").map(String::as_str), Some("java"));
+        assert!(rules.banned_blocks.contains("router"));
+        assert!(!rules.banned_blocks.contains("duo"));
+        assert_eq!(copied.mode_name.as_deref(), Some("changed"));
+        assert_eq!(copied.tags.get("author").map(String::as_str), Some("rust"));
     }
 
     #[test]
