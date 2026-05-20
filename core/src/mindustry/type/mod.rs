@@ -37,5 +37,6 @@ pub use status_effect::StatusEffect;
 pub use team_entry::TeamEntry;
 pub use weapon::Weapon;
 pub use weather::{
-    MagneticStorm, RainDrawPlan, RainWeather, SplashDrawPlan, Weather, WeatherEntry, WeatherState,
+    MagneticStorm, RainDrawPlan, RainWeather, SolarFlare, SplashDrawPlan, Weather, WeatherEntry,
+    WeatherState,
 };

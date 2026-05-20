@@ -5,8 +5,10 @@ use crate::mindustry::{
 
 pub mod magnetic_storm;
 pub mod rain_weather;
+pub mod solar_flare;
 pub use magnetic_storm::MagneticStorm;
 pub use rain_weather::{RainDrawPlan, RainWeather, SplashDrawPlan};
+pub use solar_flare::SolarFlare;
 
 pub const TIME_TO_MINUTES: f32 = 60.0 * 60.0;
 pub const WEATHER_DEFAULT_DURATION: f32 = 10.0 * TIME_TO_MINUTES;
