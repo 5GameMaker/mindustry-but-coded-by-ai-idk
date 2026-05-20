@@ -5,6 +5,7 @@ pub mod liquids;
 pub mod loadouts;
 pub mod planets;
 pub mod sector_presets;
+pub mod serpulo_tech_tree;
 pub mod status_effects;
 pub mod team_entries;
 pub mod unit_commands;
@@ -30,6 +31,7 @@ pub struct ContentCatalog {
     pub weathers: Vec<weathers::WeatherContent>,
     pub sectors: Vec<SectorPreset>,
     pub planets: Vec<planets::PlanetContent>,
+    pub serpulo_tech_tree: crate::mindustry::game::TechTree,
     pub loadouts: Vec<loadouts::Loadout>,
     pub team_entries: Vec<TeamEntry>,
     pub unit_commands: Vec<UnitCommand>,
@@ -53,6 +55,7 @@ impl ContentCatalog {
             weathers: weathers::load(),
             sectors: sector_presets::load(),
             planets: planets::load(),
+            serpulo_tech_tree: serpulo_tech_tree::load(),
             loadouts: loadouts::load_or_panic(),
             team_entries: team_entries::load(),
             unit_commands,
@@ -377,6 +380,15 @@ mod tests {
         assert_eq!(catalog.planet_by_name("serpulo").unwrap().id(), 5);
         assert_eq!(catalog.planet_by_id(1).unwrap().name(), "erekir");
         assert!(catalog.planet_by_id(999).is_none());
+        assert_eq!(
+            catalog
+                .serpulo_tech_tree
+                .node(catalog.serpulo_tech_tree.roots()[0])
+                .unwrap()
+                .content
+                .name,
+            "core-shard"
+        );
         assert_eq!(
             catalog
                 .loadout_by_name("basicBastion")
