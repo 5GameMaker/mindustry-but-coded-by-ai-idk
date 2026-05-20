@@ -15,6 +15,7 @@ pub mod sector_info;
 pub mod spawn_group;
 pub mod team;
 pub mod teams;
+pub mod tech_tree;
 pub mod universe;
 pub mod waves;
 
@@ -50,6 +51,7 @@ pub use team::{
     TEAM_DERELICT, TEAM_GREEN, TEAM_MALIS, TEAM_NEOPLASTIC, TEAM_SHARDED,
 };
 pub use teams::{BlockPlan, CoreInfo, TeamData, Teams};
+pub use tech_tree::{TechContentRef, TechNode, TechNodeId, TechTree};
 pub use universe::{
     file_stem_like_java, last_loadout_key, Universe, UniverseSettings, UniverseTurn,
     UniverseUpdate, DEFAULT_LOADOUT_CORES, LAST_LOADOUT_PREFIX, LAUNCH_RESOURCES_KEY,
