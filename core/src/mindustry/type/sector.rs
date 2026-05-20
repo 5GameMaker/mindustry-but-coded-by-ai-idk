@@ -12,8 +12,18 @@ pub struct SectorPreset {
     pub allow_launch_loadout: bool,
     pub require_unlock: bool,
     pub show_hidden: bool,
+    pub show_sector_land_info: bool,
     pub capture_wave: i32,
     pub difficulty: f32,
+    pub start_wave_time_multiplier: f32,
+    pub add_starting_items: bool,
+    pub no_lighting: bool,
+    pub is_last_sector: bool,
+    pub attack_after_waves: bool,
+    pub original_position: i32,
+    pub file_name: Option<String>,
+    pub planet_name: Option<String>,
+    pub sector_id: Option<i32>,
     pub shield_sector_ids: Vec<i32>,
 }
 
@@ -27,11 +37,57 @@ impl SectorPreset {
             override_launch_defaults: false,
             allow_launch_schematics: false,
             allow_launch_loadout: false,
-            require_unlock: false,
+            require_unlock: true,
             show_hidden: false,
-            capture_wave: -1,
+            show_sector_land_info: true,
+            capture_wave: 0,
             difficulty: 0.0,
+            start_wave_time_multiplier: 2.0,
+            add_starting_items: false,
+            no_lighting: false,
+            is_last_sector: false,
+            attack_after_waves: false,
+            original_position: 0,
+            file_name: None,
+            planet_name: None,
+            sector_id: None,
             shield_sector_ids: Vec::new(),
+        }
+    }
+
+    pub fn with_planet_sector(
+        name: impl Into<String>,
+        planet_name: impl Into<String>,
+        sector: i32,
+    ) -> Self {
+        let mut preset = Self::new(name);
+        preset.initialize(planet_name, sector, false);
+        preset
+    }
+
+    pub fn with_file_planet_sector(
+        name: impl Into<String>,
+        file_name: impl Into<String>,
+        planet_name: impl Into<String>,
+        sector: i32,
+    ) -> Self {
+        let mut preset = Self::new(name);
+        preset.file_name = Some(file_name.into());
+        preset.initialize(planet_name, sector, false);
+        preset
+    }
+
+    pub fn initialize(
+        &mut self,
+        planet_name: impl Into<String>,
+        sector: i32,
+        override_remap: bool,
+    ) {
+        self.planet_name = Some(planet_name.into());
+        self.original_position = sector;
+        self.sector_id = Some(if sector == -1 { 0 } else { sector });
+        if override_remap {
+            self.file_name.get_or_insert_with(|| self.name.clone());
         }
     }
 
@@ -66,6 +122,11 @@ impl SectorPreset {
         self
     }
 
+    pub fn show_sector_land_info(mut self, show_sector_land_info: bool) -> Self {
+        self.show_sector_land_info = show_sector_land_info;
+        self
+    }
+
     pub fn capture_wave(mut self, capture_wave: i32) -> Self {
         self.capture_wave = capture_wave;
         self
@@ -76,9 +137,46 @@ impl SectorPreset {
         self
     }
 
+    pub fn start_wave_time_multiplier(mut self, multiplier: f32) -> Self {
+        self.start_wave_time_multiplier = multiplier;
+        self
+    }
+
+    pub fn add_starting_items(mut self, add_starting_items: bool) -> Self {
+        self.add_starting_items = add_starting_items;
+        self
+    }
+
+    pub fn no_lighting(mut self, no_lighting: bool) -> Self {
+        self.no_lighting = no_lighting;
+        self
+    }
+
+    pub fn last_sector(mut self, is_last_sector: bool) -> Self {
+        self.is_last_sector = is_last_sector;
+        self
+    }
+
+    pub fn attack_after_waves(mut self, attack_after_waves: bool) -> Self {
+        self.attack_after_waves = attack_after_waves;
+        self
+    }
+
     pub fn shielded_by(mut self, sector_id: i32) -> Self {
         self.shield_sector_ids.push(sector_id);
         self
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.localized_name == self.name
+    }
+
+    pub fn content_type(&self) -> crate::mindustry::ctype::ContentType {
+        crate::mindustry::ctype::ContentType::Sector
+    }
+
+    pub fn generator_map_name(&self) -> &str {
+        self.file_name.as_deref().unwrap_or(&self.name)
     }
 }
 
@@ -346,6 +444,74 @@ mod tests {
         assert!(!sector.unlocked(SectorRuntimeState::default()));
         sector.preset = Some(SectorPreset::new("preset").always_unlocked(true));
         assert!(sector.unlocked(SectorRuntimeState::default()));
+    }
+
+    #[test]
+    fn sector_preset_defaults_match_java_field_initializers() {
+        let preset = SectorPreset::new("groundZero");
+
+        assert_eq!(preset.name, "groundZero");
+        assert_eq!(preset.localized_name, "groundZero");
+        assert_eq!(preset.generator_map_name(), "groundZero");
+        assert!(!preset.always_unlocked);
+        assert!(!preset.override_launch_defaults);
+        assert!(!preset.allow_launch_schematics);
+        assert!(!preset.allow_launch_loadout);
+        assert!(preset.require_unlock);
+        assert!(!preset.show_hidden);
+        assert!(preset.show_sector_land_info);
+        assert_eq!(preset.capture_wave, 0);
+        assert_eq!(preset.difficulty, 0.0);
+        assert_eq!(preset.start_wave_time_multiplier, 2.0);
+        assert!(!preset.add_starting_items);
+        assert!(!preset.no_lighting);
+        assert!(!preset.is_last_sector);
+        assert!(!preset.attack_after_waves);
+        assert_eq!(preset.original_position, 0);
+        assert_eq!(preset.file_name, None);
+        assert_eq!(preset.planet_name, None);
+        assert_eq!(preset.sector_id, None);
+        assert!(preset.shield_sector_ids.is_empty());
+        assert!(preset.is_hidden());
+        assert_eq!(
+            preset.content_type(),
+            crate::mindustry::ctype::ContentType::Sector
+        );
+    }
+
+    #[test]
+    fn sector_preset_initialize_records_planet_sector_and_file_name_like_java_constructor() {
+        let preset =
+            SectorPreset::with_file_planet_sector("craters", "craters-file", "serpulo", 18)
+                .difficulty(4.0)
+                .capture_wave(30)
+                .start_wave_time_multiplier(1.5)
+                .add_starting_items(true)
+                .no_lighting(true)
+                .last_sector(true)
+                .attack_after_waves(true)
+                .show_sector_land_info(false);
+
+        assert_eq!(preset.name, "craters");
+        assert_eq!(preset.file_name.as_deref(), Some("craters-file"));
+        assert_eq!(preset.generator_map_name(), "craters-file");
+        assert_eq!(preset.planet_name.as_deref(), Some("serpulo"));
+        assert_eq!(preset.original_position, 18);
+        assert_eq!(preset.sector_id, Some(18));
+        assert_eq!(preset.difficulty, 4.0);
+        assert_eq!(preset.capture_wave, 30);
+        assert_eq!(preset.start_wave_time_multiplier, 1.5);
+        assert!(preset.add_starting_items);
+        assert!(preset.no_lighting);
+        assert!(preset.is_last_sector);
+        assert!(preset.attack_after_waves);
+        assert!(!preset.show_sector_land_info);
+
+        let mut unassigned = SectorPreset::new("orphan");
+        unassigned.initialize("serpulo", -1, false);
+        assert_eq!(unassigned.original_position, -1);
+        assert_eq!(unassigned.sector_id, Some(0));
+        assert_eq!(unassigned.generator_map_name(), "orphan");
     }
 
     #[test]

@@ -348,7 +348,11 @@ mod tests {
                 .difficulty(0.0)
                 .require_unlock(true),
         );
-        sectors[2].preset = Some(SectorPreset::new("normal").difficulty(0.0));
+        sectors[2].preset = Some(
+            SectorPreset::new("normal")
+                .difficulty(0.0)
+                .require_unlock(false),
+        );
 
         meta.update_base_coverage(
             &mut sectors,
@@ -358,6 +362,6 @@ mod tests {
 
         assert_eq!(sectors[0].threat, 0.75);
         assert_eq!(sectors[1].threat, 0.0);
-        assert_eq!(sectors[2].threat, 0.3);
+        assert_eq!(sectors[2].threat, 0.376);
     }
 }
