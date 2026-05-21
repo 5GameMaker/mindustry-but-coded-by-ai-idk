@@ -1,5 +1,6 @@
 pub mod abilities;
 pub mod entity_indexer;
+pub mod leg;
 pub mod mover;
 pub mod pattern;
 pub mod sized;
@@ -11,6 +12,7 @@ pub use abilities::{
     SpawnDeathAbility,
 };
 pub use entity_indexer::EntityIndexer;
+pub use leg::Leg;
 pub use mover::Mover;
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSine, ShootSpread,
