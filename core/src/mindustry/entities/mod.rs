@@ -22,6 +22,7 @@ pub use comp::{EntityComp, EntityIoState, EntityLocality};
 pub use comp::{HealthComp, ItemStackSlot, ItemsComp};
 pub use comp::{HitboxComp, HitboxRect};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
+pub use comp::{SyncComp, SyncHooks};
 pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
 pub use entity_indexer::EntityIndexer;
