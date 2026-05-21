@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::mindustry::net::{
-    Connect, ConnectPacket, Disconnect, Net, PacketKind, ProviderEvent, Streamable,
+    Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, Net, PacketKind, ProviderEvent,
+    Streamable,
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -87,6 +88,9 @@ pub struct NetClientState {
     pub connect_packet_sent: bool,
     pub last_sent_connect_packet: Option<ConnectPacket>,
     pub last_connect_packet_error: Option<String>,
+    pub auto_confirm_world_stream: bool,
+    pub connect_confirm_sent: bool,
+    pub last_connect_confirm_error: Option<String>,
     pub last_binary_stream: Option<Vec<u8>>,
     pub last_provider_events: Vec<ProviderEvent>,
     packet_handlers: Vec<PacketHandler>,
@@ -124,6 +128,12 @@ impl fmt::Debug for NetClientState {
             .field("connect_packet_sent", &self.connect_packet_sent)
             .field("last_sent_connect_packet", &self.last_sent_connect_packet)
             .field("last_connect_packet_error", &self.last_connect_packet_error)
+            .field("auto_confirm_world_stream", &self.auto_confirm_world_stream)
+            .field("connect_confirm_sent", &self.connect_confirm_sent)
+            .field(
+                "last_connect_confirm_error",
+                &self.last_connect_confirm_error,
+            )
             .field(
                 "last_binary_stream_len",
                 &self.last_binary_stream.as_ref().map(|s| s.len()),
@@ -148,6 +158,8 @@ impl NetClientState {
         self.connect_packet_sent = false;
         self.last_sent_connect_packet = None;
         self.last_connect_packet_error = None;
+        self.connect_confirm_sent = false;
+        self.last_connect_confirm_error = None;
     }
 
     fn record_disconnect(&mut self, disconnect: &Disconnect) {
@@ -157,9 +169,13 @@ impl NetClientState {
         self.last_disconnect = Some(disconnect.clone());
         self.last_packet = Some(PacketKind::Disconnect(disconnect.clone()));
         self.connect_packet_sent = false;
+        self.connect_confirm_sent = false;
+        self.last_connect_confirm_error = None;
     }
 
     fn record_world_stream(&mut self, stream: &Streamable) {
+        self.connecting = false;
+        self.connected = true;
         self.world_stream_events += 1;
         self.last_world_stream = Some(stream.clone());
         self.last_binary_stream = Some(stream.stream.clone());
@@ -185,7 +201,10 @@ impl NetClient {
     }
 
     pub fn with_net(mut net: Net) -> Self {
-        let state = Arc::new(Mutex::new(NetClientState::default()));
+        let state = Arc::new(Mutex::new(NetClientState {
+            auto_confirm_world_stream: true,
+            ..NetClientState::default()
+        }));
         Self::install_client_listeners(&mut net, &state);
         Self {
             net: Arc::new(Mutex::new(net)),
@@ -231,10 +250,16 @@ impl NetClient {
         state.connect_packet_sent = false;
         state.last_sent_connect_packet = None;
         state.last_connect_packet_error = None;
+        state.connect_confirm_sent = false;
+        state.last_connect_confirm_error = None;
     }
 
     pub fn get_connect_config(&self) -> Option<ClientConnectConfig> {
         self.state.lock().unwrap().connect_config.clone()
+    }
+
+    pub fn set_auto_confirm_world_stream(&self, enabled: bool) {
+        self.state.lock().unwrap().auto_confirm_world_stream = enabled;
     }
 
     pub fn begin_connecting(&self) {
@@ -246,6 +271,8 @@ impl NetClient {
         state.connect_packet_sent = false;
         state.last_sent_connect_packet = None;
         state.last_connect_packet_error = None;
+        state.connect_confirm_sent = false;
+        state.last_connect_confirm_error = None;
         drop(state);
         self.reset_timeout();
     }
@@ -267,6 +294,8 @@ impl NetClient {
         state.manual_disconnects += 1;
         state.last_update_at = Some(Instant::now());
         state.connect_packet_sent = false;
+        state.connect_confirm_sent = false;
+        state.last_connect_confirm_error = None;
     }
 
     pub fn add_packet_handler<F>(&self, handler: F)
@@ -365,15 +394,27 @@ impl NetClient {
                 }
             }
 
-            {
+            let connect_confirm_to_send = {
                 let mut state = self.state.lock().unwrap();
                 state.last_packet = Some(packet.clone());
                 if let PacketKind::Streamable(stream) = &packet {
                     state.last_binary_stream = Some(stream.stream.clone());
+                    if state.auto_confirm_world_stream && !state.connect_confirm_sent {
+                        state.connect_confirm_sent = true;
+                        state.last_connect_confirm_error = None;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
                 }
-            }
+            };
 
             if quiet {
+                if connect_confirm_to_send {
+                    self.finish_connecting_and_send_confirm();
+                }
                 continue;
             }
 
@@ -391,6 +432,24 @@ impl NetClient {
                     handler(&binary_payload);
                 }
             }
+
+            if connect_confirm_to_send {
+                self.finish_connecting_and_send_confirm();
+            }
+        }
+    }
+
+    fn finish_connecting_and_send_confirm(&self) {
+        let result = {
+            let mut net = self.net.lock().unwrap();
+            net.set_client_loaded(true);
+            net.send(
+                &PacketKind::ConnectConfirmCallPacket(ConnectConfirmCallPacket),
+                true,
+            )
+        };
+        if let Err(error) = result {
+            self.state.lock().unwrap().last_connect_confirm_error = Some(error.to_string());
         }
     }
 
@@ -429,7 +488,7 @@ mod tests {
 
     use crate::mindustry::net::{
         Connect, Disconnect, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
-        PacketKind, Streamable,
+        PacketKind, StreamBegin, StreamChunk, Streamable, WorldDataBeginCallPacket,
     };
 
     use super::{ClientConnectConfig, NetClient};
@@ -596,5 +655,77 @@ mod tests {
             "rust-player"
         );
         assert!(state.last_connect_packet_error.is_none());
+    }
+
+    #[test]
+    fn update_sends_connect_confirm_once_after_world_stream_and_marks_loaded() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+        client.begin_connecting();
+
+        let queued_normal_packets = Arc::new(Mutex::new(0));
+        let queued_normal_packets_handler = Arc::clone(&queued_normal_packets);
+        client.add_packet_handler(move |packet| {
+            if matches!(packet, PacketKind::WorldDataBeginCallPacket(_)) {
+                *queued_normal_packets_handler.lock().unwrap() += 1;
+            }
+        });
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::WorldDataBeginCallPacket(
+                WorldDataBeginCallPacket,
+            ));
+            net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![1, 2, 3])));
+            net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![4, 5, 6])));
+        }
+
+        client.update();
+        client.update();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].1);
+        assert!(matches!(sent[0].0, PacketKind::ConnectConfirmCallPacket(_)));
+        assert_eq!(*queued_normal_packets.lock().unwrap(), 1);
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert!(!state.connecting);
+        assert!(state.connected);
+        assert!(state.connect_confirm_sent);
+        assert!(state.last_connect_confirm_error.is_none());
+    }
+
+    #[test]
+    fn partial_world_stream_does_not_send_connect_confirm() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::StreamBegin(StreamBegin {
+                id: 7,
+                total: 3,
+                packet_type: 2,
+            }));
+            net.handle_client_received(PacketKind::StreamChunk(StreamChunk {
+                id: 7,
+                data: vec![1, 2],
+            }));
+        }
+
+        client.update();
+
+        assert!(sent.lock().unwrap().is_empty());
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert!(!state.connect_confirm_sent);
     }
 }
