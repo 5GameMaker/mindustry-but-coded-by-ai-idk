@@ -17,6 +17,7 @@ pub use comp::{
     DamageComp, DamageState, DrawComp, Interval, OwnerComp, PosTeamDef, RotComp, ShielderComp,
     TeamState, TimerComp,
 };
+pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use entity_indexer::EntityIndexer;
 pub use leg::Leg;
 pub use leg_destroy_data::{LegDestroyData, TextureRegionRef};
