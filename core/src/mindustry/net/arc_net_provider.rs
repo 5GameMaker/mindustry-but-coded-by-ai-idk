@@ -2719,6 +2719,97 @@ mod tests {
     }
 
     #[test]
+    fn arc_net_provider_continues_broadcast_after_one_connection_fails() {
+        let port = free_local_port();
+        let mut server = ArcNetProvider::new();
+        server.host_server(port).unwrap();
+
+        let mut first_client = ArcNetProvider::new();
+        first_client
+            .connect_client("127.0.0.1", port, Box::new(|| {}))
+            .unwrap();
+
+        let first_connected = wait_for_event(&server, |event| {
+            matches!(event, ProviderEvent::ServerConnected { .. })
+        });
+        let first_connection_id = match first_connected {
+            ProviderEvent::ServerConnected { connection_id, .. } => connection_id,
+            other => panic!("unexpected event: {other:?}"),
+        };
+
+        assert!(matches!(
+            wait_for_event(&first_client, |event| matches!(
+                event,
+                ProviderEvent::ClientConnected { .. }
+            )),
+            ProviderEvent::ClientConnected { .. }
+        ));
+
+        let mut second_client = ArcNetProvider::new();
+        second_client
+            .connect_client("127.0.0.1", port, Box::new(|| {}))
+            .unwrap();
+
+        let second_connected = wait_for_event(&server, |event| {
+            matches!(event, ProviderEvent::ServerConnected { .. })
+        });
+        let _second_connection_id = match second_connected {
+            ProviderEvent::ServerConnected { connection_id, .. } => connection_id,
+            other => panic!("unexpected event: {other:?}"),
+        };
+
+        assert!(matches!(
+            wait_for_event(&second_client, |event| matches!(
+                event,
+                ProviderEvent::ClientConnected { .. }
+            )),
+            ProviderEvent::ClientConnected { .. }
+        ));
+
+        server.drain_events();
+        first_client.drain_events();
+        second_client.drain_events();
+
+        {
+            let state = server.server.as_ref().expect("server state missing");
+            let connections = lock_unpoison(&state.connections);
+            let connection = connections
+                .get(&first_connection_id)
+                .expect("missing first connection");
+            connection.mark_disconnected();
+        }
+
+        let packet = PacketKind::PingResponseCallPacket(PingResponseCallPacket { time: 303 });
+        assert!(server.send_server(&packet, true).is_err());
+        assert_eq!(wait_for_client_packet(&second_client), packet);
+
+        let disconnected = wait_for_event(&server, |event| {
+            matches!(
+                event,
+                ProviderEvent::ServerDisconnected {
+                    connection_id,
+                    ..
+                } if *connection_id == first_connection_id
+            )
+        });
+        match disconnected {
+            ProviderEvent::ServerDisconnected { connection_id, .. } => {
+                assert_eq!(connection_id, first_connection_id);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        assert_eq!(server.get_connections().len(), 1);
+        assert!(server
+            .get_connections()
+            .iter()
+            .any(|connection| connection.is_connected()));
+
+        first_client.disconnect_client();
+        second_client.disconnect_client();
+        server.close_server();
+    }
+
+    #[test]
     fn hosted_arc_net_provider_responds_to_discovery_probe() {
         let port = free_local_port();
         let mut server = ArcNetProvider::with_server_data(ServerData {
