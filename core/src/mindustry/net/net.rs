@@ -35,6 +35,10 @@ use super::packets::{
     SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
     SpawnEffectCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk,
     SyncVariableCallPacket, TakeItemsCallPacket, TextInputCallPacket, TextInputCallPacket2,
+    TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
+    TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+    TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket, UnitBuildingControlSelectCallPacket,
+    UnitCapDeathCallPacket, UnitClearCallPacket, UnitControlCallPacket, UnitDeathCallPacket,
     WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
@@ -156,6 +160,20 @@ pub enum PacketKind {
     TakeItemsCallPacket(TakeItemsCallPacket),
     TextInputCallPacket(TextInputCallPacket),
     TextInputCallPacket2(TextInputCallPacket2),
+    TextInputResultCallPacket(TextInputResultCallPacket),
+    TileConfigCallPacket(TileConfigCallPacket),
+    TileTapCallPacket(TileTapCallPacket),
+    TraceInfoCallPacket(TraceInfoCallPacket),
+    TransferInventoryCallPacket(TransferInventoryCallPacket),
+    TransferItemEffectCallPacket(TransferItemEffectCallPacket),
+    TransferItemToCallPacket(TransferItemToCallPacket),
+    TransferItemToUnitCallPacket(TransferItemToUnitCallPacket),
+    UnitBlockSpawnCallPacket(UnitBlockSpawnCallPacket),
+    UnitBuildingControlSelectCallPacket(UnitBuildingControlSelectCallPacket),
+    UnitCapDeathCallPacket(UnitCapDeathCallPacket),
+    UnitClearCallPacket(UnitClearCallPacket),
+    UnitControlCallPacket(UnitControlCallPacket),
+    UnitDeathCallPacket(UnitDeathCallPacket),
     WorldDataBeginCallPacket(WorldDataBeginCallPacket),
     Other {
         id: u8,
@@ -248,6 +266,20 @@ impl PacketKind {
             | PacketKind::SetRuleCallPacket(_)
             | PacketKind::TextInputCallPacket(_)
             | PacketKind::TextInputCallPacket2(_)
+            | PacketKind::TextInputResultCallPacket(_)
+            | PacketKind::TileConfigCallPacket(_)
+            | PacketKind::TileTapCallPacket(_)
+            | PacketKind::TraceInfoCallPacket(_)
+            | PacketKind::TransferInventoryCallPacket(_)
+            | PacketKind::TransferItemEffectCallPacket(_)
+            | PacketKind::TransferItemToCallPacket(_)
+            | PacketKind::TransferItemToUnitCallPacket(_)
+            | PacketKind::UnitBlockSpawnCallPacket(_)
+            | PacketKind::UnitBuildingControlSelectCallPacket(_)
+            | PacketKind::UnitCapDeathCallPacket(_)
+            | PacketKind::UnitClearCallPacket(_)
+            | PacketKind::UnitControlCallPacket(_)
+            | PacketKind::UnitDeathCallPacket(_)
             | PacketKind::WorldDataBeginCallPacket(_) => 1,
             PacketKind::DebugStatusClientCallPacket(_)
             | PacketKind::DebugStatusClientUnreliableCallPacket(_)
@@ -392,6 +424,20 @@ impl PacketKind {
             | PacketKind::StateSnapshotCallPacket(_)
             | PacketKind::SyncVariableCallPacket(_)
             | PacketKind::TakeItemsCallPacket(_)
+            | PacketKind::TextInputResultCallPacket(_)
+            | PacketKind::TileConfigCallPacket(_)
+            | PacketKind::TileTapCallPacket(_)
+            | PacketKind::TransferInventoryCallPacket(_)
+            | PacketKind::UnitClearCallPacket(_)
+            | PacketKind::UnitControlCallPacket(_) => true,
+            PacketKind::TraceInfoCallPacket(_)
+            | PacketKind::TransferItemEffectCallPacket(_)
+            | PacketKind::TransferItemToCallPacket(_)
+            | PacketKind::TransferItemToUnitCallPacket(_)
+            | PacketKind::UnitBlockSpawnCallPacket(_)
+            | PacketKind::UnitBuildingControlSelectCallPacket(_)
+            | PacketKind::UnitCapDeathCallPacket(_)
+            | PacketKind::UnitDeathCallPacket(_)
             | PacketKind::TextInputCallPacket(_)
             | PacketKind::TextInputCallPacket2(_) => !server,
             PacketKind::ClientBinaryPacketReliableCallPacket(_)

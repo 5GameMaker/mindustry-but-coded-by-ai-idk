@@ -37,7 +37,11 @@ use super::{
         SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
         SpawnEffectCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk,
         SyncVariableCallPacket, TakeItemsCallPacket, TextInputCallPacket, TextInputCallPacket2,
-        WorldDataBeginCallPacket,
+        TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
+        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+        TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitCapDeathCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, UnitDeathCallPacket, WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -217,6 +221,9 @@ impl PacketSerializer {
                 | PacketKind::SetUnitStanceCallPacket(_)
                 | PacketKind::SpawnEffectCallPacket(_)
                 | PacketKind::TakeItemsCallPacket(_)
+                | PacketKind::TransferItemEffectCallPacket(_)
+                | PacketKind::TransferItemToCallPacket(_)
+                | PacketKind::TransferItemToUnitCallPacket(_)
         ) {
             return Err(SerializerError::RequiresContentLoader);
         }
@@ -587,6 +594,50 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::TEXT_INPUT_CALL_PACKET2
             }
+            PacketKind::TextInputResultCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::TEXT_INPUT_RESULT_CALL_PACKET
+            }
+            PacketKind::TileConfigCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::TILE_CONFIG_CALL_PACKET
+            }
+            PacketKind::TileTapCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::TILE_TAP_CALL_PACKET
+            }
+            PacketKind::TraceInfoCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::TRACE_INFO_CALL_PACKET
+            }
+            PacketKind::TransferInventoryCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::TRANSFER_INVENTORY_CALL_PACKET
+            }
+            PacketKind::UnitBlockSpawnCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_BLOCK_SPAWN_CALL_PACKET
+            }
+            PacketKind::UnitBuildingControlSelectCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_BUILDING_CONTROL_SELECT_CALL_PACKET
+            }
+            PacketKind::UnitCapDeathCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_CAP_DEATH_CALL_PACKET
+            }
+            PacketKind::UnitClearCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_CLEAR_CALL_PACKET
+            }
+            PacketKind::UnitControlCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_CONTROL_CALL_PACKET
+            }
+            PacketKind::UnitDeathCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_DEATH_CALL_PACKET
+            }
             PacketKind::WorldDataBeginCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::WORLD_DATA_BEGIN_CALL_PACKET
@@ -618,6 +669,11 @@ impl PacketSerializer {
             | PacketKind::SetUnitStanceCallPacket(_)
             | PacketKind::SpawnEffectCallPacket(_)
             | PacketKind::TakeItemsCallPacket(_) => {
+                return Err(SerializerError::RequiresContentLoader);
+            }
+            PacketKind::TransferItemEffectCallPacket(_)
+            | PacketKind::TransferItemToCallPacket(_)
+            | PacketKind::TransferItemToUnitCallPacket(_) => {
                 return Err(SerializerError::RequiresContentLoader);
             }
             PacketKind::Other { id, .. } => return Err(SerializerError::UnsupportedPacketId(*id)),
@@ -723,6 +779,18 @@ impl PacketSerializer {
             PacketKind::ResearchedCallPacket(packet) => {
                 packet.write_to_with_loader(&mut payload, loader)?;
                 packet_ids::RESEARCHED_CALL_PACKET
+            }
+            PacketKind::TransferItemEffectCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::TRANSFER_ITEM_EFFECT_CALL_PACKET
+            }
+            PacketKind::TransferItemToCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::TRANSFER_ITEM_TO_CALL_PACKET
+            }
+            PacketKind::TransferItemToUnitCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::TRANSFER_ITEM_TO_UNIT_CALL_PACKET
             }
             _ => return Self::packet_kind_to_envelope(packet),
         };
@@ -1172,6 +1240,49 @@ impl PacketSerializer {
                     packet_ids::TEXT_INPUT_CALL_PACKET2 => Ok(PacketKind::TextInputCallPacket2(
                         TextInputCallPacket2::read_from(&mut cursor)?,
                     )),
+                    packet_ids::TEXT_INPUT_RESULT_CALL_PACKET => {
+                        Ok(PacketKind::TextInputResultCallPacket(
+                            TextInputResultCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::TILE_CONFIG_CALL_PACKET => Ok(PacketKind::TileConfigCallPacket(
+                        TileConfigCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::TILE_TAP_CALL_PACKET => Ok(PacketKind::TileTapCallPacket(
+                        TileTapCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::TRACE_INFO_CALL_PACKET => Ok(PacketKind::TraceInfoCallPacket(
+                        TraceInfoCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::TRANSFER_INVENTORY_CALL_PACKET => {
+                        Ok(PacketKind::TransferInventoryCallPacket(
+                            TransferInventoryCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UNIT_BLOCK_SPAWN_CALL_PACKET => {
+                        Ok(PacketKind::UnitBlockSpawnCallPacket(
+                            UnitBlockSpawnCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UNIT_BUILDING_CONTROL_SELECT_CALL_PACKET => {
+                        Ok(PacketKind::UnitBuildingControlSelectCallPacket(
+                            UnitBuildingControlSelectCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UNIT_CAP_DEATH_CALL_PACKET => {
+                        Ok(PacketKind::UnitCapDeathCallPacket(
+                            UnitCapDeathCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UNIT_CLEAR_CALL_PACKET => Ok(PacketKind::UnitClearCallPacket(
+                        UnitClearCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::UNIT_CONTROL_CALL_PACKET => Ok(PacketKind::UnitControlCallPacket(
+                        UnitControlCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::UNIT_DEATH_CALL_PACKET => Ok(PacketKind::UnitDeathCallPacket(
+                        UnitDeathCallPacket::read_from(&mut cursor)?,
+                    )),
                     packet_ids::WORLD_DATA_BEGIN_CALL_PACKET => {
                         Ok(PacketKind::WorldDataBeginCallPacket(
                             WorldDataBeginCallPacket::read_from(&mut cursor)?,
@@ -1304,6 +1415,27 @@ impl PacketSerializer {
                     packet_ids::RESEARCHED_CALL_PACKET => Ok(PacketKind::ResearchedCallPacket(
                         ResearchedCallPacket::read_from_with_loader(&mut cursor, loader)?,
                     )),
+                    packet_ids::TRANSFER_ITEM_EFFECT_CALL_PACKET => {
+                        Ok(PacketKind::TransferItemEffectCallPacket(
+                            TransferItemEffectCallPacket::read_from_with_loader(
+                                &mut cursor,
+                                loader,
+                            )?,
+                        ))
+                    }
+                    packet_ids::TRANSFER_ITEM_TO_CALL_PACKET => {
+                        Ok(PacketKind::TransferItemToCallPacket(
+                            TransferItemToCallPacket::read_from_with_loader(&mut cursor, loader)?,
+                        ))
+                    }
+                    packet_ids::TRANSFER_ITEM_TO_UNIT_CALL_PACKET => {
+                        Ok(PacketKind::TransferItemToUnitCallPacket(
+                            TransferItemToUnitCallPacket::read_from_with_loader(
+                                &mut cursor,
+                                loader,
+                            )?,
+                        ))
+                    }
                     _ => Self::packet_kind_from_envelope(envelope),
                 }
             }

@@ -58,7 +58,11 @@ pub use packets::{
     SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
     SoundAtCallPacket, SoundCallPacket, SpawnEffectCallPacket, StateSnapshotCallPacket,
     StreamBegin, StreamChunk, SyncVariableCallPacket, TakeItemsCallPacket, TextInputCallPacket,
-    TextInputCallPacket2, WorldDataBeginCallPacket,
+    TextInputCallPacket2, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitCapDeathCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitDeathCallPacket, WorldDataBeginCallPacket,
 };
 pub use server_group::ServerGroup;
 pub use streamable::{StreamBuilder, Streamable};
