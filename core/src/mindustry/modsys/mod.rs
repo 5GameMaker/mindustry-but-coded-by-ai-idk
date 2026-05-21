@@ -129,6 +129,37 @@ pub struct NoPatch;
 
 pub trait NoPatchMarker {}
 
+/// Lightweight class-loader handle used to mirror upstream
+/// `mindustry.mod.ClassLoaderCloser`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClassLoaderKind {
+    /// Java `URLClassLoader`, the only loader kind closed by upstream.
+    Url { closed: bool },
+    /// Any other platform loader; Java leaves it untouched.
+    Other,
+}
+
+impl ClassLoaderKind {
+    pub fn url() -> Self {
+        Self::Url { closed: false }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Self::Url { closed: true })
+    }
+}
+
+/// Mirrors Java `ClassLoaderCloser.close(loader)`.
+///
+/// Upstream only calls `close()` when the provided loader is an
+/// `URLClassLoader`; this preserves the Android workaround shape where other
+/// loaders may not expose a close method.
+pub fn close_class_loader(loader: &mut ClassLoaderKind) {
+    if let ClassLoaderKind::Url { closed } = loader {
+        *closed = true;
+    }
+}
+
 fn trim_slash(mut path: String) -> String {
     while path.ends_with('/') || path.ends_with('\\') {
         path.pop();
@@ -256,5 +287,17 @@ mod tests {
     fn plugin_marker_extends_mod_and_is_hidden_by_default() {
         let plugin = HiddenPlugin;
         assert!(plugin.hidden());
+    }
+
+    #[test]
+    fn class_loader_closer_only_closes_url_loaders_like_java() {
+        let mut url = ClassLoaderKind::url();
+        let mut other = ClassLoaderKind::Other;
+
+        close_class_loader(&mut url);
+        close_class_loader(&mut other);
+
+        assert!(url.is_closed());
+        assert_eq!(other, ClassLoaderKind::Other);
     }
 }
