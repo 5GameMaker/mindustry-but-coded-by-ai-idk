@@ -2,6 +2,10 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::ctype::ContentId;
 
+pub mod chained_building;
+
+pub use chained_building::ChainedBuilding;
+
 pub fn positions_valid_line(x1: i32, y1: i32, x2: i32, y2: i32, range: i32) -> bool {
     if x1 == x2 {
         (y1 - y2).abs() <= range
