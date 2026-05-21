@@ -900,6 +900,31 @@ pub struct AbilityWire {
     pub data: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitSyncWire {
+    pub abilities: Vec<AbilityWire>,
+    pub ammo: f32,
+    pub controller: ControllerWire,
+    pub elevation: f32,
+    pub flag: f64,
+    pub health: f32,
+    pub is_shooting: bool,
+    pub mine_tile: Option<i32>,
+    pub mounts: Vec<MountWire>,
+    pub plans: Option<Vec<BuildPlanWire>>,
+    pub rotation: f32,
+    pub shield: f32,
+    pub spawned_by_core: bool,
+    pub stack: ItemStack,
+    pub statuses: Vec<StatusEntry>,
+    pub team: TeamId,
+    pub type_id: ContentId,
+    pub update_building: bool,
+    pub vel: Vec2,
+    pub x: f32,
+    pub y: f32,
+}
+
 pub fn write_unit_ref<W: Write>(write: &mut W, unit: UnitRef) -> io::Result<()> {
     match unit {
         UnitRef::Null => {
@@ -1129,6 +1154,81 @@ pub fn read_statuses_into<R: Read>(
         statuses.push(read_status(read, loader)?);
     }
     Ok(())
+}
+
+pub fn write_unit_sync<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    sync: &UnitSyncWire,
+) -> io::Result<()> {
+    write_abilities(write, &sync.abilities)?;
+    write_f32(write, sync.ammo)?;
+    write_controller(write, &sync.controller)?;
+    write_f32(write, sync.elevation)?;
+    write_u64(write, sync.flag.to_bits())?;
+    write_f32(write, sync.health)?;
+    write_bool(write, sync.is_shooting)?;
+    write_tile_pos(write, sync.mine_tile)?;
+    write_mounts(write, &sync.mounts)?;
+    write_plans_queue_net(write, loader, sync.plans.as_deref())?;
+    write_f32(write, sync.rotation)?;
+    write_f32(write, sync.shield)?;
+    write_bool(write, sync.spawned_by_core)?;
+    write_items(write, loader, &sync.stack)?;
+    write_statuses(write, &sync.statuses)?;
+    write_team(write, Some(sync.team))?;
+    write_i16(write, sync.type_id)?;
+    write_bool(write, sync.update_building)?;
+    write_vec2(write, sync.vel)?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)
+}
+
+pub fn read_unit_sync<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<UnitSyncWire> {
+    let abilities = read_abilities(read)?;
+    let ammo = read_f32(read)?;
+    let controller = read_controller(read)?;
+    let elevation = read_f32(read)?;
+    let flag = f64::from_bits(read_u64(read)?);
+    let health = read_f32(read)?;
+    let is_shooting = read_bool(read)?;
+    let mine_tile = read_tile_pos(read)?;
+    let mounts = read_mounts(read)?;
+    let plans = read_plans_queue(read, loader)?;
+    let rotation = read_f32(read)?;
+    let shield = read_f32(read)?;
+    let spawned_by_core = read_bool(read)?;
+    let stack = read_items(read, loader)?;
+    let statuses = read_statuses(read, loader)?;
+    let team = read_team(read)?;
+    let type_id = read_i16(read)?;
+    let update_building = read_bool(read)?;
+    let vel = read_vec2(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(UnitSyncWire {
+        abilities,
+        ammo,
+        controller,
+        elevation,
+        flag,
+        health,
+        is_shooting,
+        mine_tile,
+        mounts,
+        plans,
+        rotation,
+        shield,
+        spawned_by_core,
+        stack,
+        statuses,
+        team,
+        type_id,
+        update_building,
+        vel,
+        x,
+        y,
+    })
 }
 
 pub fn write_entity_ref<W: Write>(write: &mut W, entity: EntityRef) -> io::Result<()> {
@@ -2696,6 +2796,52 @@ mod tests {
         assert_eq!(
             read_ability_data(&mut bytes.as_slice()).unwrap(),
             ability_data
+        );
+    }
+
+    #[test]
+    fn unit_sync_wire_roundtrips_the_java_field_order_subset() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let wet = loader
+            .catalog()
+            .status_effect_by_name("wet")
+            .unwrap()
+            .clone();
+        let router_plan = BuildPlanWire::new_place(3, 4, 1, "router");
+        let sync = UnitSyncWire {
+            abilities: vec![AbilityWire { data: 1.25 }, AbilityWire { data: -4.5 }],
+            ammo: 6.75,
+            controller: ControllerWire::Ground,
+            elevation: 0.5,
+            flag: 123.456,
+            health: 88.25,
+            is_shooting: true,
+            mine_tile: Some(point2_pack(11, -7)),
+            mounts: vec![MountWire {
+                shoot: true,
+                rotate: false,
+                aim_x: 4.0,
+                aim_y: -8.0,
+            }],
+            plans: Some(vec![router_plan.clone()]),
+            rotation: 270.0,
+            shield: 12.5,
+            spawned_by_core: false,
+            stack: ItemStack::new("copper", 123),
+            statuses: vec![StatusEntry::new(wet, 4.0)],
+            team: TeamId(2),
+            type_id: 17,
+            update_building: true,
+            vel: Vec2::new(1.5, -2.5),
+            x: 55.0,
+            y: -66.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_unit_sync(&mut bytes, &loader, &sync).unwrap();
+        assert_eq!(
+            read_unit_sync(&mut bytes.as_slice(), &loader).unwrap(),
+            sync
         );
     }
 
