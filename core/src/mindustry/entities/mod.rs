@@ -13,6 +13,7 @@ pub use abilities::{
     Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
     SpawnDeathAbility,
 };
+pub use comp::WeaponsComp;
 pub use comp::{apply_armor, ShieldComp};
 pub use comp::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use comp::{

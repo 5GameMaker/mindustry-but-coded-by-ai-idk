@@ -28,6 +28,7 @@ pub mod underwater_move;
 pub mod unit_tether;
 pub mod vel;
 pub mod water_crawl;
+pub mod weapons;
 pub mod world_label;
 
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
@@ -58,4 +59,5 @@ pub use underwater_move::{UnderwaterDrawPlan, UnderwaterMoveComp};
 pub use unit_tether::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use vel::VelComp;
 pub use water_crawl::{WaterCrawlComp, WaterCrawlSolidPred};
+pub use weapons::WeaponsComp;
 pub use world_label::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};
