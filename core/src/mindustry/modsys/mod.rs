@@ -114,6 +114,15 @@ pub trait Mod {
     fn register_client_commands(&mut self, _handler: &mut CommandRegistry) {}
 }
 
+/// Rust equivalent of Java `Plugin extends Mod`.
+///
+/// Plugins are a special type of mod that is always hidden.
+pub trait Plugin: Mod {
+    fn hidden(&self) -> bool {
+        true
+    }
+}
+
 /// Marker equivalent to Java's runtime `@NoPatch` annotation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct NoPatch;
@@ -170,6 +179,11 @@ mod tests {
 
     struct LockedField;
     impl NoPatchMarker for LockedField {}
+
+    #[derive(Default)]
+    struct HiddenPlugin;
+    impl Mod for HiddenPlugin {}
+    impl Plugin for HiddenPlugin {}
 
     fn assert_no_patch<T: NoPatchMarker>() {}
 
@@ -236,5 +250,11 @@ mod tests {
     fn no_patch_marker_can_be_attached_to_rust_types() {
         assert_eq!(NoPatch, NoPatch);
         assert_no_patch::<LockedField>();
+    }
+
+    #[test]
+    fn plugin_marker_extends_mod_and_is_hidden_by_default() {
+        let plugin = HiddenPlugin;
+        assert!(plugin.hidden());
     }
 }
