@@ -1,5 +1,6 @@
 //! Incremental Rust mirror of upstream `mindustry.entities.comp`.
 
+pub mod block_unit;
 pub mod building_tether;
 pub mod child;
 pub mod damage;
@@ -32,6 +33,7 @@ pub mod water_crawl;
 pub mod weapons;
 pub mod world_label;
 
+pub use block_unit::{BlockUnitBuilding, BlockUnitComp};
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use child::{ChildComp, ChildParent};
 pub use damage::DamageComp;
