@@ -1,4 +1,6 @@
 use super::{
+    net::{ConnectFilter, DoneCallback, HostCallback, NetProvider, ProviderEvent},
+    net_connection::NetConnection,
     packet::PacketCodec,
     packets::{
         packet_ids, AnnounceCallPacket, ClearObjectivesCallPacket,
@@ -47,9 +49,21 @@ use super::{
         UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
         WarningToastCallPacket, WorldDataBeginCallPacket,
     },
-    PacketKind,
+    Host, PacketKind,
 };
 use crate::mindustry::core::content_loader::ContentLoader;
+use crate::mindustry::game::Gamemode;
+use crate::mindustry::net::network_io::ServerData;
+use crate::mindustry::vars::{DEFAULT_PORT, MULTICAST_GROUP, MULTICAST_PORT};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{self, ErrorKind, Read, Write};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::sync::{
+    atomic::{AtomicBool, AtomicI32, Ordering},
+    Arc, Mutex, MutexGuard,
+};
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrameworkMessage {
@@ -234,6 +248,9 @@ impl PacketSerializer {
 
         let mut payload = Vec::new();
         let id = match packet {
+            PacketKind::Connect(_) | PacketKind::Disconnect(_) => {
+                return Err(SerializerError::ExpectedPacketEnvelope)
+            }
             PacketKind::StreamBegin(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::STREAM_BEGIN
@@ -740,6 +757,9 @@ impl PacketSerializer {
     ) -> Result<PacketEnvelope, SerializerError> {
         let mut payload = Vec::new();
         let id = match packet {
+            PacketKind::Connect(_) | PacketKind::Disconnect(_) => {
+                return Err(SerializerError::ExpectedPacketEnvelope)
+            }
             PacketKind::ClientPlanSnapshotCallPacket(packet) => {
                 packet.write_to_with_loader(&mut payload, loader)?;
                 packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET
@@ -1660,14 +1680,761 @@ impl<'a> Cursor<'a> {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ArcTransport;
+
+impl ArcTransport {
+    pub const DISCOVER_HOST_BYTES: [u8; 2] = [PacketSerializer::FRAMEWORK_ID, 1];
+
+    pub fn discover_host_probe() -> Vec<u8> {
+        PacketSerializer::write_envelope(&PacketEnvelope::Framework(FrameworkMessage::DiscoverHost))
+    }
+
+    pub fn wrap_tcp_frame(payload: &[u8]) -> Result<Vec<u8>, SerializerError> {
+        if payload.len() > u16::MAX as usize {
+            return Err(SerializerError::PayloadTooLarge(payload.len()));
+        }
+
+        let mut out = Vec::with_capacity(payload.len() + 2);
+        out.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+        out.extend_from_slice(payload);
+        Ok(out)
+    }
+
+    pub fn unwrap_tcp_frame(bytes: &[u8]) -> Result<(&[u8], usize), SerializerError> {
+        let mut cursor = Cursor::new(bytes);
+        let len = cursor.u16()? as usize;
+        let payload = cursor.take(len)?;
+        Ok((payload, 2 + len))
+    }
+
+    pub fn wrap_tcp_packet(packet: &PacketKind) -> Result<Vec<u8>, SerializerError> {
+        Self::wrap_tcp_frame(&PacketSerializer::write_packet_kind(packet)?)
+    }
+
+    pub fn unwrap_tcp_packet(bytes: &[u8]) -> Result<(PacketKind, usize), SerializerError> {
+        let (payload, used) = Self::unwrap_tcp_frame(bytes)?;
+        Ok((PacketSerializer::read_packet_kind(payload)?, used))
+    }
+
+    pub fn ping_host(address: &str, port: u16, timeout: Duration) -> io::Result<Host> {
+        let target = (address, port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "could not resolve host"))?;
+
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.set_read_timeout(Some(timeout))?;
+
+        let probe = Self::discover_host_probe();
+        let started = Instant::now();
+        socket.send_to(&probe, target)?;
+
+        let mut buffer = [0u8; 512];
+        let (len, src) = socket.recv_from(&mut buffer)?;
+        let elapsed = started.elapsed().as_millis().min(i32::MAX as u128) as i32;
+        let mut host =
+            super::network_io::read_server_data(elapsed, src.ip().to_string(), &buffer[..len])
+                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+        host.port = port as i32;
+        Ok(host)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SharedArcConnection {
+    info: NetConnection,
+    tcp: Arc<Mutex<TcpStream>>,
+    udp_addr: Option<SocketAddr>,
+}
+
+#[derive(Debug)]
+struct ClientState {
+    tcp: Arc<Mutex<TcpStream>>,
+    udp: Arc<UdpSocket>,
+    shutdown: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+struct ServerState {
+    shutdown: Arc<AtomicBool>,
+    udp: Arc<UdpSocket>,
+    pending: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+    connections: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+}
+
+pub struct ArcNetProvider {
+    client: Option<ClientState>,
+    server: Option<ServerState>,
+    events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    connect_filter: Option<ConnectFilter>,
+    discovery_data: Arc<Mutex<Option<ServerData>>>,
+    next_connection_id: Arc<AtomicI32>,
+    connect_timeout: Duration,
+}
+
+impl std::fmt::Debug for ArcNetProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArcNetProvider")
+            .field("has_client", &self.client.is_some())
+            .field("has_server", &self.server.is_some())
+            .field("connect_timeout", &self.connect_timeout)
+            .finish()
+    }
+}
+
+impl Default for ArcNetProvider {
+    fn default() -> Self {
+        Self {
+            client: None,
+            server: None,
+            events: Arc::new(Mutex::new(VecDeque::new())),
+            connect_filter: None,
+            discovery_data: Arc::new(Mutex::new(None)),
+            next_connection_id: Arc::new(AtomicI32::new(1)),
+            connect_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+impl ArcNetProvider {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_server_data(data: ServerData) -> Self {
+        let provider = Self::default();
+        *lock_unpoison(&provider.discovery_data) = Some(data);
+        provider
+    }
+
+    pub fn set_server_data(&self, data: ServerData) {
+        *lock_unpoison(&self.discovery_data) = Some(data);
+    }
+
+    pub fn set_connect_timeout(&mut self, timeout: Duration) {
+        self.connect_timeout = timeout;
+    }
+
+    pub fn drain_events(&self) -> Vec<ProviderEvent> {
+        drain_events(&self.events)
+    }
+
+    fn send_client_packet(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| io::Error::new(ErrorKind::NotConnected, "client is not connected"))?;
+
+        if reliable {
+            write_tcp_packet(&client.tcp, object)
+        } else {
+            let bytes = PacketSerializer::write_packet_kind(object).map_err(serializer_io_error)?;
+            client.udp.send(&bytes)?;
+            Ok(())
+        }
+    }
+
+    fn send_server_packet(
+        &mut self,
+        except_connection_id: Option<i32>,
+        object: &PacketKind,
+        reliable: bool,
+    ) -> io::Result<()> {
+        let server = self
+            .server
+            .as_ref()
+            .ok_or_else(|| io::Error::new(ErrorKind::NotConnected, "server is not hosted"))?;
+
+        let connections: Vec<_> = lock_unpoison(&server.connections)
+            .iter()
+            .map(|(id, connection)| (*id, connection.clone()))
+            .collect();
+
+        for (id, connection) in connections {
+            if except_connection_id == Some(id) {
+                continue;
+            }
+
+            if reliable {
+                write_tcp_packet(&connection.tcp, object)?;
+            } else if let Some(target) = connection.udp_addr {
+                let bytes =
+                    PacketSerializer::write_packet_kind(object).map_err(serializer_io_error)?;
+                server.udp.send_to(&bytes, target)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl NetProvider for ArcNetProvider {
+    fn connect_client(
+        &mut self,
+        ip: &str,
+        port: u16,
+        success: Box<dyn Fn() + Send + 'static>,
+    ) -> io::Result<()> {
+        self.disconnect_client();
+
+        let target = (ip, port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "could not resolve host"))?;
+
+        let mut tcp = TcpStream::connect_timeout(&target, self.connect_timeout)?;
+        tcp.set_nodelay(true)?;
+        tcp.set_read_timeout(Some(self.connect_timeout))?;
+        tcp.set_write_timeout(Some(self.connect_timeout))?;
+
+        let connection_id = match read_tcp_envelope(&mut tcp)? {
+            PacketEnvelope::Framework(FrameworkMessage::RegisterTcp { connection_id }) => {
+                connection_id
+            }
+            other => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("expected RegisterTCP, got {other:?}"),
+                ));
+            }
+        };
+
+        let udp = Arc::new(UdpSocket::bind("0.0.0.0:0")?);
+        udp.connect(target)?;
+        udp.set_read_timeout(Some(Duration::from_millis(250)))?;
+
+        let registering = Arc::new(AtomicBool::new(true));
+        let udp_retry = udp.try_clone()?;
+        let retrying = registering.clone();
+        thread::spawn(move || {
+            let envelope =
+                PacketEnvelope::Framework(FrameworkMessage::RegisterUdp { connection_id });
+            let bytes = PacketSerializer::write_envelope(&envelope);
+            while retrying.load(Ordering::Relaxed) {
+                let _ = udp_retry.send(&bytes);
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+
+        let ack = read_tcp_envelope(&mut tcp);
+        registering.store(false, Ordering::Relaxed);
+        match ack? {
+            PacketEnvelope::Framework(FrameworkMessage::RegisterUdp { .. }) => {}
+            other => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("expected RegisterUDP ack, got {other:?}"),
+                ));
+            }
+        }
+
+        tcp.set_read_timeout(Some(Duration::from_millis(250)))?;
+        let read_tcp = tcp.try_clone()?;
+        let tcp = Arc::new(Mutex::new(tcp));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        self.client = Some(ClientState {
+            tcp: tcp.clone(),
+            udp: udp.clone(),
+            shutdown: shutdown.clone(),
+        });
+
+        push_event(
+            &self.events,
+            ProviderEvent::ClientConnected {
+                address_tcp: target.to_string(),
+            },
+        );
+        success();
+
+        spawn_client_tcp_reader(read_tcp, self.events.clone(), shutdown.clone());
+        spawn_client_udp_reader(udp, self.events.clone(), shutdown);
+
+        Ok(())
+    }
+
+    fn send_client(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
+        self.send_client_packet(object, reliable)
+    }
+
+    fn disconnect_client(&mut self) {
+        if let Some(client) = self.client.take() {
+            client.shutdown.store(true, Ordering::Relaxed);
+            let _ = lock_unpoison(&client.tcp).shutdown(Shutdown::Both);
+            push_event(
+                &self.events,
+                ProviderEvent::ClientDisconnected {
+                    reason: "closed".to_string(),
+                },
+            );
+        }
+    }
+
+    fn discover_servers(&self, callback: HostCallback, done: DoneCallback) {
+        thread::spawn(move || {
+            let socket = match UdpSocket::bind("0.0.0.0:0") {
+                Ok(socket) => socket,
+                Err(_) => {
+                    done();
+                    return;
+                }
+            };
+            let _ = socket.set_broadcast(true);
+            let _ = socket.set_read_timeout(Some(Duration::from_secs(3)));
+            let probe = ArcTransport::discover_host_probe();
+            let _ = socket.send_to(&probe, ("255.255.255.255", DEFAULT_PORT));
+            let _ = socket.send_to(&probe, (MULTICAST_GROUP, MULTICAST_PORT));
+
+            let started = Instant::now();
+            let mut found = HashSet::new();
+            let mut buffer = [0u8; 512];
+            loop {
+                match socket.recv_from(&mut buffer) {
+                    Ok((len, src)) => {
+                        if !found.insert(src.ip()) {
+                            continue;
+                        }
+                        let elapsed = started.elapsed().as_millis().min(i32::MAX as u128) as i32;
+                        if let Ok(host) = super::network_io::read_server_data(
+                            elapsed,
+                            src.ip().to_string(),
+                            &buffer[..len],
+                        ) {
+                            callback(host);
+                        }
+                    }
+                    Err(err)
+                        if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                    {
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+            done();
+        });
+    }
+
+    fn ping_host(&self, address: &str, port: u16, timeout: Duration) -> io::Result<Host> {
+        ArcTransport::ping_host(address, port, timeout)
+    }
+
+    fn host_server(&mut self, port: u16) -> io::Result<()> {
+        self.close_server();
+
+        let listener = TcpListener::bind(("0.0.0.0", port))?;
+        listener.set_nonblocking(true)?;
+        let udp = Arc::new(UdpSocket::bind(("0.0.0.0", port))?);
+        udp.set_read_timeout(Some(Duration::from_millis(250)))?;
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let connections = Arc::new(Mutex::new(HashMap::new()));
+
+        self.server = Some(ServerState {
+            shutdown: shutdown.clone(),
+            udp: udp.clone(),
+            pending: pending.clone(),
+            connections: connections.clone(),
+        });
+
+        spawn_server_accept_loop(
+            listener,
+            pending.clone(),
+            connections.clone(),
+            self.events.clone(),
+            self.connect_filter.clone(),
+            self.next_connection_id.clone(),
+            shutdown.clone(),
+        );
+        spawn_server_udp_loop(
+            udp,
+            pending,
+            connections,
+            self.events.clone(),
+            self.discovery_data.clone(),
+            shutdown,
+            port,
+        );
+
+        Ok(())
+    }
+
+    fn get_connections(&self) -> Vec<NetConnection> {
+        self.server
+            .as_ref()
+            .map(|server| {
+                lock_unpoison(&server.connections)
+                    .values()
+                    .map(|connection| connection.info.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn close_server(&mut self) {
+        if let Some(server) = self.server.take() {
+            server.shutdown.store(true, Ordering::Relaxed);
+
+            for connection in lock_unpoison(&server.connections).values() {
+                let _ = lock_unpoison(&connection.tcp).shutdown(Shutdown::Both);
+            }
+            lock_unpoison(&server.pending).clear();
+            lock_unpoison(&server.connections).clear();
+        }
+    }
+
+    fn send_server(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
+        self.send_server_packet(None, object, reliable)
+    }
+
+    fn send_server_except(
+        &mut self,
+        except_connection_id: i32,
+        object: &PacketKind,
+        reliable: bool,
+    ) -> io::Result<()> {
+        self.send_server_packet(Some(except_connection_id), object, reliable)
+    }
+
+    fn drain_events(&mut self) -> Vec<ProviderEvent> {
+        drain_events(&self.events)
+    }
+
+    fn dispose(&mut self) {
+        self.disconnect_client();
+        self.close_server();
+    }
+
+    fn set_connect_filter(&mut self, connect_filter: Option<ConnectFilter>) {
+        self.connect_filter = connect_filter;
+    }
+
+    fn get_connect_filter(&self) -> Option<ConnectFilter> {
+        self.connect_filter.clone()
+    }
+}
+
+fn lock_unpoison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+fn push_event(events: &Arc<Mutex<VecDeque<ProviderEvent>>>, event: ProviderEvent) {
+    lock_unpoison(events).push_back(event);
+}
+
+fn drain_events(events: &Arc<Mutex<VecDeque<ProviderEvent>>>) -> Vec<ProviderEvent> {
+    lock_unpoison(events).drain(..).collect()
+}
+
+fn serializer_io_error(err: SerializerError) -> io::Error {
+    io::Error::new(ErrorKind::InvalidData, err)
+}
+
+fn read_tcp_envelope(stream: &mut TcpStream) -> io::Result<PacketEnvelope> {
+    let mut len = [0u8; 2];
+    stream.read_exact(&mut len)?;
+    let len = u16::from_be_bytes(len) as usize;
+    let mut payload = vec![0u8; len];
+    stream.read_exact(&mut payload)?;
+    PacketSerializer::read_envelope(&payload).map_err(serializer_io_error)
+}
+
+fn write_tcp_envelope(tcp: &Arc<Mutex<TcpStream>>, envelope: &PacketEnvelope) -> io::Result<()> {
+    let payload = PacketSerializer::write_envelope(envelope);
+    let frame = ArcTransport::wrap_tcp_frame(&payload).map_err(serializer_io_error)?;
+    let mut stream = lock_unpoison(tcp);
+    stream.write_all(&frame)?;
+    stream.flush()
+}
+
+fn write_tcp_packet(tcp: &Arc<Mutex<TcpStream>>, packet: &PacketKind) -> io::Result<()> {
+    let frame = ArcTransport::wrap_tcp_packet(packet).map_err(serializer_io_error)?;
+    let mut stream = lock_unpoison(tcp);
+    stream.write_all(&frame)?;
+    stream.flush()
+}
+
+fn parse_packet_envelope(envelope: PacketEnvelope) -> Result<Option<PacketKind>, SerializerError> {
+    match envelope {
+        PacketEnvelope::Framework(_) | PacketEnvelope::Raw(_) => Ok(None),
+        packet @ PacketEnvelope::Packet { .. } => {
+            PacketSerializer::packet_kind_from_envelope(&packet).map(Some)
+        }
+    }
+}
+
+fn spawn_client_tcp_reader(
+    mut stream: TcpStream,
+    events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    shutdown: Arc<AtomicBool>,
+) {
+    thread::spawn(move || {
+        while !shutdown.load(Ordering::Relaxed) {
+            match read_tcp_envelope(&mut stream) {
+                Ok(envelope) => match parse_packet_envelope(envelope) {
+                    Ok(Some(packet)) => push_event(&events, ProviderEvent::ClientPacket(packet)),
+                    Ok(None) => {}
+                    Err(_) => {}
+                },
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                    continue;
+                }
+                Err(_) => {
+                    if !shutdown.load(Ordering::Relaxed) {
+                        push_event(
+                            &events,
+                            ProviderEvent::ClientDisconnected {
+                                reason: "closed".to_string(),
+                            },
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn spawn_client_udp_reader(
+    udp: Arc<UdpSocket>,
+    events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    shutdown: Arc<AtomicBool>,
+) {
+    thread::spawn(move || {
+        let mut buffer = [0u8; 65535];
+        while !shutdown.load(Ordering::Relaxed) {
+            match udp.recv(&mut buffer) {
+                Ok(len) => match PacketSerializer::read_envelope(&buffer[..len])
+                    .and_then(parse_packet_envelope)
+                {
+                    Ok(Some(packet)) => push_event(&events, ProviderEvent::ClientPacket(packet)),
+                    Ok(None) => {}
+                    Err(_) => {}
+                },
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                    continue;
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_server_accept_loop(
+    listener: TcpListener,
+    pending: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+    connections: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+    events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    connect_filter: Option<ConnectFilter>,
+    next_connection_id: Arc<AtomicI32>,
+    shutdown: Arc<AtomicBool>,
+) {
+    thread::spawn(move || {
+        while !shutdown.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((stream, addr)) => {
+                    let address = addr.ip().to_string();
+                    if let Some(filter) = &connect_filter {
+                        if !filter(&address) {
+                            let _ = stream.shutdown(Shutdown::Both);
+                            continue;
+                        }
+                    }
+
+                    let _ = stream.set_nodelay(true);
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+                    let writer = match stream.try_clone() {
+                        Ok(stream) => Arc::new(Mutex::new(stream)),
+                        Err(_) => continue,
+                    };
+
+                    let connection_id = next_connection_id.fetch_add(1, Ordering::Relaxed);
+                    let mut info = NetConnection::new(address.clone());
+                    info.has_begun_connecting = true;
+
+                    let connection = SharedArcConnection {
+                        info,
+                        tcp: writer.clone(),
+                        udp_addr: None,
+                    };
+                    lock_unpoison(&pending).insert(connection_id, connection);
+
+                    let register =
+                        PacketEnvelope::Framework(FrameworkMessage::RegisterTcp { connection_id });
+                    if write_tcp_envelope(&writer, &register).is_err() {
+                        lock_unpoison(&pending).remove(&connection_id);
+                        continue;
+                    }
+
+                    spawn_server_tcp_reader(
+                        connection_id,
+                        stream,
+                        pending.clone(),
+                        connections.clone(),
+                        events.clone(),
+                        shutdown.clone(),
+                    );
+                }
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+fn spawn_server_tcp_reader(
+    connection_id: i32,
+    mut stream: TcpStream,
+    pending: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+    connections: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+    events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    shutdown: Arc<AtomicBool>,
+) {
+    thread::spawn(move || {
+        while !shutdown.load(Ordering::Relaxed) {
+            match read_tcp_envelope(&mut stream) {
+                Ok(envelope) => match parse_packet_envelope(envelope) {
+                    Ok(Some(packet)) => push_event(
+                        &events,
+                        ProviderEvent::ServerPacket {
+                            connection_id,
+                            packet,
+                        },
+                    ),
+                    Ok(None) => {}
+                    Err(_) => {}
+                },
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                    continue;
+                }
+                Err(_) => break,
+            }
+        }
+
+        lock_unpoison(&pending).remove(&connection_id);
+        if lock_unpoison(&connections).remove(&connection_id).is_some() {
+            push_event(
+                &events,
+                ProviderEvent::ServerDisconnected {
+                    connection_id,
+                    reason: "closed".to_string(),
+                },
+            );
+        }
+    });
+}
+
+fn spawn_server_udp_loop(
+    udp: Arc<UdpSocket>,
+    pending: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+    connections: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
+    events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    discovery_data: Arc<Mutex<Option<ServerData>>>,
+    shutdown: Arc<AtomicBool>,
+    port: u16,
+) {
+    thread::spawn(move || {
+        let mut buffer = [0u8; 65535];
+        while !shutdown.load(Ordering::Relaxed) {
+            let (len, src) = match udp.recv_from(&mut buffer) {
+                Ok(result) => result,
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                    continue;
+                }
+                Err(_) => break,
+            };
+
+            let envelope = match PacketSerializer::read_envelope(&buffer[..len]) {
+                Ok(envelope) => envelope,
+                Err(_) => continue,
+            };
+
+            match envelope {
+                PacketEnvelope::Framework(FrameworkMessage::RegisterUdp { connection_id }) => {
+                    let mut connection = match lock_unpoison(&pending).remove(&connection_id) {
+                        Some(connection) => connection,
+                        None => continue,
+                    };
+                    connection.udp_addr = Some(src);
+                    connection.info.has_connected = true;
+                    connection.info.address = src.ip().to_string();
+
+                    let tcp = connection.tcp.clone();
+                    lock_unpoison(&connections).insert(connection_id, connection.clone());
+                    let register =
+                        PacketEnvelope::Framework(FrameworkMessage::RegisterUdp { connection_id });
+                    let _ = write_tcp_envelope(&tcp, &register);
+                    push_event(
+                        &events,
+                        ProviderEvent::ServerConnected {
+                            connection_id,
+                            address: connection.info.address.clone(),
+                        },
+                    );
+                }
+                PacketEnvelope::Framework(FrameworkMessage::DiscoverHost) => {
+                    let data = lock_unpoison(&discovery_data)
+                        .clone()
+                        .unwrap_or_else(|| default_server_data(port));
+                    let bytes = super::network_io::write_server_data(&data);
+                    let _ = udp.send_to(&bytes, src);
+                }
+                PacketEnvelope::Framework(_) => {}
+                packet @ PacketEnvelope::Packet { .. } => {
+                    let connection_id =
+                        lock_unpoison(&connections)
+                            .iter()
+                            .find_map(|(id, connection)| {
+                                (connection.udp_addr == Some(src)).then_some(*id)
+                            });
+                    if let Some(connection_id) = connection_id {
+                        if let Ok(packet) = PacketSerializer::packet_kind_from_envelope(&packet) {
+                            push_event(
+                                &events,
+                                ProviderEvent::ServerPacket {
+                                    connection_id,
+                                    packet,
+                                },
+                            );
+                        }
+                    }
+                }
+                PacketEnvelope::Raw(_) => {}
+            }
+        }
+    });
+}
+
+fn default_server_data(port: u16) -> ServerData {
+    ServerData {
+        name: "Mindustry Rust".to_string(),
+        map: String::new(),
+        players: 0,
+        wave: 0,
+        version: 157,
+        version_type: "release".to_string(),
+        mode: Gamemode::Survival,
+        player_limit: 0,
+        description: String::new(),
+        mode_name: None,
+        port,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use base64::Engine;
+    use std::{net::UdpSocket, thread, time::Duration};
 
     use crate::mindustry::{
         core::content_loader::ContentLoader,
         ctype::ContentType,
+        game::Gamemode,
         io::{BuildPlanWire, BuildingRef, ContentRef, EntityRef, TeamId, TypeValue, UnitRef},
         net::packets::{
             ClientBinaryPacketCallPacket, ClientPacketCallPacket, ClientPlanSnapshotCallPacket,
@@ -1675,7 +2442,209 @@ mod tests {
             ConstructFinishCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
             DestroyPayloadCallPacket,
         },
+        net::{network_io::ServerData, write_server_data},
     };
+
+    #[test]
+    fn discover_host_probe_matches_java_framework_bytes() {
+        assert_eq!(ArcTransport::discover_host_probe(), vec![0xfe, 1]);
+    }
+
+    #[test]
+    fn tcp_frame_wrap_and_unwrap_roundtrips_packet_bytes() {
+        let packet = PacketKind::PingCallPacket(PingCallPacket { time: 123456789 });
+
+        let framed = ArcTransport::wrap_tcp_packet(&packet).unwrap();
+        let (decoded, used) = ArcTransport::unwrap_tcp_packet(&framed).unwrap();
+        assert_eq!(used, framed.len());
+        assert_eq!(decoded, packet);
+    }
+
+    #[test]
+    fn ping_host_reads_java_server_data_payload_over_udp() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let port = server.local_addr().unwrap().port();
+
+        let responder = thread::spawn(move || {
+            let mut buffer = [0u8; 512];
+            let (len, peer) = server.recv_from(&mut buffer).unwrap();
+            assert_eq!(&buffer[..len], ArcTransport::DISCOVER_HOST_BYTES);
+
+            let bytes = write_server_data(&ServerData {
+                name: "Server".into(),
+                map: "Map".into(),
+                players: 5,
+                wave: 12,
+                version: 157,
+                version_type: "release".into(),
+                mode: Gamemode::Attack,
+                player_limit: 16,
+                description: "desc".into(),
+                mode_name: Some("custom".into()),
+                port,
+            });
+            server.send_to(&bytes, peer).unwrap();
+        });
+
+        let host = ArcTransport::ping_host("127.0.0.1", port, Duration::from_secs(2)).unwrap();
+        responder.join().unwrap();
+
+        assert_eq!(host.name, "Server");
+        assert_eq!(host.mapname, "Map");
+        assert_eq!(host.players, 5);
+        assert_eq!(host.wave, 12);
+        assert_eq!(host.version, 157);
+        assert_eq!(host.version_type, "release");
+        assert_eq!(host.mode, Gamemode::Attack);
+        assert_eq!(host.player_limit, 16);
+        assert_eq!(host.description, "desc");
+        assert_eq!(host.mode_name.as_deref(), Some("custom"));
+        assert_eq!(host.port, i32::from(port));
+        assert!(host.ping >= 0);
+    }
+
+    #[test]
+    fn arc_net_provider_registers_tcp_udp_and_exchanges_packets() {
+        let port = free_local_port();
+        let mut server = ArcNetProvider::new();
+        server.host_server(port).unwrap();
+
+        let mut client = ArcNetProvider::new();
+        client
+            .connect_client("127.0.0.1", port, Box::new(|| {}))
+            .unwrap();
+
+        let server_connected = wait_for_event(&server, |event| {
+            matches!(event, ProviderEvent::ServerConnected { .. })
+        });
+        let connection_id = match server_connected {
+            ProviderEvent::ServerConnected { connection_id, .. } => connection_id,
+            other => panic!("unexpected event: {other:?}"),
+        };
+
+        assert!(matches!(
+            wait_for_event(&client, |event| matches!(
+                event,
+                ProviderEvent::ClientConnected { .. }
+            )),
+            ProviderEvent::ClientConnected { .. }
+        ));
+
+        let client_to_server = PacketKind::PingCallPacket(PingCallPacket { time: 99 });
+        server.drain_events();
+        client.send_client(&client_to_server, true).unwrap();
+        assert_eq!(
+            wait_for_server_packet(&server, connection_id),
+            client_to_server
+        );
+
+        let client_to_server_udp = PacketKind::PingCallPacket(PingCallPacket { time: 100 });
+        client.send_client(&client_to_server_udp, false).unwrap();
+        assert_eq!(
+            wait_for_server_packet(&server, connection_id),
+            client_to_server_udp
+        );
+
+        let server_to_client =
+            PacketKind::PingResponseCallPacket(PingResponseCallPacket { time: 101 });
+        client.drain_events();
+        server.send_server(&server_to_client, true).unwrap();
+        assert_eq!(wait_for_client_packet(&client), server_to_client);
+
+        let server_to_client_udp =
+            PacketKind::PingResponseCallPacket(PingResponseCallPacket { time: 102 });
+        server.send_server(&server_to_client_udp, false).unwrap();
+        assert_eq!(wait_for_client_packet(&client), server_to_client_udp);
+
+        client.disconnect_client();
+        server.close_server();
+    }
+
+    #[test]
+    fn hosted_arc_net_provider_responds_to_discovery_probe() {
+        let port = free_local_port();
+        let mut server = ArcNetProvider::with_server_data(ServerData {
+            name: "Rust Server".into(),
+            map: "Rust Map".into(),
+            players: 3,
+            wave: 9,
+            version: 157,
+            version_type: "release".into(),
+            mode: Gamemode::Survival,
+            player_limit: 12,
+            description: "provider discovery".into(),
+            mode_name: None,
+            port,
+        });
+
+        server.host_server(port).unwrap();
+        let host = ArcTransport::ping_host("127.0.0.1", port, Duration::from_secs(2)).unwrap();
+        server.close_server();
+
+        assert_eq!(host.name, "Rust Server");
+        assert_eq!(host.mapname, "Rust Map");
+        assert_eq!(host.players, 3);
+        assert_eq!(host.wave, 9);
+        assert_eq!(host.version, 157);
+        assert_eq!(host.description, "provider discovery");
+        assert_eq!(host.port, i32::from(port));
+    }
+
+    fn free_local_port() -> u16 {
+        for _ in 0..32 {
+            let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = tcp.local_addr().unwrap().port();
+            if UdpSocket::bind(("127.0.0.1", port)).is_ok() {
+                return port;
+            }
+        }
+        panic!("could not reserve a local TCP/UDP port pair");
+    }
+
+    fn wait_for_event(
+        provider: &ArcNetProvider,
+        mut predicate: impl FnMut(&ProviderEvent) -> bool,
+    ) -> ProviderEvent {
+        for _ in 0..150 {
+            for event in provider.drain_events() {
+                if predicate(&event) {
+                    return event;
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("timed out waiting for provider event");
+    }
+
+    fn wait_for_server_packet(
+        provider: &ArcNetProvider,
+        expected_connection_id: i32,
+    ) -> PacketKind {
+        match wait_for_event(provider, |event| {
+            matches!(
+                event,
+                ProviderEvent::ServerPacket {
+                    connection_id,
+                    ..
+                } if *connection_id == expected_connection_id
+            )
+        }) {
+            ProviderEvent::ServerPacket { packet, .. } => packet,
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    fn wait_for_client_packet(provider: &ArcNetProvider) -> PacketKind {
+        match wait_for_event(provider, |event| {
+            matches!(event, ProviderEvent::ClientPacket(_))
+        }) {
+            ProviderEvent::ClientPacket(packet) => packet,
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
 
     #[test]
     fn framework_ping_matches_java_layout() {

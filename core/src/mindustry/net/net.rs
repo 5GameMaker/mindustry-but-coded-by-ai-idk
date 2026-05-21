@@ -1,14 +1,19 @@
 use std::collections::{HashMap, VecDeque};
+use std::io;
+use std::sync::Arc;
+use std::time::Duration;
 
+use super::host::Host;
+use super::net_connection::NetConnection;
 use super::packets::{
     AnnounceCallPacket, ClearObjectivesCallPacket, ClientBinaryPacketReliableCallPacket,
     ClientBinaryPacketUnreliableCallPacket, ClientPacketReliableCallPacket,
     ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CompleteObjectiveCallPacket,
-    ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
+    Connect, ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
     CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
     CreateWeatherCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
-    DeconstructFinishCallPacket, DeletePlansCallPacket, DestroyPayloadCallPacket,
+    DeconstructFinishCallPacket, DeletePlansCallPacket, DestroyPayloadCallPacket, Disconnect,
     DropItemCallPacket, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
     EntitySnapshotCallPacket, FollowUpMenuCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
     HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
@@ -49,6 +54,8 @@ use super::streamable::{StreamBuilder, Streamable};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PacketKind {
+    Connect(Connect),
+    Disconnect(Disconnect),
     StreamBegin(StreamBegin),
     StreamChunk(StreamChunk),
     Streamable(Streamable),
@@ -202,10 +209,12 @@ pub enum PacketKind {
 impl PacketKind {
     pub fn priority(&self) -> i32 {
         match self {
-            PacketKind::StreamBegin(_)
+            PacketKind::Connect(_)
+            | PacketKind::Disconnect(_)
+            | PacketKind::ConnectPacket(_)
+            | PacketKind::StreamBegin(_)
             | PacketKind::StreamChunk(_)
             | PacketKind::Streamable(_)
-            | PacketKind::ConnectPacket(_)
             | PacketKind::ClientSnapshotCallPacket(_)
             | PacketKind::ConnectConfirmCallPacket(_) => 2,
             PacketKind::ClientPlanSnapshotCallPacket(_)
@@ -350,6 +359,7 @@ impl PacketKind {
 
     pub fn allow(&self, server: bool) -> bool {
         match self {
+            PacketKind::Connect(_) | PacketKind::Disconnect(_) => true,
             PacketKind::StreamBegin(_) | PacketKind::StreamChunk(_) | PacketKind::Streamable(_) => {
                 !server
             }
@@ -507,19 +517,203 @@ impl PacketKind {
     }
 }
 
-#[derive(Debug, Default)]
+pub type ConnectFilter = Arc<dyn Fn(&str) -> bool + Send + Sync + 'static>;
+pub type HostCallback = Box<dyn Fn(Host) + Send + 'static>;
+pub type DoneCallback = Box<dyn Fn() + Send + 'static>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderEvent {
+    ClientConnected {
+        address_tcp: String,
+    },
+    ClientDisconnected {
+        reason: String,
+    },
+    ClientPacket(PacketKind),
+    ServerConnected {
+        connection_id: i32,
+        address: String,
+    },
+    ServerDisconnected {
+        connection_id: i32,
+        reason: String,
+    },
+    ServerPacket {
+        connection_id: i32,
+        packet: PacketKind,
+    },
+}
+
+pub trait NetProvider: Send {
+    fn connect_client(
+        &mut self,
+        ip: &str,
+        port: u16,
+        success: Box<dyn Fn() + Send + 'static>,
+    ) -> io::Result<()>;
+
+    fn send_client(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()>;
+
+    fn disconnect_client(&mut self);
+
+    fn discover_servers(&self, callback: HostCallback, done: DoneCallback);
+
+    fn ping_host(&self, address: &str, port: u16, timeout: Duration) -> io::Result<Host>;
+
+    fn host_server(&mut self, port: u16) -> io::Result<()>;
+
+    fn get_connections(&self) -> Vec<NetConnection>;
+
+    fn close_server(&mut self);
+
+    fn send_server(&mut self, _object: &PacketKind, _reliable: bool) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn send_server_except(
+        &mut self,
+        _except_connection_id: i32,
+        object: &PacketKind,
+        reliable: bool,
+    ) -> io::Result<()> {
+        self.send_server(object, reliable)
+    }
+
+    fn drain_events(&mut self) -> Vec<ProviderEvent> {
+        Vec::new()
+    }
+
+    fn dispose(&mut self) {
+        self.disconnect_client();
+        self.close_server();
+    }
+
+    fn set_connect_filter(&mut self, _connect_filter: Option<ConnectFilter>) {}
+
+    fn get_connect_filter(&self) -> Option<ConnectFilter> {
+        None
+    }
+}
+
+#[derive(Default)]
+pub struct NoopNetProvider {
+    connect_filter: Option<ConnectFilter>,
+}
+
+impl NetProvider for NoopNetProvider {
+    fn connect_client(
+        &mut self,
+        _ip: &str,
+        _port: u16,
+        _success: Box<dyn Fn() + Send + 'static>,
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "no NetProvider is installed",
+        ))
+    }
+
+    fn send_client(&mut self, _object: &PacketKind, _reliable: bool) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "no NetProvider is installed",
+        ))
+    }
+
+    fn disconnect_client(&mut self) {}
+
+    fn discover_servers(&self, _callback: HostCallback, done: DoneCallback) {
+        done();
+    }
+
+    fn ping_host(&self, _address: &str, _port: u16, _timeout: Duration) -> io::Result<Host> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "no NetProvider is installed",
+        ))
+    }
+
+    fn host_server(&mut self, _port: u16) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "no NetProvider is installed",
+        ))
+    }
+
+    fn get_connections(&self) -> Vec<NetConnection> {
+        Vec::new()
+    }
+
+    fn close_server(&mut self) {}
+
+    fn set_connect_filter(&mut self, connect_filter: Option<ConnectFilter>) {
+        self.connect_filter = connect_filter;
+    }
+
+    fn get_connect_filter(&self) -> Option<ConnectFilter> {
+        self.connect_filter.clone()
+    }
+}
+
 pub struct Net {
+    provider: Box<dyn NetProvider>,
     server: bool,
     active: bool,
     client_loaded: bool,
     current_stream: Option<StreamBuilder>,
     packet_queue: VecDeque<PacketKind>,
     streams: HashMap<i32, StreamBuilder>,
+    server_connections: HashMap<i32, NetConnection>,
     handled_client_packets: Vec<PacketKind>,
     handled_server_packets: Vec<PacketKind>,
 }
 
+impl std::fmt::Debug for Net {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Net")
+            .field("server", &self.server)
+            .field("active", &self.active)
+            .field("client_loaded", &self.client_loaded)
+            .field("current_stream", &self.current_stream)
+            .field("packet_queue", &self.packet_queue)
+            .field("streams", &self.streams)
+            .field("server_connections", &self.server_connections)
+            .field("handled_client_packets", &self.handled_client_packets)
+            .field("handled_server_packets", &self.handled_server_packets)
+            .finish()
+    }
+}
+
+impl Default for Net {
+    fn default() -> Self {
+        Self::new(Box::<NoopNetProvider>::default())
+    }
+}
+
 impl Net {
+    pub fn new(provider: Box<dyn NetProvider>) -> Self {
+        Self {
+            provider,
+            server: false,
+            active: false,
+            client_loaded: false,
+            current_stream: None,
+            packet_queue: VecDeque::new(),
+            streams: HashMap::new(),
+            server_connections: HashMap::new(),
+            handled_client_packets: Vec::new(),
+            handled_server_packets: Vec::new(),
+        }
+    }
+
+    pub fn set_provider(&mut self, provider: Box<dyn NetProvider>) {
+        self.provider.dispose();
+        self.provider = provider;
+        self.server = false;
+        self.active = false;
+        self.server_connections.clear();
+    }
+
     pub fn set_client_loaded(&mut self, loaded: bool) {
         self.client_loaded = loaded;
         if loaded {
@@ -562,6 +756,162 @@ impl Net {
     }
     pub fn handled_server_packets(&self) -> &[PacketKind] {
         &self.handled_server_packets
+    }
+
+    pub fn connect(
+        &mut self,
+        ip: &str,
+        port: u16,
+        success: Box<dyn Fn() + Send + 'static>,
+    ) -> io::Result<()> {
+        if self.active {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "alreadyconnected",
+            ));
+        }
+
+        self.provider.connect_client(ip, port, success)?;
+        self.active = true;
+        self.server = false;
+        Ok(())
+    }
+
+    pub fn host(&mut self, port: u16) -> io::Result<()> {
+        self.provider.host_server(port)?;
+        self.active = true;
+        self.server = true;
+        Ok(())
+    }
+
+    pub fn close_server(&mut self) {
+        self.provider.close_server();
+        self.server = false;
+        self.active = false;
+        self.server_connections.clear();
+    }
+
+    pub fn reset(&mut self) {
+        self.close_server();
+        self.disconnect();
+    }
+
+    pub fn disconnect(&mut self) {
+        self.provider.disconnect_client();
+        self.server = false;
+        self.active = false;
+        self.server_connections.clear();
+    }
+
+    pub fn discover_servers(&self, callback: HostCallback, done: DoneCallback) {
+        self.provider.discover_servers(callback, done);
+    }
+
+    pub fn ping_host(&self, address: &str, port: u16, timeout: Duration) -> io::Result<Host> {
+        self.provider.ping_host(address, port, timeout)
+    }
+
+    pub fn get_connections(&self) -> Vec<NetConnection> {
+        self.provider.get_connections()
+    }
+
+    pub fn send(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
+        if self.server {
+            self.provider.send_server(object, reliable)
+        } else {
+            self.provider.send_client(object, reliable)
+        }
+    }
+
+    pub fn send_except(
+        &mut self,
+        except_connection_id: i32,
+        object: &PacketKind,
+        reliable: bool,
+    ) -> io::Result<()> {
+        self.provider
+            .send_server_except(except_connection_id, object, reliable)
+    }
+
+    pub fn set_connect_filter(&mut self, connect_filter: Option<ConnectFilter>) {
+        self.provider.set_connect_filter(connect_filter);
+    }
+
+    pub fn get_connect_filter(&self) -> Option<ConnectFilter> {
+        self.provider.get_connect_filter()
+    }
+
+    pub fn dispose(&mut self) {
+        self.provider.dispose();
+        self.server = false;
+        self.active = false;
+        self.server_connections.clear();
+    }
+
+    pub fn drain_provider_events(&mut self) -> Vec<ProviderEvent> {
+        let events = self.provider.drain_events();
+        for event in &events {
+            match event {
+                ProviderEvent::ClientConnected { address_tcp } => {
+                    self.handle_client_received(PacketKind::Connect(Connect {
+                        address_tcp: address_tcp.clone(),
+                    }));
+                }
+                ProviderEvent::ClientDisconnected { reason } => {
+                    self.handle_client_received(PacketKind::Disconnect(Disconnect {
+                        reason: reason.clone(),
+                    }));
+                    self.active = false;
+                }
+                ProviderEvent::ClientPacket(packet) => {
+                    self.handle_client_received(packet.clone());
+                }
+                ProviderEvent::ServerConnected {
+                    connection_id,
+                    address,
+                } => {
+                    let mut connection = NetConnection::new(address.clone());
+                    connection.has_connected = true;
+                    self.server_connections
+                        .insert(*connection_id, connection.clone());
+                    self.handle_server_received(
+                        connection.has_connected,
+                        PacketKind::Connect(Connect {
+                            address_tcp: address.clone(),
+                        }),
+                    );
+                }
+                ProviderEvent::ServerDisconnected {
+                    connection_id,
+                    reason,
+                } => {
+                    let has_connected = self
+                        .server_connections
+                        .get(connection_id)
+                        .map(|connection| connection.has_connected)
+                        .unwrap_or(true);
+                    self.handle_server_received(
+                        has_connected,
+                        PacketKind::Disconnect(Disconnect {
+                            reason: reason.clone(),
+                        }),
+                    );
+                    self.server_connections.remove(connection_id);
+                }
+                ProviderEvent::ServerPacket {
+                    connection_id,
+                    packet,
+                } => {
+                    let has_connected = self
+                        .server_connections
+                        .get(connection_id)
+                        .map(|connection| connection.has_connected)
+                        .unwrap_or(false);
+                    self.handle_server_received(has_connected, packet.clone());
+                }
+            }
+        }
+        events
     }
 
     pub fn handle_client_received(&mut self, packet: PacketKind) {
@@ -654,6 +1004,104 @@ mod tests {
         match &net.handled_client_packets()[0] {
             PacketKind::Streamable(stream) => assert_eq!(stream.stream, vec![1, 2, 3]),
             other => panic!("unexpected packet: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_events_flow_into_net_handlers() {
+        let provider = EventProvider {
+            events: VecDeque::from([
+                ProviderEvent::ClientConnected {
+                    address_tcp: "127.0.0.1:6567".into(),
+                },
+                ProviderEvent::ClientPacket(PacketKind::Other {
+                    id: 7,
+                    priority: 2,
+                    allow_client: true,
+                    allow_server: true,
+                }),
+                ProviderEvent::ServerConnected {
+                    connection_id: 3,
+                    address: "127.0.0.1".into(),
+                },
+                ProviderEvent::ServerPacket {
+                    connection_id: 3,
+                    packet: PacketKind::Other {
+                        id: 8,
+                        priority: 2,
+                        allow_client: true,
+                        allow_server: true,
+                    },
+                },
+            ]),
+        };
+        let mut net = Net::new(Box::new(provider));
+
+        let drained = net.drain_provider_events();
+
+        assert_eq!(drained.len(), 4);
+        assert!(matches!(
+            net.handled_client_packets()[0],
+            PacketKind::Connect(_)
+        ));
+        assert!(matches!(
+            net.handled_client_packets()[1],
+            PacketKind::Other { id: 7, .. }
+        ));
+        assert!(matches!(
+            net.handled_server_packets()[0],
+            PacketKind::Connect(_)
+        ));
+        assert!(matches!(
+            net.handled_server_packets()[1],
+            PacketKind::Other { id: 8, .. }
+        ));
+    }
+
+    #[derive(Default)]
+    struct EventProvider {
+        events: VecDeque<ProviderEvent>,
+    }
+
+    impl NetProvider for EventProvider {
+        fn connect_client(
+            &mut self,
+            _ip: &str,
+            _port: u16,
+            _success: Box<dyn Fn() + Send + 'static>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_client(&mut self, _object: &PacketKind, _reliable: bool) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn disconnect_client(&mut self) {}
+
+        fn discover_servers(&self, _callback: HostCallback, done: DoneCallback) {
+            done();
+        }
+
+        fn ping_host(&self, _address: &str, _port: u16, _timeout: Duration) -> io::Result<Host> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
+        }
+
+        fn host_server(&mut self, _port: u16) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn get_connections(&self) -> Vec<NetConnection> {
+            Vec::new()
+        }
+
+        fn close_server(&mut self) {}
+
+        fn drain_events(&mut self) -> Vec<ProviderEvent> {
+            self.events.drain(..).collect()
         }
     }
 }

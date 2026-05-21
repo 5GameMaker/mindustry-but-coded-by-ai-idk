@@ -14,9 +14,14 @@ pub use administration::{
     ActionFilter, ActionType, Administration, Config, ConfigValue, PlayerAction, PlayerInfo,
     TraceInfo,
 };
-pub use arc_net_provider::{FrameworkMessage, PacketEnvelope, PacketSerializer};
+pub use arc_net_provider::{
+    ArcNetProvider, ArcTransport, FrameworkMessage, PacketEnvelope, PacketSerializer,
+};
 pub use host::Host;
-pub use net::{Net, PacketKind};
+pub use net::{
+    ConnectFilter, DoneCallback, HostCallback, Net, NetProvider, NoopNetProvider, PacketKind,
+    ProviderEvent,
+};
 pub use net_connection::{NetConnection, SentPacket};
 pub use network_io::{read_server_data, write_server_data, ServerData};
 pub use packet::{PacketPriority, PacketRuntime};
@@ -27,11 +32,11 @@ pub use packets::{
     ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
     ClientPacketCallPacket, ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
-    CompleteObjectiveCallPacket, ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket,
-    ConstructFinishCallPacket, CopyToClipboardCallPacket, CreateBulletCallPacket,
+    CompleteObjectiveCallPacket, Connect, ConnectCallPacket, ConnectConfirmCallPacket,
+    ConnectPacket, ConstructFinishCallPacket, CopyToClipboardCallPacket, CreateBulletCallPacket,
     CreateMarkerCallPacket, CreateWeatherCallPacket, DebugStatusClientCallPacket,
     DebugStatusClientUnreliableCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
-    DestroyPayloadCallPacket, DropItemCallPacket, EffectCallPacket, EffectCallPacket2,
+    DestroyPayloadCallPacket, Disconnect, DropItemCallPacket, EffectCallPacket, EffectCallPacket2,
     EffectReliableCallPacket, EntitySnapshotCallPacket, FollowUpMenuCallPacket, GameOverCallPacket,
     HiddenSnapshotCallPacket, HideFollowUpMenuCallPacket, HideHudTextCallPacket,
     InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
