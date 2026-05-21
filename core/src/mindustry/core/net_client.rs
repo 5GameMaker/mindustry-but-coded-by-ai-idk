@@ -2,12 +2,64 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use crate::mindustry::net::{Connect, Disconnect, Net, PacketKind, ProviderEvent, Streamable};
+use crate::mindustry::net::{
+    Connect, ConnectPacket, Disconnect, Net, PacketKind, ProviderEvent, Streamable,
+};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_CLIENT_VERSION: i32 = 157;
+pub const DEFAULT_CLIENT_VERSION_TYPE: &str = "official";
 
 pub type PacketHandler = Arc<dyn Fn(PacketKind) + Send + Sync + 'static>;
 pub type BinaryPacketHandler = Arc<dyn Fn(&[u8]) + Send + Sync + 'static>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientConnectConfig {
+    pub version: i32,
+    pub version_type: String,
+    pub mods: Vec<String>,
+    pub name: String,
+    pub locale: String,
+    pub uuid: String,
+    pub usid: String,
+    pub mobile: bool,
+    pub color: i32,
+    pub uuid_crc32: Option<u32>,
+}
+
+impl Default for ClientConnectConfig {
+    fn default() -> Self {
+        Self {
+            version: DEFAULT_CLIENT_VERSION,
+            version_type: DEFAULT_CLIENT_VERSION_TYPE.into(),
+            mods: Vec::new(),
+            name: "player".into(),
+            locale: "en_US".into(),
+            uuid: String::new(),
+            usid: String::new(),
+            mobile: false,
+            color: 0,
+            uuid_crc32: None,
+        }
+    }
+}
+
+impl ClientConnectConfig {
+    pub fn to_connect_packet(&self) -> ConnectPacket {
+        ConnectPacket {
+            version: self.version,
+            version_type: self.version_type.clone(),
+            mods: self.mods.clone(),
+            name: self.name.clone(),
+            locale: self.locale.clone(),
+            uuid: self.uuid.clone(),
+            usid: self.usid.clone(),
+            mobile: self.mobile,
+            color: self.color,
+            uuid_crc32: self.uuid_crc32,
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct NetClientState {
@@ -31,6 +83,10 @@ pub struct NetClientState {
     pub last_disconnect: Option<Disconnect>,
     pub last_world_stream: Option<Streamable>,
     pub last_packet: Option<PacketKind>,
+    pub connect_config: Option<ClientConnectConfig>,
+    pub connect_packet_sent: bool,
+    pub last_sent_connect_packet: Option<ConnectPacket>,
+    pub last_connect_packet_error: Option<String>,
     pub last_binary_stream: Option<Vec<u8>>,
     pub last_provider_events: Vec<ProviderEvent>,
     packet_handlers: Vec<PacketHandler>,
@@ -64,6 +120,10 @@ impl fmt::Debug for NetClientState {
             .field("last_disconnect", &self.last_disconnect)
             .field("last_world_stream", &self.last_world_stream)
             .field("last_packet", &self.last_packet)
+            .field("connect_config", &self.connect_config)
+            .field("connect_packet_sent", &self.connect_packet_sent)
+            .field("last_sent_connect_packet", &self.last_sent_connect_packet)
+            .field("last_connect_packet_error", &self.last_connect_packet_error)
             .field(
                 "last_binary_stream_len",
                 &self.last_binary_stream.as_ref().map(|s| s.len()),
@@ -85,6 +145,9 @@ impl NetClientState {
         self.connect_events += 1;
         self.last_connect = Some(connect.clone());
         self.last_packet = Some(PacketKind::Connect(connect.clone()));
+        self.connect_packet_sent = false;
+        self.last_sent_connect_packet = None;
+        self.last_connect_packet_error = None;
     }
 
     fn record_disconnect(&mut self, disconnect: &Disconnect) {
@@ -93,6 +156,7 @@ impl NetClientState {
         self.disconnect_events += 1;
         self.last_disconnect = Some(disconnect.clone());
         self.last_packet = Some(PacketKind::Disconnect(disconnect.clone()));
+        self.connect_packet_sent = false;
     }
 
     fn record_world_stream(&mut self, stream: &Streamable) {
@@ -161,12 +225,27 @@ impl NetClient {
         state.timeout_deadline = Some(now + DEFAULT_TIMEOUT);
     }
 
+    pub fn set_connect_config(&self, config: Option<ClientConnectConfig>) {
+        let mut state = self.state.lock().unwrap();
+        state.connect_config = config;
+        state.connect_packet_sent = false;
+        state.last_sent_connect_packet = None;
+        state.last_connect_packet_error = None;
+    }
+
+    pub fn get_connect_config(&self) -> Option<ClientConnectConfig> {
+        self.state.lock().unwrap().connect_config.clone()
+    }
+
     pub fn begin_connecting(&self) {
         let mut state = self.state.lock().unwrap();
         state.connecting = true;
         state.connected = false;
         state.connection_attempts += 1;
         state.last_update_at = Some(Instant::now());
+        state.connect_packet_sent = false;
+        state.last_sent_connect_packet = None;
+        state.last_connect_packet_error = None;
         drop(state);
         self.reset_timeout();
     }
@@ -187,6 +266,7 @@ impl NetClient {
         state.connected = false;
         state.manual_disconnects += 1;
         state.last_update_at = Some(Instant::now());
+        state.connect_packet_sent = false;
     }
 
     pub fn add_packet_handler<F>(&self, handler: F)
@@ -251,6 +331,40 @@ impl NetClient {
         };
 
         for packet in new_packets {
+            let connect_packet_to_send = {
+                let mut state = self.state.lock().unwrap();
+                if let PacketKind::Connect(_) = &packet {
+                    if !state.connect_packet_sent {
+                        let connect_packet = state
+                            .connect_config
+                            .as_ref()
+                            .map(ClientConnectConfig::to_connect_packet);
+                        if let Some(connect_packet) = connect_packet {
+                            state.connect_packet_sent = true;
+                            state.last_sent_connect_packet = Some(connect_packet.clone());
+                            state.last_connect_packet_error = None;
+                            Some(connect_packet)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some(connect_packet) = connect_packet_to_send {
+                let result = {
+                    let mut net = self.net.lock().unwrap();
+                    net.send(&PacketKind::ConnectPacket(connect_packet), true)
+                };
+                if let Err(error) = result {
+                    self.state.lock().unwrap().last_connect_packet_error = Some(error.to_string());
+                }
+            }
+
             {
                 let mut state = self.state.lock().unwrap();
                 state.last_packet = Some(packet.clone());
@@ -309,11 +423,63 @@ impl NetClient {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
-    use crate::mindustry::net::{Connect, Disconnect, PacketKind, Streamable};
+    use crate::mindustry::net::{
+        Connect, Disconnect, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
+        PacketKind, Streamable,
+    };
 
-    use super::NetClient;
+    use super::{ClientConnectConfig, NetClient};
+
+    #[derive(Clone, Default)]
+    struct CaptureProvider {
+        sent: Arc<Mutex<Vec<(PacketKind, bool)>>>,
+    }
+
+    impl NetProvider for CaptureProvider {
+        fn connect_client(
+            &mut self,
+            _ip: &str,
+            _port: u16,
+            _success: Box<dyn Fn() + Send + 'static>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_client(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
+            self.sent.lock().unwrap().push((object.clone(), reliable));
+            Ok(())
+        }
+
+        fn disconnect_client(&mut self) {}
+
+        fn discover_servers(&self, _callback: HostCallback, done: DoneCallback) {
+            done();
+        }
+
+        fn ping_host(&self, _address: &str, _port: u16, _timeout: Duration) -> io::Result<Host> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
+        }
+
+        fn host_server(&mut self, _port: u16) -> io::Result<()> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
+        }
+
+        fn get_connections(&self) -> Vec<NetConnection> {
+            Vec::new()
+        }
+
+        fn close_server(&mut self) {}
+    }
 
     #[test]
     fn core_typed_listeners_update_client_state() {
@@ -378,5 +544,57 @@ mod tests {
 
         assert_eq!(*packet_count.lock().unwrap(), 1);
         assert_eq!(*binary_payloads.lock().unwrap(), vec![vec![7, 8, 9]]);
+    }
+
+    #[test]
+    fn update_sends_configured_connect_packet_once_after_connect_event() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+        client.set_connect_config(Some(ClientConnectConfig {
+            name: "rust-player".into(),
+            locale: "zh_CN".into(),
+            usid: "usid".into(),
+            uuid: "uuid".into(),
+            color: 42,
+            ..ClientConnectConfig::default()
+        }));
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::Connect(Connect {
+                address_tcp: "127.0.0.1:6567".into(),
+            }));
+        }
+
+        client.update();
+        client.update();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].1);
+        match &sent[0].0 {
+            PacketKind::ConnectPacket(packet) => {
+                assert_eq!(packet.version, 157);
+                assert_eq!(packet.version_type, "official");
+                assert_eq!(packet.name, "rust-player");
+                assert_eq!(packet.locale, "zh_CN");
+                assert_eq!(packet.usid, "usid");
+                assert_eq!(packet.uuid, "uuid");
+                assert_eq!(packet.color, 42);
+            }
+            other => panic!("unexpected packet: {other:?}"),
+        }
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert!(state.connect_packet_sent);
+        assert_eq!(
+            state.last_sent_connect_packet.as_ref().unwrap().name,
+            "rust-player"
+        );
+        assert!(state.last_connect_packet_error.is_none());
     }
 }
