@@ -1,4 +1,5 @@
 pub mod abilities;
+pub mod entity_indexer;
 pub mod pattern;
 pub mod unit_sorts;
 pub mod units;
@@ -7,6 +8,7 @@ pub use abilities::{
     Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
     SpawnDeathAbility,
 };
+pub use entity_indexer::EntityIndexer;
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSine, ShootSpread,
     ShootSummon, Shot,
