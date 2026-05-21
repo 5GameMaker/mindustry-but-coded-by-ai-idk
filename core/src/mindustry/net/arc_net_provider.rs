@@ -1808,7 +1808,10 @@ impl SharedArcConnection {
             ))
         };
 
-        if result.is_err() {
+        if result
+            .as_ref()
+            .is_err_and(|err| is_connection_send_error(err))
+        {
             self.close();
         }
         result
@@ -1928,15 +1931,45 @@ impl ArcNetProvider {
             .map(|(id, connection)| (*id, connection.clone()))
             .collect();
 
+        let mut first_error = None;
+        let mut disconnected = Vec::new();
+
         for (id, connection) in connections {
             if except_connection_id == Some(id) {
                 continue;
             }
 
-            connection.send(&server.udp, object, reliable, &self.content_loader)?;
+            if let Err(err) = connection.send(&server.udp, object, reliable, &self.content_loader) {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+                if !connection.is_connected() {
+                    disconnected.push(id);
+                }
+            }
         }
 
-        Ok(())
+        if !disconnected.is_empty() {
+            let mut active = lock_unpoison(&server.connections);
+            for id in disconnected {
+                if let Some(connection) = active.remove(&id) {
+                    connection.mark_disconnected();
+                    push_event(
+                        &self.events,
+                        ProviderEvent::ServerDisconnected {
+                            connection_id: id,
+                            reason: "error".to_string(),
+                        },
+                    );
+                }
+            }
+        }
+
+        if let Some(err) = first_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -2208,6 +2241,19 @@ fn push_event(events: &Arc<Mutex<VecDeque<ProviderEvent>>>, event: ProviderEvent
 
 fn drain_events(events: &Arc<Mutex<VecDeque<ProviderEvent>>>) -> Vec<ProviderEvent> {
     lock_unpoison(events).drain(..).collect()
+}
+
+fn is_connection_send_error(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        ErrorKind::NotConnected
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+            | ErrorKind::BrokenPipe
+            | ErrorKind::TimedOut
+            | ErrorKind::WriteZero
+            | ErrorKind::AddrNotAvailable
+    )
 }
 
 fn serializer_io_error(err: SerializerError) -> io::Error {

@@ -18,37 +18,37 @@ use super::packets::{
     EntitySnapshotCallPacket, FollowUpMenuCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
     HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
     InfoPopupCallPacket2, InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2,
-    InfoToastCallPacket, KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
-    LabelReliableCallPacket, LabelReliableCallPacket2, LandingPadLandedCallPacket,
-    LogicExplosionCallPacket, MenuCallPacket, MenuChooseCallPacket, OpenUriCallPacket,
-    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-    PingCallPacket, PingLocationCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
-    PlayerSpawnCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
-    RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBlockSnapshotCallPacket,
-    RequestBuildPayloadCallPacket, RequestDebugStatusCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, ResearchedCallPacket,
-    RotateBlockCallPacket, SectorCaptureCallPacket, SendChatMessageCallPacket,
-    SendMessageCallPacket, SendMessageCallPacket2, ServerBinaryPacketReliableCallPacket,
-    ServerBinaryPacketUnreliableCallPacket, ServerPacketReliableCallPacket,
-    ServerPacketUnreliableCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
-    SetFloorCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket, SetItemCallPacket,
-    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetMapAreaCallPacket,
-    SetObjectivesCallPacket, SetOverlayCallPacket, SetPlayerTeamEditorCallPacket,
-    SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket,
-    SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket,
-    SetTileItemsCallPacket, SetTileLiquidsCallPacket, SetTileOverlaysCallPacket,
-    SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
-    SpawnEffectCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk,
-    SyncVariableCallPacket, TakeItemsCallPacket, TextInputCallPacket, TextInputCallPacket2,
-    TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
-    TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
-    TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket, UnitBuildingControlSelectCallPacket,
-    UnitCapDeathCallPacket, UnitClearCallPacket, UnitControlCallPacket, UnitDeathCallPacket,
-    UnitDespawnCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
-    UnitEnvDeathCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
-    UnitTetherBlockSpawnedCallPacket, UpdateGameOverCallPacket, UpdateMarkerCallPacket,
-    UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket, WarningToastCallPacket,
-    WorldDataBeginCallPacket,
+    InfoToastCallPacket, KickCallPacket, KickCallPacket2, KickReason, LabelCallPacket,
+    LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
+    LandingPadLandedCallPacket, LogicExplosionCallPacket, MenuCallPacket, MenuChooseCallPacket,
+    OpenUriCallPacket, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket, PingResponseCallPacket,
+    PlayerDisconnectCallPacket, PlayerSpawnCallPacket, RemoveMarkerCallPacket,
+    RemoveQueueBlockCallPacket, RemoveTileCallPacket, RemoveWorldLabelCallPacket,
+    RequestBlockSnapshotCallPacket, RequestBuildPayloadCallPacket, RequestDebugStatusCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    ResearchedCallPacket, RotateBlockCallPacket, SectorCaptureCallPacket,
+    SendChatMessageCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
+    ServerBinaryPacketReliableCallPacket, ServerBinaryPacketUnreliableCallPacket,
+    ServerPacketReliableCallPacket, ServerPacketUnreliableCallPacket, SetCameraPositionCallPacket,
+    SetFlagCallPacket, SetFloorCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
+    SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
+    SetMapAreaCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket,
+    SetPlayerTeamEditorCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+    SetTeamCallPacket, SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket,
+    SetTileFloorsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
+    SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+    SoundAtCallPacket, SoundCallPacket, SpawnEffectCallPacket, StateSnapshotCallPacket,
+    StreamBegin, StreamChunk, SyncVariableCallPacket, TakeItemsCallPacket, TextInputCallPacket,
+    TextInputCallPacket2, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitCapDeathCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
+    UnitEnteredPayloadCallPacket, UnitEnvDeathCallPacket, UnitSafeDeathCallPacket,
+    UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket, UpdateGameOverCallPacket,
+    UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
+    WarningToastCallPacket, WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -807,6 +807,12 @@ impl Net {
     }
 
     pub fn close_server(&mut self) {
+        if self.server {
+            let kick = PacketKind::KickCallPacket2(KickCallPacket2 {
+                reason: KickReason::ServerClose,
+            });
+            let _ = self.provider.send_server(&kick, true);
+        }
         self.provider.close_server();
         self.server = false;
         self.active = false;
@@ -1157,6 +1163,34 @@ mod tests {
         assert_eq!(*server_seen.lock().unwrap(), vec![(Some(42), 22)]);
     }
 
+    #[test]
+    fn close_server_sends_server_close_kick_before_disposing_provider() {
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let closed = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let provider = RecordingProvider {
+            sent: sent.clone(),
+            closed: closed.clone(),
+        };
+        let mut net = Net::new(Box::new(provider));
+        net.server = true;
+        net.active = true;
+
+        net.close_server();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        match &sent[0].0 {
+            PacketKind::KickCallPacket2(packet) => {
+                assert_eq!(packet.reason, KickReason::ServerClose);
+            }
+            other => panic!("unexpected packet: {other:?}"),
+        }
+        assert!(sent[0].1);
+        assert!(*closed.lock().unwrap());
+        assert!(!net.server);
+        assert!(!net.active);
+    }
+
     #[derive(Default)]
     struct EventProvider {
         events: VecDeque<ProviderEvent>,
@@ -1201,6 +1235,57 @@ mod tests {
 
         fn drain_events(&mut self) -> Vec<ProviderEvent> {
             self.events.drain(..).collect()
+        }
+    }
+
+    #[derive(Clone)]
+    struct RecordingProvider {
+        sent: std::sync::Arc<std::sync::Mutex<Vec<(PacketKind, bool)>>>,
+        closed: std::sync::Arc<std::sync::Mutex<bool>>,
+    }
+
+    impl NetProvider for RecordingProvider {
+        fn connect_client(
+            &mut self,
+            _ip: &str,
+            _port: u16,
+            _success: Box<dyn Fn() + Send + 'static>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_client(&mut self, _object: &PacketKind, _reliable: bool) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_server(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
+            self.sent.lock().unwrap().push((object.clone(), reliable));
+            Ok(())
+        }
+
+        fn disconnect_client(&mut self) {}
+
+        fn discover_servers(&self, _callback: HostCallback, done: DoneCallback) {
+            done();
+        }
+
+        fn ping_host(&self, _address: &str, _port: u16, _timeout: Duration) -> io::Result<Host> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
+        }
+
+        fn host_server(&mut self, _port: u16) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn get_connections(&self) -> Vec<NetConnection> {
+            Vec::new()
+        }
+
+        fn close_server(&mut self) {
+            *self.closed.lock().unwrap() = true;
         }
     }
 }
