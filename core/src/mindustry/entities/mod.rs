@@ -19,6 +19,7 @@ pub use comp::{
     RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
 pub use comp::{EntityComp, EntityIoState, EntityLocality};
+pub use comp::{HitboxComp, HitboxRect};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
