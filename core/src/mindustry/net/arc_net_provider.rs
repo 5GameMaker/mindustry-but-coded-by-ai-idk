@@ -1769,6 +1769,7 @@ pub struct ArcNetProvider {
     events: Arc<Mutex<VecDeque<ProviderEvent>>>,
     connect_filter: Option<ConnectFilter>,
     discovery_data: Arc<Mutex<Option<ServerData>>>,
+    content_loader: Arc<Mutex<Option<ContentLoader>>>,
     next_connection_id: Arc<AtomicI32>,
     connect_timeout: Duration,
 }
@@ -1791,6 +1792,7 @@ impl Default for ArcNetProvider {
             events: Arc::new(Mutex::new(VecDeque::new())),
             connect_filter: None,
             discovery_data: Arc::new(Mutex::new(None)),
+            content_loader: Arc::new(Mutex::new(None)),
             next_connection_id: Arc::new(AtomicI32::new(1)),
             connect_timeout: Duration::from_secs(5),
         }
@@ -1812,6 +1814,14 @@ impl ArcNetProvider {
         *lock_unpoison(&self.discovery_data) = Some(data);
     }
 
+    pub fn set_content_loader(&self, loader: ContentLoader) {
+        *lock_unpoison(&self.content_loader) = Some(loader);
+    }
+
+    pub fn clear_content_loader(&self) {
+        *lock_unpoison(&self.content_loader) = None;
+    }
+
     pub fn set_connect_timeout(&mut self, timeout: Duration) {
         self.connect_timeout = timeout;
     }
@@ -1827,9 +1837,9 @@ impl ArcNetProvider {
             .ok_or_else(|| io::Error::new(ErrorKind::NotConnected, "client is not connected"))?;
 
         if reliable {
-            write_tcp_packet(&client.tcp, object)
+            write_tcp_packet(&client.tcp, object, &self.content_loader)
         } else {
-            let bytes = PacketSerializer::write_packet_kind(object).map_err(serializer_io_error)?;
+            let bytes = write_packet_bytes(object, &self.content_loader)?;
             client.udp.send(&bytes)?;
             Ok(())
         }
@@ -1857,10 +1867,9 @@ impl ArcNetProvider {
             }
 
             if reliable {
-                write_tcp_packet(&connection.tcp, object)?;
+                write_tcp_packet(&connection.tcp, object, &self.content_loader)?;
             } else if let Some(target) = connection.udp_addr {
-                let bytes =
-                    PacketSerializer::write_packet_kind(object).map_err(serializer_io_error)?;
+                let bytes = write_packet_bytes(object, &self.content_loader)?;
                 server.udp.send_to(&bytes, target)?;
             }
         }
@@ -1947,8 +1956,18 @@ impl NetProvider for ArcNetProvider {
         );
         success();
 
-        spawn_client_tcp_reader(read_tcp, self.events.clone(), shutdown.clone());
-        spawn_client_udp_reader(udp, self.events.clone(), shutdown);
+        spawn_client_tcp_reader(
+            read_tcp,
+            self.events.clone(),
+            self.content_loader.clone(),
+            shutdown.clone(),
+        );
+        spawn_client_udp_reader(
+            udp,
+            self.events.clone(),
+            self.content_loader.clone(),
+            shutdown,
+        );
 
         Ok(())
     }
@@ -2043,6 +2062,7 @@ impl NetProvider for ArcNetProvider {
             pending.clone(),
             connections.clone(),
             self.events.clone(),
+            self.content_loader.clone(),
             self.connect_filter.clone(),
             self.next_connection_id.clone(),
             shutdown.clone(),
@@ -2052,6 +2072,7 @@ impl NetProvider for ArcNetProvider {
             pending,
             connections,
             self.events.clone(),
+            self.content_loader.clone(),
             self.discovery_data.clone(),
             shutdown,
             port,
@@ -2131,6 +2152,18 @@ fn serializer_io_error(err: SerializerError) -> io::Error {
     io::Error::new(ErrorKind::InvalidData, err)
 }
 
+fn write_packet_bytes(
+    packet: &PacketKind,
+    content_loader: &Arc<Mutex<Option<ContentLoader>>>,
+) -> io::Result<Vec<u8>> {
+    let loader = lock_unpoison(content_loader);
+    if let Some(loader) = loader.as_ref() {
+        PacketSerializer::write_packet_kind_with_loader(packet, loader).map_err(serializer_io_error)
+    } else {
+        PacketSerializer::write_packet_kind(packet).map_err(serializer_io_error)
+    }
+}
+
 fn read_tcp_envelope(stream: &mut TcpStream) -> io::Result<PacketEnvelope> {
     let mut len = [0u8; 2];
     stream.read_exact(&mut len)?;
@@ -2148,31 +2181,42 @@ fn write_tcp_envelope(tcp: &Arc<Mutex<TcpStream>>, envelope: &PacketEnvelope) ->
     stream.flush()
 }
 
-fn write_tcp_packet(tcp: &Arc<Mutex<TcpStream>>, packet: &PacketKind) -> io::Result<()> {
-    let frame = ArcTransport::wrap_tcp_packet(packet).map_err(serializer_io_error)?;
+fn write_tcp_packet(
+    tcp: &Arc<Mutex<TcpStream>>,
+    packet: &PacketKind,
+    content_loader: &Arc<Mutex<Option<ContentLoader>>>,
+) -> io::Result<()> {
+    let payload = write_packet_bytes(packet, content_loader)?;
+    let frame = ArcTransport::wrap_tcp_frame(&payload).map_err(serializer_io_error)?;
     let mut stream = lock_unpoison(tcp);
     stream.write_all(&frame)?;
     stream.flush()
 }
 
-fn parse_packet_envelope(envelope: PacketEnvelope) -> Result<Option<PacketKind>, SerializerError> {
+fn parse_packet_envelope(
+    envelope: PacketEnvelope,
+    content_loader: &Arc<Mutex<Option<ContentLoader>>>,
+) -> Result<Option<PacketKind>, SerializerError> {
     match envelope {
         PacketEnvelope::Framework(_) | PacketEnvelope::Raw(_) => Ok(None),
-        packet @ PacketEnvelope::Packet { .. } => {
-            PacketSerializer::packet_kind_from_envelope(&packet).map(Some)
-        }
+        packet @ PacketEnvelope::Packet { .. } => lock_unpoison(content_loader)
+            .as_ref()
+            .map(|loader| PacketSerializer::packet_kind_from_envelope_with_loader(&packet, loader))
+            .unwrap_or_else(|| PacketSerializer::packet_kind_from_envelope(&packet))
+            .map(Some),
     }
 }
 
 fn spawn_client_tcp_reader(
     mut stream: TcpStream,
     events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    content_loader: Arc<Mutex<Option<ContentLoader>>>,
     shutdown: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
         while !shutdown.load(Ordering::Relaxed) {
             match read_tcp_envelope(&mut stream) {
-                Ok(envelope) => match parse_packet_envelope(envelope) {
+                Ok(envelope) => match parse_packet_envelope(envelope, &content_loader) {
                     Ok(Some(packet)) => push_event(&events, ProviderEvent::ClientPacket(packet)),
                     Ok(None) => {}
                     Err(_) => {}
@@ -2199,6 +2243,7 @@ fn spawn_client_tcp_reader(
 fn spawn_client_udp_reader(
     udp: Arc<UdpSocket>,
     events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    content_loader: Arc<Mutex<Option<ContentLoader>>>,
     shutdown: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
@@ -2206,7 +2251,7 @@ fn spawn_client_udp_reader(
         while !shutdown.load(Ordering::Relaxed) {
             match udp.recv(&mut buffer) {
                 Ok(len) => match PacketSerializer::read_envelope(&buffer[..len])
-                    .and_then(parse_packet_envelope)
+                    .and_then(|envelope| parse_packet_envelope(envelope, &content_loader))
                 {
                     Ok(Some(packet)) => push_event(&events, ProviderEvent::ClientPacket(packet)),
                     Ok(None) => {}
@@ -2227,6 +2272,7 @@ fn spawn_server_accept_loop(
     pending: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
     connections: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
     events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    content_loader: Arc<Mutex<Option<ContentLoader>>>,
     connect_filter: Option<ConnectFilter>,
     next_connection_id: Arc<AtomicI32>,
     shutdown: Arc<AtomicBool>,
@@ -2274,6 +2320,7 @@ fn spawn_server_accept_loop(
                         pending.clone(),
                         connections.clone(),
                         events.clone(),
+                        content_loader.clone(),
                         shutdown.clone(),
                     );
                 }
@@ -2292,12 +2339,13 @@ fn spawn_server_tcp_reader(
     pending: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
     connections: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
     events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    content_loader: Arc<Mutex<Option<ContentLoader>>>,
     shutdown: Arc<AtomicBool>,
 ) {
     thread::spawn(move || {
         while !shutdown.load(Ordering::Relaxed) {
             match read_tcp_envelope(&mut stream) {
-                Ok(envelope) => match parse_packet_envelope(envelope) {
+                Ok(envelope) => match parse_packet_envelope(envelope, &content_loader) {
                     Ok(Some(packet)) => push_event(
                         &events,
                         ProviderEvent::ServerPacket {
@@ -2333,6 +2381,7 @@ fn spawn_server_udp_loop(
     pending: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
     connections: Arc<Mutex<HashMap<i32, SharedArcConnection>>>,
     events: Arc<Mutex<VecDeque<ProviderEvent>>>,
+    content_loader: Arc<Mutex<Option<ContentLoader>>>,
     discovery_data: Arc<Mutex<Option<ServerData>>>,
     shutdown: Arc<AtomicBool>,
     port: u16,
@@ -2392,7 +2441,7 @@ fn spawn_server_udp_loop(
                                 (connection.udp_addr == Some(src)).then_some(*id)
                             });
                     if let Some(connection_id) = connection_id {
-                        if let Ok(packet) = PacketSerializer::packet_kind_from_envelope(&packet) {
+                        if let Ok(Some(packet)) = parse_packet_envelope(packet, &content_loader) {
                             push_event(
                                 &events,
                                 ProviderEvent::ServerPacket {
@@ -2591,6 +2640,47 @@ mod tests {
         assert_eq!(host.version, 157);
         assert_eq!(host.description, "provider discovery");
         assert_eq!(host.port, i32::from(port));
+    }
+
+    #[test]
+    fn arc_net_provider_uses_content_loader_for_live_packet_decode() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let port = free_local_port();
+        let mut server = ArcNetProvider::new();
+        server.set_content_loader(loader.clone());
+        server.host_server(port).unwrap();
+
+        let mut client = ArcNetProvider::new();
+        client.set_content_loader(loader);
+        client
+            .connect_client("127.0.0.1", port, Box::new(|| {}))
+            .unwrap();
+
+        let server_connected = wait_for_event(&server, |event| {
+            matches!(event, ProviderEvent::ServerConnected { .. })
+        });
+        let connection_id = match server_connected {
+            ProviderEvent::ServerConnected { connection_id, .. } => connection_id,
+            other => panic!("unexpected event: {other:?}"),
+        };
+
+        let packet = PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+            group_id: 91,
+            plans: Some(vec![BuildPlanWire::new_place_config(
+                4,
+                5,
+                1,
+                "duo",
+                TypeValue::Content(ContentRef::new(ContentType::Item, 0)),
+            )]),
+        });
+
+        server.drain_events();
+        client.send_client(&packet, true).unwrap();
+        assert_eq!(wait_for_server_packet(&server, connection_id), packet);
+
+        client.disconnect_client();
+        server.close_server();
     }
 
     fn free_local_port() -> u16 {
