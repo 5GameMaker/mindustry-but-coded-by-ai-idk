@@ -36,6 +36,7 @@ pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, PuddleUpdatePlan};
 pub use comp::{StatusColor, StatusComp};
 pub use comp::{SyncComp, SyncHooks};
+pub use comp::{TankComp, TankType, TankUpdateInput, TankUpdatePlan};
 pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
 pub use comp::{TrailState, WaterMoveComp, WaterMoveDrawPlan};
