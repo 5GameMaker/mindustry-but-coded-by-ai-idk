@@ -1,13 +1,17 @@
+use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
 use crate::mindustry::content::blocks::BlockDef;
 use crate::mindustry::core::content_loader::{ContentLoader, ContentRecord};
 use crate::mindustry::ctype::{ContentId, ContentType};
-use crate::mindustry::entities::units::{BuildPlan, StatusEntry};
-use crate::mindustry::logic::LMarkerControl;
+use crate::mindustry::entities::units::{BuildPlan, StatusEntry, WeaponMount};
+use crate::mindustry::logic::{LAccess, LMarkerControl};
 use crate::mindustry::net::{AdminAction, KickReason, TraceInfo};
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
+use crate::mindustry::world::blocks::payloads::{
+    self, PayloadRef, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
+};
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const MAX_ARRAY_SIZE: usize = 1000;
@@ -131,6 +135,9 @@ pub enum TypeValue {
     TechNode(ContentRef),
     Bool(bool),
     Double(f64),
+    Building(i32),
+    LogicAccess(LAccess),
+    Unit(i32),
     Point2(Point2),
     Vec2(Vec2),
     Team(u8),
@@ -399,6 +406,14 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write.write_all(&[11])?;
             write_u64(write, value.to_bits())
         }
+        TypeValue::Building(pos) => {
+            write.write_all(&[12])?;
+            write_i32(write, *pos)
+        }
+        TypeValue::LogicAccess(access) => {
+            write.write_all(&[13])?;
+            write_i16(write, access.ordinal() as i16)
+        }
         TypeValue::Point2(value) => {
             write.write_all(&[7])?;
             write_i32(write, value.x)?;
@@ -473,6 +488,10 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write.write_all(&[23])?;
             write_i16(write, *value)
         }
+        TypeValue::Unit(id) => {
+            write.write_all(&[17])?;
+            write_i32(write, *id)
+        }
         TypeValue::IntArray(values) => {
             if values.len() > MAX_ARRAY_SIZE || values.len() > i16::MAX as usize {
                 return Err(invalid_input("int array too large"));
@@ -537,6 +556,15 @@ fn read_object_inner_limited<R: Read>(
         5 => Ok(TypeValue::Content(read_content_ref(read)?)),
         10 => Ok(TypeValue::Bool(read_u8(read)? != 0)),
         11 => Ok(TypeValue::Double(f64::from_bits(read_u64(read)?))),
+        12 => Ok(TypeValue::Building(read_i32(read)?)),
+        13 => {
+            let ordinal = read_i16(read)?;
+            let ordinal =
+                u8::try_from(ordinal).map_err(|_| invalid_data("invalid LAccess ordinal"))?;
+            LAccess::from_ordinal(ordinal)
+                .map(TypeValue::LogicAccess)
+                .ok_or_else(|| invalid_data("invalid LAccess ordinal"))
+        }
         7 => Ok(TypeValue::Point2(Point2::new(
             read_i32(read)?,
             read_i32(read)?,
@@ -631,6 +659,11 @@ fn read_object_inner_limited<R: Read>(
             }
             Ok(TypeValue::ObjectArray(values))
         }
+        15 => {
+            let _legacy_command_type = read_u8(read)?;
+            Ok(TypeValue::Null)
+        }
+        17 => Ok(TypeValue::Unit(read_i32(read)?)),
         23 => Ok(TypeValue::UnitCommand(read_i16(read)?)),
         _ => Err(invalid_data("unsupported TypeIO object tag")),
     }
@@ -712,6 +745,28 @@ pub fn write_i64<W: Write>(write: &mut W, value: i64) -> io::Result<()> {
 
 pub fn write_u64<W: Write>(write: &mut W, value: u64) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
+}
+
+pub fn read_bool<R: Read>(read: &mut R) -> io::Result<bool> {
+    Ok(read_u8(read)? != 0)
+}
+
+pub fn write_bool<W: Write>(write: &mut W, value: bool) -> io::Result<()> {
+    write_u8(write, value as u8)
+}
+
+pub fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
+    Ok(f32::from_bits(read_u32(read)?))
+}
+
+pub fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
+    write_u32(write, value.to_bits())
+}
+
+pub fn read_remaining_bytes<R: Read>(read: &mut R) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    read.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 pub fn write_point2<W: Write>(write: &mut W, value: Point2) -> io::Result<()> {
@@ -821,6 +876,30 @@ impl UnitSyncContainer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct MountWire {
+    pub shoot: bool,
+    pub rotate: bool,
+    pub aim_x: f32,
+    pub aim_y: f32,
+}
+
+impl From<&WeaponMount> for MountWire {
+    fn from(value: &WeaponMount) -> Self {
+        Self {
+            shoot: value.shoot,
+            rotate: value.rotate,
+            aim_x: value.aim_x,
+            aim_y: value.aim_y,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AbilityWire {
+    pub data: f32,
+}
+
 pub fn write_unit_ref<W: Write>(write: &mut W, unit: UnitRef) -> io::Result<()> {
     match unit {
         UnitRef::Null => {
@@ -868,6 +947,148 @@ pub fn read_unit_container<R: Read>(read: &mut R) -> io::Result<UnitSyncContaine
     let mut sync = Vec::new();
     read.read_to_end(&mut sync)?;
     Ok(UnitSyncContainer::new(unit_id, unit_type_id, sync))
+}
+
+pub fn write_payload<W: Write>(write: &mut W, payload: Option<&PayloadRef>) -> io::Result<()> {
+    payloads::write_payload_ref(write, payload)
+}
+
+pub fn read_payload<R: Read>(read: &mut R) -> io::Result<Option<PayloadRef>> {
+    if !read_bool(read)? {
+        return Ok(None);
+    }
+    let payload_type = read_u8(read)?;
+    match payload_type {
+        PAYLOAD_BLOCK_TYPE => Ok(Some(PayloadRef::Block {
+            block: read_i16(read)?,
+            version: read_u8(read)?,
+            build_bytes: read_remaining_bytes(read)?,
+        })),
+        PAYLOAD_UNIT_TYPE => Ok(Some(PayloadRef::Unit {
+            class_id: read_u8(read)?,
+            unit_bytes: read_remaining_bytes(read)?,
+        })),
+        _ => Err(invalid_data("unknown payload type")),
+    }
+}
+
+pub fn write_mounts<W: Write>(write: &mut W, mounts: &[MountWire]) -> io::Result<()> {
+    if mounts.len() > u8::MAX as usize {
+        return Err(invalid_input("mount array too large"));
+    }
+    write_u8(write, mounts.len() as u8)?;
+    for mount in mounts {
+        let state = (mount.shoot as u8) | ((mount.rotate as u8) << 1);
+        write_u8(write, state)?;
+        write_f32(write, mount.aim_x)?;
+        write_f32(write, mount.aim_y)?;
+    }
+    Ok(())
+}
+
+pub fn write_weapon_mounts<W: Write>(write: &mut W, mounts: &[WeaponMount]) -> io::Result<()> {
+    if mounts.len() > u8::MAX as usize {
+        return Err(invalid_input("mount array too large"));
+    }
+    write_u8(write, mounts.len() as u8)?;
+    for mount in mounts {
+        let state = (mount.shoot as u8) | ((mount.rotate as u8) << 1);
+        write_u8(write, state)?;
+        write_f32(write, mount.aim_x)?;
+        write_f32(write, mount.aim_y)?;
+    }
+    Ok(())
+}
+
+pub fn read_mounts<R: Read>(read: &mut R) -> io::Result<Vec<MountWire>> {
+    let len = read_u8(read)? as usize;
+    let mut mounts = Vec::with_capacity(len);
+    for _ in 0..len {
+        let state = read_u8(read)?;
+        mounts.push(MountWire {
+            shoot: state & 1 != 0,
+            rotate: state & 2 != 0,
+            aim_x: read_f32(read)?,
+            aim_y: read_f32(read)?,
+        });
+    }
+    Ok(mounts)
+}
+
+pub fn read_mounts_into<R: Read>(read: &mut R, mounts: &mut [WeaponMount]) -> io::Result<()> {
+    let len = read_u8(read)? as usize;
+    for index in 0..len {
+        let state = read_u8(read)?;
+        let aim_x = read_f32(read)?;
+        let aim_y = read_f32(read)?;
+        if let Some(mount) = mounts.get_mut(index) {
+            mount.shoot = state & 1 != 0;
+            mount.rotate = state & 2 != 0;
+            mount.aim_x = aim_x;
+            mount.aim_y = aim_y;
+        }
+    }
+    Ok(())
+}
+
+pub fn skip_mounts<R: Read>(read: &mut R) -> io::Result<()> {
+    let len = read_u8(read)? as usize;
+    for _ in 0..len {
+        let mut buf = [0; 9];
+        read.read_exact(&mut buf)?;
+    }
+    Ok(())
+}
+
+pub fn write_abilities<W: Write>(write: &mut W, abilities: &[AbilityWire]) -> io::Result<()> {
+    if abilities.len() > u8::MAX as usize {
+        return Err(invalid_input("ability array too large"));
+    }
+    write_u8(write, abilities.len() as u8)?;
+    for ability in abilities {
+        write_f32(write, ability.data)?;
+    }
+    Ok(())
+}
+
+pub fn write_ability_data<W: Write>(write: &mut W, ability_data: &[f32]) -> io::Result<()> {
+    if ability_data.len() > u8::MAX as usize {
+        return Err(invalid_input("ability array too large"));
+    }
+    write_u8(write, ability_data.len() as u8)?;
+    for data in ability_data {
+        write_f32(write, *data)?;
+    }
+    Ok(())
+}
+
+pub fn read_abilities<R: Read>(read: &mut R) -> io::Result<Vec<AbilityWire>> {
+    let len = read_u8(read)? as usize;
+    let mut abilities = Vec::with_capacity(len);
+    for _ in 0..len {
+        abilities.push(AbilityWire {
+            data: read_f32(read)?,
+        });
+    }
+    Ok(abilities)
+}
+
+pub fn read_ability_data<R: Read>(read: &mut R) -> io::Result<Vec<f32>> {
+    let len = read_u8(read)? as usize;
+    let mut abilities = Vec::with_capacity(len);
+    for _ in 0..len {
+        abilities.push(read_f32(read)?);
+    }
+    Ok(abilities)
+}
+
+pub fn skip_abilities<R: Read>(read: &mut R) -> io::Result<()> {
+    let len = read_u8(read)? as usize;
+    for _ in 0..len {
+        let mut buf = [0; 4];
+        read.read_exact(&mut buf)?;
+    }
+    Ok(())
 }
 
 pub fn write_entity_ref<W: Write>(write: &mut W, entity: EntityRef) -> io::Result<()> {
@@ -2371,6 +2592,70 @@ mod tests {
         assert_eq!(
             read_unit_container(&mut bytes.as_slice()).unwrap(),
             container
+        );
+    }
+
+    #[test]
+    fn extended_object_and_wire_helpers_roundtrip_java_tags() {
+        let building = TypeValue::Building(123456);
+        let access = TypeValue::LogicAccess(LAccess::Enabled);
+        let unit = TypeValue::Unit(7890);
+        let legacy = [15, 0xaa];
+
+        let mut bytes = Vec::new();
+        write_object(&mut bytes, &building).unwrap();
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), building);
+
+        bytes.clear();
+        write_object(&mut bytes, &access).unwrap();
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), access);
+
+        bytes.clear();
+        write_object(&mut bytes, &unit).unwrap();
+        assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), unit);
+
+        assert_eq!(
+            read_object(&mut legacy.as_slice()).unwrap(),
+            TypeValue::Null
+        );
+
+        let payload = Some(PayloadRef::Unit {
+            class_id: 7,
+            unit_bytes: vec![1, 2, 3],
+        });
+        bytes.clear();
+        write_payload(&mut bytes, payload.as_ref()).unwrap();
+        assert_eq!(read_payload(&mut bytes.as_slice()).unwrap(), payload);
+
+        let mounts = vec![
+            MountWire {
+                shoot: true,
+                rotate: false,
+                aim_x: 1.5,
+                aim_y: -2.0,
+            },
+            MountWire {
+                shoot: false,
+                rotate: true,
+                aim_x: 4.25,
+                aim_y: 9.5,
+            },
+        ];
+        bytes.clear();
+        write_mounts(&mut bytes, &mounts).unwrap();
+        assert_eq!(read_mounts(&mut bytes.as_slice()).unwrap(), mounts);
+
+        let abilities = vec![AbilityWire { data: 1.0 }, AbilityWire { data: -3.5 }];
+        bytes.clear();
+        write_abilities(&mut bytes, &abilities).unwrap();
+        assert_eq!(read_abilities(&mut bytes.as_slice()).unwrap(), abilities);
+
+        let ability_data = vec![0.5, 2.75];
+        bytes.clear();
+        write_ability_data(&mut bytes, &ability_data).unwrap();
+        assert_eq!(
+            read_ability_data(&mut bytes.as_slice()).unwrap(),
+            ability_data
         );
     }
 
