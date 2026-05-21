@@ -520,6 +520,8 @@ impl PacketKind {
 pub type ConnectFilter = Arc<dyn Fn(&str) -> bool + Send + Sync + 'static>;
 pub type HostCallback = Box<dyn Fn(Host) + Send + 'static>;
 pub type DoneCallback = Box<dyn Fn() + Send + 'static>;
+pub type ClientListener = Box<dyn FnMut(&PacketKind) + Send + 'static>;
+pub type ServerListener = Box<dyn FnMut(Option<i32>, &PacketKind) + Send + 'static>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderEvent {
@@ -664,6 +666,8 @@ pub struct Net {
     packet_queue: VecDeque<PacketKind>,
     streams: HashMap<i32, StreamBuilder>,
     server_connections: HashMap<i32, NetConnection>,
+    client_listeners: Vec<ClientListener>,
+    server_listeners: Vec<ServerListener>,
     handled_client_packets: Vec<PacketKind>,
     handled_server_packets: Vec<PacketKind>,
 }
@@ -678,6 +682,8 @@ impl std::fmt::Debug for Net {
             .field("packet_queue", &self.packet_queue)
             .field("streams", &self.streams)
             .field("server_connections", &self.server_connections)
+            .field("client_listeners", &self.client_listeners.len())
+            .field("server_listeners", &self.server_listeners.len())
             .field("handled_client_packets", &self.handled_client_packets)
             .field("handled_server_packets", &self.handled_server_packets)
             .finish()
@@ -701,6 +707,8 @@ impl Net {
             packet_queue: VecDeque::new(),
             streams: HashMap::new(),
             server_connections: HashMap::new(),
+            client_listeners: Vec::new(),
+            server_listeners: Vec::new(),
             handled_client_packets: Vec::new(),
             handled_server_packets: Vec::new(),
         }
@@ -756,6 +764,20 @@ impl Net {
     }
     pub fn handled_server_packets(&self) -> &[PacketKind] {
         &self.handled_server_packets
+    }
+
+    pub fn handle_client<F>(&mut self, listener: F)
+    where
+        F: FnMut(&PacketKind) + Send + 'static,
+    {
+        self.client_listeners.push(Box::new(listener));
+    }
+
+    pub fn handle_server<F>(&mut self, listener: F)
+    where
+        F: FnMut(Option<i32>, &PacketKind) + Send + 'static,
+    {
+        self.server_listeners.push(Box::new(listener));
     }
 
     pub fn connect(
@@ -874,7 +896,8 @@ impl Net {
                     connection.has_connected = true;
                     self.server_connections
                         .insert(*connection_id, connection.clone());
-                    self.handle_server_received(
+                    self.handle_server_received_from_connection(
+                        Some(*connection_id),
                         connection.has_connected,
                         PacketKind::Connect(Connect {
                             address_tcp: address.clone(),
@@ -890,7 +913,8 @@ impl Net {
                         .get(connection_id)
                         .map(|connection| connection.has_connected)
                         .unwrap_or(true);
-                    self.handle_server_received(
+                    self.handle_server_received_from_connection(
+                        Some(*connection_id),
                         has_connected,
                         PacketKind::Disconnect(Disconnect {
                             reason: reason.clone(),
@@ -907,7 +931,11 @@ impl Net {
                         .get(connection_id)
                         .map(|connection| connection.has_connected)
                         .unwrap_or(false);
-                    self.handle_server_received(has_connected, packet.clone());
+                    self.handle_server_received_from_connection(
+                        Some(*connection_id),
+                        has_connected,
+                        packet.clone(),
+                    );
                 }
             }
         }
@@ -945,7 +973,7 @@ impl Net {
             packet => {
                 let priority = packet.priority();
                 if self.client_loaded || priority == 2 {
-                    self.handled_client_packets.push(packet);
+                    self.dispatch_client_packet(packet);
                 } else if priority != 0 {
                     self.packet_queue.push_back(packet);
                 }
@@ -954,12 +982,35 @@ impl Net {
     }
 
     pub fn handle_server_received(&mut self, connection_has_connected: bool, packet: PacketKind) {
+        self.handle_server_received_from_connection(None, connection_has_connected, packet);
+    }
+
+    pub fn handle_server_received_from_connection(
+        &mut self,
+        connection_id: Option<i32>,
+        connection_has_connected: bool,
+        packet: PacketKind,
+    ) {
         if !packet.allow(true) {
             return;
         }
         if connection_has_connected || packet.priority() == 2 {
-            self.handled_server_packets.push(packet);
+            self.dispatch_server_packet(connection_id, packet);
         }
+    }
+
+    fn dispatch_client_packet(&mut self, packet: PacketKind) {
+        for listener in &mut self.client_listeners {
+            listener(&packet);
+        }
+        self.handled_client_packets.push(packet);
+    }
+
+    fn dispatch_server_packet(&mut self, connection_id: Option<i32>, packet: PacketKind) {
+        for listener in &mut self.server_listeners {
+            listener(connection_id, &packet);
+        }
+        self.handled_server_packets.push(packet);
     }
 }
 
@@ -1056,6 +1107,54 @@ mod tests {
             net.handled_server_packets()[1],
             PacketKind::Other { id: 8, .. }
         ));
+    }
+
+    #[test]
+    fn listeners_receive_dispatched_client_and_server_packets() {
+        let client_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let server_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut net = Net::default();
+
+        let client_seen_listener = client_seen.clone();
+        net.handle_client(move |packet| {
+            if let PacketKind::Other { id, .. } = packet {
+                client_seen_listener.lock().unwrap().push(*id);
+            }
+        });
+
+        net.handle_client_received(PacketKind::Other {
+            id: 21,
+            priority: 1,
+            allow_client: true,
+            allow_server: true,
+        });
+        assert!(client_seen.lock().unwrap().is_empty());
+
+        net.set_client_loaded(true);
+        assert_eq!(*client_seen.lock().unwrap(), vec![21]);
+
+        let server_seen_listener = server_seen.clone();
+        net.handle_server(move |connection_id, packet| {
+            if let PacketKind::Other { id, .. } = packet {
+                server_seen_listener
+                    .lock()
+                    .unwrap()
+                    .push((connection_id, *id));
+            }
+        });
+
+        net.handle_server_received_from_connection(
+            Some(42),
+            true,
+            PacketKind::Other {
+                id: 22,
+                priority: 1,
+                allow_client: true,
+                allow_server: true,
+            },
+        );
+
+        assert_eq!(*server_seen.lock().unwrap(), vec![(Some(42), 22)]);
     }
 
     #[derive(Default)]

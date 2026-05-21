@@ -19,8 +19,8 @@ pub use arc_net_provider::{
 };
 pub use host::Host;
 pub use net::{
-    ConnectFilter, DoneCallback, HostCallback, Net, NetProvider, NoopNetProvider, PacketKind,
-    ProviderEvent,
+    ClientListener, ConnectFilter, DoneCallback, HostCallback, Net, NetProvider, NoopNetProvider,
+    PacketKind, ProviderEvent, ServerListener,
 };
 pub use net_connection::{NetConnection, SentPacket};
 pub use network_io::{read_server_data, write_server_data, ServerData};
