@@ -13,6 +13,7 @@ pub mod shielder;
 pub mod timed;
 pub mod timed_kill;
 pub mod timer;
+pub mod vel;
 
 pub use damage::DamageComp;
 pub use draw::DrawComp;
@@ -27,3 +28,4 @@ pub use shielder::{DamageState, ShielderComp, TeamState};
 pub use timed::TimedComp;
 pub use timed_kill::TimedKillComp;
 pub use timer::{Interval, TimerComp};
+pub use vel::VelComp;
