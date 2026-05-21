@@ -1,6 +1,7 @@
 pub mod abilities;
 pub mod entity_indexer;
 pub mod pattern;
+pub mod sized;
 pub mod unit_sorts;
 pub mod units;
 
@@ -13,6 +14,7 @@ pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSine, ShootSpread,
     ShootSummon, Shot,
 };
+pub use sized::{EntityPosition, SizedEntity};
 pub use unit_sorts::{
     building_default, building_water, closest, farthest, strongest, weakest,
     BuildingPriorityTarget, SortTarget,
