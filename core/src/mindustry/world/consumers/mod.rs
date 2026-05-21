@@ -1,3 +1,7 @@
+pub mod consume_power_condition;
+
+pub use consume_power_condition::ConsumePowerCondition;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ConsumeFlags {
     pub optional: bool,
