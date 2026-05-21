@@ -68,6 +68,42 @@ impl RgbaColor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TeamId(pub u8);
 
+/// Java `TypeIO.writeEntity(...)` / `readEntity(...)` wire value.
+/// The value is the sync entity id, with `-1` used as the nullable sentinel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntityRef {
+    pub id: Option<i32>,
+}
+
+impl EntityRef {
+    pub const fn new(id: i32) -> Self {
+        Self { id: Some(id) }
+    }
+
+    pub const fn null() -> Self {
+        Self { id: None }
+    }
+}
+
+/// Java `TypeIO.writeBuilding(...)` / `readBuilding(...)` wire value.
+/// The value is the packed building tile position, with `-1` used for null.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildingRef {
+    pub tile_pos: Option<i32>,
+}
+
+impl BuildingRef {
+    pub const fn new(tile_pos: i32) -> Self {
+        Self {
+            tile_pos: Some(tile_pos),
+        }
+    }
+
+    pub const fn null() -> Self {
+        Self { tile_pos: None }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContentRef {
     pub content_type: ContentType,
@@ -792,6 +828,28 @@ pub fn read_unit_ref<R: Read>(read: &mut R) -> io::Result<UnitRef> {
     }
 }
 
+pub fn write_entity_ref<W: Write>(write: &mut W, entity: EntityRef) -> io::Result<()> {
+    write_i32(write, entity.id.unwrap_or(-1))
+}
+
+pub fn read_entity_ref<R: Read>(read: &mut R) -> io::Result<EntityRef> {
+    let id = read_i32(read)?;
+    Ok(EntityRef {
+        id: (id >= 0).then_some(id),
+    })
+}
+
+pub fn write_building_ref<W: Write>(write: &mut W, building: BuildingRef) -> io::Result<()> {
+    write_i32(write, building.tile_pos.unwrap_or(-1))
+}
+
+pub fn read_building_ref<R: Read>(read: &mut R) -> io::Result<BuildingRef> {
+    let tile_pos = read_i32(read)?;
+    Ok(BuildingRef {
+        tile_pos: (tile_pos >= 0).then_some(tile_pos),
+    })
+}
+
 pub fn write_tile_pos<W: Write>(write: &mut W, tile_pos: Option<i32>) -> io::Result<()> {
     write_i32(write, tile_pos.unwrap_or_else(|| point2_pack(-1, -1)))
 }
@@ -826,6 +884,31 @@ pub fn read_content_ref_resolved<'a, R: Read>(
     loader: &'a ContentLoader,
 ) -> io::Result<Option<&'a ContentRecord>> {
     Ok(read_content_ref(read)?.resolve(loader))
+}
+
+pub fn write_required_content_ref<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    content_type: ContentType,
+    name: &str,
+) -> io::Result<()> {
+    let id = loader
+        .get_by_name(content_type, name)
+        .ok_or_else(|| invalid_input("unknown content name"))?
+        .id;
+    write_content_ref(write, ContentRef::new(content_type, id))
+}
+
+pub fn read_required_content_name<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<(ContentType, String)> {
+    let content = read_content_ref(read)?;
+    let name = loader
+        .get_by_id(content.content_type, content.id)
+        .and_then(ContentRecord::name)
+        .ok_or_else(|| invalid_data("unknown content id"))?;
+    Ok((content.content_type, name.to_string()))
 }
 
 pub fn write_nullable_content_id<W: Write>(write: &mut W, id: Option<ContentId>) -> io::Result<()> {
@@ -2187,6 +2270,53 @@ mod tests {
         );
 
         assert!(read_content_ref(&mut [0xff, 0, 1].as_slice()).is_err());
+    }
+
+    #[test]
+    fn entity_building_tile_and_required_content_refs_match_java_typeio_layout() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let mut bytes = Vec::new();
+
+        write_entity_ref(&mut bytes, EntityRef::new(123)).unwrap();
+        write_entity_ref(&mut bytes, EntityRef::null()).unwrap();
+        assert_eq!(
+            bytes,
+            [123i32.to_be_bytes(), (-1i32).to_be_bytes()].concat()
+        );
+        let mut slice = bytes.as_slice();
+        assert_eq!(read_entity_ref(&mut slice).unwrap(), EntityRef::new(123));
+        assert_eq!(read_entity_ref(&mut slice).unwrap(), EntityRef::null());
+
+        bytes.clear();
+        let pos = point2_pack(4, 5);
+        write_building_ref(&mut bytes, BuildingRef::new(pos)).unwrap();
+        write_building_ref(&mut bytes, BuildingRef::null()).unwrap();
+        assert_eq!(bytes, [pos.to_be_bytes(), (-1i32).to_be_bytes()].concat());
+        let mut slice = bytes.as_slice();
+        assert_eq!(
+            read_building_ref(&mut slice).unwrap(),
+            BuildingRef::new(pos)
+        );
+        assert_eq!(read_building_ref(&mut slice).unwrap(), BuildingRef::null());
+
+        bytes.clear();
+        write_tile_pos(&mut bytes, Some(pos)).unwrap();
+        write_tile_pos(&mut bytes, None).unwrap();
+        assert_eq!(
+            bytes,
+            [pos.to_be_bytes(), point2_pack(-1, -1).to_be_bytes()].concat()
+        );
+        let mut slice = bytes.as_slice();
+        assert_eq!(read_tile_pos(&mut slice).unwrap(), Some(pos));
+        assert_eq!(read_tile_pos(&mut slice).unwrap(), None);
+
+        bytes.clear();
+        write_required_content_ref(&mut bytes, &loader, ContentType::Item, "copper").unwrap();
+        assert_eq!(bytes, vec![ContentType::Item.ordinal(), 0, 0]);
+        assert_eq!(
+            read_required_content_name(&mut bytes.as_slice(), &loader).unwrap(),
+            (ContentType::Item, "copper".to_string())
+        );
     }
 
     #[test]

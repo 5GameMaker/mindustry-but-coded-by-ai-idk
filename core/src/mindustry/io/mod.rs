@@ -21,11 +21,13 @@ pub use save::{
     SAVE_SLOT_SETTING_PREFIX,
 };
 pub use type_io::{
-    read_action, read_bytes, read_effect_id, read_java_utf, read_kick, read_marker_control,
-    read_object, read_point2, read_point2_packed, read_sound_id, read_string, read_team,
-    read_team_id, read_tile_pos, read_trace_info, read_unit_ref, read_vec2, write_action,
-    write_bytes, write_effect_id, write_java_utf, write_kick, write_marker_control, write_object,
-    write_point2, write_point2_packed, write_sound_id, write_string, write_team, write_team_id,
-    write_tile_pos, write_trace_info, write_unit_ref, write_vec2, BuildPlanWire, ContentRef,
-    Point2, TeamId, TypeValue, UnitRef, Vec2,
+    read_action, read_building_ref, read_bytes, read_effect_id, read_entity_ref, read_java_utf,
+    read_kick, read_marker_control, read_object, read_point2, read_point2_packed,
+    read_required_content_name, read_sound_id, read_string, read_team, read_team_id, read_tile_pos,
+    read_trace_info, read_unit_ref, read_vec2, write_action, write_building_ref, write_bytes,
+    write_effect_id, write_entity_ref, write_java_utf, write_kick, write_marker_control,
+    write_object, write_point2, write_point2_packed, write_required_content_ref, write_sound_id,
+    write_string, write_team, write_team_id, write_tile_pos, write_trace_info, write_unit_ref,
+    write_vec2, BuildPlanWire, BuildingRef, ContentRef, EntityRef, Point2, TeamId, TypeValue,
+    UnitRef, Vec2,
 };

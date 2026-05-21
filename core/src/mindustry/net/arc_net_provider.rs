@@ -20,10 +20,14 @@ use super::{
         LogicExplosionCallPacket, MenuCallPacket, MenuChooseCallPacket, OpenUriCallPacket,
         PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
         PingCallPacket, PingLocationCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
-        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
-        SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
-        SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket,
-        TextInputCallPacket2, WorldDataBeginCallPacket,
+        PlayerSpawnCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
+        RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBlockSnapshotCallPacket,
+        RequestBuildPayloadCallPacket, RequestDebugStatusCallPacket, RequestDropPayloadCallPacket,
+        RequestItemCallPacket, RequestUnitPayloadCallPacket, ResearchedCallPacket,
+        RotateBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
+        SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
+        SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
+        WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -409,6 +413,10 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::PLAYER_DISCONNECT_CALL_PACKET
             }
+            PacketKind::PlayerSpawnCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::PLAYER_SPAWN_CALL_PACKET
+            }
             PacketKind::RemoveMarkerCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::REMOVE_MARKER_CALL_PACKET
@@ -416,6 +424,38 @@ impl PacketSerializer {
             PacketKind::RemoveQueueBlockCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::REMOVE_QUEUE_BLOCK_CALL_PACKET
+            }
+            PacketKind::RemoveTileCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::REMOVE_TILE_CALL_PACKET
+            }
+            PacketKind::RemoveWorldLabelCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::REMOVE_WORLD_LABEL_CALL_PACKET
+            }
+            PacketKind::RequestBlockSnapshotCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::REQUEST_BLOCK_SNAPSHOT_CALL_PACKET
+            }
+            PacketKind::RequestBuildPayloadCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::REQUEST_BUILD_PAYLOAD_CALL_PACKET
+            }
+            PacketKind::RequestDebugStatusCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::REQUEST_DEBUG_STATUS_CALL_PACKET
+            }
+            PacketKind::RequestDropPayloadCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::REQUEST_DROP_PAYLOAD_CALL_PACKET
+            }
+            PacketKind::RequestUnitPayloadCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::REQUEST_UNIT_PAYLOAD_CALL_PACKET
+            }
+            PacketKind::RotateBlockCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::ROTATE_BLOCK_CALL_PACKET
             }
             PacketKind::SetCameraPositionCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -461,7 +501,9 @@ impl PacketSerializer {
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
             | PacketKind::ClientSnapshotCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
-            | PacketKind::DeconstructFinishCallPacket(_) => {
+            | PacketKind::DeconstructFinishCallPacket(_)
+            | PacketKind::RequestItemCallPacket(_)
+            | PacketKind::ResearchedCallPacket(_) => {
                 return Err(SerializerError::RequiresContentLoader);
             }
             PacketKind::Other { id, .. } => return Err(SerializerError::UnsupportedPacketId(*id)),
@@ -495,6 +537,14 @@ impl PacketSerializer {
             PacketKind::DeconstructFinishCallPacket(packet) => {
                 packet.write_to_with_loader(&mut payload, loader)?;
                 packet_ids::DECONSTRUCT_FINISH_CALL_PACKET
+            }
+            PacketKind::RequestItemCallPacket(packet) => {
+                packet.write_client_payload_with_loader(&mut payload, loader)?;
+                packet_ids::REQUEST_ITEM_CALL_PACKET
+            }
+            PacketKind::ResearchedCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::RESEARCHED_CALL_PACKET
             }
             _ => return Self::packet_kind_to_envelope(packet),
         };
@@ -535,6 +585,8 @@ impl PacketSerializer {
                     | packet_ids::CLIENT_SNAPSHOT_CALL_PACKET
                     | packet_ids::CONSTRUCT_FINISH_CALL_PACKET
                     | packet_ids::DECONSTRUCT_FINISH_CALL_PACKET
+                    | packet_ids::REQUEST_ITEM_CALL_PACKET
+                    | packet_ids::RESEARCHED_CALL_PACKET
             ) {
                 return Err(SerializerError::RequiresContentLoader);
             }
@@ -773,6 +825,9 @@ impl PacketSerializer {
                             PlayerDisconnectCallPacket::read_from(&mut cursor)?,
                         ))
                     }
+                    packet_ids::PLAYER_SPAWN_CALL_PACKET => Ok(PacketKind::PlayerSpawnCallPacket(
+                        PlayerSpawnCallPacket::read_from(&mut cursor)?,
+                    )),
                     packet_ids::REMOVE_MARKER_CALL_PACKET => {
                         Ok(PacketKind::RemoveMarkerCallPacket(
                             RemoveMarkerCallPacket::read_from(&mut cursor)?,
@@ -783,6 +838,42 @@ impl PacketSerializer {
                             RemoveQueueBlockCallPacket::read_from(&mut cursor)?,
                         ))
                     }
+                    packet_ids::REMOVE_TILE_CALL_PACKET => Ok(PacketKind::RemoveTileCallPacket(
+                        RemoveTileCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::REMOVE_WORLD_LABEL_CALL_PACKET => {
+                        Ok(PacketKind::RemoveWorldLabelCallPacket(
+                            RemoveWorldLabelCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::REQUEST_BLOCK_SNAPSHOT_CALL_PACKET => {
+                        Ok(PacketKind::RequestBlockSnapshotCallPacket(
+                            RequestBlockSnapshotCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::REQUEST_BUILD_PAYLOAD_CALL_PACKET => {
+                        Ok(PacketKind::RequestBuildPayloadCallPacket(
+                            RequestBuildPayloadCallPacket::read_from_client_payload(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::REQUEST_DEBUG_STATUS_CALL_PACKET => {
+                        Ok(PacketKind::RequestDebugStatusCallPacket(
+                            RequestDebugStatusCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::REQUEST_DROP_PAYLOAD_CALL_PACKET => {
+                        Ok(PacketKind::RequestDropPayloadCallPacket(
+                            RequestDropPayloadCallPacket::read_from_client_payload(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::REQUEST_UNIT_PAYLOAD_CALL_PACKET => {
+                        Ok(PacketKind::RequestUnitPayloadCallPacket(
+                            RequestUnitPayloadCallPacket::read_from_client_payload(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::ROTATE_BLOCK_CALL_PACKET => Ok(PacketKind::RotateBlockCallPacket(
+                        RotateBlockCallPacket::read_from_client_payload(&mut cursor)?,
+                    )),
                     packet_ids::SET_CAMERA_POSITION_CALL_PACKET => {
                         Ok(PacketKind::SetCameraPositionCallPacket(
                             SetCameraPositionCallPacket::read_from(&mut cursor)?,
@@ -866,6 +957,15 @@ impl PacketSerializer {
                             )?,
                         ))
                     }
+                    packet_ids::REQUEST_ITEM_CALL_PACKET => Ok(PacketKind::RequestItemCallPacket(
+                        RequestItemCallPacket::read_from_client_payload_with_loader(
+                            &mut cursor,
+                            loader,
+                        )?,
+                    )),
+                    packet_ids::RESEARCHED_CALL_PACKET => Ok(PacketKind::ResearchedCallPacket(
+                        ResearchedCallPacket::read_from_with_loader(&mut cursor, loader)?,
+                    )),
                     _ => Self::packet_kind_from_envelope(envelope),
                 }
             }

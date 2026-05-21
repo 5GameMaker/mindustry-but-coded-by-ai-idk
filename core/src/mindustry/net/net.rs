@@ -18,10 +18,13 @@ use super::packets::{
     LogicExplosionCallPacket, MenuCallPacket, MenuChooseCallPacket, OpenUriCallPacket,
     PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
     PingCallPacket, PingLocationCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
-    RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
-    SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
-    SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
-    WorldDataBeginCallPacket,
+    PlayerSpawnCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
+    RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBlockSnapshotCallPacket,
+    RequestBuildPayloadCallPacket, RequestDebugStatusCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, ResearchedCallPacket,
+    RotateBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
+    SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
+    StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -87,8 +90,19 @@ pub enum PacketKind {
     PingLocationCallPacket(PingLocationCallPacket),
     PingResponseCallPacket(PingResponseCallPacket),
     PlayerDisconnectCallPacket(PlayerDisconnectCallPacket),
+    PlayerSpawnCallPacket(PlayerSpawnCallPacket),
     RemoveMarkerCallPacket(RemoveMarkerCallPacket),
     RemoveQueueBlockCallPacket(RemoveQueueBlockCallPacket),
+    RemoveTileCallPacket(RemoveTileCallPacket),
+    RemoveWorldLabelCallPacket(RemoveWorldLabelCallPacket),
+    RequestBlockSnapshotCallPacket(RequestBlockSnapshotCallPacket),
+    RequestBuildPayloadCallPacket(RequestBuildPayloadCallPacket),
+    RequestDebugStatusCallPacket(RequestDebugStatusCallPacket),
+    RequestDropPayloadCallPacket(RequestDropPayloadCallPacket),
+    RequestItemCallPacket(RequestItemCallPacket),
+    RequestUnitPayloadCallPacket(RequestUnitPayloadCallPacket),
+    ResearchedCallPacket(ResearchedCallPacket),
+    RotateBlockCallPacket(RotateBlockCallPacket),
     SetCameraPositionCallPacket(SetCameraPositionCallPacket),
     SetFlagCallPacket(SetFlagCallPacket),
     SetHudTextCallPacket(SetHudTextCallPacket),
@@ -118,7 +132,8 @@ impl PacketKind {
             PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
             | PacketKind::EntitySnapshotCallPacket(_)
-            | PacketKind::HiddenSnapshotCallPacket(_) => 0,
+            | PacketKind::HiddenSnapshotCallPacket(_)
+            | PacketKind::RequestBlockSnapshotCallPacket(_) => 0,
             PacketKind::AnnounceCallPacket(_)
             | PacketKind::ClearObjectivesCallPacket(_)
             | PacketKind::ClientBinaryPacketReliableCallPacket(_)
@@ -164,8 +179,18 @@ impl PacketKind {
             | PacketKind::PingLocationCallPacket(_)
             | PacketKind::PingResponseCallPacket(_)
             | PacketKind::PlayerDisconnectCallPacket(_)
+            | PacketKind::PlayerSpawnCallPacket(_)
             | PacketKind::RemoveMarkerCallPacket(_)
             | PacketKind::RemoveQueueBlockCallPacket(_)
+            | PacketKind::RemoveTileCallPacket(_)
+            | PacketKind::RemoveWorldLabelCallPacket(_)
+            | PacketKind::RequestBuildPayloadCallPacket(_)
+            | PacketKind::RequestDebugStatusCallPacket(_)
+            | PacketKind::RequestDropPayloadCallPacket(_)
+            | PacketKind::RequestItemCallPacket(_)
+            | PacketKind::RequestUnitPayloadCallPacket(_)
+            | PacketKind::ResearchedCallPacket(_)
+            | PacketKind::RotateBlockCallPacket(_)
             | PacketKind::SetCameraPositionCallPacket(_)
             | PacketKind::SetFlagCallPacket(_)
             | PacketKind::SetHudTextCallPacket(_)
@@ -205,6 +230,11 @@ impl PacketKind {
             | PacketKind::DeletePlansCallPacket(_)
             | PacketKind::MenuChooseCallPacket(_)
             | PacketKind::PingLocationCallPacket(_)
+            | PacketKind::RequestBuildPayloadCallPacket(_)
+            | PacketKind::RequestDropPayloadCallPacket(_)
+            | PacketKind::RequestItemCallPacket(_)
+            | PacketKind::RequestUnitPayloadCallPacket(_)
+            | PacketKind::RotateBlockCallPacket(_)
             | PacketKind::WorldDataBeginCallPacket(_) => true,
             PacketKind::ConnectCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
@@ -223,7 +253,10 @@ impl PacketKind {
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
             | PacketKind::PingResponseCallPacket(_)
+            | PacketKind::PlayerSpawnCallPacket(_)
             | PacketKind::RemoveQueueBlockCallPacket(_)
+            | PacketKind::RemoveTileCallPacket(_)
+            | PacketKind::RemoveWorldLabelCallPacket(_)
             | PacketKind::InfoPopupCallPacket(_)
             | PacketKind::InfoPopupCallPacket2(_)
             | PacketKind::InfoPopupReliableCallPacket(_)
@@ -239,6 +272,7 @@ impl PacketKind {
             | PacketKind::PayloadDroppedCallPacket(_)
             | PacketKind::PickedBuildPayloadCallPacket(_)
             | PacketKind::PickedUnitPayloadCallPacket(_)
+            | PacketKind::ResearchedCallPacket(_)
             | PacketKind::SetCameraPositionCallPacket(_)
             | PacketKind::SetFlagCallPacket(_)
             | PacketKind::SetHudTextCallPacket(_)
@@ -255,7 +289,9 @@ impl PacketKind {
             | PacketKind::ClientSnapshotCallPacket(_)
             | PacketKind::ConnectConfirmCallPacket(_)
             | PacketKind::DropItemCallPacket(_)
-            | PacketKind::PingCallPacket(_) => server,
+            | PacketKind::PingCallPacket(_)
+            | PacketKind::RequestBlockSnapshotCallPacket(_)
+            | PacketKind::RequestDebugStatusCallPacket(_) => server,
             PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => !server,
             PacketKind::Other {
                 allow_client,
