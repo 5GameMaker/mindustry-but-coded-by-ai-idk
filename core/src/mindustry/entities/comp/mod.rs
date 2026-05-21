@@ -21,6 +21,7 @@ pub mod timed;
 pub mod timed_kill;
 pub mod timer;
 pub mod vel;
+pub mod world_label;
 
 pub use child::{ChildComp, ChildParent};
 pub use damage::DamageComp;
@@ -43,3 +44,4 @@ pub use timed::TimedComp;
 pub use timed_kill::TimedKillComp;
 pub use timer::{Interval, TimerComp};
 pub use vel::VelComp;
+pub use world_label::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};
