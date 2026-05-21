@@ -813,6 +813,7 @@ impl Net {
             });
             let _ = self.provider.send_server(&kick, true);
         }
+        self.clear_client_runtime_state();
         self.provider.close_server();
         self.server = false;
         self.active = false;
@@ -825,6 +826,7 @@ impl Net {
     }
 
     pub fn disconnect(&mut self) {
+        self.clear_client_runtime_state();
         self.provider.disconnect_client();
         self.server = false;
         self.active = false;
@@ -870,10 +872,18 @@ impl Net {
     }
 
     pub fn dispose(&mut self) {
+        self.clear_client_runtime_state();
         self.provider.dispose();
         self.server = false;
         self.active = false;
         self.server_connections.clear();
+    }
+
+    fn clear_client_runtime_state(&mut self) {
+        self.current_stream = None;
+        self.packet_queue.clear();
+        self.streams.clear();
+        self.client_loaded = false;
     }
 
     pub fn drain_provider_events(&mut self) -> Vec<ProviderEvent> {
@@ -951,6 +961,10 @@ impl Net {
     pub fn handle_client_received(&mut self, packet: PacketKind) {
         if !packet.allow(false) {
             return;
+        }
+
+        if matches!(packet, PacketKind::Disconnect(_)) {
+            self.clear_client_runtime_state();
         }
 
         match packet {
@@ -1188,6 +1202,29 @@ mod tests {
         assert!(sent[0].1);
         assert!(*closed.lock().unwrap());
         assert!(!net.server);
+        assert!(!net.active);
+    }
+
+    #[test]
+    fn disconnect_clears_client_runtime_state() {
+        let mut net = Net::default();
+        net.current_stream = Some(StreamBuilder::new(7, 2, 3));
+        net.packet_queue.push_back(PacketKind::Other {
+            id: 1,
+            priority: 1,
+            allow_client: true,
+            allow_server: true,
+        });
+        net.streams.insert(7, StreamBuilder::new(7, 2, 3));
+        net.client_loaded = true;
+        net.active = true;
+
+        net.disconnect();
+
+        assert!(net.current_stream.is_none());
+        assert!(net.packet_queue.is_empty());
+        assert!(net.streams.is_empty());
+        assert!(!net.client_loaded);
         assert!(!net.active);
     }
 
