@@ -6,7 +6,8 @@ use std::time::Duration;
 use super::host::Host;
 use super::net_connection::NetConnection;
 use super::packets::{
-    AnnounceCallPacket, ClearObjectivesCallPacket, ClientBinaryPacketReliableCallPacket,
+    AnnounceCallPacket, BlockSnapshotCallPacket, BuildHealthUpdateCallPacket,
+    ClearObjectivesCallPacket, ClientBinaryPacketReliableCallPacket,
     ClientBinaryPacketUnreliableCallPacket, ClientPacketReliableCallPacket,
     ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CompleteObjectiveCallPacket,
@@ -61,6 +62,8 @@ pub enum PacketKind {
     Streamable(Streamable),
     ConnectPacket(ConnectPacket),
     AnnounceCallPacket(AnnounceCallPacket),
+    BlockSnapshotCallPacket(BlockSnapshotCallPacket),
+    BuildHealthUpdateCallPacket(BuildHealthUpdateCallPacket),
     ClearObjectivesCallPacket(ClearObjectivesCallPacket),
     ClientBinaryPacketReliableCallPacket(ClientBinaryPacketReliableCallPacket),
     ClientBinaryPacketUnreliableCallPacket(ClientBinaryPacketUnreliableCallPacket),
@@ -220,6 +223,7 @@ impl PacketKind {
             PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
             | PacketKind::EntitySnapshotCallPacket(_)
+            | PacketKind::BlockSnapshotCallPacket(_)
             | PacketKind::HiddenSnapshotCallPacket(_)
             | PacketKind::RequestBlockSnapshotCallPacket(_)
             | PacketKind::StateSnapshotCallPacket(_) => 0,
@@ -312,6 +316,7 @@ impl PacketKind {
             | PacketKind::UnitEnvDeathCallPacket(_)
             | PacketKind::UnitSafeDeathCallPacket(_)
             | PacketKind::UnitTetherBlockSpawnedCallPacket(_)
+            | PacketKind::BuildHealthUpdateCallPacket(_)
             | PacketKind::UpdateGameOverCallPacket(_)
             | PacketKind::UpdateMarkerCallPacket(_)
             | PacketKind::UpdateMarkerTextCallPacket(_)
@@ -405,6 +410,7 @@ impl PacketKind {
             | PacketKind::EntitySnapshotCallPacket(_)
             | PacketKind::FollowUpMenuCallPacket(_)
             | PacketKind::GameOverCallPacket(_)
+            | PacketKind::BlockSnapshotCallPacket(_)
             | PacketKind::HiddenSnapshotCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
@@ -481,6 +487,7 @@ impl PacketKind {
             | PacketKind::UnitSafeDeathCallPacket(_)
             | PacketKind::UnitSpawnCallPacket(_)
             | PacketKind::UnitTetherBlockSpawnedCallPacket(_)
+            | PacketKind::BuildHealthUpdateCallPacket(_)
             | PacketKind::UpdateGameOverCallPacket(_)
             | PacketKind::UpdateMarkerCallPacket(_)
             | PacketKind::UpdateMarkerTextCallPacket(_)

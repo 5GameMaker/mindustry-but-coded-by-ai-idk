@@ -3,7 +3,8 @@ use super::{
     net_connection::NetConnection,
     packet::PacketCodec,
     packets::{
-        packet_ids, AnnounceCallPacket, ClearObjectivesCallPacket,
+        packet_ids, AnnounceCallPacket, BlockSnapshotCallPacket, BuildHealthUpdateCallPacket,
+        ClearObjectivesCallPacket,
         ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
         ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
@@ -266,6 +267,14 @@ impl PacketSerializer {
             PacketKind::AnnounceCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::ANNOUNCE_CALL_PACKET
+            }
+            PacketKind::BlockSnapshotCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::BLOCK_SNAPSHOT_CALL_PACKET
+            }
+            PacketKind::BuildHealthUpdateCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::BUILD_HEALTH_UPDATE_CALL_PACKET
             }
             PacketKind::ClearObjectivesCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -995,6 +1004,14 @@ impl PacketSerializer {
                     packet_ids::ANNOUNCE_CALL_PACKET => Ok(PacketKind::AnnounceCallPacket(
                         AnnounceCallPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::BLOCK_SNAPSHOT_CALL_PACKET => Ok(PacketKind::BlockSnapshotCallPacket(
+                        BlockSnapshotCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::BUILD_HEALTH_UPDATE_CALL_PACKET => {
+                        Ok(PacketKind::BuildHealthUpdateCallPacket(
+                            BuildHealthUpdateCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::CLEAR_OBJECTIVES_CALL_PACKET => {
                         Ok(PacketKind::ClearObjectivesCallPacket(
                             ClearObjectivesCallPacket::read_from(&mut cursor)?,

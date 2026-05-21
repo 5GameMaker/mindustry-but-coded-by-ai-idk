@@ -28,7 +28,8 @@ pub use packet::{PacketPriority, PacketRuntime};
 pub use packets::{
     find_packet_by_name, find_packet_by_transport_id, find_registered_packet_by_id, packet_ids,
     packet_manifest, packet_manifest_phase1_gaps, registered_packet_manifest, AdminAction,
-    AnnounceCallPacket, ClearObjectivesCallPacket, ClientBinaryPacketCallPacket,
+    AnnounceCallPacket, BlockSnapshotCallPacket, BuildHealthUpdateCallPacket,
+    ClearObjectivesCallPacket, ClientBinaryPacketCallPacket,
     ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
     ClientPacketCallPacket, ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
