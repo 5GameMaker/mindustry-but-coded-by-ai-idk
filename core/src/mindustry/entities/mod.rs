@@ -32,6 +32,7 @@ pub use comp::{LaunchCoreBlock, LaunchCoreComp, LaunchCoreDrawPlan, LaunchCoreSm
 pub use comp::{LegsComp, LegsSolidPred, LegsType, LegsUpdateInput};
 pub use comp::{MechComp, MechStepPlan, MechType};
 pub use comp::{MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext, MinerUpdatePlan};
+pub use comp::{PayloadComp, PayloadKind, PayloadState};
 pub use comp::{PhysicRef, PhysicsComp};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, PuddleUpdatePlan};
