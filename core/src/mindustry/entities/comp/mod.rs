@@ -3,6 +3,7 @@
 pub mod block_unit;
 pub mod building_tether;
 pub mod child;
+pub mod crawl;
 pub mod damage;
 pub mod decal;
 pub mod draw;
@@ -42,6 +43,7 @@ pub mod world_label;
 pub use block_unit::{BlockUnitBuilding, BlockUnitComp};
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use child::{ChildComp, ChildParent};
+pub use crawl::{CrawlComp, CrawlSolidPred, CrawlType, CrawlUpdateInput};
 pub use damage::DamageComp;
 pub use decal::{DecalColor, DecalComp, DecalDrawPlan, DecalRegion};
 pub use draw::DrawComp;

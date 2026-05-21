@@ -21,6 +21,7 @@ pub use comp::{
     ChildComp, ChildParent, DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval,
     OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
+pub use comp::{CrawlComp, CrawlSolidPred, CrawlType, CrawlUpdateInput};
 pub use comp::{DecalColor, DecalComp, DecalDrawPlan, DecalRegion};
 pub use comp::{EffectRenderInput, EffectStateComp};
 pub use comp::{EntityComp, EntityIoState, EntityLocality};
