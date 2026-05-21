@@ -7,6 +7,7 @@ pub mod defense;
 pub mod distribution;
 pub mod environment;
 pub mod heat;
+pub mod launch_animator;
 pub mod legacy;
 pub mod liquid;
 pub mod logic;
@@ -16,6 +17,8 @@ pub mod production;
 pub mod sandbox;
 pub mod storage;
 pub mod units;
+
+pub use launch_animator::LaunchAnimator;
 
 pub trait UnitTetherBlock {
     fn spawned(&mut self, id: i32);
