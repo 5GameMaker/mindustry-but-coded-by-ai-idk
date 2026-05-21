@@ -34,6 +34,7 @@ pub use comp::{MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext, Min
 pub use comp::{PhysicRef, PhysicsComp};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, PuddleUpdatePlan};
+pub use comp::{SegmentComp, SegmentRef, SegmentType};
 pub use comp::{StatusColor, StatusComp};
 pub use comp::{SyncComp, SyncHooks};
 pub use comp::{TankComp, TankType, TankUpdateInput, TankUpdatePlan};
