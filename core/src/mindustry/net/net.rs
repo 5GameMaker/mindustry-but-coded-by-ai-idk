@@ -522,6 +522,8 @@ pub type HostCallback = Box<dyn Fn(Host) + Send + 'static>;
 pub type DoneCallback = Box<dyn Fn() + Send + 'static>;
 pub type ClientListener = Box<dyn FnMut(&PacketKind) + Send + 'static>;
 pub type ServerListener = Box<dyn FnMut(Option<i32>, &PacketKind) + Send + 'static>;
+pub type ClientTypedListener<T> = Box<dyn FnMut(&T) + Send + 'static>;
+pub type ServerTypedListener<T> = Box<dyn FnMut(Option<i32>, &T) + Send + 'static>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderEvent {
@@ -668,6 +670,12 @@ pub struct Net {
     server_connections: HashMap<i32, NetConnection>,
     client_listeners: Vec<ClientListener>,
     server_listeners: Vec<ServerListener>,
+    client_connect_listeners: Vec<ClientTypedListener<Connect>>,
+    client_disconnect_listeners: Vec<ClientTypedListener<Disconnect>>,
+    client_world_stream_listeners: Vec<ClientTypedListener<Streamable>>,
+    server_connect_listeners: Vec<ServerTypedListener<Connect>>,
+    server_disconnect_listeners: Vec<ServerTypedListener<Disconnect>>,
+    server_connect_packet_listeners: Vec<ServerTypedListener<ConnectPacket>>,
     handled_client_packets: Vec<PacketKind>,
     handled_server_packets: Vec<PacketKind>,
 }
@@ -684,6 +692,30 @@ impl std::fmt::Debug for Net {
             .field("server_connections", &self.server_connections)
             .field("client_listeners", &self.client_listeners.len())
             .field("server_listeners", &self.server_listeners.len())
+            .field(
+                "client_connect_listeners",
+                &self.client_connect_listeners.len(),
+            )
+            .field(
+                "client_disconnect_listeners",
+                &self.client_disconnect_listeners.len(),
+            )
+            .field(
+                "client_world_stream_listeners",
+                &self.client_world_stream_listeners.len(),
+            )
+            .field(
+                "server_connect_listeners",
+                &self.server_connect_listeners.len(),
+            )
+            .field(
+                "server_disconnect_listeners",
+                &self.server_disconnect_listeners.len(),
+            )
+            .field(
+                "server_connect_packet_listeners",
+                &self.server_connect_packet_listeners.len(),
+            )
             .field("handled_client_packets", &self.handled_client_packets)
             .field("handled_server_packets", &self.handled_server_packets)
             .finish()
@@ -709,6 +741,12 @@ impl Net {
             server_connections: HashMap::new(),
             client_listeners: Vec::new(),
             server_listeners: Vec::new(),
+            client_connect_listeners: Vec::new(),
+            client_disconnect_listeners: Vec::new(),
+            client_world_stream_listeners: Vec::new(),
+            server_connect_listeners: Vec::new(),
+            server_disconnect_listeners: Vec::new(),
+            server_connect_packet_listeners: Vec::new(),
             handled_client_packets: Vec::new(),
             handled_server_packets: Vec::new(),
         }
@@ -773,11 +811,70 @@ impl Net {
         self.client_listeners.push(Box::new(listener));
     }
 
+    /// Registers the Rust equivalent of Java `net.handleClient(Connect.class, ...)`.
+    pub fn handle_client_connect<F>(&mut self, listener: F)
+    where
+        F: FnMut(&Connect) + Send + 'static,
+    {
+        self.client_connect_listeners.push(Box::new(listener));
+    }
+
+    /// Registers the Rust equivalent of Java `net.handleClient(Disconnect.class, ...)`.
+    pub fn handle_client_disconnect<F>(&mut self, listener: F)
+    where
+        F: FnMut(&Disconnect) + Send + 'static,
+    {
+        self.client_disconnect_listeners.push(Box::new(listener));
+    }
+
+    /// Registers the Rust equivalent of Java `net.handleClient(WorldStream.class, ...)`.
+    ///
+    /// Mindustry v157.4 only registers `WorldStream` as a streamable packet, so the
+    /// reassembled `Streamable` payload is dispatched through this listener.
+    pub fn handle_client_world_stream<F>(&mut self, listener: F)
+    where
+        F: FnMut(&Streamable) + Send + 'static,
+    {
+        self.client_world_stream_listeners.push(Box::new(listener));
+    }
+
+    pub fn handle_client_streamable<F>(&mut self, listener: F)
+    where
+        F: FnMut(&Streamable) + Send + 'static,
+    {
+        self.handle_client_world_stream(listener);
+    }
+
     pub fn handle_server<F>(&mut self, listener: F)
     where
         F: FnMut(Option<i32>, &PacketKind) + Send + 'static,
     {
         self.server_listeners.push(Box::new(listener));
+    }
+
+    /// Registers the Rust equivalent of Java `net.handleServer(Connect.class, ...)`.
+    pub fn handle_server_connect<F>(&mut self, listener: F)
+    where
+        F: FnMut(Option<i32>, &Connect) + Send + 'static,
+    {
+        self.server_connect_listeners.push(Box::new(listener));
+    }
+
+    /// Registers the Rust equivalent of Java `net.handleServer(Disconnect.class, ...)`.
+    pub fn handle_server_disconnect<F>(&mut self, listener: F)
+    where
+        F: FnMut(Option<i32>, &Disconnect) + Send + 'static,
+    {
+        self.server_disconnect_listeners.push(Box::new(listener));
+    }
+
+    /// Registers the Rust equivalent of Java `net.handleServer(ConnectPacket.class, ...)`.
+    pub fn handle_server_connect_packet<F>(&mut self, listener: F)
+    where
+        F: FnMut(Option<i32>, &ConnectPacket) + Send + 'static,
+    {
+        self.server_connect_packet_listeners
+            .push(Box::new(listener));
     }
 
     pub fn connect(
@@ -1020,6 +1117,7 @@ impl Net {
     }
 
     fn dispatch_client_packet(&mut self, packet: PacketKind) {
+        self.dispatch_typed_client_packet(&packet);
         for listener in &mut self.client_listeners {
             listener(&packet);
         }
@@ -1027,15 +1125,62 @@ impl Net {
     }
 
     fn dispatch_server_packet(&mut self, connection_id: Option<i32>, packet: PacketKind) {
+        self.dispatch_typed_server_packet(connection_id, &packet);
         for listener in &mut self.server_listeners {
             listener(connection_id, &packet);
         }
         self.handled_server_packets.push(packet);
     }
+
+    fn dispatch_typed_client_packet(&mut self, packet: &PacketKind) {
+        match packet {
+            PacketKind::Connect(connect) => {
+                for listener in &mut self.client_connect_listeners {
+                    listener(connect);
+                }
+            }
+            PacketKind::Disconnect(disconnect) => {
+                for listener in &mut self.client_disconnect_listeners {
+                    listener(disconnect);
+                }
+            }
+            PacketKind::Streamable(stream) => {
+                for listener in &mut self.client_world_stream_listeners {
+                    listener(stream);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch_typed_server_packet(&mut self, connection_id: Option<i32>, packet: &PacketKind) {
+        match packet {
+            PacketKind::Connect(connect) => {
+                for listener in &mut self.server_connect_listeners {
+                    listener(connection_id, connect);
+                }
+            }
+            PacketKind::Disconnect(disconnect) => {
+                for listener in &mut self.server_disconnect_listeners {
+                    listener(connection_id, disconnect);
+                }
+            }
+            PacketKind::ConnectPacket(connect_packet) => {
+                for listener in &mut self.server_connect_packet_listeners {
+                    listener(connection_id, connect_packet);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine as _;
+
+    use crate::mindustry::net::packets::packet_ids;
+
     use super::*;
 
     #[test]
@@ -1175,6 +1320,155 @@ mod tests {
         );
 
         assert_eq!(*server_seen.lock().unwrap(), vec![(Some(42), 22)]);
+    }
+
+    #[test]
+    fn typed_listeners_receive_core_connectivity_packets_before_generic_listeners() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut net = Net::default();
+
+        let client_log = log.clone();
+        net.handle_client_connect(move |_| {
+            client_log.lock().unwrap().push("client-connect".into());
+        });
+        let client_log = log.clone();
+        net.handle_client_disconnect(move |_| {
+            client_log.lock().unwrap().push("client-disconnect".into());
+        });
+        let client_log = log.clone();
+        net.handle_client_world_stream(move |stream| {
+            client_log
+                .lock()
+                .unwrap()
+                .push(format!("client-world-stream:{}", stream.stream.len()));
+        });
+        let client_log = log.clone();
+        net.handle_client(move |packet| {
+            let label = match packet {
+                PacketKind::Connect(_) => "generic-client-connect".to_string(),
+                PacketKind::Disconnect(_) => "generic-client-disconnect".to_string(),
+                PacketKind::Streamable(stream) => {
+                    format!("generic-client-stream:{}", stream.stream.len())
+                }
+                _ => return,
+            };
+            client_log.lock().unwrap().push(label);
+        });
+
+        net.handle_client_received(PacketKind::Connect(Connect {
+            address_tcp: "127.0.0.1:6567".into(),
+        }));
+        net.handle_client_received(PacketKind::Disconnect(Disconnect {
+            reason: "closed".into(),
+        }));
+        net.handle_client_received(PacketKind::StreamBegin(StreamBegin {
+            id: 5,
+            total: 3,
+            packet_type: packet_ids::WORLD_STREAM,
+        }));
+        net.handle_client_received(PacketKind::StreamChunk(StreamChunk {
+            id: 5,
+            data: vec![1, 2],
+        }));
+        net.handle_client_received(PacketKind::StreamChunk(StreamChunk {
+            id: 5,
+            data: vec![3],
+        }));
+
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec![
+                "client-connect",
+                "generic-client-connect",
+                "client-disconnect",
+                "generic-client-disconnect",
+                "client-world-stream:3",
+                "generic-client-stream:3",
+            ]
+        );
+
+        let server_log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut net = Net::default();
+
+        let server_log_clone = server_log.clone();
+        net.handle_server_connect(move |connection_id, _| {
+            server_log_clone
+                .lock()
+                .unwrap()
+                .push(format!("server-connect:{connection_id:?}"));
+        });
+        let server_log_clone = server_log.clone();
+        net.handle_server_disconnect(move |connection_id, _| {
+            server_log_clone
+                .lock()
+                .unwrap()
+                .push(format!("server-disconnect:{connection_id:?}"));
+        });
+        let server_log_clone = server_log.clone();
+        net.handle_server_connect_packet(move |connection_id, packet| {
+            server_log_clone.lock().unwrap().push(format!(
+                "server-connect-packet:{connection_id:?}:{}",
+                packet.name
+            ));
+        });
+        let server_log_clone = server_log.clone();
+        net.handle_server(move |connection_id, packet| {
+            let label = match packet {
+                PacketKind::Connect(_) => format!("generic-server-connect:{connection_id:?}"),
+                PacketKind::Disconnect(_) => {
+                    format!("generic-server-disconnect:{connection_id:?}")
+                }
+                PacketKind::ConnectPacket(packet) => format!(
+                    "generic-server-connect-packet:{connection_id:?}:{}",
+                    packet.name
+                ),
+                _ => return,
+            };
+            server_log_clone.lock().unwrap().push(label);
+        });
+
+        net.handle_server_received_from_connection(
+            Some(9),
+            false,
+            PacketKind::Connect(Connect {
+                address_tcp: "10.0.0.2:6567".into(),
+            }),
+        );
+        net.handle_server_received_from_connection(
+            Some(9),
+            false,
+            PacketKind::ConnectPacket(ConnectPacket {
+                version: 157,
+                version_type: "official".into(),
+                mods: vec!["mod-a".into()],
+                name: "player".into(),
+                locale: "en_US".into(),
+                uuid: base64::engine::general_purpose::STANDARD.encode([1, 2, 3, 4, 5, 6, 7, 8]),
+                usid: "usid".into(),
+                mobile: false,
+                color: 12,
+                uuid_crc32: None,
+            }),
+        );
+        net.handle_server_received_from_connection(
+            Some(9),
+            true,
+            PacketKind::Disconnect(Disconnect {
+                reason: "left".into(),
+            }),
+        );
+
+        assert_eq!(
+            *server_log.lock().unwrap(),
+            vec![
+                "server-connect:Some(9)",
+                "generic-server-connect:Some(9)",
+                "server-connect-packet:Some(9):player",
+                "generic-server-connect-packet:Some(9):player",
+                "server-disconnect:Some(9)",
+                "generic-server-disconnect:Some(9)",
+            ]
+        );
     }
 
     #[test]
