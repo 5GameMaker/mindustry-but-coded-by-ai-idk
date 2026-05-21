@@ -1091,6 +1091,46 @@ pub fn skip_abilities<R: Read>(read: &mut R) -> io::Result<()> {
     Ok(())
 }
 
+pub fn write_statuses<W: Write>(write: &mut W, statuses: &[StatusEntry]) -> io::Result<()> {
+    write_i32(write, statuses.len() as i32)?;
+    for status in statuses {
+        write_status(write, status)?;
+    }
+    Ok(())
+}
+
+pub fn read_statuses<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<Vec<StatusEntry>> {
+    let len = read_i32(read)?;
+    if len < 0 || len as usize > MAX_ARRAY_SIZE {
+        return Err(invalid_data("invalid status list length"));
+    }
+    let mut statuses = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        statuses.push(read_status(read, loader)?);
+    }
+    Ok(statuses)
+}
+
+pub fn read_statuses_into<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+    statuses: &mut Vec<StatusEntry>,
+) -> io::Result<()> {
+    let len = read_i32(read)?;
+    if len < 0 || len as usize > MAX_ARRAY_SIZE {
+        return Err(invalid_data("invalid status list length"));
+    }
+    statuses.clear();
+    statuses.reserve(len as usize);
+    for _ in 0..len {
+        statuses.push(read_status(read, loader)?);
+    }
+    Ok(())
+}
+
 pub fn write_entity_ref<W: Write>(write: &mut W, entity: EntityRef) -> io::Result<()> {
     write_i32(write, entity.id.unwrap_or(-1))
 }
@@ -3144,6 +3184,16 @@ mod tests {
         let decoded = read_status(&mut bytes.as_slice(), &loader).unwrap();
         assert_eq!(decoded.effect.as_ref().unwrap().name(), "wet");
         assert_eq!(decoded.time, 4.0);
+
+        bytes.clear();
+        write_statuses(&mut bytes, &[normal.clone()]).unwrap();
+        assert_eq!(
+            read_statuses(&mut bytes.as_slice(), &loader).unwrap(),
+            vec![normal.clone()]
+        );
+        let mut statuses = Vec::new();
+        read_statuses_into(&mut bytes.as_slice(), &loader, &mut statuses).unwrap();
+        assert_eq!(statuses, vec![normal]);
     }
 
     #[test]
