@@ -2204,6 +2204,43 @@ impl NetProvider for ArcNetProvider {
         self.send_server_packet(None, object, reliable)
     }
 
+    fn send_server_to(
+        &mut self,
+        connection_id: i32,
+        object: &PacketKind,
+        reliable: bool,
+    ) -> io::Result<()> {
+        let server = self
+            .server
+            .as_ref()
+            .ok_or_else(|| io::Error::new(ErrorKind::NotConnected, "server is not hosted"))?;
+
+        let connection = lock_unpoison(&server.connections)
+            .get(&connection_id)
+            .cloned()
+            .ok_or_else(|| {
+                io::Error::new(
+                    ErrorKind::NotFound,
+                    format!("connection {connection_id} not found"),
+                )
+            })?;
+
+        let result = connection.send(&server.udp, object, reliable, &self.content_loader);
+        if result.is_err() && !connection.is_connected() {
+            if let Some(connection) = lock_unpoison(&server.connections).remove(&connection_id) {
+                connection.mark_disconnected();
+                push_event(
+                    &self.events,
+                    ProviderEvent::ServerDisconnected {
+                        connection_id,
+                        reason: "error".to_string(),
+                    },
+                );
+            }
+        }
+        result
+    }
+
     fn send_server_except(
         &mut self,
         except_connection_id: i32,

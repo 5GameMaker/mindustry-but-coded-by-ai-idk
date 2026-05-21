@@ -574,6 +574,15 @@ pub trait NetProvider: Send {
         Ok(())
     }
 
+    fn send_server_to(
+        &mut self,
+        _connection_id: i32,
+        object: &PacketKind,
+        reliable: bool,
+    ) -> io::Result<()> {
+        self.send_server(object, reliable)
+    }
+
     fn send_server_except(
         &mut self,
         _except_connection_id: i32,
@@ -964,6 +973,16 @@ impl Net {
         } else {
             self.provider.send_client(object, reliable)
         }
+    }
+
+    pub fn send_to(
+        &mut self,
+        connection_id: i32,
+        object: &PacketKind,
+        reliable: bool,
+    ) -> io::Result<()> {
+        self.provider
+            .send_server_to(connection_id, object, reliable)
     }
 
     pub fn send_except(

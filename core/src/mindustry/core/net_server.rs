@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use crate::mindustry::net::{
-    Connect, ConnectPacket, Disconnect, Net, NetConnection, PacketKind, ProviderEvent,
+    packet_ids, Connect, ConnectPacket, Disconnect, Net, NetConnection, PacketKind, ProviderEvent,
+    SentPacket, Streamable, WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -21,6 +22,11 @@ pub struct NetServerState {
     pub last_connect: Option<Connect>,
     pub last_handshake: Option<ConnectPacket>,
     pub last_connect_confirm_connection_id: Option<i32>,
+    pub last_world_data_connection_id: Option<i32>,
+    pub last_world_data_bytes: Option<usize>,
+    pub world_data_begin_sent: u64,
+    pub world_streams_sent: u64,
+    pub last_world_data_error: Option<String>,
     pub last_disconnect: Option<Disconnect>,
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
@@ -184,6 +190,82 @@ impl NetServer {
             .clone()
     }
 
+    pub fn send_world_data_begin(&self, connection_id: i32) -> io::Result<()> {
+        let packet = PacketKind::WorldDataBeginCallPacket(WorldDataBeginCallPacket);
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet, true)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        state.last_world_data_connection_id = Some(connection_id);
+        state.last_updated_at = Some(Instant::now());
+        match &result {
+            Ok(()) => {
+                state.world_data_begin_sent += 1;
+                state.last_world_data_error = None;
+                state
+                    .connection_states
+                    .entry(connection_id)
+                    .or_insert_with(|| NetConnection::new(String::new()))
+                    .send(SentPacket::Other("WorldDataBeginCallPacket".into()), true);
+            }
+            Err(error) => {
+                state.last_world_data_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn send_world_data(&self, connection_id: i32, bytes: impl Into<Vec<u8>>) -> io::Result<()> {
+        let bytes = bytes.into();
+        let byte_len = bytes.len();
+        let send_plan = Self::world_stream_send_plan(bytes);
+
+        let mut first_error = None;
+        {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            for (packet, _, reliable) in &send_plan {
+                if let Err(error) = net.send_to(connection_id, packet, *reliable) {
+                    first_error = Some(error);
+                    break;
+                }
+            }
+        }
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        state.last_world_data_connection_id = Some(connection_id);
+        state.last_world_data_bytes = Some(byte_len);
+        state.last_updated_at = Some(Instant::now());
+
+        if let Some(error) = first_error {
+            state.last_world_data_error = Some(error.to_string());
+            return Err(error);
+        }
+
+        state.world_streams_sent += 1;
+        state.last_world_data_error = None;
+        let connection = state
+            .connection_states
+            .entry(connection_id)
+            .or_insert_with(|| NetConnection::new(String::new()));
+        connection.sent.extend(
+            send_plan
+                .into_iter()
+                .map(|(_, sent_packet, reliable)| (sent_packet, reliable)),
+        );
+        Ok(())
+    }
+
+    pub fn resend_world_data(
+        &self,
+        connection_id: i32,
+        bytes: impl Into<Vec<u8>>,
+    ) -> io::Result<()> {
+        self.send_world_data_begin(connection_id)?;
+        self.send_world_data(connection_id, bytes)
+    }
+
     pub fn update(&self) {
         let connections = {
             let net = self.net.lock().expect("Net mutex poisoned");
@@ -193,6 +275,23 @@ impl NetServer {
         let mut state = self.state.lock().expect("NetServerState mutex poisoned");
         Self::sync_provider_connections(&mut state, connections);
         state.last_updated_at = Some(Instant::now());
+    }
+
+    fn world_stream_send_plan(bytes: Vec<u8>) -> Vec<(PacketKind, SentPacket, bool)> {
+        let mut connection = NetConnection::new(String::new());
+        connection.send_stream(Streamable::new(bytes), packet_ids::WORLD_STREAM);
+        connection
+            .sent
+            .into_iter()
+            .filter_map(|(sent_packet, reliable)| {
+                let packet = match &sent_packet {
+                    SentPacket::StreamBegin(begin) => PacketKind::StreamBegin(begin.clone()),
+                    SentPacket::StreamChunk(chunk) => PacketKind::StreamChunk(chunk.clone()),
+                    _ => return None,
+                };
+                Some((packet, sent_packet, reliable))
+            })
+            .collect()
     }
 
     fn install_typed_listeners(
@@ -382,13 +481,73 @@ impl NetServer {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use crate::mindustry::net::{
-        Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, PacketKind,
+        packet_ids, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, DoneCallback,
+        Host, HostCallback, Net, NetConnection, NetProvider, PacketKind, SentPacket,
     };
+    use crate::mindustry::vars::MAX_TCP_SIZE;
 
     use super::NetServer;
+
+    #[derive(Clone, Default)]
+    struct CaptureProvider {
+        sent: Arc<Mutex<Vec<(i32, PacketKind, bool)>>>,
+    }
+
+    impl NetProvider for CaptureProvider {
+        fn connect_client(
+            &mut self,
+            _ip: &str,
+            _port: u16,
+            _success: Box<dyn Fn() + Send + 'static>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_client(&mut self, _object: &PacketKind, _reliable: bool) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn disconnect_client(&mut self) {}
+
+        fn discover_servers(&self, _callback: HostCallback, done: DoneCallback) {
+            done();
+        }
+
+        fn ping_host(&self, _address: &str, _port: u16, _timeout: Duration) -> io::Result<Host> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
+        }
+
+        fn host_server(&mut self, _port: u16) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn get_connections(&self) -> Vec<NetConnection> {
+            Vec::new()
+        }
+
+        fn close_server(&mut self) {}
+
+        fn send_server_to(
+            &mut self,
+            connection_id: i32,
+            object: &PacketKind,
+            reliable: bool,
+        ) -> io::Result<()> {
+            self.sent
+                .lock()
+                .unwrap()
+                .push((connection_id, object.clone(), reliable));
+            Ok(())
+        }
+    }
 
     fn connect_packet(name: &str) -> ConnectPacket {
         ConnectPacket {
@@ -476,5 +635,57 @@ mod tests {
         assert!(connection.has_begun_connecting);
         assert!(connection.has_disconnected);
         assert_eq!(state.events.len(), 4);
+    }
+
+    #[test]
+    fn send_world_data_targets_connection_and_records_java_stream_shape() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        server
+            .resend_world_data(12, vec![7; MAX_TCP_SIZE + 3])
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 4);
+        assert!(matches!(sent[0].1, PacketKind::WorldDataBeginCallPacket(_)));
+        assert!(sent
+            .iter()
+            .all(|(connection_id, _, reliable)| { *connection_id == 12 && *reliable }));
+
+        match &sent[1].1 {
+            PacketKind::StreamBegin(begin) => {
+                assert_eq!(begin.id, 0);
+                assert_eq!(begin.total, (MAX_TCP_SIZE + 3) as i32);
+                assert_eq!(begin.packet_type, packet_ids::WORLD_STREAM);
+            }
+            other => panic!("unexpected packet: {other:?}"),
+        }
+        match &sent[2].1 {
+            PacketKind::StreamChunk(chunk) => assert_eq!(chunk.data.len(), MAX_TCP_SIZE),
+            other => panic!("unexpected packet: {other:?}"),
+        }
+        match &sent[3].1 {
+            PacketKind::StreamChunk(chunk) => assert_eq!(chunk.data.len(), 3),
+            other => panic!("unexpected packet: {other:?}"),
+        }
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_world_data_connection_id, Some(12));
+        assert_eq!(state.last_world_data_bytes, Some(MAX_TCP_SIZE + 3));
+        assert_eq!(state.world_data_begin_sent, 1);
+        assert_eq!(state.world_streams_sent, 1);
+        assert!(state.last_world_data_error.is_none());
+
+        let connection = state.connection_states.get(&12).unwrap();
+        assert!(matches!(connection.sent[0].0, SentPacket::Other(_)));
+        assert!(matches!(connection.sent[1].0, SentPacket::StreamBegin(_)));
+        assert!(matches!(connection.sent[2].0, SentPacket::StreamChunk(_)));
+        assert!(matches!(connection.sent[3].0, SentPacket::StreamChunk(_)));
     }
 }
