@@ -5,8 +5,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::net::{
     ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket,
-    ConnectPacket, Disconnect, Net, PacketKind, PingCallPacket, ProviderEvent, StreamBuilder,
-    Streamable,
+    ConnectPacket, Disconnect, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net, PacketKind,
+    PingCallPacket, ProviderEvent, StateSnapshotCallPacket, StreamBuilder, Streamable,
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -106,6 +106,16 @@ pub struct NetClientState {
     pub last_stream_id: Option<i32>,
     pub last_stream_len: usize,
     pub last_binary_stream: Option<Vec<u8>>,
+    pub last_entity_snapshot: Option<EntitySnapshotCallPacket>,
+    pub last_entity_snapshot_at: Option<Instant>,
+    pub entity_snapshot_packets_seen: u64,
+    pub last_hidden_snapshot: Option<HiddenSnapshotCallPacket>,
+    pub last_hidden_snapshot_at: Option<Instant>,
+    pub hidden_snapshot_packets_seen: u64,
+    pub last_state_snapshot: Option<StateSnapshotCallPacket>,
+    pub last_state_snapshot_at: Option<Instant>,
+    pub state_snapshot_packets_seen: u64,
+    pub last_server_snapshot_at: Option<Instant>,
     pub last_provider_events: Vec<ProviderEvent>,
     packet_handlers: Vec<PacketHandler>,
     binary_packet_handlers: Vec<BinaryPacketHandler>,
@@ -156,6 +166,19 @@ impl fmt::Debug for NetClientState {
             .field("timeout_disconnects", &self.timeout_disconnects)
             .field("last_stream_id", &self.last_stream_id)
             .field("last_stream_len", &self.last_stream_len)
+            .field(
+                "entity_snapshot_packets_seen",
+                &self.entity_snapshot_packets_seen,
+            )
+            .field(
+                "hidden_snapshot_packets_seen",
+                &self.hidden_snapshot_packets_seen,
+            )
+            .field(
+                "state_snapshot_packets_seen",
+                &self.state_snapshot_packets_seen,
+            )
+            .field("last_server_snapshot_at", &self.last_server_snapshot_at)
             .field(
                 "last_binary_stream_len",
                 &self.last_binary_stream.as_ref().map(|s| s.len()),
@@ -522,6 +545,30 @@ impl NetClient {
                         state.ping_ms = now.saturating_sub(response.time).max(0) as u32;
                         false
                     }
+                    PacketKind::EntitySnapshotCallPacket(snapshot) => {
+                        let now = Instant::now();
+                        state.entity_snapshot_packets_seen += 1;
+                        state.last_entity_snapshot = Some(snapshot.clone());
+                        state.last_entity_snapshot_at = Some(now);
+                        state.last_server_snapshot_at = Some(now);
+                        false
+                    }
+                    PacketKind::HiddenSnapshotCallPacket(snapshot) => {
+                        let now = Instant::now();
+                        state.hidden_snapshot_packets_seen += 1;
+                        state.last_hidden_snapshot = Some(snapshot.clone());
+                        state.last_hidden_snapshot_at = Some(now);
+                        state.last_server_snapshot_at = Some(now);
+                        false
+                    }
+                    PacketKind::StateSnapshotCallPacket(snapshot) => {
+                        let now = Instant::now();
+                        state.state_snapshot_packets_seen += 1;
+                        state.last_state_snapshot = Some(snapshot.clone());
+                        state.last_state_snapshot_at = Some(now);
+                        state.last_server_snapshot_at = Some(now);
+                        false
+                    }
                     _ => false,
                 }
             };
@@ -682,8 +729,9 @@ mod tests {
 
     use crate::mindustry::net::{
         ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, Disconnect, DoneCallback,
-        Host, HostCallback, Net, NetConnection, NetProvider, PacketKind, PingResponseCallPacket,
-        StreamBegin, StreamChunk, Streamable, WorldDataBeginCallPacket,
+        EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection,
+        NetProvider, PacketKind, PingResponseCallPacket, StateSnapshotCallPacket, StreamBegin,
+        StreamChunk, Streamable, WorldDataBeginCallPacket,
     };
 
     use super::{ClientConnectConfig, NetClient};
@@ -904,6 +952,104 @@ mod tests {
         assert_eq!(state.last_ping_request_time, Some(request_time));
         assert_eq!(state.last_ping_response_time, Some(request_time - 37));
         assert!(state.last_ping_request_error.is_none());
+    }
+
+    #[test]
+    fn update_records_server_snapshots_when_client_loaded() {
+        let client = NetClient::default();
+        let state_snapshot = StateSnapshotCallPacket {
+            wave_time: 1.25,
+            wave: 2,
+            enemies: 3,
+            paused: false,
+            game_over: false,
+            time_data: 456,
+            tps: 60,
+            rand0: 11,
+            rand1: 22,
+            core_data: vec![1, 2, 3],
+        };
+        let entity_snapshot = EntitySnapshotCallPacket {
+            amount: 2,
+            data: vec![7, 8, 9],
+        };
+        let hidden_snapshot = HiddenSnapshotCallPacket { ids: vec![4, 5] };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::StateSnapshotCallPacket(state_snapshot.clone()));
+            net.handle_client_received(PacketKind::EntitySnapshotCallPacket(
+                entity_snapshot.clone(),
+            ));
+            net.handle_client_received(PacketKind::HiddenSnapshotCallPacket(
+                hidden_snapshot.clone(),
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.state_snapshot_packets_seen, 1);
+        assert_eq!(state.last_state_snapshot.as_ref(), Some(&state_snapshot));
+        assert!(state.last_state_snapshot_at.is_some());
+        assert_eq!(state.entity_snapshot_packets_seen, 1);
+        assert_eq!(state.last_entity_snapshot.as_ref(), Some(&entity_snapshot));
+        assert!(state.last_entity_snapshot_at.is_some());
+        assert_eq!(state.hidden_snapshot_packets_seen, 1);
+        assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden_snapshot));
+        assert!(state.last_hidden_snapshot_at.is_some());
+        assert!(state.last_server_snapshot_at.is_some());
+        assert!(matches!(
+            state.last_packet,
+            Some(PacketKind::HiddenSnapshotCallPacket(_))
+        ));
+    }
+
+    #[test]
+    fn priority_zero_server_snapshots_are_ignored_before_client_loaded() {
+        let client = NetClient::default();
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::StateSnapshotCallPacket(
+                StateSnapshotCallPacket {
+                    wave_time: 1.25,
+                    wave: 2,
+                    enemies: 3,
+                    paused: false,
+                    game_over: false,
+                    time_data: 456,
+                    tps: 60,
+                    rand0: 11,
+                    rand1: 22,
+                    core_data: vec![1, 2, 3],
+                },
+            ));
+            net.handle_client_received(PacketKind::EntitySnapshotCallPacket(
+                EntitySnapshotCallPacket {
+                    amount: 2,
+                    data: vec![7, 8, 9],
+                },
+            ));
+            net.handle_client_received(PacketKind::HiddenSnapshotCallPacket(
+                HiddenSnapshotCallPacket { ids: vec![4, 5] },
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.state_snapshot_packets_seen, 0);
+        assert!(state.last_state_snapshot.is_none());
+        assert_eq!(state.entity_snapshot_packets_seen, 0);
+        assert!(state.last_entity_snapshot.is_none());
+        assert_eq!(state.hidden_snapshot_packets_seen, 0);
+        assert!(state.last_hidden_snapshot.is_none());
+        assert!(state.last_server_snapshot_at.is_none());
+        assert!(state.last_packet.is_none());
     }
 
     #[test]
