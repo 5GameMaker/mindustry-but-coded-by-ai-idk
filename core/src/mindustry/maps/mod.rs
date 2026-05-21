@@ -1,11 +1,13 @@
 use std::{collections::BTreeMap, io, io::Read, path::Path};
 
 pub mod filters;
+pub mod map_exception;
 
 use crate::mindustry::{
     game::{rules::GamemodeApplier, Gamemode, Rules},
     io::{read_deflated_save_meta, SaveMeta},
 };
+pub use map_exception::MapException;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapDescriptor {
