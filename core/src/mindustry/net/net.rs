@@ -39,6 +39,10 @@ use super::packets::{
     TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
     TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket, UnitBuildingControlSelectCallPacket,
     UnitCapDeathCallPacket, UnitClearCallPacket, UnitControlCallPacket, UnitDeathCallPacket,
+    UnitDespawnCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
+    UnitEnvDeathCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
+    UnitTetherBlockSpawnedCallPacket, UpdateGameOverCallPacket, UpdateMarkerCallPacket,
+    UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket, WarningToastCallPacket,
     WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
@@ -174,6 +178,18 @@ pub enum PacketKind {
     UnitClearCallPacket(UnitClearCallPacket),
     UnitControlCallPacket(UnitControlCallPacket),
     UnitDeathCallPacket(UnitDeathCallPacket),
+    UnitDespawnCallPacket(UnitDespawnCallPacket),
+    UnitDestroyCallPacket(UnitDestroyCallPacket),
+    UnitEnteredPayloadCallPacket(UnitEnteredPayloadCallPacket),
+    UnitEnvDeathCallPacket(UnitEnvDeathCallPacket),
+    UnitSafeDeathCallPacket(UnitSafeDeathCallPacket),
+    UnitSpawnCallPacket(UnitSpawnCallPacket),
+    UnitTetherBlockSpawnedCallPacket(UnitTetherBlockSpawnedCallPacket),
+    UpdateGameOverCallPacket(UpdateGameOverCallPacket),
+    UpdateMarkerCallPacket(UpdateMarkerCallPacket),
+    UpdateMarkerTextCallPacket(UpdateMarkerTextCallPacket),
+    UpdateMarkerTextureCallPacket(UpdateMarkerTextureCallPacket),
+    WarningToastCallPacket(WarningToastCallPacket),
     WorldDataBeginCallPacket(WorldDataBeginCallPacket),
     Other {
         id: u8,
@@ -198,6 +214,7 @@ impl PacketKind {
             | PacketKind::HiddenSnapshotCallPacket(_)
             | PacketKind::RequestBlockSnapshotCallPacket(_)
             | PacketKind::StateSnapshotCallPacket(_) => 0,
+            PacketKind::UnitSpawnCallPacket(_) => 0,
             PacketKind::AnnounceCallPacket(_)
             | PacketKind::ClearObjectivesCallPacket(_)
             | PacketKind::ClientBinaryPacketReliableCallPacket(_)
@@ -280,6 +297,17 @@ impl PacketKind {
             | PacketKind::UnitClearCallPacket(_)
             | PacketKind::UnitControlCallPacket(_)
             | PacketKind::UnitDeathCallPacket(_)
+            | PacketKind::UnitDespawnCallPacket(_)
+            | PacketKind::UnitDestroyCallPacket(_)
+            | PacketKind::UnitEnteredPayloadCallPacket(_)
+            | PacketKind::UnitEnvDeathCallPacket(_)
+            | PacketKind::UnitSafeDeathCallPacket(_)
+            | PacketKind::UnitTetherBlockSpawnedCallPacket(_)
+            | PacketKind::UpdateGameOverCallPacket(_)
+            | PacketKind::UpdateMarkerCallPacket(_)
+            | PacketKind::UpdateMarkerTextCallPacket(_)
+            | PacketKind::UpdateMarkerTextureCallPacket(_)
+            | PacketKind::WarningToastCallPacket(_)
             | PacketKind::WorldDataBeginCallPacket(_) => 1,
             PacketKind::DebugStatusClientCallPacket(_)
             | PacketKind::DebugStatusClientUnreliableCallPacket(_)
@@ -348,8 +376,7 @@ impl PacketKind {
             | PacketKind::RotateBlockCallPacket(_)
             | PacketKind::SetPlayerTeamEditorCallPacket(_)
             | PacketKind::SetUnitCommandCallPacket(_)
-            | PacketKind::SetUnitStanceCallPacket(_)
-            | PacketKind::WorldDataBeginCallPacket(_) => true,
+            | PacketKind::SetUnitStanceCallPacket(_) => true,
             PacketKind::SendChatMessageCallPacket(_)
             | PacketKind::ServerBinaryPacketReliableCallPacket(_)
             | PacketKind::ServerBinaryPacketUnreliableCallPacket(_)
@@ -438,6 +465,19 @@ impl PacketKind {
             | PacketKind::UnitBuildingControlSelectCallPacket(_)
             | PacketKind::UnitCapDeathCallPacket(_)
             | PacketKind::UnitDeathCallPacket(_)
+            | PacketKind::UnitDespawnCallPacket(_)
+            | PacketKind::UnitDestroyCallPacket(_)
+            | PacketKind::UnitEnteredPayloadCallPacket(_)
+            | PacketKind::UnitEnvDeathCallPacket(_)
+            | PacketKind::UnitSafeDeathCallPacket(_)
+            | PacketKind::UnitSpawnCallPacket(_)
+            | PacketKind::UnitTetherBlockSpawnedCallPacket(_)
+            | PacketKind::UpdateGameOverCallPacket(_)
+            | PacketKind::UpdateMarkerCallPacket(_)
+            | PacketKind::UpdateMarkerTextCallPacket(_)
+            | PacketKind::UpdateMarkerTextureCallPacket(_)
+            | PacketKind::WarningToastCallPacket(_)
+            | PacketKind::WorldDataBeginCallPacket(_)
             | PacketKind::TextInputCallPacket(_)
             | PacketKind::TextInputCallPacket2(_) => !server,
             PacketKind::ClientBinaryPacketReliableCallPacket(_)

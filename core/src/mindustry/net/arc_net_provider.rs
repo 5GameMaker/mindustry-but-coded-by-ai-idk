@@ -41,7 +41,11 @@ use super::{
         TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
         TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket,
         UnitBuildingControlSelectCallPacket, UnitCapDeathCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, UnitDeathCallPacket, WorldDataBeginCallPacket,
+        UnitControlCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
+        UnitEnteredPayloadCallPacket, UnitEnvDeathCallPacket, UnitSafeDeathCallPacket,
+        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket, UpdateGameOverCallPacket,
+        UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
+        WarningToastCallPacket, WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -638,6 +642,54 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::UNIT_DEATH_CALL_PACKET
             }
+            PacketKind::UnitDespawnCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_DESPAWN_CALL_PACKET
+            }
+            PacketKind::UnitDestroyCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_DESTROY_CALL_PACKET
+            }
+            PacketKind::UnitEnteredPayloadCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_ENTERED_PAYLOAD_CALL_PACKET
+            }
+            PacketKind::UnitEnvDeathCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_ENV_DEATH_CALL_PACKET
+            }
+            PacketKind::UnitSafeDeathCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_SAFE_DEATH_CALL_PACKET
+            }
+            PacketKind::UnitSpawnCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_SPAWN_CALL_PACKET
+            }
+            PacketKind::UnitTetherBlockSpawnedCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_TETHER_BLOCK_SPAWNED_CALL_PACKET
+            }
+            PacketKind::UpdateGameOverCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_GAME_OVER_CALL_PACKET
+            }
+            PacketKind::UpdateMarkerCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_MARKER_CALL_PACKET
+            }
+            PacketKind::UpdateMarkerTextCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_MARKER_TEXT_CALL_PACKET
+            }
+            PacketKind::UpdateMarkerTextureCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_MARKER_TEXTURE_CALL_PACKET
+            }
+            PacketKind::WarningToastCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::WARNING_TOAST_CALL_PACKET
+            }
             PacketKind::WorldDataBeginCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::WORLD_DATA_BEGIN_CALL_PACKET
@@ -791,6 +843,54 @@ impl PacketSerializer {
             PacketKind::TransferItemToUnitCallPacket(packet) => {
                 packet.write_to_with_loader(&mut payload, loader)?;
                 packet_ids::TRANSFER_ITEM_TO_UNIT_CALL_PACKET
+            }
+            PacketKind::UnitDespawnCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_DESPAWN_CALL_PACKET
+            }
+            PacketKind::UnitDestroyCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_DESTROY_CALL_PACKET
+            }
+            PacketKind::UnitEnteredPayloadCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_ENTERED_PAYLOAD_CALL_PACKET
+            }
+            PacketKind::UnitEnvDeathCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_ENV_DEATH_CALL_PACKET
+            }
+            PacketKind::UnitSafeDeathCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_SAFE_DEATH_CALL_PACKET
+            }
+            PacketKind::UnitSpawnCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_SPAWN_CALL_PACKET
+            }
+            PacketKind::UnitTetherBlockSpawnedCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UNIT_TETHER_BLOCK_SPAWNED_CALL_PACKET
+            }
+            PacketKind::UpdateGameOverCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_GAME_OVER_CALL_PACKET
+            }
+            PacketKind::UpdateMarkerCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_MARKER_CALL_PACKET
+            }
+            PacketKind::UpdateMarkerTextCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_MARKER_TEXT_CALL_PACKET
+            }
+            PacketKind::UpdateMarkerTextureCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::UPDATE_MARKER_TEXTURE_CALL_PACKET
+            }
+            PacketKind::WarningToastCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::WARNING_TOAST_CALL_PACKET
             }
             _ => return Self::packet_kind_to_envelope(packet),
         };
@@ -1283,6 +1383,60 @@ impl PacketSerializer {
                     packet_ids::UNIT_DEATH_CALL_PACKET => Ok(PacketKind::UnitDeathCallPacket(
                         UnitDeathCallPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::UNIT_DESPAWN_CALL_PACKET => Ok(PacketKind::UnitDespawnCallPacket(
+                        UnitDespawnCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::UNIT_DESTROY_CALL_PACKET => Ok(PacketKind::UnitDestroyCallPacket(
+                        UnitDestroyCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::UNIT_ENTERED_PAYLOAD_CALL_PACKET => {
+                        Ok(PacketKind::UnitEnteredPayloadCallPacket(
+                            UnitEnteredPayloadCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UNIT_ENV_DEATH_CALL_PACKET => {
+                        Ok(PacketKind::UnitEnvDeathCallPacket(
+                            UnitEnvDeathCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UNIT_SAFE_DEATH_CALL_PACKET => {
+                        Ok(PacketKind::UnitSafeDeathCallPacket(
+                            UnitSafeDeathCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UNIT_SPAWN_CALL_PACKET => Ok(PacketKind::UnitSpawnCallPacket(
+                        UnitSpawnCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::UNIT_TETHER_BLOCK_SPAWNED_CALL_PACKET => {
+                        Ok(PacketKind::UnitTetherBlockSpawnedCallPacket(
+                            UnitTetherBlockSpawnedCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UPDATE_GAME_OVER_CALL_PACKET => {
+                        Ok(PacketKind::UpdateGameOverCallPacket(
+                            UpdateGameOverCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UPDATE_MARKER_CALL_PACKET => {
+                        Ok(PacketKind::UpdateMarkerCallPacket(
+                            UpdateMarkerCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UPDATE_MARKER_TEXT_CALL_PACKET => {
+                        Ok(PacketKind::UpdateMarkerTextCallPacket(
+                            UpdateMarkerTextCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::UPDATE_MARKER_TEXTURE_CALL_PACKET => {
+                        Ok(PacketKind::UpdateMarkerTextureCallPacket(
+                            UpdateMarkerTextureCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::WARNING_TOAST_CALL_PACKET => {
+                        Ok(PacketKind::WarningToastCallPacket(
+                            WarningToastCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::WORLD_DATA_BEGIN_CALL_PACKET => {
                         Ok(PacketKind::WorldDataBeginCallPacket(
                             WorldDataBeginCallPacket::read_from(&mut cursor)?,

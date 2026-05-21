@@ -62,7 +62,11 @@ pub use packets::{
     TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
     TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBlockSpawnCallPacket,
     UnitBuildingControlSelectCallPacket, UnitCapDeathCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitDeathCallPacket, WorldDataBeginCallPacket,
+    UnitControlCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
+    UnitEnteredPayloadCallPacket, UnitEnvDeathCallPacket, UnitSafeDeathCallPacket,
+    UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket, UpdateGameOverCallPacket,
+    UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
+    WarningToastCallPacket, WorldDataBeginCallPacket,
 };
 pub use server_group::ServerGroup;
 pub use streamable::{StreamBuilder, Streamable};

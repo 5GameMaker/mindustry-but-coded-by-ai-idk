@@ -800,6 +800,27 @@ pub enum UnitRef {
     Unit { id: i32 },
 }
 
+/// Java `TypeIO.writeUnitContainer(...)` / `readUnitContainer(...)` 的原始 wire 容器。
+///
+/// 上游写入顺序为 `unit.id`、`unit.classId()`，之后直接接 `unit.writeSync(...)`
+/// 产生的同步字节；当前 Rust 端在完整 Unit 实体系统补齐前按 raw bytes 保存。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UnitSyncContainer {
+    pub unit_id: i32,
+    pub unit_type_id: u8,
+    pub sync: Vec<u8>,
+}
+
+impl UnitSyncContainer {
+    pub fn new(unit_id: i32, unit_type_id: u8, sync: Vec<u8>) -> Self {
+        Self {
+            unit_id,
+            unit_type_id,
+            sync,
+        }
+    }
+}
+
 pub fn write_unit_ref<W: Write>(write: &mut W, unit: UnitRef) -> io::Result<()> {
     match unit {
         UnitRef::Null => {
@@ -826,6 +847,27 @@ pub fn read_unit_ref<R: Read>(read: &mut R) -> io::Result<UnitRef> {
         2 => Ok(UnitRef::Unit { id }),
         _ => Err(invalid_data("unknown unit ref kind")),
     }
+}
+
+/// 按上游 `TypeIO.writeUnitContainer(...)` 字段顺序写入 raw 单位同步容器。
+pub fn write_unit_container<W: Write>(
+    write: &mut W,
+    container: &UnitSyncContainer,
+) -> io::Result<()> {
+    write_i32(write, container.unit_id)?;
+    write_u8(write, container.unit_type_id)?;
+    write.write_all(&container.sync)
+}
+
+/// 按上游 `TypeIO.readUnitContainer(...)` 语义读取 raw 单位同步容器。
+///
+/// 该 helper 会把当前 packet payload 中剩余全部字节视为 `sync` 数据。
+pub fn read_unit_container<R: Read>(read: &mut R) -> io::Result<UnitSyncContainer> {
+    let unit_id = read_i32(read)?;
+    let unit_type_id = read_u8(read)?;
+    let mut sync = Vec::new();
+    read.read_to_end(&mut sync)?;
+    Ok(UnitSyncContainer::new(unit_id, unit_type_id, sync))
 }
 
 pub fn write_entity_ref<W: Write>(write: &mut W, entity: EntityRef) -> io::Result<()> {
@@ -2316,6 +2358,19 @@ mod tests {
         assert_eq!(
             read_required_content_name(&mut bytes.as_slice(), &loader).unwrap(),
             (ContentType::Item, "copper".to_string())
+        );
+    }
+
+    #[test]
+    fn unit_container_roundtrip_uses_raw_unit_id_type_and_sync_bytes() {
+        let container = UnitSyncContainer::new(12345, 7, vec![0xaa, 0xbb, 0xcc, 0xdd]);
+        let mut bytes = Vec::new();
+
+        write_unit_container(&mut bytes, &container).unwrap();
+        assert_eq!(bytes, vec![0, 0, 0x30, 0x39, 7, 0xaa, 0xbb, 0xcc, 0xdd]);
+        assert_eq!(
+            read_unit_container(&mut bytes.as_slice()).unwrap(),
+            container
         );
     }
 
