@@ -10,6 +10,7 @@ pub mod power_graph_updater;
 pub mod rot;
 pub mod shielder;
 pub mod timed;
+pub mod timed_kill;
 pub mod timer;
 
 pub use damage::DamageComp;
@@ -22,4 +23,5 @@ pub use power_graph_updater::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use rot::RotComp;
 pub use shielder::{DamageState, ShielderComp, TeamState};
 pub use timed::TimedComp;
+pub use timed_kill::TimedKillComp;
 pub use timer::{Interval, TimerComp};

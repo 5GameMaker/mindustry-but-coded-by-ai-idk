@@ -13,12 +13,12 @@ pub use abilities::{
     Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
     SpawnDeathAbility,
 };
-pub use comp::TimedComp;
 pub use comp::{
     DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval, OwnerComp, PosComp, PosTeamDef,
     RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
+pub use comp::{TimedComp, TimedKillComp};
 pub use entity_indexer::EntityIndexer;
 pub use leg::Leg;
 pub use leg_destroy_data::{LegDestroyData, TextureRegionRef};
