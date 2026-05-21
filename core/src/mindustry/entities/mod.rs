@@ -15,8 +15,8 @@ pub use abilities::{
 };
 pub use comp::HealthComp;
 pub use comp::{
-    DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval, OwnerComp, PosComp, PosTeamDef,
-    RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
+    ChildComp, ChildParent, DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval,
+    OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
 pub use comp::{EntityComp, EntityIoState, EntityLocality};
 pub use comp::{HitboxComp, HitboxRect};

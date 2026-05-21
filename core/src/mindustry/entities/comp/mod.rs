@@ -1,5 +1,6 @@
 //! Incremental Rust mirror of upstream `mindustry.entities.comp`.
 
+pub mod child;
 pub mod damage;
 pub mod draw;
 pub mod elevation_move;
@@ -18,6 +19,7 @@ pub mod timed_kill;
 pub mod timer;
 pub mod vel;
 
+pub use child::{ChildComp, ChildParent};
 pub use damage::DamageComp;
 pub use draw::DrawComp;
 pub use elevation_move::{ElevationMoveComp, SolidPred};
