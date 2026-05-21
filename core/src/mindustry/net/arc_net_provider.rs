@@ -1743,9 +1743,76 @@ impl ArcTransport {
 
 #[derive(Debug, Clone)]
 struct SharedArcConnection {
-    info: NetConnection,
+    info: Arc<Mutex<NetConnection>>,
     tcp: Arc<Mutex<TcpStream>>,
     udp_addr: Option<SocketAddr>,
+}
+
+impl SharedArcConnection {
+    fn new(info: NetConnection, tcp: Arc<Mutex<TcpStream>>, udp_addr: Option<SocketAddr>) -> Self {
+        Self {
+            info: Arc::new(Mutex::new(info)),
+            tcp,
+            udp_addr,
+        }
+    }
+
+    fn snapshot(&self) -> NetConnection {
+        lock_unpoison(&self.info).clone()
+    }
+
+    fn is_connected(&self) -> bool {
+        let info = lock_unpoison(&self.info);
+        !info.has_disconnected && !info.kicked
+    }
+
+    fn mark_connected(&self, address: impl Into<String>) {
+        let mut info = lock_unpoison(&self.info);
+        info.address = address.into();
+        info.has_connected = true;
+        info.has_disconnected = false;
+    }
+
+    fn mark_disconnected(&self) {
+        lock_unpoison(&self.info).has_disconnected = true;
+    }
+
+    fn close(&self) {
+        self.mark_disconnected();
+        let _ = lock_unpoison(&self.tcp).shutdown(Shutdown::Both);
+    }
+
+    fn send(
+        &self,
+        udp: &UdpSocket,
+        packet: &PacketKind,
+        reliable: bool,
+        content_loader: &Arc<Mutex<Option<ContentLoader>>>,
+    ) -> io::Result<()> {
+        if !self.is_connected() {
+            return Err(io::Error::new(
+                ErrorKind::NotConnected,
+                "connection is closed",
+            ));
+        }
+
+        let result = if reliable {
+            write_tcp_packet(&self.tcp, packet, content_loader)
+        } else if let Some(target) = self.udp_addr {
+            let bytes = write_packet_bytes(packet, content_loader)?;
+            udp.send_to(&bytes, target).map(|_| ())
+        } else {
+            Err(io::Error::new(
+                ErrorKind::AddrNotAvailable,
+                "connection has no registered UDP address",
+            ))
+        };
+
+        if result.is_err() {
+            self.close();
+        }
+        result
+    }
 }
 
 #[derive(Debug)]
@@ -1866,12 +1933,7 @@ impl ArcNetProvider {
                 continue;
             }
 
-            if reliable {
-                write_tcp_packet(&connection.tcp, object, &self.content_loader)?;
-            } else if let Some(target) = connection.udp_addr {
-                let bytes = write_packet_bytes(object, &self.content_loader)?;
-                server.udp.send_to(&bytes, target)?;
-            }
+            connection.send(&server.udp, object, reliable, &self.content_loader)?;
         }
 
         Ok(())
@@ -2087,7 +2149,7 @@ impl NetProvider for ArcNetProvider {
             .map(|server| {
                 lock_unpoison(&server.connections)
                     .values()
-                    .map(|connection| connection.info.clone())
+                    .map(SharedArcConnection::snapshot)
                     .collect()
             })
             .unwrap_or_default()
@@ -2098,7 +2160,7 @@ impl NetProvider for ArcNetProvider {
             server.shutdown.store(true, Ordering::Relaxed);
 
             for connection in lock_unpoison(&server.connections).values() {
-                let _ = lock_unpoison(&connection.tcp).shutdown(Shutdown::Both);
+                connection.close();
             }
             lock_unpoison(&server.pending).clear();
             lock_unpoison(&server.connections).clear();
@@ -2300,11 +2362,7 @@ fn spawn_server_accept_loop(
                     let mut info = NetConnection::new(address.clone());
                     info.has_begun_connecting = true;
 
-                    let connection = SharedArcConnection {
-                        info,
-                        tcp: writer.clone(),
-                        udp_addr: None,
-                    };
+                    let connection = SharedArcConnection::new(info, writer.clone(), None);
                     lock_unpoison(&pending).insert(connection_id, connection);
 
                     let register =
@@ -2363,8 +2421,11 @@ fn spawn_server_tcp_reader(
             }
         }
 
-        lock_unpoison(&pending).remove(&connection_id);
-        if lock_unpoison(&connections).remove(&connection_id).is_some() {
+        if let Some(connection) = lock_unpoison(&pending).remove(&connection_id) {
+            connection.mark_disconnected();
+        }
+        if let Some(connection) = lock_unpoison(&connections).remove(&connection_id) {
+            connection.mark_disconnected();
             push_event(
                 &events,
                 ProviderEvent::ServerDisconnected {
@@ -2409,8 +2470,7 @@ fn spawn_server_udp_loop(
                         None => continue,
                     };
                     connection.udp_addr = Some(src);
-                    connection.info.has_connected = true;
-                    connection.info.address = src.ip().to_string();
+                    connection.mark_connected(src.ip().to_string());
 
                     let tcp = connection.tcp.clone();
                     lock_unpoison(&connections).insert(connection_id, connection.clone());
@@ -2421,7 +2481,7 @@ fn spawn_server_udp_loop(
                         &events,
                         ProviderEvent::ServerConnected {
                             connection_id,
-                            address: connection.info.address.clone(),
+                            address: connection.snapshot().address,
                         },
                     );
                 }
@@ -2680,6 +2740,42 @@ mod tests {
         assert_eq!(wait_for_server_packet(&server, connection_id), packet);
 
         client.disconnect_client();
+        server.close_server();
+    }
+
+    #[test]
+    fn arc_net_provider_updates_connection_snapshots_after_disconnect() {
+        let port = free_local_port();
+        let mut server = ArcNetProvider::new();
+        server.host_server(port).unwrap();
+
+        let mut client = ArcNetProvider::new();
+        client
+            .connect_client("127.0.0.1", port, Box::new(|| {}))
+            .unwrap();
+
+        let connected = wait_for_event(&server, |event| {
+            matches!(event, ProviderEvent::ServerConnected { .. })
+        });
+        let connection_id = match connected {
+            ProviderEvent::ServerConnected { connection_id, .. } => connection_id,
+            other => panic!("unexpected event: {other:?}"),
+        };
+
+        let connections = server.get_connections();
+        assert_eq!(connections.len(), 1);
+        assert!(connections[0].is_connected());
+
+        client.disconnect_client();
+        assert!(matches!(
+            wait_for_event(&server, |event| matches!(
+                event,
+                ProviderEvent::ServerDisconnected { connection_id: id, .. } if *id == connection_id
+            )),
+            ProviderEvent::ServerDisconnected { .. }
+        ));
+        assert!(server.get_connections().is_empty());
+
         server.close_server();
     }
 
