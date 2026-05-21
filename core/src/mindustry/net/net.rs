@@ -6,14 +6,19 @@ use std::time::Duration;
 use super::host::Host;
 use super::net_connection::NetConnection;
 use super::packets::{
-    AnnounceCallPacket, BlockSnapshotCallPacket, BuildHealthUpdateCallPacket,
-    ClearObjectivesCallPacket, ClientBinaryPacketReliableCallPacket,
-    ClientBinaryPacketUnreliableCallPacket, ClientPacketReliableCallPacket,
+    AdminRequestCallPacket, AnnounceCallPacket, AssemblerDroneSpawnedCallPacket,
+    AssemblerUnitSpawnedCallPacket, AutoDoorToggleCallPacket, BeginBreakCallPacket,
+    BeginPlaceCallPacket, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
+    BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
+    ClearLiquidsCallPacket, ClearObjectivesCallPacket, ClientBinaryPacketReliableCallPacket,
+    ClientBinaryPacketUnreliableCallPacket, ClientLogicDataReliableCallPacket,
+    ClientLogicDataUnreliableCallPacket, ClientPacketReliableCallPacket,
     ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CompleteObjectiveCallPacket,
-    Connect, ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
-    CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
-    CreateWeatherCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
+    CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
+    ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket, CopyToClipboardCallPacket,
+    CreateBulletCallPacket, CreateMarkerCallPacket, CreateWeatherCallPacket,
+    DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
     DeconstructFinishCallPacket, DeletePlansCallPacket, DestroyPayloadCallPacket, Disconnect,
     DropItemCallPacket, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
     EntitySnapshotCallPacket, FollowUpMenuCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
@@ -61,17 +66,31 @@ pub enum PacketKind {
     StreamChunk(StreamChunk),
     Streamable(Streamable),
     ConnectPacket(ConnectPacket),
+    AdminRequestCallPacket(AdminRequestCallPacket),
     AnnounceCallPacket(AnnounceCallPacket),
+    AssemblerDroneSpawnedCallPacket(AssemblerDroneSpawnedCallPacket),
+    AssemblerUnitSpawnedCallPacket(AssemblerUnitSpawnedCallPacket),
+    AutoDoorToggleCallPacket(AutoDoorToggleCallPacket),
+    BeginBreakCallPacket(BeginBreakCallPacket),
+    BeginPlaceCallPacket(BeginPlaceCallPacket),
     BlockSnapshotCallPacket(BlockSnapshotCallPacket),
+    BuildDestroyedCallPacket(BuildDestroyedCallPacket),
     BuildHealthUpdateCallPacket(BuildHealthUpdateCallPacket),
+    BuildingControlSelectCallPacket(BuildingControlSelectCallPacket),
+    ClearItemsCallPacket(ClearItemsCallPacket),
+    ClearLiquidsCallPacket(ClearLiquidsCallPacket),
     ClearObjectivesCallPacket(ClearObjectivesCallPacket),
     ClientBinaryPacketReliableCallPacket(ClientBinaryPacketReliableCallPacket),
     ClientBinaryPacketUnreliableCallPacket(ClientBinaryPacketUnreliableCallPacket),
+    ClientLogicDataReliableCallPacket(ClientLogicDataReliableCallPacket),
+    ClientLogicDataUnreliableCallPacket(ClientLogicDataUnreliableCallPacket),
     ClientPacketReliableCallPacket(ClientPacketReliableCallPacket),
     ClientPacketUnreliableCallPacket(ClientPacketUnreliableCallPacket),
     ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket),
     ClientPlanSnapshotReceivedCallPacket(ClientPlanSnapshotReceivedCallPacket),
     ClientSnapshotCallPacket(ClientSnapshotCallPacket),
+    CommandBuildingCallPacket(CommandBuildingCallPacket),
+    CommandUnitsCallPacket(CommandUnitsCallPacket),
     CompleteObjectiveCallPacket(CompleteObjectiveCallPacket),
     ConnectCallPacket(ConnectCallPacket),
     ConnectConfirmCallPacket(ConnectConfirmCallPacket),
@@ -228,12 +247,26 @@ impl PacketKind {
             | PacketKind::RequestBlockSnapshotCallPacket(_)
             | PacketKind::StateSnapshotCallPacket(_) => 0,
             PacketKind::UnitSpawnCallPacket(_) => 0,
-            PacketKind::AnnounceCallPacket(_)
+            PacketKind::AdminRequestCallPacket(_)
+            | PacketKind::AnnounceCallPacket(_)
+            | PacketKind::AssemblerDroneSpawnedCallPacket(_)
+            | PacketKind::AssemblerUnitSpawnedCallPacket(_)
+            | PacketKind::AutoDoorToggleCallPacket(_)
+            | PacketKind::BeginBreakCallPacket(_)
+            | PacketKind::BeginPlaceCallPacket(_)
+            | PacketKind::BuildDestroyedCallPacket(_)
+            | PacketKind::BuildingControlSelectCallPacket(_)
+            | PacketKind::ClearItemsCallPacket(_)
+            | PacketKind::ClearLiquidsCallPacket(_)
             | PacketKind::ClearObjectivesCallPacket(_)
             | PacketKind::ClientBinaryPacketReliableCallPacket(_)
             | PacketKind::ClientBinaryPacketUnreliableCallPacket(_)
+            | PacketKind::ClientLogicDataReliableCallPacket(_)
+            | PacketKind::ClientLogicDataUnreliableCallPacket(_)
             | PacketKind::ClientPacketReliableCallPacket(_)
             | PacketKind::ClientPacketUnreliableCallPacket(_)
+            | PacketKind::CommandBuildingCallPacket(_)
+            | PacketKind::CommandUnitsCallPacket(_)
             | PacketKind::CompleteObjectiveCallPacket(_)
             | PacketKind::ConnectCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
@@ -389,10 +422,16 @@ impl PacketKind {
             | PacketKind::RequestItemCallPacket(_)
             | PacketKind::RequestUnitPayloadCallPacket(_)
             | PacketKind::RotateBlockCallPacket(_)
+            | PacketKind::BuildingControlSelectCallPacket(_)
+            | PacketKind::CommandBuildingCallPacket(_)
+            | PacketKind::CommandUnitsCallPacket(_)
             | PacketKind::SetPlayerTeamEditorCallPacket(_)
             | PacketKind::SetUnitCommandCallPacket(_)
             | PacketKind::SetUnitStanceCallPacket(_) => true,
-            PacketKind::SendChatMessageCallPacket(_)
+            PacketKind::AdminRequestCallPacket(_)
+            | PacketKind::ClientLogicDataReliableCallPacket(_)
+            | PacketKind::ClientLogicDataUnreliableCallPacket(_)
+            | PacketKind::SendChatMessageCallPacket(_)
             | PacketKind::ServerBinaryPacketReliableCallPacket(_)
             | PacketKind::ServerBinaryPacketUnreliableCallPacket(_)
             | PacketKind::ServerPacketReliableCallPacket(_)
@@ -410,7 +449,15 @@ impl PacketKind {
             | PacketKind::EntitySnapshotCallPacket(_)
             | PacketKind::FollowUpMenuCallPacket(_)
             | PacketKind::GameOverCallPacket(_)
+            | PacketKind::AssemblerDroneSpawnedCallPacket(_)
+            | PacketKind::AssemblerUnitSpawnedCallPacket(_)
+            | PacketKind::AutoDoorToggleCallPacket(_)
+            | PacketKind::BeginBreakCallPacket(_)
+            | PacketKind::BeginPlaceCallPacket(_)
+            | PacketKind::BuildDestroyedCallPacket(_)
             | PacketKind::BlockSnapshotCallPacket(_)
+            | PacketKind::ClearItemsCallPacket(_)
+            | PacketKind::ClearLiquidsCallPacket(_)
             | PacketKind::HiddenSnapshotCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)

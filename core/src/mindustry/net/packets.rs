@@ -5,21 +5,22 @@ use std::io::{Read, Write};
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::{ContentId, ContentType};
 use crate::mindustry::io::type_io::{
-    read_block, read_building_ref, read_bullet_type_id, read_bytes, read_client_plans, read_color,
-    read_content_id, read_content_name, read_effect_id, read_entity_ref, read_i32, read_i64,
-    read_int_seq, read_ints, read_item, read_item_stacks, read_kick, read_liquid,
+    read_action, read_block, read_building_ref, read_bullet_type_id, read_bytes, read_client_plans,
+    read_color, read_content_id, read_content_name, read_effect_id, read_entity_ref, read_i32,
+    read_i64, read_int_seq, read_ints, read_item, read_item_stacks, read_kick, read_liquid,
     read_liquid_stacks, read_marker_control, read_object_safe, read_objective_marker_json,
     read_objectives_json, read_plans_queue, read_required_content_name, read_rules_json,
     read_sound_id, read_string, read_string_array, read_team, read_tile_pos, read_trace_info,
-    read_u32, read_u64, read_u8, read_unit_container, read_unit_ref, read_unit_type, write_block,
-    write_building_ref, write_bullet_type_id, write_bytes, write_client_plans, write_color,
-    write_content_by_name, write_content_id, write_effect_id, write_entity_ref, write_i32,
-    write_i64, write_int_seq, write_ints, write_item, write_item_stacks, write_kick, write_liquid,
-    write_liquid_stacks, write_marker_control, write_object, write_objective_marker_json,
-    write_objectives_json, write_plans_queue_net, write_required_content_ref, write_rules_json,
-    write_sound_id, write_string, write_string_array, write_team, write_tile_pos, write_trace_info,
-    write_u32, write_u64, write_u8, write_unit_container, write_unit_ref, write_unit_type,
-    BuildPlanWire, BuildingRef, EntityRef, RgbaColor, TeamId, TypeValue, UnitRef,
+    read_u32, read_u64, read_u8, read_unit_container, read_unit_ref, read_unit_type, read_vec2,
+    write_action, write_block, write_building_ref, write_bullet_type_id, write_bytes,
+    write_client_plans, write_color, write_content_by_name, write_content_id, write_effect_id,
+    write_entity_ref, write_i32, write_i64, write_int_seq, write_ints, write_item,
+    write_item_stacks, write_kick, write_liquid, write_liquid_stacks, write_marker_control,
+    write_object, write_objective_marker_json, write_objectives_json, write_plans_queue_net,
+    write_required_content_ref, write_rules_json, write_sound_id, write_string, write_string_array,
+    write_team, write_tile_pos, write_trace_info, write_u32, write_u64, write_u8,
+    write_unit_container, write_unit_ref, write_unit_type, write_vec2, BuildPlanWire, BuildingRef,
+    EntityRef, RgbaColor, TeamId, TypeValue, UnitRef, Vec2,
 };
 use crate::mindustry::io::UnitSyncContainer;
 use crate::mindustry::net::administration::TraceInfo as NetTraceInfo;
@@ -37,17 +38,31 @@ pub mod packet_ids {
     pub const STREAM_CHUNK: PacketId = 1;
     pub const WORLD_STREAM: PacketId = 2;
     pub const CONNECT_PACKET: PacketId = 3;
+    pub const ADMIN_REQUEST_CALL_PACKET: PacketId = 4;
     pub const ANNOUNCE_CALL_PACKET: PacketId = 5;
+    pub const ASSEMBLER_DRONE_SPAWNED_CALL_PACKET: PacketId = 6;
+    pub const ASSEMBLER_UNIT_SPAWNED_CALL_PACKET: PacketId = 7;
+    pub const AUTO_DOOR_TOGGLE_CALL_PACKET: PacketId = 8;
+    pub const BEGIN_BREAK_CALL_PACKET: PacketId = 9;
+    pub const BEGIN_PLACE_CALL_PACKET: PacketId = 10;
     pub const BLOCK_SNAPSHOT_CALL_PACKET: PacketId = 11;
+    pub const BUILD_DESTROYED_CALL_PACKET: PacketId = 12;
     pub const BUILD_HEALTH_UPDATE_CALL_PACKET: PacketId = 13;
+    pub const BUILDING_CONTROL_SELECT_CALL_PACKET: PacketId = 14;
+    pub const CLEAR_ITEMS_CALL_PACKET: PacketId = 15;
+    pub const CLEAR_LIQUIDS_CALL_PACKET: PacketId = 16;
     pub const CLEAR_OBJECTIVES_CALL_PACKET: PacketId = 17;
     pub const CLIENT_BINARY_PACKET_RELIABLE_CALL_PACKET: PacketId = 18;
     pub const CLIENT_BINARY_PACKET_UNRELIABLE_CALL_PACKET: PacketId = 19;
+    pub const CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET: PacketId = 20;
+    pub const CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET: PacketId = 21;
     pub const CLIENT_PACKET_RELIABLE_CALL_PACKET: PacketId = 22;
     pub const CLIENT_PACKET_UNRELIABLE_CALL_PACKET: PacketId = 23;
     pub const CLIENT_PLAN_SNAPSHOT_CALL_PACKET: PacketId = 24;
     pub const CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET: PacketId = 25;
     pub const CLIENT_SNAPSHOT_CALL_PACKET: PacketId = 26;
+    pub const COMMAND_BUILDING_CALL_PACKET: PacketId = 27;
+    pub const COMMAND_UNITS_CALL_PACKET: PacketId = 28;
     pub const COMPLETE_OBJECTIVE_CALL_PACKET: PacketId = 29;
     pub const CONNECT_CALL_PACKET: PacketId = 30;
     pub const CONNECT_CONFIRM_CALL_PACKET: PacketId = 31;
@@ -328,6 +343,21 @@ pub const CONNECT_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     notes: "Fourth upstream Net.registerPacket entry; keeps Java read/write asymmetry.",
 };
 
+pub const ADMIN_REQUEST_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::ADMIN_REQUEST_CALL_PACKET),
+    name: "AdminRequestCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ClientToServer,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: false,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.AdminRequestCallPacket",
+    notes: "Generated by Call.registerPackets(); Player entity, AdminAction ordinal and TypeIO Object params.",
+};
+
 pub const ANNOUNCE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     id: Some(packet_ids::ANNOUNCE_CALL_PACKET),
     name: "AnnounceCallPacket",
@@ -341,6 +371,81 @@ pub const ANNOUNCE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEnt
     codec: PacketCodecState::Implemented,
     upstream: "mindustry.gen.AnnounceCallPacket",
     notes: "Generated by Call.registerPackets(); single TypeIO string payload.",
+};
+
+pub const ASSEMBLER_DRONE_SPAWNED_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::ASSEMBLER_DRONE_SPAWNED_CALL_PACKET),
+    name: "AssemblerDroneSpawnedCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.AssemblerDroneSpawnedCallPacket",
+    notes: "Generated by Call.registerPackets(); assembler tile plus Java int drone id.",
+};
+
+pub const ASSEMBLER_UNIT_SPAWNED_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::ASSEMBLER_UNIT_SPAWNED_CALL_PACKET),
+    name: "AssemblerUnitSpawnedCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.AssemblerUnitSpawnedCallPacket",
+    notes: "Generated by Call.registerPackets(); assembler tile payload.",
+};
+
+pub const AUTO_DOOR_TOGGLE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::AUTO_DOOR_TOGGLE_CALL_PACKET),
+    name: "AutoDoorToggleCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.AutoDoorToggleCallPacket",
+    notes: "Generated by Call.registerPackets(); door tile plus open boolean.",
+};
+
+pub const BEGIN_BREAK_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::BEGIN_BREAK_CALL_PACKET),
+    name: "BeginBreakCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.BeginBreakCallPacket",
+    notes: "Generated by Call.registerPackets(); Unit, Team, x, y payload.",
+};
+
+pub const BEGIN_PLACE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::BEGIN_PLACE_CALL_PACKET),
+    name: "BeginPlaceCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.BeginPlaceCallPacket",
+    notes: "Generated by Call.registerPackets(); unit, block, team, coordinates, and placeConfig payload; block lookup needs ContentLoader.",
 };
 
 pub const BLOCK_SNAPSHOT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
@@ -358,6 +463,21 @@ pub const BLOCK_SNAPSHOT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManif
     notes: "Generated by Call.registerPackets(); low-priority snapshot amount short plus TypeIO byte[] payload.",
 };
 
+pub const BUILD_DESTROYED_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::BUILD_DESTROYED_CALL_PACKET),
+    name: "BuildDestroyedCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.BuildDestroyedCallPacket",
+    notes: "Generated by Call.registerPackets(); building reference payload.",
+};
+
 pub const BUILD_HEALTH_UPDATE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     id: Some(packet_ids::BUILD_HEALTH_UPDATE_CALL_PACKET),
     name: "BuildHealthUpdateCallPacket",
@@ -371,6 +491,51 @@ pub const BUILD_HEALTH_UPDATE_CALL_PACKET_MANIFEST: PacketManifestEntry = Packet
     codec: PacketCodecState::Implemented,
     upstream: "mindustry.gen.BuildHealthUpdateCallPacket",
     notes: "Generated by Call.registerPackets(); TypeIO IntSeq of building ids.",
+};
+
+pub const BUILDING_CONTROL_SELECT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::BUILDING_CONTROL_SELECT_CALL_PACKET),
+    name: "BuildingControlSelectCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::Bidirectional,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.BuildingControlSelectCallPacket",
+    notes: "Generated by Call.registerPackets(); client payload omits player, server-forwarded payload includes player then Building.",
+};
+
+pub const CLEAR_ITEMS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::CLEAR_ITEMS_CALL_PACKET),
+    name: "ClearItemsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.ClearItemsCallPacket",
+    notes: "Generated by Call.registerPackets(); single Building reference payload.",
+};
+
+pub const CLEAR_LIQUIDS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::CLEAR_LIQUIDS_CALL_PACKET),
+    name: "ClearLiquidsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.ClearLiquidsCallPacket",
+    notes: "Generated by Call.registerPackets(); single Building reference payload.",
 };
 
 pub const CLEAR_OBJECTIVES_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
@@ -418,6 +583,39 @@ pub const CLIENT_BINARY_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST: PacketManifestEn
         codec: PacketCodecState::Implemented,
         upstream: "mindustry.gen.ClientBinaryPacketUnreliableCallPacket",
         notes: "Generated by Call.registerPackets(); unreliable variant of binary custom packet.",
+    };
+
+pub const CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry =
+    PacketManifestEntry {
+        id: Some(packet_ids::CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET),
+        name: "ClientLogicDataReliableCallPacket",
+        transport: PacketTransport::NetPacket,
+        direction: PacketDirection::ClientToServer,
+        streamable: false,
+        priority: Some(PacketPriority::Normal),
+        allow_client_endpoint: false,
+        allow_server_endpoint: true,
+        force_uncompressed: false,
+        codec: PacketCodecState::Implemented,
+        upstream: "mindustry.gen.ClientLogicDataReliableCallPacket",
+        notes:
+            "Generated by Call.registerPackets(); TypeIO string channel plus TypeIO Object value.",
+    };
+
+pub const CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry =
+    PacketManifestEntry {
+        id: Some(packet_ids::CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET),
+        name: "ClientLogicDataUnreliableCallPacket",
+        transport: PacketTransport::NetPacket,
+        direction: PacketDirection::ClientToServer,
+        streamable: false,
+        priority: Some(PacketPriority::Normal),
+        allow_client_endpoint: false,
+        allow_server_endpoint: true,
+        force_uncompressed: false,
+        codec: PacketCodecState::Implemented,
+        upstream: "mindustry.gen.ClientLogicDataUnreliableCallPacket",
+        notes: "Generated by Call.registerPackets(); unreliable variant of client logic data.",
     };
 
 pub const CLIENT_PACKET_RELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
@@ -495,6 +693,36 @@ pub const CLIENT_SNAPSHOT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketMani
     codec: PacketCodecState::Implemented,
     upstream: "mindustry.gen.ClientSnapshotCallPacket",
     notes: "Generated by Call.registerPackets(); client movement/build-state snapshot, including Tile, Block and Queue<BuildPlan> TypeIO fields.",
+};
+
+pub const COMMAND_BUILDING_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::COMMAND_BUILDING_CALL_PACKET),
+    name: "CommandBuildingCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::Bidirectional,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.CommandBuildingCallPacket",
+    notes: "Generated by Call.registerPackets(); client payload omits player, server-forwarded payload includes player plus IntSeq and Vec2 target.",
+};
+
+pub const COMMAND_UNITS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::COMMAND_UNITS_CALL_PACKET),
+    name: "CommandUnitsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::Bidirectional,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.CommandUnitsCallPacket",
+    notes: "Generated by Call.registerPackets(); client payload omits player, server-forwarded payload includes player plus unit ids, targets and command flags.",
 };
 
 pub const COMPLETE_OBJECTIVE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
@@ -2474,22 +2702,36 @@ pub const PING_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     notes: "Upstream uses one Ping framework message with an isReply flag; no separate Pong class.",
 };
 
-pub const REGISTERED_PACKET_MANIFEST: [PacketManifestEntry; 144] = [
+pub const REGISTERED_PACKET_MANIFEST: [PacketManifestEntry; 158] = [
     STREAM_BEGIN_MANIFEST,
     STREAM_CHUNK_MANIFEST,
     WORLD_STREAM_MANIFEST,
     CONNECT_PACKET_MANIFEST,
+    ADMIN_REQUEST_CALL_PACKET_MANIFEST,
     ANNOUNCE_CALL_PACKET_MANIFEST,
+    ASSEMBLER_DRONE_SPAWNED_CALL_PACKET_MANIFEST,
+    ASSEMBLER_UNIT_SPAWNED_CALL_PACKET_MANIFEST,
+    AUTO_DOOR_TOGGLE_CALL_PACKET_MANIFEST,
+    BEGIN_BREAK_CALL_PACKET_MANIFEST,
+    BEGIN_PLACE_CALL_PACKET_MANIFEST,
     BLOCK_SNAPSHOT_CALL_PACKET_MANIFEST,
+    BUILD_DESTROYED_CALL_PACKET_MANIFEST,
     BUILD_HEALTH_UPDATE_CALL_PACKET_MANIFEST,
+    BUILDING_CONTROL_SELECT_CALL_PACKET_MANIFEST,
+    CLEAR_ITEMS_CALL_PACKET_MANIFEST,
+    CLEAR_LIQUIDS_CALL_PACKET_MANIFEST,
     CLEAR_OBJECTIVES_CALL_PACKET_MANIFEST,
     CLIENT_BINARY_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_BINARY_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
+    CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET_MANIFEST,
+    CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_PLAN_SNAPSHOT_CALL_PACKET_MANIFEST,
     CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET_MANIFEST,
     CLIENT_SNAPSHOT_CALL_PACKET_MANIFEST,
+    COMMAND_BUILDING_CALL_PACKET_MANIFEST,
+    COMMAND_UNITS_CALL_PACKET_MANIFEST,
     COMPLETE_OBJECTIVE_CALL_PACKET_MANIFEST,
     CONNECT_CALL_PACKET_MANIFEST,
     CONNECT_CONFIRM_CALL_PACKET_MANIFEST,
@@ -2621,24 +2863,38 @@ pub const REGISTERED_PACKET_MANIFEST: [PacketManifestEntry; 144] = [
     WORLD_DATA_BEGIN_CALL_PACKET_MANIFEST,
 ];
 
-pub const PACKET_MANIFEST: [PacketManifestEntry; 148] = [
+pub const PACKET_MANIFEST: [PacketManifestEntry; 162] = [
     CONNECT_EVENT_MANIFEST,
     DISCONNECT_EVENT_MANIFEST,
     STREAM_BEGIN_MANIFEST,
     STREAM_CHUNK_MANIFEST,
     WORLD_STREAM_MANIFEST,
     CONNECT_PACKET_MANIFEST,
+    ADMIN_REQUEST_CALL_PACKET_MANIFEST,
     ANNOUNCE_CALL_PACKET_MANIFEST,
+    ASSEMBLER_DRONE_SPAWNED_CALL_PACKET_MANIFEST,
+    ASSEMBLER_UNIT_SPAWNED_CALL_PACKET_MANIFEST,
+    AUTO_DOOR_TOGGLE_CALL_PACKET_MANIFEST,
+    BEGIN_BREAK_CALL_PACKET_MANIFEST,
+    BEGIN_PLACE_CALL_PACKET_MANIFEST,
     BLOCK_SNAPSHOT_CALL_PACKET_MANIFEST,
+    BUILD_DESTROYED_CALL_PACKET_MANIFEST,
     BUILD_HEALTH_UPDATE_CALL_PACKET_MANIFEST,
+    BUILDING_CONTROL_SELECT_CALL_PACKET_MANIFEST,
+    CLEAR_ITEMS_CALL_PACKET_MANIFEST,
+    CLEAR_LIQUIDS_CALL_PACKET_MANIFEST,
     CLEAR_OBJECTIVES_CALL_PACKET_MANIFEST,
     CLIENT_BINARY_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_BINARY_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
+    CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET_MANIFEST,
+    CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
     CLIENT_PLAN_SNAPSHOT_CALL_PACKET_MANIFEST,
     CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET_MANIFEST,
     CLIENT_SNAPSHOT_CALL_PACKET_MANIFEST,
+    COMMAND_BUILDING_CALL_PACKET_MANIFEST,
+    COMMAND_UNITS_CALL_PACKET_MANIFEST,
     COMPLETE_OBJECTIVE_CALL_PACKET_MANIFEST,
     CONNECT_CALL_PACKET_MANIFEST,
     CONNECT_CONFIRM_CALL_PACKET_MANIFEST,
@@ -2773,7 +3029,7 @@ pub const PACKET_MANIFEST: [PacketManifestEntry; 148] = [
 ];
 
 pub const PACKET_MANIFEST_PHASE1_GAPS: [&str; 2] = [
-    "Generated Call.registerPackets() entries, including any generated InvokePacket classes, are not covered because the generated Java output is not checked into upstream v157.4.",
+    "Generated InvokePacket classes are not listed separately because upstream v157.4 does not check them in with the generated packet output.",
     "Pong is not listed separately because upstream ArcNetProvider uses FrameworkMessage.Ping plus an isReply flag.",
 ];
 
@@ -3129,6 +3385,35 @@ impl PacketCodec for ConnectPacket {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdminRequestCallPacket {
+    pub other: EntityRef,
+    pub action: AdminAction,
+    pub params: TypeValue,
+}
+
+impl PacketRuntime for AdminRequestCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        server
+    }
+}
+
+impl PacketCodec for AdminRequestCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            other: read_entity_ref(read)?,
+            action: read_action(read)?,
+            params: read_object_safe(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_entity_ref(write, self.other)?;
+        write_action(write, self.action)?;
+        write_object(write, &self.params)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnnounceCallPacket {
     pub message: String,
@@ -3143,6 +3428,161 @@ impl PacketCodec for AnnounceCallPacket {
 
     fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
         write_string(write, Some(&self.message))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssemblerDroneSpawnedCallPacket {
+    pub tile: Option<i32>,
+    pub id: i32,
+}
+
+impl PacketRuntime for AssemblerDroneSpawnedCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl PacketCodec for AssemblerDroneSpawnedCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            tile: read_tile_pos(read)?,
+            id: read_i32(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_tile_pos(write, self.tile)?;
+        write_i32(write, self.id)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssemblerUnitSpawnedCallPacket {
+    pub tile: Option<i32>,
+}
+
+impl PacketRuntime for AssemblerUnitSpawnedCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl PacketCodec for AssemblerUnitSpawnedCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            tile: read_tile_pos(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_tile_pos(write, self.tile)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoDoorToggleCallPacket {
+    pub tile: Option<i32>,
+    pub open: bool,
+}
+
+impl PacketRuntime for AutoDoorToggleCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl PacketCodec for AutoDoorToggleCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            tile: read_tile_pos(read)?,
+            open: read_bool(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_tile_pos(write, self.tile)?;
+        write_bool(write, self.open)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BeginBreakCallPacket {
+    pub unit: UnitRef,
+    pub team: TeamId,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl PacketRuntime for BeginBreakCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl PacketCodec for BeginBreakCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            unit: read_unit_ref(read)?,
+            team: read_team(read)?,
+            x: read_i32(read)?,
+            y: read_i32(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_unit_ref(write, self.unit)?;
+        write_team(write, Some(self.team))?;
+        write_i32(write, self.x)?;
+        write_i32(write, self.y)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeginPlaceCallPacket {
+    pub unit: UnitRef,
+    pub result: Option<String>,
+    pub team: TeamId,
+    pub x: i32,
+    pub y: i32,
+    pub rotation: i32,
+    pub place_config: TypeValue,
+}
+
+impl PacketRuntime for BeginPlaceCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl BeginPlaceCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            unit: read_unit_ref(read)?,
+            result: read_block(read, loader)?,
+            team: read_team(read)?,
+            x: read_i32(read)?,
+            y: read_i32(read)?,
+            rotation: read_i32(read)?,
+            place_config: read_object_safe(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_unit_ref(write, self.unit)?;
+        write_block(write, loader, self.result.as_deref())?;
+        write_team(write, Some(self.team))?;
+        write_i32(write, self.x)?;
+        write_i32(write, self.y)?;
+        write_i32(write, self.rotation)?;
+        write_object(write, &self.place_config)
     }
 }
 
@@ -3176,6 +3616,29 @@ impl PacketCodec for BlockSnapshotCallPacket {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildDestroyedCallPacket {
+    pub build: BuildingRef,
+}
+
+impl PacketRuntime for BuildDestroyedCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl PacketCodec for BuildDestroyedCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_building_ref(write, self.build)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildHealthUpdateCallPacket {
     pub buildings: Vec<i32>,
@@ -3200,6 +3663,95 @@ impl PacketCodec for BuildHealthUpdateCallPacket {
 
     fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
         write_int_seq(write, &self.buildings)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildingControlSelectCallPacket {
+    /// Present on server-forwarded packets read by clients; omitted on
+    /// client-origin packets read by the server.
+    pub player: EntityRef,
+    pub build: BuildingRef,
+}
+
+impl BuildingControlSelectCallPacket {
+    pub fn read_from_client_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: EntityRef::null(),
+            build: read_building_ref(read)?,
+        })
+    }
+
+    pub fn write_client_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_building_ref(write, self.build)
+    }
+
+    pub fn read_from_server_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: read_entity_ref(read)?,
+            build: read_building_ref(read)?,
+        })
+    }
+
+    pub fn write_server_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_entity_ref(write, self.player)?;
+        write_building_ref(write, self.build)
+    }
+}
+
+impl PacketCodec for BuildingControlSelectCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Self::read_from_client_payload(read)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.write_client_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClearItemsCallPacket {
+    pub build: BuildingRef,
+}
+
+impl PacketRuntime for ClearItemsCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl PacketCodec for ClearItemsCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_building_ref(write, self.build)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClearLiquidsCallPacket {
+    pub build: BuildingRef,
+}
+
+impl PacketRuntime for ClearLiquidsCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        !server
+    }
+}
+
+impl PacketCodec for ClearLiquidsCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_building_ref(write, self.build)
     }
 }
 
@@ -3257,6 +3809,64 @@ pub struct ClientBinaryPacketUnreliableCallPacket(pub ClientBinaryPacketCallPack
 impl PacketCodec for ClientBinaryPacketUnreliableCallPacket {
     fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
         ClientBinaryPacketCallPacket::read_payload(read).map(Self)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.0.write_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientLogicDataCallPacket {
+    pub channel: String,
+    pub value: TypeValue,
+}
+
+impl ClientLogicDataCallPacket {
+    fn read_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            channel: read_string(read)?.unwrap_or_default(),
+            value: read_object_safe(read)?,
+        })
+    }
+
+    fn write_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_string(write, Some(&self.channel))?;
+        write_object(write, &self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientLogicDataReliableCallPacket(pub ClientLogicDataCallPacket);
+
+impl PacketRuntime for ClientLogicDataReliableCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        server
+    }
+}
+
+impl PacketCodec for ClientLogicDataReliableCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        ClientLogicDataCallPacket::read_payload(read).map(Self)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.0.write_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientLogicDataUnreliableCallPacket(pub ClientLogicDataCallPacket);
+
+impl PacketRuntime for ClientLogicDataUnreliableCallPacket {
+    fn allow(&self, server: bool) -> bool {
+        server
+    }
+}
+
+impl PacketCodec for ClientLogicDataUnreliableCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        ClientLogicDataCallPacket::read_payload(read).map(Self)
     }
 
     fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
@@ -3454,6 +4064,122 @@ impl ClientSnapshotCallPacket {
         write_f32(write, self.view_y)?;
         write_f32(write, self.view_width)?;
         write_f32(write, self.view_height)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandBuildingCallPacket {
+    /// Present on server-forwarded packets read by clients; omitted on
+    /// client-origin packets read by the server.
+    pub player: EntityRef,
+    pub buildings: Vec<i32>,
+    pub target: Vec2,
+}
+
+impl CommandBuildingCallPacket {
+    pub fn read_from_client_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: EntityRef::null(),
+            buildings: read_ints(read)?,
+            target: read_vec2(read)?,
+        })
+    }
+
+    pub fn write_client_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_ints(write, &self.buildings)?;
+        write_vec2(write, self.target)
+    }
+
+    pub fn read_from_server_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: read_entity_ref(read)?,
+            buildings: read_ints(read)?,
+            target: read_vec2(read)?,
+        })
+    }
+
+    pub fn write_server_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_entity_ref(write, self.player)?;
+        write_ints(write, &self.buildings)?;
+        write_vec2(write, self.target)
+    }
+}
+
+impl PacketCodec for CommandBuildingCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Self::read_from_client_payload(read)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.write_client_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandUnitsCallPacket {
+    /// Present on server-forwarded packets read by clients; omitted on
+    /// client-origin packets read by the server.
+    pub player: EntityRef,
+    pub unit_ids: Vec<i32>,
+    pub build_target: BuildingRef,
+    pub unit_target: UnitRef,
+    pub pos_target: Vec2,
+    pub queue_command: bool,
+    pub final_batch: bool,
+}
+
+impl CommandUnitsCallPacket {
+    pub fn read_from_client_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: EntityRef::null(),
+            unit_ids: read_ints(read)?,
+            build_target: read_building_ref(read)?,
+            unit_target: read_unit_ref(read)?,
+            pos_target: read_vec2(read)?,
+            queue_command: read_bool(read)?,
+            final_batch: read_bool(read)?,
+        })
+    }
+
+    pub fn write_client_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_ints(write, &self.unit_ids)?;
+        write_building_ref(write, self.build_target)?;
+        write_unit_ref(write, self.unit_target)?;
+        write_vec2(write, self.pos_target)?;
+        write_bool(write, self.queue_command)?;
+        write_bool(write, self.final_batch)
+    }
+
+    pub fn read_from_server_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: read_entity_ref(read)?,
+            unit_ids: read_ints(read)?,
+            build_target: read_building_ref(read)?,
+            unit_target: read_unit_ref(read)?,
+            pos_target: read_vec2(read)?,
+            queue_command: read_bool(read)?,
+            final_batch: read_bool(read)?,
+        })
+    }
+
+    pub fn write_server_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_entity_ref(write, self.player)?;
+        write_ints(write, &self.unit_ids)?;
+        write_building_ref(write, self.build_target)?;
+        write_unit_ref(write, self.unit_target)?;
+        write_vec2(write, self.pos_target)?;
+        write_bool(write, self.queue_command)?;
+        write_bool(write, self.final_batch)
+    }
+}
+
+impl PacketCodec for CommandUnitsCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Self::read_from_client_payload(read)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.write_client_payload(write)
     }
 }
 
@@ -7727,6 +8453,305 @@ mod tests {
     }
 
     #[test]
+    fn generated_begin_place_packet_uses_java_typeio_field_order() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let router_id = loader
+            .get_by_name(crate::mindustry::ctype::ContentType::Block, "router")
+            .unwrap()
+            .id
+            .to_be_bytes();
+        let packet = BeginPlaceCallPacket {
+            unit: UnitRef::Unit { id: 987 },
+            result: Some("router".into()),
+            team: TeamId(6),
+            x: 7,
+            y: 8,
+            rotation: 2,
+            place_config: TypeValue::String("cfg".into()),
+        };
+
+        let mut bytes = Vec::new();
+        packet.write_to_with_loader(&mut bytes, &loader).unwrap();
+        let mut expected = Vec::new();
+        expected.push(2);
+        expected.extend_from_slice(&987i32.to_be_bytes());
+        expected.extend_from_slice(&router_id);
+        expected.push(6);
+        expected.extend_from_slice(&7i32.to_be_bytes());
+        expected.extend_from_slice(&8i32.to_be_bytes());
+        expected.extend_from_slice(&2i32.to_be_bytes());
+        crate::mindustry::io::write_object(&mut expected, &TypeValue::String("cfg".into()))
+            .unwrap();
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            BeginPlaceCallPacket::read_from_with_loader(&mut bytes.as_slice(), &loader).unwrap(),
+            packet
+        );
+
+        let null_packet = BeginPlaceCallPacket {
+            unit: UnitRef::Null,
+            result: None,
+            team: TeamId(0),
+            x: 0,
+            y: 0,
+            rotation: 0,
+            place_config: TypeValue::Null,
+        };
+        bytes.clear();
+        null_packet
+            .write_to_with_loader(&mut bytes, &loader)
+            .unwrap();
+        let mut expected = Vec::new();
+        expected.push(0);
+        expected.extend_from_slice(&0i32.to_be_bytes());
+        expected.extend_from_slice(&(-1i16).to_be_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&0i32.to_be_bytes());
+        expected.extend_from_slice(&0i32.to_be_bytes());
+        expected.extend_from_slice(&0i32.to_be_bytes());
+        crate::mindustry::io::write_object(&mut expected, &TypeValue::Null).unwrap();
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            BeginPlaceCallPacket::read_from_with_loader(&mut bytes.as_slice(), &loader).unwrap(),
+            null_packet
+        );
+    }
+
+    #[test]
+    fn generated_missing_frontier_packets_use_java_typeio_field_order() {
+        let tile = crate::mindustry::world::point2_pack(2, 3);
+        let build_pos = crate::mindustry::world::point2_pack(4, 5);
+
+        let admin = AdminRequestCallPacket {
+            other: EntityRef::new(42),
+            action: AdminAction::Trace,
+            params: TypeValue::String("audit".into()),
+        };
+        let mut bytes = Vec::new();
+        admin.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&42i32.to_be_bytes());
+        expected.push(AdminAction::Trace.ordinal());
+        write_object(&mut expected, &TypeValue::String("audit".into())).unwrap();
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            AdminRequestCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            admin
+        );
+        assert!(admin.allow(true));
+        assert!(!admin.allow(false));
+
+        let drone = AssemblerDroneSpawnedCallPacket {
+            tile: Some(tile),
+            id: 77,
+        };
+        bytes.clear();
+        drone.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&tile.to_be_bytes());
+        expected.extend_from_slice(&77i32.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            AssemblerDroneSpawnedCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            drone
+        );
+        assert!(!drone.allow(true));
+        assert!(drone.allow(false));
+
+        let unit_spawned = AssemblerUnitSpawnedCallPacket { tile: Some(tile) };
+        bytes.clear();
+        unit_spawned.write_to(&mut bytes).unwrap();
+        assert_eq!(bytes, tile.to_be_bytes());
+        assert_eq!(
+            AssemblerUnitSpawnedCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            unit_spawned
+        );
+
+        let auto_door = AutoDoorToggleCallPacket {
+            tile: Some(tile),
+            open: true,
+        };
+        bytes.clear();
+        auto_door.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&tile.to_be_bytes());
+        expected.push(1);
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            AutoDoorToggleCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            auto_door
+        );
+
+        let control = BuildingControlSelectCallPacket {
+            player: EntityRef::new(12),
+            build: BuildingRef::new(build_pos),
+        };
+        bytes.clear();
+        control.write_client_payload(&mut bytes).unwrap();
+        assert_eq!(bytes, build_pos.to_be_bytes());
+        assert_eq!(
+            BuildingControlSelectCallPacket::read_from_client_payload(&mut bytes.as_slice())
+                .unwrap(),
+            BuildingControlSelectCallPacket {
+                player: EntityRef::null(),
+                build: control.build
+            }
+        );
+        bytes.clear();
+        control.write_server_payload(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&12i32.to_be_bytes());
+        expected.extend_from_slice(&build_pos.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            BuildingControlSelectCallPacket::read_from_server_payload(&mut bytes.as_slice())
+                .unwrap(),
+            control
+        );
+
+        let clear_items = ClearItemsCallPacket {
+            build: BuildingRef::new(build_pos),
+        };
+        bytes.clear();
+        clear_items.write_to(&mut bytes).unwrap();
+        assert_eq!(bytes, build_pos.to_be_bytes());
+        assert_eq!(
+            ClearItemsCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            clear_items
+        );
+
+        let clear_liquids = ClearLiquidsCallPacket {
+            build: BuildingRef::new(build_pos),
+        };
+        bytes.clear();
+        clear_liquids.write_to(&mut bytes).unwrap();
+        assert_eq!(bytes, build_pos.to_be_bytes());
+        assert_eq!(
+            ClearLiquidsCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            clear_liquids
+        );
+
+        let logic = ClientLogicDataCallPacket {
+            channel: "logic-channel".into(),
+            value: TypeValue::Int(15),
+        };
+        let reliable = ClientLogicDataReliableCallPacket(logic.clone());
+        bytes.clear();
+        reliable.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        write_string(&mut expected, Some("logic-channel")).unwrap();
+        write_object(&mut expected, &TypeValue::Int(15)).unwrap();
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            ClientLogicDataReliableCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            reliable
+        );
+        assert!(reliable.allow(true));
+        assert!(!reliable.allow(false));
+
+        let unreliable = ClientLogicDataUnreliableCallPacket(logic);
+        bytes.clear();
+        unreliable.write_to(&mut bytes).unwrap();
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            ClientLogicDataUnreliableCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            unreliable
+        );
+
+        let command_building = CommandBuildingCallPacket {
+            player: EntityRef::new(13),
+            buildings: vec![101, 102],
+            target: Vec2::new(1.25, -2.5),
+        };
+        bytes.clear();
+        command_building.write_client_payload(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&2i16.to_be_bytes());
+        expected.extend_from_slice(&101i32.to_be_bytes());
+        expected.extend_from_slice(&102i32.to_be_bytes());
+        expected.extend_from_slice(&1.25f32.to_bits().to_be_bytes());
+        expected.extend_from_slice(&(-2.5f32).to_bits().to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            CommandBuildingCallPacket::read_from_client_payload(&mut bytes.as_slice()).unwrap(),
+            CommandBuildingCallPacket {
+                player: EntityRef::null(),
+                buildings: command_building.buildings.clone(),
+                target: command_building.target
+            }
+        );
+        bytes.clear();
+        command_building.write_server_payload(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&13i32.to_be_bytes());
+        expected.extend_from_slice(&2i16.to_be_bytes());
+        expected.extend_from_slice(&101i32.to_be_bytes());
+        expected.extend_from_slice(&102i32.to_be_bytes());
+        expected.extend_from_slice(&1.25f32.to_bits().to_be_bytes());
+        expected.extend_from_slice(&(-2.5f32).to_bits().to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            CommandBuildingCallPacket::read_from_server_payload(&mut bytes.as_slice()).unwrap(),
+            command_building
+        );
+
+        let command_units = CommandUnitsCallPacket {
+            player: EntityRef::new(14),
+            unit_ids: vec![201, 202],
+            build_target: BuildingRef::new(build_pos),
+            unit_target: UnitRef::Unit { id: 333 },
+            pos_target: Vec2::new(-3.0, 4.5),
+            queue_command: true,
+            final_batch: false,
+        };
+        bytes.clear();
+        command_units.write_client_payload(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&2i16.to_be_bytes());
+        expected.extend_from_slice(&201i32.to_be_bytes());
+        expected.extend_from_slice(&202i32.to_be_bytes());
+        expected.extend_from_slice(&build_pos.to_be_bytes());
+        expected.push(2);
+        expected.extend_from_slice(&333i32.to_be_bytes());
+        expected.extend_from_slice(&(-3.0f32).to_bits().to_be_bytes());
+        expected.extend_from_slice(&4.5f32.to_bits().to_be_bytes());
+        expected.push(1);
+        expected.push(0);
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            CommandUnitsCallPacket::read_from_client_payload(&mut bytes.as_slice()).unwrap(),
+            CommandUnitsCallPacket {
+                player: EntityRef::null(),
+                unit_ids: command_units.unit_ids.clone(),
+                build_target: command_units.build_target,
+                unit_target: command_units.unit_target,
+                pos_target: command_units.pos_target,
+                queue_command: command_units.queue_command,
+                final_batch: command_units.final_batch
+            }
+        );
+        bytes.clear();
+        command_units.write_server_payload(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&14i32.to_be_bytes());
+        expected.extend_from_slice(&2i16.to_be_bytes());
+        expected.extend_from_slice(&201i32.to_be_bytes());
+        expected.extend_from_slice(&202i32.to_be_bytes());
+        expected.extend_from_slice(&build_pos.to_be_bytes());
+        expected.push(2);
+        expected.extend_from_slice(&333i32.to_be_bytes());
+        expected.extend_from_slice(&(-3.0f32).to_bits().to_be_bytes());
+        expected.extend_from_slice(&4.5f32.to_bits().to_be_bytes());
+        expected.push(1);
+        expected.push(0);
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            CommandUnitsCallPacket::read_from_server_payload(&mut bytes.as_slice()).unwrap(),
+            command_units
+        );
+    }
+
+    #[test]
     fn generated_debug_status_call_packets_use_java_int_order() {
         let packet = DebugStatusClientCallPacket {
             value: 1,
@@ -8594,14 +9619,45 @@ mod tests {
                 (packet_ids::STREAM_CHUNK, "StreamChunk"),
                 (packet_ids::WORLD_STREAM, "WorldStream"),
                 (packet_ids::CONNECT_PACKET, "ConnectPacket"),
+                (
+                    packet_ids::ADMIN_REQUEST_CALL_PACKET,
+                    "AdminRequestCallPacket",
+                ),
                 (packet_ids::ANNOUNCE_CALL_PACKET, "AnnounceCallPacket"),
+                (
+                    packet_ids::ASSEMBLER_DRONE_SPAWNED_CALL_PACKET,
+                    "AssemblerDroneSpawnedCallPacket",
+                ),
+                (
+                    packet_ids::ASSEMBLER_UNIT_SPAWNED_CALL_PACKET,
+                    "AssemblerUnitSpawnedCallPacket",
+                ),
+                (
+                    packet_ids::AUTO_DOOR_TOGGLE_CALL_PACKET,
+                    "AutoDoorToggleCallPacket",
+                ),
+                (packet_ids::BEGIN_BREAK_CALL_PACKET, "BeginBreakCallPacket",),
+                (packet_ids::BEGIN_PLACE_CALL_PACKET, "BeginPlaceCallPacket",),
                 (
                     packet_ids::BLOCK_SNAPSHOT_CALL_PACKET,
                     "BlockSnapshotCallPacket",
                 ),
                 (
+                    packet_ids::BUILD_DESTROYED_CALL_PACKET,
+                    "BuildDestroyedCallPacket",
+                ),
+                (
                     packet_ids::BUILD_HEALTH_UPDATE_CALL_PACKET,
                     "BuildHealthUpdateCallPacket",
+                ),
+                (
+                    packet_ids::BUILDING_CONTROL_SELECT_CALL_PACKET,
+                    "BuildingControlSelectCallPacket",
+                ),
+                (packet_ids::CLEAR_ITEMS_CALL_PACKET, "ClearItemsCallPacket"),
+                (
+                    packet_ids::CLEAR_LIQUIDS_CALL_PACKET,
+                    "ClearLiquidsCallPacket",
                 ),
                 (
                     packet_ids::CLEAR_OBJECTIVES_CALL_PACKET,
@@ -8614,6 +9670,14 @@ mod tests {
                 (
                     packet_ids::CLIENT_BINARY_PACKET_UNRELIABLE_CALL_PACKET,
                     "ClientBinaryPacketUnreliableCallPacket",
+                ),
+                (
+                    packet_ids::CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET,
+                    "ClientLogicDataReliableCallPacket",
+                ),
+                (
+                    packet_ids::CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET,
+                    "ClientLogicDataUnreliableCallPacket",
                 ),
                 (
                     packet_ids::CLIENT_PACKET_RELIABLE_CALL_PACKET,
@@ -8634,6 +9698,14 @@ mod tests {
                 (
                     packet_ids::CLIENT_SNAPSHOT_CALL_PACKET,
                     "ClientSnapshotCallPacket",
+                ),
+                (
+                    packet_ids::COMMAND_BUILDING_CALL_PACKET,
+                    "CommandBuildingCallPacket",
+                ),
+                (
+                    packet_ids::COMMAND_UNITS_CALL_PACKET,
+                    "CommandUnitsCallPacket",
                 ),
                 (
                     packet_ids::COMPLETE_OBJECTIVE_CALL_PACKET,
@@ -9031,7 +10103,12 @@ mod tests {
             find_registered_packet_by_id(3).unwrap().name,
             "ConnectPacket"
         );
-        assert!(find_registered_packet_by_id(4).is_none());
+        assert_eq!(
+            find_registered_packet_by_id(packet_ids::ADMIN_REQUEST_CALL_PACKET)
+                .unwrap()
+                .name,
+            "AdminRequestCallPacket"
+        );
         assert_eq!(
             find_registered_packet_by_id(packet_ids::ANNOUNCE_CALL_PACKET)
                 .unwrap()
@@ -9073,8 +10150,7 @@ mod tests {
         assert!(block_snapshot.allow_client_endpoint);
         assert!(!block_snapshot.allow_server_endpoint);
 
-        let build_health_update =
-            find_packet_by_name("BuildHealthUpdateCallPacket").unwrap();
+        let build_health_update = find_packet_by_name("BuildHealthUpdateCallPacket").unwrap();
         assert_eq!(
             build_health_update.id,
             Some(packet_ids::BUILD_HEALTH_UPDATE_CALL_PACKET)
@@ -9363,12 +10439,22 @@ mod tests {
                 "WorldStream",
             ]
         );
-        assert!(names.windows(4).any(|window| {
+        assert!(names.windows(14).any(|window| {
             window
                 == [
+                    "AdminRequestCallPacket",
                     "AnnounceCallPacket",
+                    "AssemblerDroneSpawnedCallPacket",
+                    "AssemblerUnitSpawnedCallPacket",
+                    "AutoDoorToggleCallPacket",
+                    "BeginBreakCallPacket",
+                    "BeginPlaceCallPacket",
                     "BlockSnapshotCallPacket",
+                    "BuildDestroyedCallPacket",
                     "BuildHealthUpdateCallPacket",
+                    "BuildingControlSelectCallPacket",
+                    "ClearItemsCallPacket",
+                    "ClearLiquidsCallPacket",
                     "ClearObjectivesCallPacket",
                 ]
         }));
@@ -9484,6 +10570,41 @@ mod tests {
             BuildHealthUpdateCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
             build_health_update
         );
+
+        let begin_break = BeginBreakCallPacket {
+            unit: UnitRef::Block {
+                tile_pos: crate::mindustry::world::point2_pack(5, 6),
+            },
+            team: TeamId(4),
+            x: -11,
+            y: 12,
+        };
+        let mut bytes = Vec::new();
+        begin_break.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.push(1);
+        expected.extend_from_slice(&crate::mindustry::world::point2_pack(5, 6).to_be_bytes());
+        expected.push(4);
+        expected.extend_from_slice(&(-11i32).to_be_bytes());
+        expected.extend_from_slice(&12i32.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            BeginBreakCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            begin_break
+        );
+
+        let build_destroyed = BuildDestroyedCallPacket {
+            build: BuildingRef::new(crate::mindustry::world::point2_pack(3, 4)),
+        };
+        let mut bytes = Vec::new();
+        build_destroyed.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&crate::mindustry::world::point2_pack(3, 4).to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            BuildDestroyedCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            build_destroyed
+        );
     }
 
     #[test]
@@ -9492,17 +10613,31 @@ mod tests {
             "StreamBegin",
             "StreamChunk",
             "ConnectPacket",
+            "AdminRequestCallPacket",
             "AnnounceCallPacket",
+            "AssemblerDroneSpawnedCallPacket",
+            "AssemblerUnitSpawnedCallPacket",
+            "AutoDoorToggleCallPacket",
+            "BeginBreakCallPacket",
+            "BeginPlaceCallPacket",
             "BlockSnapshotCallPacket",
+            "BuildDestroyedCallPacket",
             "BuildHealthUpdateCallPacket",
+            "BuildingControlSelectCallPacket",
+            "ClearItemsCallPacket",
+            "ClearLiquidsCallPacket",
             "ClearObjectivesCallPacket",
             "ClientBinaryPacketReliableCallPacket",
             "ClientBinaryPacketUnreliableCallPacket",
+            "ClientLogicDataReliableCallPacket",
+            "ClientLogicDataUnreliableCallPacket",
             "ClientPacketReliableCallPacket",
             "ClientPacketUnreliableCallPacket",
             "ClientPlanSnapshotCallPacket",
             "ClientPlanSnapshotReceivedCallPacket",
             "ClientSnapshotCallPacket",
+            "CommandBuildingCallPacket",
+            "CommandUnitsCallPacket",
             "CompleteObjectiveCallPacket",
             "ConnectCallPacket",
             "ConnectConfirmCallPacket",
@@ -9648,6 +10783,6 @@ mod tests {
         assert!(find_packet_by_name("InvokePacket").is_none());
         assert!(packet_manifest_phase1_gaps()
             .iter()
-            .any(|gap| gap.contains("Call.registerPackets()")));
+            .any(|gap| gap.contains("InvokePacket")));
     }
 }

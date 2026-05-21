@@ -3,12 +3,16 @@ use super::{
     net_connection::NetConnection,
     packet::PacketCodec,
     packets::{
-        packet_ids, AnnounceCallPacket, BlockSnapshotCallPacket, BuildHealthUpdateCallPacket,
-        ClearObjectivesCallPacket,
-        ClientBinaryPacketReliableCallPacket, ClientBinaryPacketUnreliableCallPacket,
-        ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
-        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
+        packet_ids, AdminRequestCallPacket, AnnounceCallPacket, AssemblerDroneSpawnedCallPacket,
+        AssemblerUnitSpawnedCallPacket, AutoDoorToggleCallPacket, BeginBreakCallPacket,
+        BeginPlaceCallPacket, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
+        BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
+        ClearLiquidsCallPacket, ClearObjectivesCallPacket, ClientBinaryPacketReliableCallPacket,
+        ClientBinaryPacketUnreliableCallPacket, ClientLogicDataReliableCallPacket,
+        ClientLogicDataUnreliableCallPacket, ClientPacketReliableCallPacket,
+        ClientPacketUnreliableCallPacket, ClientPlanSnapshotCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
+        CommandUnitsCallPacket, CompleteObjectiveCallPacket, ConnectCallPacket,
         ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
         CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
         CreateWeatherCallPacket, DebugStatusClientCallPacket,
@@ -222,6 +226,7 @@ impl PacketSerializer {
             PacketKind::ClientPlanSnapshotCallPacket(_)
                 | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
                 | PacketKind::ClientSnapshotCallPacket(_)
+                | PacketKind::BeginPlaceCallPacket(_)
                 | PacketKind::ConstructFinishCallPacket(_)
                 | PacketKind::DeconstructFinishCallPacket(_)
                 | PacketKind::SetFloorCallPacket(_)
@@ -264,17 +269,53 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::CONNECT_PACKET
             }
+            PacketKind::AdminRequestCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::ADMIN_REQUEST_CALL_PACKET
+            }
             PacketKind::AnnounceCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::ANNOUNCE_CALL_PACKET
+            }
+            PacketKind::AssemblerDroneSpawnedCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::ASSEMBLER_DRONE_SPAWNED_CALL_PACKET
+            }
+            PacketKind::AssemblerUnitSpawnedCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::ASSEMBLER_UNIT_SPAWNED_CALL_PACKET
+            }
+            PacketKind::AutoDoorToggleCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::AUTO_DOOR_TOGGLE_CALL_PACKET
+            }
+            PacketKind::BeginBreakCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::BEGIN_BREAK_CALL_PACKET
             }
             PacketKind::BlockSnapshotCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::BLOCK_SNAPSHOT_CALL_PACKET
             }
+            PacketKind::BuildDestroyedCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::BUILD_DESTROYED_CALL_PACKET
+            }
             PacketKind::BuildHealthUpdateCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::BUILD_HEALTH_UPDATE_CALL_PACKET
+            }
+            PacketKind::BuildingControlSelectCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::BUILDING_CONTROL_SELECT_CALL_PACKET
+            }
+            PacketKind::ClearItemsCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CLEAR_ITEMS_CALL_PACKET
+            }
+            PacketKind::ClearLiquidsCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CLEAR_LIQUIDS_CALL_PACKET
             }
             PacketKind::ClearObjectivesCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -288,6 +329,14 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::CLIENT_BINARY_PACKET_UNRELIABLE_CALL_PACKET
             }
+            PacketKind::ClientLogicDataReliableCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET
+            }
+            PacketKind::ClientLogicDataUnreliableCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET
+            }
             PacketKind::ClientPacketReliableCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::CLIENT_PACKET_RELIABLE_CALL_PACKET
@@ -295,6 +344,14 @@ impl PacketSerializer {
             PacketKind::ClientPacketUnreliableCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::CLIENT_PACKET_UNRELIABLE_CALL_PACKET
+            }
+            PacketKind::CommandBuildingCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::COMMAND_BUILDING_CALL_PACKET
+            }
+            PacketKind::CommandUnitsCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::COMMAND_UNITS_CALL_PACKET
             }
             PacketKind::CompleteObjectiveCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -727,6 +784,7 @@ impl PacketSerializer {
             PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
             | PacketKind::ClientSnapshotCallPacket(_)
+            | PacketKind::BeginPlaceCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
             | PacketKind::DeconstructFinishCallPacket(_)
             | PacketKind::RequestItemCallPacket(_)
@@ -768,6 +826,10 @@ impl PacketSerializer {
         let id = match packet {
             PacketKind::Connect(_) | PacketKind::Disconnect(_) => {
                 return Err(SerializerError::ExpectedPacketEnvelope)
+            }
+            PacketKind::BeginPlaceCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::BEGIN_PLACE_CALL_PACKET
             }
             PacketKind::ClientPlanSnapshotCallPacket(packet) => {
                 packet.write_to_with_loader(&mut payload, loader)?;
@@ -958,6 +1020,7 @@ impl PacketSerializer {
                 packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET
                     | packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
                     | packet_ids::CLIENT_SNAPSHOT_CALL_PACKET
+                    | packet_ids::BEGIN_PLACE_CALL_PACKET
                     | packet_ids::CONSTRUCT_FINISH_CALL_PACKET
                     | packet_ids::DECONSTRUCT_FINISH_CALL_PACKET
                     | packet_ids::REQUEST_ITEM_CALL_PACKET
@@ -1001,15 +1064,58 @@ impl PacketSerializer {
                     packet_ids::CONNECT_PACKET => Ok(PacketKind::ConnectPacket(
                         ConnectPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::ADMIN_REQUEST_CALL_PACKET => {
+                        Ok(PacketKind::AdminRequestCallPacket(
+                            AdminRequestCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::ANNOUNCE_CALL_PACKET => Ok(PacketKind::AnnounceCallPacket(
                         AnnounceCallPacket::read_from(&mut cursor)?,
                     )),
-                    packet_ids::BLOCK_SNAPSHOT_CALL_PACKET => Ok(PacketKind::BlockSnapshotCallPacket(
-                        BlockSnapshotCallPacket::read_from(&mut cursor)?,
+                    packet_ids::ASSEMBLER_DRONE_SPAWNED_CALL_PACKET => {
+                        Ok(PacketKind::AssemblerDroneSpawnedCallPacket(
+                            AssemblerDroneSpawnedCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::ASSEMBLER_UNIT_SPAWNED_CALL_PACKET => {
+                        Ok(PacketKind::AssemblerUnitSpawnedCallPacket(
+                            AssemblerUnitSpawnedCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::AUTO_DOOR_TOGGLE_CALL_PACKET => {
+                        Ok(PacketKind::AutoDoorToggleCallPacket(
+                            AutoDoorToggleCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::BEGIN_BREAK_CALL_PACKET => Ok(PacketKind::BeginBreakCallPacket(
+                        BeginBreakCallPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::BLOCK_SNAPSHOT_CALL_PACKET => {
+                        Ok(PacketKind::BlockSnapshotCallPacket(
+                            BlockSnapshotCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::BUILD_DESTROYED_CALL_PACKET => {
+                        Ok(PacketKind::BuildDestroyedCallPacket(
+                            BuildDestroyedCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::BUILD_HEALTH_UPDATE_CALL_PACKET => {
                         Ok(PacketKind::BuildHealthUpdateCallPacket(
                             BuildHealthUpdateCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::BUILDING_CONTROL_SELECT_CALL_PACKET => {
+                        Ok(PacketKind::BuildingControlSelectCallPacket(
+                            BuildingControlSelectCallPacket::read_from_client_payload(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::CLEAR_ITEMS_CALL_PACKET => Ok(PacketKind::ClearItemsCallPacket(
+                        ClearItemsCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::CLEAR_LIQUIDS_CALL_PACKET => {
+                        Ok(PacketKind::ClearLiquidsCallPacket(
+                            ClearLiquidsCallPacket::read_from(&mut cursor)?,
                         ))
                     }
                     packet_ids::CLEAR_OBJECTIVES_CALL_PACKET => {
@@ -1027,6 +1133,16 @@ impl PacketSerializer {
                             ClientBinaryPacketUnreliableCallPacket::read_from(&mut cursor)?,
                         ))
                     }
+                    packet_ids::CLIENT_LOGIC_DATA_RELIABLE_CALL_PACKET => {
+                        Ok(PacketKind::ClientLogicDataReliableCallPacket(
+                            ClientLogicDataReliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::CLIENT_LOGIC_DATA_UNRELIABLE_CALL_PACKET => {
+                        Ok(PacketKind::ClientLogicDataUnreliableCallPacket(
+                            ClientLogicDataUnreliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::CLIENT_PACKET_RELIABLE_CALL_PACKET => {
                         Ok(PacketKind::ClientPacketReliableCallPacket(
                             ClientPacketReliableCallPacket::read_from(&mut cursor)?,
@@ -1035,6 +1151,16 @@ impl PacketSerializer {
                     packet_ids::CLIENT_PACKET_UNRELIABLE_CALL_PACKET => {
                         Ok(PacketKind::ClientPacketUnreliableCallPacket(
                             ClientPacketUnreliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::COMMAND_BUILDING_CALL_PACKET => {
+                        Ok(PacketKind::CommandBuildingCallPacket(
+                            CommandBuildingCallPacket::read_from_client_payload(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::COMMAND_UNITS_CALL_PACKET => {
+                        Ok(PacketKind::CommandUnitsCallPacket(
+                            CommandUnitsCallPacket::read_from_client_payload(&mut cursor)?,
                         ))
                     }
                     packet_ids::COMPLETE_OBJECTIVE_CALL_PACKET => {
@@ -1516,6 +1642,9 @@ impl PacketSerializer {
                             ClientSnapshotCallPacket::read_from_with_loader(&mut cursor, loader)?,
                         ))
                     }
+                    packet_ids::BEGIN_PLACE_CALL_PACKET => Ok(PacketKind::BeginPlaceCallPacket(
+                        BeginPlaceCallPacket::read_from_with_loader(&mut cursor, loader)?,
+                    )),
                     packet_ids::CONSTRUCT_FINISH_CALL_PACKET => {
                         Ok(PacketKind::ConstructFinishCallPacket(
                             ConstructFinishCallPacket::read_from_with_loader(&mut cursor, loader)?,
