@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::net::{
-    packet_ids, Connect, ConnectPacket, Disconnect, Net, NetConnection, PacketKind, ProviderEvent,
-    SentPacket, Streamable, WorldDataBeginCallPacket,
+    packet_ids, ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, ConnectPacket,
+    Disconnect, Net, NetConnection, PacketKind, ProviderEvent, SentPacket, Streamable,
+    WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -32,6 +33,14 @@ pub struct NetServerState {
     pub ping_requests_seen: u64,
     pub ping_responses_sent: u64,
     pub last_ping_error: Option<String>,
+    pub last_client_snapshot_connection_id: Option<i32>,
+    pub last_client_snapshot: Option<ClientSnapshotCallPacket>,
+    pub last_client_snapshot_received_at: Option<Instant>,
+    pub client_snapshot_packets_seen: u64,
+    pub last_client_plan_snapshot_connection_id: Option<i32>,
+    pub last_client_plan_snapshot: Option<ClientPlanSnapshotCallPacket>,
+    pub last_client_plan_snapshot_received_at: Option<Instant>,
+    pub client_plan_snapshot_packets_seen: u64,
     pub last_disconnect: Option<Disconnect>,
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
@@ -424,30 +433,51 @@ impl NetServer {
         {
             let state = Arc::clone(state);
             let packet_handlers = Arc::clone(packet_handlers);
-            net.handle_server(move |connection_id, packet| {
-                let PacketKind::PingCallPacket(ping) = packet else {
-                    return;
-                };
+            net.handle_server(move |connection_id, packet| match packet {
+                PacketKind::PingCallPacket(ping) => {
+                    {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        state.last_connection_id = connection_id;
+                        state.last_ping_connection_id = connection_id;
+                        state.last_ping_time = Some(ping.time);
+                        state.ping_requests_seen += 1;
+                        state.last_updated_at = Some(Instant::now());
+                        state.ping_responses_sent += 1;
+                        state.last_ping_error = None;
+                        state.events.push(ProviderEvent::ServerPacket {
+                            connection_id: connection_id.unwrap_or(-1),
+                            packet: PacketKind::PingCallPacket(*ping),
+                        });
+                    }
 
-                {
-                    let mut state = state.lock().expect("NetServerState mutex poisoned");
-                    state.last_connection_id = connection_id;
-                    state.last_ping_connection_id = connection_id;
-                    state.last_ping_time = Some(ping.time);
-                    state.ping_requests_seen += 1;
-                    state.last_updated_at = Some(Instant::now());
-                    state.ping_responses_sent += 1;
-                    state.last_ping_error = None;
-                    state.events.push(ProviderEvent::ServerPacket {
-                        connection_id: connection_id.unwrap_or(-1),
-                        packet: PacketKind::PingCallPacket(*ping),
-                    });
+                    Self::dispatch_packet_handlers(
+                        &packet_handlers,
+                        &PacketKind::PingCallPacket(*ping),
+                    );
                 }
+                PacketKind::ClientSnapshotCallPacket(snapshot) => {
+                    let packet = PacketKind::ClientSnapshotCallPacket(snapshot.clone());
+                    let accepted = {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        Self::record_client_snapshot(&mut state, connection_id, snapshot)
+                    };
 
-                Self::dispatch_packet_handlers(
-                    &packet_handlers,
-                    &PacketKind::PingCallPacket(*ping),
-                );
+                    if !accepted {
+                        return;
+                    }
+
+                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                }
+                PacketKind::ClientPlanSnapshotCallPacket(snapshot) => {
+                    let packet = PacketKind::ClientPlanSnapshotCallPacket(snapshot.clone());
+                    {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        Self::record_client_plan_snapshot(&mut state, connection_id, snapshot);
+                    }
+
+                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                }
+                _ => {}
             });
         }
     }
@@ -466,6 +496,74 @@ impl NetServer {
             let callback = handler.as_mut();
             callback(packet);
         }
+    }
+
+    fn record_client_snapshot(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        snapshot: &ClientSnapshotCallPacket,
+    ) -> bool {
+        if let Some(connection_id) = connection_id {
+            if let Some(connection) = state.connection_states.get(&connection_id) {
+                if snapshot.snapshot_id < connection.last_received_client_snapshot {
+                    return false;
+                }
+            }
+        }
+
+        let now = Instant::now();
+        state.last_connection_id = connection_id;
+        state.last_client_snapshot_connection_id = connection_id;
+        state.last_client_snapshot = Some(snapshot.clone());
+        state.last_client_snapshot_received_at = Some(now);
+        state.client_snapshot_packets_seen += 1;
+        state.last_updated_at = Some(now);
+
+        if let Some(connection_id) = connection_id {
+            let connection = state
+                .connection_states
+                .entry(connection_id)
+                .or_insert_with(|| NetConnection::new(String::new()));
+            connection.last_received_client_snapshot = snapshot.snapshot_id;
+            connection.last_received_client_time = Self::current_millis();
+            connection.view_x = snapshot.view_x;
+            connection.view_y = snapshot.view_y;
+            connection.view_width = snapshot.view_width;
+            connection.view_height = snapshot.view_height;
+        }
+
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id: connection_id.unwrap_or(-1),
+            packet: PacketKind::ClientSnapshotCallPacket(snapshot.clone()),
+        });
+        true
+    }
+
+    fn record_client_plan_snapshot(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        snapshot: &ClientPlanSnapshotCallPacket,
+    ) {
+        let now = Instant::now();
+        state.last_connection_id = connection_id;
+        state.last_client_plan_snapshot_connection_id = connection_id;
+        state.last_client_plan_snapshot = Some(snapshot.clone());
+        state.last_client_plan_snapshot_received_at = Some(now);
+        state.client_plan_snapshot_packets_seen += 1;
+        state.last_updated_at = Some(now);
+
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id: connection_id.unwrap_or(-1),
+            packet: PacketKind::ClientPlanSnapshotCallPacket(snapshot.clone()),
+        });
+    }
+
+    fn current_millis() -> i64 {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        millis.min(i64::MAX as u128) as i64
     }
 
     fn sync_provider_connections(state: &mut NetServerState, connections: Vec<NetConnection>) {
@@ -487,11 +585,25 @@ impl NetServer {
                 let has_begun_connecting = connection.has_begun_connecting;
                 let has_disconnected = connection.has_disconnected;
                 let sent = connection.sent.clone();
+                let last_received_client_snapshot = connection.last_received_client_snapshot;
+                let snapshots_sent = connection.snapshots_sent;
+                let last_received_client_time = connection.last_received_client_time;
+                let view_width = connection.view_width;
+                let view_height = connection.view_height;
+                let view_x = connection.view_x;
+                let view_y = connection.view_y;
                 *connection = provider_connection.clone();
                 connection.has_connected = has_connected;
                 connection.has_begun_connecting = has_begun_connecting;
                 connection.has_disconnected |= has_disconnected;
                 connection.sent = sent;
+                connection.last_received_client_snapshot = last_received_client_snapshot;
+                connection.snapshots_sent = snapshots_sent;
+                connection.last_received_client_time = last_received_client_time;
+                connection.view_width = view_width;
+                connection.view_height = view_height;
+                connection.view_x = view_x;
+                connection.view_y = view_y;
             }
         }
 
@@ -501,11 +613,25 @@ impl NetServer {
                 let has_begun_connecting = connection.has_begun_connecting;
                 let has_disconnected = connection.has_disconnected;
                 let sent = connection.sent.clone();
+                let last_received_client_snapshot = connection.last_received_client_snapshot;
+                let snapshots_sent = connection.snapshots_sent;
+                let last_received_client_time = connection.last_received_client_time;
+                let view_width = connection.view_width;
+                let view_height = connection.view_height;
+                let view_x = connection.view_x;
+                let view_y = connection.view_y;
                 *connection = snapshot[0].clone();
                 connection.has_connected = has_connected;
                 connection.has_begun_connecting = has_begun_connecting;
                 connection.has_disconnected |= has_disconnected;
                 connection.sent = sent;
+                connection.last_received_client_snapshot = last_received_client_snapshot;
+                connection.snapshots_sent = snapshots_sent;
+                connection.last_received_client_time = last_received_client_time;
+                connection.view_width = view_width;
+                connection.view_height = view_height;
+                connection.view_x = view_x;
+                connection.view_y = view_y;
             }
         } else if state.connection_states.is_empty() && snapshot.len() == 1 {
             if let Some(connection_id) = state.last_connection_id {
@@ -525,9 +651,9 @@ mod tests {
     use std::time::Duration;
 
     use crate::mindustry::net::{
-        packet_ids, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, DoneCallback,
-        Host, HostCallback, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
-        PingResponseCallPacket, SentPacket,
+        packet_ids, ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect,
+        ConnectConfirmCallPacket, ConnectPacket, Disconnect, DoneCallback, Host, HostCallback, Net,
+        NetConnection, NetProvider, PacketKind, PingCallPacket, PingResponseCallPacket, SentPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
 
@@ -675,6 +801,124 @@ mod tests {
         assert!(connection.has_begun_connecting);
         assert!(connection.has_disconnected);
         assert_eq!(state.events.len(), 4);
+    }
+
+    #[test]
+    fn client_snapshot_and_plan_snapshot_packets_update_server_state() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            let label = match packet {
+                PacketKind::ClientSnapshotCallPacket(_) => "snapshot",
+                PacketKind::ClientPlanSnapshotCallPacket(_) => "plan",
+                _ => return,
+            };
+            seen_handler.lock().unwrap().push(label.to_string());
+        });
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(7),
+                true,
+                PacketKind::ClientSnapshotCallPacket(ClientSnapshotCallPacket {
+                    snapshot_id: 15,
+                    unit_id: 23,
+                    dead: false,
+                    x: 1.0,
+                    y: 2.0,
+                    pointer_x: 3.0,
+                    pointer_y: 4.0,
+                    rotation: 5.0,
+                    base_rotation: 6.0,
+                    x_velocity: 7.0,
+                    y_velocity: 8.0,
+                    mining: None,
+                    boosting: true,
+                    shooting: false,
+                    chatting: true,
+                    building: false,
+                    selected_block: Some("duo".into()),
+                    selected_rotation: 1,
+                    plans: None,
+                    view_x: 9.0,
+                    view_y: 10.0,
+                    view_width: 11.0,
+                    view_height: 12.0,
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(7),
+                true,
+                PacketKind::ClientSnapshotCallPacket(ClientSnapshotCallPacket {
+                    snapshot_id: 14,
+                    unit_id: 99,
+                    dead: true,
+                    x: 0.0,
+                    y: 0.0,
+                    pointer_x: 0.0,
+                    pointer_y: 0.0,
+                    rotation: 0.0,
+                    base_rotation: 0.0,
+                    x_velocity: 0.0,
+                    y_velocity: 0.0,
+                    mining: None,
+                    boosting: false,
+                    shooting: false,
+                    chatting: false,
+                    building: false,
+                    selected_block: None,
+                    selected_rotation: 0,
+                    plans: None,
+                    view_x: 0.0,
+                    view_y: 0.0,
+                    view_width: 0.0,
+                    view_height: 0.0,
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(7),
+                true,
+                PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+                    group_id: 88,
+                    plans: None,
+                }),
+            );
+        }
+
+        assert_eq!(*seen.lock().unwrap(), vec!["snapshot", "plan"]);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_client_snapshot_connection_id, Some(7));
+        assert_eq!(
+            state
+                .last_client_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.snapshot_id),
+            Some(15)
+        );
+        assert_eq!(state.client_snapshot_packets_seen, 1);
+        assert_eq!(state.last_client_plan_snapshot_connection_id, Some(7));
+        assert_eq!(
+            state
+                .last_client_plan_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.group_id),
+            Some(88)
+        );
+        assert_eq!(state.client_plan_snapshot_packets_seen, 1);
+
+        let connection = state.connection_states.get(&7).unwrap();
+        assert_eq!(connection.last_received_client_snapshot, 15);
+        assert_eq!(connection.view_x, 9.0);
+        assert_eq!(connection.view_y, 10.0);
+        assert_eq!(connection.view_width, 11.0);
+        assert_eq!(connection.view_height, 12.0);
+        assert!(connection.last_received_client_time > 0);
+        assert_eq!(state.events.len(), 2);
     }
 
     #[test]

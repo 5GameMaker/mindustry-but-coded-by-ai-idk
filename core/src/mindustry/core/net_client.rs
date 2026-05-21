@@ -1,10 +1,12 @@
 use std::fmt;
+use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::net::{
-    Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, Net, PacketKind, PingCallPacket,
-    ProviderEvent, StreamBuilder, Streamable,
+    ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket,
+    ConnectPacket, Disconnect, Net, PacketKind, PingCallPacket, ProviderEvent, StreamBuilder,
+    Streamable,
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -408,6 +410,19 @@ impl NetClient {
         self.state.lock().unwrap().binary_packet_handlers.clone()
     }
 
+    pub fn send_client_snapshot(&self, snapshot: ClientSnapshotCallPacket) -> io::Result<()> {
+        let mut net = self.net.lock().unwrap();
+        net.send(&PacketKind::ClientSnapshotCallPacket(snapshot), true)
+    }
+
+    pub fn send_client_plan_snapshot(
+        &self,
+        snapshot: ClientPlanSnapshotCallPacket,
+    ) -> io::Result<()> {
+        let mut net = self.net.lock().unwrap();
+        net.send(&PacketKind::ClientPlanSnapshotCallPacket(snapshot), true)
+    }
+
     pub fn update(&self) {
         let cursor = {
             let state = self.state.lock().unwrap();
@@ -666,9 +681,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crate::mindustry::net::{
-        Connect, Disconnect, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
-        PacketKind, PingResponseCallPacket, StreamBegin, StreamChunk, Streamable,
-        WorldDataBeginCallPacket,
+        ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, Disconnect, DoneCallback,
+        Host, HostCallback, Net, NetConnection, NetProvider, PacketKind, PingResponseCallPacket,
+        StreamBegin, StreamChunk, Streamable, WorldDataBeginCallPacket,
     };
 
     use super::{ClientConnectConfig, NetClient};
@@ -889,6 +904,68 @@ mod tests {
         assert_eq!(state.last_ping_request_time, Some(request_time));
         assert_eq!(state.last_ping_response_time, Some(request_time - 37));
         assert!(state.last_ping_request_error.is_none());
+    }
+
+    #[test]
+    fn send_client_snapshot_helpers_emit_expected_packets() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+
+        client
+            .send_client_snapshot(ClientSnapshotCallPacket {
+                snapshot_id: 12,
+                unit_id: 34,
+                dead: false,
+                x: 1.0,
+                y: 2.0,
+                pointer_x: 3.0,
+                pointer_y: 4.0,
+                rotation: 5.0,
+                base_rotation: 6.0,
+                x_velocity: 7.0,
+                y_velocity: 8.0,
+                mining: None,
+                boosting: true,
+                shooting: false,
+                chatting: true,
+                building: false,
+                selected_block: Some("duo".into()),
+                selected_rotation: 1,
+                plans: None,
+                view_x: 9.0,
+                view_y: 10.0,
+                view_width: 11.0,
+                view_height: 12.0,
+            })
+            .unwrap();
+
+        client
+            .send_client_plan_snapshot(ClientPlanSnapshotCallPacket {
+                group_id: 77,
+                plans: None,
+            })
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert!(matches!(
+            sent[0].0,
+            PacketKind::ClientSnapshotCallPacket(ClientSnapshotCallPacket {
+                snapshot_id: 12,
+                ..
+            })
+        ));
+        assert!(matches!(
+            sent[1].0,
+            PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+                group_id: 77,
+                ..
+            })
+        ));
+        assert!(sent.iter().all(|(_, reliable)| *reliable));
     }
 
     #[test]
