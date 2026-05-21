@@ -20,6 +20,7 @@ pub mod team;
 pub mod timed;
 pub mod timed_kill;
 pub mod timer;
+pub mod unit_tether;
 pub mod vel;
 pub mod world_label;
 
@@ -43,5 +44,6 @@ pub use team::{TeamComp, TeamRulesView};
 pub use timed::TimedComp;
 pub use timed_kill::TimedKillComp;
 pub use timer::{Interval, TimerComp};
+pub use unit_tether::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use vel::VelComp;
 pub use world_label::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};
