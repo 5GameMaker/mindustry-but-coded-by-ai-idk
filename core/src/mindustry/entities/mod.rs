@@ -31,6 +31,7 @@ pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
 pub use comp::{UnderwaterDrawPlan, UnderwaterMoveComp};
 pub use comp::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
+pub use comp::{WaterCrawlComp, WaterCrawlSolidPred};
 pub use comp::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};
 pub use entity_indexer::EntityIndexer;
 pub use leg::Leg;
