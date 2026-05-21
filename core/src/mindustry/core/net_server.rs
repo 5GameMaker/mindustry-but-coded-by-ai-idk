@@ -5,8 +5,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::net::{
     packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-    ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, Net, NetConnection, PacketKind,
-    ProviderEvent, SentPacket, Streamable, WorldDataBeginCallPacket,
+    ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
+    HiddenSnapshotCallPacket, Net, NetConnection, PacketKind, ProviderEvent, SentPacket,
+    StateSnapshotCallPacket, Streamable, WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -45,6 +46,21 @@ pub struct NetServerState {
     pub last_client_plan_snapshot_forwarded_at: Option<Instant>,
     pub client_plan_snapshots_forwarded: u64,
     pub last_client_plan_snapshot_forwarded_error: Option<String>,
+    pub last_state_snapshot_connection_id: Option<i32>,
+    pub last_state_snapshot: Option<StateSnapshotCallPacket>,
+    pub last_state_snapshot_sent_at: Option<Instant>,
+    pub state_snapshot_packets_sent: u64,
+    pub last_state_snapshot_error: Option<String>,
+    pub last_entity_snapshot_connection_id: Option<i32>,
+    pub last_entity_snapshot: Option<EntitySnapshotCallPacket>,
+    pub last_entity_snapshot_sent_at: Option<Instant>,
+    pub entity_snapshot_packets_sent: u64,
+    pub last_entity_snapshot_error: Option<String>,
+    pub last_hidden_snapshot_connection_id: Option<i32>,
+    pub last_hidden_snapshot: Option<HiddenSnapshotCallPacket>,
+    pub last_hidden_snapshot_sent_at: Option<Instant>,
+    pub hidden_snapshot_packets_sent: u64,
+    pub last_hidden_snapshot_error: Option<String>,
     pub last_disconnect: Option<Disconnect>,
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
@@ -306,12 +322,148 @@ impl NetServer {
             Ok(()) => {
                 state.client_plan_snapshots_forwarded += 1;
                 state.last_client_plan_snapshot_forwarded_error = None;
+                Self::record_connection_sent(
+                    &mut state,
+                    connection_id,
+                    "ClientPlanSnapshotReceivedCallPacket",
+                    false,
+                );
             }
             Err(error) => {
                 state.last_client_plan_snapshot_forwarded_error = Some(error.to_string());
             }
         }
         result
+    }
+
+    pub fn send_state_snapshot(
+        &self,
+        connection_id: i32,
+        packet: StateSnapshotCallPacket,
+    ) -> io::Result<()> {
+        let packet_kind = PacketKind::StateSnapshotCallPacket(packet.clone());
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet_kind, false)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let now = Instant::now();
+        state.last_state_snapshot_connection_id = Some(connection_id);
+        state.last_state_snapshot = Some(packet);
+        state.last_state_snapshot_sent_at = Some(now);
+        state.last_updated_at = Some(now);
+        match &result {
+            Ok(()) => {
+                state.state_snapshot_packets_sent += 1;
+                state.last_state_snapshot_error = None;
+                Self::record_connection_sent(
+                    &mut state,
+                    connection_id,
+                    "StateSnapshotCallPacket",
+                    false,
+                );
+            }
+            Err(error) => {
+                state.last_state_snapshot_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn send_entity_snapshot(
+        &self,
+        connection_id: i32,
+        packet: EntitySnapshotCallPacket,
+    ) -> io::Result<()> {
+        let packet_kind = PacketKind::EntitySnapshotCallPacket(packet.clone());
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet_kind, false)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let now = Instant::now();
+        state.last_entity_snapshot_connection_id = Some(connection_id);
+        state.last_entity_snapshot = Some(packet);
+        state.last_entity_snapshot_sent_at = Some(now);
+        state.last_updated_at = Some(now);
+        match &result {
+            Ok(()) => {
+                state.entity_snapshot_packets_sent += 1;
+                state.last_entity_snapshot_error = None;
+                Self::record_connection_sent(
+                    &mut state,
+                    connection_id,
+                    "EntitySnapshotCallPacket",
+                    false,
+                );
+            }
+            Err(error) => {
+                state.last_entity_snapshot_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn send_hidden_snapshot(
+        &self,
+        connection_id: i32,
+        packet: HiddenSnapshotCallPacket,
+    ) -> io::Result<()> {
+        let packet_kind = PacketKind::HiddenSnapshotCallPacket(packet.clone());
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet_kind, false)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let now = Instant::now();
+        state.last_hidden_snapshot_connection_id = Some(connection_id);
+        state.last_hidden_snapshot = Some(packet);
+        state.last_hidden_snapshot_sent_at = Some(now);
+        state.last_updated_at = Some(now);
+        match &result {
+            Ok(()) => {
+                state.hidden_snapshot_packets_sent += 1;
+                state.last_hidden_snapshot_error = None;
+                Self::record_connection_sent(
+                    &mut state,
+                    connection_id,
+                    "HiddenSnapshotCallPacket",
+                    false,
+                );
+            }
+            Err(error) => {
+                state.last_hidden_snapshot_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn send_entity_sync_snapshot(
+        &self,
+        connection_id: i32,
+        state_snapshot: StateSnapshotCallPacket,
+        entity_snapshots: impl IntoIterator<Item = EntitySnapshotCallPacket>,
+        hidden_snapshot: Option<HiddenSnapshotCallPacket>,
+    ) -> io::Result<()> {
+        self.send_state_snapshot(connection_id, state_snapshot)?;
+        for snapshot in entity_snapshots {
+            self.send_entity_snapshot(connection_id, snapshot)?;
+        }
+        if let Some(snapshot) = hidden_snapshot {
+            self.send_hidden_snapshot(connection_id, snapshot)?;
+        }
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let connection = state
+            .connection_states
+            .entry(connection_id)
+            .or_insert_with(|| NetConnection::new(String::new()));
+        connection.snapshots_sent = connection.snapshots_sent.saturating_add(1);
+        state.last_updated_at = Some(Instant::now());
+        Ok(())
     }
 
     pub fn update(&self) {
@@ -596,6 +748,19 @@ impl NetServer {
         millis.min(i64::MAX as u128) as i64
     }
 
+    fn record_connection_sent(
+        state: &mut NetServerState,
+        connection_id: i32,
+        packet_name: &str,
+        reliable: bool,
+    ) {
+        state
+            .connection_states
+            .entry(connection_id)
+            .or_insert_with(|| NetConnection::new(String::new()))
+            .send(SentPacket::Other(packet_name.into()), reliable);
+    }
+
     fn sync_provider_connections(state: &mut NetServerState, connections: Vec<NetConnection>) {
         let snapshot = connections;
         state.connections = snapshot.clone();
@@ -683,8 +848,9 @@ mod tests {
     use crate::mindustry::net::{
         packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
-        DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
-        PingCallPacket, PingResponseCallPacket, SentPacket,
+        DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
+        NetConnection, NetProvider, PacketKind, PingCallPacket, PingResponseCallPacket, SentPacket,
+        StateSnapshotCallPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
 
@@ -988,6 +1154,117 @@ mod tests {
         assert_eq!(state.client_plan_snapshots_forwarded, 1);
         assert!(state.last_client_plan_snapshot_forwarded_at.is_some());
         assert!(state.last_client_plan_snapshot_forwarded_error.is_none());
+
+        let connection = state.connection_states.get(&12).unwrap();
+        assert!(matches!(
+            connection.sent[0].0,
+            SentPacket::Other(ref name) if name == "ClientPlanSnapshotReceivedCallPacket"
+        ));
+        assert!(!connection.sent[0].1);
+    }
+
+    #[test]
+    fn send_entity_sync_snapshot_uses_java_snapshot_order_unreliably_and_records_state() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let state_packet = StateSnapshotCallPacket {
+            wave_time: 1.5,
+            wave: 2,
+            enemies: 3,
+            paused: false,
+            game_over: false,
+            time_data: 123,
+            tps: 60,
+            rand0: 11,
+            rand1: 22,
+            core_data: vec![1, 2, 3],
+        };
+        let first_entity_packet = EntitySnapshotCallPacket {
+            amount: 1,
+            data: vec![7, 8],
+        };
+        let second_entity_packet = EntitySnapshotCallPacket {
+            amount: 2,
+            data: vec![9, 10, 11],
+        };
+        let hidden_packet = HiddenSnapshotCallPacket { ids: vec![4, 5] };
+
+        server
+            .send_entity_sync_snapshot(
+                21,
+                state_packet.clone(),
+                vec![first_entity_packet.clone(), second_entity_packet.clone()],
+                Some(hidden_packet.clone()),
+            )
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 4);
+        assert!(sent
+            .iter()
+            .all(|(connection_id, _, reliable)| *connection_id == 21 && !*reliable));
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::StateSnapshotCallPacket(packet) if packet == &state_packet
+        ));
+        assert!(matches!(
+            &sent[1].1,
+            PacketKind::EntitySnapshotCallPacket(packet) if packet == &first_entity_packet
+        ));
+        assert!(matches!(
+            &sent[2].1,
+            PacketKind::EntitySnapshotCallPacket(packet) if packet == &second_entity_packet
+        ));
+        assert!(matches!(
+            &sent[3].1,
+            PacketKind::HiddenSnapshotCallPacket(packet) if packet == &hidden_packet
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_state_snapshot_connection_id, Some(21));
+        assert_eq!(state.last_state_snapshot.as_ref(), Some(&state_packet));
+        assert_eq!(state.state_snapshot_packets_sent, 1);
+        assert!(state.last_state_snapshot_sent_at.is_some());
+        assert!(state.last_state_snapshot_error.is_none());
+        assert_eq!(state.last_entity_snapshot_connection_id, Some(21));
+        assert_eq!(
+            state.last_entity_snapshot.as_ref(),
+            Some(&second_entity_packet)
+        );
+        assert_eq!(state.entity_snapshot_packets_sent, 2);
+        assert!(state.last_entity_snapshot_sent_at.is_some());
+        assert!(state.last_entity_snapshot_error.is_none());
+        assert_eq!(state.last_hidden_snapshot_connection_id, Some(21));
+        assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden_packet));
+        assert_eq!(state.hidden_snapshot_packets_sent, 1);
+        assert!(state.last_hidden_snapshot_sent_at.is_some());
+        assert!(state.last_hidden_snapshot_error.is_none());
+
+        let connection = state.connection_states.get(&21).unwrap();
+        assert_eq!(connection.snapshots_sent, 1);
+        assert_eq!(connection.sent.len(), 4);
+        assert!(connection.sent.iter().all(|(_, reliable)| !*reliable));
+        assert!(matches!(
+            connection.sent[0].0,
+            SentPacket::Other(ref name) if name == "StateSnapshotCallPacket"
+        ));
+        assert!(matches!(
+            connection.sent[1].0,
+            SentPacket::Other(ref name) if name == "EntitySnapshotCallPacket"
+        ));
+        assert!(matches!(
+            connection.sent[2].0,
+            SentPacket::Other(ref name) if name == "EntitySnapshotCallPacket"
+        ));
+        assert!(matches!(
+            connection.sent[3].0,
+            SentPacket::Other(ref name) if name == "HiddenSnapshotCallPacket"
+        ));
     }
 
     #[test]
