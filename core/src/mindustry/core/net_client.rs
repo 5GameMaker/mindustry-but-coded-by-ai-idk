@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::net::{
     Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, Net, PacketKind, PingCallPacket,
-    ProviderEvent, Streamable,
+    ProviderEvent, StreamBuilder, Streamable,
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -100,6 +100,9 @@ pub struct NetClientState {
     pub last_ping_response_time: Option<i64>,
     pub last_ping_response_at: Option<Instant>,
     pub last_ping_request_error: Option<String>,
+    pub timeout_disconnects: u64,
+    pub last_stream_id: Option<i32>,
+    pub last_stream_len: usize,
     pub last_binary_stream: Option<Vec<u8>>,
     pub last_provider_events: Vec<ProviderEvent>,
     packet_handlers: Vec<PacketHandler>,
@@ -148,6 +151,9 @@ impl fmt::Debug for NetClientState {
             .field("ping_responses_received", &self.ping_responses_received)
             .field("last_ping_request_time", &self.last_ping_request_time)
             .field("last_ping_response_time", &self.last_ping_response_time)
+            .field("timeout_disconnects", &self.timeout_disconnects)
+            .field("last_stream_id", &self.last_stream_id)
+            .field("last_stream_len", &self.last_stream_len)
             .field(
                 "last_binary_stream_len",
                 &self.last_binary_stream.as_ref().map(|s| s.len()),
@@ -175,6 +181,41 @@ impl NetClientState {
         self.ping_ms = 0;
     }
 
+    fn clear_loading_stream_tracking(&mut self) {
+        self.last_stream_id = None;
+        self.last_stream_len = 0;
+    }
+
+    fn clear_timeout_clock(&mut self) {
+        self.timeout_deadline = None;
+    }
+
+    fn reset_loading_timeout(&mut self) {
+        let now = Instant::now();
+        self.timeout_resets += 1;
+        self.last_timeout_reset_at = Some(now);
+        self.timeout_deadline = Some(now + DEFAULT_TIMEOUT);
+    }
+
+    fn record_loading_stream(&mut self, stream: &StreamBuilder) {
+        let stream_len = stream.len();
+        match self.last_stream_id {
+            Some(id) if id == stream.id => {
+                if stream_len > self.last_stream_len {
+                    self.last_stream_len = stream_len;
+                    self.reset_loading_timeout();
+                }
+            }
+            _ => {
+                self.last_stream_id = Some(stream.id);
+                self.last_stream_len = stream_len;
+                if stream_len > 0 {
+                    self.reset_loading_timeout();
+                }
+            }
+        }
+    }
+
     fn record_connect(&mut self, connect: &Connect) {
         self.connecting = false;
         self.connected = true;
@@ -187,6 +228,7 @@ impl NetClientState {
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
         self.reset_ping_state();
+        self.clear_loading_stream_tracking();
     }
 
     fn record_disconnect(&mut self, disconnect: &Disconnect) {
@@ -199,6 +241,8 @@ impl NetClientState {
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
         self.reset_ping_state();
+        self.clear_loading_stream_tracking();
+        self.clear_timeout_clock();
     }
 
     fn record_world_stream(&mut self, stream: &Streamable) {
@@ -209,6 +253,8 @@ impl NetClientState {
         self.last_binary_stream = Some(stream.stream.clone());
         self.last_packet = Some(PacketKind::Streamable(stream.clone()));
         self.next_ping_at = Some(Instant::now() + PING_INTERVAL);
+        self.clear_loading_stream_tracking();
+        self.clear_timeout_clock();
     }
 }
 
@@ -267,10 +313,7 @@ impl NetClient {
 
     pub fn reset_timeout(&self) {
         let mut state = self.state.lock().unwrap();
-        let now = Instant::now();
-        state.timeout_resets += 1;
-        state.last_timeout_reset_at = Some(now);
-        state.timeout_deadline = Some(now + DEFAULT_TIMEOUT);
+        state.reset_loading_timeout();
     }
 
     pub fn set_connect_config(&self, config: Option<ClientConnectConfig>) {
@@ -282,6 +325,8 @@ impl NetClient {
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
         state.reset_ping_state();
+        state.clear_loading_stream_tracking();
+        state.clear_timeout_clock();
     }
 
     pub fn get_connect_config(&self) -> Option<ClientConnectConfig> {
@@ -304,6 +349,7 @@ impl NetClient {
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
         state.reset_ping_state();
+        state.clear_loading_stream_tracking();
         drop(state);
         self.reset_timeout();
     }
@@ -328,6 +374,8 @@ impl NetClient {
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
         state.reset_ping_state();
+        state.clear_loading_stream_tracking();
+        state.clear_timeout_clock();
     }
 
     pub fn add_packet_handler<F>(&self, handler: F)
@@ -366,11 +414,12 @@ impl NetClient {
             state.handled_client_cursor
         };
 
-        let (provider_events, handled_packets) = {
+        let (provider_events, handled_packets, current_stream) = {
             let mut net = self.net.lock().unwrap();
             let provider_events = net.drain_provider_events();
             let handled_packets = net.handled_client_packets().to_vec();
-            (provider_events, handled_packets)
+            let current_stream = net.current_stream().cloned();
+            (provider_events, handled_packets, current_stream)
         };
 
         let start = cursor.min(handled_packets.len());
@@ -384,6 +433,16 @@ impl NetClient {
             state.last_provider_event_count = provider_events.len();
             state.last_provider_events = provider_events;
             state.last_update_at = Some(Instant::now());
+            if !state.connect_confirm_sent {
+                if let Some(stream) = current_stream.as_ref() {
+                    state.record_loading_stream(stream);
+                } else {
+                    state.clear_loading_stream_tracking();
+                }
+            } else {
+                state.clear_loading_stream_tracking();
+                state.clear_timeout_clock();
+            }
             (
                 state.quiet,
                 state.packet_handlers.clone(),
@@ -479,6 +538,7 @@ impl NetClient {
             }
         }
 
+        self.maybe_disconnect_due_to_timeout();
         self.maybe_send_ping();
     }
 
@@ -494,6 +554,40 @@ impl NetClient {
         if let Err(error) = result {
             self.state.lock().unwrap().last_connect_confirm_error = Some(error.to_string());
         }
+    }
+
+    fn maybe_disconnect_due_to_timeout(&self) {
+        let timed_out = {
+            let state = self.state.lock().unwrap();
+            if state.connect_confirm_sent {
+                false
+            } else {
+                state
+                    .timeout_deadline
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+            }
+        };
+
+        if !timed_out {
+            return;
+        }
+
+        {
+            let mut net = self.net.lock().unwrap();
+            net.disconnect();
+        }
+
+        let mut state = self.state.lock().unwrap();
+        state.connecting = false;
+        state.connected = false;
+        state.timeout_disconnects += 1;
+        state.last_update_at = Some(Instant::now());
+        state.connect_packet_sent = false;
+        state.connect_confirm_sent = false;
+        state.last_connect_confirm_error = None;
+        state.reset_ping_state();
+        state.clear_loading_stream_tracking();
+        state.clear_timeout_clock();
     }
 
     fn maybe_send_ping(&self) {
@@ -795,6 +889,77 @@ mod tests {
         assert_eq!(state.last_ping_request_time, Some(request_time));
         assert_eq!(state.last_ping_response_time, Some(request_time - 37));
         assert!(state.last_ping_request_error.is_none());
+    }
+
+    #[test]
+    fn update_resets_loading_timeout_when_stream_chunk_progresses() {
+        let client = NetClient::default();
+        client.begin_connecting();
+
+        let initial_deadline = {
+            let state = client.state();
+            let state = state.lock().unwrap();
+            state.timeout_deadline.unwrap()
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::StreamBegin(StreamBegin {
+                id: 7,
+                total: 4,
+                packet_type: 2,
+            }));
+        }
+
+        client.update();
+
+        {
+            let state = client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.timeout_resets, 1);
+            assert_eq!(state.last_stream_id, Some(7));
+            assert_eq!(state.last_stream_len, 0);
+            assert_eq!(state.timeout_deadline.unwrap(), initial_deadline);
+        }
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::StreamChunk(StreamChunk {
+                id: 7,
+                data: vec![1, 2],
+            }));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.timeout_resets, 2);
+        assert_eq!(state.last_stream_id, Some(7));
+        assert_eq!(state.last_stream_len, 2);
+        assert!(state.timeout_deadline.unwrap() > initial_deadline);
+    }
+
+    #[test]
+    fn update_disconnects_when_loading_timeout_expires() {
+        let client = NetClient::default();
+        client.begin_connecting();
+
+        {
+            let state = client.state();
+            let mut state = state.lock().unwrap();
+            state.timeout_deadline = Some(Instant::now() - Duration::from_secs(1));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.timeout_disconnects, 1);
+        assert_eq!(state.manual_disconnects, 0);
+        assert!(!state.connecting);
+        assert!(!state.connected);
+        assert!(state.timeout_deadline.is_none());
     }
 
     #[test]

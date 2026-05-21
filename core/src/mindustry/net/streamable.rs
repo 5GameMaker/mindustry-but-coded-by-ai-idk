@@ -27,6 +27,10 @@ impl StreamBuilder {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.stream.len()
+    }
+
     pub fn progress(&self) -> f32 {
         if self.total <= 0 {
             1.0
