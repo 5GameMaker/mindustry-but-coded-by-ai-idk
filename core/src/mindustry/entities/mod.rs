@@ -25,6 +25,7 @@ pub use comp::{EffectRenderInput, EffectStateComp};
 pub use comp::{EntityComp, EntityIoState, EntityLocality};
 pub use comp::{HealthComp, ItemStackSlot, ItemsComp};
 pub use comp::{HitboxComp, HitboxRect};
+pub use comp::{LaunchCoreBlock, LaunchCoreComp, LaunchCoreDrawPlan, LaunchCoreSmoke};
 pub use comp::{PhysicRef, PhysicsComp};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{SyncComp, SyncHooks};
