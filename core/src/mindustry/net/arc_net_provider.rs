@@ -9,18 +9,19 @@ use super::{
         ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
         CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
         CreateWeatherCallPacket, DebugStatusClientCallPacket,
-        DebugStatusClientUnreliableCallPacket, DropItemCallPacket, EffectCallPacket,
-        EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
-        FollowUpMenuCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
-        HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket,
-        InfoPopupCallPacket, InfoPopupCallPacket2, InfoPopupReliableCallPacket,
-        InfoPopupReliableCallPacket2, InfoToastCallPacket, KickCallPacket, KickCallPacket2,
-        LabelCallPacket, LabelCallPacket2, LabelReliableCallPacket, LabelReliableCallPacket2,
-        OpenUriCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
-        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
-        SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
-        SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket,
-        TextInputCallPacket2, WorldDataBeginCallPacket,
+        DebugStatusClientUnreliableCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
+        DestroyPayloadCallPacket, DropItemCallPacket, EffectCallPacket, EffectCallPacket2,
+        EffectReliableCallPacket, EntitySnapshotCallPacket, FollowUpMenuCallPacket,
+        GameOverCallPacket, HiddenSnapshotCallPacket, HideFollowUpMenuCallPacket,
+        HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
+        InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
+        KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
+        LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket,
+        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
+        RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
+        SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
+        SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
+        WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -183,6 +184,7 @@ impl PacketSerializer {
                 | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
                 | PacketKind::ClientSnapshotCallPacket(_)
                 | PacketKind::ConstructFinishCallPacket(_)
+                | PacketKind::DeconstructFinishCallPacket(_)
         ) {
             return Err(SerializerError::RequiresContentLoader);
         }
@@ -260,6 +262,14 @@ impl PacketSerializer {
             PacketKind::DebugStatusClientUnreliableCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::DEBUG_STATUS_CLIENT_UNRELIABLE_CALL_PACKET
+            }
+            PacketKind::DeletePlansCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::DELETE_PLANS_CALL_PACKET
+            }
+            PacketKind::DestroyPayloadCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::DESTROY_PAYLOAD_CALL_PACKET
             }
             PacketKind::DropItemCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -412,7 +422,8 @@ impl PacketSerializer {
             PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
             | PacketKind::ClientSnapshotCallPacket(_)
-            | PacketKind::ConstructFinishCallPacket(_) => {
+            | PacketKind::ConstructFinishCallPacket(_)
+            | PacketKind::DeconstructFinishCallPacket(_) => {
                 return Err(SerializerError::RequiresContentLoader);
             }
             PacketKind::Other { id, .. } => return Err(SerializerError::UnsupportedPacketId(*id)),
@@ -442,6 +453,10 @@ impl PacketSerializer {
             PacketKind::ConstructFinishCallPacket(packet) => {
                 packet.write_to_with_loader(&mut payload, loader)?;
                 packet_ids::CONSTRUCT_FINISH_CALL_PACKET
+            }
+            PacketKind::DeconstructFinishCallPacket(packet) => {
+                packet.write_to_with_loader(&mut payload, loader)?;
+                packet_ids::DECONSTRUCT_FINISH_CALL_PACKET
             }
             _ => return Self::packet_kind_to_envelope(packet),
         };
@@ -481,6 +496,7 @@ impl PacketSerializer {
                     | packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
                     | packet_ids::CLIENT_SNAPSHOT_CALL_PACKET
                     | packet_ids::CONSTRUCT_FINISH_CALL_PACKET
+                    | packet_ids::DECONSTRUCT_FINISH_CALL_PACKET
             ) {
                 return Err(SerializerError::RequiresContentLoader);
             }
@@ -573,6 +589,14 @@ impl PacketSerializer {
                     packet_ids::DEBUG_STATUS_CLIENT_UNRELIABLE_CALL_PACKET => {
                         Ok(PacketKind::DebugStatusClientUnreliableCallPacket(
                             DebugStatusClientUnreliableCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::DELETE_PLANS_CALL_PACKET => Ok(PacketKind::DeletePlansCallPacket(
+                        DeletePlansCallPacket::read_from_client_payload(&mut cursor)?,
+                    )),
+                    packet_ids::DESTROY_PAYLOAD_CALL_PACKET => {
+                        Ok(PacketKind::DestroyPayloadCallPacket(
+                            DestroyPayloadCallPacket::read_from(&mut cursor)?,
                         ))
                     }
                     packet_ids::DROP_ITEM_CALL_PACKET => Ok(PacketKind::DropItemCallPacket(
@@ -757,6 +781,14 @@ impl PacketSerializer {
                             ConstructFinishCallPacket::read_from_with_loader(&mut cursor, loader)?,
                         ))
                     }
+                    packet_ids::DECONSTRUCT_FINISH_CALL_PACKET => {
+                        Ok(PacketKind::DeconstructFinishCallPacket(
+                            DeconstructFinishCallPacket::read_from_with_loader(
+                                &mut cursor,
+                                loader,
+                            )?,
+                        ))
+                    }
                     _ => Self::packet_kind_from_envelope(envelope),
                 }
             }
@@ -839,7 +871,8 @@ mod tests {
         net::packets::{
             ClientBinaryPacketCallPacket, ClientPacketCallPacket, ClientPlanSnapshotCallPacket,
             ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
-            ConstructFinishCallPacket,
+            ConstructFinishCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
+            DestroyPayloadCallPacket,
         },
     };
 
@@ -1134,6 +1167,30 @@ mod tests {
     }
 
     #[test]
+    fn deconstruct_finish_packet_roundtrips_with_content_loader() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let packet = PacketKind::DeconstructFinishCallPacket(DeconstructFinishCallPacket {
+            tile: Some(crate::mindustry::world::point2_pack(7, 8)),
+            block: Some("router".into()),
+            builder: UnitRef::Unit { id: 1234 },
+        });
+        assert_eq!(
+            PacketSerializer::write_packet_kind(&packet).unwrap_err(),
+            SerializerError::RequiresContentLoader
+        );
+        let bytes = PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap();
+        assert_eq!(bytes[0], packet_ids::DECONSTRUCT_FINISH_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap_err(),
+            SerializerError::RequiresContentLoader
+        );
+        assert_eq!(
+            PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
+            packet
+        );
+    }
+
+    #[test]
     fn generated_call_packets_roundtrip_through_java_envelope() {
         let announce = PacketKind::AnnounceCallPacket(AnnounceCallPacket {
             message: "server announcement".into(),
@@ -1296,6 +1353,36 @@ mod tests {
         assert_eq!(
             PacketSerializer::read_packet_kind(&bytes).unwrap(),
             drop_item
+        );
+
+        let delete_plans = PacketKind::DeletePlansCallPacket(DeletePlansCallPacket {
+            player_id: Some(321),
+            positions: vec![
+                crate::mindustry::world::point2_pack(1, 2),
+                crate::mindustry::world::point2_pack(3, 4),
+            ],
+        });
+        let bytes = PacketSerializer::write_packet_kind(&delete_plans).unwrap();
+        assert_eq!(bytes[0], packet_ids::DELETE_PLANS_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            PacketKind::DeletePlansCallPacket(DeletePlansCallPacket {
+                player_id: None,
+                positions: vec![
+                    crate::mindustry::world::point2_pack(1, 2),
+                    crate::mindustry::world::point2_pack(3, 4),
+                ]
+            })
+        );
+
+        let destroy_payload = PacketKind::DestroyPayloadCallPacket(DestroyPayloadCallPacket {
+            build_pos: Some(crate::mindustry::world::point2_pack(5, 6)),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&destroy_payload).unwrap();
+        assert_eq!(bytes[0], packet_ids::DESTROY_PAYLOAD_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            destroy_payload
         );
 
         let entity_snapshot = PacketKind::EntitySnapshotCallPacket(EntitySnapshotCallPacket {

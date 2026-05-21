@@ -8,6 +8,7 @@ use super::packets::{
     ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
     CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
     CreateWeatherCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    DeconstructFinishCallPacket, DeletePlansCallPacket, DestroyPayloadCallPacket,
     DropItemCallPacket, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
     EntitySnapshotCallPacket, FollowUpMenuCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
     HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
@@ -46,6 +47,9 @@ pub enum PacketKind {
     CreateWeatherCallPacket(CreateWeatherCallPacket),
     DebugStatusClientCallPacket(DebugStatusClientCallPacket),
     DebugStatusClientUnreliableCallPacket(DebugStatusClientUnreliableCallPacket),
+    DeconstructFinishCallPacket(DeconstructFinishCallPacket),
+    DeletePlansCallPacket(DeletePlansCallPacket),
+    DestroyPayloadCallPacket(DestroyPayloadCallPacket),
     DropItemCallPacket(DropItemCallPacket),
     EffectCallPacket(EffectCallPacket),
     EffectCallPacket2(EffectCallPacket2),
@@ -116,6 +120,9 @@ impl PacketKind {
             | PacketKind::CreateBulletCallPacket(_)
             | PacketKind::CreateMarkerCallPacket(_)
             | PacketKind::CreateWeatherCallPacket(_)
+            | PacketKind::DeconstructFinishCallPacket(_)
+            | PacketKind::DeletePlansCallPacket(_)
+            | PacketKind::DestroyPayloadCallPacket(_)
             | PacketKind::DropItemCallPacket(_)
             | PacketKind::EffectCallPacket(_)
             | PacketKind::EffectCallPacket2(_)
@@ -175,12 +182,15 @@ impl PacketKind {
             | PacketKind::OpenUriCallPacket(_)
             | PacketKind::PlayerDisconnectCallPacket(_)
             | PacketKind::RemoveMarkerCallPacket(_)
+            | PacketKind::DeletePlansCallPacket(_)
             | PacketKind::WorldDataBeginCallPacket(_) => true,
             PacketKind::ConnectCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
             | PacketKind::CreateBulletCallPacket(_)
             | PacketKind::CreateMarkerCallPacket(_)
             | PacketKind::CreateWeatherCallPacket(_)
+            | PacketKind::DeconstructFinishCallPacket(_)
+            | PacketKind::DestroyPayloadCallPacket(_)
             | PacketKind::EffectCallPacket(_)
             | PacketKind::EffectCallPacket2(_)
             | PacketKind::EffectReliableCallPacket(_)
