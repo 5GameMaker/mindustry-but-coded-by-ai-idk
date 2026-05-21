@@ -2,6 +2,8 @@
 
 pub mod damage;
 pub mod owner;
+pub mod rot;
 
 pub use damage::DamageComp;
 pub use owner::OwnerComp;
+pub use rot::RotComp;
