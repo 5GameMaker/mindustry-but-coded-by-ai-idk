@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::mindustry::game::SpawnGroup;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rules {
     pub static_fog: bool,
@@ -8,6 +10,7 @@ pub struct Rules {
     pub wave_timer: bool,
     pub wave_sending: bool,
     pub waves: bool,
+    pub spawns: Vec<SpawnGroup>,
     pub air_use_spawns: bool,
     pub waves_spawn_at_cores: bool,
     pub infinite_resources: bool,
@@ -217,6 +220,7 @@ impl Default for Rules {
             wave_timer: true,
             wave_sending: true,
             waves: false,
+            spawns: Vec::new(),
             air_use_spawns: false,
             waves_spawn_at_cores: true,
             infinite_resources: false,
@@ -470,6 +474,8 @@ mod tests {
         let rules = Rules::default();
         assert!(rules.wave_timer);
         assert!(rules.wave_sending);
+        assert!(!rules.waves);
+        assert!(rules.spawns.is_empty());
         assert!(!rules.air_use_spawns);
         assert!(rules.waves_spawn_at_cores);
         assert!(rules.pvp_auto_pause);
