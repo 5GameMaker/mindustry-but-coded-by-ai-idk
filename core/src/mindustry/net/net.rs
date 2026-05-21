@@ -14,11 +14,14 @@ use super::packets::{
     HideFollowUpMenuCallPacket, HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket,
     InfoPopupCallPacket2, InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2,
     InfoToastCallPacket, KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
-    LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket, PingResponseCallPacket,
-    PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
-    SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
-    SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
-    StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
+    LabelReliableCallPacket, LabelReliableCallPacket2, LandingPadLandedCallPacket,
+    LogicExplosionCallPacket, MenuCallPacket, MenuChooseCallPacket, OpenUriCallPacket,
+    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    PingCallPacket, PingLocationCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
+    RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
+    SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
+    SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
+    WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -72,7 +75,16 @@ pub enum PacketKind {
     LabelCallPacket2(LabelCallPacket2),
     LabelReliableCallPacket(LabelReliableCallPacket),
     LabelReliableCallPacket2(LabelReliableCallPacket2),
+    LandingPadLandedCallPacket(LandingPadLandedCallPacket),
+    LogicExplosionCallPacket(LogicExplosionCallPacket),
+    MenuCallPacket(MenuCallPacket),
+    MenuChooseCallPacket(MenuChooseCallPacket),
     OpenUriCallPacket(OpenUriCallPacket),
+    PayloadDroppedCallPacket(PayloadDroppedCallPacket),
+    PickedBuildPayloadCallPacket(PickedBuildPayloadCallPacket),
+    PickedUnitPayloadCallPacket(PickedUnitPayloadCallPacket),
+    PingCallPacket(PingCallPacket),
+    PingLocationCallPacket(PingLocationCallPacket),
     PingResponseCallPacket(PingResponseCallPacket),
     PlayerDisconnectCallPacket(PlayerDisconnectCallPacket),
     RemoveMarkerCallPacket(RemoveMarkerCallPacket),
@@ -141,7 +153,15 @@ impl PacketKind {
             | PacketKind::LabelCallPacket2(_)
             | PacketKind::LabelReliableCallPacket(_)
             | PacketKind::LabelReliableCallPacket2(_)
+            | PacketKind::LandingPadLandedCallPacket(_)
+            | PacketKind::LogicExplosionCallPacket(_)
+            | PacketKind::MenuCallPacket(_)
+            | PacketKind::MenuChooseCallPacket(_)
             | PacketKind::OpenUriCallPacket(_)
+            | PacketKind::PayloadDroppedCallPacket(_)
+            | PacketKind::PickedBuildPayloadCallPacket(_)
+            | PacketKind::PickedUnitPayloadCallPacket(_)
+            | PacketKind::PingLocationCallPacket(_)
             | PacketKind::PingResponseCallPacket(_)
             | PacketKind::PlayerDisconnectCallPacket(_)
             | PacketKind::RemoveMarkerCallPacket(_)
@@ -158,7 +178,8 @@ impl PacketKind {
             PacketKind::DebugStatusClientCallPacket(_)
             | PacketKind::DebugStatusClientUnreliableCallPacket(_)
             | PacketKind::KickCallPacket(_)
-            | PacketKind::KickCallPacket2(_) => 2,
+            | PacketKind::KickCallPacket2(_)
+            | PacketKind::PingCallPacket(_) => 2,
             PacketKind::Other { priority, .. } => *priority,
         }
     }
@@ -179,10 +200,11 @@ impl PacketKind {
             | PacketKind::HideHudTextCallPacket(_)
             | PacketKind::InfoMessageCallPacket(_)
             | PacketKind::InfoToastCallPacket(_)
-            | PacketKind::OpenUriCallPacket(_)
             | PacketKind::PlayerDisconnectCallPacket(_)
             | PacketKind::RemoveMarkerCallPacket(_)
             | PacketKind::DeletePlansCallPacket(_)
+            | PacketKind::MenuChooseCallPacket(_)
+            | PacketKind::PingLocationCallPacket(_)
             | PacketKind::WorldDataBeginCallPacket(_) => true,
             PacketKind::ConnectCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
@@ -210,6 +232,13 @@ impl PacketKind {
             | PacketKind::LabelCallPacket2(_)
             | PacketKind::LabelReliableCallPacket(_)
             | PacketKind::LabelReliableCallPacket2(_)
+            | PacketKind::LandingPadLandedCallPacket(_)
+            | PacketKind::LogicExplosionCallPacket(_)
+            | PacketKind::MenuCallPacket(_)
+            | PacketKind::OpenUriCallPacket(_)
+            | PacketKind::PayloadDroppedCallPacket(_)
+            | PacketKind::PickedBuildPayloadCallPacket(_)
+            | PacketKind::PickedUnitPayloadCallPacket(_)
             | PacketKind::SetCameraPositionCallPacket(_)
             | PacketKind::SetFlagCallPacket(_)
             | PacketKind::SetHudTextCallPacket(_)
@@ -225,7 +254,8 @@ impl PacketKind {
             | PacketKind::ClientPlanSnapshotCallPacket(_)
             | PacketKind::ClientSnapshotCallPacket(_)
             | PacketKind::ConnectConfirmCallPacket(_)
-            | PacketKind::DropItemCallPacket(_) => server,
+            | PacketKind::DropItemCallPacket(_)
+            | PacketKind::PingCallPacket(_) => server,
             PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => !server,
             PacketKind::Other {
                 allow_client,

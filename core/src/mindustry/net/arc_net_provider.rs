@@ -16,12 +16,14 @@ use super::{
         HideHudTextCallPacket, InfoMessageCallPacket, InfoPopupCallPacket, InfoPopupCallPacket2,
         InfoPopupReliableCallPacket, InfoPopupReliableCallPacket2, InfoToastCallPacket,
         KickCallPacket, KickCallPacket2, LabelCallPacket, LabelCallPacket2,
-        LabelReliableCallPacket, LabelReliableCallPacket2, OpenUriCallPacket,
-        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
-        RemoveQueueBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
-        SetHudTextCallPacket, SetHudTextReliableCallPacket, SetMapAreaCallPacket,
-        SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket, TextInputCallPacket2,
-        WorldDataBeginCallPacket,
+        LabelReliableCallPacket, LabelReliableCallPacket2, LandingPadLandedCallPacket,
+        LogicExplosionCallPacket, MenuCallPacket, MenuChooseCallPacket, OpenUriCallPacket,
+        PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+        PingCallPacket, PingLocationCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
+        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, SetCameraPositionCallPacket,
+        SetFlagCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket,
+        SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin, StreamChunk, TextInputCallPacket,
+        TextInputCallPacket2, WorldDataBeginCallPacket,
     },
     PacketKind,
 };
@@ -359,9 +361,45 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::LABEL_RELIABLE_CALL_PACKET2
             }
+            PacketKind::LandingPadLandedCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::LANDING_PAD_LANDED_CALL_PACKET
+            }
+            PacketKind::LogicExplosionCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::LOGIC_EXPLOSION_CALL_PACKET
+            }
+            PacketKind::MenuCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::MENU_CALL_PACKET
+            }
+            PacketKind::MenuChooseCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::MENU_CHOOSE_CALL_PACKET
+            }
             PacketKind::OpenUriCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
                 packet_ids::OPEN_URI_CALL_PACKET
+            }
+            PacketKind::PayloadDroppedCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::PAYLOAD_DROPPED_CALL_PACKET
+            }
+            PacketKind::PickedBuildPayloadCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::PICKED_BUILD_PAYLOAD_CALL_PACKET
+            }
+            PacketKind::PickedUnitPayloadCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::PICKED_UNIT_PAYLOAD_CALL_PACKET
+            }
+            PacketKind::PingCallPacket(packet) => {
+                packet.write_to(&mut payload)?;
+                packet_ids::PING_CALL_PACKET
+            }
+            PacketKind::PingLocationCallPacket(packet) => {
+                packet.write_client_payload(&mut payload)?;
+                packet_ids::PING_LOCATION_CALL_PACKET
             }
             PacketKind::PingResponseCallPacket(packet) => {
                 packet.write_to(&mut payload)?;
@@ -683,9 +721,48 @@ impl PacketSerializer {
                             LabelReliableCallPacket2::read_from(&mut cursor)?,
                         ))
                     }
+                    packet_ids::LANDING_PAD_LANDED_CALL_PACKET => {
+                        Ok(PacketKind::LandingPadLandedCallPacket(
+                            LandingPadLandedCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::LOGIC_EXPLOSION_CALL_PACKET => {
+                        Ok(PacketKind::LogicExplosionCallPacket(
+                            LogicExplosionCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::MENU_CALL_PACKET => Ok(PacketKind::MenuCallPacket(
+                        MenuCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::MENU_CHOOSE_CALL_PACKET => Ok(PacketKind::MenuChooseCallPacket(
+                        MenuChooseCallPacket::read_from_client_payload(&mut cursor)?,
+                    )),
                     packet_ids::OPEN_URI_CALL_PACKET => Ok(PacketKind::OpenUriCallPacket(
                         OpenUriCallPacket::read_from(&mut cursor)?,
                     )),
+                    packet_ids::PAYLOAD_DROPPED_CALL_PACKET => {
+                        Ok(PacketKind::PayloadDroppedCallPacket(
+                            PayloadDroppedCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::PICKED_BUILD_PAYLOAD_CALL_PACKET => {
+                        Ok(PacketKind::PickedBuildPayloadCallPacket(
+                            PickedBuildPayloadCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::PICKED_UNIT_PAYLOAD_CALL_PACKET => {
+                        Ok(PacketKind::PickedUnitPayloadCallPacket(
+                            PickedUnitPayloadCallPacket::read_from(&mut cursor)?,
+                        ))
+                    }
+                    packet_ids::PING_CALL_PACKET => Ok(PacketKind::PingCallPacket(
+                        PingCallPacket::read_from(&mut cursor)?,
+                    )),
+                    packet_ids::PING_LOCATION_CALL_PACKET => {
+                        Ok(PacketKind::PingLocationCallPacket(
+                            PingLocationCallPacket::read_from_client_payload(&mut cursor)?,
+                        ))
+                    }
                     packet_ids::PING_RESPONSE_CALL_PACKET => {
                         Ok(PacketKind::PingResponseCallPacket(
                             PingResponseCallPacket::read_from(&mut cursor)?,
@@ -1574,6 +1651,119 @@ mod tests {
         assert_eq!(
             PacketSerializer::read_packet_kind(&bytes).unwrap(),
             reliable_label_with_id
+        );
+
+        let landing = PacketKind::LandingPadLandedCallPacket(LandingPadLandedCallPacket {
+            tile: Some(crate::mindustry::world::point2_pack(1, 2)),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&landing).unwrap();
+        assert_eq!(bytes[0], packet_ids::LANDING_PAD_LANDED_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), landing);
+
+        let logic = PacketKind::LogicExplosionCallPacket(LogicExplosionCallPacket {
+            team: TeamId(3),
+            x: 1.0,
+            y: 2.0,
+            radius: 3.0,
+            damage: 4.0,
+            air: true,
+            ground: false,
+            pierce: true,
+            effect: false,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&logic).unwrap();
+        assert_eq!(bytes[0], packet_ids::LOGIC_EXPLOSION_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), logic);
+
+        let menu = PacketKind::MenuCallPacket(MenuCallPacket {
+            menu_id: 5,
+            title: "title".into(),
+            message: "message".into(),
+            options: vec![vec![Some("A".into()), None]],
+        });
+        let bytes = PacketSerializer::write_packet_kind(&menu).unwrap();
+        assert_eq!(bytes[0], packet_ids::MENU_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), menu);
+
+        let menu_choose = PacketKind::MenuChooseCallPacket(MenuChooseCallPacket {
+            player_id: Some(123),
+            menu_id: 5,
+            option: 1,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&menu_choose).unwrap();
+        assert_eq!(bytes[0], packet_ids::MENU_CHOOSE_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            PacketKind::MenuChooseCallPacket(MenuChooseCallPacket {
+                player_id: None,
+                menu_id: 5,
+                option: 1,
+            })
+        );
+
+        let uri = PacketKind::OpenUriCallPacket(OpenUriCallPacket {
+            uri: "https://example.invalid".into(),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&uri).unwrap();
+        assert_eq!(bytes[0], packet_ids::OPEN_URI_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), uri);
+
+        let payload_drop = PacketKind::PayloadDroppedCallPacket(PayloadDroppedCallPacket {
+            unit: UnitRef::Unit { id: 77 },
+            x: 4.0,
+            y: 5.0,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&payload_drop).unwrap();
+        assert_eq!(bytes[0], packet_ids::PAYLOAD_DROPPED_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            payload_drop
+        );
+
+        let picked_build = PacketKind::PickedBuildPayloadCallPacket(PickedBuildPayloadCallPacket {
+            unit: UnitRef::Unit { id: 78 },
+            build_pos: Some(crate::mindustry::world::point2_pack(3, 4)),
+            on_ground: true,
+        });
+        let bytes = PacketSerializer::write_packet_kind(&picked_build).unwrap();
+        assert_eq!(bytes[0], packet_ids::PICKED_BUILD_PAYLOAD_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            picked_build
+        );
+
+        let picked_unit = PacketKind::PickedUnitPayloadCallPacket(PickedUnitPayloadCallPacket {
+            unit: UnitRef::Unit { id: 79 },
+            target: UnitRef::Unit { id: 80 },
+        });
+        let bytes = PacketSerializer::write_packet_kind(&picked_unit).unwrap();
+        assert_eq!(bytes[0], packet_ids::PICKED_UNIT_PAYLOAD_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            picked_unit
+        );
+
+        let ping = PacketKind::PingCallPacket(PingCallPacket { time: 123456789 });
+        let bytes = PacketSerializer::write_packet_kind(&ping).unwrap();
+        assert_eq!(bytes[0], packet_ids::PING_CALL_PACKET);
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), ping);
+
+        let ping_location = PacketKind::PingLocationCallPacket(PingLocationCallPacket {
+            player_id: Some(7),
+            x: 9.0,
+            y: 10.0,
+            text: "look".into(),
+        });
+        let bytes = PacketSerializer::write_packet_kind(&ping_location).unwrap();
+        assert_eq!(bytes[0], packet_ids::PING_LOCATION_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            PacketKind::PingLocationCallPacket(PingLocationCallPacket {
+                player_id: None,
+                x: 9.0,
+                y: 10.0,
+                text: "look".into(),
+            })
         );
 
         let camera =
