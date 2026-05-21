@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
@@ -15,6 +16,7 @@ pub struct NetServerState {
     pub server: bool,
     pub listen_port: Option<u16>,
     pub connections: Vec<NetConnection>,
+    pub connection_states: HashMap<i32, NetConnection>,
     pub last_connection_id: Option<i32>,
     pub last_connect: Option<Connect>,
     pub last_handshake: Option<ConnectPacket>,
@@ -123,6 +125,7 @@ impl NetServer {
         state.server = false;
         state.listen_port = None;
         state.connections.clear();
+        state.connection_states.clear();
         state.last_updated_at = Some(Instant::now());
     }
 
@@ -187,7 +190,7 @@ impl NetServer {
         };
 
         let mut state = self.state.lock().expect("NetServerState mutex poisoned");
-        state.connections = connections;
+        Self::sync_provider_connections(&mut state, connections);
         state.last_updated_at = Some(Instant::now());
     }
 
@@ -207,6 +210,15 @@ impl NetServer {
                     state.server = true;
                     state.last_connection_id = connection_id;
                     state.last_connect = Some(connect.clone());
+                    if let Some(connection_id) = connection_id {
+                        let connection = state
+                            .connection_states
+                            .entry(connection_id)
+                            .or_insert_with(|| NetConnection::new(connect.address_tcp.clone()));
+                        connection.address = connect.address_tcp.clone();
+                        connection.has_connected = false;
+                        connection.has_begun_connecting = false;
+                    }
                     state.events.push(ProviderEvent::ServerConnected {
                         connection_id: connection_id.unwrap_or(-1),
                         address: connect.address_tcp.clone(),
@@ -227,6 +239,13 @@ impl NetServer {
                     state.last_connection_id = connection_id;
                     state.last_disconnect = Some(disconnect.clone());
                     state.last_disconnect_reason = Some(disconnect.reason.clone());
+                    if let Some(connection_id) = connection_id {
+                        let connection = state
+                            .connection_states
+                            .entry(connection_id)
+                            .or_insert_with(|| NetConnection::new(String::new()));
+                        connection.has_disconnected = true;
+                    }
                     state.events.push(ProviderEvent::ServerDisconnected {
                         connection_id: connection_id.unwrap_or(-1),
                         reason: disconnect.reason.clone(),
@@ -246,6 +265,16 @@ impl NetServer {
                     let mut state = state.lock().expect("NetServerState mutex poisoned");
                     state.last_connection_id = connection_id;
                     state.last_handshake = Some(connect_packet.clone());
+                    if let Some(connection_id) = connection_id {
+                        let connection = state
+                            .connection_states
+                            .entry(connection_id)
+                            .or_insert_with(|| NetConnection::new(String::new()));
+                        connection.uuid = connect_packet.uuid.clone();
+                        connection.usid = connect_packet.usid.clone();
+                        connection.mobile = connect_packet.mobile;
+                        connection.has_begun_connecting = true;
+                    }
                     state.events.push(ProviderEvent::ServerPacket {
                         connection_id: connection_id.unwrap_or(-1),
                         packet: packet.clone(),
@@ -270,6 +299,55 @@ impl NetServer {
             let mut handler = handler.lock().expect("packet handler mutex poisoned");
             let callback = handler.as_mut();
             callback(packet);
+        }
+    }
+
+    fn sync_provider_connections(state: &mut NetServerState, connections: Vec<NetConnection>) {
+        let snapshot = connections;
+        state.connections = snapshot.clone();
+        let mut matched_any = false;
+
+        for connection in state.connection_states.values_mut() {
+            if let Some(provider_connection) = snapshot.iter().find(|provider_connection| {
+                (!provider_connection.address.is_empty()
+                    && provider_connection.address == connection.address)
+                    || (!provider_connection.uuid.is_empty()
+                        && provider_connection.uuid == connection.uuid)
+                    || (!provider_connection.usid.is_empty()
+                        && provider_connection.usid == connection.usid)
+            }) {
+                matched_any = true;
+                let has_connected = connection.has_connected;
+                let has_begun_connecting = connection.has_begun_connecting;
+                let has_disconnected = connection.has_disconnected;
+                let sent = connection.sent.clone();
+                *connection = provider_connection.clone();
+                connection.has_connected = has_connected;
+                connection.has_begun_connecting = has_begun_connecting;
+                connection.has_disconnected |= has_disconnected;
+                connection.sent = sent;
+            }
+        }
+
+        if !matched_any && state.connection_states.len() == 1 && snapshot.len() == 1 {
+            if let Some((_, connection)) = state.connection_states.iter_mut().next() {
+                let has_connected = connection.has_connected;
+                let has_begun_connecting = connection.has_begun_connecting;
+                let has_disconnected = connection.has_disconnected;
+                let sent = connection.sent.clone();
+                *connection = snapshot[0].clone();
+                connection.has_connected = has_connected;
+                connection.has_begun_connecting = has_begun_connecting;
+                connection.has_disconnected |= has_disconnected;
+                connection.sent = sent;
+            }
+        } else if state.connection_states.is_empty() && snapshot.len() == 1 {
+            if let Some(connection_id) = state.last_connection_id {
+                let mut connection = snapshot[0].clone();
+                connection.has_connected = false;
+                connection.has_begun_connecting = false;
+                state.connection_states.insert(connection_id, connection);
+            }
         }
     }
 }
@@ -352,6 +430,14 @@ mod tests {
         );
         assert_eq!(state.last_handshake.as_ref().unwrap().name, "player");
         assert_eq!(state.last_disconnect_reason.as_deref(), Some("left"));
+        let connection = state.connection_states.get(&12).unwrap();
+        assert_eq!(connection.address, "10.0.0.2:6567");
+        assert_eq!(connection.uuid, "uuid");
+        assert_eq!(connection.usid, "usid");
+        assert!(!connection.mobile);
+        assert!(!connection.has_connected);
+        assert!(connection.has_begun_connecting);
+        assert!(connection.has_disconnected);
         assert_eq!(state.events.len(), 3);
     }
 }
