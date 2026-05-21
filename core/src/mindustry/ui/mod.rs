@@ -2,6 +2,8 @@
 
 pub mod dialogs;
 pub mod displayable;
+pub mod mobile_button;
 
 pub use dialogs::BaseDialog;
 pub use displayable::{DisplayTable, Displayable};
+pub use mobile_button::{MobileButton, MobileButtonLayout};
