@@ -412,7 +412,7 @@ impl NetClient {
 
     pub fn send_client_snapshot(&self, snapshot: ClientSnapshotCallPacket) -> io::Result<()> {
         let mut net = self.net.lock().unwrap();
-        net.send(&PacketKind::ClientSnapshotCallPacket(snapshot), true)
+        net.send(&PacketKind::ClientSnapshotCallPacket(snapshot), false)
     }
 
     pub fn send_client_plan_snapshot(
@@ -420,7 +420,7 @@ impl NetClient {
         snapshot: ClientPlanSnapshotCallPacket,
     ) -> io::Result<()> {
         let mut net = self.net.lock().unwrap();
-        net.send(&PacketKind::ClientPlanSnapshotCallPacket(snapshot), true)
+        net.send(&PacketKind::ClientPlanSnapshotCallPacket(snapshot), false)
     }
 
     pub fn update(&self) {
@@ -965,7 +965,7 @@ mod tests {
                 ..
             })
         ));
-        assert!(sent.iter().all(|(_, reliable)| *reliable));
+        assert!(sent.iter().all(|(_, reliable)| !*reliable));
     }
 
     #[test]

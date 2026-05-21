@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::net::{
-    packet_ids, ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, ConnectPacket,
-    Disconnect, Net, NetConnection, PacketKind, ProviderEvent, SentPacket, Streamable,
-    WorldDataBeginCallPacket,
+    packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+    ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, Net, NetConnection, PacketKind,
+    ProviderEvent, SentPacket, Streamable, WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -41,6 +41,10 @@ pub struct NetServerState {
     pub last_client_plan_snapshot: Option<ClientPlanSnapshotCallPacket>,
     pub last_client_plan_snapshot_received_at: Option<Instant>,
     pub client_plan_snapshot_packets_seen: u64,
+    pub last_client_plan_snapshot_forwarded_connection_id: Option<i32>,
+    pub last_client_plan_snapshot_forwarded_at: Option<Instant>,
+    pub client_plan_snapshots_forwarded: u64,
+    pub last_client_plan_snapshot_forwarded_error: Option<String>,
     pub last_disconnect: Option<Disconnect>,
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
@@ -282,6 +286,32 @@ impl NetServer {
     ) -> io::Result<()> {
         self.send_world_data_begin(connection_id)?;
         self.send_world_data(connection_id, bytes)
+    }
+
+    pub fn send_client_plan_snapshot_received(
+        &self,
+        connection_id: i32,
+        packet: ClientPlanSnapshotReceivedCallPacket,
+    ) -> io::Result<()> {
+        let packet = PacketKind::ClientPlanSnapshotReceivedCallPacket(packet);
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet, false)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        state.last_client_plan_snapshot_forwarded_connection_id = Some(connection_id);
+        state.last_client_plan_snapshot_forwarded_at = Some(Instant::now());
+        match &result {
+            Ok(()) => {
+                state.client_plan_snapshots_forwarded += 1;
+                state.last_client_plan_snapshot_forwarded_error = None;
+            }
+            Err(error) => {
+                state.last_client_plan_snapshot_forwarded_error = Some(error.to_string());
+            }
+        }
+        result
     }
 
     pub fn update(&self) {
@@ -651,9 +681,10 @@ mod tests {
     use std::time::Duration;
 
     use crate::mindustry::net::{
-        packet_ids, ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect,
-        ConnectConfirmCallPacket, ConnectPacket, Disconnect, DoneCallback, Host, HostCallback, Net,
-        NetConnection, NetProvider, PacketKind, PingCallPacket, PingResponseCallPacket, SentPacket,
+        packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+        ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
+        DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
+        PingCallPacket, PingResponseCallPacket, SentPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
 
@@ -919,6 +950,44 @@ mod tests {
         assert_eq!(connection.view_height, 12.0);
         assert!(connection.last_received_client_time > 0);
         assert_eq!(state.events.len(), 2);
+    }
+
+    #[test]
+    fn send_client_plan_snapshot_received_targets_connection_unreliably_and_records_state() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let packet = ClientPlanSnapshotReceivedCallPacket {
+            player_id: 42,
+            group_id: 88,
+            plans: None,
+        };
+
+        server
+            .send_client_plan_snapshot_received(12, packet.clone())
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 12);
+        assert!(!sent[0].2);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::ClientPlanSnapshotReceivedCallPacket(sent_packet) if sent_packet == &packet
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.last_client_plan_snapshot_forwarded_connection_id,
+            Some(12)
+        );
+        assert_eq!(state.client_plan_snapshots_forwarded, 1);
+        assert!(state.last_client_plan_snapshot_forwarded_at.is_some());
+        assert!(state.last_client_plan_snapshot_forwarded_error.is_none());
     }
 
     #[test]
