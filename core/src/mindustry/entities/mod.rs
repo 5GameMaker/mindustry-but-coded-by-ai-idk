@@ -13,7 +13,10 @@ pub use abilities::{
     Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
     SpawnDeathAbility,
 };
-pub use comp::{DamageComp, DrawComp, Interval, OwnerComp, PosTeamDef, RotComp, TimerComp};
+pub use comp::{
+    DamageComp, DamageState, DrawComp, Interval, OwnerComp, PosTeamDef, RotComp, ShielderComp,
+    TeamState, TimerComp,
+};
 pub use entity_indexer::EntityIndexer;
 pub use leg::Leg;
 pub use leg_destroy_data::{LegDestroyData, TextureRegionRef};
