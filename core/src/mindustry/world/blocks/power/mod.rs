@@ -1,5 +1,11 @@
 use std::io::{self, Read, Write};
 
+pub mod power_block;
+pub mod power_distributor;
+
+pub use power_block::PowerBlock;
+pub use power_distributor::PowerDistributor;
+
 pub fn battery_status(power_status: f32) -> PowerBlockStatus {
     if nearly(power_status, 0.0, 0.001) {
         PowerBlockStatus::NoInput
