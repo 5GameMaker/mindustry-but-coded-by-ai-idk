@@ -4,6 +4,10 @@ use crate::mindustry::{
     world::{Block, BlockId, CacheLayer},
 };
 
+pub mod spawn_block;
+
+pub use spawn_block::SpawnBlockData;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FloorData {
     pub base: Block,
@@ -127,24 +131,6 @@ impl OverlayFloorData {
 
     pub fn can_place_on(&self, tile_block_solid: bool) -> bool {
         !self.floor.wall_ore || tile_block_solid
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SpawnBlockData {
-    pub overlay: OverlayFloorData,
-}
-
-impl SpawnBlockData {
-    pub fn new(id: BlockId, name: impl Into<String>) -> Self {
-        let mut overlay = OverlayFloorData::new(id, name);
-        overlay.floor.base.variants = 0;
-        overlay.floor.needs_surface = false;
-        Self { overlay }
-    }
-
-    pub fn should_draw_base(is_editor_tile: bool) -> bool {
-        is_editor_tile
     }
 }
 
