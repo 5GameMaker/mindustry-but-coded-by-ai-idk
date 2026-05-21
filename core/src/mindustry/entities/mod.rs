@@ -13,13 +13,13 @@ pub use abilities::{
     Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
     SpawnDeathAbility,
 };
-pub use comp::HealthComp;
 pub use comp::{apply_armor, ShieldComp};
 pub use comp::{
     ChildComp, ChildParent, DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval,
     OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
 pub use comp::{EntityComp, EntityIoState, EntityLocality};
+pub use comp::{HealthComp, ItemStackSlot, ItemsComp};
 pub use comp::{HitboxComp, HitboxRect};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{TeamComp, TeamRulesView, VelComp};
