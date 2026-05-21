@@ -14,6 +14,7 @@ pub use abilities::{
     SpawnDeathAbility,
 };
 pub use comp::{apply_armor, ShieldComp};
+pub use comp::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use comp::{
     ChildComp, ChildParent, DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval,
     OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
