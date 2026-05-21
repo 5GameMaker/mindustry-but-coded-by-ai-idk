@@ -17,6 +17,7 @@ pub use comp::{
     DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval, OwnerComp, PosComp, PosTeamDef,
     RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
+pub use comp::{EntityComp, EntityIoState, EntityLocality};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{TimedComp, TimedKillComp};
 pub use entity_indexer::EntityIndexer;

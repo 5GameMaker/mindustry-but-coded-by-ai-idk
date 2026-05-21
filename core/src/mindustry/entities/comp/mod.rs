@@ -3,6 +3,7 @@
 pub mod damage;
 pub mod draw;
 pub mod elevation_move;
+pub mod entity;
 pub mod owner;
 pub mod pos;
 pub mod pos_team_def;
@@ -16,6 +17,7 @@ pub mod timer;
 pub use damage::DamageComp;
 pub use draw::DrawComp;
 pub use elevation_move::{ElevationMoveComp, SolidPred};
+pub use entity::{EntityComp, EntityIoState, EntityLocality};
 pub use owner::OwnerComp;
 pub use pos::PosComp;
 pub use pos_team_def::PosTeamDef;
