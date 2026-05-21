@@ -23,6 +23,7 @@ pub mod puddle;
 pub mod rot;
 pub mod shield;
 pub mod shielder;
+pub mod status;
 pub mod sync;
 pub mod team;
 pub mod timed;
@@ -58,6 +59,7 @@ pub use puddle::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, Pudd
 pub use rot::RotComp;
 pub use shield::{apply_armor, ShieldComp};
 pub use shielder::{DamageState, ShielderComp, TeamState};
+pub use status::{StatusColor, StatusComp};
 pub use sync::{SyncComp, SyncHooks};
 pub use team::{TeamComp, TeamRulesView};
 pub use timed::TimedComp;

@@ -31,6 +31,7 @@ pub use comp::{LaunchCoreBlock, LaunchCoreComp, LaunchCoreDrawPlan, LaunchCoreSm
 pub use comp::{PhysicRef, PhysicsComp};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, PuddleUpdatePlan};
+pub use comp::{StatusColor, StatusComp};
 pub use comp::{SyncComp, SyncHooks};
 pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
