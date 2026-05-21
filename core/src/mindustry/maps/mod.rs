@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, io, io::Read, path::Path};
 
 pub mod filters;
+pub mod generators;
 pub mod map_exception;
 
 use crate::mindustry::{
