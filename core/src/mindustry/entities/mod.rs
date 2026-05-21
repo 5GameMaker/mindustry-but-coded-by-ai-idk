@@ -13,6 +13,7 @@ pub use abilities::{
     Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
     SpawnDeathAbility,
 };
+pub use comp::HealthComp;
 pub use comp::{
     DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval, OwnerComp, PosComp, PosTeamDef,
     RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
