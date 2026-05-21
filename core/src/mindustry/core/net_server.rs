@@ -336,6 +336,34 @@ impl NetServer {
         result
     }
 
+    pub fn send_client_plan_snapshot_received_to_many(
+        &self,
+        connection_ids: impl IntoIterator<Item = i32>,
+        packet: ClientPlanSnapshotReceivedCallPacket,
+    ) -> io::Result<usize> {
+        let mut sent = 0;
+        let mut first_error = None;
+
+        for connection_id in connection_ids {
+            match self.send_client_plan_snapshot_received(connection_id, packet.clone()) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            state.last_client_plan_snapshot_forwarded_error = Some(error.to_string());
+            Err(error)
+        } else {
+            Ok(sent)
+        }
+    }
+
     pub fn send_state_snapshot(
         &self,
         connection_id: i32,
@@ -1161,6 +1189,61 @@ mod tests {
             SentPacket::Other(ref name) if name == "ClientPlanSnapshotReceivedCallPacket"
         ));
         assert!(!connection.sent[0].1);
+    }
+
+    #[test]
+    fn send_client_plan_snapshot_received_to_many_reuses_payload_for_selected_connections() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let packet = ClientPlanSnapshotReceivedCallPacket {
+            player_id: 42,
+            group_id: 89,
+            plans: None,
+        };
+
+        let sent_count = server
+            .send_client_plan_snapshot_received_to_many(vec![3, 5, 8], packet.clone())
+            .unwrap();
+
+        assert_eq!(sent_count, 3);
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        let target_ids: Vec<i32> = sent
+            .iter()
+            .map(|(connection_id, _, _)| *connection_id)
+            .collect();
+        assert_eq!(target_ids, vec![3, 5, 8]);
+        assert!(sent.iter().all(|(_, packet_kind, reliable)| {
+            !*reliable
+                && matches!(
+                    packet_kind,
+                    PacketKind::ClientPlanSnapshotReceivedCallPacket(sent_packet)
+                        if sent_packet == &packet
+                )
+        }));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.last_client_plan_snapshot_forwarded_connection_id,
+            Some(8)
+        );
+        assert_eq!(state.client_plan_snapshots_forwarded, 3);
+        assert!(state.last_client_plan_snapshot_forwarded_error.is_none());
+
+        for connection_id in [3, 5, 8] {
+            let connection = state.connection_states.get(&connection_id).unwrap();
+            assert_eq!(connection.sent.len(), 1);
+            assert!(matches!(
+                connection.sent[0].0,
+                SentPacket::Other(ref name) if name == "ClientPlanSnapshotReceivedCallPacket"
+            ));
+            assert!(!connection.sent[0].1);
+        }
     }
 
     #[test]
