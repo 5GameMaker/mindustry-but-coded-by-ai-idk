@@ -19,6 +19,7 @@ pub use comp::{
     ChildComp, ChildParent, DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval,
     OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
+pub use comp::{DecalColor, DecalComp, DecalDrawPlan, DecalRegion};
 pub use comp::{EntityComp, EntityIoState, EntityLocality};
 pub use comp::{HealthComp, ItemStackSlot, ItemsComp};
 pub use comp::{HitboxComp, HitboxRect};

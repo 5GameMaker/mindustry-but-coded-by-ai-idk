@@ -3,6 +3,7 @@
 pub mod building_tether;
 pub mod child;
 pub mod damage;
+pub mod decal;
 pub mod draw;
 pub mod elevation_move;
 pub mod entity;
@@ -28,6 +29,7 @@ pub mod world_label;
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use child::{ChildComp, ChildParent};
 pub use damage::DamageComp;
+pub use decal::{DecalColor, DecalComp, DecalDrawPlan, DecalRegion};
 pub use draw::DrawComp;
 pub use elevation_move::{ElevationMoveComp, SolidPred};
 pub use entity::{EntityComp, EntityIoState, EntityLocality};
