@@ -2,6 +2,10 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::world::BlockId;
 
+pub mod legacy_block;
+
+pub use legacy_block::LegacyBlock;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LegacyRemoval {
     Remove,
