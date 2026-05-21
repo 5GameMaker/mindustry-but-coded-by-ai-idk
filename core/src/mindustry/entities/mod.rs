@@ -14,8 +14,8 @@ pub use abilities::{
     SpawnDeathAbility,
 };
 pub use comp::{
-    DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval, OwnerComp, PosTeamDef, RotComp,
-    ShielderComp, SolidPred, TeamState, TimerComp,
+    DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval, OwnerComp, PosComp, PosTeamDef,
+    RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
 };
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use entity_indexer::EntityIndexer;
