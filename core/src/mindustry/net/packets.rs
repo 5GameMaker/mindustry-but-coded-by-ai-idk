@@ -6,16 +6,21 @@ use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::{ContentId, ContentType};
 use crate::mindustry::io::type_io::{
     read_block, read_building_ref, read_bullet_type_id, read_bytes, read_client_plans, read_color,
-    read_content_id, read_effect_id, read_entity_ref, read_i32, read_i64, read_int_seq, read_ints,
-    read_kick, read_object_safe, read_objective_marker_json, read_plans_queue,
-    read_required_content_name, read_string, read_string_array, read_team, read_tile_pos, read_u32,
-    read_u8, read_unit_ref, write_block, write_building_ref, write_bullet_type_id, write_bytes,
-    write_client_plans, write_color, write_content_id, write_effect_id, write_entity_ref,
-    write_i32, write_i64, write_int_seq, write_ints, write_kick, write_object,
-    write_objective_marker_json, write_plans_queue_net, write_required_content_ref, write_string,
-    write_string_array, write_team, write_tile_pos, write_u32, write_unit_ref, BuildPlanWire,
-    BuildingRef, EntityRef, RgbaColor, TeamId, TypeValue, UnitRef,
+    read_content_id, read_content_name, read_effect_id, read_entity_ref, read_i32, read_i64,
+    read_int_seq, read_ints, read_item, read_item_stacks, read_kick, read_liquid,
+    read_liquid_stacks, read_object_safe, read_objective_marker_json, read_objectives_json,
+    read_plans_queue, read_required_content_name, read_rules_json, read_sound_id, read_string,
+    read_string_array, read_team, read_tile_pos, read_u32, read_u8, read_unit_ref, read_unit_type,
+    write_block, write_building_ref, write_bullet_type_id, write_bytes, write_client_plans,
+    write_color, write_content_by_name, write_content_id, write_effect_id, write_entity_ref,
+    write_i32, write_i64, write_int_seq, write_ints, write_item, write_item_stacks, write_kick,
+    write_liquid, write_liquid_stacks, write_object, write_objective_marker_json,
+    write_objectives_json, write_plans_queue_net, write_required_content_ref, write_rules_json,
+    write_sound_id, write_string, write_string_array, write_team, write_tile_pos, write_u32,
+    write_u8, write_unit_ref, write_unit_type, BuildPlanWire, BuildingRef, EntityRef, RgbaColor,
+    TeamId, TypeValue, UnitRef,
 };
+use crate::mindustry::r#type::{ItemStack, LiquidStack};
 
 use super::packet::{PacketCodec, PacketPriority, PacketRuntime};
 
@@ -98,12 +103,46 @@ pub mod packet_ids {
     pub const REQUEST_UNIT_PAYLOAD_CALL_PACKET: PacketId = 86;
     pub const RESEARCHED_CALL_PACKET: PacketId = 87;
     pub const ROTATE_BLOCK_CALL_PACKET: PacketId = 88;
+    pub const SECTOR_CAPTURE_CALL_PACKET: PacketId = 89;
+    pub const SEND_CHAT_MESSAGE_CALL_PACKET: PacketId = 90;
+    pub const SEND_MESSAGE_CALL_PACKET: PacketId = 91;
+    pub const SEND_MESSAGE_CALL_PACKET2: PacketId = 92;
+    pub const SERVER_BINARY_PACKET_RELIABLE_CALL_PACKET: PacketId = 93;
+    pub const SERVER_BINARY_PACKET_UNRELIABLE_CALL_PACKET: PacketId = 94;
+    pub const SERVER_PACKET_RELIABLE_CALL_PACKET: PacketId = 95;
+    pub const SERVER_PACKET_UNRELIABLE_CALL_PACKET: PacketId = 96;
     pub const SET_CAMERA_POSITION_CALL_PACKET: PacketId = 97;
     pub const SET_FLAG_CALL_PACKET: PacketId = 98;
+    pub const SET_FLOOR_CALL_PACKET: PacketId = 99;
     pub const SET_HUD_TEXT_CALL_PACKET: PacketId = 100;
     pub const SET_HUD_TEXT_RELIABLE_CALL_PACKET: PacketId = 101;
+    pub const SET_ITEM_CALL_PACKET: PacketId = 102;
+    pub const SET_ITEMS_CALL_PACKET: PacketId = 103;
+    pub const SET_LIQUID_CALL_PACKET: PacketId = 104;
+    pub const SET_LIQUIDS_CALL_PACKET: PacketId = 105;
     pub const SET_MAP_AREA_CALL_PACKET: PacketId = 106;
+    pub const SET_OBJECTIVES_CALL_PACKET: PacketId = 107;
+    pub const SET_OVERLAY_CALL_PACKET: PacketId = 108;
+    pub const SET_PLAYER_TEAM_EDITOR_CALL_PACKET: PacketId = 109;
+    pub const SET_POSITION_CALL_PACKET: PacketId = 110;
     pub const SET_RULE_CALL_PACKET: PacketId = 111;
+    pub const SET_RULES_CALL_PACKET: PacketId = 112;
+    pub const SET_TEAM_CALL_PACKET: PacketId = 113;
+    pub const SET_TEAMS_CALL_PACKET: PacketId = 114;
+    pub const SET_TILE_CALL_PACKET: PacketId = 115;
+    pub const SET_TILE_BLOCKS_CALL_PACKET: PacketId = 116;
+    pub const SET_TILE_FLOORS_CALL_PACKET: PacketId = 117;
+    pub const SET_TILE_ITEMS_CALL_PACKET: PacketId = 118;
+    pub const SET_TILE_LIQUIDS_CALL_PACKET: PacketId = 119;
+    pub const SET_TILE_OVERLAYS_CALL_PACKET: PacketId = 120;
+    pub const SET_UNIT_COMMAND_CALL_PACKET: PacketId = 121;
+    pub const SET_UNIT_STANCE_CALL_PACKET: PacketId = 122;
+    pub const SOUND_CALL_PACKET: PacketId = 123;
+    pub const SOUND_AT_CALL_PACKET: PacketId = 124;
+    pub const SPAWN_EFFECT_CALL_PACKET: PacketId = 125;
+    pub const STATE_SNAPSHOT_CALL_PACKET: PacketId = 126;
+    pub const SYNC_VARIABLE_CALL_PACKET: PacketId = 127;
+    pub const TAKE_ITEMS_CALL_PACKET: PacketId = 128;
     pub const TEXT_INPUT_CALL_PACKET: PacketId = 129;
     pub const TEXT_INPUT_CALL_PACKET2: PacketId = 130;
     pub const WORLD_DATA_BEGIN_CALL_PACKET: PacketId = 157;
@@ -1303,6 +1342,129 @@ pub const ROTATE_BLOCK_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifes
     notes: "Generated by Call.registerPackets(); server-forwarded packets include player entity id before build/direction.",
 };
 
+pub const SECTOR_CAPTURE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SECTOR_CAPTURE_CALL_PACKET),
+    name: "SectorCaptureCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SectorCaptureCallPacket",
+    notes: "Generated by Call.registerPackets(); empty server-to-client call packet.",
+};
+
+pub const SEND_CHAT_MESSAGE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SEND_CHAT_MESSAGE_CALL_PACKET),
+    name: "SendChatMessageCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ClientToServer,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: false,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SendChatMessageCallPacket",
+    notes: "Generated by Call.registerPackets(); client chat message to server.",
+};
+
+pub const SEND_MESSAGE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SEND_MESSAGE_CALL_PACKET),
+    name: "SendMessageCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SendMessageCallPacket",
+    notes: "Generated by Call.registerPackets(); plain message string for clients.",
+};
+
+pub const SEND_MESSAGE_CALL_PACKET2_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SEND_MESSAGE_CALL_PACKET2),
+    name: "SendMessageCallPacket2",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SendMessageCallPacket2",
+    notes: "Generated by Call.registerPackets(); message plus unformatted text and sender entity.",
+};
+
+pub const SERVER_BINARY_PACKET_RELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry =
+    PacketManifestEntry {
+        id: Some(packet_ids::SERVER_BINARY_PACKET_RELIABLE_CALL_PACKET),
+        name: "ServerBinaryPacketReliableCallPacket",
+        transport: PacketTransport::NetPacket,
+        direction: PacketDirection::ClientToServer,
+        streamable: false,
+        priority: Some(PacketPriority::Normal),
+        allow_client_endpoint: false,
+        allow_server_endpoint: true,
+        force_uncompressed: false,
+        codec: PacketCodecState::Implemented,
+        upstream: "mindustry.gen.ServerBinaryPacketReliableCallPacket",
+        notes: "Generated by Call.registerPackets(); reliable server-binary custom packet.",
+    };
+
+pub const SERVER_BINARY_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry =
+    PacketManifestEntry {
+        id: Some(packet_ids::SERVER_BINARY_PACKET_UNRELIABLE_CALL_PACKET),
+        name: "ServerBinaryPacketUnreliableCallPacket",
+        transport: PacketTransport::NetPacket,
+        direction: PacketDirection::ClientToServer,
+        streamable: false,
+        priority: Some(PacketPriority::Normal),
+        allow_client_endpoint: false,
+        allow_server_endpoint: true,
+        force_uncompressed: false,
+        codec: PacketCodecState::Implemented,
+        upstream: "mindustry.gen.ServerBinaryPacketUnreliableCallPacket",
+        notes: "Generated by Call.registerPackets(); unreliable server-binary custom packet.",
+    };
+
+pub const SERVER_PACKET_RELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SERVER_PACKET_RELIABLE_CALL_PACKET),
+    name: "ServerPacketReliableCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ClientToServer,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: false,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.ServerPacketReliableCallPacket",
+    notes: "Generated by Call.registerPackets(); reliable server string packet.",
+};
+
+pub const SERVER_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry =
+    PacketManifestEntry {
+        id: Some(packet_ids::SERVER_PACKET_UNRELIABLE_CALL_PACKET),
+        name: "ServerPacketUnreliableCallPacket",
+        transport: PacketTransport::NetPacket,
+        direction: PacketDirection::ClientToServer,
+        streamable: false,
+        priority: Some(PacketPriority::Normal),
+        allow_client_endpoint: false,
+        allow_server_endpoint: true,
+        force_uncompressed: false,
+        codec: PacketCodecState::Implemented,
+        upstream: "mindustry.gen.ServerPacketUnreliableCallPacket",
+        notes: "Generated by Call.registerPackets(); unreliable server string packet.",
+    };
+
 pub const SET_CAMERA_POSITION_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     id: Some(packet_ids::SET_CAMERA_POSITION_CALL_PACKET),
     name: "SetCameraPositionCallPacket",
@@ -1331,6 +1493,21 @@ pub const SET_FLAG_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEnt
     codec: PacketCodecState::Implemented,
     upstream: "mindustry.gen.SetFlagCallPacket",
     notes: "Generated by Call.registerPackets(); TypeIO string flag plus Java boolean add.",
+};
+
+pub const SET_FLOOR_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_FLOOR_CALL_PACKET),
+    name: "SetFloorCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetFloorCallPacket",
+    notes: "Generated by Call.registerPackets(); tile plus floor/overlay block content names.",
 };
 
 pub const SET_HUD_TEXT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
@@ -1363,6 +1540,66 @@ pub const SET_HUD_TEXT_RELIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry = Pack
     notes: "Generated by Call.registerPackets(); reliable TypeIO string HUD message.",
 };
 
+pub const SET_ITEM_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_ITEM_CALL_PACKET),
+    name: "SetItemCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetItemCallPacket",
+    notes: "Generated by Call.registerPackets(); building item stack update.",
+};
+
+pub const SET_ITEMS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_ITEMS_CALL_PACKET),
+    name: "SetItemsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetItemsCallPacket",
+    notes: "Generated by Call.registerPackets(); building item stacks update.",
+};
+
+pub const SET_LIQUID_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_LIQUID_CALL_PACKET),
+    name: "SetLiquidCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetLiquidCallPacket",
+    notes: "Generated by Call.registerPackets(); building liquid amount update.",
+};
+
+pub const SET_LIQUIDS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_LIQUIDS_CALL_PACKET),
+    name: "SetLiquidsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetLiquidsCallPacket",
+    notes: "Generated by Call.registerPackets(); building liquid stacks update.",
+};
+
 pub const SET_MAP_AREA_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     id: Some(packet_ids::SET_MAP_AREA_CALL_PACKET),
     name: "SetMapAreaCallPacket",
@@ -1378,6 +1615,67 @@ pub const SET_MAP_AREA_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifes
     notes: "Generated by Call.registerPackets(); four Java int map-area fields.",
 };
 
+pub const SET_OBJECTIVES_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_OBJECTIVES_CALL_PACKET),
+    name: "SetObjectivesCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetObjectivesCallPacket",
+    notes: "Generated by Call.registerPackets(); objectives JSON payload.",
+};
+
+pub const SET_OVERLAY_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_OVERLAY_CALL_PACKET),
+    name: "SetOverlayCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetOverlayCallPacket",
+    notes: "Generated by Call.registerPackets(); tile plus overlay block content name.",
+};
+
+pub const SET_PLAYER_TEAM_EDITOR_CALL_PACKET_MANIFEST: PacketManifestEntry =
+    PacketManifestEntry {
+        id: Some(packet_ids::SET_PLAYER_TEAM_EDITOR_CALL_PACKET),
+        name: "SetPlayerTeamEditorCallPacket",
+        transport: PacketTransport::NetPacket,
+        direction: PacketDirection::Bidirectional,
+        streamable: false,
+        priority: Some(PacketPriority::Normal),
+        allow_client_endpoint: true,
+        allow_server_endpoint: true,
+        force_uncompressed: false,
+        codec: PacketCodecState::Implemented,
+        upstream: "mindustry.gen.SetPlayerTeamEditorCallPacket",
+        notes: "Generated by Call.registerPackets(); player entity only appears on server-forwarded packets.",
+    };
+
+pub const SET_POSITION_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_POSITION_CALL_PACKET),
+    name: "SetPositionCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetPositionCallPacket",
+    notes: "Generated by Call.registerPackets(); two Java float fields.",
+};
+
 pub const SET_RULE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     id: Some(packet_ids::SET_RULE_CALL_PACKET),
     name: "SetRuleCallPacket",
@@ -1391,6 +1689,261 @@ pub const SET_RULE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEnt
     codec: PacketCodecState::Implemented,
     upstream: "mindustry.gen.SetRuleCallPacket",
     notes: "Generated by Call.registerPackets(); two TypeIO string fields: rule and jsonData.",
+};
+
+pub const SET_RULES_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_RULES_CALL_PACKET),
+    name: "SetRulesCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetRulesCallPacket",
+    notes: "Generated by Call.registerPackets(); rules JSON payload.",
+};
+
+pub const SET_TEAM_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TEAM_CALL_PACKET),
+    name: "SetTeamCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTeamCallPacket",
+    notes: "Generated by Call.registerPackets(); building plus team.",
+};
+
+pub const SET_TEAMS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TEAMS_CALL_PACKET),
+    name: "SetTeamsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTeamsCallPacket",
+    notes: "Generated by Call.registerPackets(); packed positions plus team.",
+};
+
+pub const SET_TILE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TILE_CALL_PACKET),
+    name: "SetTileCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTileCallPacket",
+    notes: "Generated by Call.registerPackets(); tile plus block/team/rotation fields.",
+};
+
+pub const SET_TILE_BLOCKS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TILE_BLOCKS_CALL_PACKET),
+    name: "SetTileBlocksCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTileBlocksCallPacket",
+    notes: "Generated by Call.registerPackets(); block/team plus packed positions.",
+};
+
+pub const SET_TILE_FLOORS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TILE_FLOORS_CALL_PACKET),
+    name: "SetTileFloorsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTileFloorsCallPacket",
+    notes: "Generated by Call.registerPackets(); floor block plus packed positions.",
+};
+
+pub const SET_TILE_ITEMS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TILE_ITEMS_CALL_PACKET),
+    name: "SetTileItemsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTileItemsCallPacket",
+    notes: "Generated by Call.registerPackets(); item amount plus packed positions.",
+};
+
+pub const SET_TILE_LIQUIDS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TILE_LIQUIDS_CALL_PACKET),
+    name: "SetTileLiquidsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTileLiquidsCallPacket",
+    notes: "Generated by Call.registerPackets(); liquid amount plus packed positions.",
+};
+
+pub const SET_TILE_OVERLAYS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_TILE_OVERLAYS_CALL_PACKET),
+    name: "SetTileOverlaysCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetTileOverlaysCallPacket",
+    notes: "Generated by Call.registerPackets(); overlay block plus packed positions.",
+};
+
+pub const SET_UNIT_COMMAND_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_UNIT_COMMAND_CALL_PACKET),
+    name: "SetUnitCommandCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::Bidirectional,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetUnitCommandCallPacket",
+    notes: "Generated by Call.registerPackets(); selected unit ids plus command content.",
+};
+
+pub const SET_UNIT_STANCE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SET_UNIT_STANCE_CALL_PACKET),
+    name: "SetUnitStanceCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::Bidirectional,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: true,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SetUnitStanceCallPacket",
+    notes: "Generated by Call.registerPackets(); selected unit ids plus stance content.",
+};
+
+pub const SOUND_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SOUND_CALL_PACKET),
+    name: "SoundCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SoundCallPacket",
+    notes: "Generated by Call.registerPackets(); global sound id/volume/pitch/pan.",
+};
+
+pub const SOUND_AT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SOUND_AT_CALL_PACKET),
+    name: "SoundAtCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SoundAtCallPacket",
+    notes: "Generated by Call.registerPackets(); positional sound id/volume/pitch.",
+};
+
+pub const SPAWN_EFFECT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SPAWN_EFFECT_CALL_PACKET),
+    name: "SpawnEffectCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SpawnEffectCallPacket",
+    notes: "Generated by Call.registerPackets(); spawn effect coordinates plus unit type.",
+};
+
+pub const STATE_SNAPSHOT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::STATE_SNAPSHOT_CALL_PACKET),
+    name: "StateSnapshotCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Low),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.StateSnapshotCallPacket",
+    notes: "Generated by Call.registerPackets(); low-priority game state snapshot.",
+};
+
+pub const SYNC_VARIABLE_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::SYNC_VARIABLE_CALL_PACKET),
+    name: "SyncVariableCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.SyncVariableCallPacket",
+    notes: "Generated by Call.registerPackets(); logic variable sync payload.",
+};
+
+pub const TAKE_ITEMS_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
+    id: Some(packet_ids::TAKE_ITEMS_CALL_PACKET),
+    name: "TakeItemsCallPacket",
+    transport: PacketTransport::NetPacket,
+    direction: PacketDirection::ServerToClient,
+    streamable: false,
+    priority: Some(PacketPriority::Normal),
+    allow_client_endpoint: true,
+    allow_server_endpoint: false,
+    force_uncompressed: false,
+    codec: PacketCodecState::Implemented,
+    upstream: "mindustry.gen.TakeItemsCallPacket",
+    notes: "Generated by Call.registerPackets(); take items from building to unit.",
 };
 
 pub const TEXT_INPUT_CALL_PACKET_MANIFEST: PacketManifestEntry = PacketManifestEntry {
@@ -1468,7 +2021,7 @@ pub const PING_MANIFEST: PacketManifestEntry = PacketManifestEntry {
     notes: "Upstream uses one Ping framework message with an isReply flag; no separate Pong class.",
 };
 
-pub const REGISTERED_PACKET_MANIFEST: [PacketManifestEntry; 82] = [
+pub const REGISTERED_PACKET_MANIFEST: [PacketManifestEntry; 116] = [
     STREAM_BEGIN_MANIFEST,
     STREAM_CHUNK_MANIFEST,
     WORLD_STREAM_MANIFEST,
@@ -1542,18 +2095,52 @@ pub const REGISTERED_PACKET_MANIFEST: [PacketManifestEntry; 82] = [
     REQUEST_UNIT_PAYLOAD_CALL_PACKET_MANIFEST,
     RESEARCHED_CALL_PACKET_MANIFEST,
     ROTATE_BLOCK_CALL_PACKET_MANIFEST,
+    SECTOR_CAPTURE_CALL_PACKET_MANIFEST,
+    SEND_CHAT_MESSAGE_CALL_PACKET_MANIFEST,
+    SEND_MESSAGE_CALL_PACKET_MANIFEST,
+    SEND_MESSAGE_CALL_PACKET2_MANIFEST,
+    SERVER_BINARY_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
+    SERVER_BINARY_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
+    SERVER_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
+    SERVER_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
     SET_CAMERA_POSITION_CALL_PACKET_MANIFEST,
     SET_FLAG_CALL_PACKET_MANIFEST,
+    SET_FLOOR_CALL_PACKET_MANIFEST,
     SET_HUD_TEXT_CALL_PACKET_MANIFEST,
     SET_HUD_TEXT_RELIABLE_CALL_PACKET_MANIFEST,
+    SET_ITEM_CALL_PACKET_MANIFEST,
+    SET_ITEMS_CALL_PACKET_MANIFEST,
+    SET_LIQUID_CALL_PACKET_MANIFEST,
+    SET_LIQUIDS_CALL_PACKET_MANIFEST,
     SET_MAP_AREA_CALL_PACKET_MANIFEST,
+    SET_OBJECTIVES_CALL_PACKET_MANIFEST,
+    SET_OVERLAY_CALL_PACKET_MANIFEST,
+    SET_PLAYER_TEAM_EDITOR_CALL_PACKET_MANIFEST,
+    SET_POSITION_CALL_PACKET_MANIFEST,
     SET_RULE_CALL_PACKET_MANIFEST,
+    SET_RULES_CALL_PACKET_MANIFEST,
+    SET_TEAM_CALL_PACKET_MANIFEST,
+    SET_TEAMS_CALL_PACKET_MANIFEST,
+    SET_TILE_CALL_PACKET_MANIFEST,
+    SET_TILE_BLOCKS_CALL_PACKET_MANIFEST,
+    SET_TILE_FLOORS_CALL_PACKET_MANIFEST,
+    SET_TILE_ITEMS_CALL_PACKET_MANIFEST,
+    SET_TILE_LIQUIDS_CALL_PACKET_MANIFEST,
+    SET_TILE_OVERLAYS_CALL_PACKET_MANIFEST,
+    SET_UNIT_COMMAND_CALL_PACKET_MANIFEST,
+    SET_UNIT_STANCE_CALL_PACKET_MANIFEST,
+    SOUND_CALL_PACKET_MANIFEST,
+    SOUND_AT_CALL_PACKET_MANIFEST,
+    SPAWN_EFFECT_CALL_PACKET_MANIFEST,
+    STATE_SNAPSHOT_CALL_PACKET_MANIFEST,
+    SYNC_VARIABLE_CALL_PACKET_MANIFEST,
+    TAKE_ITEMS_CALL_PACKET_MANIFEST,
     TEXT_INPUT_CALL_PACKET_MANIFEST,
     TEXT_INPUT_CALL_PACKET2_MANIFEST,
     WORLD_DATA_BEGIN_CALL_PACKET_MANIFEST,
 ];
 
-pub const PACKET_MANIFEST: [PacketManifestEntry; 86] = [
+pub const PACKET_MANIFEST: [PacketManifestEntry; 120] = [
     CONNECT_EVENT_MANIFEST,
     DISCONNECT_EVENT_MANIFEST,
     STREAM_BEGIN_MANIFEST,
@@ -1629,12 +2216,46 @@ pub const PACKET_MANIFEST: [PacketManifestEntry; 86] = [
     REQUEST_UNIT_PAYLOAD_CALL_PACKET_MANIFEST,
     RESEARCHED_CALL_PACKET_MANIFEST,
     ROTATE_BLOCK_CALL_PACKET_MANIFEST,
+    SECTOR_CAPTURE_CALL_PACKET_MANIFEST,
+    SEND_CHAT_MESSAGE_CALL_PACKET_MANIFEST,
+    SEND_MESSAGE_CALL_PACKET_MANIFEST,
+    SEND_MESSAGE_CALL_PACKET2_MANIFEST,
+    SERVER_BINARY_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
+    SERVER_BINARY_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
+    SERVER_PACKET_RELIABLE_CALL_PACKET_MANIFEST,
+    SERVER_PACKET_UNRELIABLE_CALL_PACKET_MANIFEST,
     SET_CAMERA_POSITION_CALL_PACKET_MANIFEST,
     SET_FLAG_CALL_PACKET_MANIFEST,
+    SET_FLOOR_CALL_PACKET_MANIFEST,
     SET_HUD_TEXT_CALL_PACKET_MANIFEST,
     SET_HUD_TEXT_RELIABLE_CALL_PACKET_MANIFEST,
+    SET_ITEM_CALL_PACKET_MANIFEST,
+    SET_ITEMS_CALL_PACKET_MANIFEST,
+    SET_LIQUID_CALL_PACKET_MANIFEST,
+    SET_LIQUIDS_CALL_PACKET_MANIFEST,
     SET_MAP_AREA_CALL_PACKET_MANIFEST,
+    SET_OBJECTIVES_CALL_PACKET_MANIFEST,
+    SET_OVERLAY_CALL_PACKET_MANIFEST,
+    SET_PLAYER_TEAM_EDITOR_CALL_PACKET_MANIFEST,
+    SET_POSITION_CALL_PACKET_MANIFEST,
     SET_RULE_CALL_PACKET_MANIFEST,
+    SET_RULES_CALL_PACKET_MANIFEST,
+    SET_TEAM_CALL_PACKET_MANIFEST,
+    SET_TEAMS_CALL_PACKET_MANIFEST,
+    SET_TILE_CALL_PACKET_MANIFEST,
+    SET_TILE_BLOCKS_CALL_PACKET_MANIFEST,
+    SET_TILE_FLOORS_CALL_PACKET_MANIFEST,
+    SET_TILE_ITEMS_CALL_PACKET_MANIFEST,
+    SET_TILE_LIQUIDS_CALL_PACKET_MANIFEST,
+    SET_TILE_OVERLAYS_CALL_PACKET_MANIFEST,
+    SET_UNIT_COMMAND_CALL_PACKET_MANIFEST,
+    SET_UNIT_STANCE_CALL_PACKET_MANIFEST,
+    SOUND_CALL_PACKET_MANIFEST,
+    SOUND_AT_CALL_PACKET_MANIFEST,
+    SPAWN_EFFECT_CALL_PACKET_MANIFEST,
+    STATE_SNAPSHOT_CALL_PACKET_MANIFEST,
+    SYNC_VARIABLE_CALL_PACKET_MANIFEST,
+    TAKE_ITEMS_CALL_PACKET_MANIFEST,
     TEXT_INPUT_CALL_PACKET_MANIFEST,
     TEXT_INPUT_CALL_PACKET2_MANIFEST,
     WORLD_DATA_BEGIN_CALL_PACKET_MANIFEST,
@@ -3831,6 +4452,168 @@ impl PacketCodec for RotateBlockCallPacket {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SectorCaptureCallPacket;
+
+impl PacketCodec for SectorCaptureCallPacket {
+    fn read_from<R: Read>(_read: &mut R) -> std::io::Result<Self> {
+        Ok(Self)
+    }
+
+    fn write_to<W: Write>(&self, _write: &mut W) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendChatMessageCallPacket {
+    pub message: String,
+}
+
+impl PacketCodec for SendChatMessageCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            message: read_string(read)?.unwrap_or_default(),
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_string(write, Some(&self.message))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendMessageCallPacket {
+    pub message: String,
+}
+
+impl PacketCodec for SendMessageCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            message: read_string(read)?.unwrap_or_default(),
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_string(write, Some(&self.message))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendMessageCallPacket2 {
+    pub message: String,
+    pub unformatted: String,
+    pub player_sender: EntityRef,
+}
+
+impl PacketCodec for SendMessageCallPacket2 {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            message: read_string(read)?.unwrap_or_default(),
+            unformatted: read_string(read)?.unwrap_or_default(),
+            player_sender: read_entity_ref(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_string(write, Some(&self.message))?;
+        write_string(write, Some(&self.unformatted))?;
+        write_entity_ref(write, self.player_sender)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerBinaryPacketCallPacket {
+    pub packet_type: String,
+    pub contents: Vec<u8>,
+}
+
+impl ServerBinaryPacketCallPacket {
+    fn read_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            packet_type: read_string(read)?.unwrap_or_default(),
+            contents: read_bytes(read)?,
+        })
+    }
+
+    fn write_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_string(write, Some(&self.packet_type))?;
+        write_bytes(write, &self.contents)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerBinaryPacketReliableCallPacket(pub ServerBinaryPacketCallPacket);
+
+impl PacketCodec for ServerBinaryPacketReliableCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        ServerBinaryPacketCallPacket::read_payload(read).map(Self)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.0.write_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerBinaryPacketUnreliableCallPacket(pub ServerBinaryPacketCallPacket);
+
+impl PacketCodec for ServerBinaryPacketUnreliableCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        ServerBinaryPacketCallPacket::read_payload(read).map(Self)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.0.write_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerPacketCallPacket {
+    pub packet_type: String,
+    pub contents: String,
+}
+
+impl ServerPacketCallPacket {
+    fn read_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            packet_type: read_string(read)?.unwrap_or_default(),
+            contents: read_string(read)?.unwrap_or_default(),
+        })
+    }
+
+    fn write_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_string(write, Some(&self.packet_type))?;
+        write_string(write, Some(&self.contents))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerPacketReliableCallPacket(pub ServerPacketCallPacket);
+
+impl PacketCodec for ServerPacketReliableCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        ServerPacketCallPacket::read_payload(read).map(Self)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.0.write_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerPacketUnreliableCallPacket(pub ServerPacketCallPacket);
+
+impl PacketCodec for ServerPacketUnreliableCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        ServerPacketCallPacket::read_payload(read).map(Self)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.0.write_payload(write)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SetCameraPositionCallPacket {
     pub x: f32,
@@ -3868,6 +4651,36 @@ impl PacketCodec for SetFlagCallPacket {
     fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
         write_string(write, Some(&self.flag))?;
         write_bool(write, self.add)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetFloorCallPacket {
+    pub tile: Option<i32>,
+    pub floor: Option<String>,
+    pub overlay: Option<String>,
+}
+
+impl SetFloorCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            tile: read_tile_pos(read)?,
+            floor: read_block(read, loader)?,
+            overlay: read_block(read, loader)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_tile_pos(write, self.tile)?;
+        write_block(write, loader, self.floor.as_deref())?;
+        write_block(write, loader, self.overlay.as_deref())
     }
 }
 
@@ -3911,6 +4724,120 @@ impl PacketCodec for SetHudTextReliableCallPacket {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetItemCallPacket {
+    pub build: BuildingRef,
+    pub item: Option<String>,
+    pub amount: i32,
+}
+
+impl SetItemCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+            item: read_item(read, loader)?,
+            amount: read_i32(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_building_ref(write, self.build)?;
+        write_item(write, loader, self.item.as_deref())?;
+        write_i32(write, self.amount)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetItemsCallPacket {
+    pub build: BuildingRef,
+    pub items: Vec<ItemStack>,
+}
+
+impl SetItemsCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+            items: read_item_stacks(read, loader)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_building_ref(write, self.build)?;
+        write_item_stacks(write, loader, &self.items)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLiquidCallPacket {
+    pub build: BuildingRef,
+    pub liquid: Option<String>,
+    pub amount: f32,
+}
+
+impl SetLiquidCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+            liquid: read_liquid(read, loader)?,
+            amount: read_f32(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_building_ref(write, self.build)?;
+        write_liquid(write, loader, self.liquid.as_deref())?;
+        write_f32(write, self.amount)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLiquidsCallPacket {
+    pub build: BuildingRef,
+    pub liquids: Vec<LiquidStack>,
+}
+
+impl SetLiquidsCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+            liquids: read_liquid_stacks(read, loader)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_building_ref(write, self.build)?;
+        write_liquid_stacks(write, loader, &self.liquids)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetMapAreaCallPacket {
     pub x: i32,
@@ -3938,6 +4865,113 @@ impl PacketCodec for SetMapAreaCallPacket {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetObjectivesCallPacket {
+    pub objectives_json: String,
+}
+
+impl PacketCodec for SetObjectivesCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            objectives_json: read_objectives_json(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_objectives_json(write, &self.objectives_json)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetOverlayCallPacket {
+    pub tile: Option<i32>,
+    pub overlay: Option<String>,
+}
+
+impl SetOverlayCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            tile: read_tile_pos(read)?,
+            overlay: read_block(read, loader)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_tile_pos(write, self.tile)?;
+        write_block(write, loader, self.overlay.as_deref())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetPlayerTeamEditorCallPacket {
+    /// Present on server-forwarded packets read by clients; omitted on
+    /// client-origin packets read by the server.
+    pub player: EntityRef,
+    pub team: TeamId,
+}
+
+impl SetPlayerTeamEditorCallPacket {
+    pub fn read_from_client_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: EntityRef::null(),
+            team: read_team(read)?,
+        })
+    }
+
+    pub fn write_client_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_team(write, Some(self.team))
+    }
+
+    pub fn read_from_server_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            player: read_entity_ref(read)?,
+            team: read_team(read)?,
+        })
+    }
+
+    pub fn write_server_payload<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_entity_ref(write, self.player)?;
+        write_team(write, Some(self.team))
+    }
+}
+
+impl PacketCodec for SetPlayerTeamEditorCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Self::read_from_client_payload(read)
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        self.write_client_payload(write)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SetPositionCallPacket {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl PacketCodec for SetPositionCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            x: read_f32(read)?,
+            y: read_f32(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_f32(write, self.x)?;
+        write_f32(write, self.y)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetRuleCallPacket {
     pub rule: String,
     pub json_data: String,
@@ -3954,6 +4988,536 @@ impl PacketCodec for SetRuleCallPacket {
     fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
         write_string(write, Some(&self.rule))?;
         write_string(write, Some(&self.json_data))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetRulesCallPacket {
+    pub rules_json: String,
+}
+
+impl PacketCodec for SetRulesCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            rules_json: read_rules_json(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_rules_json(write, &self.rules_json)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTeamCallPacket {
+    pub build: BuildingRef,
+    pub team: TeamId,
+}
+
+impl PacketCodec for SetTeamCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+            team: read_team(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_building_ref(write, self.build)?;
+        write_team(write, Some(self.team))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTeamsCallPacket {
+    pub positions: Vec<i32>,
+    pub team: TeamId,
+}
+
+impl PacketCodec for SetTeamsCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            positions: read_ints(read)?,
+            team: read_team(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_ints(write, &self.positions)?;
+        write_team(write, Some(self.team))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTileCallPacket {
+    pub tile: Option<i32>,
+    pub block: Option<String>,
+    pub team: TeamId,
+    pub rotation: i32,
+}
+
+impl SetTileCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            tile: read_tile_pos(read)?,
+            block: read_block(read, loader)?,
+            team: read_team(read)?,
+            rotation: read_i32(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_tile_pos(write, self.tile)?;
+        write_block(write, loader, self.block.as_deref())?;
+        write_team(write, Some(self.team))?;
+        write_i32(write, self.rotation)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTileBlocksCallPacket {
+    pub block: Option<String>,
+    pub team: TeamId,
+    pub positions: Vec<i32>,
+}
+
+impl SetTileBlocksCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            block: read_block(read, loader)?,
+            team: read_team(read)?,
+            positions: read_ints(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_block(write, loader, self.block.as_deref())?;
+        write_team(write, Some(self.team))?;
+        write_ints(write, &self.positions)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTileFloorsCallPacket {
+    pub block: Option<String>,
+    pub positions: Vec<i32>,
+}
+
+impl SetTileFloorsCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            block: read_block(read, loader)?,
+            positions: read_ints(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_block(write, loader, self.block.as_deref())?;
+        write_ints(write, &self.positions)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTileItemsCallPacket {
+    pub item: Option<String>,
+    pub amount: i32,
+    pub positions: Vec<i32>,
+}
+
+impl SetTileItemsCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            item: read_item(read, loader)?,
+            amount: read_i32(read)?,
+            positions: read_ints(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_item(write, loader, self.item.as_deref())?;
+        write_i32(write, self.amount)?;
+        write_ints(write, &self.positions)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetTileLiquidsCallPacket {
+    pub liquid: Option<String>,
+    pub amount: f32,
+    pub positions: Vec<i32>,
+}
+
+impl SetTileLiquidsCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            liquid: read_liquid(read, loader)?,
+            amount: read_f32(read)?,
+            positions: read_ints(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_liquid(write, loader, self.liquid.as_deref())?;
+        write_f32(write, self.amount)?;
+        write_ints(write, &self.positions)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTileOverlaysCallPacket {
+    pub block: Option<String>,
+    pub positions: Vec<i32>,
+}
+
+impl SetTileOverlaysCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            block: read_block(read, loader)?,
+            positions: read_ints(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_block(write, loader, self.block.as_deref())?;
+        write_ints(write, &self.positions)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetUnitCommandCallPacket {
+    pub player: EntityRef,
+    pub unit_ids: Vec<i32>,
+    pub command: String,
+}
+
+impl SetUnitCommandCallPacket {
+    pub fn read_from_client_payload_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            player: EntityRef::null(),
+            unit_ids: read_ints(read)?,
+            command: read_content_name(read, loader, ContentType::UnitCommand)?.ok_or_else(
+                || std::io::Error::new(std::io::ErrorKind::InvalidData, "null unit command id"),
+            )?,
+        })
+    }
+
+    pub fn write_client_payload_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_ints(write, &self.unit_ids)?;
+        write_content_by_name(write, loader, ContentType::UnitCommand, Some(&self.command))
+    }
+
+    pub fn read_from_server_payload_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            player: read_entity_ref(read)?,
+            unit_ids: read_ints(read)?,
+            command: read_content_name(read, loader, ContentType::UnitCommand)?.ok_or_else(
+                || std::io::Error::new(std::io::ErrorKind::InvalidData, "null unit command id"),
+            )?,
+        })
+    }
+
+    pub fn write_server_payload_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_entity_ref(write, self.player)?;
+        write_ints(write, &self.unit_ids)?;
+        write_content_by_name(write, loader, ContentType::UnitCommand, Some(&self.command))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetUnitStanceCallPacket {
+    pub player: EntityRef,
+    pub unit_ids: Vec<i32>,
+    pub stance: String,
+}
+
+impl SetUnitStanceCallPacket {
+    pub fn read_from_client_payload_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            player: EntityRef::null(),
+            unit_ids: read_ints(read)?,
+            stance: read_content_name(read, loader, ContentType::UnitStance)?.ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "null unit stance id")
+            })?,
+        })
+    }
+
+    pub fn write_client_payload_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_ints(write, &self.unit_ids)?;
+        write_content_by_name(write, loader, ContentType::UnitStance, Some(&self.stance))
+    }
+
+    pub fn read_from_server_payload_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            player: read_entity_ref(read)?,
+            unit_ids: read_ints(read)?,
+            stance: read_content_name(read, loader, ContentType::UnitStance)?.ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "null unit stance id")
+            })?,
+        })
+    }
+
+    pub fn write_server_payload_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_entity_ref(write, self.player)?;
+        write_ints(write, &self.unit_ids)?;
+        write_content_by_name(write, loader, ContentType::UnitStance, Some(&self.stance))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SoundCallPacket {
+    pub sound_id: i16,
+    pub volume: f32,
+    pub pitch: f32,
+    pub pan: f32,
+}
+
+impl PacketCodec for SoundCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            sound_id: read_sound_id(read)?,
+            volume: read_f32(read)?,
+            pitch: read_f32(read)?,
+            pan: read_f32(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_sound_id(write, self.sound_id)?;
+        write_f32(write, self.volume)?;
+        write_f32(write, self.pitch)?;
+        write_f32(write, self.pan)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SoundAtCallPacket {
+    pub sound_id: i16,
+    pub x: f32,
+    pub y: f32,
+    pub volume: f32,
+    pub pitch: f32,
+}
+
+impl PacketCodec for SoundAtCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            sound_id: read_sound_id(read)?,
+            x: read_f32(read)?,
+            y: read_f32(read)?,
+            volume: read_f32(read)?,
+            pitch: read_f32(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_sound_id(write, self.sound_id)?;
+        write_f32(write, self.x)?;
+        write_f32(write, self.y)?;
+        write_f32(write, self.volume)?;
+        write_f32(write, self.pitch)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpawnEffectCallPacket {
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub unit_type: String,
+}
+
+impl SpawnEffectCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            x: read_f32(read)?,
+            y: read_f32(read)?,
+            rotation: read_f32(read)?,
+            unit_type: read_unit_type(read, loader)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_f32(write, self.x)?;
+        write_f32(write, self.y)?;
+        write_f32(write, self.rotation)?;
+        write_unit_type(write, loader, &self.unit_type)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateSnapshotCallPacket {
+    pub wave_time: f32,
+    pub wave: i32,
+    pub enemies: i32,
+    pub paused: bool,
+    pub game_over: bool,
+    pub time_data: i32,
+    pub tps: u8,
+    pub rand0: i64,
+    pub rand1: i64,
+    pub core_data: Vec<u8>,
+}
+
+impl PacketCodec for StateSnapshotCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            wave_time: read_f32(read)?,
+            wave: read_i32(read)?,
+            enemies: read_i32(read)?,
+            paused: read_bool(read)?,
+            game_over: read_bool(read)?,
+            time_data: read_i32(read)?,
+            tps: read_u8(read)?,
+            rand0: read_i64(read)?,
+            rand1: read_i64(read)?,
+            core_data: read_bytes(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_f32(write, self.wave_time)?;
+        write_i32(write, self.wave)?;
+        write_i32(write, self.enemies)?;
+        write_bool(write, self.paused)?;
+        write_bool(write, self.game_over)?;
+        write_i32(write, self.time_data)?;
+        write_u8(write, self.tps)?;
+        write_i64(write, self.rand0)?;
+        write_i64(write, self.rand1)?;
+        write_bytes(write, &self.core_data)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyncVariableCallPacket {
+    pub building: BuildingRef,
+    pub variable: i32,
+    pub value: TypeValue,
+}
+
+impl PacketCodec for SyncVariableCallPacket {
+    fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
+        Ok(Self {
+            building: read_building_ref(read)?,
+            variable: read_i32(read)?,
+            value: read_object_safe(read)?,
+        })
+    }
+
+    fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write_building_ref(write, self.building)?;
+        write_i32(write, self.variable)?;
+        write_object(write, &self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakeItemsCallPacket {
+    pub build: BuildingRef,
+    pub item: Option<String>,
+    pub amount: i32,
+    pub to: UnitRef,
+}
+
+impl TakeItemsCallPacket {
+    pub fn read_from_with_loader<R: Read>(
+        read: &mut R,
+        loader: &ContentLoader,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            build: read_building_ref(read)?,
+            item: read_item(read, loader)?,
+            amount: read_i32(read)?,
+            to: read_unit_ref(read)?,
+        })
+    }
+
+    pub fn write_to_with_loader<W: Write>(
+        &self,
+        write: &mut W,
+        loader: &ContentLoader,
+    ) -> std::io::Result<()> {
+        write_building_ref(write, self.build)?;
+        write_item(write, loader, self.item.as_deref())?;
+        write_i32(write, self.amount)?;
+        write_unit_ref(write, self.to)
     }
 }
 
@@ -5967,17 +7531,114 @@ mod tests {
                     "RotateBlockCallPacket"
                 ),
                 (
+                    packet_ids::SECTOR_CAPTURE_CALL_PACKET,
+                    "SectorCaptureCallPacket"
+                ),
+                (
+                    packet_ids::SEND_CHAT_MESSAGE_CALL_PACKET,
+                    "SendChatMessageCallPacket",
+                ),
+                (
+                    packet_ids::SEND_MESSAGE_CALL_PACKET,
+                    "SendMessageCallPacket"
+                ),
+                (
+                    packet_ids::SEND_MESSAGE_CALL_PACKET2,
+                    "SendMessageCallPacket2",
+                ),
+                (
+                    packet_ids::SERVER_BINARY_PACKET_RELIABLE_CALL_PACKET,
+                    "ServerBinaryPacketReliableCallPacket",
+                ),
+                (
+                    packet_ids::SERVER_BINARY_PACKET_UNRELIABLE_CALL_PACKET,
+                    "ServerBinaryPacketUnreliableCallPacket",
+                ),
+                (
+                    packet_ids::SERVER_PACKET_RELIABLE_CALL_PACKET,
+                    "ServerPacketReliableCallPacket",
+                ),
+                (
+                    packet_ids::SERVER_PACKET_UNRELIABLE_CALL_PACKET,
+                    "ServerPacketUnreliableCallPacket",
+                ),
+                (
                     packet_ids::SET_CAMERA_POSITION_CALL_PACKET,
                     "SetCameraPositionCallPacket",
                 ),
                 (packet_ids::SET_FLAG_CALL_PACKET, "SetFlagCallPacket"),
+                (packet_ids::SET_FLOOR_CALL_PACKET, "SetFloorCallPacket"),
                 (packet_ids::SET_HUD_TEXT_CALL_PACKET, "SetHudTextCallPacket",),
                 (
                     packet_ids::SET_HUD_TEXT_RELIABLE_CALL_PACKET,
                     "SetHudTextReliableCallPacket",
                 ),
+                (packet_ids::SET_ITEM_CALL_PACKET, "SetItemCallPacket"),
+                (packet_ids::SET_ITEMS_CALL_PACKET, "SetItemsCallPacket"),
+                (packet_ids::SET_LIQUID_CALL_PACKET, "SetLiquidCallPacket"),
+                (packet_ids::SET_LIQUIDS_CALL_PACKET, "SetLiquidsCallPacket"),
                 (packet_ids::SET_MAP_AREA_CALL_PACKET, "SetMapAreaCallPacket",),
+                (
+                    packet_ids::SET_OBJECTIVES_CALL_PACKET,
+                    "SetObjectivesCallPacket"
+                ),
+                (packet_ids::SET_OVERLAY_CALL_PACKET, "SetOverlayCallPacket"),
+                (
+                    packet_ids::SET_PLAYER_TEAM_EDITOR_CALL_PACKET,
+                    "SetPlayerTeamEditorCallPacket",
+                ),
+                (
+                    packet_ids::SET_POSITION_CALL_PACKET,
+                    "SetPositionCallPacket"
+                ),
                 (packet_ids::SET_RULE_CALL_PACKET, "SetRuleCallPacket"),
+                (packet_ids::SET_RULES_CALL_PACKET, "SetRulesCallPacket"),
+                (packet_ids::SET_TEAM_CALL_PACKET, "SetTeamCallPacket"),
+                (packet_ids::SET_TEAMS_CALL_PACKET, "SetTeamsCallPacket"),
+                (packet_ids::SET_TILE_CALL_PACKET, "SetTileCallPacket"),
+                (
+                    packet_ids::SET_TILE_BLOCKS_CALL_PACKET,
+                    "SetTileBlocksCallPacket"
+                ),
+                (
+                    packet_ids::SET_TILE_FLOORS_CALL_PACKET,
+                    "SetTileFloorsCallPacket"
+                ),
+                (
+                    packet_ids::SET_TILE_ITEMS_CALL_PACKET,
+                    "SetTileItemsCallPacket"
+                ),
+                (
+                    packet_ids::SET_TILE_LIQUIDS_CALL_PACKET,
+                    "SetTileLiquidsCallPacket",
+                ),
+                (
+                    packet_ids::SET_TILE_OVERLAYS_CALL_PACKET,
+                    "SetTileOverlaysCallPacket",
+                ),
+                (
+                    packet_ids::SET_UNIT_COMMAND_CALL_PACKET,
+                    "SetUnitCommandCallPacket",
+                ),
+                (
+                    packet_ids::SET_UNIT_STANCE_CALL_PACKET,
+                    "SetUnitStanceCallPacket",
+                ),
+                (packet_ids::SOUND_CALL_PACKET, "SoundCallPacket"),
+                (packet_ids::SOUND_AT_CALL_PACKET, "SoundAtCallPacket"),
+                (
+                    packet_ids::SPAWN_EFFECT_CALL_PACKET,
+                    "SpawnEffectCallPacket"
+                ),
+                (
+                    packet_ids::STATE_SNAPSHOT_CALL_PACKET,
+                    "StateSnapshotCallPacket",
+                ),
+                (
+                    packet_ids::SYNC_VARIABLE_CALL_PACKET,
+                    "SyncVariableCallPacket",
+                ),
+                (packet_ids::TAKE_ITEMS_CALL_PACKET, "TakeItemsCallPacket"),
                 (packet_ids::TEXT_INPUT_CALL_PACKET, "TextInputCallPacket"),
                 (packet_ids::TEXT_INPUT_CALL_PACKET2, "TextInputCallPacket2"),
                 (
@@ -6310,12 +7971,46 @@ mod tests {
             "RequestUnitPayloadCallPacket",
             "ResearchedCallPacket",
             "RotateBlockCallPacket",
+            "SectorCaptureCallPacket",
+            "SendChatMessageCallPacket",
+            "SendMessageCallPacket",
+            "SendMessageCallPacket2",
+            "ServerBinaryPacketReliableCallPacket",
+            "ServerBinaryPacketUnreliableCallPacket",
+            "ServerPacketReliableCallPacket",
+            "ServerPacketUnreliableCallPacket",
             "SetCameraPositionCallPacket",
             "SetFlagCallPacket",
+            "SetFloorCallPacket",
             "SetHudTextCallPacket",
             "SetHudTextReliableCallPacket",
+            "SetItemCallPacket",
+            "SetItemsCallPacket",
+            "SetLiquidCallPacket",
+            "SetLiquidsCallPacket",
             "SetMapAreaCallPacket",
+            "SetObjectivesCallPacket",
+            "SetOverlayCallPacket",
+            "SetPlayerTeamEditorCallPacket",
+            "SetPositionCallPacket",
             "SetRuleCallPacket",
+            "SetRulesCallPacket",
+            "SetTeamCallPacket",
+            "SetTeamsCallPacket",
+            "SetTileCallPacket",
+            "SetTileBlocksCallPacket",
+            "SetTileFloorsCallPacket",
+            "SetTileItemsCallPacket",
+            "SetTileLiquidsCallPacket",
+            "SetTileOverlaysCallPacket",
+            "SetUnitCommandCallPacket",
+            "SetUnitStanceCallPacket",
+            "SoundCallPacket",
+            "SoundAtCallPacket",
+            "SpawnEffectCallPacket",
+            "StateSnapshotCallPacket",
+            "SyncVariableCallPacket",
+            "TakeItemsCallPacket",
             "TextInputCallPacket",
             "TextInputCallPacket2",
             "WorldDataBeginCallPacket",

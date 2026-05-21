@@ -22,9 +22,20 @@ use super::packets::{
     RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBlockSnapshotCallPacket,
     RequestBuildPayloadCallPacket, RequestDebugStatusCallPacket, RequestDropPayloadCallPacket,
     RequestItemCallPacket, RequestUnitPayloadCallPacket, ResearchedCallPacket,
-    RotateBlockCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket, SetHudTextCallPacket,
-    SetHudTextReliableCallPacket, SetMapAreaCallPacket, SetRuleCallPacket, StreamBegin,
-    StreamChunk, TextInputCallPacket, TextInputCallPacket2, WorldDataBeginCallPacket,
+    RotateBlockCallPacket, SectorCaptureCallPacket, SendChatMessageCallPacket,
+    SendMessageCallPacket, SendMessageCallPacket2, ServerBinaryPacketReliableCallPacket,
+    ServerBinaryPacketUnreliableCallPacket, ServerPacketReliableCallPacket,
+    ServerPacketUnreliableCallPacket, SetCameraPositionCallPacket, SetFlagCallPacket,
+    SetFloorCallPacket, SetHudTextCallPacket, SetHudTextReliableCallPacket, SetItemCallPacket,
+    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetMapAreaCallPacket,
+    SetObjectivesCallPacket, SetOverlayCallPacket, SetPlayerTeamEditorCallPacket,
+    SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket,
+    SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket,
+    SetTileItemsCallPacket, SetTileLiquidsCallPacket, SetTileOverlaysCallPacket,
+    SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
+    SpawnEffectCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk,
+    SyncVariableCallPacket, TakeItemsCallPacket, TextInputCallPacket, TextInputCallPacket2,
+    WorldDataBeginCallPacket,
 };
 use super::streamable::{StreamBuilder, Streamable};
 
@@ -103,12 +114,46 @@ pub enum PacketKind {
     RequestUnitPayloadCallPacket(RequestUnitPayloadCallPacket),
     ResearchedCallPacket(ResearchedCallPacket),
     RotateBlockCallPacket(RotateBlockCallPacket),
+    SectorCaptureCallPacket(SectorCaptureCallPacket),
+    SendChatMessageCallPacket(SendChatMessageCallPacket),
+    SendMessageCallPacket(SendMessageCallPacket),
+    SendMessageCallPacket2(SendMessageCallPacket2),
+    ServerBinaryPacketReliableCallPacket(ServerBinaryPacketReliableCallPacket),
+    ServerBinaryPacketUnreliableCallPacket(ServerBinaryPacketUnreliableCallPacket),
+    ServerPacketReliableCallPacket(ServerPacketReliableCallPacket),
+    ServerPacketUnreliableCallPacket(ServerPacketUnreliableCallPacket),
     SetCameraPositionCallPacket(SetCameraPositionCallPacket),
     SetFlagCallPacket(SetFlagCallPacket),
+    SetFloorCallPacket(SetFloorCallPacket),
     SetHudTextCallPacket(SetHudTextCallPacket),
     SetHudTextReliableCallPacket(SetHudTextReliableCallPacket),
+    SetItemCallPacket(SetItemCallPacket),
+    SetItemsCallPacket(SetItemsCallPacket),
+    SetLiquidCallPacket(SetLiquidCallPacket),
+    SetLiquidsCallPacket(SetLiquidsCallPacket),
     SetMapAreaCallPacket(SetMapAreaCallPacket),
+    SetObjectivesCallPacket(SetObjectivesCallPacket),
+    SetOverlayCallPacket(SetOverlayCallPacket),
+    SetPlayerTeamEditorCallPacket(SetPlayerTeamEditorCallPacket),
+    SetPositionCallPacket(SetPositionCallPacket),
     SetRuleCallPacket(SetRuleCallPacket),
+    SetRulesCallPacket(SetRulesCallPacket),
+    SetTeamCallPacket(SetTeamCallPacket),
+    SetTeamsCallPacket(SetTeamsCallPacket),
+    SetTileCallPacket(SetTileCallPacket),
+    SetTileBlocksCallPacket(SetTileBlocksCallPacket),
+    SetTileFloorsCallPacket(SetTileFloorsCallPacket),
+    SetTileItemsCallPacket(SetTileItemsCallPacket),
+    SetTileLiquidsCallPacket(SetTileLiquidsCallPacket),
+    SetTileOverlaysCallPacket(SetTileOverlaysCallPacket),
+    SetUnitCommandCallPacket(SetUnitCommandCallPacket),
+    SetUnitStanceCallPacket(SetUnitStanceCallPacket),
+    SoundCallPacket(SoundCallPacket),
+    SoundAtCallPacket(SoundAtCallPacket),
+    SpawnEffectCallPacket(SpawnEffectCallPacket),
+    StateSnapshotCallPacket(StateSnapshotCallPacket),
+    SyncVariableCallPacket(SyncVariableCallPacket),
+    TakeItemsCallPacket(TakeItemsCallPacket),
     TextInputCallPacket(TextInputCallPacket),
     TextInputCallPacket2(TextInputCallPacket2),
     WorldDataBeginCallPacket(WorldDataBeginCallPacket),
@@ -133,7 +178,8 @@ impl PacketKind {
             | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
             | PacketKind::EntitySnapshotCallPacket(_)
             | PacketKind::HiddenSnapshotCallPacket(_)
-            | PacketKind::RequestBlockSnapshotCallPacket(_) => 0,
+            | PacketKind::RequestBlockSnapshotCallPacket(_)
+            | PacketKind::StateSnapshotCallPacket(_) => 0,
             PacketKind::AnnounceCallPacket(_)
             | PacketKind::ClearObjectivesCallPacket(_)
             | PacketKind::ClientBinaryPacketReliableCallPacket(_)
@@ -191,11 +237,14 @@ impl PacketKind {
             | PacketKind::RequestUnitPayloadCallPacket(_)
             | PacketKind::ResearchedCallPacket(_)
             | PacketKind::RotateBlockCallPacket(_)
+            | PacketKind::SendMessageCallPacket(_)
+            | PacketKind::SendMessageCallPacket2(_)
             | PacketKind::SetCameraPositionCallPacket(_)
             | PacketKind::SetFlagCallPacket(_)
             | PacketKind::SetHudTextCallPacket(_)
             | PacketKind::SetHudTextReliableCallPacket(_)
             | PacketKind::SetMapAreaCallPacket(_)
+            | PacketKind::SetPlayerTeamEditorCallPacket(_)
             | PacketKind::SetRuleCallPacket(_)
             | PacketKind::TextInputCallPacket(_)
             | PacketKind::TextInputCallPacket2(_)
@@ -205,6 +254,36 @@ impl PacketKind {
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
             | PacketKind::PingCallPacket(_) => 2,
+            PacketKind::SectorCaptureCallPacket(_)
+            | PacketKind::SetFloorCallPacket(_)
+            | PacketKind::SetItemCallPacket(_)
+            | PacketKind::SetItemsCallPacket(_)
+            | PacketKind::SetLiquidCallPacket(_)
+            | PacketKind::SetLiquidsCallPacket(_)
+            | PacketKind::SetObjectivesCallPacket(_)
+            | PacketKind::SetOverlayCallPacket(_)
+            | PacketKind::SetPositionCallPacket(_)
+            | PacketKind::SetRulesCallPacket(_)
+            | PacketKind::SetTeamCallPacket(_)
+            | PacketKind::SetTeamsCallPacket(_)
+            | PacketKind::SetTileCallPacket(_)
+            | PacketKind::SetTileBlocksCallPacket(_)
+            | PacketKind::SetTileFloorsCallPacket(_)
+            | PacketKind::SetTileItemsCallPacket(_)
+            | PacketKind::SetTileLiquidsCallPacket(_)
+            | PacketKind::SetTileOverlaysCallPacket(_)
+            | PacketKind::SetUnitCommandCallPacket(_)
+            | PacketKind::SetUnitStanceCallPacket(_)
+            | PacketKind::SendChatMessageCallPacket(_)
+            | PacketKind::ServerBinaryPacketReliableCallPacket(_)
+            | PacketKind::ServerBinaryPacketUnreliableCallPacket(_)
+            | PacketKind::ServerPacketReliableCallPacket(_)
+            | PacketKind::ServerPacketUnreliableCallPacket(_)
+            | PacketKind::SoundCallPacket(_)
+            | PacketKind::SoundAtCallPacket(_)
+            | PacketKind::SpawnEffectCallPacket(_)
+            | PacketKind::SyncVariableCallPacket(_)
+            | PacketKind::TakeItemsCallPacket(_) => 1,
             PacketKind::Other { priority, .. } => *priority,
         }
     }
@@ -235,7 +314,15 @@ impl PacketKind {
             | PacketKind::RequestItemCallPacket(_)
             | PacketKind::RequestUnitPayloadCallPacket(_)
             | PacketKind::RotateBlockCallPacket(_)
+            | PacketKind::SetPlayerTeamEditorCallPacket(_)
+            | PacketKind::SetUnitCommandCallPacket(_)
+            | PacketKind::SetUnitStanceCallPacket(_)
             | PacketKind::WorldDataBeginCallPacket(_) => true,
+            PacketKind::SendChatMessageCallPacket(_)
+            | PacketKind::ServerBinaryPacketReliableCallPacket(_)
+            | PacketKind::ServerBinaryPacketUnreliableCallPacket(_)
+            | PacketKind::ServerPacketReliableCallPacket(_)
+            | PacketKind::ServerPacketUnreliableCallPacket(_) => server,
             PacketKind::ConnectCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
             | PacketKind::CreateBulletCallPacket(_)
@@ -273,12 +360,38 @@ impl PacketKind {
             | PacketKind::PickedBuildPayloadCallPacket(_)
             | PacketKind::PickedUnitPayloadCallPacket(_)
             | PacketKind::ResearchedCallPacket(_)
+            | PacketKind::SectorCaptureCallPacket(_)
+            | PacketKind::SendMessageCallPacket(_)
+            | PacketKind::SendMessageCallPacket2(_)
             | PacketKind::SetCameraPositionCallPacket(_)
             | PacketKind::SetFlagCallPacket(_)
+            | PacketKind::SetFloorCallPacket(_)
             | PacketKind::SetHudTextCallPacket(_)
             | PacketKind::SetHudTextReliableCallPacket(_)
+            | PacketKind::SetItemCallPacket(_)
+            | PacketKind::SetItemsCallPacket(_)
+            | PacketKind::SetLiquidCallPacket(_)
+            | PacketKind::SetLiquidsCallPacket(_)
             | PacketKind::SetMapAreaCallPacket(_)
+            | PacketKind::SetObjectivesCallPacket(_)
+            | PacketKind::SetOverlayCallPacket(_)
+            | PacketKind::SetPositionCallPacket(_)
             | PacketKind::SetRuleCallPacket(_)
+            | PacketKind::SetRulesCallPacket(_)
+            | PacketKind::SetTeamCallPacket(_)
+            | PacketKind::SetTeamsCallPacket(_)
+            | PacketKind::SetTileCallPacket(_)
+            | PacketKind::SetTileBlocksCallPacket(_)
+            | PacketKind::SetTileFloorsCallPacket(_)
+            | PacketKind::SetTileItemsCallPacket(_)
+            | PacketKind::SetTileLiquidsCallPacket(_)
+            | PacketKind::SetTileOverlaysCallPacket(_)
+            | PacketKind::SoundCallPacket(_)
+            | PacketKind::SoundAtCallPacket(_)
+            | PacketKind::SpawnEffectCallPacket(_)
+            | PacketKind::StateSnapshotCallPacket(_)
+            | PacketKind::SyncVariableCallPacket(_)
+            | PacketKind::TakeItemsCallPacket(_)
             | PacketKind::TextInputCallPacket(_)
             | PacketKind::TextInputCallPacket2(_) => !server,
             PacketKind::ClientBinaryPacketReliableCallPacket(_)
