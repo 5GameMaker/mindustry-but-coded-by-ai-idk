@@ -35,6 +35,7 @@ pub use comp::{StatusColor, StatusComp};
 pub use comp::{SyncComp, SyncHooks};
 pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
+pub use comp::{TrailState, WaterMoveComp, WaterMoveDrawPlan};
 pub use comp::{UnderwaterDrawPlan, UnderwaterMoveComp};
 pub use comp::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use comp::{WaterCrawlComp, WaterCrawlSolidPred};
