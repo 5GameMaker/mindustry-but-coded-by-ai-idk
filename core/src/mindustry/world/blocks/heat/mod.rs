@@ -1,5 +1,11 @@
 use std::io::{self, Read, Write};
 
+pub mod heat_block;
+pub mod heat_consumer;
+
+pub use heat_block::HeatBlock;
+pub use heat_consumer::HeatConsumer;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeatBlockState {
     pub heat: f32,
