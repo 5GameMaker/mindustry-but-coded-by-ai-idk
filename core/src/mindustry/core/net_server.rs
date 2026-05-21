@@ -27,6 +27,11 @@ pub struct NetServerState {
     pub world_data_begin_sent: u64,
     pub world_streams_sent: u64,
     pub last_world_data_error: Option<String>,
+    pub last_ping_connection_id: Option<i32>,
+    pub last_ping_time: Option<i64>,
+    pub ping_requests_seen: u64,
+    pub ping_responses_sent: u64,
+    pub last_ping_error: Option<String>,
     pub last_disconnect: Option<Disconnect>,
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
@@ -72,15 +77,19 @@ impl Default for NetServer {
 }
 
 impl NetServer {
-    pub fn new(mut net: Net) -> Self {
+    pub fn new(net: Net) -> Self {
         let state = Arc::new(Mutex::new(NetServerState::default()));
         let packet_handlers = Arc::new(Mutex::new(Vec::new()));
         let binary_packet_handlers = Arc::new(Mutex::new(Vec::new()));
 
-        Self::install_typed_listeners(&mut net, &state, &packet_handlers);
+        let net = Arc::new(Mutex::new(net));
+        {
+            let mut net = net.lock().expect("Net mutex poisoned");
+            Self::install_typed_listeners(&mut net, &state, &packet_handlers);
+        }
 
         Self {
-            net: Arc::new(Mutex::new(net)),
+            net,
             state,
             packet_handlers,
             binary_packet_handlers,
@@ -411,6 +420,36 @@ impl NetServer {
                 Self::dispatch_packet_handlers(&packet_handlers, &packet);
             });
         }
+
+        {
+            let state = Arc::clone(state);
+            let packet_handlers = Arc::clone(packet_handlers);
+            net.handle_server(move |connection_id, packet| {
+                let PacketKind::PingCallPacket(ping) = packet else {
+                    return;
+                };
+
+                {
+                    let mut state = state.lock().expect("NetServerState mutex poisoned");
+                    state.last_connection_id = connection_id;
+                    state.last_ping_connection_id = connection_id;
+                    state.last_ping_time = Some(ping.time);
+                    state.ping_requests_seen += 1;
+                    state.last_updated_at = Some(Instant::now());
+                    state.ping_responses_sent += 1;
+                    state.last_ping_error = None;
+                    state.events.push(ProviderEvent::ServerPacket {
+                        connection_id: connection_id.unwrap_or(-1),
+                        packet: PacketKind::PingCallPacket(*ping),
+                    });
+                }
+
+                Self::dispatch_packet_handlers(
+                    &packet_handlers,
+                    &PacketKind::PingCallPacket(*ping),
+                );
+            });
+        }
     }
 
     fn dispatch_packet_handlers(
@@ -487,7 +526,8 @@ mod tests {
 
     use crate::mindustry::net::{
         packet_ids, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, DoneCallback,
-        Host, HostCallback, Net, NetConnection, NetProvider, PacketKind, SentPacket,
+        Host, HostCallback, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
+        PingResponseCallPacket, SentPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
 
@@ -687,5 +727,41 @@ mod tests {
         assert!(matches!(connection.sent[1].0, SentPacket::StreamBegin(_)));
         assert!(matches!(connection.sent[2].0, SentPacket::StreamChunk(_)));
         assert!(matches!(connection.sent[3].0, SentPacket::StreamChunk(_)));
+    }
+
+    #[test]
+    fn ping_call_returns_ping_response_to_same_connection() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(7),
+                true,
+                PacketKind::PingCallPacket(PingCallPacket { time: 1234 }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 7);
+        assert!(matches!(
+            sent[0].1,
+            PacketKind::PingResponseCallPacket(PingResponseCallPacket { time: 1234 })
+        ));
+        assert!(sent[0].2);
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_ping_connection_id, Some(7));
+        assert_eq!(state.last_ping_time, Some(1234));
+        assert_eq!(state.ping_requests_seen, 1);
+        assert_eq!(state.ping_responses_sent, 1);
+        assert!(state.last_ping_error.is_none());
     }
 }

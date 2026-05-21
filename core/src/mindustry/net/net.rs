@@ -408,7 +408,6 @@ impl PacketKind {
             | PacketKind::HiddenSnapshotCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
-            | PacketKind::PingResponseCallPacket(_)
             | PacketKind::PlayerSpawnCallPacket(_)
             | PacketKind::RemoveQueueBlockCallPacket(_)
             | PacketKind::RemoveTileCallPacket(_)
@@ -501,6 +500,7 @@ impl PacketKind {
             | PacketKind::PingCallPacket(_)
             | PacketKind::RequestBlockSnapshotCallPacket(_)
             | PacketKind::RequestDebugStatusCallPacket(_) => server,
+            PacketKind::PingResponseCallPacket(_) => !server,
             PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => !server,
             PacketKind::Other {
                 allow_client,
@@ -1208,6 +1208,14 @@ impl Net {
             PacketKind::ConnectConfirmCallPacket(connect_confirm) => {
                 for listener in &mut self.server_connect_confirm_listeners {
                     listener(connection_id, connect_confirm);
+                }
+            }
+            PacketKind::PingCallPacket(ping) => {
+                if let Some(connection_id) = connection_id {
+                    let response = PacketKind::PingResponseCallPacket(PingResponseCallPacket {
+                        time: ping.time,
+                    });
+                    let _ = self.send_to(connection_id, &response, true);
                 }
             }
             _ => {}

@@ -1,13 +1,14 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::net::{
-    Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, Net, PacketKind, ProviderEvent,
-    Streamable,
+    Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, Net, PacketKind, PingCallPacket,
+    ProviderEvent, Streamable,
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const PING_INTERVAL: Duration = Duration::from_secs(1);
 pub const DEFAULT_CLIENT_VERSION: i32 = 157;
 pub const DEFAULT_CLIENT_VERSION_TYPE: &str = "official";
 
@@ -91,6 +92,14 @@ pub struct NetClientState {
     pub auto_confirm_world_stream: bool,
     pub connect_confirm_sent: bool,
     pub last_connect_confirm_error: Option<String>,
+    pub next_ping_at: Option<Instant>,
+    pub ping_requests_sent: u64,
+    pub ping_responses_received: u64,
+    pub last_ping_request_time: Option<i64>,
+    pub last_ping_request_at: Option<Instant>,
+    pub last_ping_response_time: Option<i64>,
+    pub last_ping_response_at: Option<Instant>,
+    pub last_ping_request_error: Option<String>,
     pub last_binary_stream: Option<Vec<u8>>,
     pub last_provider_events: Vec<ProviderEvent>,
     packet_handlers: Vec<PacketHandler>,
@@ -134,6 +143,11 @@ impl fmt::Debug for NetClientState {
                 "last_connect_confirm_error",
                 &self.last_connect_confirm_error,
             )
+            .field("next_ping_at", &self.next_ping_at)
+            .field("ping_requests_sent", &self.ping_requests_sent)
+            .field("ping_responses_received", &self.ping_responses_received)
+            .field("last_ping_request_time", &self.last_ping_request_time)
+            .field("last_ping_response_time", &self.last_ping_response_time)
             .field(
                 "last_binary_stream_len",
                 &self.last_binary_stream.as_ref().map(|s| s.len()),
@@ -149,6 +163,18 @@ impl fmt::Debug for NetClientState {
 }
 
 impl NetClientState {
+    fn reset_ping_state(&mut self) {
+        self.next_ping_at = None;
+        self.ping_requests_sent = 0;
+        self.ping_responses_received = 0;
+        self.last_ping_request_time = None;
+        self.last_ping_request_at = None;
+        self.last_ping_response_time = None;
+        self.last_ping_response_at = None;
+        self.last_ping_request_error = None;
+        self.ping_ms = 0;
+    }
+
     fn record_connect(&mut self, connect: &Connect) {
         self.connecting = false;
         self.connected = true;
@@ -160,6 +186,7 @@ impl NetClientState {
         self.last_connect_packet_error = None;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.reset_ping_state();
     }
 
     fn record_disconnect(&mut self, disconnect: &Disconnect) {
@@ -171,6 +198,7 @@ impl NetClientState {
         self.connect_packet_sent = false;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.reset_ping_state();
     }
 
     fn record_world_stream(&mut self, stream: &Streamable) {
@@ -180,6 +208,7 @@ impl NetClientState {
         self.last_world_stream = Some(stream.clone());
         self.last_binary_stream = Some(stream.stream.clone());
         self.last_packet = Some(PacketKind::Streamable(stream.clone()));
+        self.next_ping_at = Some(Instant::now() + PING_INTERVAL);
     }
 }
 
@@ -252,6 +281,7 @@ impl NetClient {
         state.last_connect_packet_error = None;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.reset_ping_state();
     }
 
     pub fn get_connect_config(&self) -> Option<ClientConnectConfig> {
@@ -273,6 +303,7 @@ impl NetClient {
         state.last_connect_packet_error = None;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.reset_ping_state();
         drop(state);
         self.reset_timeout();
     }
@@ -296,6 +327,7 @@ impl NetClient {
         state.connect_packet_sent = false;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.reset_ping_state();
     }
 
     pub fn add_packet_handler<F>(&self, handler: F)
@@ -397,17 +429,26 @@ impl NetClient {
             let connect_confirm_to_send = {
                 let mut state = self.state.lock().unwrap();
                 state.last_packet = Some(packet.clone());
-                if let PacketKind::Streamable(stream) = &packet {
-                    state.last_binary_stream = Some(stream.stream.clone());
-                    if state.auto_confirm_world_stream && !state.connect_confirm_sent {
-                        state.connect_confirm_sent = true;
-                        state.last_connect_confirm_error = None;
-                        true
-                    } else {
+                match &packet {
+                    PacketKind::Streamable(stream) => {
+                        state.last_binary_stream = Some(stream.stream.clone());
+                        if state.auto_confirm_world_stream && !state.connect_confirm_sent {
+                            state.connect_confirm_sent = true;
+                            state.last_connect_confirm_error = None;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    PacketKind::PingResponseCallPacket(response) => {
+                        let now = Self::current_millis();
+                        state.ping_responses_received += 1;
+                        state.last_ping_response_time = Some(response.time);
+                        state.last_ping_response_at = Some(Instant::now());
+                        state.ping_ms = now.saturating_sub(response.time).max(0) as u32;
                         false
                     }
-                } else {
-                    false
+                    _ => false,
                 }
             };
 
@@ -437,6 +478,8 @@ impl NetClient {
                 self.finish_connecting_and_send_confirm();
             }
         }
+
+        self.maybe_send_ping();
     }
 
     fn finish_connecting_and_send_confirm(&self) {
@@ -450,6 +493,40 @@ impl NetClient {
         };
         if let Err(error) = result {
             self.state.lock().unwrap().last_connect_confirm_error = Some(error.to_string());
+        }
+    }
+
+    fn maybe_send_ping(&self) {
+        let ping_time = {
+            let mut state = self.state.lock().unwrap();
+            if !state.connected || !state.connect_confirm_sent {
+                return;
+            }
+
+            let now = Instant::now();
+            match state.next_ping_at {
+                Some(deadline) if now < deadline => return,
+                _ => {}
+            }
+
+            let time = Self::current_millis();
+            state.ping_requests_sent += 1;
+            state.last_ping_request_time = Some(time);
+            state.last_ping_request_at = Some(now);
+            state.last_ping_request_error = None;
+            state.next_ping_at = Some(now + PING_INTERVAL);
+            Some(time)
+        };
+
+        if let Some(time) = ping_time {
+            let result = {
+                let mut net = self.net.lock().unwrap();
+                net.send(&PacketKind::PingCallPacket(PingCallPacket { time }), true)
+            };
+
+            if let Err(error) = result {
+                self.state.lock().unwrap().last_ping_request_error = Some(error.to_string());
+            }
         }
     }
 
@@ -478,17 +555,26 @@ impl NetClient {
             });
         }
     }
+
+    fn current_millis() -> i64 {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        millis.min(i64::MAX as u128) as i64
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::io;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use crate::mindustry::net::{
         Connect, Disconnect, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
-        PacketKind, StreamBegin, StreamChunk, Streamable, WorldDataBeginCallPacket,
+        PacketKind, PingResponseCallPacket, StreamBegin, StreamChunk, Streamable,
+        WorldDataBeginCallPacket,
     };
 
     use super::{ClientConnectConfig, NetClient};
@@ -655,6 +741,60 @@ mod tests {
             "rust-player"
         );
         assert!(state.last_connect_packet_error.is_none());
+    }
+
+    #[test]
+    fn update_sends_ping_and_updates_rtt_from_response() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+
+        {
+            let state = client.state();
+            let mut state = state.lock().unwrap();
+            state.connected = true;
+            state.connect_confirm_sent = true;
+            state.next_ping_at = Some(Instant::now() - Duration::from_secs(1));
+        }
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+        }
+
+        client.update();
+
+        let request_time = {
+            let sent = sent.lock().unwrap();
+            assert_eq!(sent.len(), 1);
+            match &sent[0].0 {
+                PacketKind::PingCallPacket(packet) => packet.time,
+                other => panic!("unexpected packet: {other:?}"),
+            }
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::PingResponseCallPacket(
+                PingResponseCallPacket {
+                    time: request_time - 37,
+                },
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.ping_requests_sent, 1);
+        assert_eq!(state.ping_responses_received, 1);
+        assert!(state.ping_ms >= 37);
+        assert!(state.ping_ms <= 1000);
+        assert_eq!(state.last_ping_request_time, Some(request_time));
+        assert_eq!(state.last_ping_response_time, Some(request_time - 37));
+        assert!(state.last_ping_request_error.is_none());
     }
 
     #[test]
