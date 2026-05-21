@@ -9,6 +9,7 @@ pub mod pos_team_def;
 pub mod power_graph_updater;
 pub mod rot;
 pub mod shielder;
+pub mod timed;
 pub mod timer;
 
 pub use damage::DamageComp;
@@ -20,4 +21,5 @@ pub use pos_team_def::PosTeamDef;
 pub use power_graph_updater::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use rot::RotComp;
 pub use shielder::{DamageState, ShielderComp, TeamState};
+pub use timed::TimedComp;
 pub use timer::{Interval, TimerComp};
