@@ -676,6 +676,7 @@ pub struct Net {
     server_connect_listeners: Vec<ServerTypedListener<Connect>>,
     server_disconnect_listeners: Vec<ServerTypedListener<Disconnect>>,
     server_connect_packet_listeners: Vec<ServerTypedListener<ConnectPacket>>,
+    server_connect_confirm_listeners: Vec<ServerTypedListener<ConnectConfirmCallPacket>>,
     handled_client_packets: Vec<PacketKind>,
     handled_server_packets: Vec<PacketKind>,
 }
@@ -716,6 +717,10 @@ impl std::fmt::Debug for Net {
                 "server_connect_packet_listeners",
                 &self.server_connect_packet_listeners.len(),
             )
+            .field(
+                "server_connect_confirm_listeners",
+                &self.server_connect_confirm_listeners.len(),
+            )
             .field("handled_client_packets", &self.handled_client_packets)
             .field("handled_server_packets", &self.handled_server_packets)
             .finish()
@@ -747,6 +752,7 @@ impl Net {
             server_connect_listeners: Vec::new(),
             server_disconnect_listeners: Vec::new(),
             server_connect_packet_listeners: Vec::new(),
+            server_connect_confirm_listeners: Vec::new(),
             handled_client_packets: Vec::new(),
             handled_server_packets: Vec::new(),
         }
@@ -874,6 +880,16 @@ impl Net {
         F: FnMut(Option<i32>, &ConnectPacket) + Send + 'static,
     {
         self.server_connect_packet_listeners
+            .push(Box::new(listener));
+    }
+
+    /// Registers the Rust equivalent of Java's high-priority client-to-server
+    /// `ConnectConfirmCallPacket` path.
+    pub fn handle_server_connect_confirm<F>(&mut self, listener: F)
+    where
+        F: FnMut(Option<i32>, &ConnectConfirmCallPacket) + Send + 'static,
+    {
+        self.server_connect_confirm_listeners
             .push(Box::new(listener));
     }
 
@@ -1170,6 +1186,11 @@ impl Net {
                     listener(connection_id, connect_packet);
                 }
             }
+            PacketKind::ConnectConfirmCallPacket(connect_confirm) => {
+                for listener in &mut self.server_connect_confirm_listeners {
+                    listener(connection_id, connect_confirm);
+                }
+            }
             _ => {}
         }
     }
@@ -1412,6 +1433,13 @@ mod tests {
             ));
         });
         let server_log_clone = server_log.clone();
+        net.handle_server_connect_confirm(move |connection_id, _| {
+            server_log_clone
+                .lock()
+                .unwrap()
+                .push(format!("server-connect-confirm:{connection_id:?}"));
+        });
+        let server_log_clone = server_log.clone();
         net.handle_server(move |connection_id, packet| {
             let label = match packet {
                 PacketKind::Connect(_) => format!("generic-server-connect:{connection_id:?}"),
@@ -1422,6 +1450,9 @@ mod tests {
                     "generic-server-connect-packet:{connection_id:?}:{}",
                     packet.name
                 ),
+                PacketKind::ConnectConfirmCallPacket(_) => {
+                    format!("generic-server-connect-confirm:{connection_id:?}")
+                }
                 _ => return,
             };
             server_log_clone.lock().unwrap().push(label);
@@ -1452,6 +1483,11 @@ mod tests {
         );
         net.handle_server_received_from_connection(
             Some(9),
+            false,
+            PacketKind::ConnectConfirmCallPacket(ConnectConfirmCallPacket),
+        );
+        net.handle_server_received_from_connection(
+            Some(9),
             true,
             PacketKind::Disconnect(Disconnect {
                 reason: "left".into(),
@@ -1465,6 +1501,8 @@ mod tests {
                 "generic-server-connect:Some(9)",
                 "server-connect-packet:Some(9):player",
                 "generic-server-connect-packet:Some(9):player",
+                "server-connect-confirm:Some(9)",
+                "generic-server-connect-confirm:Some(9)",
                 "server-disconnect:Some(9)",
                 "generic-server-disconnect:Some(9)",
             ]

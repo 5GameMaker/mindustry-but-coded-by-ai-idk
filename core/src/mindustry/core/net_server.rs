@@ -20,6 +20,7 @@ pub struct NetServerState {
     pub last_connection_id: Option<i32>,
     pub last_connect: Option<Connect>,
     pub last_handshake: Option<ConnectPacket>,
+    pub last_connect_confirm_connection_id: Option<i32>,
     pub last_disconnect: Option<Disconnect>,
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
@@ -284,6 +285,33 @@ impl NetServer {
                 Self::dispatch_packet_handlers(&packet_handlers, &packet);
             });
         }
+
+        {
+            let state = Arc::clone(state);
+            let packet_handlers = Arc::clone(packet_handlers);
+            net.handle_server_connect_confirm(move |connection_id, connect_confirm| {
+                let packet = PacketKind::ConnectConfirmCallPacket(*connect_confirm);
+                {
+                    let mut state = state.lock().expect("NetServerState mutex poisoned");
+                    state.last_connection_id = connection_id;
+                    state.last_connect_confirm_connection_id = connection_id;
+                    if let Some(connection_id) = connection_id {
+                        let connection = state
+                            .connection_states
+                            .entry(connection_id)
+                            .or_insert_with(|| NetConnection::new(String::new()));
+                        connection.has_begun_connecting = true;
+                        connection.has_connected = true;
+                    }
+                    state.events.push(ProviderEvent::ServerPacket {
+                        connection_id: connection_id.unwrap_or(-1),
+                        packet: packet.clone(),
+                    });
+                    state.last_updated_at = Some(Instant::now());
+                }
+                Self::dispatch_packet_handlers(&packet_handlers, &packet);
+            });
+        }
     }
 
     fn dispatch_packet_handlers(
@@ -356,7 +384,9 @@ impl NetServer {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::mindustry::net::{Connect, ConnectPacket, Disconnect, PacketKind};
+    use crate::mindustry::net::{
+        Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, PacketKind,
+    };
 
     use super::NetServer;
 
@@ -385,6 +415,7 @@ mod tests {
             let label = match packet {
                 PacketKind::Connect(_) => "connect",
                 PacketKind::ConnectPacket(_) => "connect-packet",
+                PacketKind::ConnectConfirmCallPacket(_) => "connect-confirm",
                 PacketKind::Disconnect(_) => "disconnect",
                 _ => return,
             };
@@ -407,6 +438,11 @@ mod tests {
             );
             net.handle_server_received_from_connection(
                 Some(12),
+                false,
+                PacketKind::ConnectConfirmCallPacket(ConnectConfirmCallPacket),
+            );
+            net.handle_server_received_from_connection(
+                Some(12),
                 true,
                 PacketKind::Disconnect(Disconnect {
                     reason: "left".into(),
@@ -416,7 +452,7 @@ mod tests {
 
         assert_eq!(
             *seen.lock().unwrap(),
-            vec!["connect", "connect-packet", "disconnect"]
+            vec!["connect", "connect-packet", "connect-confirm", "disconnect"]
         );
 
         let state = server.state();
@@ -429,15 +465,16 @@ mod tests {
             "10.0.0.2:6567"
         );
         assert_eq!(state.last_handshake.as_ref().unwrap().name, "player");
+        assert_eq!(state.last_connect_confirm_connection_id, Some(12));
         assert_eq!(state.last_disconnect_reason.as_deref(), Some("left"));
         let connection = state.connection_states.get(&12).unwrap();
         assert_eq!(connection.address, "10.0.0.2:6567");
         assert_eq!(connection.uuid, "uuid");
         assert_eq!(connection.usid, "usid");
         assert!(!connection.mobile);
-        assert!(!connection.has_connected);
+        assert!(connection.has_connected);
         assert!(connection.has_begun_connecting);
         assert!(connection.has_disconnected);
-        assert_eq!(state.events.len(), 3);
+        assert_eq!(state.events.len(), 4);
     }
 }
