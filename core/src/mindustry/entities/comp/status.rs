@@ -86,6 +86,7 @@ impl StatusComp {
                 .as_ref()
                 .is_some_and(|existing| existing.reacts_with(&effect))
             {
+                Self::apply_transition(entry, effect, duration);
                 return;
             }
         }
@@ -93,6 +94,45 @@ impl StatusComp {
         if !effect.reactive {
             self.applied.insert(effect.name().to_string());
             self.statuses.push(StatusEntry::new(effect, duration));
+        }
+    }
+
+    fn apply_transition(entry: &mut StatusEntry, incoming: StatusEffect, duration: f32) {
+        let Some(existing) = entry.effect.clone() else {
+            return;
+        };
+        let existing_name = existing.name();
+        let incoming_name = incoming.name();
+
+        if existing
+            .opposites
+            .iter()
+            .any(|opposite| opposite == incoming_name)
+        {
+            entry.time -= duration * 0.5;
+            if entry.time <= 0.0 {
+                entry.set(incoming, duration);
+            }
+            return;
+        }
+
+        match (existing_name, incoming_name) {
+            ("burning", "tarred") => {
+                entry.time = (entry.time + duration).min(300.0);
+            }
+            ("melting", "tarred") => {
+                entry.time = (entry.time + duration).min(200.0);
+            }
+            ("tarred", "burning") | ("tarred", "melting") => {
+                entry.time += duration;
+                entry.effect = Some(incoming);
+            }
+            ("freezing", "blasted") | ("wet", "shocked") => {
+                // Java side effects damage, FX and campaign triggers here. The data-only
+                // Rust port records the reaction by consuming the incoming reactive status
+                // while keeping the current status entry unchanged.
+            }
+            _ => {}
         }
     }
 
@@ -307,6 +347,13 @@ mod tests {
         effect
     }
 
+    fn vanilla_status(name: &str) -> StatusEffect {
+        crate::mindustry::content::status_effects::load()
+            .into_iter()
+            .find(|status| status.name() == name)
+            .unwrap_or_else(|| panic!("missing status effect: {name}"))
+    }
+
     #[test]
     fn status_component_applies_extends_unapplies_and_checks_immunity() {
         let mut comp = StatusComp::new();
@@ -375,5 +422,59 @@ mod tests {
         let color = comp.status_color();
         assert!(color.g > color.r);
         assert_eq!(color.a, 1.0);
+    }
+
+    #[test]
+    fn status_component_opposite_transition_reduces_or_replaces_like_java_handler() {
+        let mut comp = StatusComp::new();
+        comp.apply(vanilla_status("burning"), 20.0);
+        comp.apply(vanilla_status("wet"), 10.0);
+
+        assert!(comp.has_effect("burning"));
+        assert!(!comp.has_effect("wet"));
+        assert_eq!(comp.get_duration("burning"), 15.0);
+
+        comp.apply(vanilla_status("wet"), 40.0);
+        assert!(!comp.has_effect("burning"));
+        assert!(comp.has_effect("wet"));
+        assert_eq!(comp.get_duration("wet"), 40.0);
+    }
+
+    #[test]
+    fn status_component_affinity_transition_merges_tarred_fire_like_java_handlers() {
+        let mut burning = StatusComp::new();
+        burning.apply(vanilla_status("burning"), 250.0);
+        burning.apply(vanilla_status("tarred"), 80.0);
+
+        assert!(burning.has_effect("burning"));
+        assert_eq!(burning.get_duration("burning"), 300.0);
+        assert!(!burning.has_effect("tarred"));
+
+        let mut tarred = StatusComp::new();
+        tarred.apply(vanilla_status("tarred"), 12.0);
+        tarred.apply(vanilla_status("melting"), 8.0);
+
+        assert!(!tarred.has_effect("tarred"));
+        assert!(tarred.has_effect("melting"));
+        assert_eq!(tarred.get_duration("melting"), 20.0);
+    }
+
+    #[test]
+    fn status_component_reactive_affinity_consumes_incoming_without_direct_application() {
+        let mut freezing = StatusComp::new();
+        freezing.apply(vanilla_status("freezing"), 30.0);
+        freezing.apply(vanilla_status("blasted"), 20.0);
+
+        assert!(freezing.has_effect("freezing"));
+        assert_eq!(freezing.get_duration("freezing"), 30.0);
+        assert!(!freezing.has_effect("blasted"));
+
+        let mut wet = StatusComp::new();
+        wet.apply(vanilla_status("wet"), 30.0);
+        wet.apply(vanilla_status("shocked"), 20.0);
+
+        assert!(wet.has_effect("wet"));
+        assert_eq!(wet.get_duration("wet"), 30.0);
+        assert!(!wet.has_effect("shocked"));
     }
 }
