@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 pub struct Administration {
     pub banned_ips: Vec<String>,
     pub whitelist: Vec<String>,
+    pub whitelist_enabled: bool,
     pub subnet_bans: Vec<String>,
     pub dos_blacklist: HashSet<String>,
     pub kicked_ips: HashMap<String, i64>,
@@ -17,6 +18,7 @@ impl Default for Administration {
         Self {
             banned_ips: Vec::new(),
             whitelist: Vec::new(),
+            whitelist_enabled: false,
             subnet_bans: Vec::new(),
             dos_blacklist: HashSet::new(),
             kicked_ips: HashMap::new(),
@@ -116,10 +118,92 @@ impl Administration {
             .unwrap_or(false)
     }
 
+    pub fn admin_player(&mut self, id: impl Into<String>, usid: impl Into<String>) -> bool {
+        let info = self.get_or_create_info(id.into());
+        let was_admin = info.admin;
+        info.admin_usid = Some(usid.into());
+        info.admin = true;
+        was_admin
+    }
+
+    pub fn unadmin_player(&mut self, id: impl Into<String>) -> bool {
+        let info = self.get_or_create_info(id.into());
+        if !info.admin {
+            return false;
+        }
+
+        info.admin = false;
+        true
+    }
+
+    pub fn is_admin(&self, id: &str, usid: &str) -> bool {
+        self.player_info.get(id).is_some_and(|info| {
+            info.admin
+                && info
+                    .admin_usid
+                    .as_deref()
+                    .is_some_and(|admin_usid| admin_usid == usid)
+        })
+    }
+
+    pub fn set_whitelist_enabled(&mut self, enabled: bool) {
+        self.whitelist_enabled = enabled;
+    }
+
+    pub fn is_whitelist_enabled(&self) -> bool {
+        self.whitelist_enabled
+    }
+
+    pub fn is_whitelisted(&self, id: &str, usid: &str) -> bool {
+        !self.is_whitelist_enabled() || self.whitelist.contains(&Self::whitelist_key(id, usid))
+    }
+
+    pub fn whitelist(&mut self, id: impl Into<String>) -> bool {
+        let id = id.into();
+        let key = {
+            let info = self.get_or_create_info(id.clone());
+            Self::whitelist_key(&id, info.admin_usid.as_deref().unwrap_or("null"))
+        };
+        if self.whitelist.contains(&key) {
+            return false;
+        }
+
+        self.whitelist.push(key);
+        true
+    }
+
+    pub fn unwhitelist(&mut self, id: impl Into<String>) -> bool {
+        let id = id.into();
+        let key = {
+            let info = self.get_or_create_info(id.clone());
+            Self::whitelist_key(&id, info.admin_usid.as_deref().unwrap_or("null"))
+        };
+        if let Some(index) = self.whitelist.iter().position(|existing| existing == &key) {
+            self.whitelist.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_whitelisted(&self) -> Vec<PlayerInfo> {
+        self.player_info
+            .values()
+            .filter(|info| {
+                self.is_whitelisted(&info.id, info.admin_usid.as_deref().unwrap_or("null"))
+            })
+            .cloned()
+            .collect()
+    }
+
     pub fn get_or_create_info(&mut self, id: String) -> &mut PlayerInfo {
         self.player_info
             .entry(id.clone())
             .or_insert_with(|| PlayerInfo::new(id))
+    }
+
+    fn whitelist_key(id: &str, usid: &str) -> String {
+        format!("{usid}{id}")
     }
 }
 
@@ -414,5 +498,47 @@ mod tests {
         assert!(admin.ban_player_ip("1.2.3.4"));
         assert!(admin.is_ip_banned("1.2.3.4"));
         assert!(admin.is_id_banned("uuid"));
+    }
+
+    #[test]
+    fn admin_player_tracks_usid_like_java_access_control() {
+        let mut admin = Administration::default();
+
+        assert!(!admin.admin_player("uuid", "usid-a"));
+        assert!(admin.is_admin("uuid", "usid-a"));
+        assert!(!admin.is_admin("uuid", "usid-b"));
+        assert!(admin.admin_player("uuid", "usid-b"));
+        assert!(!admin.is_admin("uuid", "usid-a"));
+        assert!(admin.is_admin("uuid", "usid-b"));
+
+        assert!(admin.unadmin_player("uuid"));
+        assert!(!admin.unadmin_player("uuid"));
+        assert!(!admin.is_admin("uuid", "usid-b"));
+    }
+
+    #[test]
+    fn whitelist_uses_admin_usid_plus_id_keys_like_java() {
+        let mut admin = Administration::default();
+        admin.update_player_joined("uuid", "1.2.3.4", "name");
+
+        assert!(!admin.is_whitelist_enabled());
+        assert!(admin.is_whitelisted("uuid", "missing"));
+        admin.set_whitelist_enabled(true);
+        assert!(!admin.is_whitelisted("uuid", "usid"));
+
+        admin.admin_player("uuid", "usid");
+        assert!(admin.whitelist("uuid"));
+        assert!(!admin.whitelist("uuid"));
+        assert_eq!(admin.whitelist, vec!["usiduuid"]);
+        assert!(admin.is_whitelisted("uuid", "usid"));
+        assert!(!admin.is_whitelisted("uuid", "other"));
+
+        let listed = admin.get_whitelisted();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "uuid");
+
+        assert!(admin.unwhitelist("uuid"));
+        assert!(!admin.unwhitelist("uuid"));
+        assert!(!admin.is_whitelisted("uuid", "usid"));
     }
 }
