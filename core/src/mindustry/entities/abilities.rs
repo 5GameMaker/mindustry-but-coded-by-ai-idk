@@ -1345,9 +1345,223 @@ impl Ability for UnitSpawnAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnergyFieldAction {
+    Heal,
+    Damage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EnergyFieldTarget {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub same_team: bool,
+    pub damaged: bool,
+    pub max_health: f32,
+    pub same_type: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnergyFieldHit {
+    pub id: u32,
+    pub action: EnergyFieldAction,
+    pub amount: f32,
+    pub angle: f32,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnergyFieldPulse {
+    pub x: f32,
+    pub y: f32,
+    pub hits: Vec<EnergyFieldHit>,
+    pub any_nearby: bool,
+    pub ammo_after: i32,
+    pub timer: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnergyFieldAbility {
+    pub base: BasicAbility,
+    pub damage: f32,
+    pub reload: f32,
+    pub range: f32,
+    pub status: String,
+    pub status_duration: f32,
+    pub x: f32,
+    pub y: f32,
+    pub target_ground: bool,
+    pub target_air: bool,
+    pub hit_buildings: bool,
+    pub hit_units: bool,
+    pub max_targets: usize,
+    pub heal_percent: f32,
+    pub same_type_heal_mult: f32,
+    pub display_heal: bool,
+    pub use_ammo: bool,
+    pub timer: f32,
+    pub cur_stroke: f32,
+    pub any_nearby: bool,
+}
+
+impl Default for EnergyFieldAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            damage: 1.0,
+            reload: 100.0,
+            range: 60.0,
+            status: "electrified".into(),
+            status_duration: 60.0 * 6.0,
+            x: 0.0,
+            y: 0.0,
+            target_ground: true,
+            target_air: true,
+            hit_buildings: true,
+            hit_units: true,
+            max_targets: 25,
+            heal_percent: 3.0,
+            same_type_heal_mult: 1.0,
+            display_heal: true,
+            use_ammo: true,
+            timer: 0.0,
+            cur_stroke: 0.0,
+            any_nearby: false,
+        }
+    }
+}
+
+impl EnergyFieldAbility {
+    pub fn new(damage: f32, reload: f32, range: f32) -> Self {
+        Self {
+            damage,
+            reload,
+            range,
+            ..Default::default()
+        }
+    }
+
+    pub fn center(&self, unit_x: f32, unit_y: f32, unit_rotation: f32) -> (f32, f32) {
+        let (offset_x, offset_y) = rotate_offset(self.x, self.y, unit_rotation - 90.0);
+        (unit_x + offset_x, unit_y + offset_y)
+    }
+
+    pub fn update_targets(
+        &mut self,
+        delta: f32,
+        unit_x: f32,
+        unit_y: f32,
+        unit_rotation: f32,
+        unit_damage_scale: f32,
+        ammo: i32,
+        unit_ammo_rule: bool,
+        targets: &[EnergyFieldTarget],
+    ) -> Option<EnergyFieldPulse> {
+        self.cur_stroke = lerp_delta(
+            self.cur_stroke,
+            if self.any_nearby { 1.0 } else { 0.0 },
+            0.09,
+            delta,
+        );
+        self.timer += delta;
+
+        if self.timer < self.reload || (self.use_ammo && ammo <= 0 && unit_ammo_rule) {
+            return None;
+        }
+
+        let (cx, cy) = self.center(unit_x, unit_y, unit_rotation);
+        let mut sorted = targets
+            .iter()
+            .copied()
+            .filter(|target| distance2(cx, cy, target.x, target.y) <= self.range * self.range)
+            .collect::<Vec<_>>();
+        sorted.sort_by(|a, b| {
+            distance2(cx, cy, a.x, a.y)
+                .partial_cmp(&distance2(cx, cy, b.x, b.y))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        self.any_nearby = false;
+        let mut hits = Vec::new();
+        for target in sorted.into_iter().take(self.max_targets) {
+            if target.same_team {
+                if target.damaged {
+                    self.any_nearby = true;
+                    let heal_mult = if target.same_type {
+                        self.same_type_heal_mult
+                    } else {
+                        1.0
+                    };
+                    hits.push(EnergyFieldHit {
+                        id: target.id,
+                        action: EnergyFieldAction::Heal,
+                        amount: self.heal_percent / 100.0 * target.max_health * heal_mult,
+                        angle: angle_to(cx, cy, target.x, target.y),
+                        status: None,
+                    });
+                }
+            } else {
+                self.any_nearby = true;
+                hits.push(EnergyFieldHit {
+                    id: target.id,
+                    action: EnergyFieldAction::Damage,
+                    amount: self.damage * unit_damage_scale,
+                    angle: angle_to(cx, cy, target.x, target.y),
+                    status: (!self.status.is_empty()).then(|| self.status.clone()),
+                });
+            }
+        }
+
+        let ammo_after = if self.any_nearby && self.use_ammo && unit_ammo_rule {
+            ammo - 1
+        } else {
+            ammo
+        };
+        self.timer = 0.0;
+
+        Some(EnergyFieldPulse {
+            x: cx,
+            y: cy,
+            hits,
+            any_nearby: self.any_nearby,
+            ammo_after,
+            timer: self.timer,
+        })
+    }
+
+    pub fn firing_rate_per_second(&self) -> f32 {
+        60.0 / self.reload
+    }
+}
+
+impl Ability for EnergyFieldAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
+}
+
+fn distance2(x: f32, y: f32, tx: f32, ty: f32) -> f32 {
+    let dx = tx - x;
+    let dy = ty - y;
+    dx * dx + dy * dy
+}
+
+fn angle_to(x: f32, y: f32, tx: f32, ty: f32) -> f32 {
+    (ty - y).atan2(tx - x).to_degrees()
 }
 
 fn rotate_offset(x: f32, y: f32, rotation: f32) -> (f32, f32) {
@@ -1412,10 +1626,11 @@ fn polygon_vertex(
 #[cfg(test)]
 mod tests {
     use super::{
-        Ability, ArmorPlateAbility, BasicAbility, ForceFieldAbility, LiquidExplodeAbility,
-        LiquidRegenAbility, MoveEffectAbility, MoveLightningAbility, RegenAbility,
-        RepairFieldAbility, RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldTarget,
-        SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility, UnitSpawnAbility,
+        Ability, ArmorPlateAbility, BasicAbility, EnergyFieldAbility, EnergyFieldAction,
+        EnergyFieldTarget, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
+        MoveEffectAbility, MoveLightningAbility, RegenAbility, RepairFieldAbility,
+        RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldTarget, SpawnDeathAbility,
+        StatusFieldAbility, SuppressionFieldAbility, UnitSpawnAbility,
     };
 
     #[derive(Clone)]
@@ -1854,5 +2069,79 @@ mod tests {
         assert!(ability
             .update_state(0.0, 1.0, true, 0.0, 0.0, 0.0)
             .is_some());
+    }
+
+    #[test]
+    fn energy_field_sorts_targets_and_creates_heal_damage_hits() {
+        let mut ability = EnergyFieldAbility::new(12.0, 10.0, 100.0);
+        ability.x = 0.0;
+        ability.y = 10.0;
+        ability.heal_percent = 5.0;
+        ability.same_type_heal_mult = 2.0;
+        ability.max_targets = 3;
+        let targets = [
+            EnergyFieldTarget {
+                id: 1,
+                x: 100.0,
+                y: 210.0,
+                same_team: false,
+                damaged: false,
+                max_health: 100.0,
+                same_type: false,
+            },
+            EnergyFieldTarget {
+                id: 2,
+                x: 100.0,
+                y: 212.0,
+                same_team: true,
+                damaged: true,
+                max_health: 200.0,
+                same_type: true,
+            },
+            EnergyFieldTarget {
+                id: 3,
+                x: 500.0,
+                y: 500.0,
+                same_team: false,
+                damaged: false,
+                max_health: 100.0,
+                same_type: false,
+            },
+        ];
+
+        assert!(ability
+            .update_targets(9.0, 100.0, 200.0, 90.0, 1.5, 4, true, &targets)
+            .is_none());
+        let pulse = ability
+            .update_targets(1.0, 100.0, 200.0, 90.0, 1.5, 4, true, &targets)
+            .expect("reload threshold should fire");
+
+        assert!((pulse.x - 100.0).abs() < 0.0001);
+        assert!((pulse.y - 210.0).abs() < 0.0001);
+        assert!(pulse.any_nearby);
+        assert_eq!(pulse.ammo_after, 3);
+        assert_eq!(pulse.hits.len(), 2);
+        assert_eq!(pulse.hits[0].id, 1);
+        assert_eq!(pulse.hits[0].action, EnergyFieldAction::Damage);
+        assert_eq!(pulse.hits[0].amount, 18.0);
+        assert_eq!(pulse.hits[0].status.as_deref(), Some("electrified"));
+        assert_eq!(pulse.hits[1].id, 2);
+        assert_eq!(pulse.hits[1].action, EnergyFieldAction::Heal);
+        assert_eq!(pulse.hits[1].amount, 20.0);
+        assert_eq!(ability.firing_rate_per_second(), 6.0);
+    }
+
+    #[test]
+    fn energy_field_waits_for_ammo_when_rules_require_it() {
+        let mut ability = EnergyFieldAbility::new(10.0, 1.0, 50.0);
+        assert!(ability
+            .update_targets(1.0, 0.0, 0.0, 0.0, 1.0, 0, true, &[])
+            .is_none());
+
+        let pulse = ability
+            .update_targets(0.0, 0.0, 0.0, 0.0, 1.0, 0, false, &[])
+            .expect("ammo is ignored when unit ammo rule is disabled");
+        assert!(!pulse.any_nearby);
+        assert_eq!(pulse.ammo_after, 0);
     }
 }

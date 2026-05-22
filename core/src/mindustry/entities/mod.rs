@@ -20,12 +20,13 @@ pub mod unit_sorts;
 pub mod units;
 
 pub use abilities::{
-    Ability, ArmorPlateAbility, ArmorPlateUpdate, BasicAbility, ForceFieldAbility, ForceFieldHit,
-    ForceFieldUpdate, LiquidExplodeAbility, LiquidRegenAbility, MoveEffectAbility, MoveEffectPlan,
-    MoveLightningAbility, MoveLightningPlan, RegenAbility, RepairFieldAbility, RepairFieldPulse,
-    RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
-    SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
-    SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
+    Ability, ArmorPlateAbility, ArmorPlateUpdate, BasicAbility, EnergyFieldAbility,
+    EnergyFieldAction, EnergyFieldHit, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility,
+    ForceFieldHit, ForceFieldUpdate, LiquidExplodeAbility, LiquidRegenAbility, MoveEffectAbility,
+    MoveEffectPlan, MoveLightningAbility, MoveLightningPlan, RegenAbility, RepairFieldAbility,
+    RepairFieldPulse, RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse,
+    ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse,
+    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
