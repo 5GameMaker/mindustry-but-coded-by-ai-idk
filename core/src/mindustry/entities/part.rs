@@ -700,6 +700,106 @@ impl FlarePart {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HoverCirclePlan {
+    pub x: f32,
+    pub y: f32,
+    pub sides: i32,
+    pub radius: f32,
+    pub rotation: f32,
+    pub stroke: f32,
+    pub fin: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HoverPartDrawPlan {
+    pub color: String,
+    pub layer: Option<f32>,
+    pub layer_offset: f32,
+    pub under_turret_shading: bool,
+    pub circles: Vec<HoverCirclePlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HoverPart {
+    pub config: DrawPartConfig,
+    pub radius: f32,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub phase: f32,
+    pub stroke: f32,
+    pub min_stroke: f32,
+    pub circles: i32,
+    pub sides: i32,
+    pub color: String,
+    pub mirror: bool,
+    pub layer: f32,
+    pub layer_offset: f32,
+}
+
+impl Default for HoverPart {
+    fn default() -> Self {
+        Self {
+            config: DrawPartConfig::default(),
+            radius: 4.0,
+            x: 0.0,
+            y: 0.0,
+            rotation: 0.0,
+            phase: 50.0,
+            stroke: 3.0,
+            min_stroke: 0.12,
+            circles: 2,
+            sides: 4,
+            color: "white".into(),
+            mirror: false,
+            layer: -1.0,
+            layer_offset: 0.0,
+        }
+    }
+}
+
+impl HoverPart {
+    pub fn draw_plan(&self, params: &PartParams, time: f32) -> HoverPartDrawPlan {
+        let len = if self.mirror && params.side_override == -1 {
+            2
+        } else {
+            1
+        };
+        let mut circles = Vec::with_capacity(self.circles.max(0) as usize * len);
+        for c in 0..self.circles.max(0) {
+            let fin = (time / self.phase + c as f32 / self.circles.max(1) as f32).rem_euclid(1.0);
+            let stroke = (1.0 - fin) * self.stroke + self.min_stroke;
+            for side in 0..len {
+                let i = if params.side_override == -1 {
+                    side as i32
+                } else {
+                    params.side_override
+                };
+                let sign = (if i == 0 { 1.0 } else { -1.0 }) * params.side_multiplier as f32;
+                let offset = rotate_offset(params.rotation - 90.0, self.x * sign, self.y);
+                circles.push(HoverCirclePlan {
+                    x: params.x + offset.0,
+                    y: params.y + offset.1,
+                    sides: self.sides,
+                    radius: self.radius * fin,
+                    rotation: params.rotation,
+                    stroke,
+                    fin,
+                });
+            }
+        }
+
+        HoverPartDrawPlan {
+            color: self.color.clone(),
+            layer: (self.layer > 0.0).then_some(self.layer),
+            layer_offset: self.layer_offset,
+            under_turret_shading: self.config.under && self.config.turret_shading,
+            circles,
+        }
+    }
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -727,8 +827,8 @@ fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, PartMove, PartParams,
-        PartProgress, ShapePart, ShapePartKind,
+        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, HoverPart, PartMove,
+        PartParams, PartProgress, ShapePart, ShapePartKind,
     };
 
     #[test]
@@ -969,5 +1069,41 @@ mod tests {
         assert_eq!(plan.triangles[2].color, "white");
         assert_eq!(plan.triangles[2].width, 3.0);
         assert!((plan.triangles[2].length - 4.95).abs() < 0.0001);
+    }
+
+    #[test]
+    fn hover_part_draw_plan_builds_phased_mirrored_polygons() {
+        let mut params = PartParams::default();
+        params.set(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 200.0, 90.0);
+
+        let part = HoverPart {
+            radius: 10.0,
+            x: 5.0,
+            y: 0.0,
+            phase: 20.0,
+            stroke: 4.0,
+            min_stroke: 0.5,
+            circles: 2,
+            sides: 6,
+            mirror: true,
+            layer: 7.0,
+            layer_offset: 0.2,
+            ..Default::default()
+        };
+
+        let plan = part.draw_plan(&params, 5.0);
+        assert_eq!(plan.color, "white");
+        assert_eq!(plan.layer, Some(7.0));
+        assert_eq!(plan.layer_offset, 0.2);
+        assert_eq!(plan.circles.len(), 4);
+        assert_eq!((plan.circles[0].x, plan.circles[0].y), (105.0, 200.0));
+        assert_eq!((plan.circles[1].x, plan.circles[1].y), (95.0, 200.0));
+        assert_eq!(plan.circles[0].sides, 6);
+        assert_eq!(plan.circles[0].fin, 0.25);
+        assert_eq!(plan.circles[0].radius, 2.5);
+        assert_eq!(plan.circles[0].stroke, 3.5);
+        assert_eq!(plan.circles[2].fin, 0.75);
+        assert_eq!(plan.circles[2].radius, 7.5);
+        assert_eq!(plan.circles[2].stroke, 1.5);
     }
 }
