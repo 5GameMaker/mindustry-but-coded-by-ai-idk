@@ -3,6 +3,7 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::mindustry::io::{BuildPlanWire, TeamId};
 use crate::mindustry::net::{
     packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
     ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
@@ -12,6 +13,26 @@ use crate::mindustry::net::{
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
 pub type BinaryPacketHandler = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send + 'static>>>;
+
+pub const PLAN_PREVIEW_SYNC_INTERVAL_MS: i64 = 500;
+pub const PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerPreviewPlanSource {
+    pub player_id: i32,
+    pub team: TeamId,
+    pub connection_id: Option<i32>,
+    pub local: bool,
+    pub connected: bool,
+    pub last_preview_plan_group_server: i32,
+    pub plans: Vec<BuildPlanWire>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreviewPlanBroadcast {
+    pub target_connection_id: i32,
+    pub packet: ClientPlanSnapshotReceivedCallPacket,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct NetServerState {
@@ -364,6 +385,35 @@ impl NetServer {
         }
     }
 
+    pub fn broadcast_client_plan_previews(
+        &self,
+        players: &mut [PlayerPreviewPlanSource],
+    ) -> io::Result<usize> {
+        let broadcasts = Self::client_plan_preview_broadcasts(players);
+        let mut sent = 0;
+        let mut first_error = None;
+
+        for broadcast in broadcasts {
+            match self.send_client_plan_snapshot_received(
+                broadcast.target_connection_id,
+                broadcast.packet,
+            ) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
+    }
+
     pub fn send_state_snapshot(
         &self,
         connection_id: i32,
@@ -520,6 +570,56 @@ impl NetServer {
                 Some((packet, sent_packet, reliable))
             })
             .collect()
+    }
+
+    pub fn client_plan_preview_broadcasts(
+        players: &mut [PlayerPreviewPlanSource],
+    ) -> Vec<PreviewPlanBroadcast> {
+        let mut broadcasts = Vec::new();
+
+        for source_index in 0..players.len() {
+            players[source_index].last_preview_plan_group_server = players[source_index]
+                .last_preview_plan_group_server
+                .saturating_add(1);
+            let group_id = players[source_index].last_preview_plan_group_server;
+            let player_id = players[source_index].player_id;
+            let team = players[source_index].team;
+            let plans = players[source_index].plans.clone();
+
+            let payloads = if plans.is_empty() {
+                vec![None]
+            } else {
+                plans
+                    .chunks(PLAN_PREVIEW_CHUNK_SIZE)
+                    .map(|chunk| Some(chunk.to_vec()))
+                    .collect()
+            };
+
+            for (target_index, target) in players.iter().enumerate() {
+                if target_index == source_index
+                    || target.team != team
+                    || target.local
+                    || !target.connected
+                {
+                    continue;
+                }
+
+                let Some(target_connection_id) = target.connection_id else {
+                    continue;
+                };
+
+                broadcasts.extend(payloads.iter().cloned().map(|plans| PreviewPlanBroadcast {
+                    target_connection_id,
+                    packet: ClientPlanSnapshotReceivedCallPacket {
+                        player_id,
+                        group_id,
+                        plans,
+                    },
+                }));
+            }
+        }
+
+        broadcasts
     }
 
     fn install_typed_listeners(
@@ -873,6 +973,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    use crate::mindustry::io::{BuildPlanWire, TeamId};
     use crate::mindustry::net::{
         packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
@@ -882,7 +983,7 @@ mod tests {
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
 
-    use super::NetServer;
+    use super::{NetServer, PlayerPreviewPlanSource, PLAN_PREVIEW_CHUNK_SIZE};
 
     #[derive(Clone, Default)]
     struct CaptureProvider {
@@ -1244,6 +1345,66 @@ mod tests {
             ));
             assert!(!connection.sent[0].1);
         }
+    }
+
+    #[test]
+    fn broadcast_client_plan_previews_chunks_by_player_group_and_team_targets() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let many_plans: Vec<_> = (0..PLAN_PREVIEW_CHUNK_SIZE + 2)
+            .map(|index| BuildPlanWire::new_place(index as i32, index as i32 + 1, 0, "router"))
+            .collect();
+        let mut players = vec![
+            PlayerPreviewPlanSource {
+                player_id: 1,
+                team: TeamId(1),
+                connection_id: Some(10),
+                local: false,
+                connected: true,
+                last_preview_plan_group_server: 4,
+                plans: many_plans,
+            },
+            PlayerPreviewPlanSource {
+                player_id: 2,
+                team: TeamId(1),
+                connection_id: Some(20),
+                local: false,
+                connected: true,
+                last_preview_plan_group_server: 0,
+                plans: Vec::new(),
+            },
+        ];
+
+        let planned = NetServer::client_plan_preview_broadcasts(&mut players);
+        assert_eq!(planned.len(), 3);
+        assert_eq!(players[0].last_preview_plan_group_server, 5);
+        assert_eq!(players[1].last_preview_plan_group_server, 1);
+        assert_eq!(planned[0].target_connection_id, 20);
+        assert_eq!(planned[0].packet.player_id, 1);
+        assert_eq!(planned[0].packet.group_id, 5);
+        assert_eq!(
+            planned[0].packet.plans.as_ref().unwrap().len(),
+            PLAN_PREVIEW_CHUNK_SIZE
+        );
+        assert_eq!(planned[1].target_connection_id, 20);
+        assert_eq!(planned[1].packet.plans.as_ref().unwrap().len(), 2);
+        assert_eq!(planned[2].target_connection_id, 10);
+        assert_eq!(planned[2].packet.player_id, 2);
+        assert_eq!(planned[2].packet.group_id, 1);
+        assert!(planned[2].packet.plans.is_none());
+
+        let sent_count = server.broadcast_client_plan_previews(&mut players).unwrap();
+        assert_eq!(sent_count, 3);
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert!(sent.iter().all(|(_, _, reliable)| !*reliable));
+        assert!(matches!(
+            sent[0].1,
+            PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
+        ));
     }
 
     #[test]
