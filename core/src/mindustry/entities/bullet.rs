@@ -987,6 +987,187 @@ impl LaserBulletType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SapTargetKind {
+    Hitbox,
+    Building,
+    OtherHealth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SapTargetInfo {
+    pub kind: SapTargetKind,
+    pub health: f32,
+    pub x: f32,
+    pub y: f32,
+    pub building_collides: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SapDataPlan {
+    Target { x: f32, y: f32 },
+    EndPoint { x: f32, y: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SapInitPlan {
+    pub length: f32,
+    pub data: SapDataPlan,
+    pub owner_heal: f32,
+    pub hitbox_collision: bool,
+    pub bullet_collision: bool,
+    pub building_collision: bool,
+    pub hit_position: Option<(f32, f32)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SapDrawPlan {
+    pub laser_region: String,
+    pub laser_end_region: String,
+    pub end: (f32, f32),
+    pub width: f32,
+    pub light_width: f32,
+    pub light_color: String,
+    pub light_opacity: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SapBulletType {
+    pub base: BulletType,
+    pub length: f32,
+    pub length_rand: f32,
+    pub sap_strength: f32,
+    pub color: String,
+    pub width: f32,
+    pub sprite: String,
+    pub laser_region: String,
+    pub laser_end_region: String,
+    pub despawn_effect: String,
+    pub hit_effect: String,
+    pub light_color: String,
+}
+
+impl Default for SapBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                speed: 0.0,
+                pierce: true,
+                collides: false,
+                hit_size: 0.0,
+                hittable: false,
+                status: "sapped".into(),
+                light_opacity: 0.6,
+                status_duration: 60.0 * 3.0,
+                impact: true,
+                ..Default::default()
+            },
+            length: 100.0,
+            length_rand: 0.0,
+            sap_strength: 0.5,
+            color: "white".into(),
+            width: 0.4,
+            sprite: "laser".into(),
+            laser_region: "laser".into(),
+            laser_end_region: "laser-end".into(),
+            despawn_effect: "none".into(),
+            hit_effect: "hitLiquid".into(),
+            light_color: "sap".into(),
+        }
+    }
+}
+
+impl SapBulletType {
+    pub fn load_regions(&mut self) {
+        self.laser_region = self.sprite.clone();
+        self.laser_end_region = format!("{}-end", self.sprite);
+    }
+
+    pub fn calculate_range(&self) -> f32 {
+        self.length.max(self.base.max_range)
+    }
+
+    pub fn sampled_length(&self, random_unit: f32) -> f32 {
+        self.length + self.length_rand * random_unit.clamp(0.0, 1.0)
+    }
+
+    pub fn end_position(&self, x: f32, y: f32, rotation: f32, length: f32) -> (f32, f32) {
+        (x + trnsx(rotation, length), y + trnsy(rotation, length))
+    }
+
+    pub fn init_plan(
+        &self,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        random_unit: f32,
+        target: Option<SapTargetInfo>,
+        owner_is_health: bool,
+    ) -> SapInitPlan {
+        let length = self.sampled_length(random_unit);
+        let Some(target) = target else {
+            let (end_x, end_y) = self.end_position(x, y, rotation, length);
+            return SapInitPlan {
+                length,
+                data: SapDataPlan::EndPoint { x: end_x, y: end_y },
+                owner_heal: 0.0,
+                hitbox_collision: false,
+                bullet_collision: false,
+                building_collision: false,
+                hit_position: None,
+            };
+        };
+
+        let drained = target.health.min(self.base.damage).max(0.0);
+        let owner_heal = if owner_is_health {
+            drained * self.sap_strength
+        } else {
+            0.0
+        };
+        let hitbox_collision = target.kind == SapTargetKind::Hitbox;
+        let building_collision = target.kind == SapTargetKind::Building && target.building_collides;
+
+        SapInitPlan {
+            length,
+            data: SapDataPlan::Target {
+                x: target.x,
+                y: target.y,
+            },
+            owner_heal,
+            hitbox_collision,
+            bullet_collision: hitbox_collision,
+            building_collision,
+            hit_position: building_collision.then_some((target.x, target.y)),
+        }
+    }
+
+    pub fn draw_plan(
+        &self,
+        bullet_x: f32,
+        bullet_y: f32,
+        data: SapDataPlan,
+        fin: f32,
+        fout: f32,
+    ) -> SapDrawPlan {
+        let (data_x, data_y) = match data {
+            SapDataPlan::Target { x, y } | SapDataPlan::EndPoint { x, y } => (x, y),
+        };
+        let end = (
+            data_x + (bullet_x - data_x) * fin,
+            data_y + (bullet_y - data_y) * fin,
+        );
+        SapDrawPlan {
+            laser_region: self.laser_region.clone(),
+            laser_end_region: self.laser_end_region.clone(),
+            end,
+            width: self.width * fout,
+            light_width: 15.0 * fout,
+            light_color: self.light_color.clone(),
+            light_opacity: self.base.light_opacity,
+        }
+    }
+}
+
 pub fn bomb_bullet_type(damage: f32, radius: f32, sprite: impl Into<String>) -> BasicBulletType {
     let mut bullet = BasicBulletType::new(0.7, 0.0, sprite);
     bullet.base.splash_damage_radius = radius;
@@ -2225,6 +2406,97 @@ mod tests {
         assert_eq!(draw.light_end, (55.0, 0.0));
         assert_eq!(draw.light_width, 10.5);
         assert_eq!(draw.light_color, "lancerLaser@0.4");
+        assert_eq!(draw.light_opacity, 0.6);
+    }
+
+    #[test]
+    fn sap_bullet_init_and_draw_plans_capture_sap_linecast_side_effects() {
+        let mut sap = SapBulletType::default();
+        sap.base.damage = 30.0;
+        sap.length_rand = 20.0;
+        assert_eq!(sap.base.speed, 0.0);
+        assert_eq!(sap.despawn_effect, "none");
+        assert!(sap.base.pierce);
+        assert!(!sap.base.collides);
+        assert_eq!(sap.base.hit_size, 0.0);
+        assert!(!sap.base.hittable);
+        assert_eq!(sap.hit_effect, "hitLiquid");
+        assert_eq!(sap.base.status, "sapped");
+        assert_eq!(sap.light_color, "sap");
+        assert_eq!(sap.base.light_opacity, 0.6);
+        assert_eq!(sap.base.status_duration, 180.0);
+        assert!(sap.base.impact);
+        assert_eq!(sap.length, 100.0);
+        assert_eq!(sap.sap_strength, 0.5);
+        assert_eq!(sap.width, 0.4);
+        assert_eq!(sap.sprite, "laser");
+        assert_eq!(sap.calculate_range(), 100.0);
+        sap.base.max_range = 140.0;
+        assert_eq!(sap.calculate_range(), 140.0);
+
+        sap.sprite = "custom-laser".into();
+        sap.load_regions();
+        assert_eq!(sap.laser_region, "custom-laser");
+        assert_eq!(sap.laser_end_region, "custom-laser-end");
+        assert_eq!(sap.sampled_length(0.25), 105.0);
+
+        let miss = sap.init_plan(0.0, 0.0, 0.0, 0.25, None, true);
+        assert_eq!(miss.length, 105.0);
+        assert_eq!(miss.data, SapDataPlan::EndPoint { x: 105.0, y: 0.0 });
+        assert_eq!(miss.owner_heal, 0.0);
+        assert!(!miss.hitbox_collision);
+
+        let hitbox = sap.init_plan(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Some(SapTargetInfo {
+                kind: SapTargetKind::Hitbox,
+                health: 40.0,
+                x: 50.0,
+                y: 5.0,
+                building_collides: false,
+            }),
+            true,
+        );
+        assert_eq!(hitbox.data, SapDataPlan::Target { x: 50.0, y: 5.0 });
+        assert_eq!(hitbox.owner_heal, 15.0);
+        assert!(hitbox.hitbox_collision);
+        assert!(hitbox.bullet_collision);
+        assert!(!hitbox.building_collision);
+
+        let building = sap.init_plan(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Some(SapTargetInfo {
+                kind: SapTargetKind::Building,
+                health: 10.0,
+                x: 32.0,
+                y: 64.0,
+                building_collides: true,
+            }),
+            false,
+        );
+        assert_eq!(building.owner_heal, 0.0);
+        assert!(building.building_collision);
+        assert_eq!(building.hit_position, Some((32.0, 64.0)));
+
+        let draw = sap.draw_plan(
+            0.0,
+            0.0,
+            SapDataPlan::EndPoint { x: 100.0, y: 0.0 },
+            0.25,
+            0.5,
+        );
+        assert_eq!(draw.laser_region, "custom-laser");
+        assert_eq!(draw.laser_end_region, "custom-laser-end");
+        assert_eq!(draw.end, (75.0, 0.0));
+        assert_eq!(draw.width, 0.2);
+        assert_eq!(draw.light_width, 7.5);
+        assert_eq!(draw.light_color, "sap");
         assert_eq!(draw.light_opacity, 0.6);
     }
 

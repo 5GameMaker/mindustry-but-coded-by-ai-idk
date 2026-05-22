@@ -41,6 +41,7 @@ pub use bullet::{
     LaserLightningPlan, LightningBulletType, LiquidBulletType, LiquidDrawPlan, LiquidHitPlan,
     LiquidUpdatePlan, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan,
     MassDriverUpdatePlan, PointBulletType, PointLaserBulletType, PointLaserUpdatePlan,
+    SapBulletType, SapDataPlan, SapDrawPlan, SapInitPlan, SapTargetInfo, SapTargetKind,
     SpaceLiquidBulletType,
 };
 pub use comp::BuildingComp;
