@@ -1245,6 +1245,106 @@ impl Ability for ArmorPlateAbility {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitSpawnPlan {
+    pub unit: String,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub timer: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitSpawnAbility {
+    pub base: BasicAbility,
+    pub unit: String,
+    pub spawn_time: f32,
+    pub spawn_x: f32,
+    pub spawn_y: f32,
+    pub parentize_effects: bool,
+    pub timer: f32,
+}
+
+impl Default for UnitSpawnAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            unit: String::new(),
+            spawn_time: 60.0,
+            spawn_x: 0.0,
+            spawn_y: 0.0,
+            parentize_effects: false,
+            timer: 0.0,
+        }
+    }
+}
+
+impl UnitSpawnAbility {
+    pub fn new(unit: impl Into<String>, spawn_time: f32, spawn_x: f32, spawn_y: f32) -> Self {
+        Self {
+            unit: unit.into(),
+            spawn_time,
+            spawn_x,
+            spawn_y,
+            ..Default::default()
+        }
+    }
+
+    pub fn update_state(
+        &mut self,
+        delta: f32,
+        unit_build_speed: f32,
+        can_create: bool,
+        parent_x: f32,
+        parent_y: f32,
+        parent_rotation: f32,
+    ) -> Option<UnitSpawnPlan> {
+        self.timer += delta * unit_build_speed;
+
+        if self.timer < self.spawn_time || !can_create {
+            return None;
+        }
+
+        let (offset_x, offset_y) =
+            rotated_effect_offset(parent_rotation, self.spawn_y, -self.spawn_x);
+        self.timer = 0.0;
+
+        Some(UnitSpawnPlan {
+            unit: self.unit.clone(),
+            x: parent_x + offset_x,
+            y: parent_y + offset_y,
+            rotation: parent_rotation,
+            timer: self.timer,
+        })
+    }
+
+    pub fn build_progress(&self) -> f32 {
+        if self.spawn_time <= 0.0 {
+            1.0
+        } else {
+            (self.timer / self.spawn_time).clamp(0.0, 1.0)
+        }
+    }
+
+    pub fn build_time_seconds(&self) -> f32 {
+        self.spawn_time / 60.0
+    }
+}
+
+impl Ability for UnitSpawnAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
@@ -1315,7 +1415,7 @@ mod tests {
         Ability, ArmorPlateAbility, BasicAbility, ForceFieldAbility, LiquidExplodeAbility,
         LiquidRegenAbility, MoveEffectAbility, MoveLightningAbility, RegenAbility,
         RepairFieldAbility, RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldTarget,
-        SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility,
+        SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility, UnitSpawnAbility,
     };
 
     #[derive(Clone)]
@@ -1720,5 +1820,39 @@ mod tests {
 
         let update = ability.update_state(true, 1.0);
         assert!(!update.should_draw);
+    }
+
+    #[test]
+    fn unit_spawn_accumulates_with_build_speed_and_spawns_at_rotated_offset() {
+        let mut ability = UnitSpawnAbility::new("flare", 10.0, 2.0, 4.0);
+
+        assert!(ability
+            .update_state(4.0, 2.0, true, 100.0, 200.0, 90.0)
+            .is_none());
+        assert_eq!(ability.build_progress(), 0.8);
+
+        let plan = ability
+            .update_state(1.0, 2.0, true, 100.0, 200.0, 90.0)
+            .expect("timer should reach spawn time");
+        assert_eq!(plan.unit, "flare");
+        assert!((plan.x - 102.0).abs() < 0.0001);
+        assert!((plan.y - 204.0).abs() < 0.0001);
+        assert_eq!(plan.rotation, 90.0);
+        assert_eq!(plan.timer, 0.0);
+        assert_eq!(ability.build_time_seconds(), 10.0 / 60.0);
+    }
+
+    #[test]
+    fn unit_spawn_waits_when_unit_cap_prevents_creation() {
+        let mut ability = UnitSpawnAbility::new("mono", 5.0, 0.0, 0.0);
+
+        assert!(ability
+            .update_state(5.0, 1.0, false, 0.0, 0.0, 0.0)
+            .is_none());
+        assert_eq!(ability.build_progress(), 1.0);
+
+        assert!(ability
+            .update_state(0.0, 1.0, true, 0.0, 0.0, 0.0)
+            .is_some());
     }
 }

@@ -25,7 +25,7 @@ pub use abilities::{
     MoveLightningAbility, MoveLightningPlan, RegenAbility, RepairFieldAbility, RepairFieldPulse,
     RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
     SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
-    SuppressionFieldPulse,
+    SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
