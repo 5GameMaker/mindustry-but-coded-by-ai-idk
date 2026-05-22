@@ -334,6 +334,70 @@ impl MultiEffect {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqRenderPlan {
+    pub child_index: usize,
+    pub params: EffectRenderParams,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqEffect {
+    pub base: Effect,
+    pub effects: Vec<Effect>,
+}
+
+impl Default for SeqEffect {
+    fn default() -> Self {
+        let mut base = Effect::default();
+        base.clip = 100.0;
+        Self {
+            base,
+            effects: Vec::new(),
+        }
+    }
+}
+
+impl SeqEffect {
+    pub fn with_effects(effects: Vec<Effect>) -> Self {
+        Self {
+            effects,
+            ..Default::default()
+        }
+    }
+
+    pub fn init_defaults(&mut self) {
+        self.base.lifetime = 0.0;
+        for effect in &self.effects {
+            self.base.clip = self.base.clip.max(effect.clip);
+            self.base.lifetime += effect.lifetime;
+        }
+    }
+
+    pub fn render_plan(&mut self, input: EffectRenderParams) -> Option<SeqRenderPlan> {
+        let mut sum = 0.0;
+        for (index, effect) in self.effects.iter().enumerate() {
+            if input.time <= effect.lifetime + sum {
+                self.base.clip = self.base.clip.max(effect.clip);
+                return Some(SeqRenderPlan {
+                    child_index: index,
+                    params: EffectRenderParams {
+                        id: input.id + index as i32,
+                        color: input.color,
+                        time: input.time - sum,
+                        lifetime: effect.lifetime,
+                        rotation: input.rotation,
+                        x: input.x,
+                        y: input.y,
+                        data: input.data,
+                    },
+                });
+            }
+            sum += effect.lifetime;
+        }
+        None
+    }
+}
+
 pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: f32) -> f32 {
     let dx = x - camera_x;
     let dy = y - camera_y;
@@ -550,6 +614,66 @@ mod tests {
             },
         );
         assert!(blocked.is_empty());
+    }
+
+    #[test]
+    fn seq_effect_sums_lifetime_clip_and_selects_child_by_time() {
+        let child_a = Effect::with_lifetime(1, 10.0, 20.0);
+        let child_b = Effect::with_lifetime(2, 30.0, 140.0);
+        let mut seq = SeqEffect::with_effects(vec![child_a, child_b]);
+        assert_eq!(seq.base.clip, 100.0);
+
+        seq.init_defaults();
+        assert_eq!(seq.base.lifetime, 40.0);
+        assert_eq!(seq.base.clip, 140.0);
+
+        let first = seq
+            .render_plan(EffectRenderParams {
+                id: 5,
+                color: DecalColor::WHITE,
+                time: 8.0,
+                lifetime: 40.0,
+                rotation: 45.0,
+                x: 1.0,
+                y: 2.0,
+                data: Some("seq".into()),
+            })
+            .expect("first child should render");
+        assert_eq!(first.child_index, 0);
+        assert_eq!(first.params.id, 5);
+        assert_eq!(first.params.time, 8.0);
+        assert_eq!(first.params.lifetime, 10.0);
+        assert_eq!(first.params.data.as_deref(), Some("seq"));
+
+        let second = seq
+            .render_plan(EffectRenderParams {
+                id: 5,
+                color: DecalColor::WHITE,
+                time: 12.0,
+                lifetime: 40.0,
+                rotation: 45.0,
+                x: 1.0,
+                y: 2.0,
+                data: None,
+            })
+            .expect("second child should render");
+        assert_eq!(second.child_index, 1);
+        assert_eq!(second.params.id, 6);
+        assert_eq!(second.params.time, 2.0);
+        assert_eq!(second.params.lifetime, 30.0);
+
+        assert!(seq
+            .render_plan(EffectRenderParams {
+                id: 5,
+                color: DecalColor::WHITE,
+                time: 45.0,
+                lifetime: 40.0,
+                rotation: 0.0,
+                x: 0.0,
+                y: 0.0,
+                data: None,
+            })
+            .is_none());
     }
 
     #[test]
