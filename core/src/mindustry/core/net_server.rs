@@ -3,12 +3,13 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::mindustry::io::{BuildPlanWire, TeamId};
+use crate::mindustry::entities::comp::building::{BuildingComp, BuildingConfigChange};
+use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
     packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
     ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, Net, NetConnection, PacketKind, ProviderEvent, SentPacket,
-    StateSnapshotCallPacket, Streamable, WorldDataBeginCallPacket,
+    StateSnapshotCallPacket, Streamable, TileConfigCallPacket, WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -67,6 +68,16 @@ pub struct NetServerState {
     pub last_client_plan_snapshot_forwarded_at: Option<Instant>,
     pub client_plan_snapshots_forwarded: u64,
     pub last_client_plan_snapshot_forwarded_error: Option<String>,
+    pub last_tile_config_connection_id: Option<i32>,
+    pub last_tile_config: Option<TileConfigCallPacket>,
+    pub last_tile_config_received_at: Option<Instant>,
+    pub tile_config_packets_seen: u64,
+    pub tile_config_rejections: u64,
+    pub last_tile_config_rollback_connection_id: Option<i32>,
+    pub last_tile_config_rollback: Option<TileConfigCallPacket>,
+    pub last_tile_config_rollback_at: Option<Instant>,
+    pub tile_config_rollbacks_sent: u64,
+    pub last_tile_config_rollback_error: Option<String>,
     pub last_state_snapshot_connection_id: Option<i32>,
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_sent_at: Option<Instant>,
@@ -412,6 +423,70 @@ impl NetServer {
         } else {
             Ok(sent)
         }
+    }
+
+    pub fn send_tile_config_rollback(
+        &self,
+        connection_id: i32,
+        packet: TileConfigCallPacket,
+    ) -> io::Result<()> {
+        let packet_kind = PacketKind::TileConfigCallPacket(packet.clone());
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet_kind, true)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let now = Instant::now();
+        state.last_tile_config_rollback_connection_id = Some(connection_id);
+        state.last_tile_config_rollback = Some(packet);
+        state.last_tile_config_rollback_at = Some(now);
+        state.last_updated_at = Some(now);
+        match &result {
+            Ok(()) => {
+                state.tile_config_rollbacks_sent += 1;
+                state.last_tile_config_rollback_error = None;
+                Self::record_connection_sent(
+                    &mut state,
+                    connection_id,
+                    "TileConfigCallPacket",
+                    true,
+                );
+            }
+            Err(error) => {
+                state.last_tile_config_rollback_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn handle_tile_config_authority<F>(
+        &self,
+        connection_id: Option<i32>,
+        player: EntityRef,
+        build: &mut BuildingComp,
+        value: TypeValue,
+        accepts: F,
+    ) -> io::Result<BuildingConfigChange>
+    where
+        F: FnOnce(&TypeValue) -> bool,
+    {
+        let change = build.configure_any_checked(value, accepts);
+
+        if !change.accepted {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            state.tile_config_rejections += 1;
+            state.last_updated_at = Some(Instant::now());
+            drop(state);
+
+            if let (Some(connection_id), Some(rollback)) = (connection_id, change.rollback.clone())
+            {
+                let packet = TileConfigCallPacket::rollback_for(player, rollback);
+                self.send_tile_config_rollback(connection_id, packet)?;
+            }
+        }
+
+        Ok(change)
     }
 
     pub fn send_state_snapshot(
@@ -787,6 +862,15 @@ impl NetServer {
 
                     Self::dispatch_packet_handlers(&packet_handlers, &packet);
                 }
+                PacketKind::TileConfigCallPacket(tile_config) => {
+                    let packet = PacketKind::TileConfigCallPacket(tile_config.clone());
+                    {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        Self::record_tile_config(&mut state, connection_id, tile_config);
+                    }
+
+                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                }
                 _ => {}
             });
         }
@@ -865,6 +949,25 @@ impl NetServer {
         state.events.push(ProviderEvent::ServerPacket {
             connection_id: connection_id.unwrap_or(-1),
             packet: PacketKind::ClientPlanSnapshotCallPacket(snapshot.clone()),
+        });
+    }
+
+    fn record_tile_config(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        packet: &TileConfigCallPacket,
+    ) {
+        let now = Instant::now();
+        state.last_connection_id = connection_id;
+        state.last_tile_config_connection_id = connection_id;
+        state.last_tile_config = Some(packet.clone());
+        state.last_tile_config_received_at = Some(now);
+        state.tile_config_packets_seen += 1;
+        state.last_updated_at = Some(now);
+
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id: connection_id.unwrap_or(-1),
+            packet: PacketKind::TileConfigCallPacket(packet.clone()),
         });
     }
 
@@ -973,15 +1076,17 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use crate::mindustry::io::{BuildPlanWire, TeamId};
+    use crate::mindustry::entities::comp::BuildingComp;
+    use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue};
     use crate::mindustry::net::{
         packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
         DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
-        NetConnection, NetProvider, PacketKind, PingCallPacket, PingResponseCallPacket, SentPacket,
-        StateSnapshotCallPacket,
+        NetConnection, NetProvider, PacketKind, PingCallPacket, PingResponseCallPacket,
+        ProviderEvent, SentPacket, StateSnapshotCallPacket, TileConfigCallPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
+    use crate::mindustry::world::block::Block;
 
     use super::{NetServer, PlayerPreviewPlanSource, PLAN_PREVIEW_CHUNK_SIZE};
 
@@ -1054,6 +1159,12 @@ mod tests {
             color: 0,
             uuid_crc32: None,
         }
+    }
+
+    fn config_block() -> Block {
+        let mut block = Block::new(5, "router");
+        block.health = 100;
+        block
     }
 
     #[test]
@@ -1245,6 +1356,104 @@ mod tests {
         assert_eq!(connection.view_height, 12.0);
         assert!(connection.last_received_client_time > 0);
         assert_eq!(state.events.len(), 2);
+    }
+
+    #[test]
+    fn tile_config_packets_are_recorded_and_dispatched() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let tile_pos = crate::mindustry::world::point2_pack(2, 3);
+        let packet = TileConfigCallPacket::client(
+            BuildingRef::new(tile_pos),
+            TypeValue::String("next".into()),
+        );
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if let PacketKind::TileConfigCallPacket(packet) = packet {
+                seen_handler.lock().unwrap().push(packet.value.clone());
+            }
+        });
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(9),
+                true,
+                PacketKind::TileConfigCallPacket(packet.clone()),
+            );
+        }
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![TypeValue::String("next".into())]
+        );
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_tile_config_connection_id, Some(9));
+        assert_eq!(state.last_tile_config.as_ref(), Some(&packet));
+        assert_eq!(state.tile_config_packets_seen, 1);
+        assert!(state.last_tile_config_received_at.is_some());
+        assert!(matches!(
+            state.events.last(),
+            Some(ProviderEvent::ServerPacket {
+                connection_id: 9,
+                packet: PacketKind::TileConfigCallPacket(_)
+            })
+        ));
+    }
+
+    #[test]
+    fn tile_config_authority_rejects_and_sends_reliable_rollback() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let tile_pos = crate::mindustry::world::point2_pack(4, 5);
+        let mut building = BuildingComp::new(tile_pos, config_block(), TeamId(2));
+        building.set_config_value(TypeValue::String("old".into()));
+
+        let change = server
+            .handle_tile_config_authority(
+                Some(17),
+                EntityRef::new(33),
+                &mut building,
+                TypeValue::Int(9),
+                |value| matches!(value, TypeValue::String(_)),
+            )
+            .unwrap();
+
+        assert!(!change.accepted);
+        assert_eq!(building.config_value(), TypeValue::String("old".into()));
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 17);
+        assert!(sent[0].2);
+        match &sent[0].1 {
+            PacketKind::TileConfigCallPacket(packet) => {
+                assert_eq!(packet.player, EntityRef::new(33));
+                assert_eq!(packet.build, BuildingRef::new(tile_pos));
+                assert_eq!(packet.value, TypeValue::String("old".into()));
+            }
+            other => panic!("unexpected rollback packet: {other:?}"),
+        }
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.tile_config_rejections, 1);
+        assert_eq!(state.last_tile_config_rollback_connection_id, Some(17));
+        assert_eq!(state.tile_config_rollbacks_sent, 1);
+        assert!(state.last_tile_config_rollback_error.is_none());
+        let connection = state.connection_states.get(&17).unwrap();
+        assert!(matches!(
+            connection.sent[0].0,
+            SentPacket::Other(ref name) if name == "TileConfigCallPacket"
+        ));
+        assert!(connection.sent[0].1);
     }
 
     #[test]
