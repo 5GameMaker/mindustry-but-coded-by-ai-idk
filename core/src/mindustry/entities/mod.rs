@@ -13,6 +13,7 @@ pub use abilities::{
     Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
     SpawnDeathAbility,
 };
+pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
 pub use comp::{apply_armor, ShieldComp};
 pub use comp::{BlockUnitBuilding, BlockUnitComp};

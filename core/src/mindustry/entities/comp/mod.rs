@@ -2,6 +2,7 @@
 
 pub mod block_unit;
 pub mod builder;
+pub mod building;
 pub mod building_tether;
 pub mod bullet;
 pub mod child;
@@ -52,6 +53,7 @@ pub use block_unit::{BlockUnitBuilding, BlockUnitComp};
 pub use builder::{
     BuilderBlockInfo, BuilderComp, BuilderRequirement, BuilderSkipContext, BuilderTileSnapshot,
 };
+pub use building::BuildingComp;
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use bullet::{BulletComp, BulletPropValue, BulletSpec};
 pub use child::{ChildComp, ChildParent};
