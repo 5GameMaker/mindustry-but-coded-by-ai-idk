@@ -8,6 +8,13 @@ impl StatValues {
         StatValue::Text(value.into())
     }
 
+    pub fn string_args(
+        value: impl AsRef<str>,
+        args: impl IntoIterator<Item = impl ToString>,
+    ) -> StatValue {
+        StatValue::Text(format_at_placeholders(value.as_ref(), args))
+    }
+
     pub fn bool(value: bool) -> StatValue {
         StatValue::Bool(value)
     }
@@ -115,6 +122,18 @@ impl StatValues {
     }
 }
 
+fn format_at_placeholders(value: &str, args: impl IntoIterator<Item = impl ToString>) -> String {
+    let mut result = value.to_string();
+    for arg in args {
+        if let Some(index) = result.find('@') {
+            result.replace_range(index..index + 1, &arg.to_string());
+        } else {
+            break;
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +141,10 @@ mod tests {
     #[test]
     fn stat_values_constructors_match_java_helper_intent() {
         assert_eq!(StatValues::string("hello"), StatValue::Text("hello".into()));
+        assert_eq!(
+            StatValues::string_args("hello @ @", ["copper", "lead"]),
+            StatValue::Text("hello copper lead".into())
+        );
         assert_eq!(StatValues::bool(true), StatValue::Bool(true));
         assert_eq!(
             StatValues::number(2.0, StatUnit::Seconds),
@@ -173,5 +196,12 @@ mod tests {
             StatValues::blocks(&attr, false, 1.0, false).kind(),
             "blocks"
         );
+    }
+
+    #[test]
+    fn stat_values_string_args_replace_at_markers_like_arc_strings_format() {
+        assert_eq!(format_at_placeholders("@x @ @", ["A", "B", "C"]), "Ax B C");
+        assert_eq!(format_at_placeholders("no args", ["ignored"]), "no args");
+        assert_eq!(format_at_placeholders("@ @ @", ["one"]), "one @ @");
     }
 }

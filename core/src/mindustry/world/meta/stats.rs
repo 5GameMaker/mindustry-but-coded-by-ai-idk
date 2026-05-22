@@ -95,6 +95,15 @@ impl Stats {
         self.add_value(stat, StatValues::string(value));
     }
 
+    pub fn add_string_args(
+        &mut self,
+        stat: Stat,
+        value: impl AsRef<str>,
+        args: impl IntoIterator<Item = impl ToString>,
+    ) {
+        self.add_value(stat, StatValues::string_args(value, args));
+    }
+
     pub fn replace(&mut self, stat: Stat, value: StatValue) {
         self.remove(stat);
         self.add_value(stat, value);
@@ -176,7 +185,6 @@ mod tests {
                 merge: false
             }
         );
-
         stats.replace(Stat::Health, StatValues::number(200.0, StatUnit::None));
         assert_eq!(stats.values(Stat::Health).unwrap().len(), 1);
         assert_eq!(
@@ -210,5 +218,17 @@ mod tests {
         assert!(stats.remove(Stat::Explosiveness).is_none());
 
         assert_eq!(stats.to_map(), vec![(StatCat::General, Vec::new())]);
+    }
+
+    #[test]
+    fn stats_add_string_args_delegates_to_stat_values_formatting() {
+        let mut stats = Stats::new();
+
+        stats.add_string_args(Stat::Armor, "armor @ / @", [3, 5]);
+
+        assert_eq!(
+            stats.values(Stat::Armor).unwrap()[0],
+            StatValue::Text("armor 3 / 5".into())
+        );
     }
 }
