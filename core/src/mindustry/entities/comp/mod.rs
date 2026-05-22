@@ -23,6 +23,7 @@ pub mod miner;
 pub mod owner;
 pub mod payload;
 pub mod physics;
+pub mod player;
 pub mod pos;
 pub mod pos_team_def;
 pub mod power_graph_updater;
@@ -71,6 +72,7 @@ pub use miner::{MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext, Mi
 pub use owner::OwnerComp;
 pub use payload::{PayloadComp, PayloadKind, PayloadState};
 pub use physics::{PhysicRef, PhysicsComp};
+pub use player::{PlayerComp, PlayerUnitState};
 pub use pos::PosComp;
 pub use pos_team_def::PosTeamDef;
 pub use power_graph_updater::{PowerGraphUpdate, PowerGraphUpdaterComp};
