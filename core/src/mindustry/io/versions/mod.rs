@@ -254,6 +254,31 @@ pub fn skip_legacy_short_world_entities<R: Read>(read: &mut R) -> io::Result<usi
     read_legacy_short_world_entities(read).map(|entities| entities.len())
 }
 
+pub fn read_legacy_short_world_entities_without_ids<R: Read>(
+    read: &mut R,
+) -> io::Result<LegacyWorldEntities> {
+    let amount = read_i32(read)?;
+    if amount < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "negative legacy world entity count",
+        ));
+    }
+
+    let mut chunks = Vec::with_capacity(amount as usize);
+    for _ in 0..amount {
+        chunks.push(parse_legacy_world_entity_chunk_without_id(
+            read_legacy_short_chunk(read)?,
+        )?);
+    }
+
+    Ok(LegacyWorldEntities { chunks })
+}
+
+pub fn skip_legacy_short_world_entities_without_ids<R: Read>(read: &mut R) -> io::Result<usize> {
+    read_legacy_short_world_entities_without_ids(read).map(|entities| entities.len())
+}
+
 fn parse_legacy_world_entity_chunk(raw: Vec<u8>) -> io::Result<LegacyWorldEntityChunk> {
     let (&type_id, rest) = raw.split_first().ok_or_else(|| {
         io::Error::new(
@@ -273,6 +298,22 @@ fn parse_legacy_world_entity_chunk(raw: Vec<u8>) -> io::Result<LegacyWorldEntity
         type_id,
         entity_id,
         body,
+        raw,
+    })
+}
+
+fn parse_legacy_world_entity_chunk_without_id(raw: Vec<u8>) -> io::Result<LegacyWorldEntityChunk> {
+    let (&type_id, rest) = raw.split_first().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "empty legacy world entity chunk",
+        )
+    })?;
+
+    Ok(LegacyWorldEntityChunk {
+        type_id,
+        entity_id: None,
+        body: rest.to_vec(),
         raw,
     })
 }

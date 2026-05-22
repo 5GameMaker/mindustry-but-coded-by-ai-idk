@@ -3,7 +3,8 @@
 use std::io::{self, Read};
 
 use super::{
-    read_legacy_team_blocks, read_legacy_world_entities, LegacyTeamBlocks, LegacyWorldEntities,
+    read_legacy_short_chunk_map, read_legacy_short_world_entities_without_ids,
+    read_legacy_team_blocks, LegacyShortChunkMap, LegacyTeamBlocks, LegacyWorldEntities,
 };
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -22,16 +23,21 @@ impl Save4 {
         Self::VERSION
     }
 
-    /// Java `Save4.readEntities(...)` has no custom entity-id mapping chunk:
-    /// it reads team block plans and then reads world entity chunks with
-    /// `EntityMapping.idMap`.
+    /// Java `Save4.readEntities(...)` has no custom entity-id mapping chunk
+    /// and inherits `LegacySaveVersion2.readWorldEntities(...)`; world
+    /// entities are legacy short chunks without per-entity IDs.
     pub fn read_entities<R: Read>(self, read: &mut R) -> io::Result<Save4Entities> {
         let team_blocks = read_legacy_team_blocks(read)?;
-        let world_entities = read_legacy_world_entities(read)?;
+        let world_entities = read_legacy_short_world_entities_without_ids(read)?;
         Ok(Save4Entities {
             team_blocks,
             world_entities,
         })
+    }
+
+    /// Java `Save4` also inherits `ShortChunkSaveVersion.readMap(...)`.
+    pub fn read_map<R: Read>(self, read: &mut R) -> io::Result<LegacyShortChunkMap> {
+        read_legacy_short_chunk_map(read)
     }
 }
 
@@ -39,8 +45,8 @@ impl Save4 {
 mod tests {
     use super::*;
     use crate::mindustry::io::{
-        save::write_chunk,
-        type_io::{write_i16, write_i32, write_object, TypeValue},
+        save::write_legacy_short_chunk,
+        type_io::{write_i16, write_i32, write_object, write_u16, write_u8, TypeValue},
     };
 
     #[test]
@@ -70,19 +76,8 @@ mod tests {
         write_object(&mut bytes, &TypeValue::Int(42)).unwrap();
 
         write_i32(&mut bytes, 2).unwrap(); // world entity count
-        write_chunk(&mut bytes, |chunk| {
-            chunk.push(6);
-            write_i32(chunk, 123)?;
-            chunk.extend_from_slice(&[1, 2, 3]);
-            Ok(())
-        })
-        .unwrap();
-        write_chunk(&mut bytes, |chunk| {
-            chunk.push(9);
-            chunk.extend_from_slice(&[4, 5]);
-            Ok(())
-        })
-        .unwrap();
+        write_legacy_short_chunk(&mut bytes, &[6, 1, 2, 3]).unwrap();
+        write_legacy_short_chunk(&mut bytes, &[9, 4, 5]).unwrap();
 
         let entities = Save4.read_entities(&mut bytes.as_slice()).unwrap();
 
@@ -98,7 +93,7 @@ mod tests {
 
         assert_eq!(entities.world_entities.len(), 2);
         assert_eq!(entities.world_entities.chunks[0].type_id, 6);
-        assert_eq!(entities.world_entities.chunks[0].entity_id, Some(123));
+        assert_eq!(entities.world_entities.chunks[0].entity_id, None);
         assert_eq!(entities.world_entities.chunks[0].body, vec![1, 2, 3]);
         assert_eq!(entities.world_entities.chunks[1].type_id, 9);
         assert_eq!(entities.world_entities.chunks[1].entity_id, None);
@@ -112,5 +107,28 @@ mod tests {
 
         let err = Save4.read_entities(&mut bytes.as_slice()).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn save4_reads_short_chunk_map_format() {
+        let mut bytes = Vec::new();
+        write_u16(&mut bytes, 2).unwrap();
+        write_u16(&mut bytes, 1).unwrap();
+
+        write_i16(&mut bytes, 1).unwrap();
+        write_i16(&mut bytes, 0).unwrap();
+        write_u8(&mut bytes, 1).unwrap();
+
+        write_i16(&mut bytes, 5).unwrap();
+        write_u8(&mut bytes, 0).unwrap();
+        write_u8(&mut bytes, 1).unwrap();
+
+        let map = Save4.read_map(&mut bytes.as_slice()).unwrap();
+
+        assert_eq!(map.width, 2);
+        assert_eq!(map.height, 1);
+        assert_eq!(map.floors[0].len(), 2);
+        assert_eq!(map.blocks[0].block_id, 5);
+        assert_eq!(map.blocks[0].len(), 2);
     }
 }
