@@ -1,8 +1,10 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
+pub mod cutscene_action;
 pub mod query_shape;
 pub mod query_type;
 
+pub use cutscene_action::CutsceneAction;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
 
@@ -9960,42 +9962,6 @@ impl MessageType {
         MessageType::Mission,
     ];
     pub const WIRE_NAMES: [&'static str; 4] = ["notify", "announce", "toast", "mission"];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn wire_name(self) -> &'static str {
-        Self::WIRE_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_wire_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|value| value.wire_name() == name)
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CutsceneAction {
-    Pan,
-    Zoom,
-    Stop,
-}
-
-impl CutsceneAction {
-    pub const ALL: [CutsceneAction; 3] = [
-        CutsceneAction::Pan,
-        CutsceneAction::Zoom,
-        CutsceneAction::Stop,
-    ];
-    pub const WIRE_NAMES: [&'static str; 3] = ["pan", "zoom", "stop"];
 
     pub const fn ordinal(self) -> u8 {
         self as u8
