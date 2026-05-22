@@ -14,6 +14,7 @@ use crate::mindustry::net::{
     SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData, Streamable,
     TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
 };
+use crate::mindustry::vars::MAX_TEXT_LENGTH;
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
 pub type BinaryPacketHandler = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send + 'static>>>;
@@ -1841,7 +1842,6 @@ impl NetServer {
         let current_millis = Self::current_millis();
         let player = Self::connection_player_label(state, connection_id);
         let player_uuid = Self::connection_uuid(state, connection_id);
-        let command_message = packet.message.starts_with('/');
 
         if !Self::can_accept_chat_message(state, connection_id, current_millis) {
             return None;
@@ -1880,10 +1880,18 @@ impl NetServer {
             return None;
         }
 
+        if Self::java_text_length(&packet.message) > MAX_TEXT_LENGTH {
+            state.chat_packets_filtered += 1;
+            return None;
+        }
+
+        let sanitized_message = Self::sanitize_chat_message(&packet.message);
+        let command_message = sanitized_message.starts_with('/');
+
         if !command_message {
             if let Some(uuid) = player_uuid.as_deref() {
                 let info = state.administration.get_info(uuid.to_string());
-                if info.last_sent_message.as_deref() == Some(packet.message.as_str())
+                if info.last_sent_message.as_deref() == Some(sanitized_message.as_str())
                     && current_millis - info.last_message_time < 10_000
                 {
                     state.chat_packets_filtered += 1;
@@ -1893,11 +1901,11 @@ impl NetServer {
         }
 
         let filtered = if command_message {
-            Some(packet.message.clone())
+            Some(sanitized_message.clone())
         } else {
             state
                 .administration
-                .filter_message(player.as_deref(), &packet.message)
+                .filter_message(player.as_deref(), &sanitized_message)
         };
 
         let Some(message) = filtered else {
@@ -1909,7 +1917,7 @@ impl NetServer {
             if let Some(uuid) = player_uuid {
                 let info = state.administration.get_info(uuid);
                 info.last_message_time = current_millis;
-                info.last_sent_message = Some(packet.message.clone());
+                info.last_sent_message = Some(sanitized_message.clone());
             }
         }
 
@@ -1943,6 +1951,14 @@ impl NetServer {
             && connection.player_added
             && !connection.kicked
             && !connection.has_disconnected
+    }
+
+    fn java_text_length(message: &str) -> usize {
+        message.encode_utf16().count()
+    }
+
+    fn sanitize_chat_message(message: &str) -> String {
+        message.replace('\n', "")
     }
 
     fn record_tile_tap(
@@ -2133,7 +2149,7 @@ mod tests {
         SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData,
         TileConfigCallPacket, TileTapCallPacket,
     };
-    use crate::mindustry::vars::MAX_TCP_SIZE;
+    use crate::mindustry::vars::{MAX_TCP_SIZE, MAX_TEXT_LENGTH};
     use crate::mindustry::world::block::Block;
 
     use super::{
@@ -3112,6 +3128,70 @@ mod tests {
             Some("foo")
         );
         assert_eq!(state.events.len(), 2);
+    }
+
+    #[test]
+    fn chat_messages_reject_overlength_and_strip_newlines_like_java() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(13, ready_chat_connection("1.2.3.5", "uuid-chat-sanitize"));
+            state
+                .administration
+                .add_chat_filter(|_player, message| Some(format!("filtered:{message}")));
+        }
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if let PacketKind::SendChatMessageCallPacket(packet) = packet {
+                seen_handler.lock().unwrap().push(packet.message.clone());
+            }
+        });
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(13),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "f\no".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(13),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "\n/cmd".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(13),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "x".repeat(MAX_TEXT_LENGTH + 1),
+                }),
+            );
+        }
+
+        assert_eq!(*seen.lock().unwrap(), vec!["filtered:fo", "/cmd"]);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.chat_packets_seen, 3);
+        assert_eq!(state.chat_packets_filtered, 1);
+        assert_eq!(state.last_chat_message, None);
+        assert_eq!(
+            state
+                .administration
+                .get_info_optional("uuid-chat-sanitize")
+                .and_then(|info| info.last_sent_message.as_deref()),
+            Some("fo")
+        );
     }
 
     #[test]
