@@ -1,5 +1,6 @@
 // Mirrors upstream core/src/mindustry/ai. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 pub mod astar;
+pub mod base_builder_ai;
 pub mod base_registry;
 pub mod block_indexer;
 pub mod item_unit_stance;
@@ -11,6 +12,14 @@ pub mod unit_stance;
 pub mod wave_spawner;
 
 pub use astar::{manhattan, pathfind_grid, pathfind_grid_manhattan, D4};
+pub use base_builder_ai::{
+    begin_path_refresh, choose_part_pool, place_interval, random_position_source,
+    rotate_build_tile, rotate_center, should_spawn_core_unit, step_core_path, try_place_part,
+    BaseBuildPart, BaseBuildTile, BaseBuilderPathState, BlockPlan, PartPoolChoice,
+    PathCalculationOutcome, SeedPositionSource, TilePoint, ATTEMPTS, CORE_UNIT_MULTIPLIER,
+    EMPTY_CHANCE, PATH_STEP as BASE_BUILDER_PATH_STEP, PLACE_INTERVAL_MAX, PLACE_INTERVAL_MIN,
+    TIMER_REFRESH_PATH, TIMER_SPAWN, TIMER_STEP,
+};
 pub use base_registry::{BasePart, BasePartTile, BasePartTileKind, BaseRegistry};
 pub use block_indexer::{
     quadrant_dimensions, quadrant_for_tile, BlockIndexer, IndexedTile, QUADRANT_SIZE,
