@@ -63,11 +63,7 @@ impl PartialOrd for PayloadStack {
 
 impl Ord for PayloadStack {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.content_type.ordinal(), self.id, &self.name).cmp(&(
-            other.content_type.ordinal(),
-            other.id,
-            &other.name,
-        ))
+        (self.content_type.ordinal(), self.id).cmp(&(other.content_type.ordinal(), other.id))
     }
 }
 
@@ -97,6 +93,15 @@ mod tests {
         assert_eq!(
             PayloadStack::list(&[(ContentType::Block, 5, "router", 4)]).len(),
             1
+        );
+        assert_eq!(
+            PayloadStack::new(ContentType::Block, 5, "router", 1).cmp(&PayloadStack::new(
+                ContentType::Block,
+                5,
+                "renamed-router",
+                999
+            )),
+            std::cmp::Ordering::Equal
         );
     }
 }
