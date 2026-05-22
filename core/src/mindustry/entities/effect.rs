@@ -522,12 +522,111 @@ impl RadialEffect {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SoundPlaybackPlan {
+    pub sound: String,
+    pub x: f32,
+    pub y: f32,
+    pub delay: f32,
+    pub pitch: f32,
+    pub volume: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SoundEffectCreatePlan {
+    pub sound: SoundPlaybackPlan,
+    pub effect: Option<EffectCreatePlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SoundEffect {
+    pub base: Effect,
+    pub sound: String,
+    pub min_pitch: f32,
+    pub max_pitch: f32,
+    pub min_volume: f32,
+    pub max_volume: f32,
+    pub effect: Effect,
+}
+
+impl Default for SoundEffect {
+    fn default() -> Self {
+        let mut base = Effect::default();
+        base.start_delay = -1.0;
+        Self {
+            base,
+            sound: "none".into(),
+            min_pitch: 0.8,
+            max_pitch: 1.2,
+            min_volume: 1.0,
+            max_volume: 1.0,
+            effect: Effect::default(),
+        }
+    }
+}
+
+impl SoundEffect {
+    pub fn new(sound: impl Into<String>, effect: Effect) -> Self {
+        Self {
+            sound: sound.into(),
+            effect,
+            ..Default::default()
+        }
+    }
+
+    pub fn init_defaults(&mut self) {
+        if self.base.start_delay < 0.0 {
+            self.base.start_delay = self.effect.start_delay;
+        }
+    }
+
+    pub fn create_plan(
+        &mut self,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: DecalColor,
+        data: Option<String>,
+        pitch_random: f32,
+        volume_random: f32,
+        context: EffectCreateContext,
+    ) -> Option<SoundEffectCreatePlan> {
+        if !self.base.should_create(context) {
+            return None;
+        }
+
+        let pitch = lerp(self.min_pitch, self.max_pitch, pitch_random.clamp(0.0, 1.0));
+        let volume = lerp(
+            self.min_volume,
+            self.max_volume,
+            volume_random.clamp(0.0, 1.0),
+        );
+        Some(SoundEffectCreatePlan {
+            sound: SoundPlaybackPlan {
+                sound: self.sound.clone(),
+                x,
+                y,
+                delay: self.base.start_delay.max(0.0),
+                pitch,
+                volume,
+            },
+            effect: self
+                .effect
+                .create_plan(x, y, rotation, color, data, None, context),
+        })
+    }
+}
+
 fn trnsx(angle: f32, len: f32) -> f32 {
     angle.to_radians().cos() * len
 }
 
 fn trnsy(angle: f32, len: f32) -> f32 {
     angle.to_radians().sin() * len
+}
+
+fn lerp(from: f32, to: f32, t: f32) -> f32 {
+    from + (to - from) * t
 }
 
 pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: f32) -> f32 {
@@ -881,6 +980,60 @@ mod tests {
                 EffectCreateContext::default(),
             )
             .is_empty());
+    }
+
+    #[test]
+    fn sound_effect_inherits_delay_and_records_sound_plus_child_effect() {
+        let child = Effect::with_lifetime(12, 20.0, 30.0).start_delay(3.0);
+        let mut sound = SoundEffect::new("boom", child);
+        sound.min_pitch = 0.5;
+        sound.max_pitch = 1.5;
+        sound.min_volume = 0.25;
+        sound.max_volume = 0.75;
+
+        assert_eq!(sound.base.start_delay, -1.0);
+        sound.init_defaults();
+        assert_eq!(sound.base.start_delay, 3.0);
+
+        let plan = sound
+            .create_plan(
+                4.0,
+                5.0,
+                6.0,
+                DecalColor::WHITE,
+                Some("sound".into()),
+                0.25,
+                0.5,
+                EffectCreateContext::default(),
+            )
+            .expect("sound effect should create");
+        assert_eq!(plan.sound.sound, "boom");
+        assert_eq!(plan.sound.x, 4.0);
+        assert_eq!(plan.sound.y, 5.0);
+        assert_eq!(plan.sound.delay, 3.0);
+        assert_eq!(plan.sound.pitch, 0.75);
+        assert_eq!(plan.sound.volume, 0.5);
+
+        let child = plan.effect.expect("child effect should also create");
+        assert_eq!(child.spawn.effect_id, 12);
+        assert_eq!(child.spawn.rotation, 6.0);
+        assert_eq!(child.spawn.data.as_deref(), Some("sound"));
+
+        assert!(sound
+            .create_plan(
+                0.0,
+                0.0,
+                0.0,
+                DecalColor::WHITE,
+                None,
+                0.0,
+                0.0,
+                EffectCreateContext {
+                    headless: true,
+                    ..EffectCreateContext::default()
+                },
+            )
+            .is_none());
     }
 
     #[test]
