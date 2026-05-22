@@ -282,6 +282,157 @@ impl Default for DrawPartConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EffectSpawnerRectPlan {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectSpawnerSpawnPlan {
+    pub effect: String,
+    pub color: String,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectSpawnerDrawPlan {
+    pub debug_rects: Vec<EffectSpawnerRectPlan>,
+    pub spawns: Vec<EffectSpawnerSpawnPlan>,
+    pub effect_interval_state: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectSpawnerPart {
+    pub config: DrawPartConfig,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub rotation: f32,
+    pub mirror: bool,
+    pub effect_rot: f32,
+    pub effect_rand_rot: f32,
+    pub effect_interval: f32,
+    pub effect_interval_from: f32,
+    pub effect_chance: f32,
+    pub effect: String,
+    pub effect_color: String,
+    pub use_progress: bool,
+    pub progress: PartProgress,
+    pub debug_draw: bool,
+    pub effect_interval_state: f32,
+}
+
+impl Default for EffectSpawnerPart {
+    fn default() -> Self {
+        Self {
+            config: DrawPartConfig::default(),
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            rotation: 0.0,
+            mirror: false,
+            effect_rot: 0.0,
+            effect_rand_rot: 0.0,
+            effect_interval: 0.0,
+            effect_interval_from: 0.0,
+            effect_chance: 0.1,
+            effect: "sparkShoot".into(),
+            effect_color: "white".into(),
+            use_progress: true,
+            progress: PartProgress::Warmup,
+            debug_draw: false,
+            effect_interval_state: 0.0,
+        }
+    }
+}
+
+impl EffectSpawnerPart {
+    pub fn draw_plan(
+        &mut self,
+        params: &PartParams,
+        time: f32,
+        delta: f32,
+        paused: bool,
+        chance_values: &[f32],
+        random_offsets: &[(f32, f32, f32)],
+    ) -> EffectSpawnerDrawPlan {
+        let sides = if self.mirror { 2 } else { 1 };
+        let mut debug_rects = Vec::new();
+        let mut spawns = Vec::new();
+
+        for i in 0..sides {
+            let sign = if i == 0 { 1.0 } else { -1.0 };
+            let rot = params.rotation + self.rotation * sign;
+            let base = rotate_offset(params.rotation - 90.0, self.x * sign, self.y);
+            let x = params.x + base.0;
+            let y = params.y + base.1;
+            if self.debug_draw {
+                debug_rects.push(EffectSpawnerRectPlan {
+                    x,
+                    y,
+                    width: self.width,
+                    height: self.height,
+                    rotation: rot - 90.0,
+                });
+            }
+        }
+
+        if !paused {
+            let progress = self.progress.get_clamp(params, time, true);
+            let real_interval = if self.effect_interval_from > 0.0 {
+                lerp(self.effect_interval_from, self.effect_interval, progress)
+            } else {
+                self.effect_interval
+            };
+
+            for i in 0..sides {
+                let should_spawn = if real_interval > 0.0 {
+                    self.effect_interval_state += delta;
+                    self.effect_interval_state >= real_interval
+                } else {
+                    let threshold =
+                        self.effect_chance * if self.use_progress { progress } else { 1.0 };
+                    chance_values.get(i).copied().unwrap_or(1.0) <= threshold
+                };
+
+                if should_spawn {
+                    let sign = if i == 0 { 1.0 } else { -1.0 };
+                    let rot = params.rotation + self.rotation * sign;
+                    let base = rotate_offset(params.rotation - 90.0, self.x * sign, self.y);
+                    let random = random_offsets.get(i).copied().unwrap_or((0.0, 0.0, 0.0));
+                    let jitter = rotate_offset(rot, random.0, random.1);
+                    spawns.push(EffectSpawnerSpawnPlan {
+                        effect: self.effect.clone(),
+                        color: self.effect_color.clone(),
+                        x: params.x + base.0 + jitter.0,
+                        y: params.y + base.1 + jitter.1,
+                        rotation: rot
+                            + self.effect_rot * sign
+                            + random.2.clamp(-self.effect_rand_rot, self.effect_rand_rot),
+                    });
+                    if real_interval > 0.0 {
+                        self.effect_interval_state %= real_interval;
+                    }
+                }
+            }
+        }
+
+        EffectSpawnerDrawPlan {
+            debug_rects,
+            spawns,
+            effect_interval_state: self.effect_interval_state,
+        }
+    }
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -301,9 +452,17 @@ fn lerp(from: f32, to: f32, t: f32) -> f32 {
     from + (to - from) * t
 }
 
+fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
+    let rad = angle.to_radians();
+    (x * rad.cos() - y * rad.sin(), x * rad.sin() + y * rad.cos())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DrawPartConfig, PartMove, PartParams, PartProgress};
+    use super::{
+        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, PartMove, PartParams,
+        PartProgress,
+    };
 
     #[test]
     fn part_params_set_and_recoil_match_java_mutators() {
@@ -401,5 +560,63 @@ mod tests {
         assert!(!config.under);
         assert_eq!(config.weapon_index, 0);
         assert_eq!(config.recoil_index, -1);
+    }
+
+    #[test]
+    fn effect_spawner_part_builds_debug_rects_and_effect_spawn_plan() {
+        let mut params = PartParams::default();
+        params.set(0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 200.0, 90.0);
+
+        let mut part = EffectSpawnerPart {
+            x: 10.0,
+            y: 0.0,
+            width: 4.0,
+            height: 8.0,
+            mirror: true,
+            effect_chance: 1.0,
+            effect_rot: 0.0,
+            effect_rand_rot: 10.0,
+            debug_draw: true,
+            ..Default::default()
+        };
+
+        let plan = part.draw_plan(
+            &params,
+            0.0,
+            1.0,
+            false,
+            &[0.4, 0.6],
+            &[(0.0, 0.0, 5.0), (0.0, 0.0, -5.0)],
+        );
+
+        assert_eq!(
+            plan.debug_rects,
+            vec![
+                EffectSpawnerRectPlan {
+                    x: 110.0,
+                    y: 200.0,
+                    width: 4.0,
+                    height: 8.0,
+                    rotation: 0.0,
+                },
+                EffectSpawnerRectPlan {
+                    x: 90.0,
+                    y: 200.0,
+                    width: 4.0,
+                    height: 8.0,
+                    rotation: 0.0,
+                },
+            ]
+        );
+        assert_eq!(plan.spawns.len(), 1);
+        assert_eq!(plan.spawns[0].effect, "sparkShoot");
+        assert_eq!(plan.spawns[0].color, "white");
+        assert!((plan.spawns[0].x - 110.0).abs() < 0.0001);
+        assert!((plan.spawns[0].y - 200.0).abs() < 0.0001);
+        assert_eq!(plan.spawns[0].rotation, 95.0);
+
+        let paused = part.draw_plan(&params, 0.0, 1.0, true, &[0.0, 0.0], &[]);
+        assert!(paused.spawns.is_empty());
+        assert_eq!(paused.debug_rects.len(), 2);
     }
 }

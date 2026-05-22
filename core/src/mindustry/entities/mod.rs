@@ -122,7 +122,10 @@ pub use lightning::{
     LightningSpawnPlan, LightningTarget, HIT_RANGE, MAX_CHAIN,
 };
 pub use mover::Mover;
-pub use part::{DrawPartConfig, PartMove, PartParams, PartProgress};
+pub use part::{
+    DrawPartConfig, EffectSpawnerDrawPlan, EffectSpawnerPart, EffectSpawnerRectPlan,
+    EffectSpawnerSpawnPlan, PartMove, PartParams, PartProgress,
+};
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootMulti, ShootPattern, ShootSine,
     ShootSpread, ShootSummon, Shot,
