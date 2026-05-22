@@ -16,14 +16,14 @@ use crate::mindustry::io::type_io::CommandWire;
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
-    CommandUnitsCallPacket, DeletePlansCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-    RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket,
-    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket,
-    SetUnitStanceCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    CommandBuildingCallPacket, CommandUnitsCallPacket, DeletePlansCallPacket, DropItemCallPacket,
+    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    PingLocationCallPacket, RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
+    SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket, TakeItemsCallPacket,
+    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket,
+    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
@@ -591,6 +591,28 @@ pub struct SetUnitStanceOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandBuildingRejectReason {
+    MissingPlayer,
+    MissingBuildings,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CommandBuildingContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandBuildingOutcome {
+    pub accepted: bool,
+    pub rejection: Option<CommandBuildingRejectReason>,
+    pub commanded_positions: Vec<i32>,
+    pub packet: Option<CommandBuildingCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoveQueueBlockRejectReason {
     MissingUnit,
 }
@@ -979,6 +1001,22 @@ impl SetUnitStanceOutcome {
             accepted: false,
             rejection: Some(reason),
             commanded: 0,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl CommandBuildingOutcome {
+    fn rejected(
+        context: &CommandBuildingContext,
+        reason: CommandBuildingRejectReason,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            commanded_positions: Vec::new(),
             packet: None,
             should_raise_validate: validate_rejection && !context.local_player,
         }
@@ -2700,6 +2738,81 @@ pub fn client_set_unit_stance_packet(
     }
 }
 
+pub fn command_building<A>(
+    context: CommandBuildingContext,
+    player: Option<&PlayerComp>,
+    builds: &mut [BuildingComp],
+    buildings: Vec<i32>,
+    target: Vec2,
+    admin_allows: A,
+) -> CommandBuildingOutcome
+where
+    A: FnOnce(&[i32]) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return CommandBuildingOutcome::rejected(
+            &context,
+            CommandBuildingRejectReason::MissingPlayer,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    if buildings.is_empty() {
+        return CommandBuildingOutcome::rejected(
+            &context,
+            CommandBuildingRejectReason::MissingBuildings,
+            false,
+        );
+    }
+
+    if !admin_allows(&buildings) {
+        return CommandBuildingOutcome::rejected(
+            &context,
+            CommandBuildingRejectReason::AdminDenied,
+            true,
+        );
+    }
+
+    let colored_name = player.colored_name();
+    let mut commanded_positions = Vec::new();
+
+    for pos in &buildings {
+        let Some(build) = builds.iter_mut().find(|build| build.tile_pos == *pos) else {
+            continue;
+        };
+        if build.team != player.team || !build.block.commandable {
+            continue;
+        }
+
+        build.last_accessed = colored_name.clone();
+        commanded_positions.push(build.tile_pos);
+    }
+
+    CommandBuildingOutcome {
+        accepted: true,
+        rejection: None,
+        commanded_positions,
+        packet: Some(CommandBuildingCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            buildings,
+            target,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_command_building_packet(
+    buildings: Vec<i32>,
+    target: Vec2,
+) -> CommandBuildingCallPacket {
+    CommandBuildingCallPacket {
+        player: EntityRef::null(),
+        buildings,
+        target,
+    }
+}
+
 pub fn remove_queue_block(
     unit: Option<&mut UnitComp>,
     x: i32,
@@ -2744,6 +2857,12 @@ mod tests {
         let mut block = block();
         block.has_items = true;
         block.item_capacity = 30;
+        block
+    }
+
+    fn command_block() -> Block {
+        let mut block = block();
+        block.commandable = true;
         block
     }
 
@@ -4237,6 +4356,90 @@ mod tests {
         assert_eq!(stance.unit_ids, vec![3]);
         assert_eq!(stance.stance, "stop");
         assert!(!stance.enable);
+    }
+
+    #[test]
+    fn command_building_updates_commandable_same_team_buildings() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.name = "builder".into();
+        player.color = 0xAABB_CCDD;
+        let commandable = BuildingComp::new(point2_pack(11, 12), command_block(), TeamId(1));
+        let enemy = BuildingComp::new(point2_pack(13, 14), command_block(), TeamId(2));
+        let mut plain = BuildingComp::new(point2_pack(15, 16), block(), TeamId(1));
+        plain.block.commandable = false;
+        let mut builds = vec![commandable, enemy, plain];
+
+        let outcome = command_building(
+            CommandBuildingContext {
+                player: Some(EntityRef::new(90)),
+                local_player: false,
+            },
+            Some(&player),
+            &mut builds,
+            vec![
+                point2_pack(11, 12),
+                point2_pack(13, 14),
+                point2_pack(15, 16),
+            ],
+            Vec2::new(4.0, 5.0),
+            |_| true,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.commanded_positions, vec![point2_pack(11, 12)]);
+        assert_eq!(builds[0].last_accessed, "[#AABBCCDD]builder");
+        assert!(builds[1].last_accessed.is_empty());
+        assert!(builds[2].last_accessed.is_empty());
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(90));
+        assert_eq!(
+            packet.buildings,
+            vec![
+                point2_pack(11, 12),
+                point2_pack(13, 14),
+                point2_pack(15, 16)
+            ]
+        );
+        assert_eq!(packet.target, Vec2::new(4.0, 5.0));
+    }
+
+    #[test]
+    fn command_building_rejects_admin_denied_as_validate_error() {
+        let player = PlayerComp::new(TeamId(1));
+        let mut builds = vec![BuildingComp::new(
+            point2_pack(11, 12),
+            command_block(),
+            TeamId(1),
+        )];
+
+        let outcome = command_building(
+            CommandBuildingContext {
+                player: Some(EntityRef::new(90)),
+                local_player: false,
+            },
+            Some(&player),
+            &mut builds,
+            vec![point2_pack(11, 12)],
+            Vec2::new(4.0, 5.0),
+            |_| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(CommandBuildingRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert!(builds[0].last_accessed.is_empty());
+    }
+
+    #[test]
+    fn client_command_building_packet_uses_client_payload_shape() {
+        let packet = client_command_building_packet(vec![1, 2], Vec2::new(3.0, 4.0));
+
+        assert_eq!(packet.player, EntityRef::null());
+        assert_eq!(packet.buildings, vec![1, 2]);
+        assert_eq!(packet.target, Vec2::new(3.0, 4.0));
     }
 
     #[test]
