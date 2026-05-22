@@ -156,6 +156,15 @@ impl GameState {
         self.teams.bosses().first().copied()
     }
 
+    fn sector_ref(&self) -> Option<&Sector> {
+        self.rules.sector.as_ref().or(self.sector.as_ref())
+    }
+
+    pub fn set_sector(&mut self, sector: Option<Sector>) {
+        self.rules.sector = sector.clone();
+        self.sector = sector;
+    }
+
     pub fn set(&mut self, state: GameStateState) -> Option<StateChangeEvent> {
         if self.state == state {
             return None;
@@ -181,20 +190,19 @@ impl GameState {
 
     /// Note that being in a campaign does not necessarily mean having a sector.
     pub fn is_campaign(&self) -> bool {
-        self.sector.is_some()
+        self.sector_ref().is_some()
     }
 
     pub fn has_sector(&self) -> bool {
-        self.sector.is_some()
+        self.sector_ref().is_some()
     }
 
     pub fn get_sector(&self) -> Option<&Sector> {
-        self.sector.as_ref()
+        self.sector_ref()
     }
 
     pub fn get_planet_name(&self) -> Option<&str> {
-        self.sector
-            .as_ref()
+        self.sector_ref()
             .and_then(|sector| sector.preset.as_ref())
             .and_then(|preset| preset.planet_name.as_deref())
             .or_else(|| (!self.rules.planet.is_empty()).then_some(self.rules.planet.as_str()))
@@ -336,12 +344,34 @@ mod tests {
 
         let mut sector = Sector::new(5);
         sector.preset = Some(SectorPreset::with_planet_sector("groundZero", "erekir", 5));
-        state.sector = Some(sector);
+        state.set_sector(Some(sector));
 
         assert!(state.is_campaign());
         assert!(state.has_sector());
         assert_eq!(state.get_sector().map(|sector| sector.id), Some(5));
         assert_eq!(state.get_planet_name(), Some("erekir"));
+    }
+
+    #[test]
+    fn rules_sector_is_the_primary_campaign_source_like_java() {
+        let mut state = GameState::new();
+
+        let mut mirrored = Sector::new(1);
+        mirrored.preset = Some(SectorPreset::with_planet_sector("old", "serpulo", 1));
+        state.sector = Some(mirrored);
+
+        let mut rules_sector = Sector::new(2);
+        rules_sector.preset = Some(SectorPreset::with_planet_sector("new", "erekir", 2));
+        state.rules.sector = Some(rules_sector);
+
+        assert!(state.is_campaign());
+        assert_eq!(state.get_sector().map(|sector| sector.id), Some(2));
+        assert_eq!(state.get_planet_name(), Some("erekir"));
+
+        state.set_sector(None);
+        assert!(!state.is_campaign());
+        assert!(state.rules.sector.is_none());
+        assert!(state.sector.is_none());
     }
 
     #[test]

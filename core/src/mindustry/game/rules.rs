@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::mindustry::game::SpawnGroup;
+use crate::mindustry::{game::SpawnGroup, r#type::Sector};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rules {
@@ -102,6 +102,7 @@ pub struct Rules {
     pub custom_background_callback: Option<String>,
     pub background_texture: Option<String>,
     pub planet: String,
+    pub sector: Option<Sector>,
     pub allow_logic_data: bool,
     pub default_team: i32,
     pub wave_team: i32,
@@ -312,6 +313,7 @@ impl Default for Rules {
             custom_background_callback: None,
             background_texture: None,
             planet: "serpulo".into(),
+            sector: None,
             allow_logic_data: false,
             default_team: crate::mindustry::game::TEAM_SHARDED as i32,
             wave_team: crate::mindustry::game::TEAM_CRUX as i32,
