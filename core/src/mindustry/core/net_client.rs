@@ -143,6 +143,9 @@ pub struct NetClientState {
     pub auto_confirm_world_stream: bool,
     pub connect_confirm_sent: bool,
     pub last_connect_confirm_error: Option<String>,
+    pub world_data_loading: bool,
+    pub world_data_begin_packets_seen: u64,
+    pub last_world_data_begin_at: Option<Instant>,
     pub next_ping_at: Option<Instant>,
     pub next_client_snapshot_at: Option<Instant>,
     pub next_client_plan_snapshot_at: Option<Instant>,
@@ -320,6 +323,11 @@ impl fmt::Debug for NetClientState {
                 "last_connect_confirm_error",
                 &self.last_connect_confirm_error,
             )
+            .field("world_data_loading", &self.world_data_loading)
+            .field(
+                "world_data_begin_packets_seen",
+                &self.world_data_begin_packets_seen,
+            )
             .field("next_ping_at", &self.next_ping_at)
             .field("next_client_snapshot_at", &self.next_client_snapshot_at)
             .field(
@@ -496,6 +504,19 @@ impl NetClientState {
         self.timeout_deadline = None;
     }
 
+    fn record_world_data_begin(&mut self) {
+        self.connecting = true;
+        self.connected = false;
+        self.world_data_loading = true;
+        self.world_data_begin_packets_seen = self.world_data_begin_packets_seen.saturating_add(1);
+        self.last_world_data_begin_at = Some(Instant::now());
+        self.connect_confirm_sent = false;
+        self.last_connect_confirm_error = None;
+        self.reset_client_gameplay_sync_state();
+        self.clear_loading_stream_tracking();
+        self.reset_loading_timeout();
+    }
+
     fn reset_loading_timeout(&mut self) {
         let now = Instant::now();
         self.timeout_resets += 1;
@@ -525,6 +546,7 @@ impl NetClientState {
     fn record_connect(&mut self, connect: &Connect) {
         self.connecting = false;
         self.connected = true;
+        self.world_data_loading = false;
         self.connect_events += 1;
         self.last_connect = Some(connect.clone());
         self.last_packet = Some(PacketKind::Connect(connect.clone()));
@@ -541,6 +563,7 @@ impl NetClientState {
     fn record_disconnect(&mut self, disconnect: &Disconnect) {
         self.connecting = false;
         self.connected = false;
+        self.world_data_loading = false;
         self.disconnect_events += 1;
         self.last_disconnect = Some(disconnect.clone());
         self.last_packet = Some(PacketKind::Disconnect(disconnect.clone()));
@@ -556,6 +579,7 @@ impl NetClientState {
     fn record_world_stream(&mut self, stream: &Streamable) {
         self.connecting = false;
         self.connected = true;
+        self.world_data_loading = false;
         self.world_stream_events += 1;
         self.last_world_stream = Some(stream.clone());
         self.last_binary_stream = Some(stream.stream.clone());
@@ -651,6 +675,7 @@ impl NetClient {
         let mut state = self.state.lock().unwrap();
         state.connecting = true;
         state.connected = false;
+        state.world_data_loading = false;
         state.connection_attempts += 1;
         state.last_update_at = Some(Instant::now());
         state.connect_packet_sent = false;
@@ -679,6 +704,7 @@ impl NetClient {
         let mut state = self.state.lock().unwrap();
         state.connecting = false;
         state.connected = false;
+        state.world_data_loading = false;
         state.manual_disconnects += 1;
         state.last_update_at = Some(Instant::now());
         state.connect_packet_sent = false;
@@ -1126,33 +1152,40 @@ impl NetClient {
                 }
             }
 
-            let connect_confirm_to_send = {
+            let (connect_confirm_to_send, mark_client_unloaded) = {
                 let mut state = self.state.lock().unwrap();
                 state.last_packet = Some(packet.clone());
                 match &packet {
                     PacketKind::Streamable(stream) => {
+                        state.connecting = false;
+                        state.connected = true;
+                        state.world_data_loading = false;
                         state.last_binary_stream = Some(stream.stream.clone());
                         if state.auto_confirm_world_stream && !state.connect_confirm_sent {
                             state.connect_confirm_sent = true;
                             state.last_connect_confirm_error = None;
-                            true
+                            (true, false)
                         } else {
-                            false
+                            (false, false)
                         }
+                    }
+                    PacketKind::WorldDataBeginCallPacket(_) => {
+                        state.record_world_data_begin();
+                        (false, true)
                     }
                     PacketKind::SendMessageCallPacket(packet) => {
                         state.message_packets_seen += 1;
                         state.last_message = Some(packet.message.clone());
                         state.last_message_unformatted = None;
                         state.last_message_sender = None;
-                        false
+                        (false, false)
                     }
                     PacketKind::SendMessageCallPacket2(packet) => {
                         state.message_packets_seen += 1;
                         state.last_message = Some(packet.message.clone());
                         state.last_message_unformatted = Some(packet.unformatted.clone());
                         state.last_message_sender = Some(packet.player_sender);
-                        false
+                        (false, false)
                     }
                     PacketKind::PingResponseCallPacket(response) => {
                         let now = Self::current_millis();
@@ -1160,7 +1193,7 @@ impl NetClient {
                         state.last_ping_response_time = Some(response.time);
                         state.last_ping_response_at = Some(Instant::now());
                         state.ping_ms = now.saturating_sub(response.time).max(0) as u32;
-                        false
+                        (false, false)
                     }
                     PacketKind::EntitySnapshotCallPacket(snapshot) => {
                         let now = Instant::now();
@@ -1168,7 +1201,7 @@ impl NetClient {
                         state.last_entity_snapshot = Some(snapshot.clone());
                         state.last_entity_snapshot_at = Some(now);
                         state.last_server_snapshot_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::HiddenSnapshotCallPacket(snapshot) => {
                         let now = Instant::now();
@@ -1176,7 +1209,7 @@ impl NetClient {
                         state.last_hidden_snapshot = Some(snapshot.clone());
                         state.last_hidden_snapshot_at = Some(now);
                         state.last_server_snapshot_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::StateSnapshotCallPacket(snapshot) => {
                         let now = Instant::now();
@@ -1184,249 +1217,253 @@ impl NetClient {
                         state.last_state_snapshot = Some(snapshot.clone());
                         state.last_state_snapshot_at = Some(now);
                         state.last_server_snapshot_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::ClientPlanSnapshotReceivedCallPacket(snapshot) => {
                         let now = Instant::now();
                         state.client_plan_snapshot_received_packets_seen += 1;
                         state.last_client_plan_snapshot_received = Some(snapshot.clone());
                         state.last_client_plan_snapshot_received_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::SetItemCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_item_packets_seen += 1;
                         state.last_set_item = Some(packet.clone());
                         state.last_set_item_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::SetItemsCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_items_packets_seen += 1;
                         state.last_set_items = Some(packet.clone());
                         state.last_set_items_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::ClearItemsCallPacket(packet) => {
                         let now = Instant::now();
                         state.clear_items_packets_seen += 1;
                         state.last_clear_items = Some(*packet);
                         state.last_clear_items_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::SetLiquidCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_liquid_packets_seen += 1;
                         state.last_set_liquid = Some(packet.clone());
                         state.last_set_liquid_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::SetLiquidsCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_liquids_packets_seen += 1;
                         state.last_set_liquids = Some(packet.clone());
                         state.last_set_liquids_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::ClearLiquidsCallPacket(packet) => {
                         let now = Instant::now();
                         state.clear_liquids_packets_seen += 1;
                         state.last_clear_liquids = Some(*packet);
                         state.last_clear_liquids_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::TakeItemsCallPacket(packet) => {
                         let now = Instant::now();
                         state.take_items_packets_seen += 1;
                         state.last_take_items = Some(packet.clone());
                         state.last_take_items_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::TransferItemEffectCallPacket(packet) => {
                         let now = Instant::now();
                         state.transfer_item_effect_packets_seen += 1;
                         state.last_transfer_item_effect = Some(packet.clone());
                         state.last_transfer_item_effect_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::TransferItemToCallPacket(packet) => {
                         let now = Instant::now();
                         state.transfer_item_to_packets_seen += 1;
                         state.last_transfer_item_to = Some(packet.clone());
                         state.last_transfer_item_to_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::TransferItemToUnitCallPacket(packet) => {
                         let now = Instant::now();
                         state.transfer_item_to_unit_packets_seen += 1;
                         state.last_transfer_item_to_unit = Some(packet.clone());
                         state.last_transfer_item_to_unit_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::RequestItemCallPacket(packet) => {
                         let now = Instant::now();
                         state.request_item_packets_seen += 1;
                         state.last_request_item = Some(packet.clone());
                         state.last_request_item_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::TransferInventoryCallPacket(packet) => {
                         let now = Instant::now();
                         state.transfer_inventory_packets_seen += 1;
                         state.last_transfer_inventory = Some(packet.clone());
                         state.last_transfer_inventory_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::RequestBuildPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.request_build_payload_packets_seen += 1;
                         state.last_request_build_payload = Some(packet.clone());
                         state.last_request_build_payload_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::RequestUnitPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.request_unit_payload_packets_seen += 1;
                         state.last_request_unit_payload = Some(packet.clone());
                         state.last_request_unit_payload_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::PickedBuildPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.picked_build_payload_packets_seen += 1;
                         state.last_picked_build_payload = Some(packet.clone());
                         state.last_picked_build_payload_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::PickedUnitPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.picked_unit_payload_packets_seen += 1;
                         state.last_picked_unit_payload = Some(packet.clone());
                         state.last_picked_unit_payload_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::RequestDropPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.request_drop_payload_packets_seen += 1;
                         state.last_request_drop_payload = Some(packet.clone());
                         state.last_request_drop_payload_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::PayloadDroppedCallPacket(packet) => {
                         let now = Instant::now();
                         state.payload_dropped_packets_seen += 1;
                         state.last_payload_dropped = Some(packet.clone());
                         state.last_payload_dropped_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::UnitEnteredPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.unit_entered_payload_packets_seen += 1;
                         state.last_unit_entered_payload = Some(packet.clone());
                         state.last_unit_entered_payload_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::PingLocationCallPacket(packet) => {
                         let now = Instant::now();
                         state.ping_location_packets_seen += 1;
                         state.last_ping_location = Some(packet.clone());
                         state.last_ping_location_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::DeletePlansCallPacket(packet) => {
                         let now = Instant::now();
                         state.delete_plans_packets_seen += 1;
                         state.last_delete_plans = Some(packet.clone());
                         state.last_delete_plans_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::CommandBuildingCallPacket(packet) => {
                         let now = Instant::now();
                         state.command_building_packets_seen += 1;
                         state.last_command_building = Some(packet.clone());
                         state.last_command_building_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::CommandUnitsCallPacket(packet) => {
                         let now = Instant::now();
                         state.command_units_packets_seen += 1;
                         state.last_command_units = Some(packet.clone());
                         state.last_command_units_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::SetUnitCommandCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_unit_command_packets_seen += 1;
                         state.last_set_unit_command = Some(packet.clone());
                         state.last_set_unit_command_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::SetUnitStanceCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_unit_stance_packets_seen += 1;
                         state.last_set_unit_stance = Some(packet.clone());
                         state.last_set_unit_stance_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::BuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.building_control_select_packets_seen += 1;
                         state.last_building_control_select = Some(packet.clone());
                         state.last_building_control_select_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::UnitBuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.unit_building_control_select_packets_seen += 1;
                         state.last_unit_building_control_select = Some(packet.clone());
                         state.last_unit_building_control_select_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::UnitControlCallPacket(packet) => {
                         let now = Instant::now();
                         state.unit_control_packets_seen += 1;
                         state.last_unit_control = Some(packet.clone());
                         state.last_unit_control_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::UnitClearCallPacket(packet) => {
                         let now = Instant::now();
                         state.unit_clear_packets_seen += 1;
                         state.last_unit_clear = Some(packet.clone());
                         state.last_unit_clear_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::RemoveQueueBlockCallPacket(packet) => {
                         let now = Instant::now();
                         state.remove_queue_block_packets_seen += 1;
                         state.last_remove_queue_block = Some(*packet);
                         state.last_remove_queue_block_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::TileConfigCallPacket(packet) => {
                         let now = Instant::now();
                         state.tile_config_packets_seen += 1;
                         state.last_tile_config = Some(packet.clone());
                         state.last_tile_config_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::RotateBlockCallPacket(packet) => {
                         let now = Instant::now();
                         state.rotate_block_packets_seen += 1;
                         state.last_rotate_block = Some(packet.clone());
                         state.last_rotate_block_at = Some(now);
-                        false
+                        (false, false)
                     }
                     PacketKind::TileTapCallPacket(packet) => {
                         let now = Instant::now();
                         state.tile_tap_packets_seen += 1;
                         state.last_tile_tap = Some(packet.clone());
                         state.last_tile_tap_at = Some(now);
-                        false
+                        (false, false)
                     }
-                    _ => false,
+                    _ => (false, false),
                 }
             };
+
+            if mark_client_unloaded {
+                self.net.lock().unwrap().set_client_loaded(false);
+            }
 
             if quiet {
                 if connect_confirm_to_send {
@@ -1497,6 +1534,7 @@ impl NetClient {
         let mut state = self.state.lock().unwrap();
         state.connecting = false;
         state.connected = false;
+        state.world_data_loading = false;
         state.timeout_disconnects += 1;
         state.last_update_at = Some(Instant::now());
         state.connect_packet_sent = false;
@@ -2800,19 +2838,8 @@ mod tests {
         let client = NetClient::with_net(Net::new(Box::new(provider)));
         client.begin_connecting();
 
-        let queued_normal_packets = Arc::new(Mutex::new(0));
-        let queued_normal_packets_handler = Arc::clone(&queued_normal_packets);
-        client.add_packet_handler(move |packet| {
-            if matches!(packet, PacketKind::WorldDataBeginCallPacket(_)) {
-                *queued_normal_packets_handler.lock().unwrap() += 1;
-            }
-        });
-
         {
             let mut net = client.net_mut();
-            net.handle_client_received(PacketKind::WorldDataBeginCallPacket(
-                WorldDataBeginCallPacket,
-            ));
             net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![1, 2, 3])));
             net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![4, 5, 6])));
         }
@@ -2824,14 +2851,78 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert!(sent[0].1);
         assert!(matches!(sent[0].0, PacketKind::ConnectConfirmCallPacket(_)));
-        assert_eq!(*queued_normal_packets.lock().unwrap(), 1);
 
         let state = client.state();
         let state = state.lock().unwrap();
         assert!(!state.connecting);
         assert!(state.connected);
+        assert!(!state.world_data_loading);
         assert!(state.connect_confirm_sent);
         assert!(state.last_connect_confirm_error.is_none());
+    }
+
+    #[test]
+    fn world_data_begin_marks_client_loading_until_world_stream_confirms() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+        }
+
+        {
+            let state = client.state();
+            let mut state = state.lock().unwrap();
+            state.connected = true;
+            state.connect_confirm_sent = true;
+        }
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::WorldDataBeginCallPacket(
+                WorldDataBeginCallPacket,
+            ));
+        }
+
+        client.update();
+
+        {
+            let state = client.state();
+            let state = state.lock().unwrap();
+            assert!(state.connecting);
+            assert!(!state.connected);
+            assert!(state.world_data_loading);
+            assert_eq!(state.world_data_begin_packets_seen, 1);
+            assert!(state.last_world_data_begin_at.is_some());
+            assert!(!state.connect_confirm_sent);
+            assert!(state.last_connect_confirm_error.is_none());
+            assert!(state.timeout_deadline.is_some());
+        }
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![9, 8, 7])));
+        }
+
+        client.update();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].1);
+        assert!(matches!(sent[0].0, PacketKind::ConnectConfirmCallPacket(_)));
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert!(!state.connecting);
+        assert!(state.connected);
+        assert!(!state.world_data_loading);
+        assert!(state.connect_confirm_sent);
+        assert_eq!(state.world_data_begin_packets_seen, 1);
+        assert!(state.timeout_deadline.is_none());
     }
 
     #[test]
