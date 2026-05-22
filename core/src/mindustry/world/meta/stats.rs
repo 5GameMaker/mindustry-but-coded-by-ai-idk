@@ -101,18 +101,7 @@ impl Stats {
     }
 
     pub fn remove(&mut self, stat: Stat) -> Option<Vec<StatValue>> {
-        let values = self
-            .map
-            .get_mut(&stat.category())
-            .and_then(|stats| stats.remove(&stat));
-        if self
-            .map
-            .get(&stat.category())
-            .is_some_and(|stats| stats.is_empty())
-        {
-            self.map.remove(&stat.category());
-        }
-        values
+        self.map.entry(stat.category()).or_default().remove(&stat)
     }
 
     pub fn values(&self, stat: Stat) -> Option<&[StatValue]> {
@@ -200,10 +189,26 @@ mod tests {
         );
         assert!(stats.remove(Stat::TargetsAir).is_some());
         assert!(stats.values(Stat::TargetsAir).is_none());
+        assert!(
+            stats
+                .to_map()
+                .iter()
+                .any(|(cat, entries)| *cat == StatCat::Function && entries.is_empty()),
+            "Java Stats.remove() leaves an empty category map instead of pruning it"
+        );
         assert_eq!(
             Stats::stat_info_key(Stat::BuildTime, true).unwrap(),
             "@stat.buildtime.info"
         );
         assert_eq!(Stats::stat_info_key(Stat::BuildTime, false), None);
+    }
+
+    #[test]
+    fn stats_remove_missing_stat_creates_empty_category_like_java() {
+        let mut stats = Stats::new();
+
+        assert!(stats.remove(Stat::Explosiveness).is_none());
+
+        assert_eq!(stats.to_map(), vec![(StatCat::General, Vec::new())]);
     }
 }
