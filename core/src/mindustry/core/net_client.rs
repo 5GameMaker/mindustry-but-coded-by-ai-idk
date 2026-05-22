@@ -9,8 +9,8 @@ use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect,
-    ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
+    ConnectConfirmCallPacket, ConnectPacket, DeletePlansCallPacket, Disconnect,
+    EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
     PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
     PingLocationCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
     RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
@@ -192,6 +192,9 @@ pub struct NetClientState {
     pub last_ping_location: Option<PingLocationCallPacket>,
     pub last_ping_location_at: Option<Instant>,
     pub ping_location_packets_seen: u64,
+    pub last_delete_plans: Option<DeletePlansCallPacket>,
+    pub last_delete_plans_at: Option<Instant>,
+    pub delete_plans_packets_seen: u64,
     pub last_building_control_select: Option<BuildingControlSelectCallPacket>,
     pub last_building_control_select_at: Option<Instant>,
     pub building_control_select_packets_seen: u64,
@@ -329,6 +332,7 @@ impl fmt::Debug for NetClientState {
                 "ping_location_packets_seen",
                 &self.ping_location_packets_seen,
             )
+            .field("delete_plans_packets_seen", &self.delete_plans_packets_seen)
             .field(
                 "building_control_select_packets_seen",
                 &self.building_control_select_packets_seen,
@@ -1149,6 +1153,13 @@ impl NetClient {
                         state.last_ping_location_at = Some(now);
                         false
                     }
+                    PacketKind::DeletePlansCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.delete_plans_packets_seen += 1;
+                        state.last_delete_plans = Some(packet.clone());
+                        state.last_delete_plans_at = Some(now);
+                        false
+                    }
                     PacketKind::BuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.building_control_select_packets_seen += 1;
@@ -1362,16 +1373,16 @@ mod tests {
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
         BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
-        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, Disconnect,
-        DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
-        NetConnection, NetProvider, PacketKind, PayloadDroppedCallPacket,
-        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-        PingResponseCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TileConfigCallPacket,
-        TileTapCallPacket, TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket,
-        UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
-        WorldDataBeginCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect,
+        DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
+        HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
+        PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+        PingLocationCallPacket, PingResponseCallPacket, RequestBuildPayloadCallPacket,
+        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+        RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
+        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -2141,6 +2152,10 @@ mod tests {
             y: 22.5,
             text: "go".into(),
         };
+        let delete_plans = DeletePlansCallPacket {
+            player_id: Some(310),
+            positions: vec![1, 2, 3],
+        };
         let building_control_select = BuildingControlSelectCallPacket {
             player: EntityRef::new(306),
             build: primary_build,
@@ -2186,6 +2201,7 @@ mod tests {
                 unit_entered_payload.clone(),
             ));
             net.handle_client_received(PacketKind::PingLocationCallPacket(ping_location.clone()));
+            net.handle_client_received(PacketKind::DeletePlansCallPacket(delete_plans.clone()));
             net.handle_client_received(PacketKind::UnitBuildingControlSelectCallPacket(
                 unit_building_control_select.clone(),
             ));
@@ -2251,6 +2267,9 @@ mod tests {
         assert_eq!(state.ping_location_packets_seen, 1);
         assert_eq!(state.last_ping_location.as_ref(), Some(&ping_location));
         assert!(state.last_ping_location_at.is_some());
+        assert_eq!(state.delete_plans_packets_seen, 1);
+        assert_eq!(state.last_delete_plans.as_ref(), Some(&delete_plans));
+        assert!(state.last_delete_plans_at.is_some());
         assert_eq!(state.building_control_select_packets_seen, 1);
         assert_eq!(
             state.last_building_control_select.as_ref(),
