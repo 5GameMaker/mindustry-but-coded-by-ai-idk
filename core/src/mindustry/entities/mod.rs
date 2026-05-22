@@ -18,8 +18,9 @@ pub use comp::{apply_armor, ShieldComp};
 pub use comp::{BlockUnitBuilding, BlockUnitComp};
 pub use comp::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use comp::{
-    ChildComp, ChildParent, DamageComp, DamageState, DrawComp, ElevationMoveComp, Interval,
-    OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred, TeamState, TimerComp,
+    BulletComp, BulletSpec, ChildComp, ChildParent, DamageComp, DamageState, DrawComp,
+    ElevationMoveComp, Interval, OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred,
+    TeamState, TimerComp,
 };
 pub use comp::{CrawlComp, CrawlSolidPred, CrawlType, CrawlUpdateInput};
 pub use comp::{DecalColor, DecalComp, DecalDrawPlan, DecalRegion};
