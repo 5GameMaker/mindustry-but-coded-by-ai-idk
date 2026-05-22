@@ -125,6 +125,11 @@ pub struct NetServerState {
     pub last_connection_id: Option<i32>,
     pub last_connect: Option<Connect>,
     pub last_handshake: Option<ConnectPacket>,
+    pub last_connect_validation_connection_id: Option<i32>,
+    pub last_connect_validation_plan: Option<ConnectPacketValidationPlan>,
+    pub connect_packets_accepted: u64,
+    pub connect_packets_rejected: u64,
+    pub pending_connect_kicks: Vec<(i32, KickReason)>,
     pub last_connect_confirm_connection_id: Option<i32>,
     pub last_world_data_connection_id: Option<i32>,
     pub last_world_data_bytes: Option<usize>,
@@ -778,6 +783,8 @@ impl NetServer {
     }
 
     pub fn update(&self) {
+        self.flush_pending_connect_kicks();
+
         let connections = {
             let net = self.net.lock().expect("Net mutex poisoned");
             net.get_connections()
@@ -786,6 +793,17 @@ impl NetServer {
         let mut state = self.state.lock().expect("NetServerState mutex poisoned");
         Self::sync_provider_connections(&mut state, connections);
         state.last_updated_at = Some(Instant::now());
+    }
+
+    fn flush_pending_connect_kicks(&self) {
+        let pending = {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            std::mem::take(&mut state.pending_connect_kicks)
+        };
+
+        for (connection_id, reason) in pending {
+            let _ = self.kick_connection_reason(connection_id, reason);
+        }
     }
 
     fn world_stream_send_plan(bytes: Vec<u8>) -> Vec<(PacketKind, SentPacket, bool)> {
@@ -803,6 +821,134 @@ impl NetServer {
                 Some((packet, sent_packet, reliable))
             })
             .collect()
+    }
+
+    fn connect_packet_validation_context(
+        state: &NetServerState,
+        connection_id: i32,
+        packet: &ConnectPacket,
+    ) -> ConnectPacketValidationContext {
+        let connection = state.connection_states.get(&connection_id);
+        let connection_address = connection
+            .map(|connection| connection.address.clone())
+            .unwrap_or_default();
+        let normalized_uuid = if connection_address.starts_with("steam:") {
+            connection_address
+                .strip_prefix("steam:")
+                .unwrap_or(&connection_address)
+                .to_string()
+        } else {
+            packet.uuid.clone()
+        };
+        let normalized_name = Self::fix_name_like_java(&packet.name);
+        let duplicate_name_key = normalized_name.trim().to_ascii_lowercase();
+
+        let mut context = ConnectPacketValidationContext {
+            connection_address,
+            connection_kicked: connection
+                .map(|connection| connection.kicked)
+                .unwrap_or_default(),
+            connection_connected: connection
+                .map(|connection| connection.is_connected())
+                .unwrap_or(true),
+            has_begun_connecting: connection
+                .map(|connection| connection.has_begun_connecting)
+                .unwrap_or_default(),
+            duplicate_name: false,
+            duplicate_id: false,
+            duplicate_connection_uuid: false,
+            ..Default::default()
+        };
+
+        for (other_connection_id, other) in &state.connection_states {
+            if *other_connection_id == connection_id || other.kicked || other.has_disconnected {
+                continue;
+            }
+
+            if !duplicate_name_key.is_empty()
+                && !other.name.trim().is_empty()
+                && other.name.trim().to_ascii_lowercase() == duplicate_name_key
+            {
+                context.duplicate_name = true;
+            }
+
+            if (!normalized_uuid.is_empty() && other.uuid == normalized_uuid)
+                || (!packet.usid.is_empty() && other.usid == packet.usid)
+            {
+                context.duplicate_id = true;
+            }
+
+            if !normalized_uuid.is_empty() && other.uuid == normalized_uuid {
+                context.duplicate_connection_uuid = true;
+            }
+        }
+
+        context
+    }
+
+    fn record_server_connect_packet(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        connect_packet: &ConnectPacket,
+    ) -> bool {
+        state.last_connection_id = connection_id;
+        state.last_handshake = Some(connect_packet.clone());
+
+        let Some(connection_id) = connection_id else {
+            state.last_connect_validation_connection_id = None;
+            state.last_connect_validation_plan = None;
+            state.events.push(ProviderEvent::ServerPacket {
+                connection_id: -1,
+                packet: PacketKind::ConnectPacket(connect_packet.clone()),
+            });
+            state.last_updated_at = Some(Instant::now());
+            return true;
+        };
+
+        let context = Self::connect_packet_validation_context(state, connection_id, connect_packet);
+        let plan = Self::validate_connect_packet(connect_packet, &context);
+        let decision = plan.decision;
+        let kick_reason = plan.kick_reason();
+
+        state.last_connect_validation_connection_id = Some(connection_id);
+        state.last_connect_validation_plan = Some(plan.clone());
+
+        if decision == ConnectPacketDecision::Ignore {
+            state.last_updated_at = Some(Instant::now());
+            return false;
+        }
+
+        {
+            let connection = state
+                .connection_states
+                .entry(connection_id)
+                .or_insert_with(|| NetConnection::new(context.connection_address.clone()));
+            connection.uuid = plan.normalized_uuid.clone();
+            connection.usid = connect_packet.usid.clone();
+            connection.name = plan.normalized_name.clone();
+            connection.locale = plan.locale.clone();
+            connection.color = connect_packet.color;
+            connection.mobile = plan.mobile;
+            connection.modclient = plan.mod_client;
+            connection.connect_time = Self::current_millis();
+            if plan.mark_begun_connecting {
+                connection.has_begun_connecting = true;
+            }
+        }
+
+        if let Some(reason) = kick_reason {
+            state.connect_packets_rejected = state.connect_packets_rejected.saturating_add(1);
+            state.pending_connect_kicks.push((connection_id, reason));
+        } else {
+            state.connect_packets_accepted = state.connect_packets_accepted.saturating_add(1);
+        }
+
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id,
+            packet: PacketKind::ConnectPacket(connect_packet.clone()),
+        });
+        state.last_updated_at = Some(Instant::now());
+        true
     }
 
     pub fn validate_connect_packet(
@@ -1060,27 +1206,14 @@ impl NetServer {
             let packet_handlers = Arc::clone(packet_handlers);
             net.handle_server_connect_packet(move |connection_id, connect_packet| {
                 let packet = PacketKind::ConnectPacket(connect_packet.clone());
-                {
+                let dispatch = {
                     let mut state = state.lock().expect("NetServerState mutex poisoned");
-                    state.last_connection_id = connection_id;
-                    state.last_handshake = Some(connect_packet.clone());
-                    if let Some(connection_id) = connection_id {
-                        let connection = state
-                            .connection_states
-                            .entry(connection_id)
-                            .or_insert_with(|| NetConnection::new(String::new()));
-                        connection.uuid = connect_packet.uuid.clone();
-                        connection.usid = connect_packet.usid.clone();
-                        connection.mobile = connect_packet.mobile;
-                        connection.has_begun_connecting = true;
-                    }
-                    state.events.push(ProviderEvent::ServerPacket {
-                        connection_id: connection_id.unwrap_or(-1),
-                        packet: packet.clone(),
-                    });
-                    state.last_updated_at = Some(Instant::now());
+                    Self::record_server_connect_packet(&mut state, connection_id, connect_packet)
+                };
+
+                if dispatch {
+                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
                 }
-                Self::dispatch_packet_handlers(&packet_handlers, &packet);
             });
         }
 
@@ -1362,6 +1495,11 @@ impl NetServer {
                 let has_connected = connection.has_connected;
                 let has_begun_connecting = connection.has_begun_connecting;
                 let has_disconnected = connection.has_disconnected;
+                let name = connection.name.clone();
+                let locale = connection.locale.clone();
+                let color = connection.color;
+                let modclient = connection.modclient;
+                let kicked = connection.kicked;
                 let sent = connection.sent.clone();
                 let last_received_client_snapshot = connection.last_received_client_snapshot;
                 let snapshots_sent = connection.snapshots_sent;
@@ -1374,6 +1512,11 @@ impl NetServer {
                 connection.has_connected = has_connected;
                 connection.has_begun_connecting = has_begun_connecting;
                 connection.has_disconnected |= has_disconnected;
+                connection.name = name;
+                connection.locale = locale;
+                connection.color = color;
+                connection.modclient |= modclient;
+                connection.kicked |= kicked;
                 connection.sent = sent;
                 connection.last_received_client_snapshot = last_received_client_snapshot;
                 connection.snapshots_sent = snapshots_sent;
@@ -1390,6 +1533,11 @@ impl NetServer {
                 let has_connected = connection.has_connected;
                 let has_begun_connecting = connection.has_begun_connecting;
                 let has_disconnected = connection.has_disconnected;
+                let name = connection.name.clone();
+                let locale = connection.locale.clone();
+                let color = connection.color;
+                let modclient = connection.modclient;
+                let kicked = connection.kicked;
                 let sent = connection.sent.clone();
                 let last_received_client_snapshot = connection.last_received_client_snapshot;
                 let snapshots_sent = connection.snapshots_sent;
@@ -1402,6 +1550,11 @@ impl NetServer {
                 connection.has_connected = has_connected;
                 connection.has_begun_connecting = has_begun_connecting;
                 connection.has_disconnected |= has_disconnected;
+                connection.name = name;
+                connection.locale = locale;
+                connection.color = color;
+                connection.modclient |= modclient;
+                connection.kicked |= kicked;
                 connection.sent = sent;
                 connection.last_received_client_snapshot = last_received_client_snapshot;
                 connection.snapshots_sent = snapshots_sent;
@@ -1685,13 +1838,106 @@ mod tests {
         assert_eq!(state.last_disconnect_reason.as_deref(), Some("left"));
         let connection = state.connection_states.get(&12).unwrap();
         assert_eq!(connection.address, "10.0.0.2:6567");
+        assert_eq!(connection.name, "player");
+        assert_eq!(connection.locale, "en_US");
         assert_eq!(connection.uuid, "uuid");
         assert_eq!(connection.usid, "usid");
         assert!(!connection.mobile);
+        assert!(!connection.modclient);
         assert!(connection.has_connected);
         assert!(connection.has_begun_connecting);
         assert!(connection.has_disconnected);
+        assert_eq!(state.last_connect_validation_connection_id, Some(12));
+        assert!(state
+            .last_connect_validation_plan
+            .as_ref()
+            .unwrap()
+            .accepted());
+        assert_eq!(state.connect_packets_accepted, 1);
+        assert_eq!(state.connect_packets_rejected, 0);
         assert_eq!(state.events.len(), 4);
+    }
+
+    #[test]
+    fn connect_packet_listener_validates_and_flushes_kick_without_recursive_net_lock() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if matches!(packet, PacketKind::ConnectPacket(_)) {
+                seen_handler.lock().unwrap().push("connect-packet");
+            }
+        });
+
+        let mut rejected = connect_packet("player");
+        rejected.version_type = "custom".into();
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(41),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "10.0.0.41:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(41),
+                false,
+                PacketKind::ConnectPacket(rejected),
+            );
+        }
+
+        {
+            let state = server.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.connect_packets_accepted, 0);
+            assert_eq!(state.connect_packets_rejected, 1);
+            assert_eq!(
+                state.pending_connect_kicks,
+                vec![(41, KickReason::TypeMismatch)]
+            );
+            assert_eq!(state.last_kick_connection_id, None);
+            assert_eq!(
+                state
+                    .last_connect_validation_plan
+                    .as_ref()
+                    .unwrap()
+                    .kick_reason(),
+                Some(KickReason::TypeMismatch)
+            );
+            let connection = state.connection_states.get(&41).unwrap();
+            assert!(connection.has_begun_connecting);
+            assert!(!connection.kicked);
+        }
+
+        server.update();
+
+        assert_eq!(*seen.lock().unwrap(), vec!["connect-packet"]);
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 41);
+        assert!(sent[0].2);
+        assert!(matches!(
+            sent[0].1,
+            PacketKind::KickCallPacket2(packet)
+                if packet.reason == KickReason::TypeMismatch
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert!(state.pending_connect_kicks.is_empty());
+        assert_eq!(state.last_kick_connection_id, Some(41));
+        assert_eq!(state.last_kick_reason, Some(KickReason::TypeMismatch));
+        let connection = state.connection_states.get(&41).unwrap();
+        assert!(connection.kicked);
+        assert!(connection.has_disconnected);
     }
 
     #[test]

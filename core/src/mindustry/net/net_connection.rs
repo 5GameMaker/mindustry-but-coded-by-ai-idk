@@ -14,8 +14,11 @@ pub enum SentPacket {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NetConnection {
     pub address: String,
+    pub name: String,
+    pub locale: String,
     pub uuid: String,
     pub usid: String,
+    pub color: i32,
     pub mobile: bool,
     pub modclient: bool,
     pub kicked: bool,
@@ -39,8 +42,11 @@ impl NetConnection {
         let uuid = "AAAAAAAA".to_string();
         Self {
             address: address.into(),
+            name: String::new(),
+            locale: "en".into(),
             usid: uuid.clone(),
             uuid,
+            color: 0,
             mobile: false,
             modclient: false,
             kicked: false,
