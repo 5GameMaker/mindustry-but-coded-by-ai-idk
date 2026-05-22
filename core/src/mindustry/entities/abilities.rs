@@ -316,11 +316,225 @@ impl Ability for LiquidRegenAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceFieldUpdate {
+    pub shield: f32,
+    pub radius_scale: f32,
+    pub alpha: f32,
+    pub was_broken: bool,
+    pub broke_this_tick: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceFieldHit {
+    pub shield_after: f32,
+    pub alpha: f32,
+    pub absorbed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForceFieldAbility {
+    pub base: BasicAbility,
+    pub radius: f32,
+    pub regen: f32,
+    pub max: f32,
+    pub cooldown: f32,
+    pub sides: i32,
+    pub rotation: f32,
+    pub radius_scale: f32,
+    pub alpha: f32,
+    pub was_broken: bool,
+}
+
+impl Default for ForceFieldAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            radius: 60.0,
+            regen: 0.1,
+            max: 200.0,
+            cooldown: 60.0 * 5.0,
+            sides: 6,
+            rotation: 0.0,
+            radius_scale: 0.0,
+            alpha: 0.0,
+            was_broken: true,
+        }
+    }
+}
+
+impl ForceFieldAbility {
+    pub fn new(radius: f32, regen: f32, max: f32, cooldown: f32) -> Self {
+        Self {
+            radius,
+            regen,
+            max,
+            cooldown,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_polygon(
+        radius: f32,
+        regen: f32,
+        max: f32,
+        cooldown: f32,
+        sides: i32,
+        rotation: f32,
+    ) -> Self {
+        Self {
+            radius,
+            regen,
+            max,
+            cooldown,
+            sides,
+            rotation,
+            ..Default::default()
+        }
+    }
+
+    pub fn created_shield(&self) -> f32 {
+        self.max
+    }
+
+    pub fn real_radius(&self) -> f32 {
+        self.radius_scale * self.radius
+    }
+
+    pub fn update_state(&mut self, shield: f32, delta: f32) -> ForceFieldUpdate {
+        let mut shield = shield;
+        let mut broke_this_tick = false;
+
+        if shield <= 0.0 && !self.was_broken {
+            shield -= self.cooldown * self.regen;
+            broke_this_tick = true;
+        }
+
+        self.was_broken = shield <= 0.0;
+
+        if shield < self.max {
+            shield += delta * self.regen;
+        }
+
+        self.alpha = (self.alpha - delta / 10.0).max(0.0);
+
+        if shield > 0.0 {
+            self.radius_scale = lerp_delta(self.radius_scale, 1.0, 0.06, delta);
+        } else {
+            self.radius_scale = 0.0;
+        }
+
+        ForceFieldUpdate {
+            shield,
+            radius_scale: self.radius_scale,
+            alpha: self.alpha,
+            was_broken: self.was_broken,
+            broke_this_tick,
+        }
+    }
+
+    pub fn absorb_bullet(
+        &mut self,
+        shield: f32,
+        unit_team: i32,
+        bullet_team: i32,
+        bullet_absorbable: bool,
+        bullet_pos: (f32, f32),
+        unit_pos: (f32, f32),
+        shield_damage: f32,
+    ) -> Option<ForceFieldHit> {
+        if bullet_team != unit_team
+            && bullet_absorbable
+            && shield > 0.0
+            && point_in_regular_polygon(
+                self.sides,
+                unit_pos.0,
+                unit_pos.1,
+                self.real_radius(),
+                self.rotation,
+                bullet_pos.0,
+                bullet_pos.1,
+            )
+        {
+            self.alpha = 1.0;
+            Some(ForceFieldHit {
+                shield_after: shield - shield_damage,
+                alpha: self.alpha,
+                absorbed: true,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl Ability for ForceFieldAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
+fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
+    let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
+    from + (to - from) * scaled
+}
+
+fn point_in_regular_polygon(
+    sides: i32,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    rotation: f32,
+    x: f32,
+    y: f32,
+) -> bool {
+    if radius <= 0.0 || sides < 3 {
+        return false;
+    }
+
+    let mut inside = false;
+    let sides = sides as usize;
+    let mut prev = polygon_vertex(sides - 1, sides, center_x, center_y, radius, rotation);
+    for i in 0..sides {
+        let current = polygon_vertex(i, sides, center_x, center_y, radius, rotation);
+        let intersects = ((current.1 > y) != (prev.1 > y))
+            && (x < (prev.0 - current.0) * (y - current.1) / (prev.1 - current.1) + current.0);
+        if intersects {
+            inside = !inside;
+        }
+        prev = current;
+    }
+    inside
+}
+
+fn polygon_vertex(
+    index: usize,
+    sides: usize,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    rotation: f32,
+) -> (f32, f32) {
+    let angle = rotation.to_radians() + index as f32 * std::f32::consts::TAU / sides as f32;
+    (
+        center_x + angle.cos() * radius,
+        center_y + angle.sin() * radius,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
-        SpawnDeathAbility,
+        Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
+        RegenAbility, SpawnDeathAbility,
     };
 
     #[derive(Clone)]
@@ -402,5 +616,49 @@ mod tests {
         assert!(ability.is_visible());
         assert_eq!(ability.data(), 7.5);
         assert!((ability.planned_heal_amount(2.0) - 12.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn force_field_regenerates_breaks_and_scales_radius_like_java_update() {
+        let mut ability = ForceFieldAbility::new(60.0, 0.1, 200.0, 300.0);
+        ability.was_broken = false;
+        ability.alpha = 1.0;
+
+        let broken = ability.update_state(0.0, 1.0);
+        assert!(broken.broke_this_tick);
+        assert!(broken.shield < 0.0);
+        assert_eq!(broken.radius_scale, 0.0);
+        assert!((broken.alpha - 0.9).abs() < 0.0001);
+
+        let mut active = ForceFieldAbility::new(60.0, 0.1, 200.0, 300.0);
+        let update = active.update_state(100.0, 1.0);
+        assert!(!update.broke_this_tick);
+        assert!((update.shield - 100.1).abs() < 0.0001);
+        assert!((update.radius_scale - 0.06).abs() < 0.0001);
+        assert!((active.real_radius() - 3.6).abs() < 0.0001);
+        assert_eq!(active.created_shield(), 200.0);
+    }
+
+    #[test]
+    fn force_field_absorbs_only_enemy_absorbable_bullets_inside_polygon() {
+        let mut ability = ForceFieldAbility::with_polygon(10.0, 0.1, 100.0, 60.0, 6, 0.0);
+        ability.radius_scale = 1.0;
+
+        let hit = ability
+            .absorb_bullet(50.0, 1, 2, true, (3.0, 0.0), (0.0, 0.0), 7.0)
+            .expect("bullet inside shield should be absorbed");
+        assert_eq!(hit.shield_after, 43.0);
+        assert_eq!(hit.alpha, 1.0);
+        assert!(hit.absorbed);
+
+        assert!(ability
+            .absorb_bullet(50.0, 1, 1, true, (3.0, 0.0), (0.0, 0.0), 7.0)
+            .is_none());
+        assert!(ability
+            .absorb_bullet(50.0, 1, 2, false, (3.0, 0.0), (0.0, 0.0), 7.0)
+            .is_none());
+        assert!(ability
+            .absorb_bullet(50.0, 1, 2, true, (30.0, 0.0), (0.0, 0.0), 7.0)
+            .is_none());
     }
 }

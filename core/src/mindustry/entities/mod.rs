@@ -20,8 +20,8 @@ pub mod unit_sorts;
 pub mod units;
 
 pub use abilities::{
-    Ability, BasicAbility, LiquidExplodeAbility, LiquidRegenAbility, RegenAbility,
-    SpawnDeathAbility,
+    Ability, BasicAbility, ForceFieldAbility, ForceFieldHit, ForceFieldUpdate,
+    LiquidExplodeAbility, LiquidRegenAbility, RegenAbility, SpawnDeathAbility,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
