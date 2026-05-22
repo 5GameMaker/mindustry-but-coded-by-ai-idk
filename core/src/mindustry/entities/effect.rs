@@ -876,6 +876,220 @@ impl ExplosionEffect {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParticleVectorInput {
+    pub angle_offset: f32,
+    pub length_factor: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParticleDrawKind {
+    Sprite {
+        region: String,
+        width: f32,
+        height: f32,
+        rotation: f32,
+    },
+    Line {
+        stroke: f32,
+        length: f32,
+        angle: f32,
+        cap: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParticleDrawItem {
+    pub x: f32,
+    pub y: f32,
+    pub kind: ParticleDrawKind,
+    pub light_radius: f32,
+    pub light_color: String,
+    pub light_opacity: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParticleDrawPlan {
+    pub color_from: String,
+    pub color_to: String,
+    pub color_mix: f32,
+    pub origin: (f32, f32),
+    pub requested_length: f32,
+    pub particles: Vec<ParticleDrawItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParticleEffect {
+    pub base: Effect,
+    pub color_from: String,
+    pub color_to: String,
+    pub particles: i32,
+    pub rand_length: bool,
+    pub casing_flip: bool,
+    pub cone: f32,
+    pub length: f32,
+    pub base_length: f32,
+    pub interp: EffectInterp,
+    pub size_interp: Option<EffectInterp>,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub light_scl: f32,
+    pub light_opacity: f32,
+    pub light_color: Option<String>,
+    pub spin: f32,
+    pub size_from: f32,
+    pub size_to: f32,
+    pub size_change_start: f32,
+    pub use_rotation: bool,
+    pub offset: f32,
+    pub region: String,
+    pub line: bool,
+    pub stroke_from: f32,
+    pub stroke_to: f32,
+    pub len_from: f32,
+    pub len_to: f32,
+    pub cap: bool,
+}
+
+impl Default for ParticleEffect {
+    fn default() -> Self {
+        Self {
+            base: Effect::default(),
+            color_from: "white".into(),
+            color_to: "white".into(),
+            particles: 6,
+            rand_length: true,
+            casing_flip: false,
+            cone: 180.0,
+            length: 20.0,
+            base_length: 0.0,
+            interp: EffectInterp::Linear,
+            size_interp: None,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            light_scl: 2.0,
+            light_opacity: 0.6,
+            light_color: None,
+            spin: 0.0,
+            size_from: 2.0,
+            size_to: 0.0,
+            size_change_start: 0.0,
+            use_rotation: true,
+            offset: 0.0,
+            region: "circle".into(),
+            line: false,
+            stroke_from: 2.0,
+            stroke_to: 0.0,
+            len_from: 4.0,
+            len_to: 2.0,
+            cap: true,
+        }
+    }
+}
+
+impl ParticleEffect {
+    pub fn init_defaults(&mut self) {
+        self.base.clip = self
+            .base
+            .clip
+            .max(self.length + self.size_from.max(self.size_to));
+        self.size_change_start = self.size_change_start.clamp(0.0, self.base.lifetime);
+        if self.size_interp.is_none() {
+            self.size_interp = Some(self.interp);
+        }
+    }
+
+    pub fn draw_plan(
+        &self,
+        params: &EffectRenderParams,
+        vectors: &[ParticleVectorInput],
+        texture_ratio: f32,
+    ) -> ParticleDrawPlan {
+        let real_rotation = if self.use_rotation {
+            if self.casing_flip {
+                params.rotation.abs()
+            } else {
+                params.rotation
+            }
+        } else {
+            self.base.base_rotation
+        };
+        let flip = if self.casing_flip {
+            -signum_nonzero(params.rotation)
+        } else {
+            1.0
+        };
+        let raw_fin = params.time / params.lifetime;
+        let fin = self.interp.scalar(raw_fin);
+        let size_interp = self.size_interp.unwrap_or(self.interp);
+        let size_curve = curve(raw_fin, self.size_change_start / params.lifetime, 1.0);
+        let rad = size_interp.apply(self.size_from, self.size_to, size_curve) * 2.0;
+        let offset = rotate_offset(real_rotation, self.offset_x * flip, self.offset_y);
+        let origin = (params.x + offset.0, params.y + offset.1);
+        let requested_length = self.length * fin + self.base_length;
+        let light_color = self
+            .light_color
+            .clone()
+            .unwrap_or_else(|| self.color_to.clone());
+
+        let particles = vectors
+            .iter()
+            .take(self.particles.max(0) as usize)
+            .map(|vector| {
+                let len = if self.rand_length {
+                    requested_length * vector.length_factor.clamp(0.0, 1.0)
+                } else {
+                    requested_length
+                };
+                let angle = real_rotation + vector.angle_offset.clamp(-self.cone, self.cone);
+                let local = (trnsx(angle, len), trnsy(angle, len));
+                let x = origin.0 + local.0;
+                let y = origin.1 + local.1;
+                if self.line {
+                    let stroke = size_interp.apply(self.stroke_from, self.stroke_to, raw_fin);
+                    let length = size_interp.apply(self.len_from, self.len_to, raw_fin);
+                    ParticleDrawItem {
+                        x,
+                        y,
+                        kind: ParticleDrawKind::Line {
+                            stroke,
+                            length,
+                            angle: local.1.atan2(local.0).to_degrees(),
+                            cap: self.cap,
+                        },
+                        light_radius: length * self.light_scl,
+                        light_color: light_color.clone(),
+                        light_opacity: self.light_opacity,
+                    }
+                } else {
+                    ParticleDrawItem {
+                        x,
+                        y,
+                        kind: ParticleDrawKind::Sprite {
+                            region: self.region.clone(),
+                            width: rad,
+                            height: rad / texture_ratio.max(f32::EPSILON),
+                            rotation: real_rotation + self.offset + params.time * self.spin,
+                        },
+                        light_radius: rad * self.light_scl,
+                        light_color: light_color.clone(),
+                        light_opacity: self.light_opacity,
+                    }
+                }
+            })
+            .collect();
+
+        ParticleDrawPlan {
+            color_from: self.color_from.clone(),
+            color_to: self.color_to.clone(),
+            color_mix: fin,
+            origin,
+            requested_length,
+            particles,
+        }
+    }
+}
+
 fn trnsx(angle: f32, len: f32) -> f32 {
     angle.to_radians().cos() * len
 }
@@ -891,6 +1105,21 @@ fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
 
 fn lerp(from: f32, to: f32, t: f32) -> f32 {
     from + (to - from) * t
+}
+
+fn curve(value: f32, start: f32, end: f32) -> f32 {
+    if (end - start).abs() <= f32::EPSILON {
+        return if value >= end { 1.0 } else { 0.0 };
+    }
+    ((value - start) / (end - start)).clamp(0.0, 1.0)
+}
+
+fn signum_nonzero(value: f32) -> f32 {
+    if value < 0.0 {
+        -1.0
+    } else {
+        1.0
+    }
 }
 
 pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: f32) -> f32 {
@@ -1393,6 +1622,84 @@ mod tests {
         assert_eq!(plan.sparks[0].length, 4.0);
         assert_eq!(plan.sparks[0].light_radius, 12.0);
         assert_eq!(plan.sparks[0].light_opacity, 0.7);
+    }
+
+    #[test]
+    fn particle_effect_init_and_draw_plan_cover_sprite_and_line_modes() {
+        let mut particle = ParticleEffect::default();
+        assert_eq!(particle.color_from, "white");
+        assert_eq!(particle.color_to, "white");
+        assert_eq!(particle.particles, 6);
+        assert!(particle.rand_length);
+        assert_eq!(particle.cone, 180.0);
+        assert_eq!(particle.length, 20.0);
+        assert_eq!(particle.light_scl, 2.0);
+        assert_eq!(particle.size_from, 2.0);
+        assert_eq!(particle.size_to, 0.0);
+        assert_eq!(particle.region, "circle");
+        assert!(!particle.line);
+        particle.init_defaults();
+        assert_eq!(particle.base.clip, 22.0);
+        assert_eq!(particle.size_interp, Some(EffectInterp::Linear));
+
+        let params = EffectRenderParams {
+            id: 1,
+            color: DecalColor::WHITE,
+            time: 25.0,
+            lifetime: 50.0,
+            rotation: 30.0,
+            x: 0.0,
+            y: 0.0,
+            data: None,
+        };
+        let sprite = particle.draw_plan(
+            &params,
+            &[ParticleVectorInput {
+                angle_offset: 0.0,
+                length_factor: 1.0,
+            }],
+            2.0,
+        );
+        assert_eq!(sprite.color_mix, 0.5);
+        assert_eq!(sprite.requested_length, 10.0);
+        assert!((sprite.particles[0].x - 8.660254).abs() < 0.0001);
+        assert!((sprite.particles[0].y - 5.0).abs() < 0.0001);
+        assert_eq!(
+            sprite.particles[0].kind,
+            ParticleDrawKind::Sprite {
+                region: "circle".into(),
+                width: 2.0,
+                height: 1.0,
+                rotation: 30.0,
+            }
+        );
+        assert_eq!(sprite.particles[0].light_radius, 4.0);
+        assert_eq!(sprite.particles[0].light_opacity, 0.6);
+
+        particle.line = true;
+        particle.rand_length = false;
+        particle.use_rotation = false;
+        particle.base.base_rotation = 90.0;
+        let line = particle.draw_plan(
+            &params,
+            &[ParticleVectorInput {
+                angle_offset: 0.0,
+                length_factor: 0.25,
+            }],
+            1.0,
+        );
+        assert!((line.particles[0].x).abs() < 0.0001);
+        assert!((line.particles[0].y - 10.0).abs() < 0.0001);
+        assert_eq!(
+            line.particles[0].kind,
+            ParticleDrawKind::Line {
+                stroke: 1.0,
+                length: 3.0,
+                angle: 90.0,
+                cap: true,
+            }
+        );
+        assert_eq!(line.particles[0].light_radius, 6.0);
     }
 
     #[test]
