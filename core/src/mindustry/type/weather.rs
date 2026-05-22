@@ -239,6 +239,15 @@ pub struct WeatherEntry {
     pub always: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeatherTriggerPlan {
+    pub weather: String,
+    pub intensity: f32,
+    pub duration: f32,
+    pub wind_x: f32,
+    pub wind_y: f32,
+}
+
 impl WeatherEntry {
     pub fn new(weather: &Weather) -> Self {
         Self::with_ranges(
@@ -297,8 +306,75 @@ pub fn logic_weather_event_from_state(state: &WeatherState) -> LogicWeatherEvent
     }
 }
 
+pub fn reset_weather_cooldowns_on_play(entries: &mut [WeatherEntry]) {
+    reset_weather_cooldowns_on_play_seeded(entries, random_seed());
+}
+
+pub fn reset_weather_cooldowns_on_play_seeded(entries: &mut [WeatherEntry], seed: u64) {
+    let mut rng = WeatherRandom::new(seed);
+    let mut order: Vec<usize> = (0..entries.len()).collect();
+    shuffle_indices(&mut order, &mut rng);
+
+    let mut sum = 0.0;
+    for index in order {
+        let cooldown = sum + weather_entry_cooldown(0.0, entries[index].max_frequency, rng.next());
+        entries[index].cooldown = cooldown;
+        sum += cooldown;
+    }
+}
+
+pub fn update_weather_entries<F>(
+    entries: &mut [WeatherEntry],
+    delta: f32,
+    mut is_active: F,
+) -> Vec<WeatherTriggerPlan>
+where
+    F: FnMut(&str) -> bool,
+{
+    update_weather_entries_seeded(entries, delta, &mut is_active, random_seed())
+}
+
+pub fn update_weather_entries_seeded<F>(
+    entries: &mut [WeatherEntry],
+    delta: f32,
+    mut is_active: F,
+    seed: u64,
+) -> Vec<WeatherTriggerPlan>
+where
+    F: FnMut(&str) -> bool,
+{
+    let mut rng = WeatherRandom::new(seed);
+    let mut plans = Vec::new();
+
+    for entry in entries {
+        entry.cooldown -= delta;
+
+        if (entry.cooldown < 0.0 || entry.always) && !is_active(&entry.weather) {
+            let duration = if entry.always {
+                f32::INFINITY
+            } else {
+                weather_entry_cooldown(entry.min_duration, entry.max_duration, rng.next())
+            };
+            entry.cooldown = duration
+                + weather_entry_cooldown(entry.min_frequency, entry.max_frequency, rng.next());
+            let (wind_x, wind_y) = random_wind_vector(&mut rng);
+
+            plans.push(WeatherTriggerPlan {
+                weather: entry.weather.clone(),
+                intensity: entry.intensity,
+                duration,
+                wind_x,
+                wind_y,
+            });
+        }
+    }
+
+    plans
+}
+
 fn random_weather_entry_cooldown(min_frequency: f32, max_frequency: f32) -> f32 {
-    weather_entry_cooldown(min_frequency, max_frequency, random_unit())
+    let mut rng = WeatherRandom::from_time();
+    weather_entry_cooldown(min_frequency, max_frequency, rng.next())
 }
 
 fn weather_entry_cooldown(min_frequency: f32, max_frequency: f32, random_unit: f32) -> f32 {
@@ -306,23 +382,52 @@ fn weather_entry_cooldown(min_frequency: f32, max_frequency: f32, random_unit: f
     min_frequency + (max_frequency - min_frequency) * unit
 }
 
-fn random_unit() -> f32 {
-    let seed = SystemTime::now()
+fn random_seed() -> u64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos() as u64)
-        .unwrap_or(0);
-    random_unit_from_seed(seed)
+        .unwrap_or(0)
 }
 
-fn random_unit_from_seed(mut seed: u64) -> f32 {
-    if seed == 0 {
-        seed = 0x9e37_79b9_7f4a_7c15;
+fn random_wind_vector(rng: &mut WeatherRandom) -> (f32, f32) {
+    let angle = rng.next() * std::f32::consts::PI * 2.0;
+    (angle.cos(), angle.sin())
+}
+
+fn shuffle_indices(indices: &mut [usize], rng: &mut WeatherRandom) {
+    for index in (1..indices.len()).rev() {
+        let swap_with = (rng.next() * (index as f32 + 1.0)).floor() as usize;
+        indices.swap(index, swap_with.min(index));
     }
-    seed ^= seed >> 12;
-    seed ^= seed << 25;
-    seed ^= seed >> 27;
-    let value = seed.wrapping_mul(0x2545_f491_4f6c_dd1d);
-    ((value >> 40) as f32) / ((1u64 << 24) as f32)
+}
+
+#[derive(Debug, Clone)]
+struct WeatherRandom {
+    state: u64,
+}
+
+impl WeatherRandom {
+    fn from_time() -> Self {
+        Self::new(random_seed())
+    }
+
+    fn new(seed: u64) -> Self {
+        Self {
+            state: if seed == 0 {
+                0x9e37_79b9_7f4a_7c15
+            } else {
+                seed
+            },
+        }
+    }
+
+    fn next(&mut self) -> f32 {
+        self.state ^= self.state >> 12;
+        self.state ^= self.state << 25;
+        self.state ^= self.state >> 27;
+        let value = self.state.wrapping_mul(0x2545_f491_4f6c_dd1d);
+        ((value >> 40) as f32) / ((1u64 << 24) as f32)
+    }
 }
 
 #[cfg(test)]
@@ -442,6 +547,83 @@ mod tests {
 
         let reversed = weather_entry_cooldown(30.0, 10.0, 0.25);
         assert_eq!(reversed, 25.0);
+    }
+
+    #[test]
+    fn play_event_reset_shuffles_and_staggers_weather_cooldowns_like_java() {
+        let weather = Weather::new(0, "rain");
+        let mut entries = vec![
+            WeatherEntry::with_ranges(&weather, 10.0, 20.0, 30.0, 40.0),
+            WeatherEntry::with_ranges(&weather, 10.0, 50.0, 30.0, 40.0),
+            WeatherEntry::with_ranges(&weather, 10.0, 80.0, 30.0, 40.0),
+        ];
+        for entry in &mut entries {
+            entry.cooldown = -1.0;
+        }
+
+        reset_weather_cooldowns_on_play_seeded(&mut entries, 12345);
+
+        assert!(entries.iter().all(|entry| entry.cooldown >= 0.0));
+        assert!(
+            entries[0].cooldown <= 20.0
+                || entries[1].cooldown <= 50.0
+                || entries[2].cooldown <= 80.0
+        );
+        assert!(entries
+            .iter()
+            .any(|entry| entry.cooldown > entry.max_frequency));
+
+        let first_pass = entries
+            .iter()
+            .map(|entry| entry.cooldown)
+            .collect::<Vec<_>>();
+        reset_weather_cooldowns_on_play_seeded(&mut entries, 12345);
+        let second_pass = entries
+            .iter()
+            .map(|entry| entry.cooldown)
+            .collect::<Vec<_>>();
+        assert_eq!(first_pass, second_pass);
+    }
+
+    #[test]
+    fn update_weather_entries_samples_duration_resets_cooldown_and_emits_trigger_plan() {
+        let weather = Weather::new(0, "sandstorm");
+        let mut entries = vec![WeatherEntry::with_ranges(&weather, 10.0, 20.0, 30.0, 40.0)];
+        entries[0].cooldown = 1.0;
+        entries[0].intensity = 0.65;
+
+        let plans = update_weather_entries_seeded(&mut entries, 2.0, |_| false, 999);
+
+        assert_eq!(plans.len(), 1);
+        let plan = &plans[0];
+        assert_eq!(plan.weather, "sandstorm");
+        assert_eq!(plan.intensity, 0.65);
+        assert!(plan.duration >= 30.0);
+        assert!(plan.duration <= 40.0);
+        assert!(entries[0].cooldown >= plan.duration + 10.0);
+        assert!(entries[0].cooldown <= plan.duration + 20.0);
+        let wind_len = (plan.wind_x * plan.wind_x + plan.wind_y * plan.wind_y).sqrt();
+        assert!((wind_len - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn update_weather_entries_respects_active_weather_and_always_entries() {
+        let weather = Weather::new(0, "rain");
+        let mut active_entries = vec![WeatherEntry::with_ranges(&weather, 10.0, 20.0, 30.0, 40.0)];
+        active_entries[0].cooldown = -1.0;
+
+        let plans = update_weather_entries_seeded(&mut active_entries, 1.0, |_| true, 1);
+        assert!(plans.is_empty());
+        assert_eq!(active_entries[0].cooldown, -2.0);
+
+        let mut always_entries = vec![WeatherEntry::with_ranges(&weather, 10.0, 20.0, 30.0, 40.0)];
+        always_entries[0].always = true;
+        always_entries[0].cooldown = 999.0;
+
+        let plans = update_weather_entries_seeded(&mut always_entries, 1.0, |_| false, 2);
+        assert_eq!(plans.len(), 1);
+        assert!(plans[0].duration.is_infinite());
+        assert!(always_entries[0].cooldown.is_infinite());
     }
 
     #[test]
