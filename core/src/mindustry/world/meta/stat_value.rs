@@ -1,4 +1,5 @@
 use super::StatUnit;
+use crate::mindustry::r#type::{ItemStack, LiquidStack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatValue {
@@ -28,9 +29,19 @@ pub enum StatValue {
         amount: i32,
         display_name: bool,
     },
+    Items {
+        stacks: Vec<ItemStack>,
+        display_name: bool,
+        time_period: Option<f32>,
+    },
     Liquid {
         name: String,
         amount: f32,
+        per_second: bool,
+    },
+    Liquids {
+        stacks: Vec<LiquidStack>,
+        time_period: f32,
         per_second: bool,
     },
     Blocks {
@@ -51,7 +62,9 @@ impl StatValue {
             StatValue::MultiplierModifier { .. } => "multiplierModifier",
             StatValue::PercentModifier { .. } => "percentModifier",
             StatValue::Item { .. } => "item",
+            StatValue::Items { .. } => "items",
             StatValue::Liquid { .. } => "liquid",
+            StatValue::Liquids { .. } => "liquids",
             StatValue::Blocks { .. } => "blocks",
         }
     }
@@ -129,6 +142,31 @@ impl StatValue {
                 amount,
                 if *display_name { "name" } else { "icon" }
             )],
+            StatValue::Items {
+                stacks,
+                display_name,
+                time_period,
+            } => stacks
+                .iter()
+                .map(|stack| {
+                    if let Some(time_period) = time_period {
+                        format!(
+                            "item:{}:{}:perSecond:{}:{}",
+                            stack.item,
+                            stack.amount,
+                            fix_value(stack.amount as f32 / (*time_period / 60.0)),
+                            if *display_name { "name" } else { "icon" }
+                        )
+                    } else {
+                        format!(
+                            "item:{}:{}:{}",
+                            stack.item,
+                            stack.amount,
+                            if *display_name { "name" } else { "icon" }
+                        )
+                    }
+                })
+                .collect(),
             StatValue::Liquid {
                 name,
                 amount,
@@ -138,6 +176,21 @@ impl StatValue {
                 fix_value(*amount),
                 if *per_second { "perSecond" } else { "raw" }
             )],
+            StatValue::Liquids {
+                stacks,
+                time_period,
+                per_second,
+            } => stacks
+                .iter()
+                .map(|stack| {
+                    format!(
+                        "liquid:{}:{}:{}",
+                        stack.liquid,
+                        fix_value(stack.amount * (60.0 / *time_period)),
+                        if *per_second { "perSecond" } else { "raw" }
+                    )
+                })
+                .collect(),
             StatValue::Blocks {
                 attribute,
                 floating,
@@ -230,6 +283,24 @@ mod tests {
             }
             .display_tokens(),
             vec!["8@unit.percent"]
+        );
+        assert_eq!(
+            StatValue::Items {
+                stacks: vec![ItemStack::new("copper", 2), ItemStack::new("lead", 3)],
+                display_name: false,
+                time_period: None
+            }
+            .display_tokens(),
+            vec!["item:copper:2:icon", "item:lead:3:icon"]
+        );
+        assert_eq!(
+            StatValue::Liquids {
+                stacks: vec![LiquidStack::new("water", 30.0)],
+                time_period: 120.0,
+                per_second: true
+            }
+            .display_tokens(),
+            vec!["liquid:water:15:perSecond"]
         );
     }
 }
