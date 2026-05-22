@@ -11,7 +11,7 @@ use crate::mindustry::net::{
     DebugStatusClientUnreliableCallPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection,
     PacketKind, ProviderEvent, RotateBlockCallPacket, SentPacket, StateSnapshotCallPacket,
-    Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
+    SteamAdminData, Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -121,6 +121,7 @@ pub struct NetServerState {
     pub active: bool,
     pub server: bool,
     pub administration: Administration,
+    pub steam_admin_data: SteamAdminData,
     pub listen_port: Option<u16>,
     pub connections: Vec<NetConnection>,
     pub connection_states: HashMap<i32, NetConnection>,
@@ -1006,7 +1007,10 @@ impl NetServer {
         context.subnet_banned = state
             .administration
             .is_subnet_banned(&context.connection_address);
-        context.id_banned = state.administration.is_id_banned(&normalized_uuid);
+        context.id_banned = state.administration.is_id_banned(&normalized_uuid)
+            || state
+                .steam_admin_data
+                .is_banned(&context.connection_address);
         context.whitelisted = state
             .administration
             .is_whitelisted(&normalized_uuid, &packet.usid);
@@ -1766,7 +1770,8 @@ mod tests {
         DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback,
         KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
         PingResponseCallPacket, ProviderEvent, RequestDebugStatusCallPacket, RotateBlockCallPacket,
-        SentPacket, StateSnapshotCallPacket, TileConfigCallPacket, TileTapCallPacket,
+        SentPacket, StateSnapshotCallPacket, SteamAdminData, TileConfigCallPacket,
+        TileTapCallPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
     use crate::mindustry::world::block::Block;
@@ -1941,6 +1946,26 @@ mod tests {
         state.administration.whitelist("uuid");
         let context = NetServer::connect_packet_validation_context(&state, 8, &packet);
         assert!(context.whitelisted);
+    }
+
+    #[test]
+    fn connect_packet_context_uses_steam_ban_data_for_steam_connections() {
+        let packet = connect_packet("player");
+        let mut state = NetServerState {
+            steam_admin_data: SteamAdminData::from_lists(["12345"], ["99999"]),
+            ..Default::default()
+        };
+        state
+            .connection_states
+            .insert(9, NetConnection::new("steam:12345"));
+
+        let context = NetServer::connect_packet_validation_context(&state, 9, &packet);
+
+        assert_eq!(context.connection_address, "steam:12345");
+        assert!(context.id_banned);
+
+        let plan = NetServer::validate_connect_packet(&packet, &context);
+        assert_eq!(plan.kick_reason(), Some(KickReason::Banned));
     }
 
     #[test]
