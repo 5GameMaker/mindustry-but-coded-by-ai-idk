@@ -1,4 +1,4 @@
-use crate::mindustry::r#type::Item;
+use crate::mindustry::r#type::{Item, Liquid};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BulletType {
@@ -593,6 +593,186 @@ impl MassDriverBolt {
             radius_scl: 1.0,
             damage_explosions,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidUpdatePlan {
+    pub vaporize: bool,
+    pub extinguish_fire: bool,
+    pub extinguish_intensity: f32,
+    pub remove: bool,
+    pub hit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiquidDrawPlan {
+    pub color_rgba: u32,
+    pub mix_color_rgba: u32,
+    pub mix: f32,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiquidHitPlan {
+    pub hit_effect: String,
+    pub deposit_puddle: bool,
+    pub puddle_size: f32,
+    pub extinguish_intensity: Option<f32>,
+    pub extinguish_offsets: Vec<(i32, i32)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiquidBulletType {
+    pub base: BulletType,
+    pub liquid: Option<Liquid>,
+    pub puddle_size: f32,
+    pub orb_size: f32,
+    pub boil_time: f32,
+    pub hit_color_rgba: u32,
+    pub light_color_rgba: u32,
+    pub despawn_effect: String,
+    pub hit_effect: String,
+    pub smoke_effect: String,
+    pub shoot_effect: String,
+    pub knockback: f32,
+    pub display_ammo_multiplier: bool,
+}
+
+impl Default for LiquidBulletType {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+impl LiquidBulletType {
+    pub fn new(liquid: Option<Liquid>) -> Self {
+        let mut base = BulletType {
+            speed: 3.5,
+            damage: 0.0,
+            ammo_multiplier: 1.0,
+            lifetime: 34.0,
+            status_duration: 60.0 * 2.0,
+            drag: 0.001,
+            ..Default::default()
+        };
+        let mut hit_color_rgba = 0xffff_ffff;
+        let mut light_color_rgba = 0x0000_0000;
+        if let Some(liquid) = liquid.as_ref() {
+            base.status = liquid.effect.clone().unwrap_or_else(|| "none".into());
+            hit_color_rgba = liquid.color_rgba;
+            light_color_rgba = liquid.light_color_rgba;
+            base.light_opacity = rgba_alpha(light_color_rgba);
+        }
+
+        Self {
+            base,
+            liquid,
+            puddle_size: 6.0,
+            orb_size: 3.0,
+            boil_time: 5.0,
+            hit_color_rgba,
+            light_color_rgba,
+            despawn_effect: "none".into(),
+            hit_effect: "hitLiquid".into(),
+            smoke_effect: "none".into(),
+            shoot_effect: "none".into(),
+            knockback: 0.55,
+            display_ammo_multiplier: false,
+        }
+    }
+
+    pub fn update_plan(
+        &self,
+        heat_env: f32,
+        time: f32,
+        random_boil_time: f32,
+        tile_has_fire: bool,
+    ) -> LiquidUpdatePlan {
+        let Some(liquid) = self.liquid.as_ref() else {
+            return LiquidUpdatePlan {
+                vaporize: false,
+                extinguish_fire: false,
+                extinguish_intensity: 0.0,
+                remove: false,
+                hit: false,
+            };
+        };
+
+        if liquid.will_boil(heat_env) && time >= random_boil_time {
+            return LiquidUpdatePlan {
+                vaporize: true,
+                extinguish_fire: false,
+                extinguish_intensity: 0.0,
+                remove: true,
+                hit: false,
+            };
+        }
+
+        if liquid.can_extinguish() && tile_has_fire {
+            return LiquidUpdatePlan {
+                vaporize: false,
+                extinguish_fire: true,
+                extinguish_intensity: 100.0,
+                remove: true,
+                hit: true,
+            };
+        }
+
+        LiquidUpdatePlan {
+            vaporize: false,
+            extinguish_fire: false,
+            extinguish_intensity: 0.0,
+            remove: false,
+            hit: false,
+        }
+    }
+
+    pub fn draw_plan(
+        &self,
+        heat_env: f32,
+        time: f32,
+        random_boil_time: f32,
+        fin: f32,
+        fout: f32,
+    ) -> Option<LiquidDrawPlan> {
+        let liquid = self.liquid.as_ref()?;
+        if liquid.will_boil(heat_env) {
+            Some(LiquidDrawPlan {
+                color_rgba: liquid.color_rgba,
+                mix_color_rgba: with_rgba_alpha(liquid.gas_color_rgba, 0x66),
+                mix: safe_div(time, random_boil_time),
+                radius: self.orb_size * (fin * 1.1 + 1.0),
+            })
+        } else {
+            Some(LiquidDrawPlan {
+                color_rgba: liquid.color_rgba,
+                mix_color_rgba: 0xffff_ffff,
+                mix: fout / 100.0,
+                radius: self.orb_size,
+            })
+        }
+    }
+
+    pub fn despawn_effect_plan(&self, heat_env: f32) -> Option<String> {
+        let liquid = self.liquid.as_ref()?;
+        (!liquid.will_boil(heat_env)).then(|| self.hit_effect.clone())
+    }
+
+    pub fn hit_plan(&self) -> Option<LiquidHitPlan> {
+        let liquid = self.liquid.as_ref()?;
+        let extinguishes_nearby = liquid.temperature <= 0.5 && liquid.flammability < 0.3;
+        Some(LiquidHitPlan {
+            hit_effect: self.hit_effect.clone(),
+            deposit_puddle: true,
+            puddle_size: self.puddle_size,
+            extinguish_intensity: extinguishes_nearby.then_some(400.0 * self.puddle_size / 6.0),
+            extinguish_offsets: if extinguishes_nearby {
+                vec![(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+            } else {
+                Vec::new()
+            },
+        })
     }
 }
 
@@ -1278,6 +1458,22 @@ fn trnsy(angle: f32, len: f32) -> f32 {
     angle.to_radians().sin() * len
 }
 
+fn rgba_alpha(rgba: u32) -> f32 {
+    (rgba & 0xff) as f32 / 255.0
+}
+
+fn with_rgba_alpha(rgba: u32, alpha: u8) -> u32 {
+    (rgba & 0xffff_ff00) | alpha as u32
+}
+
+fn safe_div(a: f32, b: f32) -> f32 {
+    if b.abs() <= f32::EPSILON {
+        0.0
+    } else {
+        a / b
+    }
+}
+
 fn pow3_out(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
 }
@@ -1673,6 +1869,75 @@ mod tests {
         assert!((explosion.power - 0.5 * 2.0_f32.powf(1.1) * 25.0).abs() < 0.0001);
         assert_eq!(explosion.radius_scl, 1.0);
         assert!(explosion.damage_explosions);
+    }
+
+    #[test]
+    fn liquid_bullet_plans_boil_extinguish_draw_and_puddle_effects() {
+        let mut water = Liquid::new(0, "water");
+        water.effect = Some("wet".into());
+        water.color_rgba = 0x3366_ccff;
+        water.gas_color_rgba = 0xaabb_ccff;
+        water.light_color_rgba = 0x1122_3380;
+        water.boil_point = 0.7;
+        water.temperature = 0.5;
+        water.flammability = 0.0;
+
+        let liquid = LiquidBulletType::new(Some(water));
+        assert_eq!(liquid.base.speed, 3.5);
+        assert_eq!(liquid.base.damage, 0.0);
+        assert_eq!(liquid.base.ammo_multiplier, 1.0);
+        assert_eq!(liquid.base.lifetime, 34.0);
+        assert_eq!(liquid.base.status, "wet");
+        assert_eq!(liquid.base.status_duration, 120.0);
+        assert_eq!(liquid.base.drag, 0.001);
+        assert_eq!(liquid.puddle_size, 6.0);
+        assert_eq!(liquid.orb_size, 3.0);
+        assert_eq!(liquid.boil_time, 5.0);
+        assert_eq!(liquid.hit_color_rgba, 0x3366_ccff);
+        assert_eq!(liquid.light_color_rgba, 0x1122_3380);
+        assert!((liquid.base.light_opacity - 128.0 / 255.0).abs() < 0.0001);
+        assert_eq!(liquid.hit_effect, "hitLiquid");
+        assert_eq!(liquid.knockback, 0.55);
+        assert!(!liquid.display_ammo_multiplier);
+
+        let boil = liquid.update_plan(1.0, 4.0, 3.5, true);
+        assert!(boil.vaporize);
+        assert!(boil.remove);
+        assert!(!boil.hit);
+        assert!(!boil.extinguish_fire);
+
+        let extinguish = liquid.update_plan(0.0, 1.0, 3.5, true);
+        assert!(!extinguish.vaporize);
+        assert!(extinguish.extinguish_fire);
+        assert_eq!(extinguish.extinguish_intensity, 100.0);
+        assert!(extinguish.remove);
+        assert!(extinguish.hit);
+
+        let boiling_draw = liquid
+            .draw_plan(1.0, 2.0, 4.0, 0.5, 0.25)
+            .expect("liquid draw plan");
+        assert_eq!(boiling_draw.color_rgba, 0x3366_ccff);
+        assert_eq!(boiling_draw.mix_color_rgba, 0xaabb_cc66);
+        assert_eq!(boiling_draw.mix, 0.5);
+        assert!((boiling_draw.radius - 4.65).abs() < 0.0001);
+
+        let normal_draw = liquid
+            .draw_plan(0.0, 2.0, 4.0, 0.5, 25.0)
+            .expect("normal liquid draw plan");
+        assert_eq!(normal_draw.mix_color_rgba, 0xffff_ffff);
+        assert_eq!(normal_draw.mix, 0.25);
+        assert_eq!(normal_draw.radius, 3.0);
+        assert!(liquid.despawn_effect_plan(1.0).is_none());
+        assert_eq!(liquid.despawn_effect_plan(0.0), Some("hitLiquid".into()));
+
+        let hit = liquid.hit_plan().expect("liquid hit plan");
+        assert!(hit.deposit_puddle);
+        assert_eq!(hit.puddle_size, 6.0);
+        assert_eq!(hit.extinguish_intensity, Some(400.0));
+        assert_eq!(
+            hit.extinguish_offsets,
+            vec![(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+        );
     }
 
     #[test]
