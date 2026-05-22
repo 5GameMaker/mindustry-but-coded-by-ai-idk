@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -16,11 +17,12 @@ use crate::mindustry::net::{
     PingLocationCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
     RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
-    SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
-    StateSnapshotCallPacket, StreamBuilder, Streamable, TakeItemsCallPacket, TileConfigCallPacket,
-    TileTapCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
-    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
-    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    SetLiquidCallPacket, SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+    SetUnitCommandCallPacket, SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBuilder,
+    Streamable, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+    TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -60,6 +62,37 @@ pub struct ClientInputSnapshot {
     pub building: bool,
     /// Java sends `Mechc.baseRotation()` here and `0` for non-mechs.
     pub base_rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientGameStateMirror {
+    pub wave_time: f32,
+    pub wave: i32,
+    pub enemies: i32,
+    pub paused: bool,
+    pub game_over: bool,
+    pub time_data: i32,
+    pub tps: u8,
+    pub rand0: i64,
+    pub rand1: i64,
+    pub core_data: Vec<u8>,
+}
+
+impl From<&StateSnapshotCallPacket> for ClientGameStateMirror {
+    fn from(snapshot: &StateSnapshotCallPacket) -> Self {
+        Self {
+            wave_time: snapshot.wave_time,
+            wave: snapshot.wave,
+            enemies: snapshot.enemies,
+            paused: snapshot.paused,
+            game_over: snapshot.game_over,
+            time_data: snapshot.time_data,
+            tps: snapshot.tps,
+            rand0: snapshot.rand0,
+            rand1: snapshot.rand1,
+            core_data: snapshot.core_data.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +202,15 @@ pub struct NetClientState {
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_at: Option<Instant>,
     pub state_snapshot_packets_seen: u64,
+    pub last_state_snapshot_mirror: Option<ClientGameStateMirror>,
+    pub last_set_rules: Option<SetRulesCallPacket>,
+    pub last_set_rules_at: Option<Instant>,
+    pub set_rules_packets_seen: u64,
+    pub last_rules_json: Option<String>,
+    pub last_set_rule: Option<SetRuleCallPacket>,
+    pub last_set_rule_at: Option<Instant>,
+    pub set_rule_packets_seen: u64,
+    pub rule_json_patches: BTreeMap<String, String>,
     pub last_client_plan_snapshot_received: Option<ClientPlanSnapshotReceivedCallPacket>,
     pub last_client_plan_snapshot_received_at: Option<Instant>,
     pub client_plan_snapshot_received_packets_seen: u64,
@@ -353,6 +395,14 @@ impl fmt::Debug for NetClientState {
                 "state_snapshot_packets_seen",
                 &self.state_snapshot_packets_seen,
             )
+            .field(
+                "last_state_snapshot_mirror",
+                &self.last_state_snapshot_mirror,
+            )
+            .field("set_rules_packets_seen", &self.set_rules_packets_seen)
+            .field("last_rules_json", &self.last_rules_json)
+            .field("set_rule_packets_seen", &self.set_rule_packets_seen)
+            .field("rule_json_patches", &self.rule_json_patches)
             .field(
                 "client_plan_snapshot_received_packets_seen",
                 &self.client_plan_snapshot_received_packets_seen,
@@ -1216,7 +1266,28 @@ impl NetClient {
                         state.state_snapshot_packets_seen += 1;
                         state.last_state_snapshot = Some(snapshot.clone());
                         state.last_state_snapshot_at = Some(now);
+                        state.last_state_snapshot_mirror =
+                            Some(ClientGameStateMirror::from(snapshot));
                         state.last_server_snapshot_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::SetRulesCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_rules_packets_seen += 1;
+                        state.last_rules_json = Some(packet.rules_json.clone());
+                        state.rule_json_patches.clear();
+                        state.last_set_rules = Some(packet.clone());
+                        state.last_set_rules_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::SetRuleCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_rule_packets_seen += 1;
+                        state
+                            .rule_json_patches
+                            .insert(packet.rule.clone(), packet.json_data.clone());
+                        state.last_set_rule = Some(packet.clone());
+                        state.last_set_rule_at = Some(now);
                         (false, false)
                     }
                     PacketKind::ClientPlanSnapshotReceivedCallPacket(snapshot) => {
@@ -1635,9 +1706,9 @@ mod tests {
         RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
         RequestUnitPayloadCallPacket, RotateBlockCallPacket, SendMessageCallPacket,
         SendMessageCallPacket2, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-        SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
-        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetUnitCommandCallPacket,
+        SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
+        TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
         TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
         UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
@@ -1948,6 +2019,20 @@ mod tests {
         assert_eq!(state.state_snapshot_packets_seen, 1);
         assert_eq!(state.last_state_snapshot.as_ref(), Some(&state_snapshot));
         assert!(state.last_state_snapshot_at.is_some());
+        let mirror = state
+            .last_state_snapshot_mirror
+            .as_ref()
+            .expect("state snapshot should mirror into lightweight game state");
+        assert_eq!(mirror.wave_time, state_snapshot.wave_time);
+        assert_eq!(mirror.wave, state_snapshot.wave);
+        assert_eq!(mirror.enemies, state_snapshot.enemies);
+        assert_eq!(mirror.paused, state_snapshot.paused);
+        assert_eq!(mirror.game_over, state_snapshot.game_over);
+        assert_eq!(mirror.time_data, state_snapshot.time_data);
+        assert_eq!(mirror.tps, state_snapshot.tps);
+        assert_eq!(mirror.rand0, state_snapshot.rand0);
+        assert_eq!(mirror.rand1, state_snapshot.rand1);
+        assert_eq!(mirror.core_data, state_snapshot.core_data);
         assert_eq!(state.entity_snapshot_packets_seen, 1);
         assert_eq!(state.last_entity_snapshot.as_ref(), Some(&entity_snapshot));
         assert!(state.last_entity_snapshot_at.is_some());
@@ -1998,12 +2083,86 @@ mod tests {
         let state = state.lock().unwrap();
         assert_eq!(state.state_snapshot_packets_seen, 0);
         assert!(state.last_state_snapshot.is_none());
+        assert!(state.last_state_snapshot_mirror.is_none());
         assert_eq!(state.entity_snapshot_packets_seen, 0);
         assert!(state.last_entity_snapshot.is_none());
         assert_eq!(state.hidden_snapshot_packets_seen, 0);
         assert!(state.last_hidden_snapshot.is_none());
         assert!(state.last_server_snapshot_at.is_none());
         assert!(state.last_packet.is_none());
+    }
+
+    #[test]
+    fn update_records_server_rule_packets_like_java_set_rules_calls() {
+        let client = NetClient::default();
+        let rules = SetRulesCallPacket {
+            rules_json: r#"{"waves":true,"waveSpacing":7200}"#.into(),
+        };
+        let rule = SetRuleCallPacket {
+            rule: "pvp".into(),
+            json_data: "true".into(),
+        };
+        let second_rule = SetRuleCallPacket {
+            rule: "unitCap".into(),
+            json_data: "42".into(),
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetRulesCallPacket(rules.clone()));
+            net.handle_client_received(PacketKind::SetRuleCallPacket(rule.clone()));
+            net.handle_client_received(PacketKind::SetRuleCallPacket(second_rule.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.set_rules_packets_seen, 1);
+        assert_eq!(state.last_set_rules.as_ref(), Some(&rules));
+        assert!(state.last_set_rules_at.is_some());
+        assert_eq!(
+            state.last_rules_json.as_deref(),
+            Some(rules.rules_json.as_str())
+        );
+        assert_eq!(state.set_rule_packets_seen, 2);
+        assert_eq!(state.last_set_rule.as_ref(), Some(&second_rule));
+        assert!(state.last_set_rule_at.is_some());
+        assert_eq!(
+            state.rule_json_patches.get("pvp").map(String::as_str),
+            Some(rule.json_data.as_str())
+        );
+        assert_eq!(
+            state.rule_json_patches.get("unitCap").map(String::as_str),
+            Some(second_rule.json_data.as_str())
+        );
+    }
+
+    #[test]
+    fn set_rules_replaces_recorded_rule_patch_mirror() {
+        let client = NetClient::default();
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetRuleCallPacket(SetRuleCallPacket {
+                rule: "pvp".into(),
+                json_data: "true".into(),
+            }));
+            net.handle_client_received(PacketKind::SetRulesCallPacket(SetRulesCallPacket {
+                rules_json: r#"{"pvp":false}"#.into(),
+            }));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.set_rule_packets_seen, 1);
+        assert_eq!(state.set_rules_packets_seen, 1);
+        assert!(state.rule_json_patches.is_empty());
+        assert_eq!(state.last_rules_json.as_deref(), Some(r#"{"pvp":false}"#));
     }
 
     #[test]
