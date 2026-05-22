@@ -5707,6 +5707,22 @@ pub struct RotateBlockCallPacket {
 }
 
 impl RotateBlockCallPacket {
+    pub fn client(build: BuildingRef, direction: bool) -> Self {
+        Self {
+            player: EntityRef::null(),
+            build,
+            direction,
+        }
+    }
+
+    pub fn server(player: EntityRef, build: BuildingRef, direction: bool) -> Self {
+        Self {
+            player,
+            build,
+            direction,
+        }
+    }
+
     pub fn read_from_client_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
         Ok(Self {
             player: EntityRef::null(),
@@ -6995,6 +7011,17 @@ pub struct TileTapCallPacket {
 }
 
 impl TileTapCallPacket {
+    pub fn client(tile: Option<i32>) -> Self {
+        Self {
+            player: EntityRef::null(),
+            tile,
+        }
+    }
+
+    pub fn server(player: EntityRef, tile: Option<i32>) -> Self {
+        Self { player, tile }
+    }
+
     pub fn read_from_client_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
         Ok(Self {
             player: EntityRef::null(),
@@ -7697,6 +7724,30 @@ mod tests {
             TileConfigCallPacket::read_from_server_payload(&mut bytes.as_slice()).unwrap(),
             rollback_packet
         );
+    }
+
+    #[test]
+    fn rotate_and_tile_tap_constructors_preserve_endpoint_payload_shapes() {
+        let build_pos = crate::mindustry::world::point2_pack(5, 6);
+        let tile_pos = crate::mindustry::world::point2_pack(7, 8);
+
+        let rotate_client = RotateBlockCallPacket::client(BuildingRef::new(build_pos), true);
+        assert_eq!(rotate_client.player, EntityRef::null());
+        assert_eq!(rotate_client.build, BuildingRef::new(build_pos));
+        assert!(rotate_client.direction);
+
+        let rotate_server =
+            RotateBlockCallPacket::server(EntityRef::new(9), BuildingRef::new(build_pos), false);
+        assert_eq!(rotate_server.player, EntityRef::new(9));
+        assert!(!rotate_server.direction);
+
+        let tap_client = TileTapCallPacket::client(Some(tile_pos));
+        assert_eq!(tap_client.player, EntityRef::null());
+        assert_eq!(tap_client.tile, Some(tile_pos));
+
+        let tap_server = TileTapCallPacket::server(EntityRef::new(10), Some(tile_pos));
+        assert_eq!(tap_server.player, EntityRef::new(10));
+        assert_eq!(tap_server.tile, Some(tile_pos));
     }
 
     #[test]

@@ -204,21 +204,17 @@ where
         rejection: None,
         previous_rotation: Some(previous_rotation),
         current_rotation: Some(build.rotation),
-        packet: Some(RotateBlockCallPacket {
-            player: context.player.unwrap_or_else(EntityRef::null),
-            build: BuildingRef::new(build.tile_pos),
+        packet: Some(RotateBlockCallPacket::server(
+            context.player.unwrap_or_else(EntityRef::null),
+            BuildingRef::new(build.tile_pos),
             direction,
-        }),
+        )),
         should_raise_validate: false,
     }
 }
 
 pub fn client_rotate_block_packet(build: &BuildingComp, direction: bool) -> RotateBlockCallPacket {
-    RotateBlockCallPacket {
-        player: EntityRef::null(),
-        build: BuildingRef::new(build.tile_pos),
-        direction,
-    }
+    RotateBlockCallPacket::client(BuildingRef::new(build.tile_pos), direction)
 }
 
 pub fn tile_tap(context: TileTapContext, tile: Option<i32>) -> TileTapOutcome {
@@ -231,18 +227,15 @@ pub fn tile_tap(context: TileTapContext, tile: Option<i32>) -> TileTapOutcome {
 
     TileTapOutcome {
         accepted: true,
-        packet: Some(TileTapCallPacket {
-            player: context.player.unwrap_or_else(EntityRef::null),
-            tile: Some(tile),
-        }),
+        packet: Some(TileTapCallPacket::server(
+            context.player.unwrap_or_else(EntityRef::null),
+            Some(tile),
+        )),
     }
 }
 
 pub fn client_tile_tap_packet(tile: Option<i32>) -> Option<TileTapCallPacket> {
-    tile.map(|tile| TileTapCallPacket {
-        player: EntityRef::null(),
-        tile: Some(tile),
-    })
+    tile.map(|tile| TileTapCallPacket::client(Some(tile)))
 }
 
 #[cfg(test)]
