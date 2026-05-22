@@ -37,7 +37,8 @@ pub use bullet::{
     ContinuousFlameBulletType, ContinuousLaserBulletType, EmpBulletType, EmpEnemyPowerPlan,
     EmpFriendlyBuildingPlan, EmpUnitHitPlan, FireBulletType, FireBulletUpdatePlan, FlakBulletType,
     FlakUpdatePlan, InterceptorBulletType, InterceptorHitPlan, LaserBoltBulletType,
-    LaserBoltDrawPlan, LightningBulletType, PointBulletType, PointLaserBulletType,
+    LaserBoltDrawPlan, LightningBulletType, MassDriverBolt, MassDriverDropPlan,
+    MassDriverExplosionPlan, MassDriverUpdatePlan, PointBulletType, PointLaserBulletType,
     PointLaserUpdatePlan, SpaceLiquidBulletType,
 };
 pub use comp::BuildingComp;

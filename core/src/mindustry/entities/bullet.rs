@@ -1,3 +1,5 @@
+use crate::mindustry::r#type::Item;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BulletType {
     pub name: String,
@@ -435,6 +437,162 @@ impl EmpBulletType {
             apply_status: self.base.base.status != "none",
             status_duration: self.base.base.status_duration,
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MassDriverUpdatePlan {
+    pub hit: bool,
+    pub keep_flying: bool,
+    pub snap_position: Option<(f32, f32)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MassDriverDropPlan {
+    pub item_index: usize,
+    pub amount_dropped: i32,
+    pub angle: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MassDriverExplosionPlan {
+    pub flammability: f32,
+    pub explosiveness: f32,
+    pub power: f32,
+    pub radius_scl: f32,
+    pub damage_explosions: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MassDriverBolt {
+    pub base: BasicBulletType,
+    pub despawn_effect: String,
+    pub hit_effect: String,
+}
+
+impl Default for MassDriverBolt {
+    fn default() -> Self {
+        let mut base = BasicBulletType::new(1.0, 75.0, "shell");
+        base.base.collides_tiles = false;
+        base.base.lifetime = 1.0;
+        base.width = 11.0;
+        base.height = 13.0;
+        base.shrink_y = 0.0;
+        Self {
+            base,
+            despawn_effect: "smeltsmoke".into(),
+            hit_effect: "hitBulletBig".into(),
+        }
+    }
+}
+
+impl MassDriverBolt {
+    pub fn invalid_data_plan(&self) -> MassDriverUpdatePlan {
+        MassDriverUpdatePlan {
+            hit: true,
+            keep_flying: false,
+            snap_position: None,
+        }
+    }
+
+    pub fn update_plan(
+        &self,
+        bullet_x: f32,
+        bullet_y: f32,
+        from_x: f32,
+        from_y: f32,
+        to_x: f32,
+        to_y: f32,
+        target_dead: bool,
+    ) -> MassDriverUpdatePlan {
+        if target_dead {
+            return MassDriverUpdatePlan {
+                hit: false,
+                keep_flying: true,
+                snap_position: None,
+            };
+        }
+
+        let hit_dst = 7.0;
+        let base_dst = dst(from_x, from_y, to_x, to_y);
+        let dst1 = dst(bullet_x, bullet_y, from_x, from_y);
+        let dst2 = dst(bullet_x, bullet_y, to_x, to_y);
+        let mut snap_position = None;
+        let mut hit = false;
+
+        if dst1 > base_dst {
+            let angle_to_target = angle_to_degrees(bullet_x, bullet_y, to_x, to_y);
+            let base_angle = angle_to_degrees(to_x, to_y, from_x, from_y);
+            if angle_near(angle_to_target, base_angle, 2.0) {
+                hit = true;
+                snap_position = Some((
+                    to_x + trnsx(base_angle, hit_dst),
+                    to_y + trnsy(base_angle, hit_dst),
+                ));
+            }
+        }
+
+        if (dst1 + dst2 - base_dst).abs() < 4.0 && dst2 <= hit_dst {
+            hit = true;
+        }
+
+        MassDriverUpdatePlan {
+            hit,
+            keep_flying: false,
+            snap_position,
+        }
+    }
+
+    pub fn despawn_drop_plans(
+        &self,
+        item_amounts: &[i32],
+        random_amounts: &[i32],
+        bullet_rotation: f32,
+        random_angle_offsets: &[f32],
+    ) -> Vec<MassDriverDropPlan> {
+        item_amounts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, amount)| {
+                let random_amount = random_amounts.get(index).copied().unwrap_or(0);
+                let amount_dropped = random_amount.clamp(0, (*amount).max(0));
+                (amount_dropped > 0).then(|| MassDriverDropPlan {
+                    item_index: index,
+                    amount_dropped,
+                    angle: bullet_rotation
+                        + random_angle_offsets.get(index).copied().unwrap_or(0.0),
+                })
+            })
+            .collect()
+    }
+
+    pub fn dynamic_explosion_plan(
+        &self,
+        items: &[Item],
+        item_amounts: &[i32],
+        damage_explosions: bool,
+    ) -> MassDriverExplosionPlan {
+        let mut explosiveness = 0.0;
+        let mut flammability = 0.0;
+        let mut power = 0.0;
+
+        for (index, amount) in item_amounts.iter().copied().enumerate() {
+            let Some(item) = items.get(index) else {
+                continue;
+            };
+            let amount = amount.max(0) as f32;
+            explosiveness += item.explosiveness * amount;
+            flammability += item.flammability * amount;
+            power += item.charge * amount.powf(1.1) * 25.0;
+        }
+
+        MassDriverExplosionPlan {
+            flammability: flammability / 10.0,
+            explosiveness: explosiveness / 10.0,
+            power,
+            radius_scl: 1.0,
+            damage_explosions,
+        }
     }
 }
 
@@ -1097,6 +1255,29 @@ pub fn explosion_bullet_type(splash_damage: f32, splash_damage_radius: f32) -> B
     }
 }
 
+fn dst(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn angle_to_degrees(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    (y2 - y1).atan2(x2 - x1).to_degrees()
+}
+
+fn angle_near(a: f32, b: f32, margin: f32) -> bool {
+    let delta = (a - b + 180.0).rem_euclid(360.0) - 180.0;
+    delta.abs() <= margin
+}
+
+fn trnsx(angle: f32, len: f32) -> f32 {
+    angle.to_radians().cos() * len
+}
+
+fn trnsy(angle: f32, len: f32) -> f32 {
+    angle.to_radians().sin() * len
+}
+
 fn pow3_out(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
 }
@@ -1429,6 +1610,69 @@ mod tests {
         assert!(unit.apply_status);
         assert_eq!(unit.status_duration, 480.0);
         assert!(emp.enemy_unit_plan(true, true).is_none());
+    }
+
+    #[test]
+    fn mass_driver_bolt_intersection_drops_and_explosion_stats_are_pure() {
+        let bolt = MassDriverBolt::default();
+        assert_eq!(bolt.base.base.speed, 1.0);
+        assert_eq!(bolt.base.base.damage, 75.0);
+        assert!(!bolt.base.base.collides_tiles);
+        assert_eq!(bolt.base.base.lifetime, 1.0);
+        assert_eq!((bolt.base.width, bolt.base.height), (11.0, 13.0));
+        assert_eq!(bolt.base.shrink_y, 0.0);
+        assert_eq!(bolt.base.sprite, "shell");
+        assert_eq!(bolt.despawn_effect, "smeltsmoke");
+        assert_eq!(bolt.hit_effect, "hitBulletBig");
+
+        assert!(bolt.invalid_data_plan().hit);
+        let dead_target = bolt.update_plan(95.0, 0.0, 0.0, 0.0, 100.0, 0.0, true);
+        assert!(!dead_target.hit);
+        assert!(dead_target.keep_flying);
+
+        let in_range = bolt.update_plan(95.0, 0.0, 0.0, 0.0, 100.0, 0.0, false);
+        assert!(in_range.hit);
+        assert_eq!(in_range.snap_position, None);
+
+        let overshot = bolt.update_plan(108.0, 0.0, 0.0, 0.0, 100.0, 0.0, false);
+        assert!(overshot.hit);
+        let snap = overshot
+            .snap_position
+            .expect("overshot hit should snap back");
+        assert!((snap.0 - 93.0).abs() < f32::EPSILON);
+        assert!(snap.1.abs() < 0.0001);
+
+        let drops = bolt.despawn_drop_plans(&[3, 0, 5], &[2, 4, 7], 10.0, &[1.0, 2.0, 3.0]);
+        assert_eq!(
+            drops,
+            vec![
+                MassDriverDropPlan {
+                    item_index: 0,
+                    amount_dropped: 2,
+                    angle: 11.0,
+                },
+                MassDriverDropPlan {
+                    item_index: 2,
+                    amount_dropped: 5,
+                    angle: 13.0,
+                },
+            ]
+        );
+
+        let mut coal = Item::new(0, "coal");
+        coal.explosiveness = 0.2;
+        coal.flammability = 0.4;
+        coal.charge = 0.0;
+        let mut thorium = Item::new(1, "thorium");
+        thorium.explosiveness = 0.1;
+        thorium.flammability = 0.0;
+        thorium.charge = 0.5;
+        let explosion = bolt.dynamic_explosion_plan(&[coal, thorium], &[4, 2], true);
+        assert_eq!(explosion.flammability, 0.16);
+        assert_eq!(explosion.explosiveness, 0.1);
+        assert!((explosion.power - 0.5 * 2.0_f32.powf(1.1) * 25.0).abs() < 0.0001);
+        assert_eq!(explosion.radius_scl, 1.0);
+        assert!(explosion.damage_explosions);
     }
 
     #[test]
