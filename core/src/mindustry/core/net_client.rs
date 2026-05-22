@@ -8,8 +8,8 @@ use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect,
-    ConnectConfirmCallPacket, ConnectPacket, DeletePlansCallPacket, Disconnect,
+    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandUnitsCallPacket,
+    Connect, ConnectConfirmCallPacket, ConnectPacket, DeletePlansCallPacket, Disconnect,
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
     PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
     PingLocationCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
@@ -195,6 +195,9 @@ pub struct NetClientState {
     pub last_delete_plans: Option<DeletePlansCallPacket>,
     pub last_delete_plans_at: Option<Instant>,
     pub delete_plans_packets_seen: u64,
+    pub last_command_units: Option<CommandUnitsCallPacket>,
+    pub last_command_units_at: Option<Instant>,
+    pub command_units_packets_seen: u64,
     pub last_building_control_select: Option<BuildingControlSelectCallPacket>,
     pub last_building_control_select_at: Option<Instant>,
     pub building_control_select_packets_seen: u64,
@@ -333,6 +336,10 @@ impl fmt::Debug for NetClientState {
                 &self.ping_location_packets_seen,
             )
             .field("delete_plans_packets_seen", &self.delete_plans_packets_seen)
+            .field(
+                "command_units_packets_seen",
+                &self.command_units_packets_seen,
+            )
             .field(
                 "building_control_select_packets_seen",
                 &self.building_control_select_packets_seen,
@@ -1160,6 +1167,13 @@ impl NetClient {
                         state.last_delete_plans_at = Some(now);
                         false
                     }
+                    PacketKind::CommandUnitsCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.command_units_packets_seen += 1;
+                        state.last_command_units = Some(packet.clone());
+                        state.last_command_units_at = Some(now);
+                        false
+                    }
                     PacketKind::BuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.building_control_select_packets_seen += 1;
@@ -1373,8 +1387,8 @@ mod tests {
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
         BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
-        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect,
-        DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandUnitsCallPacket,
+        Connect, DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
         HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
         PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
         PingLocationCallPacket, PingResponseCallPacket, RequestBuildPayloadCallPacket,
@@ -2156,6 +2170,15 @@ mod tests {
             player_id: Some(310),
             positions: vec![1, 2, 3],
         };
+        let command_units = CommandUnitsCallPacket {
+            player: EntityRef::new(311),
+            unit_ids: vec![77, 78],
+            build_target: secondary_build,
+            unit_target: UnitRef::Unit { id: 409 },
+            pos_target: Vec2::new(9.0, 10.0),
+            queue_command: true,
+            final_batch: false,
+        };
         let building_control_select = BuildingControlSelectCallPacket {
             player: EntityRef::new(306),
             build: primary_build,
@@ -2202,6 +2225,7 @@ mod tests {
             ));
             net.handle_client_received(PacketKind::PingLocationCallPacket(ping_location.clone()));
             net.handle_client_received(PacketKind::DeletePlansCallPacket(delete_plans.clone()));
+            net.handle_client_received(PacketKind::CommandUnitsCallPacket(command_units.clone()));
             net.handle_client_received(PacketKind::UnitBuildingControlSelectCallPacket(
                 unit_building_control_select.clone(),
             ));
@@ -2270,6 +2294,9 @@ mod tests {
         assert_eq!(state.delete_plans_packets_seen, 1);
         assert_eq!(state.last_delete_plans.as_ref(), Some(&delete_plans));
         assert!(state.last_delete_plans_at.is_some());
+        assert_eq!(state.command_units_packets_seen, 1);
+        assert_eq!(state.last_command_units.as_ref(), Some(&command_units));
+        assert!(state.last_command_units_at.is_some());
         assert_eq!(state.building_control_select_packets_seen, 1);
         assert_eq!(
             state.last_building_control_select.as_ref(),
