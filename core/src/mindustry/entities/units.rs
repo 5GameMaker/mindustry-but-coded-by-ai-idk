@@ -1,5 +1,6 @@
 use crate::mindustry::io::{Point2, TypeValue};
 use crate::mindustry::r#type::{StatusEffect, Weapon};
+use crate::mindustry::world::block::Block;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusEntry {
@@ -185,6 +186,10 @@ impl BuildPlan {
         }
     }
 
+    pub fn new_place_block(x: i32, y: i32, rotation: i32, block: &Block) -> Self {
+        Self::new_place(x, y, block.plan_rotation(rotation), block.name.clone())
+    }
+
     pub fn new_config(
         x: i32,
         y: i32,
@@ -195,6 +200,19 @@ impl BuildPlan {
         Self {
             config,
             ..Self::new_place(x, y, rotation, block)
+        }
+    }
+
+    pub fn new_config_block(
+        x: i32,
+        y: i32,
+        rotation: i32,
+        block: &Block,
+        config: TypeValue,
+    ) -> Self {
+        Self {
+            config,
+            ..Self::new_place_block(x, y, rotation, block)
         }
     }
 
@@ -235,6 +253,10 @@ impl BuildPlan {
         self.rotation = rotation;
         self.block = Some(block.into());
         self.breaking = false;
+    }
+
+    pub fn set_place_block(&mut self, x: i32, y: i32, rotation: i32, block: &Block) {
+        self.set_place(x, y, block.plan_rotation(rotation), block.name.clone());
     }
 
     pub fn set_break(&mut self) {
@@ -291,6 +313,7 @@ impl Default for BuildPlan {
 mod tests {
     use crate::mindustry::io::{Point2, TypeValue};
     use crate::mindustry::r#type::{StatusEffect, Weapon};
+    use crate::mindustry::world::block::Block;
 
     use super::{BuildPlan, StatusEntry, WeaponMount};
 
@@ -366,5 +389,28 @@ mod tests {
             }),
             string_config
         );
+    }
+
+    #[test]
+    fn build_plan_block_helpers_apply_block_plan_rotation() {
+        let mut block = Block::new(5, "sorter");
+
+        let locked = BuildPlan::new_place_block(1, 2, 3, &block);
+        assert_eq!(locked.block.as_deref(), Some("sorter"));
+        assert_eq!(locked.rotation, 0);
+
+        block.rotate = true;
+        let rotating =
+            BuildPlan::new_config_block(3, 4, 5, &block, TypeValue::String("cfg".into()));
+        assert_eq!(rotating.rotation, 1);
+        assert_eq!(rotating.config, TypeValue::String("cfg".into()));
+
+        block.rotate = false;
+        block.lock_rotation = false;
+        let mut plan = BuildPlan::new_break(0, 0);
+        plan.set_place_block(7, 8, -1, &block);
+        assert_eq!((plan.x, plan.y, plan.rotation), (7, 8, 3));
+        assert_eq!(plan.block.as_deref(), Some("sorter"));
+        assert!(!plan.breaking);
     }
 }
