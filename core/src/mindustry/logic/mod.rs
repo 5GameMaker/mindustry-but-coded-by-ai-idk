@@ -9,6 +9,7 @@ pub mod l_writable;
 pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
+pub mod radar_sort;
 pub mod ranged;
 pub mod senseable;
 pub mod settable;
@@ -23,6 +24,7 @@ pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
+pub use radar_sort::RadarSort;
 pub use ranged::Ranged;
 pub use senseable::Senseable;
 pub use settable::Settable;
@@ -9470,62 +9472,6 @@ impl RadarUnitView {
             is_boss: false,
             is_grounded: false,
             targetable: true,
-        }
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RadarSort {
-    Distance,
-    Health,
-    Shield,
-    Armor,
-    MaxHealth,
-}
-
-impl RadarSort {
-    pub const ALL: [RadarSort; 5] = [
-        RadarSort::Distance,
-        RadarSort::Health,
-        RadarSort::Shield,
-        RadarSort::Armor,
-        RadarSort::MaxHealth,
-    ];
-
-    pub const WIRE_NAMES: [&'static str; 5] =
-        ["distance", "health", "shield", "armor", "maxHealth"];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn wire_name(self) -> &'static str {
-        Self::WIRE_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_wire_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|value| value.wire_name() == name)
-    }
-
-    pub fn score(self, origin_x: f32, origin_y: f32, other: &RadarUnitView) -> f32 {
-        match self {
-            RadarSort::Distance => {
-                let dx = origin_x - other.x;
-                let dy = origin_y - other.y;
-                -(dx * dx + dy * dy)
-            }
-            RadarSort::Health => other.health,
-            RadarSort::Shield => other.shield,
-            RadarSort::Armor => other.armor,
-            RadarSort::MaxHealth => other.max_health,
         }
     }
 }
