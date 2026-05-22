@@ -3,19 +3,54 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
+use crate::mindustry::entities::units::BuildPlan;
+use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
-    ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket,
-    ConnectPacket, Disconnect, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net, PacketKind,
-    PingCallPacket, ProviderEvent, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
+    Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
+    HiddenSnapshotCallPacket, Net, PacketKind, PingCallPacket, ProviderEvent,
+    StateSnapshotCallPacket, StreamBuilder, Streamable,
 };
+use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const PING_INTERVAL: Duration = Duration::from_secs(1);
+pub const CLIENT_PLAYER_SYNC_INTERVAL_MS: i64 = 66;
+pub const CLIENT_PLAN_SYNC_INTERVAL_MS: i64 = 500;
+pub const CLIENT_PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
 pub const DEFAULT_CLIENT_VERSION: i32 = 157;
 pub const DEFAULT_CLIENT_VERSION_TYPE: &str = "official";
 
 pub type PacketHandler = Arc<dyn Fn(PacketKind) + Send + Sync + 'static>;
 pub type BinaryPacketHandler = Arc<dyn Fn(&[u8]) + Send + Sync + 'static>;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientCameraView {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Default for ClientCameraView {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ClientInputSnapshot {
+    pub chatting: bool,
+    pub building: bool,
+    /// Java sends `Mechc.baseRotation()` here and `0` for non-mechs.
+    pub base_rotation: f32,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientConnectConfig {
@@ -115,7 +150,17 @@ pub struct NetClientState {
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_at: Option<Instant>,
     pub state_snapshot_packets_seen: u64,
+    pub last_client_plan_snapshot_received: Option<ClientPlanSnapshotReceivedCallPacket>,
+    pub last_client_plan_snapshot_received_at: Option<Instant>,
+    pub client_plan_snapshot_received_packets_seen: u64,
     pub last_server_snapshot_at: Option<Instant>,
+    pub last_sent_client_snapshot_id: i32,
+    pub last_sent_client_snapshot: Option<ClientSnapshotCallPacket>,
+    pub client_snapshot_packets_sent: u64,
+    pub last_client_snapshot_error: Option<String>,
+    pub last_sent_client_plan_snapshot: Option<ClientPlanSnapshotCallPacket>,
+    pub client_plan_snapshot_packets_sent: u64,
+    pub last_client_plan_snapshot_error: Option<String>,
     pub last_provider_events: Vec<ProviderEvent>,
     packet_handlers: Vec<PacketHandler>,
     binary_packet_handlers: Vec<BinaryPacketHandler>,
@@ -178,7 +223,23 @@ impl fmt::Debug for NetClientState {
                 "state_snapshot_packets_seen",
                 &self.state_snapshot_packets_seen,
             )
+            .field(
+                "client_plan_snapshot_received_packets_seen",
+                &self.client_plan_snapshot_received_packets_seen,
+            )
             .field("last_server_snapshot_at", &self.last_server_snapshot_at)
+            .field(
+                "last_sent_client_snapshot_id",
+                &self.last_sent_client_snapshot_id,
+            )
+            .field(
+                "client_snapshot_packets_sent",
+                &self.client_snapshot_packets_sent,
+            )
+            .field(
+                "client_plan_snapshot_packets_sent",
+                &self.client_plan_snapshot_packets_sent,
+            )
             .field(
                 "last_binary_stream_len",
                 &self.last_binary_stream.as_ref().map(|s| s.len()),
@@ -434,16 +495,242 @@ impl NetClient {
     }
 
     pub fn send_client_snapshot(&self, snapshot: ClientSnapshotCallPacket) -> io::Result<()> {
-        let mut net = self.net.lock().unwrap();
-        net.send(&PacketKind::ClientSnapshotCallPacket(snapshot), false)
+        let result = {
+            let mut net = self.net.lock().unwrap();
+            net.send(
+                &PacketKind::ClientSnapshotCallPacket(snapshot.clone()),
+                false,
+            )
+        };
+
+        let mut state = self.state.lock().unwrap();
+        match &result {
+            Ok(()) => {
+                state.client_snapshot_packets_sent += 1;
+                state.last_sent_client_snapshot = Some(snapshot);
+                state.last_client_snapshot_error = None;
+            }
+            Err(error) => {
+                state.last_client_snapshot_error = Some(error.to_string());
+            }
+        }
+        result
     }
 
     pub fn send_client_plan_snapshot(
         &self,
         snapshot: ClientPlanSnapshotCallPacket,
     ) -> io::Result<()> {
-        let mut net = self.net.lock().unwrap();
-        net.send(&PacketKind::ClientPlanSnapshotCallPacket(snapshot), false)
+        let result = {
+            let mut net = self.net.lock().unwrap();
+            net.send(
+                &PacketKind::ClientPlanSnapshotCallPacket(snapshot.clone()),
+                false,
+            )
+        };
+
+        let mut state = self.state.lock().unwrap();
+        match &result {
+            Ok(()) => {
+                state.client_plan_snapshot_packets_sent += 1;
+                state.last_sent_client_plan_snapshot = Some(snapshot);
+                state.last_client_plan_snapshot_error = None;
+            }
+            Err(error) => {
+                state.last_client_plan_snapshot_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn next_client_snapshot_packet(
+        &self,
+        player: &PlayerComp,
+        unit: Option<&UnitComp>,
+        input: ClientInputSnapshot,
+        camera: ClientCameraView,
+    ) -> ClientSnapshotCallPacket {
+        let snapshot_id = {
+            let mut state = self.state.lock().unwrap();
+            let snapshot_id = state.last_sent_client_snapshot_id;
+            state.last_sent_client_snapshot_id = state.last_sent_client_snapshot_id.wrapping_add(1);
+            snapshot_id
+        };
+
+        Self::client_snapshot_packet(snapshot_id, player, unit, input, camera)
+    }
+
+    pub fn send_next_client_snapshot(
+        &self,
+        player: &PlayerComp,
+        unit: Option<&UnitComp>,
+        input: ClientInputSnapshot,
+        camera: ClientCameraView,
+    ) -> io::Result<ClientSnapshotCallPacket> {
+        let snapshot = self.next_client_snapshot_packet(player, unit, input, camera);
+        self.send_client_snapshot(snapshot.clone())?;
+        Ok(snapshot)
+    }
+
+    pub fn client_snapshot_packet(
+        snapshot_id: i32,
+        player: &PlayerComp,
+        unit: Option<&UnitComp>,
+        input: ClientInputSnapshot,
+        camera: ClientCameraView,
+    ) -> ClientSnapshotCallPacket {
+        let dead = player.dead();
+        let active_unit = if dead { None } else { unit };
+        let selected_block = player
+            .selected_block
+            .as_ref()
+            .map(|block| block.name.clone());
+        let plans = if player.is_builder() {
+            active_unit.and_then(|unit| {
+                if unit.builder.plans.is_empty() {
+                    None
+                } else {
+                    Some(
+                        unit.builder
+                            .plans
+                            .iter()
+                            .map(BuildPlanWire::from_build_plan)
+                            .collect(),
+                    )
+                }
+            })
+        } else {
+            None
+        };
+
+        ClientSnapshotCallPacket {
+            snapshot_id,
+            unit_id: active_unit.map_or(-1, UnitComp::id),
+            dead,
+            x: active_unit.map_or(player.x, UnitComp::x),
+            y: active_unit.map_or(player.y, UnitComp::y),
+            pointer_x: active_unit.map_or(0.0, |unit| unit.weapons.aim_x),
+            pointer_y: active_unit.map_or(0.0, |unit| unit.weapons.aim_y),
+            rotation: active_unit.map_or(0.0, UnitComp::rotation),
+            base_rotation: active_unit.map_or(0.0, |_| input.base_rotation),
+            x_velocity: active_unit.map_or(0.0, |unit| unit.vel.vel.x),
+            y_velocity: active_unit.map_or(0.0, |unit| unit.vel.vel.y),
+            mining: active_unit.and_then(|unit| unit.to_sync_wire().mine_tile),
+            boosting: player.boosting,
+            shooting: player.shooting,
+            chatting: input.chatting,
+            building: input.building,
+            selected_block,
+            selected_rotation: player.selected_rotation,
+            plans,
+            view_x: camera.x,
+            view_y: camera.y,
+            view_width: camera.width,
+            view_height: camera.height,
+        }
+    }
+
+    pub fn client_plan_snapshot_packets(
+        player: &mut PlayerComp,
+        plans: &[BuildPlan],
+    ) -> Vec<ClientPlanSnapshotCallPacket> {
+        Self::client_plan_snapshot_packets_with_limit(player, plans, MAX_PLAYER_PREVIEW_PLANS)
+    }
+
+    pub fn client_plan_snapshot_packets_with_limit(
+        player: &mut PlayerComp,
+        plans: &[BuildPlan],
+        max_preview_plans: usize,
+    ) -> Vec<ClientPlanSnapshotCallPacket> {
+        player.last_preview_plan_group = player.last_preview_plan_group.saturating_add(1);
+        let group_id = player.last_preview_plan_group;
+        let max_preview_plans = max_preview_plans.min(MAX_PLAYER_PREVIEW_PLANS);
+        let plans: Vec<_> = plans
+            .iter()
+            .take(max_preview_plans)
+            .map(BuildPlanWire::from_build_plan)
+            .collect();
+
+        if plans.is_empty() {
+            return vec![ClientPlanSnapshotCallPacket {
+                group_id,
+                plans: None,
+            }];
+        }
+
+        plans
+            .chunks(CLIENT_PLAN_PREVIEW_CHUNK_SIZE)
+            .map(|chunk| ClientPlanSnapshotCallPacket {
+                group_id,
+                plans: Some(chunk.to_vec()),
+            })
+            .collect()
+    }
+
+    pub fn send_client_plan_snapshots(
+        &self,
+        player: &mut PlayerComp,
+        plans: &[BuildPlan],
+    ) -> io::Result<usize> {
+        self.send_client_plan_snapshots_with_limit(player, plans, MAX_PLAYER_PREVIEW_PLANS)
+    }
+
+    pub fn send_client_plan_snapshots_with_limit(
+        &self,
+        player: &mut PlayerComp,
+        plans: &[BuildPlan],
+        max_preview_plans: usize,
+    ) -> io::Result<usize> {
+        let packets =
+            Self::client_plan_snapshot_packets_with_limit(player, plans, max_preview_plans);
+        let mut sent = 0;
+        let mut first_error = None;
+
+        for packet in packets {
+            match self.send_client_plan_snapshot(packet) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
+    }
+
+    pub fn apply_received_preview_plans_to_player(
+        player: &mut PlayerComp,
+        packet: &ClientPlanSnapshotReceivedCallPacket,
+        now_millis: i64,
+        max_preview_plans: usize,
+    ) -> io::Result<usize> {
+        let plans = packet
+            .plans
+            .as_ref()
+            .map(|plans| {
+                plans
+                    .iter()
+                    .map(BuildPlanWire::to_build_plan)
+                    .collect::<io::Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let count_base = if packet.group_id > player.last_preview_plan_group {
+            0
+        } else {
+            player.preview_plans_assembling.len()
+        };
+        player.handle_preview_plans(packet.group_id, &plans, now_millis, max_preview_plans);
+        Ok(player
+            .preview_plans_assembling
+            .len()
+            .saturating_sub(count_base))
     }
 
     pub fn update(&self) {
@@ -567,6 +854,13 @@ impl NetClient {
                         state.last_state_snapshot = Some(snapshot.clone());
                         state.last_state_snapshot_at = Some(now);
                         state.last_server_snapshot_at = Some(now);
+                        false
+                    }
+                    PacketKind::ClientPlanSnapshotReceivedCallPacket(snapshot) => {
+                        let now = Instant::now();
+                        state.client_plan_snapshot_received_packets_seen += 1;
+                        state.last_client_plan_snapshot_received = Some(snapshot.clone());
+                        state.last_client_plan_snapshot_received_at = Some(now);
                         false
                     }
                     _ => false,
@@ -727,14 +1021,23 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
+    use crate::mindustry::entities::comp::{PlayerComp, PlayerUnitState, UnitComp};
+    use crate::mindustry::entities::units::BuildPlan;
+    use crate::mindustry::io::{BuildPlanWire, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
-        ClientPlanSnapshotCallPacket, ClientSnapshotCallPacket, Connect, Disconnect, DoneCallback,
-        EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection,
-        NetProvider, PacketKind, PingResponseCallPacket, StateSnapshotCallPacket, StreamBegin,
-        StreamChunk, Streamable, WorldDataBeginCallPacket,
+        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+        ClientSnapshotCallPacket, Connect, Disconnect, DoneCallback, EntitySnapshotCallPacket,
+        HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
+        PingResponseCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
+        WorldDataBeginCallPacket,
     };
+    use crate::mindustry::r#type::UnitType;
+    use crate::mindustry::world::block::Block;
 
-    use super::{ClientConnectConfig, NetClient};
+    use super::{
+        ClientCameraView, ClientConnectConfig, ClientInputSnapshot, NetClient,
+        CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
+    };
 
     #[derive(Clone, Default)]
     struct CaptureProvider {
@@ -781,6 +1084,13 @@ mod tests {
         }
 
         fn close_server(&mut self) {}
+    }
+
+    fn unit_type() -> UnitType {
+        let mut unit = UnitType::new(1, "alpha");
+        unit.aim_dst = 12.0;
+        unit.build_speed = 1.0;
+        unit
     }
 
     #[test]
@@ -1112,6 +1422,172 @@ mod tests {
             })
         ));
         assert!(sent.iter().all(|(_, reliable)| !*reliable));
+    }
+
+    #[test]
+    fn next_client_snapshot_packet_mirrors_java_player_sync_shape() {
+        let client = NetClient::default();
+        let mut player = PlayerComp::default();
+        player.x = 100.0;
+        player.y = 200.0;
+        player.boosting = true;
+        player.shooting = true;
+        player.selected_rotation = 2;
+        player.selected_block = Some(Block::new(3, "router"));
+        player.set_unit_state(
+            PlayerUnitState::unit(34)
+                .with_valid(true)
+                .with_can_build(true),
+        );
+
+        let mut unit = UnitComp::new(34, unit_type(), TeamId(2));
+        unit.set_pos(10.0, 20.0);
+        unit.set_rotation(90.0);
+        unit.vel.vel = Vec2::new(1.5, -2.5);
+        unit.weapons.aim_x = 30.0;
+        unit.weapons.aim_y = 40.0;
+        unit.builder.plans.push_back(BuildPlan::new_config(
+            4,
+            5,
+            1,
+            "duo",
+            TypeValue::String("cfg".into()),
+        ));
+
+        let snapshot = client.next_client_snapshot_packet(
+            &player,
+            Some(&unit),
+            ClientInputSnapshot {
+                chatting: true,
+                building: true,
+                base_rotation: 15.0,
+            },
+            ClientCameraView {
+                x: 7.0,
+                y: 8.0,
+                width: 9.0,
+                height: 10.0,
+            },
+        );
+
+        assert_eq!(snapshot.snapshot_id, 0);
+        assert_eq!(snapshot.unit_id, 34);
+        assert!(!snapshot.dead);
+        assert_eq!((snapshot.x, snapshot.y), (10.0, 20.0));
+        assert_eq!((snapshot.pointer_x, snapshot.pointer_y), (30.0, 40.0));
+        assert_eq!(snapshot.rotation, 90.0);
+        assert_eq!(snapshot.base_rotation, 15.0);
+        assert_eq!((snapshot.x_velocity, snapshot.y_velocity), (1.5, -2.5));
+        assert!(snapshot.boosting);
+        assert!(snapshot.shooting);
+        assert!(snapshot.chatting);
+        assert!(snapshot.building);
+        assert_eq!(snapshot.selected_block.as_deref(), Some("router"));
+        assert_eq!(snapshot.selected_rotation, 2);
+        assert_eq!(snapshot.plans.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            snapshot.plans.as_ref().unwrap()[0].config,
+            TypeValue::String("cfg".into())
+        );
+        assert_eq!(
+            (
+                snapshot.view_x,
+                snapshot.view_y,
+                snapshot.view_width,
+                snapshot.view_height
+            ),
+            (7.0, 8.0, 9.0, 10.0)
+        );
+
+        let next = client.next_client_snapshot_packet(
+            &player,
+            Some(&unit),
+            ClientInputSnapshot::default(),
+            ClientCameraView::default(),
+        );
+        assert_eq!(next.snapshot_id, 1);
+    }
+
+    #[test]
+    fn client_plan_snapshot_packets_increment_group_and_chunk_preview_plans() {
+        let mut player = PlayerComp::default();
+        let plans: Vec<_> = (0..CLIENT_PLAN_PREVIEW_CHUNK_SIZE + 2)
+            .map(|index| BuildPlan::new_place(index as i32, index as i32 + 1, 0, "router"))
+            .collect();
+
+        let packets = NetClient::client_plan_snapshot_packets_with_limit(
+            &mut player,
+            &plans,
+            CLIENT_PLAN_PREVIEW_CHUNK_SIZE + 2,
+        );
+
+        assert_eq!(packets.len(), 2);
+        assert_eq!(player.last_preview_plan_group, 0);
+        assert_eq!(packets[0].group_id, 0);
+        assert_eq!(
+            packets[0].plans.as_ref().unwrap().len(),
+            CLIENT_PLAN_PREVIEW_CHUNK_SIZE
+        );
+        assert_eq!(packets[1].group_id, 0);
+        assert_eq!(packets[1].plans.as_ref().unwrap().len(), 2);
+
+        let empty = NetClient::client_plan_snapshot_packets(&mut player, &[]);
+        assert_eq!(player.last_preview_plan_group, 1);
+        assert_eq!(
+            empty,
+            vec![ClientPlanSnapshotCallPacket {
+                group_id: 1,
+                plans: None
+            }]
+        );
+    }
+
+    #[test]
+    fn update_records_received_preview_plan_packets_and_applies_to_player() {
+        let client = NetClient::default();
+        let packet = ClientPlanSnapshotReceivedCallPacket {
+            player_id: 42,
+            group_id: 3,
+            plans: Some(vec![BuildPlanWire::new_place_config(
+                1,
+                2,
+                0,
+                "router",
+                TypeValue::String("cfg".into()),
+            )]),
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::ClientPlanSnapshotReceivedCallPacket(
+                packet.clone(),
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.client_plan_snapshot_received_packets_seen, 1);
+        assert_eq!(
+            state.last_client_plan_snapshot_received.as_ref(),
+            Some(&packet)
+        );
+        assert!(state.last_client_plan_snapshot_received_at.is_some());
+        drop(state);
+
+        let mut player = PlayerComp::default();
+        let added = NetClient::apply_received_preview_plans_to_player(&mut player, &packet, 10, 10)
+            .unwrap();
+        assert_eq!(added, 1);
+        assert_eq!(player.preview_plans_assembling.len(), 1);
+        assert_eq!(player.last_preview_plan_group, 3);
+        assert!(player.receiving_new_plan_group);
+
+        let current = player.get_preview_plans(110);
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].config, TypeValue::String("cfg".into()));
     }
 
     #[test]
