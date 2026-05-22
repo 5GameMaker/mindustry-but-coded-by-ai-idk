@@ -1,5 +1,6 @@
 pub mod save;
 pub mod type_io;
+pub mod versions;
 
 pub use save::{
     backup_file_for_path, backup_file_name_for, collect_valid_deflated_save_slots,
@@ -33,4 +34,7 @@ pub use type_io::{
     write_unit_container, write_unit_ref, write_unit_sync, write_vec2, AbilityWire, BuildPlanWire,
     BuildingRef, ContentRef, EntityRef, MountWire, Point2, TeamId, TypeValue, UnitRef,
     UnitSyncContainer, UnitSyncWire, Vec2,
+};
+pub use versions::{
+    read_legacy_entity_groups, LegacyEntityChunk, LegacyEntityGroup, LegacyEntityGroups, Save1,
 };
