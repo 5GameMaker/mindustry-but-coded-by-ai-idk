@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LiquidStack {
     pub liquid: String,
     pub amount: f32,
@@ -67,6 +67,12 @@ impl fmt::Display for LiquidStack {
     }
 }
 
+impl PartialOrd for LiquidStack {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.liquid.cmp(&other.liquid))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +109,10 @@ mod tests {
             LiquidStack::list([("slag", 3.0)]),
             vec![LiquidStack::new("slag", 3.0)]
         );
+        assert_eq!(
+            LiquidStack::new("water", 1.0).partial_cmp(&LiquidStack::new("water", 999.0)),
+            Some(std::cmp::Ordering::Equal)
+        );
+        assert!(LiquidStack::new("oil", 999.0) < LiquidStack::new("water", 1.0));
     }
 }
