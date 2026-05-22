@@ -1,6 +1,7 @@
 pub mod block;
 pub mod blocks;
 pub mod cached_tile;
+pub mod color_mapper;
 pub mod consumers;
 pub mod directional_item_buffer;
 pub mod draw;
@@ -15,6 +16,7 @@ pub mod world_params;
 
 pub use block::{Block, BlockId, CacheLayer};
 pub use cached_tile::CachedTile;
+pub use color_mapper::{ColorMapper, BLACK_AIR_RGBA};
 pub use directional_item_buffer::{BufferItem, BufferItemLegacy, DirectionalItemBuffer};
 pub use edges::{get_edges, get_facing_edge, get_inside_edges, get_pixel_polygon, Point2, Vec2f};
 pub use item_buffer::{ItemBuffer, TimeItem};
