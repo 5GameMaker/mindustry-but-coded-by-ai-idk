@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     game::{GameStats, MapMarkers, Rules, Teams},
     maps::MapDescriptor,
+    net::StateSnapshotCallPacket,
     r#type::{MapLocales, Sector},
     world::blocks::Attributes,
 };
@@ -49,6 +50,21 @@ pub struct StateChangeEvent {
 impl StateChangeEvent {
     pub const fn new(from: GameStateState, to: GameStateState) -> Self {
         Self { from, to }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateSnapshotApplyResult {
+    pub wave_changed: bool,
+    pub state_change: Option<StateChangeEvent>,
+}
+
+impl StateSnapshotApplyResult {
+    pub const fn new(wave_changed: bool, state_change: Option<StateChangeEvent>) -> Self {
+        Self {
+            wave_changed,
+            state_change,
+        }
     }
 }
 
@@ -245,6 +261,31 @@ impl GameState {
             self.rules.default_team as u8,
         );
     }
+
+    pub fn apply_state_snapshot(
+        &mut self,
+        snapshot: &StateSnapshotCallPacket,
+    ) -> StateSnapshotApplyResult {
+        let wave_changed = self.wave != snapshot.wave;
+
+        self.game_over = snapshot.game_over;
+        self.wavetime = snapshot.wave_time;
+        self.wave = snapshot.wave;
+        self.enemies = snapshot.enemies;
+        self.server_tps = snapshot.tps as i32;
+
+        let state_change = if self.is_menu() {
+            None
+        } else {
+            self.set(if snapshot.paused {
+                GameStateState::Paused
+            } else {
+                GameStateState::Playing
+            })
+        };
+
+        StateSnapshotApplyResult::new(wave_changed, state_change)
+    }
 }
 
 pub fn empty_map_descriptor() -> MapDescriptor {
@@ -258,6 +299,7 @@ mod tests {
     use super::*;
     use crate::mindustry::{
         game::{CoreInfo, SpawnGroup, TEAM_CRUX},
+        net::StateSnapshotCallPacket,
         r#type::SectorPreset,
     };
 
@@ -384,5 +426,102 @@ mod tests {
             Some(GameStateState::Playing)
         );
         assert_eq!(GameStateState::from_java_name("missing"), None);
+    }
+
+    #[test]
+    fn apply_state_snapshot_updates_scalar_client_runtime_state() {
+        let mut state = GameState::new();
+        state.set(GameStateState::Playing);
+
+        let snapshot = StateSnapshotCallPacket {
+            wave_time: 12.5,
+            wave: 9,
+            enemies: 17,
+            paused: true,
+            game_over: true,
+            time_data: 456,
+            tps: 255,
+            rand0: 11,
+            rand1: 22,
+            core_data: vec![1, 2, 3],
+        };
+
+        let result = state.apply_state_snapshot(&snapshot);
+
+        assert_eq!(
+            result,
+            StateSnapshotApplyResult::new(
+                true,
+                Some(StateChangeEvent::new(
+                    GameStateState::Playing,
+                    GameStateState::Paused
+                ))
+            )
+        );
+        assert_eq!(state.wavetime, snapshot.wave_time);
+        assert_eq!(state.wave, snapshot.wave);
+        assert_eq!(state.enemies, snapshot.enemies);
+        assert_eq!(state.game_over, snapshot.game_over);
+        assert_eq!(state.server_tps, 255);
+        assert!(state.is_paused());
+
+        let next = StateSnapshotCallPacket {
+            wave_time: 1.0,
+            wave: 9,
+            enemies: 0,
+            paused: false,
+            game_over: false,
+            time_data: 789,
+            tps: 60,
+            rand0: 33,
+            rand1: 44,
+            core_data: Vec::new(),
+        };
+
+        let result = state.apply_state_snapshot(&next);
+
+        assert_eq!(
+            result,
+            StateSnapshotApplyResult::new(
+                false,
+                Some(StateChangeEvent::new(
+                    GameStateState::Paused,
+                    GameStateState::Playing
+                ))
+            )
+        );
+        assert_eq!(state.wavetime, next.wave_time);
+        assert_eq!(state.wave, next.wave);
+        assert_eq!(state.enemies, next.enemies);
+        assert_eq!(state.server_tps, 60);
+        assert!(state.is_playing());
+    }
+
+    #[test]
+    fn apply_state_snapshot_keeps_menu_state_like_java_guard() {
+        let mut state = GameState::new();
+        assert!(state.is_menu());
+
+        let snapshot = StateSnapshotCallPacket {
+            wave_time: 3.5,
+            wave: 4,
+            enemies: 5,
+            paused: true,
+            game_over: false,
+            time_data: 123,
+            tps: 30,
+            rand0: 0,
+            rand1: 0,
+            core_data: Vec::new(),
+        };
+
+        let result = state.apply_state_snapshot(&snapshot);
+
+        assert_eq!(result, StateSnapshotApplyResult::new(true, None));
+        assert!(state.is_menu());
+        assert_eq!(state.wavetime, snapshot.wave_time);
+        assert_eq!(state.wave, snapshot.wave);
+        assert_eq!(state.enemies, snapshot.enemies);
+        assert_eq!(state.server_tps, 30);
     }
 }
