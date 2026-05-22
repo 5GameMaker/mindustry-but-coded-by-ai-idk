@@ -36,8 +36,8 @@ impl Liquid {
         Self {
             base: UnlockableContentBase::new(id, ContentType::Liquid, name),
             gas: false,
-            color_rgba: 0xffffffff,
-            gas_color_rgba: 0xffffffff,
+            color_rgba: 0x000000ff,
+            gas_color_rgba: 0xbfbfbfff,
             bar_color_rgba: None,
             light_color_rgba: 0x00000000,
             flammability: 0.0,
@@ -150,8 +150,8 @@ mod tests {
         let liquid = Liquid::new(2, "water");
         assert_eq!(liquid.name(), "water");
         assert!(!liquid.gas);
-        assert_eq!(liquid.color_rgba, 0xffffffff);
-        assert_eq!(liquid.gas_color_rgba, 0xffffffff);
+        assert_eq!(liquid.color_rgba, 0x000000ff);
+        assert_eq!(liquid.gas_color_rgba, 0xbfbfbfff);
         assert_eq!(liquid.bar_color_rgba, None);
         assert_eq!(liquid.light_color_rgba, 0x00000000);
         assert_eq!(liquid.temperature, 0.5);
