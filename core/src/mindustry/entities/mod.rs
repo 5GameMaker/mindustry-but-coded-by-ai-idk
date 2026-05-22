@@ -34,8 +34,9 @@ pub use bullet::{
     bomb_bullet_type, empty_bullet_type, explosion_bullet_type, missile_bullet_type,
     ArtilleryBulletType, ArtilleryTrailPlan, BasicBulletDrawPlan, BasicBulletType,
     BulletCreatePlan, BulletType, ContinuousBulletType, ContinuousDamagePlan,
-    ContinuousFlameBulletType, ContinuousLaserBulletType, FireBulletType, FireBulletUpdatePlan,
-    FlakBulletType, FlakUpdatePlan, InterceptorBulletType, InterceptorHitPlan, LaserBoltBulletType,
+    ContinuousFlameBulletType, ContinuousLaserBulletType, EmpBulletType, EmpEnemyPowerPlan,
+    EmpFriendlyBuildingPlan, EmpUnitHitPlan, FireBulletType, FireBulletUpdatePlan, FlakBulletType,
+    FlakUpdatePlan, InterceptorBulletType, InterceptorHitPlan, LaserBoltBulletType,
     LaserBoltDrawPlan, LightningBulletType, PointBulletType, PointLaserBulletType,
     PointLaserUpdatePlan, SpaceLiquidBulletType,
 };

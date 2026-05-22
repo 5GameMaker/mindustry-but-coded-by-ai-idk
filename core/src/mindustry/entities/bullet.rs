@@ -24,6 +24,8 @@ pub struct BulletType {
     pub kill_shooter: bool,
     pub scaled_splash_damage: bool,
     pub impact: bool,
+    pub status: String,
+    pub status_duration: f32,
     pub pierce: bool,
     pub pierce_building: bool,
     pub remove_after_pierce: bool,
@@ -91,6 +93,8 @@ impl Default for BulletType {
             kill_shooter: false,
             scaled_splash_damage: false,
             impact: false,
+            status: "none".into(),
+            status_duration: 60.0 * 8.0,
             pierce: false,
             pierce_building: false,
             remove_after_pierce: true,
@@ -322,6 +326,115 @@ impl BasicBulletType {
             mix_t: fin.clamp(0.0, 1.0),
             draw_back: back_region_found,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmpFriendlyBuildingPlan {
+    pub apply_boost: bool,
+    pub boost_scale: f32,
+    pub boost_duration: f32,
+    pub heal_amount: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmpEnemyPowerPlan {
+    pub apply_slowdown: bool,
+    pub slowdown_scale: f32,
+    pub slowdown_duration: f32,
+    pub damage: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmpUnitHitPlan {
+    pub damage: f32,
+    pub apply_status: bool,
+    pub status_duration: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmpBulletType {
+    pub base: BasicBulletType,
+    pub radius: f32,
+    pub time_increase: f32,
+    pub time_duration: f32,
+    pub power_damage_scl: f32,
+    pub power_scl_decrease: f32,
+    pub hit_power_effect: String,
+    pub chain_effect: String,
+    pub apply_effect: String,
+    pub hit_units: bool,
+    pub unit_damage_scl: f32,
+}
+
+impl Default for EmpBulletType {
+    fn default() -> Self {
+        Self {
+            base: BasicBulletType::default(),
+            radius: 100.0,
+            time_increase: 2.5,
+            time_duration: 60.0 * 10.0,
+            power_damage_scl: 2.0,
+            power_scl_decrease: 0.2,
+            hit_power_effect: "hitEmpSpark".into(),
+            chain_effect: "chainEmp".into(),
+            apply_effect: "heal".into(),
+            hit_units: true,
+            unit_damage_scl: 0.7,
+        }
+    }
+}
+
+impl EmpBulletType {
+    pub fn new(speed: f32, damage: f32, sprite: impl Into<String>) -> Self {
+        let mut out = Self::default();
+        out.base = BasicBulletType::new(speed, damage, sprite);
+        out
+    }
+
+    pub fn friendly_building_plan(
+        &self,
+        has_power: bool,
+        can_overdrive: bool,
+        time_scale: f32,
+        damaged: bool,
+        max_health: f32,
+    ) -> EmpFriendlyBuildingPlan {
+        EmpFriendlyBuildingPlan {
+            apply_boost: has_power && can_overdrive && time_scale < self.time_increase,
+            boost_scale: self.time_increase,
+            boost_duration: self.time_duration,
+            heal_amount: if has_power && damaged {
+                self.base.base.heal_percent / 100.0 * max_health + self.base.base.heal_amount
+            } else {
+                0.0
+            },
+        }
+    }
+
+    pub fn enemy_power_plan(
+        &self,
+        has_power_graph: bool,
+        last_power_produced: f32,
+    ) -> Option<EmpEnemyPowerPlan> {
+        (has_power_graph && last_power_produced > 0.0).then_some(EmpEnemyPowerPlan {
+            apply_slowdown: true,
+            slowdown_scale: self.power_scl_decrease,
+            slowdown_duration: self.time_duration,
+            damage: self.base.base.damage * self.power_damage_scl,
+        })
+    }
+
+    pub fn enemy_unit_plan(
+        &self,
+        hittable: bool,
+        absorbed_by_shield: bool,
+    ) -> Option<EmpUnitHitPlan> {
+        (self.hit_units && hittable && !absorbed_by_shield).then_some(EmpUnitHitPlan {
+            damage: self.base.base.damage * self.unit_damage_scl,
+            apply_status: self.base.base.status != "none",
+            status_duration: self.base.base.status_duration,
+        })
     }
 }
 
@@ -1272,6 +1385,50 @@ mod tests {
 
         basic.back_sprite = Some("custom-back".into());
         assert_eq!(basic.back_region_name(), "custom-back");
+    }
+
+    #[test]
+    fn emp_bullet_plans_building_power_and_unit_effects() {
+        let mut emp = EmpBulletType::new(4.0, 30.0, "emp");
+        emp.base.base.heal_percent = 5.0;
+        emp.base.base.heal_amount = 10.0;
+        emp.base.base.status = "shocked".into();
+
+        assert_eq!(emp.base.base.speed, 4.0);
+        assert_eq!(emp.base.base.damage, 30.0);
+        assert_eq!(emp.radius, 100.0);
+        assert_eq!(emp.time_increase, 2.5);
+        assert_eq!(emp.time_duration, 600.0);
+        assert_eq!(emp.power_damage_scl, 2.0);
+        assert_eq!(emp.power_scl_decrease, 0.2);
+        assert_eq!(emp.hit_power_effect, "hitEmpSpark");
+        assert_eq!(emp.chain_effect, "chainEmp");
+        assert_eq!(emp.apply_effect, "heal");
+        assert!(emp.hit_units);
+        assert_eq!(emp.unit_damage_scl, 0.7);
+
+        let friendly = emp.friendly_building_plan(true, true, 1.0, true, 400.0);
+        assert!(friendly.apply_boost);
+        assert_eq!(friendly.boost_scale, 2.5);
+        assert_eq!(friendly.boost_duration, 600.0);
+        assert_eq!(friendly.heal_amount, 30.0);
+
+        let enemy = emp
+            .enemy_power_plan(true, 12.0)
+            .expect("powered enemy building should be affected");
+        assert!(enemy.apply_slowdown);
+        assert_eq!(enemy.slowdown_scale, 0.2);
+        assert_eq!(enemy.slowdown_duration, 600.0);
+        assert_eq!(enemy.damage, 60.0);
+        assert!(emp.enemy_power_plan(true, 0.0).is_none());
+
+        let unit = emp
+            .enemy_unit_plan(true, false)
+            .expect("hittable enemy unit without absorber should be affected");
+        assert_eq!(unit.damage, 21.0);
+        assert!(unit.apply_status);
+        assert_eq!(unit.status_duration, 480.0);
+        assert!(emp.enemy_unit_plan(true, true).is_none());
     }
 
     #[test]
