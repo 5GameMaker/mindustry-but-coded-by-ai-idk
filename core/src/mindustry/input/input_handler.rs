@@ -23,7 +23,8 @@ use crate::mindustry::net::{
     RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
     SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket, TakeItemsCallPacket,
     TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket,
-    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
@@ -625,6 +626,22 @@ pub struct RemoveQueueBlockOutcome {
     pub packet: Option<RemoveQueueBlockCallPacket>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitBuildingControlSelectRejectReason {
+    MissingUnit,
+    MissingBuild,
+    UnitDead,
+    TeamMismatch,
+    NotSelectable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitBuildingControlSelectOutcome {
+    pub accepted: bool,
+    pub rejection: Option<UnitBuildingControlSelectRejectReason>,
+    pub packet: Option<UnitBuildingControlSelectCallPacket>,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -1029,6 +1046,16 @@ impl RemoveQueueBlockOutcome {
             accepted: false,
             rejection: Some(reason),
             removed: None,
+            packet: None,
+        }
+    }
+}
+
+impl UnitBuildingControlSelectOutcome {
+    fn rejected(reason: UnitBuildingControlSelectRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
             packet: None,
         }
     }
@@ -2837,6 +2864,64 @@ pub fn remove_queue_block_packet(x: i32, y: i32, breaking: bool) -> RemoveQueueB
     RemoveQueueBlockCallPacket { x, y, breaking }
 }
 
+pub fn unit_building_control_select<C>(
+    unit: Option<&UnitComp>,
+    build: Option<&BuildingComp>,
+    client_side: bool,
+    can_control_select: C,
+) -> UnitBuildingControlSelectOutcome
+where
+    C: FnOnce(&UnitComp, &BuildingComp) -> bool,
+{
+    let Some(unit) = unit else {
+        return UnitBuildingControlSelectOutcome::rejected(
+            UnitBuildingControlSelectRejectReason::MissingUnit,
+        );
+    };
+    if unit.health.dead {
+        return UnitBuildingControlSelectOutcome::rejected(
+            UnitBuildingControlSelectRejectReason::UnitDead,
+        );
+    }
+
+    let Some(build) = build else {
+        return UnitBuildingControlSelectOutcome::rejected(
+            UnitBuildingControlSelectRejectReason::MissingBuild,
+        );
+    };
+
+    if unit.team.team != build.team {
+        return UnitBuildingControlSelectOutcome::rejected(
+            UnitBuildingControlSelectRejectReason::TeamMismatch,
+        );
+    }
+
+    if !client_side && !can_control_select(unit, build) {
+        return UnitBuildingControlSelectOutcome::rejected(
+            UnitBuildingControlSelectRejectReason::NotSelectable,
+        );
+    }
+
+    UnitBuildingControlSelectOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(UnitBuildingControlSelectCallPacket {
+            unit: UnitRef::Unit { id: unit.id() },
+            build: BuildingRef::new(build.tile_pos),
+        }),
+    }
+}
+
+pub fn unit_building_control_select_packet(
+    unit: UnitRef,
+    build: &BuildingComp,
+) -> UnitBuildingControlSelectCallPacket {
+    UnitBuildingControlSelectCallPacket {
+        unit,
+        build: BuildingRef::new(build.tile_pos),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -4502,5 +4587,79 @@ mod tests {
                 breaking: true
             }
         );
+    }
+
+    #[test]
+    fn unit_building_control_select_accepts_same_team_selectable_building() {
+        let unit = UnitComp::new(90, unit_type(10), TeamId(1));
+        let building = BuildingComp::new(point2_pack(22, 24), command_block(), TeamId(1));
+
+        let outcome =
+            unit_building_control_select(Some(&unit), Some(&building), false, |unit, build| {
+                unit.id() == 90 && build.tile_pos == point2_pack(22, 24)
+            });
+
+        assert!(outcome.accepted);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 90 });
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(22, 24)));
+    }
+
+    #[test]
+    fn unit_building_control_select_rejects_server_side_not_selectable() {
+        let unit = UnitComp::new(91, unit_type(10), TeamId(1));
+        let building = BuildingComp::new(point2_pack(23, 25), command_block(), TeamId(1));
+
+        let outcome =
+            unit_building_control_select(Some(&unit), Some(&building), false, |_, _| false);
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(UnitBuildingControlSelectRejectReason::NotSelectable)
+        );
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn unit_building_control_select_client_side_skips_selectable_check() {
+        let unit = UnitComp::new(92, unit_type(10), TeamId(1));
+        let building = BuildingComp::new(point2_pack(24, 26), command_block(), TeamId(1));
+
+        let outcome =
+            unit_building_control_select(Some(&unit), Some(&building), true, |_, _| false);
+
+        assert!(outcome.accepted);
+        assert!(outcome.packet.is_some());
+    }
+
+    #[test]
+    fn unit_building_control_select_rejects_dead_or_other_team_unit() {
+        let mut unit = UnitComp::new(93, unit_type(10), TeamId(1));
+        unit.health.kill();
+        let building = BuildingComp::new(point2_pack(25, 27), command_block(), TeamId(1));
+
+        let dead = unit_building_control_select(Some(&unit), Some(&building), true, |_, _| true);
+        assert_eq!(
+            dead.rejection,
+            Some(UnitBuildingControlSelectRejectReason::UnitDead)
+        );
+
+        let unit = UnitComp::new(94, unit_type(10), TeamId(2));
+        let mismatch =
+            unit_building_control_select(Some(&unit), Some(&building), true, |_, _| true);
+        assert_eq!(
+            mismatch.rejection,
+            Some(UnitBuildingControlSelectRejectReason::TeamMismatch)
+        );
+    }
+
+    #[test]
+    fn unit_building_control_select_packet_uses_java_payload_shape() {
+        let building = BuildingComp::new(point2_pack(26, 28), command_block(), TeamId(1));
+        let packet = unit_building_control_select_packet(UnitRef::Unit { id: 95 }, &building);
+
+        assert_eq!(packet.unit, UnitRef::Unit { id: 95 });
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(26, 28)));
     }
 }
