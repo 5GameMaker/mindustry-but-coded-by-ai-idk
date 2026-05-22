@@ -16,6 +16,9 @@ pub use abilities::{
 pub use comp::WeaponsComp;
 pub use comp::{apply_armor, ShieldComp};
 pub use comp::{BlockUnitBuilding, BlockUnitComp};
+pub use comp::{
+    BuilderBlockInfo, BuilderComp, BuilderRequirement, BuilderSkipContext, BuilderTileSnapshot,
+};
 pub use comp::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use comp::{
     BulletComp, BulletSpec, ChildComp, ChildParent, DamageComp, DamageState, DrawComp,

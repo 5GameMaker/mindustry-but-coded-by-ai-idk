@@ -1,6 +1,7 @@
 //! Incremental Rust mirror of upstream `mindustry.entities.comp`.
 
 pub mod block_unit;
+pub mod builder;
 pub mod building_tether;
 pub mod bullet;
 pub mod child;
@@ -46,6 +47,9 @@ pub mod weapons;
 pub mod world_label;
 
 pub use block_unit::{BlockUnitBuilding, BlockUnitComp};
+pub use builder::{
+    BuilderBlockInfo, BuilderComp, BuilderRequirement, BuilderSkipContext, BuilderTileSnapshot,
+};
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
 pub use bullet::{BulletComp, BulletPropValue, BulletSpec};
 pub use child::{ChildComp, ChildParent};
