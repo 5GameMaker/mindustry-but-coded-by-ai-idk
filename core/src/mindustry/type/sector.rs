@@ -10,6 +10,7 @@ pub struct SectorPreset {
     pub id: ContentId,
     pub name: String,
     pub localized_name: String,
+    pub description: Option<String>,
     pub always_unlocked: bool,
     pub override_launch_defaults: bool,
     pub allow_launch_schematics: bool,
@@ -37,6 +38,7 @@ impl SectorPreset {
         Self {
             id: -1,
             localized_name: name.clone(),
+            description: None,
             name,
             always_unlocked: false,
             override_launch_defaults: false,
@@ -103,6 +105,11 @@ impl SectorPreset {
 
     pub fn localized(mut self, localized_name: impl Into<String>) -> Self {
         self.localized_name = localized_name.into();
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
         self
     }
 
@@ -178,7 +185,7 @@ impl SectorPreset {
     }
 
     pub fn is_hidden(&self) -> bool {
-        self.localized_name == self.name
+        self.description.is_none()
     }
 
     pub fn content_type(&self) -> crate::mindustry::ctype::ContentType {
@@ -474,6 +481,7 @@ mod tests {
         assert_eq!(preset.id(), -1);
         assert_eq!(preset.name, "groundZero");
         assert_eq!(preset.localized_name, "groundZero");
+        assert_eq!(preset.description, None);
         assert_eq!(preset.generator_map_name(), "groundZero");
         assert!(!preset.always_unlocked);
         assert!(!preset.override_launch_defaults);
@@ -499,6 +507,18 @@ mod tests {
             preset.content_type(),
             crate::mindustry::ctype::ContentType::Sector
         );
+    }
+
+    #[test]
+    fn sector_preset_hidden_depends_on_description_like_java() {
+        let localized_without_description =
+            SectorPreset::new("groundZero").localized("Ground Zero");
+        assert!(localized_without_description.is_hidden());
+
+        let described = SectorPreset::new("groundZero")
+            .localized("Ground Zero")
+            .description("The beginning.");
+        assert!(!described.is_hidden());
     }
 
     #[test]
