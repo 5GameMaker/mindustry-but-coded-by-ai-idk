@@ -4,11 +4,15 @@
 //! outside. Callers provide validation predicates and receive explicit plans
 //! such as tile-config rollback packets.
 
-use crate::mindustry::entities::comp::building::{
-    BuildingComp, BuildingConfigChange, BuildingConfigRollback,
+use crate::mindustry::entities::comp::{
+    building::{BuildingConfigChange, BuildingConfigRollback},
+    BuildingComp, PlayerComp, UnitComp,
 };
-use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue};
-use crate::mindustry::net::{RotateBlockCallPacket, TileConfigCallPacket, TileTapCallPacket};
+use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
+use crate::mindustry::net::{
+    RequestItemCallPacket, RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
+    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileConfigRejectReason {
@@ -77,6 +81,71 @@ pub struct TileTapOutcome {
     pub packet: Option<TileTapCallPacket>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestItemRejectReason {
+    MissingPlayer,
+    MissingBuild,
+    MissingUnit,
+    MissingItem,
+    NotInteractable,
+    OutOfRange,
+    PlayerDead,
+    NonPositiveAmount,
+    CannotInteract,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RequestItemContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+    pub within_range: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestItemOutcome {
+    pub accepted: bool,
+    pub rejection: Option<RequestItemRejectReason>,
+    pub requested_amount: i32,
+    pub accepted_amount: i32,
+    pub packet: Option<TakeItemsCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferInventoryRejectReason {
+    MissingPlayer,
+    MissingBuild,
+    MissingUnit,
+    MissingItem,
+    OutOfRange,
+    MissingItemStorage,
+    PlayerDead,
+    DepositBlocked,
+    EmptyStack,
+    CannotInteract,
+    DepositRateLimited,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TransferInventoryContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+    pub within_range: bool,
+    pub deposit_rate_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransferInventoryOutcome {
+    pub accepted: bool,
+    pub rejection: Option<TransferInventoryRejectReason>,
+    pub stack_amount: i32,
+    pub accepted_amount: i32,
+    pub packet: Option<TransferItemToCallPacket>,
+    pub should_raise_validate: bool,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -118,6 +187,46 @@ impl TileConfigOutcome {
             should_raise_validate: !context.local_player,
         }
     }
+}
+
+impl RequestItemOutcome {
+    fn rejected(
+        context: &RequestItemContext,
+        reason: RequestItemRejectReason,
+        requested_amount: i32,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            requested_amount,
+            accepted_amount: 0,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl TransferInventoryOutcome {
+    fn rejected(
+        context: &TransferInventoryContext,
+        reason: TransferInventoryRejectReason,
+        stack_amount: i32,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            stack_amount,
+            accepted_amount: 0,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+fn player_unit_ref(player: &PlayerComp, unit: &UnitComp) -> UnitRef {
+    player.unit_ref().unwrap_or(UnitRef::Unit { id: unit.id() })
 }
 
 pub fn tile_config<F, A>(
@@ -238,9 +347,300 @@ pub fn client_tile_tap_packet(tile: Option<i32>) -> Option<TileTapCallPacket> {
     tile.map(|tile| TileTapCallPacket::client(Some(tile)))
 }
 
+pub fn request_item<I, C, A>(
+    context: RequestItemContext,
+    player: Option<&PlayerComp>,
+    unit: Option<&UnitComp>,
+    build: Option<&BuildingComp>,
+    item: Option<String>,
+    amount: i32,
+    build_interactable: I,
+    can_interact: C,
+    admin_allows: A,
+) -> RequestItemOutcome
+where
+    I: FnOnce(&BuildingComp, &PlayerComp) -> bool,
+    C: FnOnce(&PlayerComp, &BuildingComp) -> bool,
+    A: FnOnce(&BuildingComp, &str, i32) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::MissingPlayer,
+            amount,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    let Some(build) = build else {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::MissingBuild,
+            amount,
+            false,
+        );
+    };
+
+    if !build_interactable(build, player) {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::NotInteractable,
+            amount,
+            false,
+        );
+    }
+
+    if !context.within_range {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::OutOfRange,
+            amount,
+            false,
+        );
+    }
+
+    if player.dead() {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::PlayerDead,
+            amount,
+            false,
+        );
+    }
+
+    if amount <= 0 {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::NonPositiveAmount,
+            amount,
+            false,
+        );
+    }
+
+    let Some(unit) = unit else {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::MissingUnit,
+            amount,
+            false,
+        );
+    };
+
+    let Some(item) = item else {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::MissingItem,
+            amount,
+            false,
+        );
+    };
+
+    if !can_interact(player, build) {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::CannotInteract,
+            amount,
+            true,
+        );
+    }
+
+    if !admin_allows(build, &item, amount) {
+        return RequestItemOutcome::rejected(
+            &context,
+            RequestItemRejectReason::AdminDenied,
+            amount,
+            true,
+        );
+    }
+
+    let accepted_amount = unit.items.max_accepted(&item).min(amount).max(0);
+    RequestItemOutcome {
+        accepted: true,
+        rejection: None,
+        requested_amount: amount,
+        accepted_amount,
+        packet: Some(TakeItemsCallPacket {
+            build: BuildingRef::new(build.tile_pos),
+            item: Some(item),
+            amount: accepted_amount,
+            to: player_unit_ref(player, unit),
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_request_item_packet(
+    build: &BuildingComp,
+    item: Option<String>,
+    amount: i32,
+) -> RequestItemCallPacket {
+    RequestItemCallPacket {
+        player: EntityRef::null(),
+        build: BuildingRef::new(build.tile_pos),
+        item,
+        amount,
+    }
+}
+
+pub fn transfer_inventory<D, I, A, S>(
+    context: TransferInventoryContext,
+    player: Option<&PlayerComp>,
+    unit: Option<&UnitComp>,
+    build: Option<&BuildingComp>,
+    allow_deposit: D,
+    can_interact: I,
+    admin_allows: A,
+    accept_stack: S,
+) -> TransferInventoryOutcome
+where
+    D: FnOnce(&BuildingComp) -> bool,
+    I: FnOnce(&PlayerComp, &BuildingComp) -> bool,
+    A: FnOnce(&PlayerComp, &BuildingComp, &str, i32) -> bool,
+    S: FnOnce(&BuildingComp, &UnitComp, &str, i32) -> i32,
+{
+    if context.player.is_none() || player.is_none() {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::MissingPlayer,
+            0,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    let Some(build) = build else {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::MissingBuild,
+            0,
+            false,
+        );
+    };
+
+    if !context.within_range {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::OutOfRange,
+            0,
+            false,
+        );
+    }
+
+    if build.items.is_none() {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::MissingItemStorage,
+            0,
+            false,
+        );
+    }
+
+    if player.dead() {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::PlayerDead,
+            0,
+            false,
+        );
+    }
+
+    if !allow_deposit(build) {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::DepositBlocked,
+            0,
+            false,
+        );
+    }
+
+    let Some(unit) = unit else {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::MissingUnit,
+            0,
+            false,
+        );
+    };
+
+    let stack_amount = unit.items.stack.amount;
+    if stack_amount <= 0 {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::EmptyStack,
+            stack_amount,
+            true,
+        );
+    }
+
+    let Some(item) = unit.items.item().map(str::to_owned) else {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::MissingItem,
+            stack_amount,
+            false,
+        );
+    };
+
+    if !can_interact(player, build) {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::CannotInteract,
+            stack_amount,
+            true,
+        );
+    }
+
+    if !context.deposit_rate_allowed {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::DepositRateLimited,
+            stack_amount,
+            true,
+        );
+    }
+
+    if !admin_allows(player, build, &item, stack_amount) {
+        return TransferInventoryOutcome::rejected(
+            &context,
+            TransferInventoryRejectReason::AdminDenied,
+            stack_amount,
+            true,
+        );
+    }
+
+    let accepted_amount = accept_stack(build, unit, &item, stack_amount)
+        .clamp(0, stack_amount)
+        .max(0);
+    TransferInventoryOutcome {
+        accepted: true,
+        rejection: None,
+        stack_amount,
+        accepted_amount,
+        packet: Some(TransferItemToCallPacket {
+            unit: player_unit_ref(player, unit),
+            item: Some(item),
+            amount: accepted_amount,
+            x: unit.x(),
+            y: unit.y(),
+            build: BuildingRef::new(build.tile_pos),
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_transfer_inventory_packet(build: &BuildingComp) -> TransferInventoryCallPacket {
+    TransferInventoryCallPacket {
+        player: EntityRef::null(),
+        build: BuildingRef::new(build.tile_pos),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::entities::comp::PlayerUnitState;
     use crate::mindustry::io::TeamId;
+    use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
     use crate::mindustry::world::point2_pack;
 
@@ -250,6 +650,19 @@ mod tests {
         let mut block = Block::new(5, "router");
         block.health = 100;
         block
+    }
+
+    fn item_block() -> Block {
+        let mut block = block();
+        block.has_items = true;
+        block.item_capacity = 30;
+        block
+    }
+
+    fn unit_type(item_capacity: i32) -> UnitType {
+        let mut unit_type = UnitType::new(1, "alpha");
+        unit_type.item_capacity = item_capacity;
+        unit_type
     }
 
     #[test]
@@ -445,5 +858,191 @@ mod tests {
         assert_eq!(packet.player, EntityRef::null());
         assert_eq!(packet.tile, Some(tile));
         assert!(client_tile_tap_packet(None).is_none());
+    }
+
+    #[test]
+    fn request_item_accepts_after_validation_and_plans_take_items() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(44).with_valid(true));
+        let unit = UnitComp::new(44, unit_type(10), TeamId(1));
+        let building = BuildingComp::new(point2_pack(8, 9), item_block(), TeamId(1));
+
+        let outcome = request_item(
+            RequestItemContext {
+                player: Some(EntityRef::new(7)),
+                local_player: false,
+                within_range: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            Some("copper".into()),
+            15,
+            |build, player| build.team == player.team,
+            |player, build| player.team == build.team,
+            |_, item, amount| item == "copper" && amount == 15,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.requested_amount, 15);
+        assert_eq!(outcome.accepted_amount, 10);
+        assert!(!outcome.should_raise_validate);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(8, 9)));
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!(packet.amount, 10);
+        assert_eq!(packet.to, UnitRef::Unit { id: 44 });
+    }
+
+    #[test]
+    fn request_item_rejects_admin_denied_as_validate_error() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(44).with_valid(true));
+        let unit = UnitComp::new(44, unit_type(10), TeamId(1));
+        let building = BuildingComp::new(point2_pack(8, 9), item_block(), TeamId(1));
+
+        let outcome = request_item(
+            RequestItemContext {
+                player: Some(EntityRef::new(7)),
+                local_player: false,
+                within_range: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            Some("lead".into()),
+            3,
+            |_, _| true,
+            |_, _| true,
+            |_, _, _| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(RequestItemRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn request_item_rejects_nonpositive_amount_without_validate_error() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(44).with_valid(true));
+        let unit = UnitComp::new(44, unit_type(10), TeamId(1));
+        let building = BuildingComp::new(point2_pack(8, 9), item_block(), TeamId(1));
+
+        let outcome = request_item(
+            RequestItemContext {
+                player: Some(EntityRef::new(7)),
+                local_player: false,
+                within_range: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            Some("copper".into()),
+            0,
+            |_, _| true,
+            |_, _| true,
+            |_, _, _| true,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(RequestItemRejectReason::NonPositiveAmount)
+        );
+        assert!(!outcome.should_raise_validate);
+    }
+
+    #[test]
+    fn client_request_item_packet_uses_client_payload_shape() {
+        let building = BuildingComp::new(point2_pack(10, 11), item_block(), TeamId(1));
+        let packet = client_request_item_packet(&building, Some("copper".into()), 4);
+
+        assert_eq!(packet.player, EntityRef::null());
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(10, 11)));
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!(packet.amount, 4);
+    }
+
+    #[test]
+    fn transfer_inventory_accepts_after_validation_and_plans_transfer_item() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(45).with_valid(true));
+        let mut unit = UnitComp::new(45, unit_type(10), TeamId(1));
+        unit.set_pos(12.0, 24.0);
+        unit.items.add_item_amount("copper", 7);
+        let building = BuildingComp::new(point2_pack(12, 13), item_block(), TeamId(1));
+
+        let outcome = transfer_inventory(
+            TransferInventoryContext {
+                player: Some(EntityRef::new(8)),
+                local_player: false,
+                within_range: true,
+                deposit_rate_allowed: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            |_| true,
+            |player, build| player.team == build.team,
+            |_, _, item, amount| item == "copper" && amount == 7,
+            |_, _, _, amount| amount - 2,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.stack_amount, 7);
+        assert_eq!(outcome.accepted_amount, 5);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 45 });
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!(packet.amount, 5);
+        assert_eq!((packet.x, packet.y), (12.0, 24.0));
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(12, 13)));
+    }
+
+    #[test]
+    fn transfer_inventory_rejects_rate_limited_as_validate_error() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(45).with_valid(true));
+        let mut unit = UnitComp::new(45, unit_type(10), TeamId(1));
+        unit.items.add_item_amount("lead", 2);
+        let building = BuildingComp::new(point2_pack(12, 13), item_block(), TeamId(1));
+
+        let outcome = transfer_inventory(
+            TransferInventoryContext {
+                player: Some(EntityRef::new(8)),
+                local_player: false,
+                within_range: true,
+                deposit_rate_allowed: false,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            |_| true,
+            |_, _| true,
+            |_, _, _, _| true,
+            |_, _, _, amount| amount,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(TransferInventoryRejectReason::DepositRateLimited)
+        );
+        assert!(outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn client_transfer_inventory_packet_uses_client_payload_shape() {
+        let building = BuildingComp::new(point2_pack(14, 15), item_block(), TeamId(1));
+        let packet = client_transfer_inventory_packet(&building);
+
+        assert_eq!(packet.player, EntityRef::null());
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(14, 15)));
     }
 }
