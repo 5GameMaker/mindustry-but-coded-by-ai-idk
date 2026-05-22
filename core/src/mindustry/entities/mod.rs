@@ -6,6 +6,7 @@ pub mod entity_indexer;
 pub mod fires;
 pub mod leg;
 pub mod leg_destroy_data;
+pub mod lightning;
 pub mod mover;
 pub mod pattern;
 pub mod predict;
@@ -71,6 +72,11 @@ pub use entity_indexer::EntityIndexer;
 pub use fires::{ExtinguishResult, FireCreateResult, FireRules, Fires, BASE_FIRE_LIFETIME};
 pub use leg::Leg;
 pub use leg_destroy_data::{LegDestroyData, TextureRegionRef};
+pub use lightning::{
+    create_lightning_plan, find_furthest_target, within_lightning_rect, LightningConfig,
+    LightningHitter, LightningInsulatorHit, LightningPlan, LightningPoint, LightningSeedState,
+    LightningSpawnPlan, LightningTarget, HIT_RANGE, MAX_CHAIN,
+};
 pub use mover::Mover;
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSine, ShootSpread,
