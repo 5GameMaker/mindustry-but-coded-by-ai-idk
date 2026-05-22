@@ -9764,6 +9764,19 @@ mod tests {
             rule
         );
 
+        let rules = SetRulesCallPacket {
+            rules_json: r#"{"waves":true,"waveSpacing":7200}"#.into(),
+        };
+        let mut bytes = Vec::new();
+        rules.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        write_rules_json(&mut expected, r#"{"waves":true,"waveSpacing":7200}"#).unwrap();
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            SetRulesCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            rules
+        );
+
         let prompt = TextInputCallPacket {
             text_input_id: 12,
             title: "title".into(),
