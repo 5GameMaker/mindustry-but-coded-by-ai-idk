@@ -21,10 +21,11 @@ use crate::mindustry::net::{
     PingLocationCallPacket, RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket,
     RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
     RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-    SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket, TakeItemsCallPacket,
-    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket,
-    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    SetLiquidsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
+    SetUnitCommandCallPacket, SetUnitStanceCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
+    TileTapCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
+    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
@@ -193,6 +194,88 @@ pub struct ClearLiquidsOutcome {
     pub cleared_current: Option<i16>,
     pub cleared_amount: f32,
     pub packet: Option<ClearLiquidsCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferItemEffectRejectReason {
+    MissingTarget,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransferItemEffectOutcome {
+    pub accepted: bool,
+    pub rejection: Option<TransferItemEffectRejectReason>,
+    pub packet: Option<TransferItemEffectCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeItemsRejectReason {
+    MissingBuild,
+    MissingItemStorage,
+    MissingUnit,
+    MissingItem,
+    UnknownItem,
+    NothingRemoved,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TakeItemsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<TakeItemsRejectReason>,
+    pub requested_amount: i32,
+    pub removed_amount: i32,
+    pub transfer_effects: Vec<TransferItemEffectCallPacket>,
+    pub packet: Option<TakeItemsCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferItemToUnitRejectReason {
+    MissingTarget,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransferItemToUnitOutcome {
+    pub accepted: bool,
+    pub rejection: Option<TransferItemToUnitRejectReason>,
+    pub item_added: bool,
+    pub packet: Option<TransferItemToUnitCallPacket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetTileItemsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<ItemSyncRejectReason>,
+    pub applied_positions: usize,
+    pub packet: Option<SetTileItemsCallPacket>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetTileLiquidsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<LiquidSyncRejectReason>,
+    pub applied_positions: usize,
+    pub packet: Option<SetTileLiquidsCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferItemToRejectReason {
+    MissingBuild,
+    MissingItemStorage,
+    MissingItem,
+    UnknownItem,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransferItemToOutcome {
+    pub accepted: bool,
+    pub rejection: Option<TransferItemToRejectReason>,
+    pub requested_amount: i32,
+    pub unit_previous_amount: Option<i32>,
+    pub unit_new_amount: Option<i32>,
+    pub building_previous_amount: i32,
+    pub building_new_amount: i32,
+    pub effect_count: usize,
+    pub packet: Option<TransferItemToCallPacket>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -772,6 +855,78 @@ impl ClearLiquidsOutcome {
     }
 }
 
+impl TransferItemEffectOutcome {
+    fn rejected(reason: TransferItemEffectRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            packet: None,
+        }
+    }
+}
+
+impl TakeItemsOutcome {
+    fn rejected(reason: TakeItemsRejectReason, requested_amount: i32) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            requested_amount,
+            removed_amount: 0,
+            transfer_effects: Vec::new(),
+            packet: None,
+        }
+    }
+}
+
+impl TransferItemToUnitOutcome {
+    fn rejected(reason: TransferItemToUnitRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            item_added: false,
+            packet: None,
+        }
+    }
+}
+
+impl SetTileItemsOutcome {
+    fn rejected(reason: ItemSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            applied_positions: 0,
+            packet: None,
+        }
+    }
+}
+
+impl SetTileLiquidsOutcome {
+    fn rejected(reason: LiquidSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            applied_positions: 0,
+            packet: None,
+        }
+    }
+}
+
+impl TransferItemToOutcome {
+    fn rejected(reason: TransferItemToRejectReason, requested_amount: i32) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            requested_amount,
+            unit_previous_amount: None,
+            unit_new_amount: None,
+            building_previous_amount: 0,
+            building_new_amount: 0,
+            effect_count: 0,
+            packet: None,
+        }
+    }
+}
+
 impl TransferInventoryOutcome {
     fn rejected(
         context: &TransferInventoryContext,
@@ -1063,6 +1218,10 @@ impl UnitBuildingControlSelectOutcome {
 
 fn player_unit_ref(player: &PlayerComp, unit: &UnitComp) -> UnitRef {
     player.unit_ref().unwrap_or(UnitRef::Unit { id: unit.id() })
+}
+
+fn item_transfer_effect_count(amount: i32) -> usize {
+    (amount / 3).clamp(1, 8) as usize
 }
 
 fn clamp_drop_position(unit: &UnitComp, x: f32, y: f32) -> (f32, f32) {
@@ -1543,6 +1702,281 @@ pub fn clear_liquids(build: Option<&mut BuildingComp>) -> ClearLiquidsOutcome {
         cleared_current,
         cleared_amount,
         packet: Some(ClearLiquidsCallPacket { build: build_ref }),
+    }
+}
+
+pub fn transfer_item_effect(
+    item: Option<String>,
+    x: f32,
+    y: f32,
+    to: Option<EntityRef>,
+) -> TransferItemEffectOutcome {
+    let Some(to) = to.filter(|to| to.id.is_some()) else {
+        return TransferItemEffectOutcome::rejected(TransferItemEffectRejectReason::MissingTarget);
+    };
+
+    TransferItemEffectOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(TransferItemEffectCallPacket { item, x, y, to }),
+    }
+}
+
+pub fn take_items<R>(
+    build: Option<&mut BuildingComp>,
+    item: Option<String>,
+    amount: i32,
+    to: Option<&mut UnitComp>,
+    resolve_item_id: R,
+) -> TakeItemsOutcome
+where
+    R: FnOnce(&str) -> Option<i16>,
+{
+    let Some(build) = build else {
+        return TakeItemsOutcome::rejected(TakeItemsRejectReason::MissingBuild, amount);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+    let (x, y) = (build.x, build.y);
+
+    let Some(items) = build.items.as_mut() else {
+        return TakeItemsOutcome::rejected(TakeItemsRejectReason::MissingItemStorage, amount);
+    };
+
+    let Some(to) = to else {
+        return TakeItemsOutcome::rejected(TakeItemsRejectReason::MissingUnit, amount);
+    };
+    let to_ref = UnitRef::Unit { id: to.id() };
+    let to_entity = EntityRef::new(to.id());
+
+    let Some(item_name) = item else {
+        return TakeItemsOutcome::rejected(TakeItemsRejectReason::MissingItem, amount);
+    };
+
+    let Some(item_id) = resolve_item_id(&item_name) else {
+        return TakeItemsOutcome::rejected(TakeItemsRejectReason::UnknownItem, amount);
+    };
+
+    let requested_removal = to.items.max_accepted(&item_name).min(amount).max(0);
+    let removed_amount = items.get(item_id).min(requested_removal).max(0);
+    if removed_amount == 0 {
+        return TakeItemsOutcome::rejected(TakeItemsRejectReason::NothingRemoved, amount);
+    }
+
+    items.remove(item_id, removed_amount);
+    to.items.add_item_amount(item_name.clone(), removed_amount);
+
+    let transfer_effects = (0..item_transfer_effect_count(removed_amount))
+        .map(|_| TransferItemEffectCallPacket {
+            item: Some(item_name.clone()),
+            x,
+            y,
+            to: to_entity,
+        })
+        .collect();
+
+    TakeItemsOutcome {
+        accepted: true,
+        rejection: None,
+        requested_amount: amount,
+        removed_amount,
+        transfer_effects,
+        packet: Some(TakeItemsCallPacket {
+            build: build_ref,
+            item: Some(item_name),
+            amount: removed_amount,
+            to: to_ref,
+        }),
+    }
+}
+
+pub fn transfer_item_to_unit(
+    item: Option<String>,
+    x: f32,
+    y: f32,
+    to: Option<&mut UnitComp>,
+    to_ref: Option<EntityRef>,
+) -> TransferItemToUnitOutcome {
+    let target_ref = to_ref
+        .filter(|to| to.id.is_some())
+        .or_else(|| to.as_ref().map(|unit| EntityRef::new(unit.id())));
+    let Some(target_ref) = target_ref else {
+        return TransferItemToUnitOutcome::rejected(TransferItemToUnitRejectReason::MissingTarget);
+    };
+
+    let mut item_added = false;
+    if let (Some(unit), Some(item_name)) = (to, item.clone()) {
+        unit.items.add_item(item_name);
+        item_added = true;
+    }
+
+    TransferItemToUnitOutcome {
+        accepted: true,
+        rejection: None,
+        item_added,
+        packet: Some(TransferItemToUnitCallPacket {
+            item,
+            x,
+            y,
+            to: target_ref,
+        }),
+    }
+}
+
+pub fn set_tile_items<R>(
+    buildings: &mut [BuildingComp],
+    item: Option<String>,
+    amount: i32,
+    positions: Vec<i32>,
+    resolve_item_id: R,
+) -> SetTileItemsOutcome
+where
+    R: FnOnce(&str) -> Option<i16>,
+{
+    let Some(item_name) = item else {
+        return SetTileItemsOutcome::rejected(ItemSyncRejectReason::MissingItem);
+    };
+    let Some(item_id) = resolve_item_id(&item_name) else {
+        return SetTileItemsOutcome::rejected(ItemSyncRejectReason::UnknownItem);
+    };
+
+    let mut applied_positions = 0;
+    for position in &positions {
+        if let Some(build) = buildings
+            .iter_mut()
+            .find(|build| build.tile_pos == *position)
+        {
+            if let Some(items) = build.items.as_mut() {
+                items.set(item_id, amount);
+                applied_positions += 1;
+            }
+        }
+    }
+
+    SetTileItemsOutcome {
+        accepted: true,
+        rejection: None,
+        applied_positions,
+        packet: Some(SetTileItemsCallPacket {
+            item: Some(item_name),
+            amount,
+            positions,
+        }),
+    }
+}
+
+pub fn set_tile_liquids<R>(
+    buildings: &mut [BuildingComp],
+    liquid: Option<String>,
+    amount: f32,
+    positions: Vec<i32>,
+    resolve_liquid_id: R,
+) -> SetTileLiquidsOutcome
+where
+    R: FnOnce(&str) -> Option<i16>,
+{
+    let Some(liquid_name) = liquid else {
+        return SetTileLiquidsOutcome::rejected(LiquidSyncRejectReason::MissingLiquid);
+    };
+    let Some(liquid_id) = resolve_liquid_id(&liquid_name) else {
+        return SetTileLiquidsOutcome::rejected(LiquidSyncRejectReason::UnknownLiquid);
+    };
+
+    let mut applied_positions = 0;
+    for position in &positions {
+        if let Some(build) = buildings
+            .iter_mut()
+            .find(|build| build.tile_pos == *position)
+        {
+            if let Some(liquids) = build.liquids.as_mut() {
+                liquids.set(liquid_id, amount);
+                applied_positions += 1;
+            }
+        }
+    }
+
+    SetTileLiquidsOutcome {
+        accepted: true,
+        rejection: None,
+        applied_positions,
+        packet: Some(SetTileLiquidsCallPacket {
+            liquid: Some(liquid_name),
+            amount,
+            positions,
+        }),
+    }
+}
+
+pub fn transfer_item_to<R>(
+    unit: Option<&mut UnitComp>,
+    item: Option<String>,
+    amount: i32,
+    x: f32,
+    y: f32,
+    build: Option<&mut BuildingComp>,
+    resolve_item_id: R,
+) -> TransferItemToOutcome
+where
+    R: FnOnce(&str) -> Option<i16>,
+{
+    let Some(build) = build else {
+        return TransferItemToOutcome::rejected(TransferItemToRejectReason::MissingBuild, amount);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+
+    if build.items.is_none() {
+        return TransferItemToOutcome::rejected(
+            TransferItemToRejectReason::MissingItemStorage,
+            amount,
+        );
+    }
+
+    let Some(item_name) = item else {
+        return TransferItemToOutcome::rejected(TransferItemToRejectReason::MissingItem, amount);
+    };
+    let Some(item_id) = resolve_item_id(&item_name) else {
+        return TransferItemToOutcome::rejected(TransferItemToRejectReason::UnknownItem, amount);
+    };
+
+    let items = build.items.as_mut().expect("checked item module presence");
+
+    let building_previous_amount = items.get(item_id);
+    let mut unit_ref = UnitRef::Null;
+    let mut unit_previous_amount = None;
+    let mut unit_new_amount = None;
+
+    if let Some(unit) = unit {
+        unit_ref = UnitRef::Unit { id: unit.id() };
+        if unit.items.item() == Some(item_name.as_str()) {
+            let previous = unit.items.stack.amount;
+            let next = (previous - amount).max(0);
+            unit.items.stack.amount = next;
+            unit_previous_amount = Some(previous);
+            unit_new_amount = Some(next);
+        }
+    }
+
+    if amount > 0 {
+        items.add(item_id, amount);
+    }
+    let building_new_amount = items.get(item_id);
+
+    TransferItemToOutcome {
+        accepted: true,
+        rejection: None,
+        requested_amount: amount,
+        unit_previous_amount,
+        unit_new_amount,
+        building_previous_amount,
+        building_new_amount,
+        effect_count: item_transfer_effect_count(amount),
+        packet: Some(TransferItemToCallPacket {
+            unit: unit_ref,
+            item: Some(item_name),
+            amount,
+            x,
+            y,
+            build: build_ref,
+        }),
     }
 }
 
@@ -3467,6 +3901,196 @@ mod tests {
             Some(LiquidSyncRejectReason::MissingLiquidStorage)
         );
         assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn transfer_item_effect_records_packet_and_rejects_null_target() {
+        let outcome =
+            transfer_item_effect(Some("copper".into()), 12.5, 24.25, Some(EntityRef::new(90)));
+
+        assert!(outcome.accepted);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!((packet.x, packet.y), (12.5, 24.25));
+        assert_eq!(packet.to, EntityRef::new(90));
+
+        let rejected =
+            transfer_item_effect(Some("copper".into()), 0.0, 0.0, Some(EntityRef::null()));
+        assert!(!rejected.accepted);
+        assert_eq!(
+            rejected.rejection,
+            Some(TransferItemEffectRejectReason::MissingTarget)
+        );
+        assert!(rejected.packet.is_none());
+    }
+
+    #[test]
+    fn take_items_removes_from_building_adds_to_unit_and_plans_effects() {
+        let mut building = BuildingComp::new(point2_pack(22, 24), item_block(), TeamId(1));
+        building.items.as_mut().unwrap().set(0, 8);
+        let mut unit = UnitComp::new(46, unit_type(5), TeamId(1));
+        unit.items.add_item_amount("copper", 2);
+
+        let outcome = take_items(
+            Some(&mut building),
+            Some("copper".into()),
+            6,
+            Some(&mut unit),
+            item_id,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.requested_amount, 6);
+        assert_eq!(outcome.removed_amount, 3);
+        assert_eq!(building.items.as_ref().unwrap().get(0), 5);
+        assert_eq!(unit.items.item(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 5);
+        assert_eq!(outcome.transfer_effects.len(), 1);
+        assert_eq!(outcome.transfer_effects[0].to, EntityRef::new(46));
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(22, 24)));
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!(packet.amount, 3);
+        assert_eq!(packet.to, UnitRef::Unit { id: 46 });
+    }
+
+    #[test]
+    fn take_items_rejects_when_unit_cannot_accept_without_mutating() {
+        let mut building = BuildingComp::new(point2_pack(23, 25), item_block(), TeamId(1));
+        building.items.as_mut().unwrap().set(0, 8);
+        let mut unit = UnitComp::new(47, unit_type(2), TeamId(1));
+        unit.items.add_item_amount("copper", 2);
+
+        let outcome = take_items(
+            Some(&mut building),
+            Some("copper".into()),
+            4,
+            Some(&mut unit),
+            item_id,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(TakeItemsRejectReason::NothingRemoved)
+        );
+        assert_eq!(building.items.as_ref().unwrap().get(0), 8);
+        assert_eq!(unit.items.stack.amount, 2);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn transfer_item_to_unit_adds_one_item_and_records_packet() {
+        let mut unit = UnitComp::new(48, unit_type(4), TeamId(1));
+        unit.set_pos(30.0, 31.0);
+
+        let outcome = transfer_item_to_unit(Some("lead".into()), 12.0, 13.0, Some(&mut unit), None);
+
+        assert!(outcome.accepted);
+        assert!(outcome.item_added);
+        assert_eq!(unit.items.item(), Some("lead"));
+        assert_eq!(unit.items.stack.amount, 1);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.item.as_deref(), Some("lead"));
+        assert_eq!((packet.x, packet.y), (12.0, 13.0));
+        assert_eq!(packet.to, EntityRef::new(48));
+    }
+
+    #[test]
+    fn set_tile_items_applies_best_effort_by_positions() {
+        let pos_a = point2_pack(24, 26);
+        let pos_b = point2_pack(25, 26);
+        let pos_c = point2_pack(26, 26);
+        let missing = point2_pack(27, 26);
+        let mut buildings = vec![
+            BuildingComp::new(pos_a, item_block(), TeamId(1)),
+            BuildingComp::new(pos_b, block(), TeamId(1)),
+            BuildingComp::new(pos_c, item_block(), TeamId(1)),
+        ];
+        buildings[0].items.as_mut().unwrap().set(0, 1);
+        buildings[2].items.as_mut().unwrap().set(0, 2);
+
+        let positions = vec![pos_a, pos_b, missing, pos_c];
+        let outcome = set_tile_items(
+            &mut buildings,
+            Some("copper".into()),
+            9,
+            positions.clone(),
+            item_id,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.applied_positions, 2);
+        assert_eq!(buildings[0].items.as_ref().unwrap().get(0), 9);
+        assert_eq!(buildings[2].items.as_ref().unwrap().get(0), 9);
+        assert!(buildings[1].items.is_none());
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!(packet.amount, 9);
+        assert_eq!(packet.positions, positions);
+    }
+
+    #[test]
+    fn set_tile_liquids_applies_best_effort_by_positions() {
+        let pos_a = point2_pack(28, 26);
+        let pos_b = point2_pack(29, 26);
+        let pos_c = point2_pack(30, 26);
+        let mut buildings = vec![
+            BuildingComp::new(pos_a, liquid_block(), TeamId(1)),
+            BuildingComp::new(pos_b, block(), TeamId(1)),
+            BuildingComp::new(pos_c, liquid_block(), TeamId(1)),
+        ];
+
+        let positions = vec![pos_a, pos_b, pos_c];
+        let outcome = set_tile_liquids(
+            &mut buildings,
+            Some("water".into()),
+            7.25,
+            positions.clone(),
+            liquid_id,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.applied_positions, 2);
+        assert_eq!(buildings[0].liquids.as_ref().unwrap().get(0), 7.25);
+        assert_eq!(buildings[2].liquids.as_ref().unwrap().get(0), 7.25);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.liquid.as_deref(), Some("water"));
+        assert_eq!(packet.amount, 7.25);
+        assert_eq!(packet.positions, positions);
+    }
+
+    #[test]
+    fn transfer_item_to_deducts_matching_unit_stack_and_adds_to_building() {
+        let mut unit = UnitComp::new(49, unit_type(10), TeamId(1));
+        unit.items.add_item_amount("copper", 7);
+        let mut building = BuildingComp::new(point2_pack(31, 26), item_block(), TeamId(1));
+        building.items.as_mut().unwrap().set(0, 1);
+
+        let outcome = transfer_item_to(
+            Some(&mut unit),
+            Some("copper".into()),
+            5,
+            11.0,
+            12.0,
+            Some(&mut building),
+            item_id,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.unit_previous_amount, Some(7));
+        assert_eq!(outcome.unit_new_amount, Some(2));
+        assert_eq!(unit.items.stack.amount, 2);
+        assert_eq!(outcome.building_previous_amount, 1);
+        assert_eq!(outcome.building_new_amount, 6);
+        assert_eq!(building.items.as_ref().unwrap().get(0), 6);
+        assert_eq!(outcome.effect_count, 1);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 49 });
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!(packet.amount, 5);
+        assert_eq!((packet.x, packet.y), (11.0, 12.0));
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(31, 26)));
     }
 
     #[test]
