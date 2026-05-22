@@ -1145,9 +1145,11 @@ mod tests {
         );
 
         let mut short = Weapon::new("short");
-        short.shoot_cone = 120.0;
+        short.bullet_range = 120.0;
+        short.shoot_cone = 12.0;
         let mut long = Weapon::new("long");
-        long.shoot_cone = 200.0;
+        long.bullet_range = 200.0;
+        long.shoot_cone = 8.0;
         unit.weapons = vec![short, long];
         assert_eq!(
             unit.attack_range_plan(4.0),
@@ -1251,7 +1253,8 @@ mod tests {
         let mut weapon = Weapon::new("flare-gun");
         weapon.rotate = false;
         weapon.reload = 20.0;
-        weapon.shoot_cone = 160.0;
+        weapon.bullet_range = 160.0;
+        weapon.shoot_cone = 12.0;
         unit.weapons.push(weapon);
 
         let plan = unit.pure_init_plan();

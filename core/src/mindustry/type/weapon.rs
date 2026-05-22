@@ -2,6 +2,9 @@
 pub struct Weapon {
     pub name: String,
     pub bullet: String,
+    /// Mirrors Java `bullet.range` while the Rust shell still stores the
+    /// projectile by name instead of an owned `BulletType`.
+    pub bullet_range: f32,
     pub eject_effect: String,
     pub display: bool,
     pub use_ammo: bool,
@@ -80,6 +83,7 @@ impl Weapon {
         Self {
             name: name.into(),
             bullet: String::new(),
+            bullet_range: 0.0,
             eject_effect: String::new(),
             display: true,
             use_ammo: true,
@@ -155,7 +159,7 @@ impl Weapon {
     }
 
     pub fn range(&self) -> f32 {
-        self.shoot_cone
+        self.bullet_range
     }
 
     pub fn shots_per_sec(&self, shots: f32) -> f32 {
@@ -197,5 +201,36 @@ impl Weapon {
 impl Default for Weapon {
     fn default() -> Self {
         Self::new("")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weapon_range_uses_bullet_range_not_shoot_cone_like_java() {
+        let mut weapon = Weapon::new("scattershot");
+        weapon.bullet_range = 175.0;
+        weapon.shoot_cone = 12.0;
+
+        assert_eq!(weapon.range(), 175.0);
+    }
+
+    #[test]
+    fn weapon_flip_keeps_bullet_range_and_mirrors_offsets_like_java_shell() {
+        let mut weapon = Weapon::new("left");
+        weapon.x = 6.0;
+        weapon.shoot_x = 1.5;
+        weapon.base_rotation = 20.0;
+        weapon.bullet_range = 120.0;
+
+        weapon.flip();
+
+        assert_eq!(weapon.x, -6.0);
+        assert_eq!(weapon.shoot_x, -1.5);
+        assert_eq!(weapon.base_rotation, -20.0);
+        assert!(weapon.flip_sprite);
+        assert_eq!(weapon.bullet_range, 120.0);
     }
 }
