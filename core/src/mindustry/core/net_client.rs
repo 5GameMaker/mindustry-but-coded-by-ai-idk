@@ -10,16 +10,17 @@ use crate::mindustry::io::{BuildPlanWire, EntityRef};
 use crate::mindustry::net::{
     BlockSnapshotCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
     ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-    ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket, Connect,
-    ConnectConfirmCallPacket, ConnectPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket,
-    EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, Net, PacketKind,
-    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-    PingCallPacket, PingLocationCallPacket, PlayerDisconnectCallPacket, ProviderEvent,
-    RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
-    SetCameraPositionCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-    SetLiquidsCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+    ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
+    CompleteObjectiveCallPacket, Connect, ConnectCallPacket, ConnectConfirmCallPacket,
+    ConnectPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket, EffectCallPacket2,
+    EffectReliableCallPacket, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket,
+    KickCallPacket2, Net, PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket,
+    PlayerDisconnectCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetCameraPositionCallPacket,
+    SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
+    SetObjectivesCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
     SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
     StateSnapshotCallPacket, StreamBuilder, Streamable, TakeItemsCallPacket, TileConfigCallPacket,
     TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
@@ -209,6 +210,9 @@ pub struct NetClientState {
     pub last_block_snapshot: Option<BlockSnapshotCallPacket>,
     pub last_block_snapshot_at: Option<Instant>,
     pub block_snapshot_packets_seen: u64,
+    pub last_connect_call: Option<ConnectCallPacket>,
+    pub last_connect_call_at: Option<Instant>,
+    pub connect_call_packets_seen: u64,
     pub connect_config: Option<ClientConnectConfig>,
     pub connect_packet_sent: bool,
     pub last_sent_connect_packet: Option<ConnectPacket>,
@@ -251,6 +255,16 @@ pub struct NetClientState {
     pub last_set_rule_at: Option<Instant>,
     pub set_rule_packets_seen: u64,
     pub rule_json_patches: BTreeMap<String, String>,
+    pub last_set_objectives: Option<SetObjectivesCallPacket>,
+    pub last_set_objectives_at: Option<Instant>,
+    pub set_objectives_packets_seen: u64,
+    pub last_objectives_json: Option<String>,
+    pub last_clear_objectives_at: Option<Instant>,
+    pub clear_objectives_packets_seen: u64,
+    pub last_complete_objective: Option<CompleteObjectiveCallPacket>,
+    pub last_complete_objective_at: Option<Instant>,
+    pub complete_objective_packets_seen: u64,
+    pub completed_objective_indices: Vec<i32>,
     pub last_client_plan_snapshot_received: Option<ClientPlanSnapshotReceivedCallPacket>,
     pub last_client_plan_snapshot_received_at: Option<Instant>,
     pub client_plan_snapshot_received_packets_seen: u64,
@@ -423,6 +437,7 @@ impl fmt::Debug for NetClientState {
                 "block_snapshot_packets_seen",
                 &self.block_snapshot_packets_seen,
             )
+            .field("connect_call_packets_seen", &self.connect_call_packets_seen)
             .field("connect_config", &self.connect_config)
             .field("connect_packet_sent", &self.connect_packet_sent)
             .field("last_sent_connect_packet", &self.last_sent_connect_packet)
@@ -471,6 +486,22 @@ impl fmt::Debug for NetClientState {
             .field("last_rules_json", &self.last_rules_json)
             .field("set_rule_packets_seen", &self.set_rule_packets_seen)
             .field("rule_json_patches", &self.rule_json_patches)
+            .field(
+                "set_objectives_packets_seen",
+                &self.set_objectives_packets_seen,
+            )
+            .field(
+                "clear_objectives_packets_seen",
+                &self.clear_objectives_packets_seen,
+            )
+            .field(
+                "complete_objective_packets_seen",
+                &self.complete_objective_packets_seen,
+            )
+            .field(
+                "completed_objective_indices",
+                &self.completed_objective_indices,
+            )
             .field(
                 "client_plan_snapshot_received_packets_seen",
                 &self.client_plan_snapshot_received_packets_seen,
@@ -628,6 +659,22 @@ impl NetClientState {
         self.connected = false;
         self.world_data_loading = false;
         self.kicked = true;
+        self.connect_packet_sent = false;
+        self.connect_confirm_sent = false;
+        self.last_connect_confirm_error = None;
+        self.removed_entity_ids.clear();
+        self.reset_ping_state();
+        self.reset_client_gameplay_sync_state();
+        self.clear_loading_stream_tracking();
+        self.clear_timeout_clock();
+    }
+
+    fn record_server_redirect_disconnect(&mut self) {
+        self.quiet = true;
+        self.connecting = false;
+        self.connected = false;
+        self.world_data_loading = false;
+        self.kicked = false;
         self.connect_packet_sent = false;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
@@ -1287,9 +1334,11 @@ impl NetClient {
         };
 
         for packet in new_packets {
-            let disconnect_due_to_kick = matches!(
+            let disconnect_due_to_remote_control = matches!(
                 &packet,
-                PacketKind::KickCallPacket(_) | PacketKind::KickCallPacket2(_)
+                PacketKind::KickCallPacket(_)
+                    | PacketKind::KickCallPacket2(_)
+                    | PacketKind::ConnectCallPacket(_)
             );
 
             let connect_packet_to_send = {
@@ -1374,6 +1423,14 @@ impl NetClient {
                         state.trace_info_packets_seen += 1;
                         state.last_trace_info = Some(packet.clone());
                         state.last_trace_info_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::ConnectCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.connect_call_packets_seen += 1;
+                        state.last_connect_call = Some(packet.clone());
+                        state.last_connect_call_at = Some(now);
+                        state.record_server_redirect_disconnect();
                         (false, false)
                     }
                     PacketKind::SoundCallPacket(packet) => {
@@ -1500,6 +1557,31 @@ impl NetClient {
                             .insert(packet.rule.clone(), packet.json_data.clone());
                         state.last_set_rule = Some(packet.clone());
                         state.last_set_rule_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::SetObjectivesCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_objectives_packets_seen += 1;
+                        state.last_objectives_json = Some(packet.objectives_json.clone());
+                        state.completed_objective_indices.clear();
+                        state.last_set_objectives = Some(packet.clone());
+                        state.last_set_objectives_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::ClearObjectivesCallPacket(_) => {
+                        let now = Instant::now();
+                        state.clear_objectives_packets_seen += 1;
+                        state.last_objectives_json = None;
+                        state.completed_objective_indices.clear();
+                        state.last_clear_objectives_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::CompleteObjectiveCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.complete_objective_packets_seen += 1;
+                        state.completed_objective_indices.push(packet.index);
+                        state.last_complete_objective = Some(*packet);
+                        state.last_complete_objective_at = Some(now);
                         (false, false)
                     }
                     PacketKind::ClientPlanSnapshotReceivedCallPacket(snapshot) => {
@@ -1748,7 +1830,7 @@ impl NetClient {
                 self.net.lock().unwrap().set_client_loaded(false);
             }
 
-            if disconnect_due_to_kick {
+            if disconnect_due_to_remote_control {
                 self.net.lock().unwrap().disconnect();
             }
 
@@ -1915,8 +1997,9 @@ mod tests {
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
         BlockSnapshotCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
-        ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket, Connect,
+        ClearLiquidsCallPacket, ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
+        CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
         DeletePlansCallPacket, Disconnect, DoneCallback, EffectCallPacket, EffectCallPacket2,
         EffectReliableCallPacket, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
         HostCallback, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection, NetProvider,
@@ -1926,13 +2009,13 @@ mod tests {
         RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
         RotateBlockCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
         SetCameraPositionCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-        SetLiquidsCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
-        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
-        TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
-        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
-        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        SetLiquidsCallPacket, SetObjectivesCallPacket, SetPositionCallPacket, SetRuleCallPacket,
+        SetRulesCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket,
+        SoundCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
+        TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
+        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -2362,6 +2445,70 @@ mod tests {
         assert_eq!(state.last_block_snapshot.as_ref(), Some(&packet));
         assert!(state.last_block_snapshot_at.is_some());
         assert!(state.last_server_snapshot_at.is_some());
+    }
+
+    #[test]
+    fn update_records_objective_packets_like_java_rules_objectives_calls() {
+        let client = NetClient::default();
+        let objectives = SetObjectivesCallPacket {
+            objectives_json: r#"{"objectives":[]}"#.into(),
+        };
+        let complete = CompleteObjectiveCallPacket { index: 3 };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetObjectivesCallPacket(objectives.clone()));
+            net.handle_client_received(PacketKind::CompleteObjectiveCallPacket(complete));
+            net.handle_client_received(PacketKind::ClearObjectivesCallPacket(
+                ClearObjectivesCallPacket,
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.set_objectives_packets_seen, 1);
+        assert_eq!(state.last_set_objectives.as_ref(), Some(&objectives));
+        assert!(state.last_set_objectives_at.is_some());
+        assert_eq!(state.complete_objective_packets_seen, 1);
+        assert_eq!(state.last_complete_objective, Some(complete));
+        assert!(state.last_complete_objective_at.is_some());
+        assert_eq!(state.clear_objectives_packets_seen, 1);
+        assert!(state.last_clear_objectives_at.is_some());
+        assert!(state.last_objectives_json.is_none());
+        assert!(state.completed_objective_indices.is_empty());
+    }
+
+    #[test]
+    fn update_records_connect_redirect_packet_and_marks_remote_disconnect() {
+        let client = NetClient::default();
+        client.begin_connecting();
+        let packet = ConnectCallPacket {
+            ip: "127.0.0.1".into(),
+            port: 6567,
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::ConnectCallPacket(packet.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.connect_call_packets_seen, 1);
+        assert_eq!(state.last_connect_call.as_ref(), Some(&packet));
+        assert!(state.last_connect_call_at.is_some());
+        assert!(state.quiet);
+        assert!(!state.kicked);
+        assert!(!state.connecting);
+        assert!(!state.connected);
+        assert!(state.timeout_deadline.is_none());
+        assert_eq!(state.manual_disconnects, 0);
     }
 
     #[test]
