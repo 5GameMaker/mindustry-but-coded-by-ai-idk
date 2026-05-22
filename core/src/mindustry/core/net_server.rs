@@ -18,6 +18,7 @@ pub type BinaryPacketHandler = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send + 'static>>
 
 pub const PLAN_PREVIEW_SYNC_INTERVAL_MS: i64 = 500;
 pub const PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
+pub const JAVA_MAX_NAME_BYTES: usize = 40;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerPreviewPlanSource {
@@ -34,6 +35,84 @@ pub struct PlayerPreviewPlanSource {
 pub struct PreviewPlanBroadcast {
     pub target_connection_id: i32,
     pub packet: ClientPlanSnapshotReceivedCallPacket,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectPacketValidationContext {
+    pub connection_address: String,
+    pub connection_kicked: bool,
+    pub connection_connected: bool,
+    pub has_begun_connecting: bool,
+    pub ip_banned: bool,
+    pub subnet_banned: bool,
+    pub id_banned: bool,
+    pub name_banned: bool,
+    pub recent_kick_active: bool,
+    pub player_limit_reached: bool,
+    pub whitelisted: bool,
+    pub server_version: i32,
+    pub server_version_type: String,
+    pub allows_custom_clients: bool,
+    pub prevent_duplicates: bool,
+    pub duplicate_name: bool,
+    pub duplicate_id: bool,
+    pub duplicate_connection_uuid: bool,
+}
+
+impl Default for ConnectPacketValidationContext {
+    fn default() -> Self {
+        Self {
+            connection_address: String::new(),
+            connection_kicked: false,
+            connection_connected: true,
+            has_begun_connecting: false,
+            ip_banned: false,
+            subnet_banned: false,
+            id_banned: false,
+            name_banned: false,
+            recent_kick_active: false,
+            player_limit_reached: false,
+            whitelisted: true,
+            server_version: 157,
+            server_version_type: "official".into(),
+            allows_custom_clients: false,
+            prevent_duplicates: false,
+            duplicate_name: false,
+            duplicate_id: false,
+            duplicate_connection_uuid: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectPacketDecision {
+    Ignore,
+    Kick(KickReason),
+    Accept,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectPacketValidationPlan {
+    pub decision: ConnectPacketDecision,
+    pub normalized_uuid: String,
+    pub normalized_name: String,
+    pub locale: String,
+    pub mobile: bool,
+    pub mark_begun_connecting: bool,
+    pub mod_client: bool,
+}
+
+impl ConnectPacketValidationPlan {
+    pub fn accepted(&self) -> bool {
+        self.decision == ConnectPacketDecision::Accept
+    }
+
+    pub fn kick_reason(&self) -> Option<KickReason> {
+        match self.decision {
+            ConnectPacketDecision::Kick(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -726,6 +805,144 @@ impl NetServer {
             .collect()
     }
 
+    pub fn validate_connect_packet(
+        packet: &ConnectPacket,
+        context: &ConnectPacketValidationContext,
+    ) -> ConnectPacketValidationPlan {
+        let normalized_uuid = if context.connection_address.starts_with("steam:") {
+            context
+                .connection_address
+                .strip_prefix("steam:")
+                .unwrap_or(&context.connection_address)
+                .to_string()
+        } else {
+            packet.uuid.clone()
+        };
+        let normalized_name = Self::fix_name_like_java(&packet.name);
+        let locale = if packet.locale.is_empty() {
+            "en".into()
+        } else {
+            packet.locale.clone()
+        };
+
+        let mut plan = ConnectPacketValidationPlan {
+            decision: ConnectPacketDecision::Accept,
+            normalized_uuid,
+            normalized_name,
+            locale,
+            mobile: packet.mobile,
+            mark_begun_connecting: false,
+            mod_client: false,
+        };
+
+        if context.connection_kicked
+            || !context.connection_connected
+            || context.ip_banned
+            || context.subnet_banned
+        {
+            plan.decision = ConnectPacketDecision::Ignore;
+            return plan;
+        }
+
+        if context.has_begun_connecting {
+            plan.decision = ConnectPacketDecision::Kick(KickReason::IdInUse);
+            return plan;
+        }
+
+        plan.mark_begun_connecting = true;
+
+        if plan.normalized_uuid.is_empty() || packet.usid.is_empty() {
+            plan.decision = ConnectPacketDecision::Kick(KickReason::IdInUse);
+            return plan;
+        }
+
+        if context.id_banned || context.name_banned {
+            plan.decision = ConnectPacketDecision::Kick(KickReason::Banned);
+            return plan;
+        }
+
+        if context.recent_kick_active {
+            plan.decision = ConnectPacketDecision::Kick(KickReason::RecentKick);
+            return plan;
+        }
+
+        if context.player_limit_reached {
+            plan.decision = ConnectPacketDecision::Kick(KickReason::PlayerLimit);
+            return plan;
+        }
+
+        if !context.whitelisted {
+            plan.decision = ConnectPacketDecision::Kick(KickReason::Whitelist);
+            return plan;
+        }
+
+        if packet.version_type.is_empty()
+            || ((packet.version == -1 || packet.version_type != context.server_version_type)
+                && context.server_version != -1
+                && !context.allows_custom_clients)
+        {
+            plan.decision = if packet.version_type != context.server_version_type {
+                ConnectPacketDecision::Kick(KickReason::TypeMismatch)
+            } else {
+                ConnectPacketDecision::Kick(KickReason::CustomClient)
+            };
+            return plan;
+        }
+
+        if context.prevent_duplicates {
+            if context.duplicate_name {
+                plan.decision = ConnectPacketDecision::Kick(KickReason::NameInUse);
+                return plan;
+            }
+
+            if context.duplicate_id || context.duplicate_connection_uuid {
+                plan.decision = ConnectPacketDecision::Kick(KickReason::IdInUse);
+                return plan;
+            }
+        }
+
+        if plan.normalized_name.trim().is_empty() {
+            plan.decision = ConnectPacketDecision::Kick(KickReason::NameEmpty);
+            return plan;
+        }
+
+        if packet.version != context.server_version
+            && context.server_version != -1
+            && packet.version != -1
+        {
+            plan.decision = if packet.version > context.server_version {
+                ConnectPacketDecision::Kick(KickReason::ServerOutdated)
+            } else {
+                ConnectPacketDecision::Kick(KickReason::ClientOutdated)
+            };
+            return plan;
+        }
+
+        if packet.version == -1 {
+            plan.mod_client = true;
+        }
+
+        plan
+    }
+
+    pub fn fix_name_like_java(name: &str) -> String {
+        let name = name.trim().replace(['\n', '\t'], "");
+        if name == "[" || name == "]" {
+            return String::new();
+        }
+
+        let mut result = String::new();
+        for ch in name.chars() {
+            let mut candidate = result.clone();
+            candidate.push(ch);
+            if candidate.len() > JAVA_MAX_NAME_BYTES {
+                break;
+            }
+            result.push(ch);
+        }
+        result
+    }
+
     pub fn client_plan_preview_broadcasts(
         players: &mut [PlayerPreviewPlanSource],
     ) -> Vec<PreviewPlanBroadcast> {
@@ -1224,7 +1441,9 @@ mod tests {
     use crate::mindustry::vars::MAX_TCP_SIZE;
     use crate::mindustry::world::block::Block;
 
-    use super::{NetServer, PlayerPreviewPlanSource, PLAN_PREVIEW_CHUNK_SIZE};
+    use super::{
+        ConnectPacketValidationContext, NetServer, PlayerPreviewPlanSource, PLAN_PREVIEW_CHUNK_SIZE,
+    };
 
     #[derive(Clone, Default)]
     struct CaptureProvider {
@@ -1301,6 +1520,105 @@ mod tests {
         let mut block = Block::new(5, "router");
         block.health = 100;
         block
+    }
+
+    #[test]
+    fn connect_packet_validation_accepts_and_normalizes_java_handshake_fields() {
+        let mut packet = connect_packet("\n player\t");
+        packet.locale.clear();
+        let context = ConnectPacketValidationContext {
+            connection_address: "steam:steam-uuid".into(),
+            ..Default::default()
+        };
+
+        let plan = NetServer::validate_connect_packet(&packet, &context);
+
+        assert!(plan.accepted());
+        assert_eq!(plan.normalized_uuid, "steam-uuid");
+        assert_eq!(plan.normalized_name, "player");
+        assert_eq!(plan.locale, "en");
+        assert!(plan.mark_begun_connecting);
+        assert!(!plan.mod_client);
+        assert_eq!(plan.kick_reason(), None);
+    }
+
+    #[test]
+    fn connect_packet_validation_matches_java_rejection_order() {
+        let packet = connect_packet("player");
+
+        let plan = NetServer::validate_connect_packet(
+            &packet,
+            &ConnectPacketValidationContext {
+                has_begun_connecting: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(plan.kick_reason(), Some(KickReason::IdInUse));
+
+        let plan = NetServer::validate_connect_packet(
+            &packet,
+            &ConnectPacketValidationContext {
+                id_banned: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(plan.kick_reason(), Some(KickReason::Banned));
+
+        let plan = NetServer::validate_connect_packet(
+            &packet,
+            &ConnectPacketValidationContext {
+                whitelisted: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(plan.kick_reason(), Some(KickReason::Whitelist));
+
+        let plan = NetServer::validate_connect_packet(
+            &packet,
+            &ConnectPacketValidationContext {
+                prevent_duplicates: true,
+                duplicate_name: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(plan.kick_reason(), Some(KickReason::NameInUse));
+    }
+
+    #[test]
+    fn connect_packet_validation_matches_java_version_and_name_rejections() {
+        let mut packet = connect_packet("player");
+
+        packet.version_type = "custom".into();
+        let plan = NetServer::validate_connect_packet(&packet, &Default::default());
+        assert_eq!(plan.kick_reason(), Some(KickReason::TypeMismatch));
+
+        packet.version_type = "official".into();
+        packet.version = -1;
+        let plan = NetServer::validate_connect_packet(&packet, &Default::default());
+        assert_eq!(plan.kick_reason(), Some(KickReason::CustomClient));
+
+        let plan = NetServer::validate_connect_packet(
+            &packet,
+            &ConnectPacketValidationContext {
+                allows_custom_clients: true,
+                ..Default::default()
+            },
+        );
+        assert!(plan.accepted());
+        assert!(plan.mod_client);
+
+        packet.version = 158;
+        let plan = NetServer::validate_connect_packet(&packet, &Default::default());
+        assert_eq!(plan.kick_reason(), Some(KickReason::ServerOutdated));
+
+        packet.version = 156;
+        let plan = NetServer::validate_connect_packet(&packet, &Default::default());
+        assert_eq!(plan.kick_reason(), Some(KickReason::ClientOutdated));
+
+        packet.version = 157;
+        packet.name = "[\n\t".into();
+        let plan = NetServer::validate_connect_packet(&packet, &Default::default());
+        assert_eq!(plan.kick_reason(), Some(KickReason::NameEmpty));
     }
 
     #[test]
