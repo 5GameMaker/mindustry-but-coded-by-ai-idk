@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::mindustry::entities::comp::building::{BuildingComp, BuildingConfigChange};
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
-    packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+    packet_ids, Administration, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
     ClientSnapshotCallPacket, Connect, ConnectPacket, DebugStatusClientCallPacket,
     DebugStatusClientUnreliableCallPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection,
@@ -120,6 +120,7 @@ impl ConnectPacketValidationPlan {
 pub struct NetServerState {
     pub active: bool,
     pub server: bool,
+    pub administration: Administration,
     pub listen_port: Option<u16>,
     pub connections: Vec<NetConnection>,
     pub connection_states: HashMap<i32, NetConnection>,
@@ -999,6 +1000,17 @@ impl NetServer {
             ..Default::default()
         };
 
+        context.ip_banned = state
+            .administration
+            .is_ip_banned(&context.connection_address);
+        context.subnet_banned = state
+            .administration
+            .is_subnet_banned(&context.connection_address);
+        context.id_banned = state.administration.is_id_banned(&normalized_uuid);
+        context.whitelisted = state
+            .administration
+            .is_whitelisted(&normalized_uuid, &packet.usid);
+
         for (other_connection_id, other) in &state.connection_states {
             if *other_connection_id == connection_id || other.kicked || other.has_disconnected {
                 continue;
@@ -1760,7 +1772,8 @@ mod tests {
     use crate::mindustry::world::block::Block;
 
     use super::{
-        ConnectPacketValidationContext, NetServer, PlayerPreviewPlanSource, PLAN_PREVIEW_CHUNK_SIZE,
+        ConnectPacketValidationContext, NetServer, NetServerState, PlayerPreviewPlanSource,
+        PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -1900,6 +1913,34 @@ mod tests {
             },
         );
         assert_eq!(plan.kick_reason(), Some(KickReason::NameInUse));
+    }
+
+    #[test]
+    fn connect_packet_context_uses_administration_bans_and_whitelist() {
+        let packet = connect_packet("player");
+        let mut state = NetServerState::default();
+        state
+            .connection_states
+            .insert(7, NetConnection::new("1.2.3.4"));
+        state.administration.ban_player_ip("1.2.3.4");
+        state.administration.ban_player_id("uuid");
+
+        let context = NetServer::connect_packet_validation_context(&state, 7, &packet);
+        assert!(context.ip_banned);
+        assert!(context.id_banned);
+
+        let mut state = NetServerState::default();
+        state
+            .connection_states
+            .insert(8, NetConnection::new("10.0.0.2"));
+        state.administration.set_whitelist_enabled(true);
+        let context = NetServer::connect_packet_validation_context(&state, 8, &packet);
+        assert!(!context.whitelisted);
+
+        state.administration.admin_player("uuid", "usid");
+        state.administration.whitelist("uuid");
+        let context = NetServer::connect_packet_validation_context(&state, 8, &packet);
+        assert!(context.whitelisted);
     }
 
     #[test]
