@@ -2,11 +2,13 @@
 
 pub mod cutscene_action;
 pub mod l_readable;
+pub mod l_writable;
 pub mod query_shape;
 pub mod query_type;
 
 pub use cutscene_action::CutsceneAction;
 pub use l_readable::{LReadable, LReadable as LogicReadable};
+pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
 
@@ -10255,11 +10257,6 @@ pub trait Controllable {
     fn control(&mut self, access: LAccess, p1: f64, p2: f64, p3: f64, p4: f64);
     fn control_object(&mut self, access: LAccess, p1: Self::Object, p2: f64, p3: f64, p4: f64);
     fn team(&self) -> u8;
-}
-
-pub trait LogicWritable<E, V> {
-    fn writable(&self, exec: &E) -> bool;
-    fn write(&mut self, position: &mut V, value: &mut V);
 }
 
 pub trait Ranged {
