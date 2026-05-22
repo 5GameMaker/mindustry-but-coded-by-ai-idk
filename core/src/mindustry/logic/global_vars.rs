@@ -5,8 +5,8 @@ use crate::mindustry::{content::ContentCatalog, ctype::ContentType};
 use std::sync::OnceLock;
 
 use super::{
-    logic_team_from_name, named_logic_color_rgba, rgba_u32_to_double_bits, LAccess, LogicAlign,
-    LogicValue,
+    logic_assembler::{named_logic_color_rgba, rgba_u32_to_double_bits, LogicValue},
+    logic_team_from_name, LAccess, LogicAlign,
 };
 
 pub const LOGIC_CTRL_PROCESSOR: i32 = 1;
