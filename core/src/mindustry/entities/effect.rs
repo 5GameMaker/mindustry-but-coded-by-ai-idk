@@ -229,6 +229,14 @@ impl EffectContainer {
         self.time / self.lifetime
     }
 
+    pub fn fout(&self) -> f32 {
+        1.0 - self.fin()
+    }
+
+    pub fn finpow(&self) -> f32 {
+        self.fin().powi(2)
+    }
+
     pub fn scaled(&self, lifetime: f32) -> Option<Self> {
         (self.time <= lifetime).then(|| Self {
             lifetime,
@@ -729,6 +737,145 @@ impl WaveEffect {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExplosionWavePlan {
+    pub stroke: f32,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExplosionSmokePlan {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExplosionSparkPlan {
+    pub x: f32,
+    pub y: f32,
+    pub stroke: f32,
+    pub angle: f32,
+    pub length: f32,
+    pub light_radius: f32,
+    pub light_opacity: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplosionDrawPlan {
+    pub wave_color: String,
+    pub smoke_color: String,
+    pub spark_color: String,
+    pub wave: Option<ExplosionWavePlan>,
+    pub smoke_vector_radius: f32,
+    pub spark_vector_radius: f32,
+    pub smokes: Vec<ExplosionSmokePlan>,
+    pub sparks: Vec<ExplosionSparkPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplosionEffect {
+    pub base: Effect,
+    pub wave_color: String,
+    pub smoke_color: String,
+    pub spark_color: String,
+    pub wave_life: f32,
+    pub wave_stroke: f32,
+    pub wave_rad: f32,
+    pub wave_rad_base: f32,
+    pub spark_stroke: f32,
+    pub spark_rad: f32,
+    pub spark_len: f32,
+    pub smoke_size: f32,
+    pub smoke_size_base: f32,
+    pub smoke_rad: f32,
+    pub smokes: i32,
+    pub sparks: i32,
+}
+
+impl Default for ExplosionEffect {
+    fn default() -> Self {
+        let mut base = Effect::default();
+        base.clip = 100.0;
+        base.lifetime = 22.0;
+        Self {
+            base,
+            wave_color: "missileYellow".into(),
+            smoke_color: "gray".into(),
+            spark_color: "missileYellowBack".into(),
+            wave_life: 6.0,
+            wave_stroke: 3.0,
+            wave_rad: 15.0,
+            wave_rad_base: 2.0,
+            spark_stroke: 1.0,
+            spark_rad: 23.0,
+            spark_len: 3.0,
+            smoke_size: 4.0,
+            smoke_size_base: 0.5,
+            smoke_rad: 23.0,
+            smokes: 5,
+            sparks: 4,
+        }
+    }
+}
+
+impl ExplosionEffect {
+    pub fn draw_plan(
+        &self,
+        container: &EffectContainer,
+        smoke_vectors: &[(f32, f32)],
+        spark_vectors: &[(f32, f32)],
+    ) -> ExplosionDrawPlan {
+        let wave = container
+            .scaled(self.wave_life)
+            .map(|inner| ExplosionWavePlan {
+                stroke: self.wave_stroke * inner.fout(),
+                radius: self.wave_rad_base + inner.fin() * self.wave_rad,
+            });
+        let smoke_radius = container.fout() * self.smoke_size + self.smoke_size_base;
+        let smokes = if self.smoke_size > 0.0 {
+            smoke_vectors
+                .iter()
+                .take(self.smokes.max(0) as usize)
+                .map(|(x, y)| ExplosionSmokePlan {
+                    x: container.x + x,
+                    y: container.y + y,
+                    radius: smoke_radius,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let spark_stroke = container.fout() * self.spark_stroke;
+        let spark_len = 1.0 + container.fout() * self.spark_len;
+        let sparks = spark_vectors
+            .iter()
+            .take(self.sparks.max(0) as usize)
+            .map(|(x, y)| ExplosionSparkPlan {
+                x: container.x + x,
+                y: container.y + y,
+                stroke: spark_stroke,
+                angle: (*y).atan2(*x).to_degrees(),
+                length: spark_len,
+                light_radius: container.fout() * self.spark_len * 4.0,
+                light_opacity: 0.7,
+            })
+            .collect();
+
+        ExplosionDrawPlan {
+            wave_color: self.wave_color.clone(),
+            smoke_color: self.smoke_color.clone(),
+            spark_color: self.spark_color.clone(),
+            wave,
+            smoke_vector_radius: 2.0 + self.smoke_rad * container.finpow(),
+            spark_vector_radius: 1.0 + self.spark_rad * container.finpow(),
+            smokes,
+            sparks,
+        }
+    }
+}
+
 fn trnsx(angle: f32, len: f32) -> f32 {
     angle.to_radians().cos() * len
 }
@@ -1189,6 +1336,63 @@ mod tests {
         assert_eq!(draw.light_radius, 75.0);
         assert_eq!(draw.light_color, "light");
         assert_eq!(draw.light_opacity, 0.6);
+    }
+
+    #[test]
+    fn explosion_effect_draw_plan_covers_wave_smoke_and_sparks() {
+        let explosion = ExplosionEffect::default();
+        assert_eq!(explosion.base.clip, 100.0);
+        assert_eq!(explosion.base.lifetime, 22.0);
+        assert_eq!(explosion.wave_color, "missileYellow");
+        assert_eq!(explosion.smoke_color, "gray");
+        assert_eq!(explosion.spark_color, "missileYellowBack");
+        assert_eq!(explosion.wave_life, 6.0);
+        assert_eq!(explosion.smokes, 5);
+        assert_eq!(explosion.sparks, 4);
+
+        let container = EffectContainer {
+            x: 10.0,
+            y: 20.0,
+            time: 0.0,
+            lifetime: 22.0,
+            rotation: 0.0,
+            color: DecalColor::WHITE,
+            id: 7,
+            data: None,
+        };
+        let plan = explosion.draw_plan(&container, &[(1.0, 0.0), (0.0, 2.0)], &[(3.0, 4.0)]);
+        assert_eq!(
+            plan.wave,
+            Some(ExplosionWavePlan {
+                stroke: 3.0,
+                radius: 2.0,
+            })
+        );
+        assert_eq!(plan.smoke_vector_radius, 2.0);
+        assert_eq!(plan.spark_vector_radius, 1.0);
+        assert_eq!(
+            plan.smokes,
+            vec![
+                ExplosionSmokePlan {
+                    x: 11.0,
+                    y: 20.0,
+                    radius: 4.5,
+                },
+                ExplosionSmokePlan {
+                    x: 10.0,
+                    y: 22.0,
+                    radius: 4.5,
+                },
+            ]
+        );
+        assert_eq!(plan.sparks.len(), 1);
+        assert_eq!(plan.sparks[0].x, 13.0);
+        assert_eq!(plan.sparks[0].y, 24.0);
+        assert_eq!(plan.sparks[0].stroke, 1.0);
+        assert!((plan.sparks[0].angle - 53.130104).abs() < 0.0001);
+        assert_eq!(plan.sparks[0].length, 4.0);
+        assert_eq!(plan.sparks[0].light_radius, 12.0);
+        assert_eq!(plan.sparks[0].light_opacity, 0.7);
     }
 
     #[test]
