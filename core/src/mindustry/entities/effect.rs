@@ -289,6 +289,51 @@ impl Default for EffectRegistry {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultiEffect {
+    pub base: Effect,
+    pub effects: Vec<Effect>,
+}
+
+impl Default for MultiEffect {
+    fn default() -> Self {
+        Self {
+            base: Effect::default(),
+            effects: Vec::new(),
+        }
+    }
+}
+
+impl MultiEffect {
+    pub fn with_effects(effects: Vec<Effect>) -> Self {
+        Self {
+            effects,
+            ..Default::default()
+        }
+    }
+
+    pub fn create_plans(
+        &mut self,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: DecalColor,
+        data: Option<String>,
+        context: EffectCreateContext,
+    ) -> Vec<EffectCreatePlan> {
+        if !self.base.should_create(context) {
+            return Vec::new();
+        }
+
+        self.effects
+            .iter_mut()
+            .filter_map(|effect| {
+                effect.create_plan(x, y, rotation, color, data.clone(), None, context)
+            })
+            .collect()
+    }
+}
+
 pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: f32) -> f32 {
     let dx = x - camera_x;
     let dy = y - camera_y;
@@ -464,6 +509,47 @@ mod tests {
         assert_eq!(registry.get(1).unwrap().id, 1);
         assert!(registry.get(-1).is_none());
         assert!(registry.get(99).is_none());
+    }
+
+    #[test]
+    fn multi_effect_creates_all_child_effects_without_rendering_itself() {
+        let child_a = Effect::with_lifetime(1, 10.0, 20.0).start_delay(2.0);
+        let child_b = Effect::with_lifetime(2, 30.0, 40.0).base_rotation(5.0);
+        let mut multi = MultiEffect::with_effects(vec![child_a, child_b]);
+
+        let plans = multi.create_plans(
+            7.0,
+            8.0,
+            9.0,
+            DecalColor::WHITE,
+            Some("payload".into()),
+            EffectCreateContext::default(),
+        );
+
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].delay, 2.0);
+        assert_eq!(plans[0].spawn.effect_id, 1);
+        assert_eq!(plans[0].spawn.x, 7.0);
+        assert_eq!(plans[0].spawn.y, 8.0);
+        assert_eq!(plans[0].spawn.rotation, 9.0);
+        assert_eq!(plans[0].spawn.data.as_deref(), Some("payload"));
+        assert_eq!(plans[1].spawn.effect_id, 2);
+        assert_eq!(plans[1].spawn.rotation, 14.0);
+        assert!(plans[0].initialized_now);
+        assert!(plans[1].initialized_now);
+
+        let blocked = multi.create_plans(
+            0.0,
+            0.0,
+            0.0,
+            DecalColor::WHITE,
+            None,
+            EffectCreateContext {
+                enable_effects: false,
+                ..EffectCreateContext::default()
+            },
+        );
+        assert!(blocked.is_empty());
     }
 
     #[test]
