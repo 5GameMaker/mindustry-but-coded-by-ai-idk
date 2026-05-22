@@ -8,6 +8,11 @@ pub struct StatusEffectFxPlan {
     pub parentize: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusEffectRemovedPlan {
+    pub effect: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusIntervalDamageKind {
     Normal,
@@ -203,6 +208,12 @@ impl StatusEffect {
             parentize: self.parentize_apply_effect,
         })
     }
+
+    pub fn removed_plan(&self) -> StatusEffectRemovedPlan {
+        StatusEffectRemovedPlan {
+            effect: self.name().to_string(),
+        }
+    }
 }
 
 impl std::fmt::Display for StatusEffect {
@@ -362,5 +373,17 @@ mod tests {
         assert_eq!(status.applied_plan(true), None);
         status.apply_extend = true;
         assert!(status.applied_plan(true).is_some());
+    }
+
+    #[test]
+    fn status_effect_removed_plan_records_java_on_removed_hook_intent() {
+        let status = StatusEffect::new(7, "melting");
+
+        assert_eq!(
+            status.removed_plan(),
+            StatusEffectRemovedPlan {
+                effect: "melting".into(),
+            }
+        );
     }
 }

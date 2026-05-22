@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::mindustry::entities::units::StatusEntry;
+use crate::mindustry::r#type::status_effect::StatusEffectRemovedPlan;
 use crate::mindustry::r#type::StatusEffect;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,6 +27,7 @@ impl StatusColor {
 pub struct StatusComp {
     pub statuses: Vec<StatusEntry>,
     pub applied: BTreeSet<String>,
+    pub removed_plans: Vec<StatusEffectRemovedPlan>,
     pub speed_multiplier: f32,
     pub damage_multiplier: f32,
     pub health_multiplier: f32,
@@ -46,6 +48,7 @@ impl StatusComp {
         Self {
             statuses: Vec::with_capacity(4),
             applied: BTreeSet::new(),
+            removed_plans: Vec::new(),
             speed_multiplier: 1.0,
             damage_multiplier: 1.0,
             health_multiplier: 1.0,
@@ -150,17 +153,26 @@ impl StatusComp {
     }
 
     pub fn clear_statuses(&mut self) {
-        self.statuses.clear();
+        for entry in std::mem::take(&mut self.statuses) {
+            self.record_removed_entry(&entry);
+        }
         self.applied.clear();
     }
 
     pub fn unapply(&mut self, effect_name: &str) {
-        self.statuses.retain(|entry| {
-            !entry
+        let mut retained = Vec::with_capacity(self.statuses.len());
+        for entry in std::mem::take(&mut self.statuses) {
+            let remove = entry
                 .effect
                 .as_ref()
-                .is_some_and(|effect| effect.name() == effect_name)
-        });
+                .is_some_and(|effect| effect.name() == effect_name);
+            if remove {
+                self.record_removed_entry(&entry);
+            } else {
+                retained.push(entry);
+            }
+        }
+        self.statuses = retained;
         self.applied.remove(effect_name);
     }
 
@@ -291,7 +303,7 @@ impl StatusComp {
         self.disarmed = false;
 
         let mut retained = Vec::with_capacity(self.statuses.len());
-        for mut entry in self.statuses.drain(..) {
+        for mut entry in std::mem::take(&mut self.statuses) {
             entry.time = (entry.time - delta).max(0.0);
             let remove = entry
                 .effect
@@ -299,6 +311,7 @@ impl StatusComp {
                 .map(|effect| entry.time <= 0.0 && !effect.permanent)
                 .unwrap_or(true);
             if remove {
+                self.record_removed_entry(&entry);
                 continue;
             }
 
@@ -320,6 +333,16 @@ impl StatusComp {
             retained.push(entry);
         }
         self.statuses = retained;
+    }
+
+    pub fn take_removed_plans(&mut self) -> Vec<StatusEffectRemovedPlan> {
+        std::mem::take(&mut self.removed_plans)
+    }
+
+    fn record_removed_entry(&mut self, entry: &StatusEntry) {
+        if let Some(effect) = &entry.effect {
+            self.removed_plans.push(effect.removed_plan());
+        }
     }
 }
 
@@ -406,6 +429,12 @@ mod tests {
 
         assert!(comp.statuses.is_empty());
         assert!(comp.applied.is_empty());
+        assert_eq!(
+            comp.take_removed_plans(),
+            vec![StatusEffectRemovedPlan {
+                effect: "burning".into()
+            }]
+        );
     }
 
     #[test]
@@ -476,5 +505,28 @@ mod tests {
         assert!(wet.has_effect("wet"));
         assert_eq!(wet.get_duration("wet"), 30.0);
         assert!(!wet.has_effect("shocked"));
+    }
+
+    #[test]
+    fn status_component_clear_statuses_records_removed_plans() {
+        let mut comp = StatusComp::new();
+        comp.apply(effect(9, "tarred", 0x996633ff), 30.0);
+        comp.apply(effect(10, "wet", 0x0000ffff), 20.0);
+
+        comp.clear_statuses();
+
+        assert!(comp.statuses.is_empty());
+        assert!(comp.applied.is_empty());
+        assert_eq!(
+            comp.take_removed_plans(),
+            vec![
+                StatusEffectRemovedPlan {
+                    effect: "tarred".into()
+                },
+                StatusEffectRemovedPlan {
+                    effect: "wet".into()
+                },
+            ]
+        );
     }
 }
