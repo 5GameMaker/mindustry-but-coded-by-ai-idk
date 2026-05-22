@@ -203,6 +203,9 @@ pub struct NetServerState {
     pub chat_packets_seen: u64,
     pub chat_packets_filtered: u64,
     pub chat_packets_rate_limited: u64,
+    pub last_client_command_connection_id: Option<i32>,
+    pub last_client_command: Option<String>,
+    pub client_commands_seen: u64,
     pub packet_rate_limited: u64,
     pub last_state_snapshot_connection_id: Option<i32>,
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
@@ -1888,37 +1891,36 @@ impl NetServer {
         let sanitized_message = Self::sanitize_chat_message(&packet.message);
         let command_message = sanitized_message.starts_with('/');
 
-        if !command_message {
-            if let Some(uuid) = player_uuid.as_deref() {
-                let info = state.administration.get_info(uuid.to_string());
-                if info.last_sent_message.as_deref() == Some(sanitized_message.as_str())
-                    && current_millis - info.last_message_time < 10_000
-                {
-                    state.chat_packets_filtered += 1;
-                    return None;
-                }
+        if command_message {
+            state.last_client_command_connection_id = connection_id;
+            state.last_client_command = Some(sanitized_message);
+            state.client_commands_seen = state.client_commands_seen.saturating_add(1);
+            return None;
+        }
+
+        if let Some(uuid) = player_uuid.as_deref() {
+            let info = state.administration.get_info(uuid.to_string());
+            if info.last_sent_message.as_deref() == Some(sanitized_message.as_str())
+                && current_millis - info.last_message_time < 10_000
+            {
+                state.chat_packets_filtered += 1;
+                return None;
             }
         }
 
-        let filtered = if command_message {
-            Some(sanitized_message.clone())
-        } else {
-            state
-                .administration
-                .filter_message(player.as_deref(), &sanitized_message)
-        };
+        let filtered = state
+            .administration
+            .filter_message(player.as_deref(), &sanitized_message);
 
         let Some(message) = filtered else {
             state.chat_packets_filtered += 1;
             return None;
         };
 
-        if !command_message {
-            if let Some(uuid) = player_uuid {
-                let info = state.administration.get_info(uuid);
-                info.last_message_time = current_millis;
-                info.last_sent_message = Some(sanitized_message.clone());
-            }
+        if let Some(uuid) = player_uuid {
+            let info = state.administration.get_info(uuid);
+            info.last_message_time = current_millis;
+            info.last_sent_message = Some(sanitized_message.clone());
         }
 
         let packet = SendChatMessageCallPacket { message };
@@ -3059,7 +3061,7 @@ mod tests {
     }
 
     #[test]
-    fn chat_messages_are_filtered_recorded_and_commands_bypass_filters() {
+    fn chat_messages_are_filtered_recorded_and_commands_enter_command_handler() {
         let server = NetServer::default();
         let seen = Arc::new(Mutex::new(Vec::new()));
 
@@ -3109,12 +3111,15 @@ mod tests {
             );
         }
 
-        assert_eq!(*seen.lock().unwrap(), vec!["bar", "/foo"]);
+        assert_eq!(*seen.lock().unwrap(), vec!["bar"]);
 
         let state = server.state();
         let state = state.lock().unwrap();
         assert_eq!(state.chat_packets_seen, 3);
         assert_eq!(state.chat_packets_filtered, 1);
+        assert_eq!(state.client_commands_seen, 1);
+        assert_eq!(state.last_client_command_connection_id, Some(12));
+        assert_eq!(state.last_client_command.as_deref(), Some("/foo"));
         assert_eq!(
             state.last_chat_unfiltered_message.as_deref(),
             Some("blocked")
@@ -3127,7 +3132,7 @@ mod tests {
                 .and_then(|info| info.last_sent_message.as_deref()),
             Some("foo")
         );
-        assert_eq!(state.events.len(), 2);
+        assert_eq!(state.events.len(), 1);
     }
 
     #[test]
@@ -3178,12 +3183,14 @@ mod tests {
             );
         }
 
-        assert_eq!(*seen.lock().unwrap(), vec!["filtered:fo", "/cmd"]);
+        assert_eq!(*seen.lock().unwrap(), vec!["filtered:fo"]);
 
         let state = server.state();
         let state = state.lock().unwrap();
         assert_eq!(state.chat_packets_seen, 3);
         assert_eq!(state.chat_packets_filtered, 1);
+        assert_eq!(state.client_commands_seen, 1);
+        assert_eq!(state.last_client_command.as_deref(), Some("/cmd"));
         assert_eq!(state.last_chat_message, None);
         assert_eq!(
             state
