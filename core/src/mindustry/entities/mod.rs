@@ -1,6 +1,7 @@
 pub mod abilities;
 pub mod comp;
 pub mod damage;
+pub mod effect;
 pub mod entity_collisions;
 pub mod entity_group;
 pub mod entity_indexer;
@@ -68,6 +69,11 @@ pub use comp::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};
 pub use damage::{
     calculate_damage, complete_damage_tiles, find_length, pierce_result_length,
     tile_damage_edge_scaled_damage, tile_damage_ray_count, DAMAGE_FALLOFF,
+};
+pub use effect::{
+    shake_intensity, Effect, EffectContainer, EffectCreateContext, EffectCreatePlan, EffectParent,
+    EffectRegistry, EffectRenderParams, EffectSpawnPlan, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER,
+    DEFAULT_EFFECT_LIFETIME, SHAKE_FALLOFF,
 };
 pub use entity_collisions::{
     collide, legs_solid, move_check_hitbox, move_delta_rect, move_hitbox, move_rect, overlaps_tile,
