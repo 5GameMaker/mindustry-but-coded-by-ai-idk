@@ -146,6 +146,82 @@ pub struct GameServiceTurnPlan {
     pub stat_max_updates: Vec<(SStat, i32)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceUnitDestroySnapshot {
+    pub campaign: bool,
+    pub enemy_unit: bool,
+    pub boss: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceBlockDestroySnapshot {
+    pub campaign: bool,
+    pub enemy_block: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameServiceSectorLaunchLoadoutSnapshot {
+    pub planet_name: Option<String>,
+    pub default_loadout: bool,
+}
+
+impl GameServiceSectorLaunchLoadoutSnapshot {
+    pub fn serpulo_custom() -> Self {
+        Self {
+            planet_name: Some("serpulo".into()),
+            default_loadout: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceUnitControlSnapshot {
+    pub controlled_router_block: bool,
+    pub controlled_turret_build: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameServiceSectorCaptureSnapshot {
+    pub sector_being_played: bool,
+    pub net_client: bool,
+    pub wave: i32,
+    pub attack_mode: bool,
+    pub buildings_destroyed: i32,
+    pub planet_name: Option<String>,
+    pub all_planet_sectors_have_base: bool,
+    pub preset_last_sector: bool,
+    pub sectors_with_base: i32,
+}
+
+impl GameServiceSectorCaptureSnapshot {
+    pub fn played_serpulo_attack() -> Self {
+        Self {
+            sector_being_played: true,
+            net_client: false,
+            wave: 1,
+            attack_mode: true,
+            buildings_destroyed: 0,
+            planet_name: Some("serpulo".into()),
+            all_planet_sectors_have_base: false,
+            preset_last_sector: false,
+            sectors_with_base: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceEventPlan {
+    pub stat_additions: Vec<SStat>,
+    pub stat_sets: Vec<(SStat, i32)>,
+    pub achievements: BTreeSet<Achievement>,
+}
+
+impl GameServiceEventPlan {
+    pub fn is_empty(&self) -> bool {
+        self.stat_additions.is_empty() && self.stat_sets.is_empty() && self.achievements.is_empty()
+    }
+}
+
 impl GameServiceState {
     pub fn mark_block_built(&mut self, block: impl Into<String>) {
         self.blocks_built.insert(block.into());
@@ -322,6 +398,111 @@ impl GameServiceState {
                 (SStat::TotalCampaignItems, snapshot.total_campaign_items),
             ],
         }
+    }
+
+    pub fn unit_destroy_plan(
+        &self,
+        snapshot: GameServiceUnitDestroySnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign && snapshot.enemy_unit {
+            plan.stat_additions.push(SStat::UnitsDestroyed);
+            if snapshot.boss {
+                plan.stat_additions.push(SStat::BossesDefeated);
+            }
+        }
+        plan
+    }
+
+    pub fn block_destroy_plan(
+        &self,
+        snapshot: GameServiceBlockDestroySnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign && snapshot.enemy_block {
+            plan.stat_additions.push(SStat::BlocksDestroyed);
+        }
+        plan
+    }
+
+    pub fn schematic_create_plan(&self) -> GameServiceEventPlan {
+        GameServiceEventPlan {
+            stat_additions: vec![SStat::SchematicsCreated],
+            ..Default::default()
+        }
+    }
+
+    pub fn sector_launch_loadout_plan(
+        &self,
+        snapshot: GameServiceSectorLaunchLoadoutSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.planet_name.as_deref() == Some("serpulo") && !snapshot.default_loadout {
+            plan.achievements.insert(Achievement::LaunchCoreSchematic);
+        }
+        plan
+    }
+
+    pub fn unit_control_plan(
+        &self,
+        snapshot: GameServiceUnitControlSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.controlled_router_block {
+            plan.achievements.insert(Achievement::BecomeRouter);
+        }
+        if snapshot.controlled_turret_build {
+            plan.achievements.insert(Achievement::ControlTurret);
+        }
+        plan
+    }
+
+    pub fn sector_capture_plan(
+        &self,
+        snapshot: GameServiceSectorCaptureSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        let played_or_client = snapshot.sector_being_played || snapshot.net_client;
+
+        if played_or_client {
+            if snapshot.wave <= 5 && snapshot.attack_mode {
+                plan.achievements.insert(Achievement::DefeatAttack5Waves);
+            }
+
+            if snapshot.buildings_destroyed == 0 {
+                plan.achievements.insert(Achievement::CaptureNoBlocksBroken);
+            }
+        }
+
+        if snapshot.attack_mode {
+            plan.stat_additions.push(SStat::AttacksWon);
+        }
+
+        if !snapshot.sector_being_played && !snapshot.net_client {
+            plan.achievements.insert(Achievement::CaptureBackground);
+        }
+
+        match snapshot.planet_name.as_deref() {
+            Some("serpulo") => {
+                if snapshot.all_planet_sectors_have_base {
+                    plan.achievements.insert(Achievement::CaptureAllSectors);
+                }
+                if snapshot.preset_last_sector {
+                    plan.achievements.insert(Achievement::CompleteSerpulo);
+                }
+
+                // Keep Java's current behavior: sectorsControlled is set only
+                // for Serpulo captures, using the planet-wide hasBase count.
+                plan.stat_sets
+                    .push((SStat::SectorsControlled, snapshot.sectors_with_base));
+            }
+            Some("erekir") if snapshot.preset_last_sector => {
+                plan.achievements.insert(Achievement::CompleteErekir);
+            }
+            _ => {}
+        }
+
+        plan
     }
 }
 
@@ -609,5 +790,136 @@ mod tests {
                 (SStat::TotalCampaignItems, 12345)
             ]
         );
+    }
+
+    #[test]
+    fn unit_destroy_plan_counts_enemy_and_boss_kills_like_java_event() {
+        let state = GameServiceState::default();
+
+        let plan = state.unit_destroy_plan(GameServiceUnitDestroySnapshot {
+            campaign: true,
+            enemy_unit: true,
+            boss: true,
+        });
+
+        assert_eq!(
+            plan.stat_additions,
+            vec![SStat::UnitsDestroyed, SStat::BossesDefeated]
+        );
+
+        assert!(state
+            .unit_destroy_plan(GameServiceUnitDestroySnapshot {
+                campaign: false,
+                enemy_unit: true,
+                boss: true,
+            })
+            .is_empty());
+        assert!(state
+            .unit_destroy_plan(GameServiceUnitDestroySnapshot {
+                campaign: true,
+                enemy_unit: false,
+                boss: true,
+            })
+            .is_empty());
+    }
+
+    #[test]
+    fn block_destroy_and_schematic_create_plans_match_java_stat_events() {
+        let state = GameServiceState::default();
+
+        let block_plan = state.block_destroy_plan(GameServiceBlockDestroySnapshot {
+            campaign: true,
+            enemy_block: true,
+        });
+        assert_eq!(block_plan.stat_additions, vec![SStat::BlocksDestroyed]);
+
+        assert!(state
+            .block_destroy_plan(GameServiceBlockDestroySnapshot {
+                campaign: true,
+                enemy_block: false,
+            })
+            .is_empty());
+
+        let schematic_plan = state.schematic_create_plan();
+        assert_eq!(
+            schematic_plan.stat_additions,
+            vec![SStat::SchematicsCreated]
+        );
+    }
+
+    #[test]
+    fn launch_loadout_and_unit_control_plans_complete_direct_achievements() {
+        let state = GameServiceState::default();
+
+        let loadout_plan = state
+            .sector_launch_loadout_plan(GameServiceSectorLaunchLoadoutSnapshot::serpulo_custom());
+        assert!(loadout_plan
+            .achievements
+            .contains(&Achievement::LaunchCoreSchematic));
+
+        let default_loadout_plan =
+            state.sector_launch_loadout_plan(GameServiceSectorLaunchLoadoutSnapshot {
+                planet_name: Some("serpulo".into()),
+                default_loadout: true,
+            });
+        assert!(default_loadout_plan.is_empty());
+
+        let control_plan = state.unit_control_plan(GameServiceUnitControlSnapshot {
+            controlled_router_block: true,
+            controlled_turret_build: true,
+        });
+        assert!(control_plan
+            .achievements
+            .contains(&Achievement::BecomeRouter));
+        assert!(control_plan
+            .achievements
+            .contains(&Achievement::ControlTurret));
+    }
+
+    #[test]
+    fn sector_capture_plan_matches_played_serpulo_attack_branches() {
+        let state = GameServiceState::default();
+        let mut snapshot = GameServiceSectorCaptureSnapshot::played_serpulo_attack();
+        snapshot.all_planet_sectors_have_base = true;
+        snapshot.preset_last_sector = true;
+        snapshot.sectors_with_base = 64;
+
+        let plan = state.sector_capture_plan(snapshot);
+
+        assert_eq!(plan.stat_additions, vec![SStat::AttacksWon]);
+        assert_eq!(plan.stat_sets, vec![(SStat::SectorsControlled, 64)]);
+        assert!(plan.achievements.contains(&Achievement::DefeatAttack5Waves));
+        assert!(plan
+            .achievements
+            .contains(&Achievement::CaptureNoBlocksBroken));
+        assert!(plan.achievements.contains(&Achievement::CaptureAllSectors));
+        assert!(plan.achievements.contains(&Achievement::CompleteSerpulo));
+        assert!(!plan.achievements.contains(&Achievement::CaptureBackground));
+    }
+
+    #[test]
+    fn sector_capture_plan_matches_background_and_erekir_last_sector() {
+        let state = GameServiceState::default();
+
+        let plan = state.sector_capture_plan(GameServiceSectorCaptureSnapshot {
+            sector_being_played: false,
+            net_client: false,
+            wave: 20,
+            attack_mode: false,
+            buildings_destroyed: 3,
+            planet_name: Some("erekir".into()),
+            all_planet_sectors_have_base: true,
+            preset_last_sector: true,
+            sectors_with_base: 12,
+        });
+
+        assert!(plan.stat_additions.is_empty());
+        assert!(plan.stat_sets.is_empty());
+        assert!(plan.achievements.contains(&Achievement::CaptureBackground));
+        assert!(plan.achievements.contains(&Achievement::CompleteErekir));
+        assert!(!plan.achievements.contains(&Achievement::CaptureAllSectors));
+        assert!(!plan
+            .achievements
+            .contains(&Achievement::CaptureNoBlocksBroken));
     }
 }
