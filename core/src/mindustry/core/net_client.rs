@@ -182,6 +182,18 @@ pub struct NetClientState {
     pub last_hud_text: Option<String>,
     pub last_open_uri: Option<String>,
     pub last_clipboard_text: Option<String>,
+    pub last_world_update_packet: Option<PacketKind>,
+    pub last_world_update_packet_at: Option<Instant>,
+    pub world_update_packets_seen: u64,
+    pub last_unit_lifecycle_packet: Option<PacketKind>,
+    pub last_unit_lifecycle_packet_at: Option<Instant>,
+    pub unit_lifecycle_packets_seen: u64,
+    pub last_marker_packet: Option<PacketKind>,
+    pub last_marker_packet_at: Option<Instant>,
+    pub marker_packets_seen: u64,
+    pub last_campaign_event_packet: Option<PacketKind>,
+    pub last_campaign_event_packet_at: Option<Instant>,
+    pub campaign_event_packets_seen: u64,
     pub last_player_disconnect: Option<PlayerDisconnectCallPacket>,
     pub last_player_disconnect_at: Option<Instant>,
     pub player_disconnect_packets_seen: u64,
@@ -424,6 +436,16 @@ impl fmt::Debug for NetClientState {
             .field("last_toast_message", &self.last_toast_message)
             .field("last_hud_text", &self.last_hud_text)
             .field("last_open_uri", &self.last_open_uri)
+            .field("world_update_packets_seen", &self.world_update_packets_seen)
+            .field(
+                "unit_lifecycle_packets_seen",
+                &self.unit_lifecycle_packets_seen,
+            )
+            .field("marker_packets_seen", &self.marker_packets_seen)
+            .field(
+                "campaign_event_packets_seen",
+                &self.campaign_event_packets_seen,
+            )
             .field(
                 "player_disconnect_packets_seen",
                 &self.player_disconnect_packets_seen,
@@ -672,6 +694,30 @@ impl NetClientState {
         self.client_ui_packets_seen = self.client_ui_packets_seen.saturating_add(1);
         self.last_client_ui_packet = Some(packet.clone());
         self.last_client_ui_packet_at = Some(Instant::now());
+    }
+
+    fn record_world_update_packet(&mut self, packet: &PacketKind) {
+        self.world_update_packets_seen = self.world_update_packets_seen.saturating_add(1);
+        self.last_world_update_packet = Some(packet.clone());
+        self.last_world_update_packet_at = Some(Instant::now());
+    }
+
+    fn record_unit_lifecycle_packet(&mut self, packet: &PacketKind) {
+        self.unit_lifecycle_packets_seen = self.unit_lifecycle_packets_seen.saturating_add(1);
+        self.last_unit_lifecycle_packet = Some(packet.clone());
+        self.last_unit_lifecycle_packet_at = Some(Instant::now());
+    }
+
+    fn record_marker_packet(&mut self, packet: &PacketKind) {
+        self.marker_packets_seen = self.marker_packets_seen.saturating_add(1);
+        self.last_marker_packet = Some(packet.clone());
+        self.last_marker_packet_at = Some(Instant::now());
+    }
+
+    fn record_campaign_event_packet(&mut self, packet: &PacketKind) {
+        self.campaign_event_packets_seen = self.campaign_event_packets_seen.saturating_add(1);
+        self.last_campaign_event_packet = Some(packet.clone());
+        self.last_campaign_event_packet_at = Some(Instant::now());
     }
 
     fn record_server_kick_disconnect(&mut self) {
@@ -1622,6 +1668,68 @@ impl NetClient {
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
+                    PacketKind::ConstructFinishCallPacket(_)
+                    | PacketKind::DeconstructFinishCallPacket(_)
+                    | PacketKind::DestroyPayloadCallPacket(_)
+                    | PacketKind::AutoDoorToggleCallPacket(_)
+                    | PacketKind::BeginBreakCallPacket(_)
+                    | PacketKind::BeginPlaceCallPacket(_)
+                    | PacketKind::BuildDestroyedCallPacket(_)
+                    | PacketKind::BuildHealthUpdateCallPacket(_)
+                    | PacketKind::RemoveTileCallPacket(_)
+                    | PacketKind::SetFlagCallPacket(_)
+                    | PacketKind::SetFloorCallPacket(_)
+                    | PacketKind::SetMapAreaCallPacket(_)
+                    | PacketKind::SetOverlayCallPacket(_)
+                    | PacketKind::SetPlayerTeamEditorCallPacket(_)
+                    | PacketKind::SetTeamCallPacket(_)
+                    | PacketKind::SetTeamsCallPacket(_)
+                    | PacketKind::SetTileCallPacket(_)
+                    | PacketKind::SetTileBlocksCallPacket(_)
+                    | PacketKind::SetTileFloorsCallPacket(_)
+                    | PacketKind::SetTileItemsCallPacket(_)
+                    | PacketKind::SetTileLiquidsCallPacket(_)
+                    | PacketKind::SetTileOverlaysCallPacket(_)
+                    | PacketKind::SpawnEffectCallPacket(_)
+                    | PacketKind::LogicExplosionCallPacket(_)
+                    | PacketKind::CreateBulletCallPacket(_)
+                    | PacketKind::CreateWeatherCallPacket(_)
+                    | PacketKind::LandingPadLandedCallPacket(_)
+                    | PacketKind::PlayerSpawnCallPacket(_)
+                    | PacketKind::SyncVariableCallPacket(_) => {
+                        state.record_world_update_packet(&packet);
+                        (false, false)
+                    }
+                    PacketKind::UnitBlockSpawnCallPacket(_)
+                    | PacketKind::UnitCapDeathCallPacket(_)
+                    | PacketKind::UnitDeathCallPacket(_)
+                    | PacketKind::UnitDespawnCallPacket(_)
+                    | PacketKind::UnitDestroyCallPacket(_)
+                    | PacketKind::UnitEnvDeathCallPacket(_)
+                    | PacketKind::UnitSafeDeathCallPacket(_)
+                    | PacketKind::UnitSpawnCallPacket(_)
+                    | PacketKind::UnitTetherBlockSpawnedCallPacket(_)
+                    | PacketKind::AssemblerDroneSpawnedCallPacket(_)
+                    | PacketKind::AssemblerUnitSpawnedCallPacket(_) => {
+                        state.record_unit_lifecycle_packet(&packet);
+                        (false, false)
+                    }
+                    PacketKind::CreateMarkerCallPacket(_)
+                    | PacketKind::UpdateMarkerCallPacket(_)
+                    | PacketKind::UpdateMarkerTextCallPacket(_)
+                    | PacketKind::UpdateMarkerTextureCallPacket(_)
+                    | PacketKind::RemoveMarkerCallPacket(_)
+                    | PacketKind::RemoveWorldLabelCallPacket(_) => {
+                        state.record_marker_packet(&packet);
+                        (false, false)
+                    }
+                    PacketKind::GameOverCallPacket(_)
+                    | PacketKind::UpdateGameOverCallPacket(_)
+                    | PacketKind::ResearchedCallPacket(_)
+                    | PacketKind::SectorCaptureCallPacket(_) => {
+                        state.record_campaign_event_packet(&packet);
+                        (false, false)
+                    }
                     PacketKind::SetRulesCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_rules_packets_seen += 1;
@@ -2078,29 +2186,32 @@ mod tests {
     use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
-        AnnounceCallPacket, BlockSnapshotCallPacket, BuildingControlSelectCallPacket,
-        ClearItemsCallPacket, ClearLiquidsCallPacket, ClearObjectivesCallPacket,
-        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
-        CompleteObjectiveCallPacket, Connect, ConnectCallPacket, CopyToClipboardCallPacket,
-        DeletePlansCallPacket, Disconnect, DoneCallback, EffectCallPacket, EffectCallPacket2,
-        EffectReliableCallPacket, EntitySnapshotCallPacket, HiddenSnapshotCallPacket,
+        AnnounceCallPacket, BlockSnapshotCallPacket, BuildHealthUpdateCallPacket,
+        BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
+        ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
+        CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
+        CopyToClipboardCallPacket, CreateMarkerCallPacket, DeletePlansCallPacket, Disconnect,
+        DoneCallback, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
+        EntitySnapshotCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
         HideHudTextCallPacket, Host, HostCallback, InfoMessageCallPacket, InfoToastCallPacket,
         KickCallPacket, KickCallPacket2, KickReason, MenuCallPacket, Net, NetConnection,
         NetProvider, OpenUriCallPacket, PacketKind, PayloadDroppedCallPacket,
         PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveQueueBlockCallPacket,
-        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-        RequestUnitPayloadCallPacket, RotateBlockCallPacket, SendMessageCallPacket,
-        SendMessageCallPacket2, SetCameraPositionCallPacket, SetHudTextCallPacket,
-        SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
-        SetObjectivesCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
-        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
-        TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
+        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
+        RemoveQueueBlockCallPacket, RemoveTileCallPacket, RequestBuildPayloadCallPacket,
+        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+        RotateBlockCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
+        SetCameraPositionCallPacket, SetHudTextCallPacket, SetItemCallPacket, SetItemsCallPacket,
+        SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket, SetPositionCallPacket,
+        SetRuleCallPacket, SetRulesCallPacket, SetTileCallPacket, SetUnitCommandCallPacket,
+        SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
+        StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket, TileConfigCallPacket,
+        TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
         TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitEnteredPayloadCallPacket, WarningToastCallPacket, WorldDataBeginCallPacket,
+        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, WarningToastCallPacket,
+        WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -2328,6 +2439,69 @@ mod tests {
             Some("https://example.invalid")
         );
         assert_eq!(state.last_clipboard_text.as_deref(), Some("copy me"));
+    }
+
+    #[test]
+    fn update_records_world_unit_marker_and_campaign_packets_for_later_application() {
+        let client = NetClient::default();
+        let set_tile = SetTileCallPacket {
+            tile: Some(12),
+            block: Some("router".into()),
+            team: TeamId(1),
+            rotation: 2,
+        };
+        let build_health = BuildHealthUpdateCallPacket {
+            buildings: vec![12, 34],
+        };
+        let remove_tile = RemoveTileCallPacket { tile: Some(12) };
+        let unit_death = UnitDeathCallPacket { uid: 77 };
+        let create_marker = CreateMarkerCallPacket {
+            id: 5,
+            marker_json: "{}".into(),
+        };
+        let remove_marker = RemoveMarkerCallPacket { id: 5 };
+        let game_over = GameOverCallPacket { winner: TeamId(2) };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetTileCallPacket(set_tile));
+            net.handle_client_received(PacketKind::BuildHealthUpdateCallPacket(build_health));
+            net.handle_client_received(PacketKind::RemoveTileCallPacket(remove_tile));
+            net.handle_client_received(PacketKind::UnitDeathCallPacket(unit_death));
+            net.handle_client_received(PacketKind::CreateMarkerCallPacket(create_marker));
+            net.handle_client_received(PacketKind::RemoveMarkerCallPacket(remove_marker));
+            net.handle_client_received(PacketKind::GameOverCallPacket(game_over));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.world_update_packets_seen, 3);
+        assert!(matches!(
+            state.last_world_update_packet.as_ref(),
+            Some(PacketKind::RemoveTileCallPacket(_))
+        ));
+        assert!(state.last_world_update_packet_at.is_some());
+        assert_eq!(state.unit_lifecycle_packets_seen, 1);
+        assert!(matches!(
+            state.last_unit_lifecycle_packet.as_ref(),
+            Some(PacketKind::UnitDeathCallPacket(_))
+        ));
+        assert!(state.last_unit_lifecycle_packet_at.is_some());
+        assert_eq!(state.marker_packets_seen, 2);
+        assert!(matches!(
+            state.last_marker_packet.as_ref(),
+            Some(PacketKind::RemoveMarkerCallPacket(_))
+        ));
+        assert!(state.last_marker_packet_at.is_some());
+        assert_eq!(state.campaign_event_packets_seen, 1);
+        assert!(matches!(
+            state.last_campaign_event_packet.as_ref(),
+            Some(PacketKind::GameOverCallPacket(_))
+        ));
+        assert!(state.last_campaign_event_packet_at.is_some());
     }
 
     #[test]
