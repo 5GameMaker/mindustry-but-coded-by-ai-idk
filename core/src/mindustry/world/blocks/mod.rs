@@ -260,6 +260,19 @@ impl Attributes {
         }
     }
 
+    pub fn from_content_entries(values: &BTreeMap<String, f32>) -> Self {
+        let mut attributes = Self::new(Attribute::all().len());
+        attributes.read_content_entries(values);
+        attributes
+    }
+
+    pub fn read_content_entries(&mut self, values: &BTreeMap<String, f32>) {
+        for (name, value) in values {
+            let attribute = Attribute::parse_content_name(name);
+            self.set(&attribute, *value);
+        }
+    }
+
     pub fn values(&self) -> &[f32] {
         &self.values
     }
@@ -425,5 +438,24 @@ mod tests {
         assert_eq!(first.get(heat), 2.5);
         assert_eq!(first.get(spores), 1.75);
         assert_eq!(first.values().len(), attrs.len());
+    }
+
+    #[test]
+    fn attributes_content_entries_auto_register_unknown_attribute_names() {
+        let custom_name = format!("content-parser-custom-{}-{}", std::process::id(), line!());
+        let mut values = BTreeMap::new();
+        values.insert("heat".to_string(), 1.5);
+        values.insert(custom_name.clone(), 2.25);
+
+        assert!(!Attribute::exists(&custom_name));
+        let attributes = Attributes::from_content_entries(&values);
+        let custom = Attribute::get(&custom_name);
+
+        assert_eq!(attributes.get(&Attribute::heat()), 1.5);
+        assert_eq!(attributes.get(&custom), 2.25);
+
+        let json = attributes.json_entries(&Attribute::all());
+        assert_eq!(json.get("heat"), Some(&1.5));
+        assert_eq!(json.get(&custom_name), Some(&2.25));
     }
 }

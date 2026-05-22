@@ -55,6 +55,14 @@ impl Attribute {
         lock_global_registry().get(name)
     }
 
+    pub fn get_or_add(name: &str) -> Self {
+        lock_global_registry().get_or_add(name)
+    }
+
+    pub fn parse_content_name(name: &str) -> Self {
+        Self::get_or_add(name)
+    }
+
     pub fn exists(name: &str) -> bool {
         lock_global_registry().exists(name)
     }
@@ -134,6 +142,10 @@ impl AttributeRegistry {
         self.map.get(name).and_then(|id| self.all.get(*id)).cloned()
     }
 
+    pub fn get_or_add(&mut self, name: &str) -> Attribute {
+        self.get(name).unwrap_or_else(|| self.add(name))
+    }
+
     pub fn exists(&self, name: &str) -> bool {
         self.map.contains_key(name)
     }
@@ -200,6 +212,20 @@ mod tests {
     }
 
     #[test]
+    fn registry_get_or_add_matches_content_parser_attribute_resolution() {
+        let mut registry = AttributeRegistry::with_vanilla();
+        let heat = registry.get_or_add("heat");
+        assert_eq!(heat.id, 0);
+        assert_eq!(registry.all().len(), 7);
+
+        let custom = registry.get_or_add("ambient-radiation");
+        assert_eq!(custom.id, 7);
+        assert_eq!(custom.name, "ambient-radiation");
+        assert_eq!(registry.get_or_add("ambient-radiation"), custom);
+        assert_eq!(registry.all().len(), 8);
+    }
+
+    #[test]
     fn global_attribute_helpers_match_java_static_fields_and_throwing_get() {
         assert_eq!(Attribute::heat().id, 0);
         assert_eq!(Attribute::spores().name, "spores");
@@ -219,6 +245,9 @@ mod tests {
         assert_eq!(added.id, before);
         assert_eq!(Attribute::get(&name), added);
         assert_eq!(Attribute::map().get(&name), Some(&added));
+
+        let existing = Attribute::parse_content_name(&name);
+        assert_eq!(existing, added);
     }
 
     #[test]
