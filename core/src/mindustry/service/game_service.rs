@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{AchievementService, StatService};
+use super::{Achievement, AchievementService, SStat, StatService};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameServiceInitAction {
@@ -26,6 +26,41 @@ pub struct GameServiceState {
     pub all_transport_erekir: Vec<String>,
     pub all_erekir_blocks: Vec<String>,
     pub all_serpulo_blocks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GameServiceUpdateSnapshot {
+    pub campaign: bool,
+    pub player_team_unit_count: i32,
+    pub player_team_poly_count: i32,
+    pub core_has_all_campaign_items: bool,
+    pub power_balance_per_second: Option<f32>,
+    pub battery_stored: f32,
+}
+
+impl GameServiceUpdateSnapshot {
+    pub const fn non_campaign() -> Self {
+        Self {
+            campaign: false,
+            player_team_unit_count: 0,
+            player_team_poly_count: 0,
+            core_has_all_campaign_items: false,
+            power_balance_per_second: None,
+            battery_stored: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceUpdatePlan {
+    pub stat_max_updates: Vec<(SStat, i32)>,
+    pub achievements: BTreeSet<Achievement>,
+}
+
+impl GameServiceUpdatePlan {
+    pub fn is_empty(&self) -> bool {
+        self.stat_max_updates.is_empty() && self.achievements.is_empty()
+    }
 }
 
 impl GameServiceState {
@@ -55,6 +90,40 @@ impl GameServiceState {
 
     pub fn seed_java_t5_units(&mut self) {
         self.t5s = java_t5_units();
+    }
+
+    pub fn check_update_plan(&self, snapshot: GameServiceUpdateSnapshot) -> GameServiceUpdatePlan {
+        if !snapshot.campaign {
+            return GameServiceUpdatePlan::default();
+        }
+
+        let mut plan = GameServiceUpdatePlan {
+            stat_max_updates: vec![(SStat::MaxUnitActive, snapshot.player_team_unit_count)],
+            achievements: BTreeSet::new(),
+        };
+
+        if snapshot.player_team_poly_count >= 10 {
+            plan.achievements.insert(Achievement::Active10Polys);
+        }
+
+        if snapshot.core_has_all_campaign_items {
+            plan.achievements.insert(Achievement::FillCoreAllCampaign);
+        }
+
+        if let Some(balance) = snapshot.power_balance_per_second {
+            if balance < -10_000.0 {
+                plan.achievements.insert(Achievement::Negative10kPower);
+            }
+            if balance > 100_000.0 {
+                plan.achievements.insert(Achievement::Positive100kPower);
+            }
+        }
+
+        if snapshot.battery_stored > 1_000_000.0 {
+            plan.achievements.insert(Achievement::Store1milPower);
+        }
+
+        plan
     }
 }
 
@@ -178,5 +247,52 @@ mod tests {
         assert!(!state.has_all_blocks_built(&["router", "junction"]));
         assert!(state.has_all_units_built(&["dagger"]));
         assert!(state.checked.contains(&1234));
+    }
+
+    #[test]
+    fn update_plan_ignores_non_campaign_like_java_check_update() {
+        let state = GameServiceState::default();
+
+        assert!(state
+            .check_update_plan(GameServiceUpdateSnapshot::non_campaign())
+            .is_empty());
+    }
+
+    #[test]
+    fn update_plan_matches_java_campaign_periodic_checks() {
+        let state = GameServiceState::default();
+        let plan = state.check_update_plan(GameServiceUpdateSnapshot {
+            campaign: true,
+            player_team_unit_count: 12,
+            player_team_poly_count: 10,
+            core_has_all_campaign_items: true,
+            power_balance_per_second: Some(120_000.0),
+            battery_stored: 1_500_000.0,
+        });
+
+        assert_eq!(plan.stat_max_updates, vec![(SStat::MaxUnitActive, 12)]);
+        assert!(plan.achievements.contains(&Achievement::Active10Polys));
+        assert!(plan
+            .achievements
+            .contains(&Achievement::FillCoreAllCampaign));
+        assert!(plan.achievements.contains(&Achievement::Positive100kPower));
+        assert!(plan.achievements.contains(&Achievement::Store1milPower));
+        assert!(!plan.achievements.contains(&Achievement::Negative10kPower));
+    }
+
+    #[test]
+    fn update_plan_keeps_power_thresholds_strict_like_java() {
+        let state = GameServiceState::default();
+        let plan = state.check_update_plan(GameServiceUpdateSnapshot {
+            campaign: true,
+            player_team_unit_count: 0,
+            player_team_poly_count: 0,
+            core_has_all_campaign_items: false,
+            power_balance_per_second: Some(-10_001.0),
+            battery_stored: 1_000_000.0,
+        });
+
+        assert!(plan.achievements.contains(&Achievement::Negative10kPower));
+        assert!(!plan.achievements.contains(&Achievement::Store1milPower));
     }
 }

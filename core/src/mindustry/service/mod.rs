@@ -7,5 +7,8 @@ pub mod s_stat;
 pub use achievement::{
     Achievement, AchievementContext, AchievementData, AchievementService, AchievementState,
 };
-pub use game_service::{DefaultGameService, GameService, GameServiceInitAction, GameServiceState};
+pub use game_service::{
+    DefaultGameService, GameService, GameServiceInitAction, GameServiceState,
+    GameServiceUpdatePlan, GameServiceUpdateSnapshot,
+};
 pub use s_stat::{SStat, StatService};
