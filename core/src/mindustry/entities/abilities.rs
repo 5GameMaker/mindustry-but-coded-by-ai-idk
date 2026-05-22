@@ -827,9 +827,107 @@ impl Ability for StatusFieldAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SuppressionFieldPulse {
+    pub x: f32,
+    pub y: f32,
+    pub range: f32,
+    pub reload: f32,
+    pub max_delay: f32,
+    pub apply_particle_chance: f32,
+    pub timer: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuppressionFieldAbility {
+    pub base: BasicAbility,
+    pub reload: f32,
+    pub max_delay: f32,
+    pub range: f32,
+    pub x: f32,
+    pub y: f32,
+    pub active: bool,
+    pub apply_particle_chance: f32,
+    pub timer: f32,
+}
+
+impl Default for SuppressionFieldAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            reload: 60.0 * 1.5,
+            max_delay: 60.0 * 1.5,
+            range: 200.0,
+            x: 0.0,
+            y: 0.0,
+            active: true,
+            apply_particle_chance: 13.0,
+            timer: 0.0,
+        }
+    }
+}
+
+impl SuppressionFieldAbility {
+    pub fn update_state(
+        &mut self,
+        delta: f32,
+        unit_x: f32,
+        unit_y: f32,
+        unit_rotation: f32,
+    ) -> Option<SuppressionFieldPulse> {
+        if !self.active {
+            return None;
+        }
+
+        self.timer += delta;
+        if self.timer < self.max_delay {
+            return None;
+        }
+
+        let (offset_x, offset_y) = rotate_offset(self.x, self.y, unit_rotation - 90.0);
+        self.timer = 0.0;
+
+        Some(SuppressionFieldPulse {
+            x: unit_x + offset_x,
+            y: unit_y + offset_y,
+            range: self.range,
+            reload: self.reload,
+            max_delay: self.max_delay,
+            apply_particle_chance: self.apply_particle_chance,
+            timer: self.timer,
+        })
+    }
+
+    pub fn duration_seconds(&self) -> f32 {
+        self.reload / 60.0
+    }
+}
+
+impl Ability for SuppressionFieldAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
+}
+
+fn rotate_offset(x: f32, y: f32, rotation: f32) -> (f32, f32) {
+    let radians = rotation.to_radians();
+    (
+        x * radians.cos() - y * radians.sin(),
+        x * radians.sin() + y * radians.cos(),
+    )
 }
 
 fn rotated_effect_offset(rotation: f32, forward: f32, sideways: f32) -> (f32, f32) {
@@ -888,7 +986,7 @@ mod tests {
     use super::{
         Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
         RegenAbility, RepairFieldAbility, RepairFieldTarget, ShieldRegenFieldAbility,
-        ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility,
+        ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility,
     };
 
     #[derive(Clone)]
@@ -1136,5 +1234,43 @@ mod tests {
             .expect("stored timer should fire once shooting starts");
 
         assert_eq!(pulse.active_param, 45.0);
+    }
+
+    #[test]
+    fn suppression_field_triggers_after_delay_at_rotated_offset() {
+        let mut ability = SuppressionFieldAbility {
+            x: 0.0,
+            y: 10.0,
+            max_delay: 5.0,
+            reload: 30.0,
+            range: 80.0,
+            ..Default::default()
+        };
+
+        assert!(ability.update_state(4.0, 100.0, 200.0, 90.0).is_none());
+        let pulse = ability
+            .update_state(1.0, 100.0, 200.0, 90.0)
+            .expect("max delay should trigger suppression");
+
+        assert!((pulse.x - 100.0).abs() < 0.0001);
+        assert!((pulse.y - 210.0).abs() < 0.0001);
+        assert_eq!(pulse.range, 80.0);
+        assert_eq!(pulse.reload, 30.0);
+        assert_eq!(pulse.max_delay, 5.0);
+        assert_eq!(pulse.apply_particle_chance, 13.0);
+        assert_eq!(pulse.timer, 0.0);
+        assert_eq!(ability.duration_seconds(), 0.5);
+    }
+
+    #[test]
+    fn suppression_field_does_not_tick_when_inactive() {
+        let mut ability = SuppressionFieldAbility {
+            active: false,
+            max_delay: 1.0,
+            ..Default::default()
+        };
+
+        assert!(ability.update_state(10.0, 0.0, 0.0, 0.0).is_none());
+        assert_eq!(ability.timer, 0.0);
     }
 }
