@@ -979,6 +979,389 @@ impl HaloPart {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionTexture {
+    pub name: String,
+    pub width: f32,
+    pub height: f32,
+    pub scale: f32,
+    pub found: bool,
+}
+
+impl RegionTexture {
+    pub fn found(name: impl Into<String>, width: f32, height: f32) -> Self {
+        Self {
+            name: name.into(),
+            width,
+            height,
+            scale: 1.0,
+            found: true,
+        }
+    }
+
+    pub fn missing(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            width: 0.0,
+            height: 0.0,
+            scale: 1.0,
+            found: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionPartLoadPlan {
+    pub real_name: String,
+    pub regions: Vec<String>,
+    pub outlines: Vec<String>,
+    pub heat: String,
+    pub light: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegionDrawKind {
+    Outline,
+    Region,
+    Heat,
+    HeatLight,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionDrawItem {
+    pub kind: RegionDrawKind,
+    pub region: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub rotation: f32,
+    pub color: Option<String>,
+    pub color_to: Option<String>,
+    pub color_mix: f32,
+    pub mix_color: Option<String>,
+    pub mix_color_to: Option<String>,
+    pub heat_alpha: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionPartDrawPlan {
+    pub layer: Option<f32>,
+    pub layer_offset: f32,
+    pub under_turret_shading: bool,
+    pub x_scale: f32,
+    pub y_scale: f32,
+    pub items: Vec<RegionDrawItem>,
+    pub child_params: Vec<PartParams>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionPart {
+    pub config: DrawPartConfig,
+    pub suffix: String,
+    pub name: Option<String>,
+    pub mirror: bool,
+    pub outline: bool,
+    pub replace_outline: bool,
+    pub draw_region: bool,
+    pub heat_light: bool,
+    pub clamp_progress: bool,
+    pub progress: PartProgress,
+    pub grow_progress: PartProgress,
+    pub heat_progress: PartProgress,
+    pub blending: String,
+    pub layer: f32,
+    pub layer_offset: f32,
+    pub heat_layer_offset: f32,
+    pub turret_heat_layer: f32,
+    pub outline_layer_offset: f32,
+    pub x: f32,
+    pub y: f32,
+    pub x_scl: f32,
+    pub y_scl: f32,
+    pub rotation: f32,
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub move_x: f32,
+    pub move_y: f32,
+    pub grow_x: f32,
+    pub grow_y: f32,
+    pub move_rot: f32,
+    pub heat_light_opacity: f32,
+    pub color: Option<String>,
+    pub color_to: Option<String>,
+    pub mix_color: Option<String>,
+    pub mix_color_to: Option<String>,
+    pub heat_color: String,
+    pub moves: Vec<PartMove>,
+}
+
+impl Default for RegionPart {
+    fn default() -> Self {
+        Self {
+            config: DrawPartConfig::default(),
+            suffix: String::new(),
+            name: None,
+            mirror: false,
+            outline: true,
+            replace_outline: false,
+            draw_region: true,
+            heat_light: false,
+            clamp_progress: true,
+            progress: PartProgress::Warmup,
+            grow_progress: PartProgress::Warmup,
+            heat_progress: PartProgress::Heat,
+            blending: "normal".into(),
+            layer: -1.0,
+            layer_offset: 0.0,
+            heat_layer_offset: 1.0,
+            turret_heat_layer: 110.0,
+            outline_layer_offset: -0.001,
+            x: 0.0,
+            y: 0.0,
+            x_scl: 1.0,
+            y_scl: 1.0,
+            rotation: 0.0,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            move_x: 0.0,
+            move_y: 0.0,
+            grow_x: 0.0,
+            grow_y: 0.0,
+            move_rot: 0.0,
+            heat_light_opacity: 0.3,
+            color: None,
+            color_to: None,
+            mix_color: None,
+            mix_color_to: None,
+            heat_color: "turretHeat".into(),
+            moves: Vec::new(),
+        }
+    }
+}
+
+impl RegionPart {
+    pub fn new(region: impl Into<String>) -> Self {
+        Self {
+            suffix: region.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn load_plan(&self, base_name: &str) -> RegionPartLoadPlan {
+        let real_name = self
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("{base_name}{}", self.suffix));
+        let (regions, outlines) = if self.draw_region {
+            if self.mirror && self.config.turret_shading {
+                (
+                    vec![format!("{real_name}-r"), format!("{real_name}-l")],
+                    vec![
+                        format!("{real_name}-r-outline"),
+                        format!("{real_name}-l-outline"),
+                    ],
+                )
+            } else {
+                (
+                    vec![real_name.clone()],
+                    vec![format!("{real_name}-outline")],
+                )
+            }
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
+        RegionPartLoadPlan {
+            real_name: real_name.clone(),
+            regions,
+            outlines,
+            heat: format!("{real_name}-heat"),
+            light: format!("{real_name}-light"),
+        }
+    }
+
+    pub fn draw_plan(
+        &self,
+        params: &PartParams,
+        time: f32,
+        regions: &[RegionTexture],
+        outlines: &[RegionTexture],
+        heat: Option<&RegionTexture>,
+        light: Option<&RegionTexture>,
+    ) -> RegionPartDrawPlan {
+        let prog = self.progress.get_clamp(params, time, self.clamp_progress);
+        let scl_prog = self
+            .grow_progress
+            .get_clamp(params, time, self.clamp_progress);
+        let mut mx = self.move_x * prog;
+        let mut my = self.move_y * prog;
+        let mut mr = self.move_rot * prog + self.rotation;
+        let mut gx = self.grow_x * scl_prog;
+        let mut gy = self.grow_y * scl_prog;
+
+        for movement in &self.moves {
+            let p = movement
+                .progress
+                .get_clamp(params, time, self.clamp_progress);
+            mx += movement.x * p;
+            my += movement.y * p;
+            mr += movement.rot * p;
+            gx += movement.gx * p;
+            gy += movement.gy * p;
+        }
+
+        let len = if self.mirror && params.side_override == -1 {
+            2
+        } else {
+            1
+        };
+        let x_scale = self.x_scl + gx;
+        let y_scale = self.y_scl + gy;
+        let mut items = Vec::new();
+        let mut child_params = Vec::with_capacity(len);
+
+        for side in 0..len {
+            let i = if params.side_override == -1 {
+                side as i32
+            } else {
+                params.side_override
+            };
+            let sign = (if i == 0 { 1.0 } else { -1.0 }) * params.side_multiplier as f32;
+            let offset = rotate_offset(params.rotation - 90.0, (self.x + mx) * sign, self.y + my);
+            let rx = params.x + offset.0;
+            let ry = params.y + offset.1;
+            let rot = mr * sign + params.rotation - 90.0;
+            let index = (i.max(0) as usize).min(regions.len().saturating_sub(1));
+
+            if self.outline && self.draw_region {
+                if let Some(outline) = outlines.get(index) {
+                    items.push(self.region_item(
+                        RegionDrawKind::Outline,
+                        outline,
+                        rx,
+                        ry,
+                        rot,
+                        x_scale * sign,
+                        y_scale,
+                        prog,
+                        0.0,
+                    ));
+                }
+            }
+
+            if self.draw_region {
+                if let Some(region) = regions.get(index).filter(|region| region.found) {
+                    items.push(self.region_item(
+                        RegionDrawKind::Region,
+                        region,
+                        rx,
+                        ry,
+                        rot,
+                        x_scale * sign,
+                        y_scale,
+                        prog,
+                        0.0,
+                    ));
+                }
+            }
+
+            if let Some(heat) = heat.filter(|heat| heat.found) {
+                let hprog = self
+                    .heat_progress
+                    .get_clamp(params, time, self.clamp_progress);
+                items.push(self.region_item(
+                    RegionDrawKind::Heat,
+                    heat,
+                    rx,
+                    ry,
+                    rot,
+                    x_scale * sign,
+                    y_scale,
+                    prog,
+                    hprog,
+                ));
+                if self.heat_light {
+                    let light_region = light.filter(|light| light.found).unwrap_or(heat);
+                    items.push(self.region_item(
+                        RegionDrawKind::HeatLight,
+                        light_region,
+                        rx,
+                        ry,
+                        rot,
+                        x_scale * sign,
+                        y_scale,
+                        prog,
+                        hprog * self.heat_light_opacity,
+                    ));
+                }
+            }
+
+            let mut child = PartParams::default();
+            child.set(
+                params.warmup,
+                params.reload,
+                params.smooth_reload,
+                params.heat,
+                params.recoil,
+                params.charge,
+                rx,
+                ry,
+                mr * sign + params.rotation,
+            );
+            child.side_multiplier = params.side_multiplier;
+            child.life = params.life;
+            child.side_override = i;
+            child_params.push(child);
+        }
+
+        RegionPartDrawPlan {
+            layer: (self.layer > 0.0).then_some(self.layer),
+            layer_offset: self.layer_offset,
+            under_turret_shading: self.config.under && self.config.turret_shading,
+            x_scale,
+            y_scale,
+            items,
+            child_params,
+        }
+    }
+
+    fn region_item(
+        &self,
+        kind: RegionDrawKind,
+        region: &RegionTexture,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        x_scale: f32,
+        y_scale: f32,
+        color_mix: f32,
+        heat_alpha: f32,
+    ) -> RegionDrawItem {
+        let width = region.width * region.scale * x_scale;
+        let height = region.height * region.scale * y_scale;
+        RegionDrawItem {
+            kind,
+            region: region.name.clone(),
+            x,
+            y,
+            width,
+            height,
+            origin_x: width / 2.0 + self.origin_x * x_scale,
+            origin_y: height / 2.0 + self.origin_y * y_scale,
+            rotation,
+            color: self.color.clone(),
+            color_to: self.color_to.clone(),
+            color_mix,
+            mix_color: self.mix_color.clone(),
+            mix_color_to: self.mix_color_to.clone(),
+            heat_alpha,
+        }
+    }
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -1007,7 +1390,8 @@ fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
 mod tests {
     use super::{
         DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, HaloPart,
-        HaloShapeKind, HoverPart, PartMove, PartParams, PartProgress, ShapePart, ShapePartKind,
+        HaloShapeKind, HoverPart, PartMove, PartParams, PartProgress, RegionDrawKind, RegionPart,
+        RegionTexture, ShapePart, ShapePartKind,
     };
 
     #[test]
@@ -1326,5 +1710,128 @@ mod tests {
         assert!((plan.shapes[1].x - 100.0).abs() < 0.0001);
         assert!((plan.shapes[1].y - 185.0).abs() < 0.0001);
         assert_eq!(plan.shapes[1].rotation, 296.0);
+    }
+
+    #[test]
+    fn region_part_load_plan_matches_mirrored_and_named_regions() {
+        let mut part = RegionPart::new("-barrel");
+        part.mirror = true;
+        part.config.turret_shading = true;
+
+        let plan = part.load_plan("duo");
+        assert_eq!(plan.real_name, "duo-barrel");
+        assert_eq!(plan.regions, vec!["duo-barrel-r", "duo-barrel-l"]);
+        assert_eq!(
+            plan.outlines,
+            vec!["duo-barrel-r-outline", "duo-barrel-l-outline"]
+        );
+        assert_eq!(plan.heat, "duo-barrel-heat");
+        assert_eq!(plan.light, "duo-barrel-light");
+
+        part.name = Some("custom-region".into());
+        part.draw_region = false;
+        let heat_only = part.load_plan("ignored");
+        assert_eq!(heat_only.real_name, "custom-region");
+        assert!(heat_only.regions.is_empty());
+        assert!(heat_only.outlines.is_empty());
+        assert_eq!(heat_only.heat, "custom-region-heat");
+        assert_eq!(heat_only.light, "custom-region-light");
+    }
+
+    #[test]
+    fn region_part_draw_plan_builds_mirrored_region_heat_and_child_params() {
+        let mut params = PartParams::default();
+        params.set(0.5, 0.0, 0.0, 0.25, 0.0, 0.0, 100.0, 200.0, 90.0);
+        params.life = 0.7;
+
+        let part = RegionPart {
+            mirror: true,
+            heat_light: true,
+            x: 10.0,
+            y: 2.0,
+            rotation: 15.0,
+            move_x: 4.0,
+            move_y: 6.0,
+            move_rot: 20.0,
+            color: Some("from".into()),
+            color_to: Some("to".into()),
+            mix_color: Some("mix-from".into()),
+            mix_color_to: Some("mix-to".into()),
+            ..Default::default()
+        };
+
+        let regions = [
+            RegionTexture::found("barrel-r", 20.0, 10.0),
+            RegionTexture::found("barrel-l", 20.0, 10.0),
+        ];
+        let outlines = [
+            RegionTexture::found("barrel-r-outline", 22.0, 12.0),
+            RegionTexture::found("barrel-l-outline", 22.0, 12.0),
+        ];
+        let heat = RegionTexture::found("barrel-heat", 20.0, 10.0);
+        let light = RegionTexture::found("barrel-light", 24.0, 14.0);
+
+        let plan = part.draw_plan(&params, 3.0, &regions, &outlines, Some(&heat), Some(&light));
+        assert_eq!(plan.layer, None);
+        assert_eq!(plan.layer_offset, 0.0);
+        assert_eq!(plan.x_scale, 1.0);
+        assert_eq!(plan.y_scale, 1.0);
+        assert_eq!(plan.items.len(), 8);
+        assert_eq!(plan.child_params.len(), 2);
+
+        let outline = &plan.items[0];
+        assert_eq!(outline.kind, RegionDrawKind::Outline);
+        assert_eq!(outline.region, "barrel-r-outline");
+        assert_eq!((outline.x, outline.y), (112.0, 205.0));
+        assert_eq!((outline.width, outline.height), (22.0, 12.0));
+        assert_eq!(outline.rotation, 25.0);
+        assert_eq!(outline.color.as_deref(), Some("from"));
+        assert_eq!(outline.color_to.as_deref(), Some("to"));
+        assert_eq!(outline.color_mix, 0.5);
+
+        let region = &plan.items[1];
+        assert_eq!(region.kind, RegionDrawKind::Region);
+        assert_eq!(region.region, "barrel-r");
+        assert_eq!((region.width, region.height), (20.0, 10.0));
+        assert_eq!(region.mix_color.as_deref(), Some("mix-from"));
+        assert_eq!(region.mix_color_to.as_deref(), Some("mix-to"));
+
+        let heat_item = &plan.items[2];
+        assert_eq!(heat_item.kind, RegionDrawKind::Heat);
+        assert_eq!(heat_item.region, "barrel-heat");
+        assert_eq!(heat_item.heat_alpha, 0.25);
+
+        let light_item = &plan.items[3];
+        assert_eq!(light_item.kind, RegionDrawKind::HeatLight);
+        assert_eq!(light_item.region, "barrel-light");
+        assert!((light_item.heat_alpha - 0.075).abs() < 0.0001);
+
+        let mirrored = &plan.items[5];
+        assert_eq!(mirrored.kind, RegionDrawKind::Region);
+        assert_eq!(mirrored.region, "barrel-l");
+        assert_eq!((mirrored.x, mirrored.y), (88.0, 205.0));
+        assert_eq!(mirrored.width, -20.0);
+        assert_eq!(mirrored.height, 10.0);
+        assert_eq!(mirrored.rotation, -25.0);
+
+        assert_eq!(
+            (
+                plan.child_params[0].x,
+                plan.child_params[0].y,
+                plan.child_params[0].rotation,
+                plan.child_params[0].side_override,
+                plan.child_params[0].life,
+            ),
+            (112.0, 205.0, 115.0, 0, 0.7)
+        );
+        assert_eq!(
+            (
+                plan.child_params[1].x,
+                plan.child_params[1].y,
+                plan.child_params[1].rotation,
+                plan.child_params[1].side_override,
+            ),
+            (88.0, 205.0, 65.0, 1)
+        );
     }
 }

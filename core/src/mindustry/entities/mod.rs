@@ -126,8 +126,9 @@ pub use part::{
     DrawPartConfig, EffectSpawnerDrawPlan, EffectSpawnerPart, EffectSpawnerRectPlan,
     EffectSpawnerSpawnPlan, FlarePart, FlarePartDrawPlan, FlareTrianglePlan, HaloPart,
     HaloPartDrawPlan, HaloShapeKind, HaloShapePlan, HoverCirclePlan, HoverPart, HoverPartDrawPlan,
-    PartMove, PartParams, PartProgress, ShapePart, ShapePartDrawItem, ShapePartDrawPlan,
-    ShapePartKind,
+    PartMove, PartParams, PartProgress, RegionDrawItem, RegionDrawKind, RegionPart,
+    RegionPartDrawPlan, RegionPartLoadPlan, RegionTexture, ShapePart, ShapePartDrawItem,
+    ShapePartDrawPlan, ShapePartKind,
 };
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootMulti, ShootPattern, ShootSine,
