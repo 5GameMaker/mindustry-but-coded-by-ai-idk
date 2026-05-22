@@ -137,6 +137,23 @@ pub struct GameServiceUnitCreatePlan {
     pub saved_built_sets: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameServiceSaveLoadSnapshot {
+    pub campaign: bool,
+    pub present_unit_names: Vec<String>,
+    pub visible_unit_names: Vec<String>,
+}
+
+impl GameServiceSaveLoadSnapshot {
+    pub fn campaign_units(unit_names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            campaign: true,
+            present_unit_names: unit_names.into_iter().map(Into::into).collect(),
+            visible_unit_names: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameServiceTurnSnapshot {
     pub production_per_minute: i32,
@@ -246,6 +263,39 @@ pub struct GameServiceUnitDrownSnapshot {
 pub struct GameServiceNewGameSnapshot {
     pub campaign: bool,
     pub core_items_total: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceBuildingBulletDestroySnapshot {
+    pub campaign: bool,
+    pub build_block_name: String,
+    pub build_team_is_wave_team: bool,
+    pub bullet_owner_unit_name: Option<String>,
+    pub bullet_owner_team_is_player_team: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceGeneratorPressureExplodeSnapshot {
+    pub campaign: bool,
+    pub block_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceUnitBulletDestroySnapshot {
+    pub campaign: bool,
+    pub bullet_team_is_player_team: bool,
+    pub bullet_owner_wall_build: bool,
+    pub killed_unit_name: String,
+    pub bullet_owner_turret_block_name: Option<String>,
+    pub bullet_type_mass_driver_bolt: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServicePayloadDropSnapshot {
+    pub campaign: bool,
+    pub unit_present: bool,
+    pub carrier_team_is_default: bool,
+    pub within_enemy_core_radius: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -466,6 +516,40 @@ impl GameServiceState {
 
         if self.t5s.contains(&snapshot.unit_name) {
             plan.achievements.insert(Achievement::BuildT5);
+        }
+
+        plan
+    }
+
+    pub fn save_load_plan(
+        &mut self,
+        snapshot: GameServiceSaveLoadSnapshot,
+    ) -> GameServiceUnitCreatePlan {
+        let mut plan = GameServiceUnitCreatePlan::default();
+        if !snapshot.campaign {
+            return plan;
+        }
+
+        let mut added = false;
+        for unit_name in snapshot.present_unit_names {
+            if self.t5s.contains(&unit_name) {
+                plan.achievements.insert(Achievement::BuildT5);
+            }
+
+            if self.units_built.insert(unit_name) {
+                added = true;
+            }
+        }
+
+        if added {
+            let visible_built = snapshot
+                .visible_unit_names
+                .iter()
+                .filter(|unit| self.units_built.contains(unit.as_str()))
+                .count() as i32;
+            plan.stat_max_updates
+                .push((SStat::UnitTypesBuilt, visible_built));
+            plan.saved_built_sets = true;
         }
 
         plan
@@ -733,6 +817,74 @@ impl GameServiceState {
         let mut plan = GameServiceEventPlan::default();
         if snapshot.campaign && snapshot.core_items_total >= 10_000 {
             plan.achievements.insert(Achievement::Drop10kitems);
+        }
+        plan
+    }
+
+    pub fn building_bullet_destroy_plan(
+        &self,
+        snapshot: GameServiceBuildingBulletDestroySnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign
+            && snapshot.build_block_name == "scatter"
+            && snapshot.build_team_is_wave_team
+            && snapshot.bullet_owner_unit_name.as_deref() == Some("flare")
+            && snapshot.bullet_owner_team_is_player_team
+        {
+            plan.achievements.insert(Achievement::DestroyScatterFlare);
+        }
+        plan
+    }
+
+    pub fn generator_pressure_explode_plan(
+        &self,
+        snapshot: GameServiceGeneratorPressureExplodeSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign && snapshot.block_name == "neoplasia-reactor" {
+            plan.achievements.insert(Achievement::NeoplasiaExplosion);
+        }
+        plan
+    }
+
+    pub fn unit_bullet_destroy_plan(
+        &self,
+        snapshot: GameServiceUnitBulletDestroySnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if !snapshot.campaign || !snapshot.bullet_team_is_player_team {
+            return plan;
+        }
+
+        if snapshot.bullet_owner_wall_build {
+            plan.achievements.insert(Achievement::KillEnemyPhaseWall);
+        }
+
+        if snapshot.killed_unit_name == "eclipse"
+            && snapshot.bullet_owner_turret_block_name.as_deref() == Some("duo")
+        {
+            plan.achievements.insert(Achievement::KillEclipseDuo);
+        }
+
+        if snapshot.bullet_type_mass_driver_bolt {
+            plan.achievements.insert(Achievement::KillMassDriver);
+        }
+
+        plan
+    }
+
+    pub fn payload_drop_plan(
+        &self,
+        snapshot: GameServicePayloadDropSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign
+            && snapshot.unit_present
+            && snapshot.carrier_team_is_default
+            && snapshot.within_enemy_core_radius
+        {
+            plan.achievements.insert(Achievement::DropUnitsCoreZone);
         }
         plan
     }
@@ -1064,6 +1216,33 @@ mod tests {
         snapshot.default_team_unit = false;
         assert_eq!(
             state.unit_create_plan(snapshot),
+            GameServiceUnitCreatePlan::default()
+        );
+    }
+
+    #[test]
+    fn save_load_plan_backfills_existing_units_and_t5_like_java_delayed_scan() {
+        let mut state = GameServiceState::default();
+        state.seed_java_t5_units();
+        state.mark_unit_built("dagger");
+
+        let mut snapshot = GameServiceSaveLoadSnapshot::campaign_units(["dagger", "omura"]);
+        snapshot.visible_unit_names = vec!["dagger".into(), "omura".into(), "hidden-test".into()];
+
+        let plan = state.save_load_plan(snapshot);
+
+        assert!(plan.achievements.contains(&Achievement::BuildT5));
+        assert_eq!(plan.stat_max_updates, vec![(SStat::UnitTypesBuilt, 2)]);
+        assert!(plan.saved_built_sets);
+        assert!(state.units_built.contains("dagger"));
+        assert!(state.units_built.contains("omura"));
+
+        assert_eq!(
+            state.save_load_plan(GameServiceSaveLoadSnapshot {
+                campaign: false,
+                present_unit_names: vec!["corvus".into()],
+                visible_unit_names: vec!["corvus".into()],
+            }),
             GameServiceUnitCreatePlan::default()
         );
     }
@@ -1494,5 +1673,80 @@ mod tests {
             })
             .achievements
             .contains(&Achievement::Drop10kitems));
+    }
+
+    #[test]
+    fn combat_and_payload_event_plans_match_java_achievement_branches() {
+        let state = GameServiceState::default();
+
+        let scatter_plan =
+            state.building_bullet_destroy_plan(GameServiceBuildingBulletDestroySnapshot {
+                campaign: true,
+                build_block_name: "scatter".into(),
+                build_team_is_wave_team: true,
+                bullet_owner_unit_name: Some("flare".into()),
+                bullet_owner_team_is_player_team: true,
+            });
+        assert!(scatter_plan
+            .achievements
+            .contains(&Achievement::DestroyScatterFlare));
+
+        assert!(state
+            .building_bullet_destroy_plan(GameServiceBuildingBulletDestroySnapshot {
+                campaign: true,
+                build_block_name: "scatter".into(),
+                build_team_is_wave_team: true,
+                bullet_owner_unit_name: Some("dagger".into()),
+                bullet_owner_team_is_player_team: true,
+            })
+            .is_empty());
+
+        let neoplasia_plan =
+            state.generator_pressure_explode_plan(GameServiceGeneratorPressureExplodeSnapshot {
+                campaign: true,
+                block_name: "neoplasia-reactor".into(),
+            });
+        assert!(neoplasia_plan
+            .achievements
+            .contains(&Achievement::NeoplasiaExplosion));
+
+        let bullet_plan = state.unit_bullet_destroy_plan(GameServiceUnitBulletDestroySnapshot {
+            campaign: true,
+            bullet_team_is_player_team: true,
+            bullet_owner_wall_build: true,
+            killed_unit_name: "eclipse".into(),
+            bullet_owner_turret_block_name: Some("duo".into()),
+            bullet_type_mass_driver_bolt: true,
+        });
+        assert!(bullet_plan
+            .achievements
+            .contains(&Achievement::KillEnemyPhaseWall));
+        assert!(bullet_plan
+            .achievements
+            .contains(&Achievement::KillEclipseDuo));
+        assert!(bullet_plan
+            .achievements
+            .contains(&Achievement::KillMassDriver));
+
+        assert!(state
+            .unit_bullet_destroy_plan(GameServiceUnitBulletDestroySnapshot {
+                campaign: true,
+                bullet_team_is_player_team: false,
+                bullet_owner_wall_build: true,
+                killed_unit_name: "eclipse".into(),
+                bullet_owner_turret_block_name: Some("duo".into()),
+                bullet_type_mass_driver_bolt: true,
+            })
+            .is_empty());
+
+        let payload_plan = state.payload_drop_plan(GameServicePayloadDropSnapshot {
+            campaign: true,
+            unit_present: true,
+            carrier_team_is_default: true,
+            within_enemy_core_radius: true,
+        });
+        assert!(payload_plan
+            .achievements
+            .contains(&Achievement::DropUnitsCoreZone));
     }
 }

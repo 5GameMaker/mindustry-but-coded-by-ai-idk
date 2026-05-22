@@ -9,14 +9,17 @@ pub use achievement::{
 };
 pub use game_service::{
     DefaultGameService, GameService, GameServiceBlockBuildPlan, GameServiceBlockBuildSnapshot,
-    GameServiceBlockDestroySnapshot, GameServiceClientChatSnapshot,
-    GameServiceClientPreConnectSnapshot, GameServiceEventPlan, GameServiceInitAction,
-    GameServiceLaunchItemSnapshot, GameServiceNewGameSnapshot, GameServicePickupSnapshot,
-    GameServicePlayerJoinSnapshot, GameServiceResearchSnapshot, GameServiceSectorCaptureSnapshot,
+    GameServiceBlockDestroySnapshot, GameServiceBuildingBulletDestroySnapshot,
+    GameServiceClientChatSnapshot, GameServiceClientPreConnectSnapshot, GameServiceEventPlan,
+    GameServiceGeneratorPressureExplodeSnapshot, GameServiceInitAction,
+    GameServiceLaunchItemSnapshot, GameServiceNewGameSnapshot, GameServicePayloadDropSnapshot,
+    GameServicePickupSnapshot, GameServicePlayerJoinSnapshot, GameServiceResearchSnapshot,
+    GameServiceSaveLoadSnapshot, GameServiceSectorCaptureSnapshot,
     GameServiceSectorLaunchLoadoutSnapshot, GameServiceState, GameServiceTriggerSnapshot,
-    GameServiceTurnPlan, GameServiceTurnSnapshot, GameServiceUnitControlSnapshot,
-    GameServiceUnitCreatePlan, GameServiceUnitCreateSnapshot, GameServiceUnitDestroySnapshot,
-    GameServiceUnitDrownSnapshot, GameServiceUnlockSnapshot, GameServiceUpdatePlan,
-    GameServiceUpdateSnapshot, GameServiceWaveSnapshot, GameServiceWinSnapshot,
+    GameServiceTurnPlan, GameServiceTurnSnapshot, GameServiceUnitBulletDestroySnapshot,
+    GameServiceUnitControlSnapshot, GameServiceUnitCreatePlan, GameServiceUnitCreateSnapshot,
+    GameServiceUnitDestroySnapshot, GameServiceUnitDrownSnapshot, GameServiceUnlockSnapshot,
+    GameServiceUpdatePlan, GameServiceUpdateSnapshot, GameServiceWaveSnapshot,
+    GameServiceWinSnapshot,
 };
 pub use s_stat::{SStat, StatService};
