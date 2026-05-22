@@ -23,6 +23,8 @@ pub const PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
 pub const JAVA_MAX_NAME_BYTES: usize = 40;
 pub const JAVA_CHAT_SPAM_WINDOW_MS: i64 = 2_000;
 pub const JAVA_CHAT_SPAM_LIMIT: i32 = 20;
+pub const JAVA_PACKET_SPAM_WINDOW_MS: i64 = 3_000;
+pub const JAVA_PACKET_SPAM_LIMIT: i32 = 300;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerPreviewPlanSource {
@@ -197,6 +199,7 @@ pub struct NetServerState {
     pub chat_packets_seen: u64,
     pub chat_packets_filtered: u64,
     pub chat_packets_rate_limited: u64,
+    pub packet_rate_limited: u64,
     pub last_state_snapshot_connection_id: Option<i32>,
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_sent_at: Option<Instant>,
@@ -1435,115 +1438,121 @@ impl NetServer {
         {
             let state = Arc::clone(state);
             let packet_handlers = Arc::clone(packet_handlers);
-            net.handle_server(move |connection_id, packet| match packet {
-                PacketKind::PingCallPacket(ping) => {
-                    {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        state.last_connection_id = connection_id;
-                        state.last_ping_connection_id = connection_id;
-                        state.last_ping_time = Some(ping.time);
-                        state.ping_requests_seen += 1;
-                        state.last_updated_at = Some(Instant::now());
-                        state.ping_responses_sent += 1;
-                        state.last_ping_error = None;
-                        state.events.push(ProviderEvent::ServerPacket {
-                            connection_id: connection_id.unwrap_or(-1),
-                            packet: PacketKind::PingCallPacket(*ping),
-                        });
-                    }
-
-                    Self::dispatch_packet_handlers(
-                        &packet_handlers,
-                        &PacketKind::PingCallPacket(*ping),
-                    );
+            net.handle_server(move |connection_id, packet| {
+                if !Self::allow_server_packet_rate(&state, connection_id) {
+                    return;
                 }
-                PacketKind::RequestDebugStatusCallPacket(request) => {
-                    let packet = PacketKind::RequestDebugStatusCallPacket(*request);
-                    {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        state.last_connection_id = connection_id;
-                        state.debug_status_requests_seen =
-                            state.debug_status_requests_seen.saturating_add(1);
-                        if let Some(connection_id) = connection_id {
-                            state.pending_debug_status_connections.push(connection_id);
+
+                match packet {
+                    PacketKind::PingCallPacket(ping) => {
+                        {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            state.last_connection_id = connection_id;
+                            state.last_ping_connection_id = connection_id;
+                            state.last_ping_time = Some(ping.time);
+                            state.ping_requests_seen += 1;
+                            state.last_updated_at = Some(Instant::now());
+                            state.ping_responses_sent += 1;
+                            state.last_ping_error = None;
+                            state.events.push(ProviderEvent::ServerPacket {
+                                connection_id: connection_id.unwrap_or(-1),
+                                packet: PacketKind::PingCallPacket(*ping),
+                            });
                         }
-                        state.events.push(ProviderEvent::ServerPacket {
-                            connection_id: connection_id.unwrap_or(-1),
-                            packet: packet.clone(),
-                        });
-                        state.last_updated_at = Some(Instant::now());
+
+                        Self::dispatch_packet_handlers(
+                            &packet_handlers,
+                            &PacketKind::PingCallPacket(*ping),
+                        );
                     }
+                    PacketKind::RequestDebugStatusCallPacket(request) => {
+                        let packet = PacketKind::RequestDebugStatusCallPacket(*request);
+                        {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            state.last_connection_id = connection_id;
+                            state.debug_status_requests_seen =
+                                state.debug_status_requests_seen.saturating_add(1);
+                            if let Some(connection_id) = connection_id {
+                                state.pending_debug_status_connections.push(connection_id);
+                            }
+                            state.events.push(ProviderEvent::ServerPacket {
+                                connection_id: connection_id.unwrap_or(-1),
+                                packet: packet.clone(),
+                            });
+                            state.last_updated_at = Some(Instant::now());
+                        }
 
-                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
-                }
-                PacketKind::ClientSnapshotCallPacket(snapshot) => {
-                    let packet = PacketKind::ClientSnapshotCallPacket(snapshot.clone());
-                    let accepted = {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        Self::record_client_snapshot(&mut state, connection_id, snapshot)
-                    };
-
-                    if !accepted {
-                        return;
-                    }
-
-                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
-                }
-                PacketKind::ClientPlanSnapshotCallPacket(snapshot) => {
-                    let packet = PacketKind::ClientPlanSnapshotCallPacket(snapshot.clone());
-                    {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        Self::record_client_plan_snapshot(&mut state, connection_id, snapshot);
-                    }
-
-                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
-                }
-                PacketKind::TileConfigCallPacket(tile_config) => {
-                    let packet = PacketKind::TileConfigCallPacket(tile_config.clone());
-                    let accepted = {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        Self::record_tile_config(&mut state, connection_id, tile_config)
-                    };
-
-                    if !accepted {
-                        return;
-                    }
-
-                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
-                }
-                PacketKind::RotateBlockCallPacket(rotate) => {
-                    let packet = PacketKind::RotateBlockCallPacket(rotate.clone());
-                    let accepted = {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        Self::record_rotate_block(&mut state, connection_id, rotate)
-                    };
-
-                    if !accepted {
-                        return;
-                    }
-
-                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
-                }
-                PacketKind::TileTapCallPacket(tile_tap) => {
-                    let packet = PacketKind::TileTapCallPacket(tile_tap.clone());
-                    {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        Self::record_tile_tap(&mut state, connection_id, tile_tap);
-                    }
-
-                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
-                }
-                PacketKind::SendChatMessageCallPacket(chat) => {
-                    let packet = {
-                        let mut state = state.lock().expect("NetServerState mutex poisoned");
-                        Self::record_chat_message(&mut state, connection_id, chat)
-                    };
-
-                    if let Some(packet) = packet {
                         Self::dispatch_packet_handlers(&packet_handlers, &packet);
                     }
+                    PacketKind::ClientSnapshotCallPacket(snapshot) => {
+                        let packet = PacketKind::ClientSnapshotCallPacket(snapshot.clone());
+                        let accepted = {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            Self::record_client_snapshot(&mut state, connection_id, snapshot)
+                        };
+
+                        if !accepted {
+                            return;
+                        }
+
+                        Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                    }
+                    PacketKind::ClientPlanSnapshotCallPacket(snapshot) => {
+                        let packet = PacketKind::ClientPlanSnapshotCallPacket(snapshot.clone());
+                        {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            Self::record_client_plan_snapshot(&mut state, connection_id, snapshot);
+                        }
+
+                        Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                    }
+                    PacketKind::TileConfigCallPacket(tile_config) => {
+                        let packet = PacketKind::TileConfigCallPacket(tile_config.clone());
+                        let accepted = {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            Self::record_tile_config(&mut state, connection_id, tile_config)
+                        };
+
+                        if !accepted {
+                            return;
+                        }
+
+                        Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                    }
+                    PacketKind::RotateBlockCallPacket(rotate) => {
+                        let packet = PacketKind::RotateBlockCallPacket(rotate.clone());
+                        let accepted = {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            Self::record_rotate_block(&mut state, connection_id, rotate)
+                        };
+
+                        if !accepted {
+                            return;
+                        }
+
+                        Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                    }
+                    PacketKind::TileTapCallPacket(tile_tap) => {
+                        let packet = PacketKind::TileTapCallPacket(tile_tap.clone());
+                        {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            Self::record_tile_tap(&mut state, connection_id, tile_tap);
+                        }
+
+                        Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                    }
+                    PacketKind::SendChatMessageCallPacket(chat) => {
+                        let packet = {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            Self::record_chat_message(&mut state, connection_id, chat)
+                        };
+
+                        if let Some(packet) = packet {
+                            Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             });
         }
     }
@@ -1561,6 +1570,43 @@ impl NetServer {
             let mut handler = handler.lock().expect("packet handler mutex poisoned");
             let callback = handler.as_mut();
             callback(packet);
+        }
+    }
+
+    fn allow_server_packet_rate(
+        state: &Arc<Mutex<NetServerState>>,
+        connection_id: Option<i32>,
+    ) -> bool {
+        let Some(connection_id) = connection_id else {
+            return true;
+        };
+
+        let now_millis = Self::current_millis();
+        let mut state = state.lock().expect("NetServerState mutex poisoned");
+        let rate_limited_address =
+            state
+                .connection_states
+                .get_mut(&connection_id)
+                .and_then(|connection| {
+                    if connection.packet_rate.allow(
+                        JAVA_PACKET_SPAM_WINDOW_MS,
+                        JAVA_PACKET_SPAM_LIMIT,
+                        now_millis,
+                    ) {
+                        None
+                    } else {
+                        connection.kick_reason(KickReason::Kick);
+                        Some(connection.address.clone())
+                    }
+                });
+
+        if let Some(address) = rate_limited_address {
+            state.packet_rate_limited += 1;
+            state.administration.blacklist_dos(address);
+            state.last_updated_at = Some(Instant::now());
+            false
+        } else {
+            true
         }
     }
 
@@ -1970,7 +2016,7 @@ mod tests {
 
     use super::{
         ConnectPacketValidationContext, NetServer, NetServerState, PlayerPreviewPlanSource,
-        PLAN_PREVIEW_CHUNK_SIZE,
+        JAVA_PACKET_SPAM_LIMIT, PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -3526,6 +3572,50 @@ mod tests {
         assert_eq!(state.ping_requests_seen, 1);
         assert_eq!(state.ping_responses_sent, 1);
         assert!(state.last_ping_error.is_none());
+    }
+
+    #[test]
+    fn packet_rate_limit_kicks_and_blacklists_before_dispatch() {
+        let server = NetServer::default();
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(77, NetConnection::new("7.7.7.7"));
+        }
+
+        {
+            let mut net = server.net_mut();
+            for _ in 0..=JAVA_PACKET_SPAM_LIMIT {
+                net.handle_server_received_from_connection(
+                    Some(77),
+                    true,
+                    PacketKind::RequestDebugStatusCallPacket(RequestDebugStatusCallPacket),
+                );
+            }
+        }
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.debug_status_requests_seen,
+            JAVA_PACKET_SPAM_LIMIT as u64
+        );
+        assert_eq!(
+            state.pending_debug_status_connections.len(),
+            JAVA_PACKET_SPAM_LIMIT as usize
+        );
+        assert_eq!(state.packet_rate_limited, 1);
+        assert!(state.administration.is_dos_blacklisted("7.7.7.7"));
+        let connection = state.connection_states.get(&77).unwrap();
+        assert!(connection.kicked);
+        assert!(connection.has_disconnected);
+        assert!(matches!(
+            connection.sent.last(),
+            Some((SentPacket::KickReason(KickReason::Kick), true))
+        ));
     }
 
     #[test]
