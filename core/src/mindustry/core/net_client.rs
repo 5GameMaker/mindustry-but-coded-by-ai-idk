@@ -10,11 +10,12 @@ use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect,
     ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, Net, PacketKind, PickedBuildPayloadCallPacket, PingCallPacket,
-    ProviderEvent, RequestBuildPayloadCallPacket, RequestItemCallPacket, RotateBlockCallPacket,
-    StateSnapshotCallPacket, StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket,
+    HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket, ProviderEvent,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBuilder,
+    Streamable, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -168,9 +169,21 @@ pub struct NetClientState {
     pub last_request_build_payload: Option<RequestBuildPayloadCallPacket>,
     pub last_request_build_payload_at: Option<Instant>,
     pub request_build_payload_packets_seen: u64,
+    pub last_request_unit_payload: Option<RequestUnitPayloadCallPacket>,
+    pub last_request_unit_payload_at: Option<Instant>,
+    pub request_unit_payload_packets_seen: u64,
     pub last_picked_build_payload: Option<PickedBuildPayloadCallPacket>,
     pub last_picked_build_payload_at: Option<Instant>,
     pub picked_build_payload_packets_seen: u64,
+    pub last_picked_unit_payload: Option<PickedUnitPayloadCallPacket>,
+    pub last_picked_unit_payload_at: Option<Instant>,
+    pub picked_unit_payload_packets_seen: u64,
+    pub last_request_drop_payload: Option<RequestDropPayloadCallPacket>,
+    pub last_request_drop_payload_at: Option<Instant>,
+    pub request_drop_payload_packets_seen: u64,
+    pub last_payload_dropped: Option<PayloadDroppedCallPacket>,
+    pub last_payload_dropped_at: Option<Instant>,
+    pub payload_dropped_packets_seen: u64,
     pub last_building_control_select: Option<BuildingControlSelectCallPacket>,
     pub last_building_control_select_at: Option<Instant>,
     pub building_control_select_packets_seen: u64,
@@ -281,8 +294,24 @@ impl fmt::Debug for NetClientState {
                 &self.request_build_payload_packets_seen,
             )
             .field(
+                "request_unit_payload_packets_seen",
+                &self.request_unit_payload_packets_seen,
+            )
+            .field(
                 "picked_build_payload_packets_seen",
                 &self.picked_build_payload_packets_seen,
+            )
+            .field(
+                "picked_unit_payload_packets_seen",
+                &self.picked_unit_payload_packets_seen,
+            )
+            .field(
+                "request_drop_payload_packets_seen",
+                &self.request_drop_payload_packets_seen,
+            )
+            .field(
+                "payload_dropped_packets_seen",
+                &self.payload_dropped_packets_seen,
             )
             .field(
                 "building_control_select_packets_seen",
@@ -1055,11 +1084,39 @@ impl NetClient {
                         state.last_request_build_payload_at = Some(now);
                         false
                     }
+                    PacketKind::RequestUnitPayloadCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.request_unit_payload_packets_seen += 1;
+                        state.last_request_unit_payload = Some(packet.clone());
+                        state.last_request_unit_payload_at = Some(now);
+                        false
+                    }
                     PacketKind::PickedBuildPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.picked_build_payload_packets_seen += 1;
                         state.last_picked_build_payload = Some(packet.clone());
                         state.last_picked_build_payload_at = Some(now);
+                        false
+                    }
+                    PacketKind::PickedUnitPayloadCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.picked_unit_payload_packets_seen += 1;
+                        state.last_picked_unit_payload = Some(packet.clone());
+                        state.last_picked_unit_payload_at = Some(now);
+                        false
+                    }
+                    PacketKind::RequestDropPayloadCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.request_drop_payload_packets_seen += 1;
+                        state.last_request_drop_payload = Some(packet.clone());
+                        state.last_request_drop_payload_at = Some(now);
+                        false
+                    }
+                    PacketKind::PayloadDroppedCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.payload_dropped_packets_seen += 1;
+                        state.last_payload_dropped = Some(packet.clone());
+                        state.last_payload_dropped_at = Some(now);
                         false
                     }
                     PacketKind::BuildingControlSelectCallPacket(packet) => {
@@ -1277,12 +1334,13 @@ mod tests {
         BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
         ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, Disconnect,
         DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
-        NetConnection, NetProvider, PacketKind, PickedBuildPayloadCallPacket,
-        PingResponseCallPacket, RequestBuildPayloadCallPacket, RequestItemCallPacket,
-        RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        WorldDataBeginCallPacket,
+        NetConnection, NetProvider, PacketKind, PayloadDroppedCallPacket,
+        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingResponseCallPacket,
+        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+        RequestUnitPayloadCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin,
+        StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket,
+        TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -2019,10 +2077,28 @@ mod tests {
             player: EntityRef::new(303),
             build: primary_build,
         };
+        let request_unit_payload = RequestUnitPayloadCallPacket {
+            player: EntityRef::new(307),
+            target: UnitRef::Unit { id: 404 },
+        };
         let picked_build_payload = PickedBuildPayloadCallPacket {
             unit: UnitRef::Unit { id: 401 },
             build_pos: Some(22_003),
             on_ground: true,
+        };
+        let picked_unit_payload = PickedUnitPayloadCallPacket {
+            unit: UnitRef::Unit { id: 405 },
+            target: UnitRef::Unit { id: 406 },
+        };
+        let request_drop_payload = RequestDropPayloadCallPacket {
+            player: EntityRef::new(308),
+            x: 123.25,
+            y: 456.5,
+        };
+        let payload_dropped = PayloadDroppedCallPacket {
+            unit: UnitRef::Unit { id: 407 },
+            x: 321.75,
+            y: 654.25,
         };
         let building_control_select = BuildingControlSelectCallPacket {
             player: EntityRef::new(306),
@@ -2050,8 +2126,20 @@ mod tests {
             net.handle_client_received(PacketKind::RequestBuildPayloadCallPacket(
                 request_build_payload.clone(),
             ));
+            net.handle_client_received(PacketKind::RequestUnitPayloadCallPacket(
+                request_unit_payload.clone(),
+            ));
             net.handle_client_received(PacketKind::PickedBuildPayloadCallPacket(
                 picked_build_payload,
+            ));
+            net.handle_client_received(PacketKind::PickedUnitPayloadCallPacket(
+                picked_unit_payload.clone(),
+            ));
+            net.handle_client_received(PacketKind::RequestDropPayloadCallPacket(
+                request_drop_payload.clone(),
+            ));
+            net.handle_client_received(PacketKind::PayloadDroppedCallPacket(
+                payload_dropped.clone(),
             ));
             net.handle_client_received(PacketKind::UnitBuildingControlSelectCallPacket(
                 unit_building_control_select.clone(),
@@ -2082,12 +2170,33 @@ mod tests {
             Some(&request_build_payload)
         );
         assert!(state.last_request_build_payload_at.is_some());
+        assert_eq!(state.request_unit_payload_packets_seen, 1);
+        assert_eq!(
+            state.last_request_unit_payload.as_ref(),
+            Some(&request_unit_payload)
+        );
+        assert!(state.last_request_unit_payload_at.is_some());
         assert_eq!(state.picked_build_payload_packets_seen, 1);
         assert_eq!(
             state.last_picked_build_payload.as_ref(),
             Some(&picked_build_payload)
         );
         assert!(state.last_picked_build_payload_at.is_some());
+        assert_eq!(state.picked_unit_payload_packets_seen, 1);
+        assert_eq!(
+            state.last_picked_unit_payload.as_ref(),
+            Some(&picked_unit_payload)
+        );
+        assert!(state.last_picked_unit_payload_at.is_some());
+        assert_eq!(state.request_drop_payload_packets_seen, 1);
+        assert_eq!(
+            state.last_request_drop_payload.as_ref(),
+            Some(&request_drop_payload)
+        );
+        assert!(state.last_request_drop_payload_at.is_some());
+        assert_eq!(state.payload_dropped_packets_seen, 1);
+        assert_eq!(state.last_payload_dropped.as_ref(), Some(&payload_dropped));
+        assert!(state.last_payload_dropped_at.is_some());
         assert_eq!(state.building_control_select_packets_seen, 1);
         assert_eq!(
             state.last_building_control_select.as_ref(),
