@@ -12,6 +12,7 @@ pub mod leg;
 pub mod leg_destroy_data;
 pub mod lightning;
 pub mod mover;
+pub mod part;
 pub mod pattern;
 pub mod predict;
 pub mod puddles;
@@ -121,6 +122,7 @@ pub use lightning::{
     LightningSpawnPlan, LightningTarget, HIT_RANGE, MAX_CHAIN,
 };
 pub use mover::Mover;
+pub use part::{DrawPartConfig, PartMove, PartParams, PartProgress};
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootMulti, ShootPattern, ShootSine,
     ShootSpread, ShootSummon, Shot,
