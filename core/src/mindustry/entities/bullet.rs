@@ -776,6 +776,217 @@ impl LiquidBulletType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaserLightningPlan {
+    pub x: f32,
+    pub y: f32,
+    pub delay: f32,
+    pub angle: f32,
+    pub angle_rand: f32,
+    pub damage: f32,
+    pub length: i32,
+    pub length_rand: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaserInitPlan {
+    pub result_length: f32,
+    pub laser_effect: String,
+    pub laser_effect_data: f32,
+    pub lightnings: Vec<LaserLightningPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaserLayerDrawPlan {
+    pub color: String,
+    pub stroke: f32,
+    pub head_width: f32,
+    pub head_length: f32,
+    pub circle_radius: f32,
+    pub side_width: f32,
+    pub side_length: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaserDrawPlan {
+    pub base_length: f32,
+    pub layers: Vec<LaserLayerDrawPlan>,
+    pub light_end: (f32, f32),
+    pub light_width: f32,
+    pub light_color: String,
+    pub light_opacity: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaserBulletType {
+    pub base: BulletType,
+    pub colors: Vec<String>,
+    pub laser_effect: String,
+    pub length: f32,
+    pub width: f32,
+    pub length_falloff: f32,
+    pub side_length: f32,
+    pub side_width: f32,
+    pub side_angle: f32,
+    pub lightning_spacing: f32,
+    pub lightning_delay: f32,
+    pub lightning_angle_rand: f32,
+    pub lightning_damage: f32,
+    pub lightning_color: String,
+    pub large_hit: bool,
+    pub hit_effect: String,
+    pub hit_color: String,
+    pub despawn_effect: String,
+    pub shoot_effect: String,
+    pub smoke_effect: String,
+    pub delay_frags: bool,
+}
+
+impl Default for LaserBulletType {
+    fn default() -> Self {
+        Self::new(1.0)
+    }
+}
+
+impl LaserBulletType {
+    pub fn new(damage: f32) -> Self {
+        Self {
+            base: BulletType {
+                damage,
+                speed: 0.0,
+                hit_size: 4.0,
+                lifetime: 16.0,
+                impact: true,
+                keep_velocity: false,
+                collides: false,
+                pierce: true,
+                hittable: false,
+                absorbable: false,
+                remove_after_pierce: false,
+                ..Default::default()
+            },
+            colors: vec![
+                "lancerLaser@0.4".into(),
+                "lancerLaser".into(),
+                "white".into(),
+            ],
+            laser_effect: "lancerLaserShootSmoke".into(),
+            length: 160.0,
+            width: 15.0,
+            length_falloff: 0.5,
+            side_length: 29.0,
+            side_width: 0.7,
+            side_angle: 90.0,
+            lightning_spacing: -1.0,
+            lightning_delay: 0.1,
+            lightning_angle_rand: 0.0,
+            lightning_damage: -1.0,
+            lightning_color: "surge".into(),
+            large_hit: false,
+            hit_effect: "hitLaserBlast".into(),
+            hit_color: "white".into(),
+            despawn_effect: "none".into(),
+            shoot_effect: "hitLancer".into(),
+            smoke_effect: "none".into(),
+            delay_frags: true,
+        }
+    }
+
+    pub fn estimate_dps(&mut self) -> f32 {
+        self.base.estimate_dps() * 3.0
+    }
+
+    pub fn init_defaults(&mut self) {
+        self.base.init_defaults();
+        self.base.draw_size = self.base.draw_size.max(self.length * 2.0);
+    }
+
+    pub fn calculate_range(&self) -> f32 {
+        self.length.max(self.base.max_range)
+    }
+
+    pub fn init_plan(&self, x: f32, y: f32, rotation: f32, result_length: f32) -> LaserInitPlan {
+        let mut lightnings = Vec::new();
+        if self.lightning_spacing > 0.0 {
+            let mut idx = 0;
+            let mut distance = 0.0;
+            while distance <= result_length {
+                let cx = x + trnsx(rotation, distance);
+                let cy = y + trnsy(rotation, distance);
+                for sign in [-1.0_f32, 1.0] {
+                    lightnings.push(LaserLightningPlan {
+                        x: cx,
+                        y: cy,
+                        delay: idx as f32 * self.lightning_delay,
+                        angle: rotation + 90.0 * sign,
+                        angle_rand: self.lightning_angle_rand,
+                        damage: if self.lightning_damage < 0.0 {
+                            self.base.damage
+                        } else {
+                            self.lightning_damage
+                        },
+                        length: self.base.lightning_length,
+                        length_rand: self.base.lightning_length_rand,
+                    });
+                }
+                idx += 1;
+                distance += self.lightning_spacing;
+            }
+        }
+
+        LaserInitPlan {
+            result_length,
+            laser_effect: self.laser_effect.clone(),
+            laser_effect_data: result_length * 0.75,
+            lightnings,
+        }
+    }
+
+    pub fn draw_plan(
+        &self,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        real_length: f32,
+        fin: f32,
+        fout: f32,
+    ) -> LaserDrawPlan {
+        let f = curve(fin, 0.0, 0.2);
+        let base_length = real_length * f;
+        let mut cwidth = self.width;
+        let mut compound = 1.0;
+        let mut layers = Vec::with_capacity(self.colors.len());
+
+        for color in &self.colors {
+            cwidth *= self.length_falloff;
+            let stroke = cwidth * fout;
+            layers.push(LaserLayerDrawPlan {
+                color: color.clone(),
+                stroke,
+                head_width: stroke,
+                head_length: cwidth * 2.0 + self.width / 2.0,
+                circle_radius: cwidth * fout,
+                side_width: self.side_width * fout * cwidth,
+                side_length: self.side_length * compound,
+            });
+            compound *= self.length_falloff;
+        }
+
+        let light_len = base_length * 1.1;
+        LaserDrawPlan {
+            base_length,
+            layers,
+            light_end: (
+                x + trnsx(rotation, light_len),
+                y + trnsy(rotation, light_len),
+            ),
+            light_width: self.width * 1.4 * fout,
+            light_color: self.colors.first().cloned().unwrap_or_default(),
+            light_opacity: 0.6,
+        }
+    }
+}
+
 pub fn bomb_bullet_type(damage: f32, radius: f32, sprite: impl Into<String>) -> BasicBulletType {
     let mut bullet = BasicBulletType::new(0.7, 0.0, sprite);
     bullet.base.splash_damage_radius = radius;
@@ -1474,6 +1685,10 @@ fn safe_div(a: f32, b: f32) -> f32 {
     }
 }
 
+fn curve(value: f32, start: f32, end: f32) -> f32 {
+    ((value - start) / (end - start)).clamp(0.0, 1.0)
+}
+
 fn pow3_out(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
 }
@@ -1938,6 +2153,79 @@ mod tests {
             hit.extinguish_offsets,
             vec![(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
         );
+    }
+
+    #[test]
+    fn laser_bullet_range_dps_lightning_and_draw_layers_match_java_shape() {
+        let mut laser = LaserBulletType::new(25.0);
+        assert_eq!(laser.base.damage, 25.0);
+        assert_eq!(laser.base.speed, 0.0);
+        assert_eq!(laser.hit_effect, "hitLaserBlast");
+        assert_eq!(laser.hit_color, "white");
+        assert_eq!(laser.despawn_effect, "none");
+        assert_eq!(laser.shoot_effect, "hitLancer");
+        assert_eq!(laser.smoke_effect, "none");
+        assert_eq!(laser.base.hit_size, 4.0);
+        assert_eq!(laser.base.lifetime, 16.0);
+        assert!(laser.base.impact);
+        assert!(!laser.base.keep_velocity);
+        assert!(!laser.base.collides);
+        assert!(laser.base.pierce);
+        assert!(!laser.base.hittable);
+        assert!(!laser.base.absorbable);
+        assert!(!laser.base.remove_after_pierce);
+        assert!(laser.delay_frags);
+        assert_eq!(
+            laser.colors,
+            vec!["lancerLaser@0.4", "lancerLaser", "white"]
+        );
+        assert_eq!(laser.length, 160.0);
+        assert_eq!(laser.width, 15.0);
+        assert_eq!(laser.length_falloff, 0.5);
+        assert_eq!(laser.side_length, 29.0);
+        assert_eq!(laser.side_width, 0.7);
+        assert_eq!(laser.side_angle, 90.0);
+        assert_eq!(laser.lightning_spacing, -1.0);
+        assert_eq!(laser.lightning_delay, 0.1);
+        assert!(!laser.large_hit);
+
+        assert_eq!(laser.calculate_range(), 160.0);
+        laser.base.max_range = 200.0;
+        assert_eq!(laser.calculate_range(), 200.0);
+        assert_eq!(laser.estimate_dps(), 150.0);
+        laser.init_defaults();
+        assert_eq!(laser.base.draw_size, 320.0);
+
+        laser.lightning_spacing = 40.0;
+        laser.lightning_angle_rand = 15.0;
+        let init = laser.init_plan(0.0, 0.0, 0.0, 100.0);
+        assert_eq!(init.result_length, 100.0);
+        assert_eq!(init.laser_effect, "lancerLaserShootSmoke");
+        assert_eq!(init.laser_effect_data, 75.0);
+        assert_eq!(init.lightnings.len(), 6);
+        assert_eq!(init.lightnings[0].x, 0.0);
+        assert_eq!(init.lightnings[0].y, 0.0);
+        assert_eq!(init.lightnings[0].delay, 0.0);
+        assert_eq!(init.lightnings[0].angle, -90.0);
+        assert_eq!(init.lightnings[0].angle_rand, 15.0);
+        assert_eq!(init.lightnings[0].damage, 25.0);
+        assert_eq!(init.lightnings[2].x, 40.0);
+        assert_eq!(init.lightnings[2].delay, 0.1);
+
+        let draw = laser.draw_plan(0.0, 0.0, 0.0, 100.0, 0.1, 0.5);
+        assert_eq!(draw.base_length, 50.0);
+        assert_eq!(draw.layers.len(), 3);
+        assert_eq!(draw.layers[0].color, "lancerLaser@0.4");
+        assert_eq!(draw.layers[0].stroke, 3.75);
+        assert_eq!(draw.layers[0].head_width, 3.75);
+        assert_eq!(draw.layers[0].head_length, 22.5);
+        assert_eq!(draw.layers[0].circle_radius, 3.75);
+        assert_eq!(draw.layers[0].side_width, 2.625);
+        assert_eq!(draw.layers[0].side_length, 29.0);
+        assert_eq!(draw.light_end, (55.0, 0.0));
+        assert_eq!(draw.light_width, 10.5);
+        assert_eq!(draw.light_color, "lancerLaser@0.4");
+        assert_eq!(draw.light_opacity, 0.6);
     }
 
     #[test]
