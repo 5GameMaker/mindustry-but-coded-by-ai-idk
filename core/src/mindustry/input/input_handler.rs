@@ -8,7 +8,7 @@ use crate::mindustry::entities::comp::building::{
     BuildingComp, BuildingConfigChange, BuildingConfigRollback,
 };
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue};
-use crate::mindustry::net::TileConfigCallPacket;
+use crate::mindustry::net::{RotateBlockCallPacket, TileConfigCallPacket};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileConfigRejectReason {
@@ -40,6 +40,43 @@ pub struct TileConfigOutcome {
     /// Mirrors Java remote validation behavior: rejected non-local players raise
     /// `ValidateException`; local clients just return after optional rollback.
     pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RotateBlockRejectReason {
+    MissingBuild,
+    CannotInteract,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RotateBlockContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+    pub last_accessed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RotateBlockOutcome {
+    pub accepted: bool,
+    pub rejection: Option<RotateBlockRejectReason>,
+    pub previous_rotation: Option<i32>,
+    pub current_rotation: Option<i32>,
+    pub packet: Option<RotateBlockCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+impl RotateBlockOutcome {
+    fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            previous_rotation: None,
+            current_rotation: None,
+            packet: None,
+            should_raise_validate: !context.local_player,
+        }
+    }
 }
 
 impl TileConfigOutcome {
@@ -117,6 +154,60 @@ where
 
 pub fn client_tile_config_packet(build: &BuildingComp, value: TypeValue) -> TileConfigCallPacket {
     TileConfigCallPacket::client(BuildingRef::new(build.tile_pos), value)
+}
+
+pub fn rotate_block<F, A>(
+    context: RotateBlockContext,
+    build: Option<&mut BuildingComp>,
+    direction: bool,
+    can_interact: F,
+    admin_allows: A,
+) -> RotateBlockOutcome
+where
+    F: FnOnce(&BuildingComp) -> bool,
+    A: FnOnce(&BuildingComp, i32) -> bool,
+{
+    let Some(build) = build else {
+        return RotateBlockOutcome::rejected(context, RotateBlockRejectReason::MissingBuild);
+    };
+
+    let delta = if direction { 1 } else { -1 };
+    let previous_rotation = build.rotation;
+    let next_rotation = (build.rotation + delta).rem_euclid(4);
+
+    if !can_interact(build) {
+        return RotateBlockOutcome::rejected(context, RotateBlockRejectReason::CannotInteract);
+    }
+
+    if !admin_allows(build, next_rotation) {
+        return RotateBlockOutcome::rejected(context, RotateBlockRejectReason::AdminDenied);
+    }
+
+    build.set_rotation(next_rotation);
+    if let Some(last_accessed) = context.last_accessed {
+        build.last_accessed = last_accessed;
+    }
+
+    RotateBlockOutcome {
+        accepted: true,
+        rejection: None,
+        previous_rotation: Some(previous_rotation),
+        current_rotation: Some(build.rotation),
+        packet: Some(RotateBlockCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            build: BuildingRef::new(build.tile_pos),
+            direction,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_rotate_block_packet(build: &BuildingComp, direction: bool) -> RotateBlockCallPacket {
+    RotateBlockCallPacket {
+        player: EntityRef::null(),
+        build: BuildingRef::new(build.tile_pos),
+        direction,
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +317,70 @@ mod tests {
         assert_eq!(packet.player, EntityRef::null());
         assert_eq!(packet.build, BuildingRef::new(point2_pack(8, 9)));
         assert_eq!(packet.value, TypeValue::String("cfg".into()));
+    }
+
+    #[test]
+    fn rotate_block_applies_direction_after_validation() {
+        let mut building = BuildingComp::new(point2_pack(2, 2), block(), TeamId(1));
+        building.set_rotation(3);
+
+        let outcome = rotate_block(
+            RotateBlockContext {
+                player: Some(EntityRef::new(7)),
+                local_player: false,
+                last_accessed: Some("[#ffaa00]frog".into()),
+            },
+            Some(&mut building),
+            true,
+            |_| true,
+            |_, next_rotation| next_rotation == 0,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.previous_rotation, Some(3));
+        assert_eq!(outcome.current_rotation, Some(0));
+        assert_eq!(building.rotation, 0);
+        assert_eq!(building.last_accessed, "[#ffaa00]frog");
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(7));
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(2, 2)));
+        assert!(packet.direction);
+    }
+
+    #[test]
+    fn rotate_block_rejects_remote_without_mutating_rotation() {
+        let mut building = BuildingComp::new(point2_pack(3, 3), block(), TeamId(1));
+        building.set_rotation(1);
+
+        let outcome = rotate_block(
+            RotateBlockContext {
+                player: Some(EntityRef::new(8)),
+                local_player: false,
+                last_accessed: None,
+            },
+            Some(&mut building),
+            false,
+            |_| true,
+            |_, _| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(RotateBlockRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert_eq!(building.rotation, 1);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn client_rotate_block_packet_uses_client_payload_shape() {
+        let building = BuildingComp::new(point2_pack(4, 4), block(), TeamId(1));
+        let packet = client_rotate_block_packet(&building, false);
+
+        assert_eq!(packet.player, EntityRef::null());
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(4, 4)));
+        assert!(!packet.direction);
     }
 }
