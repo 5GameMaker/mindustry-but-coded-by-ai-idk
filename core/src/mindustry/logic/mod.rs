@@ -10,6 +10,7 @@ pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
 pub mod radar_sort;
+pub mod radar_target;
 pub mod ranged;
 pub mod senseable;
 pub mod settable;
@@ -25,6 +26,7 @@ pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
 pub use radar_sort::RadarSort;
+pub use radar_target::RadarTarget;
 pub use ranged::Ranged;
 pub use senseable::Senseable;
 pub use settable::Settable;
@@ -9472,71 +9474,6 @@ impl RadarUnitView {
             is_boss: false,
             is_grounded: false,
             targetable: true,
-        }
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RadarTarget {
-    Any,
-    Enemy,
-    Ally,
-    Player,
-    Attacker,
-    Flying,
-    Boss,
-    Ground,
-}
-
-impl RadarTarget {
-    /// Upstream Team.derelict has id 0.
-    pub const DERELICT_TEAM: u8 = 0;
-
-    pub const ALL: [RadarTarget; 8] = [
-        RadarTarget::Any,
-        RadarTarget::Enemy,
-        RadarTarget::Ally,
-        RadarTarget::Player,
-        RadarTarget::Attacker,
-        RadarTarget::Flying,
-        RadarTarget::Boss,
-        RadarTarget::Ground,
-    ];
-
-    pub const WIRE_NAMES: [&'static str; 8] = [
-        "any", "enemy", "ally", "player", "attacker", "flying", "boss", "ground",
-    ];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn wire_name(self) -> &'static str {
-        Self::WIRE_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_wire_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|value| value.wire_name() == name)
-    }
-
-    pub fn matches(self, team: u8, other: &RadarUnitView) -> bool {
-        match self {
-            RadarTarget::Any => true,
-            RadarTarget::Enemy => team != other.team && other.team != Self::DERELICT_TEAM,
-            RadarTarget::Ally => team == other.team,
-            RadarTarget::Player => other.is_player,
-            RadarTarget::Attacker => other.can_shoot,
-            RadarTarget::Flying => other.is_flying,
-            RadarTarget::Boss => other.is_boss,
-            RadarTarget::Ground => other.is_grounded,
         }
     }
 }
