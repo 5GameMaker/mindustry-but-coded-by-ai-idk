@@ -15,10 +15,11 @@ use crate::mindustry::net::{
     PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket, ProviderEvent,
     RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
     RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket,
-    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, StateSnapshotCallPacket,
-    StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket,
+    SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -217,6 +218,12 @@ pub struct NetClientState {
     pub last_command_units: Option<CommandUnitsCallPacket>,
     pub last_command_units_at: Option<Instant>,
     pub command_units_packets_seen: u64,
+    pub last_set_unit_command: Option<SetUnitCommandCallPacket>,
+    pub last_set_unit_command_at: Option<Instant>,
+    pub set_unit_command_packets_seen: u64,
+    pub last_set_unit_stance: Option<SetUnitStanceCallPacket>,
+    pub last_set_unit_stance_at: Option<Instant>,
+    pub set_unit_stance_packets_seen: u64,
     pub last_building_control_select: Option<BuildingControlSelectCallPacket>,
     pub last_building_control_select_at: Option<Instant>,
     pub building_control_select_packets_seen: u64,
@@ -370,6 +377,14 @@ impl fmt::Debug for NetClientState {
             .field(
                 "command_units_packets_seen",
                 &self.command_units_packets_seen,
+            )
+            .field(
+                "set_unit_command_packets_seen",
+                &self.set_unit_command_packets_seen,
+            )
+            .field(
+                "set_unit_stance_packets_seen",
+                &self.set_unit_stance_packets_seen,
             )
             .field(
                 "building_control_select_packets_seen",
@@ -1251,6 +1266,20 @@ impl NetClient {
                         state.last_command_units_at = Some(now);
                         false
                     }
+                    PacketKind::SetUnitCommandCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_unit_command_packets_seen += 1;
+                        state.last_set_unit_command = Some(packet.clone());
+                        state.last_set_unit_command_at = Some(now);
+                        false
+                    }
+                    PacketKind::SetUnitStanceCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_unit_stance_packets_seen += 1;
+                        state.last_set_unit_stance = Some(packet.clone());
+                        state.last_set_unit_stance_at = Some(now);
+                        false
+                    }
                     PacketKind::BuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.building_control_select_packets_seen += 1;
@@ -1479,10 +1508,11 @@ mod tests {
         PingResponseCallPacket, RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket,
         RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
         RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-        SetLiquidsCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TileConfigCallPacket,
+        TileTapCallPacket, TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket,
+        UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+        WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -2304,6 +2334,17 @@ mod tests {
             queue_command: true,
             final_batch: false,
         };
+        let set_unit_command = SetUnitCommandCallPacket {
+            player: EntityRef::new(312),
+            unit_ids: vec![77, 78],
+            command: "move".into(),
+        };
+        let set_unit_stance = SetUnitStanceCallPacket {
+            player: EntityRef::new(313),
+            unit_ids: vec![77, 78],
+            stance: "holdfire".into(),
+            enable: false,
+        };
         let building_control_select = BuildingControlSelectCallPacket {
             player: EntityRef::new(306),
             build: primary_build,
@@ -2357,6 +2398,12 @@ mod tests {
             net.handle_client_received(PacketKind::PingLocationCallPacket(ping_location.clone()));
             net.handle_client_received(PacketKind::DeletePlansCallPacket(delete_plans.clone()));
             net.handle_client_received(PacketKind::CommandUnitsCallPacket(command_units.clone()));
+            net.handle_client_received(PacketKind::SetUnitCommandCallPacket(
+                set_unit_command.clone(),
+            ));
+            net.handle_client_received(PacketKind::SetUnitStanceCallPacket(
+                set_unit_stance.clone(),
+            ));
             net.handle_client_received(PacketKind::UnitBuildingControlSelectCallPacket(
                 unit_building_control_select.clone(),
             ));
@@ -2446,6 +2493,15 @@ mod tests {
         assert_eq!(state.command_units_packets_seen, 1);
         assert_eq!(state.last_command_units.as_ref(), Some(&command_units));
         assert!(state.last_command_units_at.is_some());
+        assert_eq!(state.set_unit_command_packets_seen, 1);
+        assert_eq!(
+            state.last_set_unit_command.as_ref(),
+            Some(&set_unit_command)
+        );
+        assert!(state.last_set_unit_command_at.is_some());
+        assert_eq!(state.set_unit_stance_packets_seen, 1);
+        assert_eq!(state.last_set_unit_stance.as_ref(), Some(&set_unit_stance));
+        assert!(state.last_set_unit_stance_at.is_some());
         assert_eq!(state.building_control_select_packets_seen, 1);
         assert_eq!(
             state.last_building_control_select.as_ref(),
