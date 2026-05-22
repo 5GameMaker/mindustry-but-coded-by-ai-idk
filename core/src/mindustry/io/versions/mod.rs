@@ -8,8 +8,10 @@ use crate::mindustry::io::{
 };
 
 pub mod save1;
+pub mod save2;
 
 pub use save1::Save1;
+pub use save2::Save2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyEntityChunk {

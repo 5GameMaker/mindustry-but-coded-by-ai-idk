@@ -37,4 +37,5 @@ pub use type_io::{
 };
 pub use versions::{
     read_legacy_entity_groups, LegacyEntityChunk, LegacyEntityGroup, LegacyEntityGroups, Save1,
+    Save2,
 };
