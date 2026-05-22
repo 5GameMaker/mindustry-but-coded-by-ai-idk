@@ -7,17 +7,18 @@ use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, ClearItemsCallPacket, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandUnitsCallPacket,
-    Connect, ConnectConfirmCallPacket, ConnectPacket, DeletePlansCallPacket, Disconnect,
-    EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
-    PingLocationCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
-    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, StateSnapshotCallPacket,
-    StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
+    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
+    CommandUnitsCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket,
+    DeletePlansCallPacket, Disconnect, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net,
+    PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket, ProviderEvent,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
+    SetLiquidCallPacket, SetLiquidsCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -171,6 +172,15 @@ pub struct NetClientState {
     pub last_clear_items: Option<ClearItemsCallPacket>,
     pub last_clear_items_at: Option<Instant>,
     pub clear_items_packets_seen: u64,
+    pub last_set_liquid: Option<SetLiquidCallPacket>,
+    pub last_set_liquid_at: Option<Instant>,
+    pub set_liquid_packets_seen: u64,
+    pub last_set_liquids: Option<SetLiquidsCallPacket>,
+    pub last_set_liquids_at: Option<Instant>,
+    pub set_liquids_packets_seen: u64,
+    pub last_clear_liquids: Option<ClearLiquidsCallPacket>,
+    pub last_clear_liquids_at: Option<Instant>,
+    pub clear_liquids_packets_seen: u64,
     pub last_request_item: Option<RequestItemCallPacket>,
     pub last_request_item_at: Option<Instant>,
     pub request_item_packets_seen: u64,
@@ -310,6 +320,12 @@ impl fmt::Debug for NetClientState {
             .field("set_item_packets_seen", &self.set_item_packets_seen)
             .field("set_items_packets_seen", &self.set_items_packets_seen)
             .field("clear_items_packets_seen", &self.clear_items_packets_seen)
+            .field("set_liquid_packets_seen", &self.set_liquid_packets_seen)
+            .field("set_liquids_packets_seen", &self.set_liquids_packets_seen)
+            .field(
+                "clear_liquids_packets_seen",
+                &self.clear_liquids_packets_seen,
+            )
             .field("request_item_packets_seen", &self.request_item_packets_seen)
             .field(
                 "transfer_inventory_packets_seen",
@@ -1123,6 +1139,27 @@ impl NetClient {
                         state.last_clear_items_at = Some(now);
                         false
                     }
+                    PacketKind::SetLiquidCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_liquid_packets_seen += 1;
+                        state.last_set_liquid = Some(packet.clone());
+                        state.last_set_liquid_at = Some(now);
+                        false
+                    }
+                    PacketKind::SetLiquidsCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_liquids_packets_seen += 1;
+                        state.last_set_liquids = Some(packet.clone());
+                        state.last_set_liquids_at = Some(now);
+                        false
+                    }
+                    PacketKind::ClearLiquidsCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.clear_liquids_packets_seen += 1;
+                        state.last_clear_liquids = Some(*packet);
+                        state.last_clear_liquids_at = Some(now);
+                        false
+                    }
                     PacketKind::RequestItemCallPacket(packet) => {
                         let now = Instant::now();
                         state.request_item_packets_seen += 1;
@@ -1419,19 +1456,21 @@ mod tests {
     use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
-        BuildingControlSelectCallPacket, ClearItemsCallPacket, ClientPlanSnapshotCallPacket,
-        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandUnitsCallPacket,
-        Connect, DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
-        HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
-        PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-        PingLocationCallPacket, PingResponseCallPacket, RequestBuildPayloadCallPacket,
-        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-        RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, StateSnapshotCallPacket,
-        StreamBegin, StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket,
-        TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
+        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+        ClientSnapshotCallPacket, CommandUnitsCallPacket, Connect, DeletePlansCallPacket,
+        Disconnect, DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
+        HostCallback, Net, NetConnection, NetProvider, PacketKind, PayloadDroppedCallPacket,
+        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
+        PingResponseCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+        SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TileConfigCallPacket,
+        TileTapCallPacket, TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket,
+        UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+        WorldDataBeginCallPacket,
     };
-    use crate::mindustry::r#type::{ItemStack, UnitType};
+    use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
 
     use super::{
@@ -2164,6 +2203,21 @@ mod tests {
         let clear_items = ClearItemsCallPacket {
             build: secondary_build,
         };
+        let set_liquid = SetLiquidCallPacket {
+            build: primary_build,
+            liquid: Some("water".into()),
+            amount: 6.5,
+        };
+        let set_liquids = SetLiquidsCallPacket {
+            build: secondary_build,
+            liquids: vec![
+                LiquidStack::new("water", 1.25),
+                LiquidStack::new("slag", 2.5),
+            ],
+        };
+        let clear_liquids = ClearLiquidsCallPacket {
+            build: secondary_build,
+        };
         let request_item = RequestItemCallPacket {
             player: EntityRef::new(301),
             build: primary_build,
@@ -2246,6 +2300,9 @@ mod tests {
             net.handle_client_received(PacketKind::SetItemCallPacket(set_item.clone()));
             net.handle_client_received(PacketKind::SetItemsCallPacket(set_items.clone()));
             net.handle_client_received(PacketKind::ClearItemsCallPacket(clear_items));
+            net.handle_client_received(PacketKind::SetLiquidCallPacket(set_liquid.clone()));
+            net.handle_client_received(PacketKind::SetLiquidsCallPacket(set_liquids.clone()));
+            net.handle_client_received(PacketKind::ClearLiquidsCallPacket(clear_liquids));
             net.handle_client_received(PacketKind::RequestItemCallPacket(request_item.clone()));
             net.handle_client_received(PacketKind::TransferInventoryCallPacket(
                 transfer_inventory.clone(),
@@ -2297,6 +2354,15 @@ mod tests {
         assert_eq!(state.clear_items_packets_seen, 1);
         assert_eq!(state.last_clear_items.as_ref(), Some(&clear_items));
         assert!(state.last_clear_items_at.is_some());
+        assert_eq!(state.set_liquid_packets_seen, 1);
+        assert_eq!(state.last_set_liquid.as_ref(), Some(&set_liquid));
+        assert!(state.last_set_liquid_at.is_some());
+        assert_eq!(state.set_liquids_packets_seen, 1);
+        assert_eq!(state.last_set_liquids.as_ref(), Some(&set_liquids));
+        assert!(state.last_set_liquids_at.is_some());
+        assert_eq!(state.clear_liquids_packets_seen, 1);
+        assert_eq!(state.last_clear_liquids.as_ref(), Some(&clear_liquids));
+        assert!(state.last_clear_liquids_at.is_some());
         assert_eq!(state.request_item_packets_seen, 1);
         assert_eq!(state.last_request_item.as_ref(), Some(&request_item));
         assert!(state.last_request_item_at.is_some());
