@@ -12,21 +12,22 @@ use crate::mindustry::net::{
     ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
     ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
     CompleteObjectiveCallPacket, Connect, ConnectCallPacket, ConnectConfirmCallPacket,
-    ConnectPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket, EffectCallPacket2,
+    ConnectPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    DeletePlansCallPacket, Disconnect, EffectCallPacket, EffectCallPacket2,
     EffectReliableCallPacket, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket,
-    KickCallPacket2, Net, PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket,
-    PlayerDisconnectCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
+    KickCallPacket2, MenuChooseCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
+    PingLocationCallPacket, PlayerDisconnectCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
     RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetCameraPositionCallPacket,
     SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
     SetObjectivesCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
     SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
-    StateSnapshotCallPacket, StreamBuilder, Streamable, TakeItemsCallPacket, TileConfigCallPacket,
-    TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
-    TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
-    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    StateSnapshotCallPacket, StreamBuilder, Streamable, TakeItemsCallPacket,
+    TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
+    TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+    TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -182,6 +183,18 @@ pub struct NetClientState {
     pub last_hud_text: Option<String>,
     pub last_open_uri: Option<String>,
     pub last_clipboard_text: Option<String>,
+    pub last_debug_status: Option<DebugStatusClientCallPacket>,
+    pub last_debug_status_at: Option<Instant>,
+    pub debug_status_packets_seen: u64,
+    pub last_debug_status_unreliable: Option<DebugStatusClientUnreliableCallPacket>,
+    pub last_debug_status_unreliable_at: Option<Instant>,
+    pub debug_status_unreliable_packets_seen: u64,
+    pub last_menu_choose: Option<MenuChooseCallPacket>,
+    pub last_menu_choose_at: Option<Instant>,
+    pub menu_choose_packets_seen: u64,
+    pub last_text_input_result: Option<TextInputResultCallPacket>,
+    pub last_text_input_result_at: Option<Instant>,
+    pub text_input_result_packets_seen: u64,
     pub last_world_update_packet: Option<PacketKind>,
     pub last_world_update_packet_at: Option<Instant>,
     pub world_update_packets_seen: u64,
@@ -436,6 +449,16 @@ impl fmt::Debug for NetClientState {
             .field("last_toast_message", &self.last_toast_message)
             .field("last_hud_text", &self.last_hud_text)
             .field("last_open_uri", &self.last_open_uri)
+            .field("debug_status_packets_seen", &self.debug_status_packets_seen)
+            .field(
+                "debug_status_unreliable_packets_seen",
+                &self.debug_status_unreliable_packets_seen,
+            )
+            .field("menu_choose_packets_seen", &self.menu_choose_packets_seen)
+            .field(
+                "text_input_result_packets_seen",
+                &self.text_input_result_packets_seen,
+            )
             .field("world_update_packets_seen", &self.world_update_packets_seen)
             .field(
                 "unit_lifecycle_packets_seen",
@@ -1538,6 +1561,34 @@ impl NetClient {
                         state.record_client_ui_packet(&packet);
                         (false, false)
                     }
+                    PacketKind::DebugStatusClientCallPacket(debug) => {
+                        let now = Instant::now();
+                        state.debug_status_packets_seen += 1;
+                        state.last_debug_status = Some(*debug);
+                        state.last_debug_status_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::DebugStatusClientUnreliableCallPacket(debug) => {
+                        let now = Instant::now();
+                        state.debug_status_unreliable_packets_seen += 1;
+                        state.last_debug_status_unreliable = Some(*debug);
+                        state.last_debug_status_unreliable_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::MenuChooseCallPacket(menu) => {
+                        let now = Instant::now();
+                        state.menu_choose_packets_seen += 1;
+                        state.last_menu_choose = Some(*menu);
+                        state.last_menu_choose_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::TextInputResultCallPacket(result) => {
+                        let now = Instant::now();
+                        state.text_input_result_packets_seen += 1;
+                        state.last_text_input_result = Some(result.clone());
+                        state.last_text_input_result_at = Some(now);
+                        (false, false)
+                    }
                     PacketKind::PlayerDisconnectCallPacket(packet) => {
                         let now = Instant::now();
                         state.player_disconnect_packets_seen += 1;
@@ -2191,22 +2242,23 @@ mod tests {
         ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
         ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
         CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
-        CopyToClipboardCallPacket, CreateMarkerCallPacket, DeletePlansCallPacket, Disconnect,
-        DoneCallback, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
-        EntitySnapshotCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
-        HideHudTextCallPacket, Host, HostCallback, InfoMessageCallPacket, InfoToastCallPacket,
-        KickCallPacket, KickCallPacket2, KickReason, MenuCallPacket, Net, NetConnection,
-        NetProvider, OpenUriCallPacket, PacketKind, PayloadDroppedCallPacket,
-        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveMarkerCallPacket,
-        RemoveQueueBlockCallPacket, RemoveTileCallPacket, RequestBuildPayloadCallPacket,
-        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-        RotateBlockCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
-        SetCameraPositionCallPacket, SetHudTextCallPacket, SetItemCallPacket, SetItemsCallPacket,
-        SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket, SetPositionCallPacket,
-        SetRuleCallPacket, SetRulesCallPacket, SetTileCallPacket, SetUnitCommandCallPacket,
-        SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
-        StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket, TileConfigCallPacket,
+        CopyToClipboardCallPacket, CreateMarkerCallPacket, DebugStatusClientCallPacket,
+        DebugStatusClientUnreliableCallPacket, DeletePlansCallPacket, Disconnect, DoneCallback,
+        EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
+        GameOverCallPacket, HiddenSnapshotCallPacket, HideHudTextCallPacket, Host, HostCallback,
+        InfoMessageCallPacket, InfoToastCallPacket, KickCallPacket, KickCallPacket2, KickReason,
+        MenuCallPacket, MenuChooseCallPacket, Net, NetConnection, NetProvider, OpenUriCallPacket,
+        PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
+        PickedUnitPayloadCallPacket, PingLocationCallPacket, PingResponseCallPacket,
+        PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
+        RemoveTileCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+        SendMessageCallPacket, SendMessageCallPacket2, SetCameraPositionCallPacket,
+        SetHudTextCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
+        SetLiquidsCallPacket, SetObjectivesCallPacket, SetPositionCallPacket, SetRuleCallPacket,
+        SetRulesCallPacket, SetTileCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+        SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk,
+        Streamable, TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket,
         TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
         TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
@@ -2439,6 +2491,59 @@ mod tests {
             Some("https://example.invalid")
         );
         assert_eq!(state.last_clipboard_text.as_deref(), Some("copy me"));
+    }
+
+    #[test]
+    fn update_records_debug_menu_and_text_input_result_packets() {
+        let client = NetClient::default();
+        let debug = DebugStatusClientCallPacket {
+            value: 5,
+            last_client_snapshot: 6,
+            snapshots_sent: 7,
+        };
+        let debug_unreliable = DebugStatusClientUnreliableCallPacket(DebugStatusClientCallPacket {
+            value: 8,
+            last_client_snapshot: 9,
+            snapshots_sent: 10,
+        });
+        let menu_choose = MenuChooseCallPacket {
+            player_id: Some(44),
+            menu_id: 3,
+            option: 2,
+        };
+        let text_result = TextInputResultCallPacket {
+            player: EntityRef::new(44),
+            text_input_id: 11,
+            text: "typed".into(),
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::DebugStatusClientCallPacket(debug));
+            net.handle_client_received(PacketKind::DebugStatusClientUnreliableCallPacket(
+                debug_unreliable,
+            ));
+            net.handle_client_received(PacketKind::MenuChooseCallPacket(menu_choose));
+            net.handle_client_received(PacketKind::TextInputResultCallPacket(text_result.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.debug_status_packets_seen, 1);
+        assert_eq!(state.last_debug_status, Some(debug));
+        assert!(state.last_debug_status_at.is_some());
+        assert_eq!(state.debug_status_unreliable_packets_seen, 1);
+        assert_eq!(state.last_debug_status_unreliable, Some(debug_unreliable));
+        assert!(state.last_debug_status_unreliable_at.is_some());
+        assert_eq!(state.menu_choose_packets_seen, 1);
+        assert_eq!(state.last_menu_choose, Some(menu_choose));
+        assert!(state.last_menu_choose_at.is_some());
+        assert_eq!(state.text_input_result_packets_seen, 1);
+        assert_eq!(state.last_text_input_result.as_ref(), Some(&text_result));
+        assert!(state.last_text_input_result_at.is_some());
     }
 
     #[test]
