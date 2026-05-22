@@ -15,11 +15,11 @@ use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
     CommandUnitsCallPacket, DeletePlansCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
     PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
-    SetLiquidCallPacket, SetLiquidsCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
-    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket,
+    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, TakeItemsCallPacket,
+    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket,
+    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
@@ -540,6 +540,19 @@ pub struct CommandUnitsOutcome {
     pub should_raise_validate: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveQueueBlockRejectReason {
+    MissingUnit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoveQueueBlockOutcome {
+    pub accepted: bool,
+    pub rejection: Option<RemoveQueueBlockRejectReason>,
+    pub removed: Option<BuildPlan>,
+    pub packet: Option<RemoveQueueBlockCallPacket>,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -886,6 +899,17 @@ impl CommandUnitsOutcome {
             commanded: 0,
             packet: None,
             should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl RemoveQueueBlockOutcome {
+    fn rejected(reason: RemoveQueueBlockRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            removed: None,
+            packet: None,
         }
     }
 }
@@ -2363,6 +2387,30 @@ pub fn client_command_units_packet(
     }
 }
 
+pub fn remove_queue_block(
+    unit: Option<&mut UnitComp>,
+    x: i32,
+    y: i32,
+    breaking: bool,
+) -> RemoveQueueBlockOutcome {
+    let Some(unit) = unit else {
+        return RemoveQueueBlockOutcome::rejected(RemoveQueueBlockRejectReason::MissingUnit);
+    };
+
+    let removed = unit.builder.remove_build(x, y, breaking);
+
+    RemoveQueueBlockOutcome {
+        accepted: true,
+        rejection: None,
+        removed,
+        packet: Some(RemoveQueueBlockCallPacket { x, y, breaking }),
+    }
+}
+
+pub fn remove_queue_block_packet(x: i32, y: i32, breaking: bool) -> RemoveQueueBlockCallPacket {
+    RemoveQueueBlockCallPacket { x, y, breaking }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -3719,5 +3767,67 @@ mod tests {
         assert_eq!(packet.build_target, BuildingRef::null());
         assert_eq!(packet.unit_target, UnitRef::Unit { id: 10 });
         assert!(packet.final_batch);
+    }
+
+    #[test]
+    fn remove_queue_block_removes_matching_plan_and_records_packet() {
+        let mut unit = UnitComp::new(80, unit_type(10), TeamId(1));
+        let keep = BuildPlan::new_place(1, 2, 0, "router");
+        let remove = BuildPlan::new_break(3, 4);
+        unit.builder.plans.push_back(keep.clone());
+        unit.builder.plans.push_back(remove.clone());
+
+        let outcome = remove_queue_block(Some(&mut unit), 3, 4, true);
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.removed, Some(remove));
+        assert_eq!(unit.builder.plans.len(), 1);
+        assert_eq!(unit.builder.plans.front(), Some(&keep));
+        let packet = outcome.packet.unwrap();
+        assert_eq!(
+            packet,
+            RemoveQueueBlockCallPacket {
+                x: 3,
+                y: 4,
+                breaking: true
+            }
+        );
+    }
+
+    #[test]
+    fn remove_queue_block_keeps_queue_when_plan_missing() {
+        let mut unit = UnitComp::new(81, unit_type(10), TeamId(1));
+        let keep = BuildPlan::new_place(5, 6, 0, "router");
+        unit.builder.plans.push_back(keep.clone());
+
+        let outcome = remove_queue_block(Some(&mut unit), 7, 8, false);
+
+        assert!(outcome.accepted);
+        assert!(outcome.removed.is_none());
+        assert_eq!(unit.builder.plans.front(), Some(&keep));
+    }
+
+    #[test]
+    fn remove_queue_block_rejects_missing_unit_without_packet() {
+        let outcome = remove_queue_block(None, 1, 2, false);
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(RemoveQueueBlockRejectReason::MissingUnit)
+        );
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn remove_queue_block_packet_uses_java_payload_shape() {
+        assert_eq!(
+            remove_queue_block_packet(9, 10, true),
+            RemoveQueueBlockCallPacket {
+                x: 9,
+                y: 10,
+                breaking: true
+            }
+        );
     }
 }
