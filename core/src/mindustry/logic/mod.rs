@@ -20,6 +20,7 @@ pub mod logic_fx;
 pub mod logic_op;
 pub mod logic_parser;
 pub mod logic_rule;
+pub mod logic_sanitize;
 pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
@@ -68,6 +69,7 @@ pub use logic_parser::{
     LogicStatementKind, LOGIC_PARSER_MAX_JUMPS, LOGIC_PARSER_MAX_TOKENS,
 };
 pub use logic_rule::LogicRule;
+pub use logic_sanitize::sanitize_logic_value;
 pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
@@ -3084,38 +3086,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-pub fn sanitize_logic_value(value: &str) -> String {
-    if value.is_empty() {
-        return String::new();
-    } else if value.chars().count() == 1 {
-        let c = value.chars().next().unwrap();
-        if c == '"' || c == ';' || c == ' ' {
-            return "invalid".to_string();
-        }
-    } else {
-        let mut res = String::with_capacity(value.len());
-        if value.starts_with('"') && value.ends_with('"') {
-            res.push('"');
-            for c in value[1..value.len() - 1].chars() {
-                res.push(if c == '"' { '\'' } else { c });
-            }
-            res.push('"');
-        } else {
-            for c in value.chars() {
-                res.push(match c {
-                    ';' => 's',
-                    '"' => '\'',
-                    ' ' => '_',
-                    _ => c,
-                });
-            }
-        }
-        return res;
-    }
-
-    value.to_string()
 }
 
 #[derive(Debug, Clone, PartialEq)]
