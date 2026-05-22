@@ -24,6 +24,7 @@ pub mod logic_executor;
 pub mod logic_fx;
 pub mod logic_marker_object;
 pub mod logic_memory_object;
+pub mod logic_object_helpers;
 pub mod logic_op;
 pub mod logic_parser;
 pub mod logic_query_view;
@@ -89,6 +90,10 @@ pub use logic_fx::{
 };
 pub use logic_marker_object::{LogicMarkerControlEvent, LogicMarkerEvent, LogicMarkerObject};
 pub use logic_memory_object::LogicMemoryObject;
+pub use logic_object_helpers::{
+    logic_conv, logic_object_name, logic_team_from_name, logic_team_from_var, logic_unconv,
+    logic_unwrap_object_name,
+};
 pub use logic_op::LogicOp;
 pub use logic_parser::{
     check_logic_tokens, parse_logic_statements, LogicParseError, LogicParserOutput,
@@ -5579,26 +5584,6 @@ where
     best.map(|(name, _)| name)
 }
 
-pub fn logic_unwrap_object_name(name: &str) -> &str {
-    name.strip_prefix('@').unwrap_or(name)
-}
-
-pub fn logic_object_name(name: &str) -> String {
-    if name.starts_with('@') {
-        name.to_string()
-    } else {
-        format!("@{name}")
-    }
-}
-
-pub fn logic_unconv(coord: f32) -> f32 {
-    coord * LOGIC_TILE_SIZE
-}
-
-pub fn logic_conv(coord: f32) -> f32 {
-    coord / LOGIC_TILE_SIZE
-}
-
 fn find_closest_ore(
     exec: &LogicExecutor,
     unit: &LogicUnitObject,
@@ -5764,29 +5749,6 @@ fn logic_distance_sq(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
 
 fn logic_tile_world(coord: i32) -> f32 {
     coord as f32 * LOGIC_TILE_SIZE
-}
-
-pub fn logic_team_from_var(var: &LVar) -> Option<u8> {
-    if var.is_obj {
-        var.obj().and_then(logic_team_from_name)
-    } else {
-        let value = var.numi();
-        (0..=255).contains(&value).then_some(value as u8)
-    }
-}
-
-pub fn logic_team_from_name(name: &str) -> Option<u8> {
-    let name = logic_unwrap_object_name(name);
-    match name {
-        "derelict" => Some(0),
-        "sharded" => Some(1),
-        "crux" => Some(2),
-        "malis" => Some(3),
-        "green" => Some(4),
-        "blue" => Some(5),
-        "neoplastic" => Some(6),
-        _ => name.parse::<u8>().ok(),
-    }
 }
 
 #[cfg(test)]
