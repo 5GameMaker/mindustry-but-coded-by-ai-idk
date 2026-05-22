@@ -23,6 +23,7 @@ pub const PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
 pub const JAVA_MAX_NAME_BYTES: usize = 40;
 pub const JAVA_CHAT_SPAM_WINDOW_MS: i64 = 2_000;
 pub const JAVA_CHAT_SPAM_LIMIT: i32 = 20;
+pub const JAVA_CHAT_MIN_CONNECT_AGE_MS: i64 = 500;
 pub const JAVA_PACKET_SPAM_WINDOW_MS: i64 = 3_000;
 pub const JAVA_PACKET_SPAM_LIMIT: i32 = 300;
 pub const JAVA_DEFAULT_KICK_DURATION_MS: i64 = 30_000;
@@ -1814,6 +1815,10 @@ impl NetServer {
         let player_uuid = Self::connection_uuid(state, connection_id);
         let command_message = packet.message.starts_with('/');
 
+        if !Self::can_accept_chat_message(state, connection_id, current_millis) {
+            return None;
+        }
+
         state.last_connection_id = connection_id;
         state.last_chat_connection_id = connection_id;
         state.last_chat_unfiltered_message = Some(packet.message.clone());
@@ -1888,6 +1893,28 @@ impl NetServer {
         });
 
         Some(PacketKind::SendChatMessageCallPacket(packet))
+    }
+
+    fn can_accept_chat_message(
+        state: &NetServerState,
+        connection_id: Option<i32>,
+        current_millis: i64,
+    ) -> bool {
+        let Some(connection_id) = connection_id else {
+            return false;
+        };
+        let Some(connection) = state.connection_states.get(&connection_id) else {
+            return false;
+        };
+
+        if current_millis.saturating_sub(connection.connect_time) < JAVA_CHAT_MIN_CONNECT_AGE_MS {
+            return false;
+        }
+
+        connection.has_connected
+            && connection.player_added
+            && !connection.kicked
+            && !connection.has_disconnected
     }
 
     fn record_tile_tap(
@@ -2083,7 +2110,8 @@ mod tests {
 
     use super::{
         ConnectPacketValidationContext, NetServer, NetServerState, PlayerPreviewPlanSource,
-        JAVA_DEFAULT_KICK_DURATION_MS, JAVA_PACKET_SPAM_LIMIT, PLAN_PREVIEW_CHUNK_SIZE,
+        JAVA_CHAT_MIN_CONNECT_AGE_MS, JAVA_DEFAULT_KICK_DURATION_MS, JAVA_PACKET_SPAM_LIMIT,
+        PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -2163,6 +2191,15 @@ mod tests {
             color: 0,
             uuid_crc32: None,
         }
+    }
+
+    fn ready_chat_connection(address: &str, uuid: &str) -> NetConnection {
+        let mut connection = NetConnection::new(address);
+        connection.uuid = uuid.into();
+        connection.has_connected = true;
+        connection.player_added = true;
+        connection.connect_time = NetServer::current_millis() - JAVA_CHAT_MIN_CONNECT_AGE_MS - 1;
+        connection
     }
 
     fn config_block() -> Block {
@@ -2931,9 +2968,8 @@ mod tests {
         {
             let state = server.state();
             let mut state = state.lock().unwrap();
-            let mut connection = NetConnection::new("1.2.3.4");
+            let mut connection = ready_chat_connection("1.2.3.4", "uuid-chat");
             connection.name = "talker".into();
-            connection.uuid = "uuid-chat".into();
             state.connection_states.insert(12, connection);
             state
                 .administration
@@ -3004,8 +3040,7 @@ mod tests {
         {
             let state = server.state();
             let mut state = state.lock().unwrap();
-            let mut connection = NetConnection::new("2.2.2.2");
-            connection.uuid = "uuid-repeat".into();
+            let connection = ready_chat_connection("2.2.2.2", "uuid-repeat");
             state.connection_states.insert(22, connection);
         }
 
@@ -3052,9 +3087,8 @@ mod tests {
         {
             let state = server.state();
             let mut state = state.lock().unwrap();
-            let mut connection = NetConnection::new("9.9.9.9");
+            let mut connection = ready_chat_connection("9.9.9.9", "uuid-spam");
             connection.name = "spammer".into();
-            connection.uuid = "uuid-spam".into();
             state.connection_states.insert(21, connection);
         }
 
@@ -3093,6 +3127,66 @@ mod tests {
             connection.sent.last(),
             Some((SentPacket::KickReason(KickReason::Kick), true))
         ));
+    }
+
+    #[test]
+    fn chat_messages_before_java_join_guard_do_not_touch_rate_limit_or_filters() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut too_early = ready_chat_connection("3.3.3.3", "uuid-too-early");
+            too_early.connect_time = NetServer::current_millis();
+            state.connection_states.insert(23, too_early);
+
+            let mut not_connected = ready_chat_connection("4.4.4.4", "uuid-not-connected");
+            not_connected.has_connected = false;
+            state.connection_states.insert(24, not_connected);
+
+            let mut not_added = ready_chat_connection("5.5.5.5", "uuid-not-added");
+            not_added.player_added = false;
+            state.connection_states.insert(25, not_added);
+
+            state
+                .administration
+                .add_chat_filter(|_player, _message| Some("filtered".into()));
+        }
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if let PacketKind::SendChatMessageCallPacket(packet) = packet {
+                seen_handler.lock().unwrap().push(packet.message.clone());
+            }
+        });
+
+        {
+            let mut net = server.net_mut();
+            for connection_id in [23, 24, 25] {
+                net.handle_server_received_from_connection(
+                    Some(connection_id),
+                    true,
+                    PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                        message: "ignored".into(),
+                    }),
+                );
+            }
+        }
+
+        assert!(seen.lock().unwrap().is_empty());
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.chat_packets_seen, 0);
+        assert_eq!(state.chat_packets_filtered, 0);
+        assert_eq!(state.chat_packets_rate_limited, 0);
+        assert!(state.events.is_empty());
+        for connection_id in [23, 24, 25] {
+            let connection = state.connection_states.get(&connection_id).unwrap();
+            assert_eq!(connection.chat_rate.occurences, 0);
+            assert!(!connection.kicked);
+        }
     }
 
     #[test]
