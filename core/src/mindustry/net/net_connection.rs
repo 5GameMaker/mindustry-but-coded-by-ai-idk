@@ -1,5 +1,6 @@
 use super::packets::{KickReason, StreamBegin, StreamChunk};
 use super::streamable::Streamable;
+use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::vars::MAX_TCP_SIZE;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,9 @@ pub struct NetConnection {
     pub last_received_client_snapshot: i32,
     pub snapshots_sent: i32,
     pub last_received_client_time: i64,
+    pub rejected_requests: Vec<BuildPlan>,
+    pub chat_rate: Ratekeeper,
+    pub packet_rate: Ratekeeper,
     pub player_added: bool,
     pub has_connected: bool,
     pub has_begun_connecting: bool,
@@ -56,6 +60,9 @@ impl NetConnection {
             last_received_client_snapshot: -1,
             snapshots_sent: 0,
             last_received_client_time: 0,
+            rejected_requests: Vec::new(),
+            chat_rate: Ratekeeper::new(),
+            packet_rate: Ratekeeper::new(),
             player_added: false,
             has_connected: false,
             has_begun_connecting: false,
@@ -134,6 +141,46 @@ impl NetConnection {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ratekeeper {
+    pub occurences: i32,
+    pub last_millis: i64,
+}
+
+impl Ratekeeper {
+    pub const fn new() -> Self {
+        Self {
+            occurences: 0,
+            last_millis: 0,
+        }
+    }
+
+    pub fn allow(&mut self, window_millis: i64, limit: i32, now_millis: i64) -> bool {
+        if window_millis <= 0 || limit <= 0 {
+            return false;
+        }
+
+        if self.last_millis == 0 || now_millis - self.last_millis > window_millis {
+            self.last_millis = now_millis;
+            self.occurences = 0;
+        }
+
+        self.occurences += 1;
+        self.occurences <= limit
+    }
+
+    pub fn reset(&mut self) {
+        self.occurences = 0;
+        self.last_millis = 0;
+    }
+}
+
+impl Default for Ratekeeper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +198,27 @@ mod tests {
         if let SentPacket::StreamChunk(chunk) = &con.sent[2].0 {
             assert_eq!(chunk.data.len(), 3);
         }
+    }
+
+    #[test]
+    fn net_connection_initializes_java_rate_limit_state() {
+        let con = NetConnection::new("127.0.0.1");
+        assert!(con.rejected_requests.is_empty());
+        assert_eq!(con.chat_rate, Ratekeeper::new());
+        assert_eq!(con.packet_rate, Ratekeeper::new());
+    }
+
+    #[test]
+    fn ratekeeper_allows_limited_occurrences_per_window() {
+        let mut rate = Ratekeeper::new();
+        assert!(rate.allow(1_000, 2, 100));
+        assert!(rate.allow(1_000, 2, 200));
+        assert!(!rate.allow(1_000, 2, 300));
+        assert_eq!(rate.occurences, 3);
+
+        assert!(rate.allow(1_000, 2, 1_301));
+        assert_eq!(rate.occurences, 1);
+        rate.reset();
+        assert_eq!(rate, Ratekeeper::new());
     }
 }

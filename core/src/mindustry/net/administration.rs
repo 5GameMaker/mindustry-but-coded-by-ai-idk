@@ -1,10 +1,14 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub struct Administration {
     pub banned_ips: Vec<String>,
     pub whitelist: Vec<String>,
     pub whitelist_enabled: bool,
+    pub chat_filters: Vec<ChatFilter>,
+    pub action_filters: Vec<ActionFilter>,
     pub subnet_bans: Vec<String>,
     pub dos_blacklist: HashSet<String>,
     pub kicked_ips: HashMap<String, i64>,
@@ -19,6 +23,8 @@ impl Default for Administration {
             banned_ips: Vec::new(),
             whitelist: Vec::new(),
             whitelist_enabled: false,
+            chat_filters: Vec::new(),
+            action_filters: Vec::new(),
             subnet_bans: Vec::new(),
             dos_blacklist: HashSet::new(),
             kicked_ips: HashMap::new(),
@@ -40,6 +46,36 @@ impl Administration {
 
     pub fn is_dos_blacklisted(&self, address: &str) -> bool {
         self.dos_blacklist.contains(address)
+    }
+
+    pub fn add_chat_filter<F>(&mut self, filter: F)
+    where
+        F: Fn(Option<&str>, &str) -> Option<String> + Send + Sync + 'static,
+    {
+        self.chat_filters.push(Arc::new(filter));
+    }
+
+    pub fn filter_message(&self, player: Option<&str>, message: &str) -> Option<String> {
+        let mut current = message.to_string();
+        for filter in &self.chat_filters {
+            current = filter(player, &current)?;
+        }
+        Some(current)
+    }
+
+    pub fn add_action_filter<F>(&mut self, filter: F)
+    where
+        F: Fn(&PlayerAction) -> bool + Send + Sync + 'static,
+    {
+        self.action_filters.push(Arc::new(filter));
+    }
+
+    pub fn allow_action(&self, action: &PlayerAction) -> bool {
+        if action.player.is_none() {
+            return true;
+        }
+
+        self.action_filters.iter().all(|filter| filter(action))
     }
 
     pub fn add_subnet_ban(&mut self, ip_prefix: impl Into<String>) {
@@ -204,6 +240,40 @@ impl Administration {
 
     fn whitelist_key(id: &str, usid: &str) -> String {
         format!("{usid}{id}")
+    }
+}
+
+impl fmt::Debug for Administration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Administration")
+            .field("banned_ips", &self.banned_ips)
+            .field("whitelist", &self.whitelist)
+            .field("whitelist_enabled", &self.whitelist_enabled)
+            .field("chat_filters", &self.chat_filters.len())
+            .field("action_filters", &self.action_filters.len())
+            .field("subnet_bans", &self.subnet_bans)
+            .field("dos_blacklist", &self.dos_blacklist)
+            .field("kicked_ips", &self.kicked_ips)
+            .field("banned_names", &self.banned_names)
+            .field("player_info", &self.player_info)
+            .field("configs", &self.configs)
+            .finish()
+    }
+}
+
+impl PartialEq for Administration {
+    fn eq(&self, other: &Self) -> bool {
+        self.banned_ips == other.banned_ips
+            && self.whitelist == other.whitelist
+            && self.whitelist_enabled == other.whitelist_enabled
+            && self.chat_filters.len() == other.chat_filters.len()
+            && self.action_filters.len() == other.action_filters.len()
+            && self.subnet_bans == other.subnet_bans
+            && self.dos_blacklist == other.dos_blacklist
+            && self.kicked_ips == other.kicked_ips
+            && self.banned_names == other.banned_names
+            && self.player_info == other.player_info
+            && self.configs == other.configs
     }
 }
 
@@ -422,7 +492,8 @@ impl TraceInfo {
     }
 }
 
-pub type ActionFilter = Box<dyn Fn(&PlayerAction) -> bool + Send + Sync>;
+pub type ChatFilter = Arc<dyn Fn(Option<&str>, &str) -> Option<String> + Send + Sync>;
+pub type ActionFilter = Arc<dyn Fn(&PlayerAction) -> bool + Send + Sync>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerAction {
@@ -540,5 +611,44 @@ mod tests {
         assert!(admin.unwhitelist("uuid"));
         assert!(!admin.unwhitelist("uuid"));
         assert!(!admin.is_whitelisted("uuid", "usid"));
+    }
+
+    #[test]
+    fn chat_filters_chain_and_can_suppress_messages_like_java() {
+        let mut admin = Administration::default();
+        admin.add_chat_filter(|_player, message| Some(message.replace("foo", "bar")));
+        admin.add_chat_filter(|_player, message| Some(format!("{message}!")));
+
+        assert_eq!(
+            admin.filter_message(Some("player"), "foo").as_deref(),
+            Some("bar!")
+        );
+
+        admin.add_chat_filter(|_player, message| {
+            if message.contains("blocked") {
+                None
+            } else {
+                Some(message.to_string())
+            }
+        });
+        assert_eq!(admin.filter_message(Some("player"), "blocked"), None);
+    }
+
+    #[test]
+    fn action_filters_allow_server_actions_and_short_circuit_player_actions() {
+        let mut admin = Administration::default();
+        admin.add_action_filter(|action| action.action_type != ActionType::Configure);
+        admin.add_action_filter(|action| action.block.as_deref() != Some("forbidden"));
+
+        let mut configure = PlayerAction::new(Some("player".into()), ActionType::Configure);
+        configure.block = Some("router".into());
+        assert!(!admin.allow_action(&configure));
+
+        let mut place = PlayerAction::new(Some("player".into()), ActionType::PlaceBlock);
+        place.block = Some("forbidden".into());
+        assert!(!admin.allow_action(&place));
+
+        let server_action = PlayerAction::new(None, ActionType::Configure);
+        assert!(admin.allow_action(&server_action));
     }
 }

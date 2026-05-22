@@ -11,8 +11,8 @@ pub mod streamable;
 pub mod validate_exception;
 
 pub use administration::{
-    ActionFilter, ActionType, Administration, Config, ConfigValue, PlayerAction, PlayerInfo,
-    TraceInfo,
+    ActionFilter, ActionType, Administration, ChatFilter, Config, ConfigValue, PlayerAction,
+    PlayerInfo, TraceInfo,
 };
 pub use arc_net_provider::{
     ArcNetProvider, ArcTransport, FrameworkMessage, PacketEnvelope, PacketSerializer,
@@ -22,7 +22,7 @@ pub use net::{
     ClientListener, ConnectFilter, DoneCallback, HostCallback, Net, NetProvider, NoopNetProvider,
     PacketKind, ProviderEvent, ServerListener,
 };
-pub use net_connection::{NetConnection, SentPacket};
+pub use net_connection::{NetConnection, Ratekeeper, SentPacket};
 pub use network_io::{read_server_data, write_server_data, ServerData};
 pub use packet::{PacketPriority, PacketRuntime};
 pub use packets::{
