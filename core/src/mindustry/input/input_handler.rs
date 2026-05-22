@@ -12,14 +12,16 @@ use crate::mindustry::entities::comp::{
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, CommandUnitsCallPacket, DeletePlansCallPacket,
-    DropItemCallPacket, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, PingLocationCallPacket, RequestBuildPayloadCallPacket,
-    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    BuildingControlSelectCallPacket, ClearItemsCallPacket, CommandUnitsCallPacket,
+    DeletePlansCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
+    TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+    TransferItemToCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
+use crate::mindustry::r#type::ItemStack;
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::{meta::BuildVisibility, point2_pack};
 
@@ -119,6 +121,39 @@ pub struct RequestItemOutcome {
     pub accepted_amount: i32,
     pub packet: Option<TakeItemsCallPacket>,
     pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemSyncRejectReason {
+    MissingBuild,
+    MissingItemStorage,
+    MissingItem,
+    UnknownItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetItemOutcome {
+    pub accepted: bool,
+    pub rejection: Option<ItemSyncRejectReason>,
+    pub previous_amount: i32,
+    pub new_amount: i32,
+    pub packet: Option<SetItemCallPacket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetItemsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<ItemSyncRejectReason>,
+    pub applied_entries: usize,
+    pub packet: Option<SetItemsCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClearItemsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<ItemSyncRejectReason>,
+    pub cleared_total: i32,
+    pub packet: Option<ClearItemsCallPacket>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -528,6 +563,40 @@ impl RequestItemOutcome {
             accepted_amount: 0,
             packet: None,
             should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl SetItemOutcome {
+    fn rejected(reason: ItemSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            previous_amount: 0,
+            new_amount: 0,
+            packet: None,
+        }
+    }
+}
+
+impl SetItemsOutcome {
+    fn rejected(reason: ItemSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            applied_entries: 0,
+            packet: None,
+        }
+    }
+}
+
+impl ClearItemsOutcome {
+    fn rejected(reason: ItemSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            cleared_total: 0,
+            packet: None,
         }
     }
 }
@@ -1021,6 +1090,110 @@ pub fn client_request_item_packet(
         build: BuildingRef::new(build.tile_pos),
         item,
         amount,
+    }
+}
+
+pub fn set_item<R>(
+    build: Option<&mut BuildingComp>,
+    item: Option<String>,
+    amount: i32,
+    resolve_item_id: R,
+) -> SetItemOutcome
+where
+    R: FnOnce(&str) -> Option<i16>,
+{
+    let Some(build) = build else {
+        return SetItemOutcome::rejected(ItemSyncRejectReason::MissingBuild);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+
+    let Some(items) = build.items.as_mut() else {
+        return SetItemOutcome::rejected(ItemSyncRejectReason::MissingItemStorage);
+    };
+
+    let Some(item_name) = item else {
+        return SetItemOutcome::rejected(ItemSyncRejectReason::MissingItem);
+    };
+
+    let Some(item_id) = resolve_item_id(&item_name) else {
+        return SetItemOutcome::rejected(ItemSyncRejectReason::UnknownItem);
+    };
+
+    let previous_amount = items.get(item_id);
+    items.set(item_id, amount);
+
+    SetItemOutcome {
+        accepted: true,
+        rejection: None,
+        previous_amount,
+        new_amount: amount,
+        packet: Some(SetItemCallPacket {
+            build: build_ref,
+            item: Some(item_name),
+            amount,
+        }),
+    }
+}
+
+pub fn set_items<R>(
+    build: Option<&mut BuildingComp>,
+    stacks: Vec<ItemStack>,
+    mut resolve_item_id: R,
+) -> SetItemsOutcome
+where
+    R: FnMut(&str) -> Option<i16>,
+{
+    let Some(build) = build else {
+        return SetItemsOutcome::rejected(ItemSyncRejectReason::MissingBuild);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+
+    if build.items.is_none() {
+        return SetItemsOutcome::rejected(ItemSyncRejectReason::MissingItemStorage);
+    }
+
+    let mut resolved = Vec::with_capacity(stacks.len());
+    for stack in &stacks {
+        let Some(item_id) = resolve_item_id(&stack.item) else {
+            return SetItemsOutcome::rejected(ItemSyncRejectReason::UnknownItem);
+        };
+        resolved.push((item_id, stack.amount));
+    }
+
+    let items = build.items.as_mut().expect("checked item module presence");
+    for (item_id, amount) in resolved {
+        items.set(item_id, amount);
+    }
+
+    SetItemsOutcome {
+        accepted: true,
+        rejection: None,
+        applied_entries: stacks.len(),
+        packet: Some(SetItemsCallPacket {
+            build: build_ref,
+            items: stacks,
+        }),
+    }
+}
+
+pub fn clear_items(build: Option<&mut BuildingComp>) -> ClearItemsOutcome {
+    let Some(build) = build else {
+        return ClearItemsOutcome::rejected(ItemSyncRejectReason::MissingBuild);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+
+    let Some(items) = build.items.as_mut() else {
+        return ClearItemsOutcome::rejected(ItemSyncRejectReason::MissingItemStorage);
+    };
+
+    let cleared_total = items.total();
+    items.clear();
+
+    ClearItemsOutcome {
+        accepted: true,
+        rejection: None,
+        cleared_total,
+        packet: Some(ClearItemsCallPacket { build: build_ref }),
     }
 }
 
@@ -2035,6 +2208,15 @@ mod tests {
         block
     }
 
+    fn item_id(name: &str) -> Option<i16> {
+        match name {
+            "copper" => Some(0),
+            "lead" => Some(1),
+            "scrap" => Some(2),
+            _ => None,
+        }
+    }
+
     fn unit_type(item_capacity: i32) -> UnitType {
         let mut unit_type = UnitType::new(1, "alpha");
         unit_type.item_capacity = item_capacity;
@@ -2350,6 +2532,89 @@ mod tests {
         assert_eq!(packet.build, BuildingRef::new(point2_pack(10, 11)));
         assert_eq!(packet.item.as_deref(), Some("copper"));
         assert_eq!(packet.amount, 4);
+    }
+
+    #[test]
+    fn set_item_updates_building_items_and_records_packet() {
+        let mut building = BuildingComp::new(point2_pack(12, 14), item_block(), TeamId(1));
+        building.items.as_mut().unwrap().set(0, 5);
+
+        let outcome = set_item(Some(&mut building), Some("copper".into()), 9, item_id);
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.previous_amount, 5);
+        assert_eq!(outcome.new_amount, 9);
+        assert_eq!(building.items.as_ref().unwrap().get(0), 9);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(12, 14)));
+        assert_eq!(packet.item.as_deref(), Some("copper"));
+        assert_eq!(packet.amount, 9);
+    }
+
+    #[test]
+    fn set_items_applies_all_stacks_without_clearing_absent_items() {
+        let mut building = BuildingComp::new(point2_pack(13, 15), item_block(), TeamId(1));
+        building.items.as_mut().unwrap().set(2, 7);
+
+        let stacks = vec![ItemStack::new("copper", 3), ItemStack::new("lead", 4)];
+        let outcome = set_items(Some(&mut building), stacks.clone(), item_id);
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.applied_entries, 2);
+        let items = building.items.as_ref().unwrap();
+        assert_eq!(items.get(0), 3);
+        assert_eq!(items.get(1), 4);
+        assert_eq!(items.get(2), 7);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(13, 15)));
+        assert_eq!(packet.items, stacks);
+    }
+
+    #[test]
+    fn set_items_rejects_unknown_item_without_partial_mutation() {
+        let mut building = BuildingComp::new(point2_pack(14, 16), item_block(), TeamId(1));
+        building.items.as_mut().unwrap().set(0, 5);
+
+        let outcome = set_items(
+            Some(&mut building),
+            vec![ItemStack::new("copper", 1), ItemStack::new("missing", 2)],
+            item_id,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(outcome.rejection, Some(ItemSyncRejectReason::UnknownItem));
+        assert_eq!(building.items.as_ref().unwrap().get(0), 5);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn clear_items_clears_module_and_records_packet() {
+        let mut building = BuildingComp::new(point2_pack(15, 17), item_block(), TeamId(1));
+        let items = building.items.as_mut().unwrap();
+        items.set(0, 5);
+        items.set(1, 6);
+
+        let outcome = clear_items(Some(&mut building));
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.cleared_total, 11);
+        assert_eq!(building.items.as_ref().unwrap().total(), 0);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(15, 17)));
+    }
+
+    #[test]
+    fn clear_items_rejects_building_without_item_module() {
+        let mut building = BuildingComp::new(point2_pack(16, 18), block(), TeamId(1));
+
+        let outcome = clear_items(Some(&mut building));
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(ItemSyncRejectReason::MissingItemStorage)
+        );
+        assert!(outcome.packet.is_none());
     }
 
     #[test]
