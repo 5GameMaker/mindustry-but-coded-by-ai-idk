@@ -20,8 +20,8 @@ pub mod unit_sorts;
 pub mod units;
 
 pub use abilities::{
-    Ability, BasicAbility, ForceFieldAbility, ForceFieldHit, ForceFieldUpdate,
-    LiquidExplodeAbility, LiquidRegenAbility, MoveEffectAbility, MoveEffectPlan,
+    Ability, ArmorPlateAbility, ArmorPlateUpdate, BasicAbility, ForceFieldAbility, ForceFieldHit,
+    ForceFieldUpdate, LiquidExplodeAbility, LiquidRegenAbility, MoveEffectAbility, MoveEffectPlan,
     MoveLightningAbility, MoveLightningPlan, RegenAbility, RepairFieldAbility, RepairFieldPulse,
     RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
     SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,

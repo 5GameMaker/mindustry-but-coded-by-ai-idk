@@ -1180,6 +1180,71 @@ impl Ability for MoveLightningAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArmorPlateUpdate {
+    pub warmup: f32,
+    pub health_multiplier_bonus: f32,
+    pub should_draw: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArmorPlateAbility {
+    pub base: BasicAbility,
+    pub plate_suffix: String,
+    pub shine_suffix: String,
+    pub shine_speed: f32,
+    pub z: f32,
+    pub draw_plate: bool,
+    pub draw_shine: bool,
+    pub health_multiplier: f32,
+    pub warmup: f32,
+}
+
+impl Default for ArmorPlateAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            plate_suffix: "-armor".into(),
+            shine_suffix: "-shine".into(),
+            shine_speed: 1.0,
+            z: -1.0,
+            draw_plate: true,
+            draw_shine: true,
+            health_multiplier: 0.2,
+            warmup: 0.0,
+        }
+    }
+}
+
+impl ArmorPlateAbility {
+    pub fn update_state(&mut self, is_shooting: bool, delta: f32) -> ArmorPlateUpdate {
+        self.warmup = lerp_delta(self.warmup, if is_shooting { 1.0 } else { 0.0 }, 0.1, delta);
+        ArmorPlateUpdate {
+            warmup: self.warmup,
+            health_multiplier_bonus: self.warmup * self.health_multiplier,
+            should_draw: (self.draw_plate || self.draw_shine) && self.warmup > 0.001,
+        }
+    }
+
+    pub fn damage_reduction_stat_percent(&self) -> f32 {
+        -self.health_multiplier * 100.0
+    }
+}
+
+impl Ability for ArmorPlateAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
@@ -1247,10 +1312,10 @@ fn polygon_vertex(
 #[cfg(test)]
 mod tests {
     use super::{
-        Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
-        MoveEffectAbility, MoveLightningAbility, RegenAbility, RepairFieldAbility,
-        RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldTarget, SpawnDeathAbility,
-        StatusFieldAbility, SuppressionFieldAbility,
+        Ability, ArmorPlateAbility, BasicAbility, ForceFieldAbility, LiquidExplodeAbility,
+        LiquidRegenAbility, MoveEffectAbility, MoveLightningAbility, RegenAbility,
+        RepairFieldAbility, RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldTarget,
+        SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility,
     };
 
     #[derive(Clone)]
@@ -1629,5 +1694,31 @@ mod tests {
 
         assert_eq!(plan.side_after, 1.0);
         assert_eq!(ability.side, 1.0);
+    }
+
+    #[test]
+    fn armor_plate_warms_up_while_shooting_and_adds_health_multiplier() {
+        let mut ability = ArmorPlateAbility::default();
+
+        let update = ability.update_state(true, 1.0);
+        assert!((update.warmup - 0.1).abs() < 0.0001);
+        assert!((update.health_multiplier_bonus - 0.02).abs() < 0.0001);
+        assert!(update.should_draw);
+        assert_eq!(ability.damage_reduction_stat_percent(), -20.0);
+
+        let cooldown = ability.update_state(false, 1.0);
+        assert!((cooldown.warmup - 0.09).abs() < 0.0001);
+    }
+
+    #[test]
+    fn armor_plate_respects_draw_flags() {
+        let mut ability = ArmorPlateAbility {
+            draw_plate: false,
+            draw_shine: false,
+            ..Default::default()
+        };
+
+        let update = ability.update_state(true, 1.0);
+        assert!(!update.should_draw);
     }
 }
