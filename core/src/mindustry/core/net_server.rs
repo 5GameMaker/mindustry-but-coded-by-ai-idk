@@ -2117,8 +2117,85 @@ impl NetServer {
                     Some(ClientCommandAction::WorldDataBegin)
                 }
             }
+            ClientCommandResponse::Valid { command, args } if command.text == "votekick" => {
+                Self::votekick_command_action(state, connection_id, args)
+            }
             _ => None,
         }
+    }
+
+    fn votekick_command_action(
+        state: &NetServerState,
+        connection_id: i32,
+        args: &[String],
+    ) -> Option<ClientCommandAction> {
+        if !Self::administration_config_bool(state, "enableVotekick", true) {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]Vote-kick is disabled on this server.".to_string(),
+            ));
+        }
+
+        if Self::connected_player_count(state) < 3 {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]At least 3 players are needed to start a votekick.".to_string(),
+            ));
+        }
+
+        if args.is_empty() {
+            let mut message = "[orange]Players to kick: \n".to_string();
+            for (candidate_connection_id, candidate) in
+                state
+                    .connection_states
+                    .iter()
+                    .filter(|(candidate_connection_id, candidate)| {
+                        **candidate_connection_id != connection_id
+                            && candidate.has_connected
+                            && candidate.player_added
+                            && !candidate.has_disconnected
+                            && !Self::connection_is_admin_ref(state, candidate)
+                    })
+            {
+                let name = if candidate.name.is_empty() {
+                    candidate.uuid.as_str()
+                } else {
+                    candidate.name.as_str()
+                };
+                message.push_str(&format!(
+                    "[lightgray] {}[accent] (#{})\n",
+                    name, candidate_connection_id
+                ));
+            }
+            return Some(ClientCommandAction::PrivateMessage(message));
+        }
+
+        if args.len() == 1 {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[orange]You need a valid reason to kick the player. Add a reason after the player name."
+                    .to_string(),
+            ));
+        }
+
+        let target = Self::find_votekick_target(state, &args[0]);
+        let Some((target_connection_id, target_connection)) = target else {
+            return Some(ClientCommandAction::PrivateMessage(format!(
+                "[scarlet]No player [orange]'{}'[scarlet] found.",
+                args[0]
+            )));
+        };
+
+        if target_connection_id == connection_id {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]You can't vote to kick yourself.".to_string(),
+            ));
+        }
+
+        if Self::connection_is_admin_ref(state, target_connection) {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]Did you really expect to be able to kick an admin?".to_string(),
+            ));
+        }
+
+        None
     }
 
     fn record_client_command_action(
@@ -2160,6 +2237,62 @@ impl NetServer {
                     .is_admin(&connection.uuid, &connection.usid)
                     || state.steam_admin_data.is_admin(&connection.address)
             })
+    }
+
+    fn connection_is_admin_ref(state: &NetServerState, connection: &NetConnection) -> bool {
+        state
+            .administration
+            .is_admin(&connection.uuid, &connection.usid)
+            || state.steam_admin_data.is_admin(&connection.address)
+    }
+
+    fn connected_player_count(state: &NetServerState) -> usize {
+        state
+            .connection_states
+            .values()
+            .filter(|connection| {
+                connection.has_connected && connection.player_added && !connection.has_disconnected
+            })
+            .count()
+    }
+
+    fn find_votekick_target<'a>(
+        state: &'a NetServerState,
+        query: &str,
+    ) -> Option<(i32, &'a NetConnection)> {
+        if let Some(id) = query
+            .strip_prefix('#')
+            .and_then(|id| id.parse::<i32>().ok())
+        {
+            return state
+                .connection_states
+                .get(&id)
+                .map(|connection| (id, connection));
+        }
+
+        state
+            .connection_states
+            .iter()
+            .find(|(_, connection)| {
+                connection.has_connected
+                    && connection.player_added
+                    && !connection.has_disconnected
+                    && connection.name.eq_ignore_ascii_case(query)
+            })
+            .map(|(connection_id, connection)| (*connection_id, connection))
+    }
+
+    fn administration_config_bool(state: &NetServerState, name: &str, default_value: bool) -> bool {
+        state
+            .administration
+            .configs
+            .iter()
+            .find(|config| config.name == name)
+            .and_then(|config| match &config.default_value {
+                crate::mindustry::net::ConfigValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+            .unwrap_or(default_value)
     }
 
     fn split_client_command(command_line: &str) -> (&str, &str) {
@@ -3781,6 +3914,201 @@ mod tests {
             state.last_client_command_response.as_deref(),
             Some("[scarlet]You may only /sync every 5 seconds.")
         );
+    }
+
+    #[test]
+    fn votekick_command_respects_disabled_and_minimum_player_checks() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for id in 20..23 {
+                let mut connection =
+                    ready_chat_connection(&format!("4.4.4.{id}"), &format!("uuid-votekick-{id}"));
+                connection.name = format!("player{id}");
+                state.connection_states.insert(id, connection);
+            }
+            let config = state
+                .administration
+                .configs
+                .iter_mut()
+                .find(|config| config.name == "enableVotekick")
+                .unwrap();
+            config.default_value = crate::mindustry::net::ConfigValue::Bool(false);
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(20),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/votekick player21 reason".into(),
+                }),
+            );
+        }
+
+        {
+            let sent = sent.lock().unwrap();
+            assert_eq!(sent.len(), 1);
+            assert!(matches!(
+                &sent[0].1,
+                PacketKind::SendMessageCallPacket2(packet)
+                    if packet.message == "[scarlet]Vote-kick is disabled on this server."
+            ));
+        }
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(24, ready_chat_connection("4.4.4.24", "uuid-votekick-one"));
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(24),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/votekick".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]At least 3 players are needed to start a votekick."
+        ));
+    }
+
+    #[test]
+    fn votekick_command_lists_candidates_and_requires_reason_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name) in [(30, "sender"), (31, "target"), (32, "other")] {
+                let mut connection =
+                    ready_chat_connection(&format!("4.4.4.{id}"), &format!("uuid-{name}"));
+                connection.name = name.into();
+                state.connection_states.insert(id, connection);
+            }
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(30),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/votekick".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(30),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/votekick target".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message.starts_with("[orange]Players to kick: \n")
+                    && packet.message.contains("[lightgray] target[accent] (#31)\n")
+                    && packet.message.contains("[lightgray] other[accent] (#32)\n")
+                    && !packet.message.contains("sender")
+        ));
+        assert!(matches!(
+            &sent[1].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[orange]You need a valid reason to kick the player. Add a reason after the player name."
+        ));
+    }
+
+    #[test]
+    fn votekick_command_reports_missing_self_and_admin_targets_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name) in [(40, "sender"), (41, "target"), (42, "admin")] {
+                let mut connection =
+                    ready_chat_connection(&format!("4.4.4.{id}"), &format!("uuid-{name}"));
+                connection.name = name.into();
+                state.connection_states.insert(id, connection);
+            }
+            state.administration.admin_player("uuid-admin", "AAAAAAAA");
+        }
+
+        {
+            let mut net = server.net_mut();
+            for message in [
+                "/votekick missing reason",
+                "/votekick sender reason",
+                "/votekick admin reason",
+            ] {
+                net.handle_server_received_from_connection(
+                    Some(40),
+                    true,
+                    PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                        message: message.into(),
+                    }),
+                );
+            }
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]No player [orange]'missing'[scarlet] found."
+        ));
+        assert!(matches!(
+            &sent[1].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]You can't vote to kick yourself."
+        ));
+        assert!(matches!(
+            &sent[2].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]Did you really expect to be able to kick an admin?"
+        ));
     }
 
     #[test]
