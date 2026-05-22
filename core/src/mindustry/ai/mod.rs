@@ -4,6 +4,7 @@ pub mod item_unit_stance;
 pub mod pathfind_queue;
 pub mod pathfinder;
 pub mod unit_command;
+pub mod unit_group;
 pub mod unit_stance;
 
 pub use block_indexer::{
@@ -17,4 +18,8 @@ pub use pathfinder::{
     BIT_NEAR_GROUND, BIT_NEAR_LEG_SOLID, BIT_NEAR_LIQUID, BIT_NEAR_SOLID, BIT_SOLID,
     BIT_TEAM_PASSABLE, COST_GROUND, COST_HOVER, COST_LEGS, COST_NAVAL, COST_NEOPLASM, COST_NONE,
     FIELD_CORE, IMPASSABLE, MAX_COSTS, MAX_FIELDS,
+};
+pub use unit_group::{
+    calculate_relative_positions, update_raycast_position, UnitGroup, UnitGroupMember,
+    LAYER_FLYING, LAYER_GROUND, LAYER_LEGS, LAYER_UNDERWATER, PHYSICS_LAYERS,
 };
