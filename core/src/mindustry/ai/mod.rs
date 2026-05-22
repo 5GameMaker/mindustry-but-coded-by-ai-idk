@@ -7,6 +7,7 @@ pub mod control_pathfinder;
 pub mod item_unit_stance;
 pub mod pathfind_queue;
 pub mod pathfinder;
+pub mod rts_ai;
 pub mod unit_command;
 pub mod unit_group;
 pub mod unit_stance;
@@ -42,6 +43,14 @@ pub use pathfinder::{
     BIT_NEAR_GROUND, BIT_NEAR_LEG_SOLID, BIT_NEAR_LIQUID, BIT_NEAR_SOLID, BIT_SOLID,
     BIT_TEAM_PASSABLE, COST_GROUND, COST_HOVER, COST_LEGS, COST_NAVAL, COST_NEOPLASM, COST_NONE,
     FIELD_CORE, IMPASSABLE, MAX_COSTS, MAX_FIELDS,
+};
+pub use rts_ai::{
+    battle_yield, candidate_score, compare_candidates, point_segment_distance,
+    select_target_candidate, RtsAiConfig, RtsRulesSnapshot, SquadMemberSnapshot, SquadSummary,
+    TargetCandidate, TargetPriority, DEFAULT_TARGET_PRIORITIES, RTS_BATTLE_EPSILON,
+    RTS_BATTLE_YIELD_IMPOSSIBLE, RTS_DEFEND_CHECK_RANGE, RTS_DEFEND_WITHIN_RANGE,
+    RTS_MAX_TARGETS_CHECKED, RTS_SQUAD_RADIUS, RTS_TIMER_SPAWN, RTS_TIME_UPDATE,
+    RTS_TURRET_SCAN_PADDING,
 };
 pub use unit_group::{
     calculate_relative_positions, update_raycast_position, UnitGroup, UnitGroupMember,
