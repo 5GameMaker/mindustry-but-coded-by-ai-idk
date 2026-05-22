@@ -486,6 +486,71 @@ impl FlakBulletType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InterceptorHitPlan {
+    pub hit_x: f32,
+    pub hit_y: f32,
+    pub other_damage_after: f32,
+    pub remove_other: bool,
+    pub remove_self: bool,
+    pub clear_data: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterceptorBulletType {
+    pub base: BasicBulletType,
+}
+
+impl Default for InterceptorBulletType {
+    fn default() -> Self {
+        Self {
+            base: BasicBulletType::default(),
+        }
+    }
+}
+
+impl InterceptorBulletType {
+    pub fn new(speed: f32, damage: f32, sprite: impl Into<String>) -> Self {
+        Self {
+            base: BasicBulletType::new(speed, damage, sprite),
+        }
+    }
+
+    pub fn resolve_intercept(
+        &self,
+        other_added: bool,
+        collision_point: Option<(f32, f32)>,
+        other_damage: f32,
+        self_damage: f32,
+    ) -> Option<InterceptorHitPlan> {
+        if !other_added {
+            return Some(InterceptorHitPlan {
+                hit_x: 0.0,
+                hit_y: 0.0,
+                other_damage_after: other_damage,
+                remove_other: false,
+                remove_self: false,
+                clear_data: true,
+            });
+        }
+
+        let (hit_x, hit_y) = collision_point?;
+        let remove_other = other_damage <= self_damage;
+        Some(InterceptorHitPlan {
+            hit_x,
+            hit_y,
+            other_damage_after: if remove_other {
+                0.0
+            } else {
+                other_damage - self_damage
+            },
+            remove_other,
+            remove_self: true,
+            clear_data: false,
+        })
+    }
+}
+
 pub fn empty_bullet_type() -> BulletType {
     BulletType {
         hittable: false,
@@ -881,5 +946,36 @@ mod tests {
         let plan = flak.update_plan(10.0, 0.0, true, true);
         assert!(plan.prime);
         assert_eq!(plan.explode_delay, 5.0);
+    }
+
+    #[test]
+    fn interceptor_bullet_resolves_overlap_damage_and_removal() {
+        let interceptor = InterceptorBulletType::new(4.0, 10.0, "point");
+        assert_eq!(interceptor.base.base.speed, 4.0);
+        assert_eq!(interceptor.base.base.damage, 10.0);
+
+        assert!(interceptor
+            .resolve_intercept(true, None, 20.0, 5.0)
+            .is_none());
+
+        let damaged = interceptor
+            .resolve_intercept(true, Some((3.0, 4.0)), 20.0, 5.0)
+            .expect("collision point should produce hit");
+        assert_eq!((damaged.hit_x, damaged.hit_y), (3.0, 4.0));
+        assert_eq!(damaged.other_damage_after, 15.0);
+        assert!(!damaged.remove_other);
+        assert!(damaged.remove_self);
+
+        let removed = interceptor
+            .resolve_intercept(true, Some((0.0, 0.0)), 5.0, 5.0)
+            .expect("equal damage removes target bullet");
+        assert!(removed.remove_other);
+        assert_eq!(removed.other_damage_after, 0.0);
+
+        let cleared = interceptor
+            .resolve_intercept(false, None, 7.0, 5.0)
+            .expect("missing target clears bullet data");
+        assert!(cleared.clear_data);
+        assert!(!cleared.remove_self);
     }
 }
