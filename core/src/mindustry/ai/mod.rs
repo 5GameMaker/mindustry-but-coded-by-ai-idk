@@ -1,5 +1,6 @@
 // Mirrors upstream core/src/mindustry/ai. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 pub mod astar;
+pub mod base_registry;
 pub mod block_indexer;
 pub mod item_unit_stance;
 pub mod pathfind_queue;
@@ -9,6 +10,7 @@ pub mod unit_group;
 pub mod unit_stance;
 
 pub use astar::{manhattan, pathfind_grid, pathfind_grid_manhattan, D4};
+pub use base_registry::{BasePart, BasePartTile, BasePartTileKind, BaseRegistry};
 pub use block_indexer::{
     quadrant_dimensions, quadrant_for_tile, BlockIndexer, IndexedTile, QUADRANT_SIZE,
 };
