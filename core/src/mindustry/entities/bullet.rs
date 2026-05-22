@@ -1168,6 +1168,155 @@ impl SapBulletType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShrapnelTrianglePlan {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub length: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShrapnelDrawPlan {
+    pub from_color: String,
+    pub to_color: String,
+    pub color_mix: f32,
+    pub serrations: Vec<ShrapnelTrianglePlan>,
+    pub body: ShrapnelTrianglePlan,
+    pub tail: ShrapnelTrianglePlan,
+    pub light_end: (f32, f32),
+    pub light_width: f32,
+    pub light_color: String,
+    pub light_opacity: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShrapnelBulletType {
+    pub base: BulletType,
+    pub length: f32,
+    pub width: f32,
+    pub from_color: String,
+    pub to_color: String,
+    pub hit_large: bool,
+    pub serrations: i32,
+    pub serration_len_scl: f32,
+    pub serration_width: f32,
+    pub serration_spacing: f32,
+    pub serration_space_offset: f32,
+    pub serration_fade_offset: f32,
+    pub hit_effect: String,
+    pub shoot_effect: String,
+    pub smoke_effect: String,
+    pub despawn_effect: String,
+}
+
+impl Default for ShrapnelBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                speed: 0.0,
+                lifetime: 10.0,
+                keep_velocity: false,
+                collides: false,
+                pierce: true,
+                hittable: false,
+                absorbable: false,
+                light_opacity: 0.6,
+                ..Default::default()
+            },
+            length: 100.0,
+            width: 20.0,
+            from_color: "white".into(),
+            to_color: "lancerLaser".into(),
+            hit_large: false,
+            serrations: 7,
+            serration_len_scl: 10.0,
+            serration_width: 4.0,
+            serration_spacing: 8.0,
+            serration_space_offset: 80.0,
+            serration_fade_offset: 0.5,
+            hit_effect: "hitLancer".into(),
+            shoot_effect: "lightningShoot".into(),
+            smoke_effect: "lightningShoot".into(),
+            despawn_effect: "none".into(),
+        }
+    }
+}
+
+impl ShrapnelBulletType {
+    pub fn calculate_range(&self) -> f32 {
+        self.length.max(self.base.max_range)
+    }
+
+    pub fn init_defaults(&mut self) {
+        self.base.init_defaults();
+        self.base.draw_size = self.base.draw_size.max(self.length * 2.0);
+    }
+
+    pub fn draw_plan(
+        &self,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        real_length: f32,
+        fin: f32,
+        fout: f32,
+    ) -> ShrapnelDrawPlan {
+        let serration_count = (self.serrations as f32 * real_length / self.length) as i32;
+        let serration_alpha = (fout - self.serration_fade_offset).clamp(0.0, 1.0);
+        let mut serrations = Vec::with_capacity((serration_count.max(0) * 2) as usize);
+        for i in 0..serration_count.max(0) {
+            let px = x + trnsx(rotation, i as f32 * self.serration_spacing);
+            let py = y + trnsy(rotation, i as f32 * self.serration_spacing);
+            let length =
+                serration_alpha * (self.serration_space_offset - i as f32 * self.serration_len_scl);
+            serrations.push(ShrapnelTrianglePlan {
+                x: px,
+                y: py,
+                width: self.serration_width,
+                length,
+                rotation: rotation + 90.0,
+            });
+            serrations.push(ShrapnelTrianglePlan {
+                x: px,
+                y: py,
+                width: self.serration_width,
+                length,
+                rotation: rotation - 90.0,
+            });
+        }
+
+        ShrapnelDrawPlan {
+            from_color: self.from_color.clone(),
+            to_color: self.to_color.clone(),
+            color_mix: fin,
+            serrations,
+            body: ShrapnelTrianglePlan {
+                x,
+                y,
+                width: self.width * fout,
+                length: real_length + 4.0,
+                rotation,
+            },
+            tail: ShrapnelTrianglePlan {
+                x,
+                y,
+                width: self.width * fout,
+                length: 10.0,
+                rotation: rotation + 180.0,
+            },
+            light_end: (
+                x + trnsx(rotation, real_length),
+                y + trnsy(rotation, real_length),
+            ),
+            light_width: self.width * 2.5 * fout,
+            light_color: self.to_color.clone(),
+            light_opacity: self.base.light_opacity,
+        }
+    }
+}
+
 pub fn bomb_bullet_type(damage: f32, radius: f32, sprite: impl Into<String>) -> BasicBulletType {
     let mut bullet = BasicBulletType::new(0.7, 0.0, sprite);
     bullet.base.splash_damage_radius = radius;
@@ -2497,6 +2646,75 @@ mod tests {
         assert_eq!(draw.width, 0.2);
         assert_eq!(draw.light_width, 7.5);
         assert_eq!(draw.light_color, "sap");
+        assert_eq!(draw.light_opacity, 0.6);
+    }
+
+    #[test]
+    fn shrapnel_bullet_defaults_range_and_draw_serrations_match_java_geometry() {
+        let mut shrapnel = ShrapnelBulletType::default();
+        assert_eq!(shrapnel.base.speed, 0.0);
+        assert_eq!(shrapnel.hit_effect, "hitLancer");
+        assert_eq!(shrapnel.shoot_effect, "lightningShoot");
+        assert_eq!(shrapnel.smoke_effect, "lightningShoot");
+        assert_eq!(shrapnel.base.lifetime, 10.0);
+        assert_eq!(shrapnel.despawn_effect, "none");
+        assert!(!shrapnel.base.keep_velocity);
+        assert!(!shrapnel.base.collides);
+        assert!(shrapnel.base.pierce);
+        assert!(!shrapnel.base.hittable);
+        assert!(!shrapnel.base.absorbable);
+        assert_eq!(shrapnel.base.light_opacity, 0.6);
+        assert_eq!(shrapnel.length, 100.0);
+        assert_eq!(shrapnel.width, 20.0);
+        assert_eq!(shrapnel.from_color, "white");
+        assert_eq!(shrapnel.to_color, "lancerLaser");
+        assert!(!shrapnel.hit_large);
+        assert_eq!(shrapnel.serrations, 7);
+        assert_eq!(shrapnel.serration_len_scl, 10.0);
+        assert_eq!(shrapnel.serration_width, 4.0);
+        assert_eq!(shrapnel.serration_spacing, 8.0);
+        assert_eq!(shrapnel.serration_space_offset, 80.0);
+        assert_eq!(shrapnel.serration_fade_offset, 0.5);
+
+        assert_eq!(shrapnel.calculate_range(), 100.0);
+        shrapnel.base.max_range = 120.0;
+        assert_eq!(shrapnel.calculate_range(), 120.0);
+        shrapnel.init_defaults();
+        assert_eq!(shrapnel.base.draw_size, 200.0);
+
+        let draw = shrapnel.draw_plan(0.0, 0.0, 0.0, 50.0, 0.25, 0.75);
+        assert_eq!(draw.from_color, "white");
+        assert_eq!(draw.to_color, "lancerLaser");
+        assert_eq!(draw.color_mix, 0.25);
+        assert_eq!(draw.serrations.len(), 6);
+        assert_eq!(
+            draw.serrations[0],
+            ShrapnelTrianglePlan {
+                x: 0.0,
+                y: 0.0,
+                width: 4.0,
+                length: 20.0,
+                rotation: 90.0,
+            }
+        );
+        assert_eq!(draw.serrations[1].rotation, -90.0);
+        assert_eq!(draw.serrations[2].x, 8.0);
+        assert_eq!(draw.serrations[2].length, 17.5);
+        assert_eq!(
+            draw.body,
+            ShrapnelTrianglePlan {
+                x: 0.0,
+                y: 0.0,
+                width: 15.0,
+                length: 54.0,
+                rotation: 0.0,
+            }
+        );
+        assert_eq!(draw.tail.length, 10.0);
+        assert_eq!(draw.tail.rotation, 180.0);
+        assert_eq!(draw.light_end, (50.0, 0.0));
+        assert_eq!(draw.light_width, 37.5);
+        assert_eq!(draw.light_color, "lancerLaser");
         assert_eq!(draw.light_opacity, 0.6);
     }
 
