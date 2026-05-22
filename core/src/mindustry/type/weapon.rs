@@ -1,3 +1,5 @@
+use core::fmt;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Weapon {
     pub name: String,
@@ -195,12 +197,27 @@ impl Weapon {
         }
     }
 
-    pub fn load(&mut self) {}
+    pub fn load(&mut self) {
+        self.region = Some(self.name.clone());
+        self.heat_region = Some(format!("{}-heat", self.name));
+        self.cell_region = Some(format!("{}-cell", self.name));
+        self.outline_region = Some(format!("{}-outline", self.name));
+    }
 }
 
 impl Default for Weapon {
     fn default() -> Self {
         Self::new("")
+    }
+}
+
+impl fmt::Display for Weapon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.is_empty() {
+            write!(f, "Weapon")
+        } else {
+            write!(f, "Weapon: {}", self.name)
+        }
     }
 }
 
@@ -232,5 +249,23 @@ mod tests {
         assert_eq!(weapon.base_rotation, -20.0);
         assert!(weapon.flip_sprite);
         assert_eq!(weapon.bullet_range, 120.0);
+    }
+
+    #[test]
+    fn weapon_load_populates_regions_like_java_load() {
+        let mut weapon = Weapon::new("duo");
+
+        weapon.load();
+
+        assert_eq!(weapon.region.as_deref(), Some("duo"));
+        assert_eq!(weapon.heat_region.as_deref(), Some("duo-heat"));
+        assert_eq!(weapon.cell_region.as_deref(), Some("duo-cell"));
+        assert_eq!(weapon.outline_region.as_deref(), Some("duo-outline"));
+    }
+
+    #[test]
+    fn weapon_display_matches_java_tostring() {
+        assert_eq!(Weapon::new("").to_string(), "Weapon");
+        assert_eq!(Weapon::new("duo").to_string(), "Weapon: duo");
     }
 }

@@ -1,4 +1,35 @@
-﻿use crate::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
+use crate::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
+use crate::mindustry::entities::units::StatusEntry;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusEffectFxPlan {
+    pub effect: String,
+    pub color_rgba: u32,
+    pub parentize: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusIntervalDamageKind {
+    Normal,
+    Pierce,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StatusIntervalDamagePlan {
+    pub damage: f32,
+    pub kind: StatusIntervalDamageKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StatusEffectUpdatePlan {
+    /// Mirrors Java `unit.damageContinuousPierce(damage)`. The receiving unit
+    /// runtime is responsible for applying its usual continuous-damage delta.
+    pub continuous_pierce_damage: f32,
+    /// Mirrors Java `unit.heal(-damage * Time.delta)` for negative damage.
+    pub heal: f32,
+    pub interval_damage: Option<StatusIntervalDamagePlan>,
+    pub visual_effect: Option<StatusEffectFxPlan>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusEffect {
@@ -117,6 +148,61 @@ impl StatusEffect {
     pub fn reacts_with(&self, effect: &StatusEffect) -> bool {
         self.reacts_with_name(effect.name())
     }
+
+    pub fn update_plan(
+        &self,
+        entry: &mut StatusEntry,
+        delta: f32,
+        effect_roll: Option<f32>,
+    ) -> StatusEffectUpdatePlan {
+        let mut plan = StatusEffectUpdatePlan::default();
+
+        if self.damage > 0.0 {
+            plan.continuous_pierce_damage = self.damage;
+        } else if self.damage < 0.0 {
+            plan.heal = -self.damage * delta;
+        }
+
+        if self.interval_damage_time > 0.0 {
+            entry.damage_time += delta;
+            if entry.damage_time >= self.interval_damage_time {
+                entry.damage_time %= self.interval_damage_time;
+                plan.interval_damage = Some(StatusIntervalDamagePlan {
+                    damage: self.interval_damage,
+                    kind: if self.interval_damage_pierce {
+                        StatusIntervalDamageKind::Pierce
+                    } else {
+                        StatusIntervalDamageKind::Normal
+                    },
+                });
+            }
+        }
+
+        if self.effect != "none" {
+            let chance = (self.effect_chance * delta).clamp(0.0, 1.0);
+            if effect_roll.is_some_and(|roll| roll < chance) {
+                plan.visual_effect = Some(StatusEffectFxPlan {
+                    effect: self.effect.clone(),
+                    color_rgba: self.color_rgba,
+                    parentize: self.parentize_effect,
+                });
+            }
+        }
+
+        plan
+    }
+
+    pub fn applied_plan(&self, extend: bool) -> Option<StatusEffectFxPlan> {
+        if self.apply_effect == "none" || (extend && !self.apply_extend) {
+            return None;
+        }
+
+        Some(StatusEffectFxPlan {
+            effect: self.apply_effect.clone(),
+            color_rgba: self.apply_color_rgba,
+            parentize: self.parentize_apply_effect,
+        })
+    }
 }
 
 impl std::fmt::Display for StatusEffect {
@@ -203,5 +289,78 @@ mod tests {
         assert_eq!(wet.affinities, vec!["shocked"]);
         assert_eq!(wet.opposites, vec!["tarred"]);
         assert_eq!(wet.transitions, vec!["shocked", "tarred"]);
+    }
+
+    #[test]
+    fn status_effect_update_plan_matches_java_damage_and_interval_timers() {
+        let mut burning = StatusEffect::new(1, "burning");
+        burning.damage = 0.25;
+        burning.interval_damage_time = 5.0;
+        burning.interval_damage = 12.0;
+        burning.interval_damage_pierce = true;
+        let mut entry = StatusEntry::new(burning.clone(), 60.0);
+
+        let first = burning.update_plan(&mut entry, 3.0, None);
+        assert_eq!(first.continuous_pierce_damage, 0.25);
+        assert_eq!(first.heal, 0.0);
+        assert_eq!(first.interval_damage, None);
+        assert_eq!(entry.damage_time, 3.0);
+
+        let second = burning.update_plan(&mut entry, 4.0, None);
+        assert_eq!(
+            second.interval_damage,
+            Some(StatusIntervalDamagePlan {
+                damage: 12.0,
+                kind: StatusIntervalDamageKind::Pierce,
+            })
+        );
+        assert_eq!(entry.damage_time, 2.0);
+
+        let mut mending = StatusEffect::new(2, "mending");
+        mending.damage = -0.5;
+        let mut entry = StatusEntry::new(mending.clone(), 60.0);
+        let plan = mending.update_plan(&mut entry, 6.0, None);
+        assert_eq!(plan.continuous_pierce_damage, 0.0);
+        assert_eq!(plan.heal, 3.0);
+    }
+
+    #[test]
+    fn status_effect_update_and_apply_plans_gate_fx_like_java_hooks() {
+        let mut status = StatusEffect::new(3, "wet");
+        status.effect = "wetEffect".into();
+        status.color_rgba = 0x3366ccff;
+        status.parentize_effect = true;
+        status.effect_chance = 0.2;
+        let mut entry = StatusEntry::new(status.clone(), 60.0);
+
+        assert_eq!(
+            status
+                .update_plan(&mut entry, 2.0, Some(0.39))
+                .visual_effect,
+            Some(StatusEffectFxPlan {
+                effect: "wetEffect".into(),
+                color_rgba: 0x3366ccff,
+                parentize: true,
+            })
+        );
+        assert_eq!(
+            status.update_plan(&mut entry, 2.0, Some(0.4)).visual_effect,
+            None
+        );
+
+        status.apply_effect = "applyWet".into();
+        status.apply_color_rgba = 0x112233ff;
+        status.parentize_apply_effect = true;
+        assert_eq!(
+            status.applied_plan(false),
+            Some(StatusEffectFxPlan {
+                effect: "applyWet".into(),
+                color_rgba: 0x112233ff,
+                parentize: true,
+            })
+        );
+        assert_eq!(status.applied_plan(true), None);
+        status.apply_extend = true;
+        assert!(status.applied_plan(true).is_some());
     }
 }
