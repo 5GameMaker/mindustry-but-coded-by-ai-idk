@@ -135,6 +135,17 @@ pub struct GameServiceUnitCreatePlan {
     pub saved_built_sets: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceTurnSnapshot {
+    pub production_per_minute: i32,
+    pub total_campaign_items: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceTurnPlan {
+    pub stat_max_updates: Vec<(SStat, i32)>,
+}
+
 impl GameServiceState {
     pub fn mark_block_built(&mut self, block: impl Into<String>) {
         self.blocks_built.insert(block.into());
@@ -302,6 +313,15 @@ impl GameServiceState {
         }
 
         plan
+    }
+
+    pub fn turn_plan(&self, snapshot: GameServiceTurnSnapshot) -> GameServiceTurnPlan {
+        GameServiceTurnPlan {
+            stat_max_updates: vec![
+                (SStat::MaxProduction, snapshot.production_per_minute),
+                (SStat::TotalCampaignItems, snapshot.total_campaign_items),
+            ],
+        }
     }
 }
 
@@ -570,6 +590,24 @@ mod tests {
         assert_eq!(
             state.unit_create_plan(snapshot),
             GameServiceUnitCreatePlan::default()
+        );
+    }
+
+    #[test]
+    fn turn_plan_updates_production_and_total_campaign_item_max_stats() {
+        let state = GameServiceState::default();
+
+        let plan = state.turn_plan(GameServiceTurnSnapshot {
+            production_per_minute: 6000,
+            total_campaign_items: 12345,
+        });
+
+        assert_eq!(
+            plan.stat_max_updates,
+            vec![
+                (SStat::MaxProduction, 6000),
+                (SStat::TotalCampaignItems, 12345)
+            ]
         );
     }
 }
