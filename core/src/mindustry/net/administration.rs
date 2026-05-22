@@ -154,6 +154,26 @@ impl Administration {
             .unwrap_or(false)
     }
 
+    pub fn get_admins(&self) -> Vec<PlayerInfo> {
+        self.player_info
+            .values()
+            .filter(|info| info.admin)
+            .cloned()
+            .collect()
+    }
+
+    pub fn get_banned(&self) -> Vec<PlayerInfo> {
+        self.player_info
+            .values()
+            .filter(|info| info.banned)
+            .cloned()
+            .collect()
+    }
+
+    pub fn get_banned_ips(&self) -> &[String] {
+        &self.banned_ips
+    }
+
     pub fn admin_player(&mut self, id: impl Into<String>, usid: impl Into<String>) -> bool {
         let info = self.get_or_create_info(id.into());
         let was_admin = info.admin;
@@ -232,6 +252,60 @@ impl Administration {
             .collect()
     }
 
+    pub fn find_by_name(&self, name: &str) -> Vec<PlayerInfo> {
+        self.player_info
+            .values()
+            .filter(|info| {
+                info.last_name.eq_ignore_ascii_case(name)
+                    || info.names.iter().any(|candidate| candidate == name)
+                    || strip_colors(&strip_colors(&info.last_name)) == name
+                    || info.ips.iter().any(|ip| ip == name)
+                    || info.id == name
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn search_names(&self, name: &str) -> Vec<PlayerInfo> {
+        let lower_name = name.to_ascii_lowercase();
+        self.player_info
+            .values()
+            .filter(|info| {
+                info.names.iter().any(|candidate| {
+                    candidate.to_ascii_lowercase().contains(&lower_name)
+                        || strip_colors(candidate)
+                            .trim()
+                            .to_ascii_lowercase()
+                            .contains(&lower_name)
+                })
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn find_by_ips(&self, ip: &str) -> Vec<PlayerInfo> {
+        self.player_info
+            .values()
+            .filter(|info| info.ips.iter().any(|candidate| candidate == ip))
+            .cloned()
+            .collect()
+    }
+
+    pub fn find_by_ip(&self, ip: &str) -> Option<PlayerInfo> {
+        self.player_info
+            .values()
+            .find(|info| info.ips.iter().any(|candidate| candidate == ip))
+            .cloned()
+    }
+
+    pub fn get_info(&mut self, id: impl Into<String>) -> &mut PlayerInfo {
+        self.get_or_create_info(id.into())
+    }
+
+    pub fn get_info_optional(&self, id: &str) -> Option<&PlayerInfo> {
+        self.player_info.get(id)
+    }
+
     pub fn get_or_create_info(&mut self, id: String) -> &mut PlayerInfo {
         self.player_info
             .entry(id.clone())
@@ -281,6 +355,25 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.contains(&value) {
         values.push(value);
     }
+}
+
+fn strip_colors(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            for next in chars.by_ref() {
+                if next == ']' {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+
+    out
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -448,6 +541,10 @@ impl PlayerInfo {
             last_sent_message: None,
             message_infractions: 0,
         }
+    }
+
+    pub fn plain_last_name(&self) -> String {
+        strip_colors(&self.last_name)
     }
 }
 
@@ -650,5 +747,42 @@ mod tests {
 
         let server_action = PlayerAction::new(None, ActionType::Configure);
         assert!(admin.allow_action(&server_action));
+    }
+
+    #[test]
+    fn player_info_queries_match_java_admin_ban_and_ip_helpers() {
+        let mut admin = Administration::default();
+        admin.update_player_joined("uuid-a", "1.2.3.4", "Alice");
+        admin.update_player_joined("uuid-b", "5.6.7.8", "Bob");
+        admin.admin_player("uuid-a", "usid-a");
+        admin.ban_player_id("uuid-b");
+        admin.ban_player_ip("9.9.9.9");
+
+        assert_eq!(admin.get_admins().len(), 1);
+        assert_eq!(admin.get_admins()[0].id, "uuid-a");
+        assert_eq!(admin.get_banned().len(), 1);
+        assert_eq!(admin.get_banned()[0].id, "uuid-b");
+        assert_eq!(admin.get_banned_ips(), &["9.9.9.9".to_string()]);
+        assert_eq!(admin.find_by_ip("5.6.7.8").unwrap().id, "uuid-b");
+        assert_eq!(admin.find_by_ips("1.2.3.4")[0].id, "uuid-a");
+        assert!(admin.get_info_optional("missing").is_none());
+        assert_eq!(admin.get_info("created").id, "created");
+    }
+
+    #[test]
+    fn player_info_name_search_matches_java_exact_and_contains_shapes() {
+        let mut admin = Administration::default();
+        admin.update_player_joined("uuid-a", "1.2.3.4", "[scarlet]Alice");
+        admin.update_player_joined("uuid-b", "5.6.7.8", "builder");
+        admin.get_info("uuid-a").names.push("[accent]Alicia".into());
+
+        assert_eq!(admin.find_by_name("Alice")[0].id, "uuid-a");
+        assert_eq!(admin.find_by_name("1.2.3.4")[0].id, "uuid-a");
+        assert_eq!(admin.find_by_name("uuid-b")[0].id, "uuid-b");
+        assert_eq!(admin.search_names("lic")[0].id, "uuid-a");
+        assert_eq!(
+            admin.get_info_optional("uuid-a").unwrap().plain_last_name(),
+            "Alice"
+        );
     }
 }
