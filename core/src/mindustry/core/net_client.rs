@@ -19,7 +19,7 @@ use crate::mindustry::net::{
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
     SetLiquidCallPacket, SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket,
     SetUnitCommandCallPacket, SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBuilder,
-    Streamable, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    Streamable, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
     TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
     TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
     UnitControlCallPacket, UnitEnteredPayloadCallPacket,
@@ -173,6 +173,9 @@ pub struct NetClientState {
     pub last_player_disconnect_at: Option<Instant>,
     pub player_disconnect_packets_seen: u64,
     pub removed_entity_ids: BTreeSet<i32>,
+    pub last_trace_info: Option<TraceInfoCallPacket>,
+    pub last_trace_info_at: Option<Instant>,
+    pub trace_info_packets_seen: u64,
     pub connect_config: Option<ClientConnectConfig>,
     pub connect_packet_sent: bool,
     pub last_sent_connect_packet: Option<ConnectPacket>,
@@ -364,6 +367,7 @@ impl fmt::Debug for NetClientState {
                 &self.player_disconnect_packets_seen,
             )
             .field("removed_entity_ids", &self.removed_entity_ids)
+            .field("trace_info_packets_seen", &self.trace_info_packets_seen)
             .field("connect_config", &self.connect_config)
             .field("connect_packet_sent", &self.connect_packet_sent)
             .field("last_sent_connect_packet", &self.last_sent_connect_packet)
@@ -1259,6 +1263,13 @@ impl NetClient {
                         state.last_player_disconnect_at = Some(now);
                         (false, false)
                     }
+                    PacketKind::TraceInfoCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.trace_info_packets_seen += 1;
+                        state.last_trace_info = Some(packet.clone());
+                        state.last_trace_info_at = Some(now);
+                        (false, false)
+                    }
                     PacketKind::PingResponseCallPacket(response) => {
                         let now = Self::current_millis();
                         state.ping_responses_received += 1;
@@ -1732,9 +1743,10 @@ mod tests {
         SetLiquidCallPacket, SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket,
         SetUnitCommandCallPacket, SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin,
         StreamChunk, Streamable, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
-        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
-        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+        TransferItemToCallPacket, TransferItemToUnitCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -1939,6 +1951,40 @@ mod tests {
         let state = state.lock().unwrap();
         assert!(state.removed_entity_ids.is_empty());
         assert!(state.world_data_loading);
+    }
+
+    #[test]
+    fn update_records_trace_info_packet_for_admin_ui_mirror() {
+        let client = NetClient::default();
+        let info = crate::mindustry::net::administration::TraceInfo::new(
+            Some("127.0.0.1".into()),
+            Some("uuid".into()),
+            Some("en_US".into()),
+            true,
+            false,
+            3,
+            1,
+            vec![Some("127.0.0.1".into())],
+            vec![Some("player".into())],
+        );
+        let packet = TraceInfoCallPacket {
+            player: EntityRef::new(7),
+            info: info.clone(),
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::TraceInfoCallPacket(packet.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.trace_info_packets_seen, 1);
+        assert_eq!(state.last_trace_info.as_ref(), Some(&packet));
+        assert!(state.last_trace_info_at.is_some());
     }
 
     #[test]
