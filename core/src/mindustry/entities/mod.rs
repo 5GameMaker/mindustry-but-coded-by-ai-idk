@@ -4,6 +4,7 @@ pub mod damage;
 pub mod entity_group;
 pub mod entity_indexer;
 pub mod fires;
+pub mod group_defs;
 pub mod leg;
 pub mod leg_destroy_data;
 pub mod lightning;
@@ -70,6 +71,10 @@ pub use damage::{
 pub use entity_group::{EntityGroup, EntityGroupItem, Rect, SpatialEntity};
 pub use entity_indexer::EntityIndexer;
 pub use fires::{ExtinguishResult, FireCreateResult, FireRules, Fires, BASE_FIRE_LIFETIME};
+pub use group_defs::{
+    colliding_groups, group_def, mapping_groups, spatial_groups, EntityGroupKind, GroupDef,
+    GROUP_DEFS,
+};
 pub use leg::Leg;
 pub use leg_destroy_data::{LegDestroyData, TextureRegionRef};
 pub use lightning::{
