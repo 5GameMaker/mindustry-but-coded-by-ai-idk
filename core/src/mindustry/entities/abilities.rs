@@ -604,6 +604,118 @@ impl Ability for RepairFieldAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldRegenFieldTarget {
+    pub shield: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShieldRegenFieldPulse {
+    pub shields: Vec<f32>,
+    pub active_effect: bool,
+    pub timer: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShieldRegenFieldAbility {
+    pub base: BasicAbility,
+    pub amount: f32,
+    pub max: f32,
+    pub reload: f32,
+    pub range: f32,
+    pub parentize_effects: bool,
+    pub timer: f32,
+    pub applied: bool,
+}
+
+impl Default for ShieldRegenFieldAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            amount: 1.0,
+            max: 100.0,
+            reload: 100.0,
+            range: 60.0,
+            parentize_effects: false,
+            timer: 0.0,
+            applied: false,
+        }
+    }
+}
+
+impl ShieldRegenFieldAbility {
+    pub fn new(amount: f32, max: f32, reload: f32, range: f32) -> Self {
+        Self {
+            amount,
+            max,
+            reload,
+            range,
+            ..Default::default()
+        }
+    }
+
+    pub fn shield_after_pulse(&self, shield: f32) -> f32 {
+        if shield < self.max {
+            (shield + self.amount).min(self.max)
+        } else {
+            shield
+        }
+    }
+
+    pub fn update_targets(
+        &mut self,
+        delta: f32,
+        targets: &[ShieldRegenFieldTarget],
+    ) -> Option<ShieldRegenFieldPulse> {
+        self.timer += delta;
+
+        if self.timer < self.reload {
+            return None;
+        }
+
+        self.applied = false;
+        let shields = targets
+            .iter()
+            .map(|target| {
+                let next = self.shield_after_pulse(target.shield);
+                if next > target.shield {
+                    self.applied = true;
+                }
+                next
+            })
+            .collect::<Vec<_>>();
+        self.timer = 0.0;
+
+        Some(ShieldRegenFieldPulse {
+            shields,
+            active_effect: self.applied,
+            timer: self.timer,
+        })
+    }
+
+    pub fn pulses_per_second(&self) -> f32 {
+        60.0 / self.reload
+    }
+
+    pub fn regen_per_second(&self) -> f32 {
+        self.amount * 60.0 / self.reload
+    }
+}
+
+impl Ability for ShieldRegenFieldAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
@@ -656,7 +768,8 @@ fn polygon_vertex(
 mod tests {
     use super::{
         Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
-        RegenAbility, RepairFieldAbility, RepairFieldTarget, SpawnDeathAbility,
+        RegenAbility, RepairFieldAbility, RepairFieldTarget, ShieldRegenFieldAbility,
+        ShieldRegenFieldTarget, SpawnDeathAbility,
     };
 
     #[derive(Clone)]
@@ -831,5 +944,39 @@ mod tests {
         assert_eq!(pulse.heals, vec![3.0]);
         assert!(!pulse.active_effect);
         assert!(!ability.was_healed);
+    }
+
+    #[test]
+    fn shield_regen_field_caps_shields_and_reports_active_effect() {
+        let mut ability = ShieldRegenFieldAbility::new(25.0, 100.0, 10.0, 60.0);
+        let targets = [
+            ShieldRegenFieldTarget { shield: 10.0 },
+            ShieldRegenFieldTarget { shield: 90.0 },
+            ShieldRegenFieldTarget { shield: 100.0 },
+        ];
+
+        assert!(ability.update_targets(9.0, &targets).is_none());
+        let pulse = ability
+            .update_targets(1.0, &targets)
+            .expect("reload threshold should fire a pulse");
+
+        assert_eq!(pulse.shields, vec![35.0, 100.0, 100.0]);
+        assert!(pulse.active_effect);
+        assert!(ability.applied);
+        assert_eq!(pulse.timer, 0.0);
+        assert_eq!(ability.pulses_per_second(), 6.0);
+        assert_eq!(ability.regen_per_second(), 150.0);
+    }
+
+    #[test]
+    fn shield_regen_field_can_pulse_without_applying_when_everyone_is_full() {
+        let mut ability = ShieldRegenFieldAbility::new(10.0, 50.0, 5.0, 40.0);
+        let pulse = ability
+            .update_targets(5.0, &[ShieldRegenFieldTarget { shield: 50.0 }])
+            .expect("reload threshold should fire");
+
+        assert_eq!(pulse.shields, vec![50.0]);
+        assert!(!pulse.active_effect);
+        assert!(!ability.applied);
     }
 }
