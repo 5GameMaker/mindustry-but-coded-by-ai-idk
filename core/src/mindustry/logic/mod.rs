@@ -8,6 +8,7 @@ pub mod l_writable;
 pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
+pub mod ranged;
 pub mod senseable;
 pub mod settable;
 pub mod tile_layer;
@@ -20,6 +21,7 @@ pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
+pub use ranged::Ranged;
 pub use senseable::Senseable;
 pub use settable::Settable;
 pub use tile_layer::TileLayer;
@@ -10124,13 +10126,6 @@ impl LCategory {
     pub fn description_key(self) -> String {
         format!("lcategory.{}.description", self.name)
     }
-}
-
-pub trait Ranged {
-    fn x(&self) -> f32;
-    fn y(&self) -> f32;
-    fn team(&self) -> u8;
-    fn range(&self) -> f32;
 }
 
 /// Mirrors upstream `mindustry.logic.LMarkerControl`.
