@@ -12,6 +12,7 @@ use crate::mindustry::io::{
 
 pub mod save1;
 pub mod save10;
+pub mod save11;
 pub mod save2;
 pub mod save3;
 pub mod save4;
@@ -23,6 +24,7 @@ pub mod save9;
 
 pub use save1::Save1;
 pub use save10::Save10;
+pub use save11::Save11;
 pub use save2::Save2;
 pub use save3::Save3;
 pub use save4::Save4;
