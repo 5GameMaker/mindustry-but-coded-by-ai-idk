@@ -94,10 +94,11 @@ pub use damage::{
     tile_damage_edge_scaled_damage, tile_damage_ray_count, DAMAGE_FALLOFF,
 };
 pub use effect::{
-    shake_intensity, Effect, EffectContainer, EffectCreateContext, EffectCreatePlan, EffectParent,
-    EffectRegistry, EffectRenderParams, EffectSpawnPlan, MultiEffect, RadialEffect, SeqEffect,
-    SeqRenderPlan, SoundEffect, SoundEffectCreatePlan, SoundPlaybackPlan, WrapEffect,
-    DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER, DEFAULT_EFFECT_LIFETIME, SHAKE_FALLOFF,
+    shake_intensity, Effect, EffectContainer, EffectCreateContext, EffectCreatePlan, EffectInterp,
+    EffectParent, EffectRegistry, EffectRenderParams, EffectSpawnPlan, MultiEffect, RadialEffect,
+    SeqEffect, SeqRenderPlan, SoundEffect, SoundEffectCreatePlan, SoundPlaybackPlan, WaveDrawPlan,
+    WaveEffect, WrapEffect, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER, DEFAULT_EFFECT_LIFETIME,
+    SHAKE_FALLOFF,
 };
 pub use entity_collisions::{
     collide, legs_solid, move_check_hitbox, move_delta_rect, move_hitbox, move_rect, overlaps_tile,

@@ -617,12 +617,129 @@ impl SoundEffect {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectInterp {
+    Linear,
+    Reverse,
+}
+
+impl EffectInterp {
+    pub fn apply(self, from: f32, to: f32, t: f32) -> f32 {
+        let t = match self {
+            EffectInterp::Linear => t,
+            EffectInterp::Reverse => 1.0 - t,
+        }
+        .clamp(0.0, 1.0);
+        lerp(from, to, t)
+    }
+
+    pub fn scalar(self, t: f32) -> f32 {
+        self.apply(0.0, 1.0, t)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WaveDrawPlan {
+    pub center: (f32, f32),
+    pub color_from: String,
+    pub color_to: String,
+    pub color_mix: f32,
+    pub stroke: f32,
+    pub radius: f32,
+    pub sides: i32,
+    pub rotation: f32,
+    pub light_radius: f32,
+    pub light_color: String,
+    pub light_opacity: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WaveEffect {
+    pub base: Effect,
+    pub color_from: String,
+    pub color_to: String,
+    pub light_color: Option<String>,
+    pub size_from: f32,
+    pub size_to: f32,
+    pub light_scl: f32,
+    pub light_opacity: f32,
+    pub sides: i32,
+    pub rotation: f32,
+    pub stroke_from: f32,
+    pub stroke_to: f32,
+    pub interp: EffectInterp,
+    pub light_interp: EffectInterp,
+    pub offset_x: f32,
+    pub offset_y: f32,
+}
+
+impl Default for WaveEffect {
+    fn default() -> Self {
+        Self {
+            base: Effect::default(),
+            color_from: "white".into(),
+            color_to: "white".into(),
+            light_color: None,
+            size_from: 0.0,
+            size_to: 100.0,
+            light_scl: 3.0,
+            light_opacity: 0.8,
+            sides: -1,
+            rotation: 0.0,
+            stroke_from: 2.0,
+            stroke_to: 0.0,
+            interp: EffectInterp::Linear,
+            light_interp: EffectInterp::Reverse,
+            offset_x: 0.0,
+            offset_y: 0.0,
+        }
+    }
+}
+
+impl WaveEffect {
+    pub fn init_defaults(&mut self) {
+        self.base.clip = self
+            .base
+            .clip
+            .max(self.size_from.max(self.size_to) + self.stroke_from.max(self.stroke_to));
+    }
+
+    pub fn draw_plan(&self, params: &EffectRenderParams) -> WaveDrawPlan {
+        let fin = params.time / params.lifetime;
+        let color_mix = self.interp.scalar(fin);
+        let offset = rotate_offset(params.rotation, self.offset_x, self.offset_y);
+        let center = (params.x + offset.0, params.y + offset.1);
+        let radius = self.interp.apply(self.size_from, self.size_to, fin);
+        WaveDrawPlan {
+            center,
+            color_from: self.color_from.clone(),
+            color_to: self.color_to.clone(),
+            color_mix,
+            stroke: self.interp.apply(self.stroke_from, self.stroke_to, fin),
+            radius,
+            sides: self.sides,
+            rotation: self.rotation + params.rotation,
+            light_radius: radius * self.light_scl,
+            light_color: self
+                .light_color
+                .clone()
+                .unwrap_or_else(|| self.color_to.clone()),
+            light_opacity: self.light_opacity * self.light_interp.scalar(fin),
+        }
+    }
+}
+
 fn trnsx(angle: f32, len: f32) -> f32 {
     angle.to_radians().cos() * len
 }
 
 fn trnsy(angle: f32, len: f32) -> f32 {
     angle.to_radians().sin() * len
+}
+
+fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
+    let rad = angle.to_radians();
+    (x * rad.cos() - y * rad.sin(), x * rad.sin() + y * rad.cos())
 }
 
 fn lerp(from: f32, to: f32, t: f32) -> f32 {
@@ -1034,6 +1151,44 @@ mod tests {
                 },
             )
             .is_none());
+    }
+
+    #[test]
+    fn wave_effect_init_and_draw_plan_follow_java_radius_stroke_light_math() {
+        let mut wave = WaveEffect::default();
+        wave.color_from = "from".into();
+        wave.color_to = "to".into();
+        wave.light_color = Some("light".into());
+        wave.sides = 6;
+        wave.rotation = 15.0;
+        wave.offset_x = 10.0;
+        wave.offset_y = 0.0;
+
+        wave.init_defaults();
+        assert_eq!(wave.base.clip, 102.0);
+
+        let draw = wave.draw_plan(&EffectRenderParams {
+            id: 1,
+            color: DecalColor::WHITE,
+            time: 25.0,
+            lifetime: 100.0,
+            rotation: 90.0,
+            x: 1.0,
+            y: 2.0,
+            data: None,
+        });
+        assert!((draw.center.0 - 1.0).abs() < 0.0001);
+        assert!((draw.center.1 - 12.0).abs() < 0.0001);
+        assert_eq!(draw.color_from, "from");
+        assert_eq!(draw.color_to, "to");
+        assert_eq!(draw.color_mix, 0.25);
+        assert_eq!(draw.stroke, 1.5);
+        assert_eq!(draw.radius, 25.0);
+        assert_eq!(draw.sides, 6);
+        assert_eq!(draw.rotation, 105.0);
+        assert_eq!(draw.light_radius, 75.0);
+        assert_eq!(draw.light_color, "light");
+        assert_eq!(draw.light_opacity, 0.6);
     }
 
     #[test]
