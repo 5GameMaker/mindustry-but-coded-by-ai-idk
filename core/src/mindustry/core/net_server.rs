@@ -63,6 +63,11 @@ pub enum ClientCommandResponse {
 enum ClientCommandAction {
     PrivateMessage(String),
     TargetedMessages(Vec<TargetedClientMessage>),
+    TargetedKicks {
+        connection_ids: Vec<i32>,
+        reason: KickReason,
+    },
+    Composite(Vec<ClientCommandAction>),
     WorldDataBegin,
 }
 
@@ -72,6 +77,73 @@ struct TargetedClientMessage {
     message: String,
     unformatted: String,
     player_sender: EntityRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoteSession {
+    pub target_connection_id: i32,
+    pub target_uuid: String,
+    pub target_name: String,
+    pub target_team: TeamId,
+    pub votes: i32,
+    pub voted: HashMap<String, i32>,
+}
+
+impl VoteSession {
+    fn new(target_connection_id: i32, target: &NetConnection) -> Self {
+        Self {
+            target_connection_id,
+            target_uuid: target.uuid.clone(),
+            target_name: Self::player_name(target),
+            target_team: target.team,
+            votes: 0,
+            voted: HashMap::new(),
+        }
+    }
+
+    fn player_name(connection: &NetConnection) -> String {
+        if !connection.name.is_empty() {
+            connection.name.clone()
+        } else if !connection.uuid.is_empty() {
+            connection.uuid.clone()
+        } else {
+            connection.address.clone()
+        }
+    }
+
+    fn same_vote(&self, uuid: &str, address: &str, vote: i32) -> bool {
+        vote != 0
+            && (self.voted.get(&Self::uuid_vote_key(uuid)) == Some(&vote)
+                || self.voted.get(&Self::address_vote_key(address)) == Some(&vote))
+    }
+
+    fn record_vote(&mut self, uuid: &str, address: &str, vote: i32) {
+        let last_vote = self.last_vote(uuid, address);
+        self.votes -= last_vote;
+        self.votes += vote;
+        self.voted.insert(Self::uuid_vote_key(uuid), vote);
+        self.voted.insert(Self::address_vote_key(address), vote);
+    }
+
+    fn last_vote(&self, uuid: &str, address: &str) -> i32 {
+        self.voted
+            .get(&Self::uuid_vote_key(uuid))
+            .copied()
+            .unwrap_or(0)
+            | self
+                .voted
+                .get(&Self::address_vote_key(address))
+                .copied()
+                .unwrap_or(0)
+    }
+
+    fn uuid_vote_key(uuid: &str) -> String {
+        format!("uuid:{uuid}")
+    }
+
+    fn address_vote_key(address: &str) -> String {
+        format!("address:{address}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,6 +247,7 @@ pub struct NetServerState {
     pub server: bool,
     pub administration: Administration,
     pub steam_admin_data: SteamAdminData,
+    pub currently_kicking: Option<VoteSession>,
     pub player_limit: i32,
     pub listen_port: Option<u16>,
     pub connections: Vec<NetConnection>,
@@ -2093,10 +2166,8 @@ impl NetServer {
                     Self::admin_chat_command_action(state, connection_id, &args[0])
                 }
             }
-            ClientCommandResponse::Valid { command, .. } if command.text == "vote" => {
-                Some(ClientCommandAction::PrivateMessage(
-                    "[scarlet]Nobody is being voted on.".to_string(),
-                ))
+            ClientCommandResponse::Valid { command, args } if command.text == "vote" => {
+                Self::vote_command_action(state, connection_id, args)
             }
             ClientCommandResponse::Valid { command, .. } if command.text == "sync" => {
                 let current_millis = Self::current_millis();
@@ -2151,6 +2222,21 @@ impl NetServer {
                     }),
                     reliable: true,
                 })
+                .collect(),
+            ClientCommandAction::TargetedKicks {
+                connection_ids,
+                reason,
+            } => connection_ids
+                .into_iter()
+                .map(|connection_id| ServerResponse {
+                    connection_id,
+                    packet: PacketKind::KickCallPacket2(KickCallPacket2 { reason }),
+                    reliable: true,
+                })
+                .collect(),
+            ClientCommandAction::Composite(actions) => actions
+                .into_iter()
+                .flat_map(|action| Self::client_command_server_responses(connection_id, action))
                 .collect(),
             ClientCommandAction::WorldDataBegin => vec![ServerResponse {
                 connection_id,
@@ -2238,6 +2324,48 @@ impl NetServer {
         )
     }
 
+    fn broadcast_message_action(state: &NetServerState, message: String) -> ClientCommandAction {
+        Self::broadcast_messages_action(state, vec![message])
+    }
+
+    fn broadcast_messages_action(
+        state: &NetServerState,
+        messages: Vec<String>,
+    ) -> ClientCommandAction {
+        let mut targets: Vec<i32> = state
+            .connection_states
+            .iter()
+            .filter(|(_, connection)| Self::connection_can_receive_message(connection))
+            .map(|(connection_id, _)| *connection_id)
+            .collect();
+        targets.sort_unstable();
+
+        let mut targeted = Vec::with_capacity(targets.len() * messages.len());
+        for message in messages {
+            for connection_id in &targets {
+                targeted.push(TargetedClientMessage {
+                    connection_id: *connection_id,
+                    message: message.clone(),
+                    unformatted: String::new(),
+                    player_sender: EntityRef::null(),
+                });
+            }
+        }
+
+        ClientCommandAction::TargetedMessages(targeted)
+    }
+
+    fn vote_broadcast_message(
+        voter_name: &str,
+        session: &VoteSession,
+        votes_required: i32,
+    ) -> String {
+        format!(
+            "[lightgray]{}[lightgray] has voted on kicking[orange] {}[lightgray].[accent] ({}/{})\n[lightgray]Type[orange] /vote <y/n>[] to agree.",
+            voter_name, session.target_name, session.votes, votes_required
+        )
+    }
+
     fn team_color_hex(team: TeamId) -> String {
         let teams = crate::mindustry::game::team::vanilla_teams();
         format!("{:08x}", teams.get(team.0 as i32).color_rgba)
@@ -2251,7 +2379,7 @@ impl NetServer {
     }
 
     fn votekick_command_action(
-        state: &NetServerState,
+        state: &mut NetServerState,
         connection_id: i32,
         args: &[String],
     ) -> Option<ClientCommandAction> {
@@ -2264,6 +2392,12 @@ impl NetServer {
         if Self::connected_player_count(state) < 3 {
             return Some(ClientCommandAction::PrivateMessage(
                 "[scarlet]At least 3 players are needed to start a votekick.".to_string(),
+            ));
+        }
+
+        if state.currently_kicking.is_some() {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]A vote is already in progress.".to_string(),
             ));
         }
 
@@ -2321,7 +2455,140 @@ impl NetServer {
             ));
         }
 
-        None
+        let sender = state.connection_states.get(&connection_id)?;
+        if target_connection.team != sender.team {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]Only players on your team can be kicked.".to_string(),
+            ));
+        }
+
+        let reason = args[1].clone();
+        let sender_name = VoteSession::player_name(sender);
+        let sender_uuid = sender.uuid.clone();
+        let sender_address = sender.address.clone();
+        let votes_required = Self::votes_required(state);
+        let mut session = VoteSession::new(target_connection_id, target_connection);
+        session.record_vote(&sender_uuid, &sender_address, 1);
+        let vote_message = Self::vote_broadcast_message(&sender_name, &session, votes_required);
+        state.currently_kicking = Some(session);
+
+        Some(Self::broadcast_messages_action(
+            state,
+            vec![
+                vote_message,
+                format!("[lightgray]Reason:[orange] {reason}[lightgray]."),
+            ],
+        ))
+    }
+
+    fn vote_command_action(
+        state: &mut NetServerState,
+        connection_id: i32,
+        args: &[String],
+    ) -> Option<ClientCommandAction> {
+        if state.currently_kicking.is_none() {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]Nobody is being voted on.".to_string(),
+            ));
+        }
+
+        let raw_vote = args.first()?;
+        if raw_vote.eq_ignore_ascii_case("c") && Self::connection_is_admin(state, connection_id) {
+            let admin_name = state
+                .connection_states
+                .get(&connection_id)
+                .map(VoteSession::player_name)
+                .unwrap_or_else(|| connection_id.to_string());
+            state.currently_kicking = None;
+            return Some(Self::broadcast_message_action(
+                state,
+                format!("[lightgray]Vote canceled by admin[orange] {admin_name}[lightgray]."),
+            ));
+        }
+
+        let vote = match raw_vote.to_ascii_lowercase().as_str() {
+            "y" | "yes" => 1,
+            "n" | "no" => -1,
+            _ => 0,
+        };
+
+        let voter = state.connection_states.get(&connection_id)?;
+        let voter_name = VoteSession::player_name(voter);
+        let voter_uuid = voter.uuid.clone();
+        let voter_address = voter.address.clone();
+        let voter_team = voter.team;
+        let session = state.currently_kicking.as_ref()?;
+
+        if session.same_vote(&voter_uuid, &voter_address, vote) {
+            return Some(ClientCommandAction::PrivateMessage(format!(
+                "[scarlet]You've already voted {}. Sit down.",
+                raw_vote.to_ascii_lowercase()
+            )));
+        }
+
+        if session.target_connection_id == connection_id {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]You can't vote on your own trial.".to_string(),
+            ));
+        }
+
+        if session.target_team != voter_team {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]You can't vote for other teams.".to_string(),
+            ));
+        }
+
+        if vote == 0 {
+            return Some(ClientCommandAction::PrivateMessage(
+                "[scarlet]Vote either 'y' (yes) or 'n' (no).".to_string(),
+            ));
+        }
+
+        let votes_required = Self::votes_required(state);
+        let (vote_message, passed_target) = {
+            let session = state.currently_kicking.as_mut()?;
+            session.record_vote(&voter_uuid, &voter_address, vote);
+            let vote_message = Self::vote_broadcast_message(&voter_name, session, votes_required);
+            let passed_target = (session.votes >= votes_required).then(|| {
+                (
+                    session.target_uuid.clone(),
+                    session.target_name.clone(),
+                    Self::vote_kick_duration_minutes(),
+                )
+            });
+            (vote_message, passed_target)
+        };
+
+        if let Some((target_uuid, target_name, duration_minutes)) = passed_target {
+            let mut kick_connection_ids: Vec<_> = state
+                .connection_states
+                .iter()
+                .filter(|(_, connection)| {
+                    connection.uuid == target_uuid
+                        && Self::connection_can_receive_message(connection)
+                })
+                .map(|(connection_id, _)| *connection_id)
+                .collect();
+            kick_connection_ids.sort_unstable();
+            state.currently_kicking = None;
+            return Some(ClientCommandAction::Composite(vec![
+                Self::broadcast_messages_action(
+                    state,
+                    vec![
+                        vote_message,
+                        format!(
+                            "[orange]Vote passed.[scarlet] {target_name}[orange] will be banned from the server for {duration_minutes} minutes."
+                        ),
+                    ],
+                ),
+                ClientCommandAction::TargetedKicks {
+                    connection_ids: kick_connection_ids,
+                    reason: KickReason::Vote,
+                },
+            ]));
+        }
+
+        Some(Self::broadcast_message_action(state, vote_message))
     }
 
     fn record_client_command_action(
@@ -2353,6 +2620,33 @@ impl NetServer {
                         "SendMessageCallPacket2",
                         true,
                     );
+                }
+            }
+            ClientCommandAction::TargetedKicks {
+                connection_ids,
+                reason,
+            } => {
+                for &target_connection_id in connection_ids {
+                    Self::record_recent_kick(
+                        state,
+                        target_connection_id,
+                        Self::default_reason_kick_duration_millis(*reason),
+                    );
+                    state.last_kick_connection_id = Some(target_connection_id);
+                    state.last_kick_reason = Some(*reason);
+                    state.last_kick_message = None;
+                    state.kick_packets_sent = state.kick_packets_sent.saturating_add(1);
+                    state.last_kick_error = None;
+                    state
+                        .connection_states
+                        .entry(target_connection_id)
+                        .or_insert_with(|| NetConnection::new(String::new()))
+                        .kick_reason(*reason);
+                }
+            }
+            ClientCommandAction::Composite(actions) => {
+                for action in actions {
+                    Self::record_client_command_action(state, connection_id, action);
                 }
             }
             ClientCommandAction::WorldDataBegin => {
@@ -2396,6 +2690,14 @@ impl NetServer {
                 connection.has_connected && connection.player_added && !connection.has_disconnected
             })
             .count()
+    }
+
+    fn votes_required(state: &NetServerState) -> i32 {
+        2 + i32::from(Self::connected_player_count(state) > 4)
+    }
+
+    fn vote_kick_duration_minutes() -> i64 {
+        JAVA_DEFAULT_VOTE_KICK_DURATION_MS / 60_000
     }
 
     fn find_votekick_target<'a>(
@@ -2963,6 +3265,32 @@ mod tests {
         connection.player_added = true;
         connection.connect_time = NetServer::current_millis() - JAVA_CHAT_MIN_CONNECT_AGE_MS - 1;
         connection
+    }
+
+    fn send_chat(server: &NetServer, connection_id: i32, message: &str) {
+        let mut net = server.net_mut();
+        net.handle_server_received_from_connection(
+            Some(connection_id),
+            true,
+            PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                message: message.into(),
+            }),
+        );
+    }
+
+    fn captured_send_messages(
+        sent: &Arc<Mutex<Vec<(i32, PacketKind, bool)>>>,
+    ) -> Vec<(i32, String)> {
+        sent.lock()
+            .unwrap()
+            .iter()
+            .map(|(connection_id, packet, _)| {
+                let PacketKind::SendMessageCallPacket2(packet) = packet else {
+                    panic!("expected SendMessageCallPacket2, got {packet:?}");
+                };
+                (*connection_id, packet.message.clone())
+            })
+            .collect()
     }
 
     fn config_block() -> Block {
@@ -4403,6 +4731,323 @@ mod tests {
             PacketKind::SendMessageCallPacket2(packet)
                 if packet.message == "[scarlet]Did you really expect to be able to kick an admin?"
         ));
+    }
+
+    #[test]
+    fn votekick_command_starts_session_and_broadcasts_reason_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name) in [(80, "sender"), (81, "target"), (82, "other")] {
+                let mut connection =
+                    ready_chat_connection(&format!("8.8.8.{id}"), &format!("uuid-{name}"));
+                connection.name = name.into();
+                connection.team = TeamId(1);
+                state.connection_states.insert(id, connection);
+            }
+        }
+
+        send_chat(&server, 80, "/votekick target griefing the core");
+
+        let messages = captured_send_messages(&sent);
+        let vote_message = "[lightgray]sender[lightgray] has voted on kicking[orange] target[lightgray].[accent] (1/2)\n[lightgray]Type[orange] /vote <y/n>[] to agree.";
+        let reason_message = "[lightgray]Reason:[orange] griefing the core[lightgray].";
+        assert_eq!(
+            messages,
+            vec![
+                (80, vote_message.to_string()),
+                (81, vote_message.to_string()),
+                (82, vote_message.to_string()),
+                (80, reason_message.to_string()),
+                (81, reason_message.to_string()),
+                (82, reason_message.to_string()),
+            ]
+        );
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        let session = state.currently_kicking.as_ref().unwrap();
+        assert_eq!(session.target_connection_id, 81);
+        assert_eq!(session.target_name, "target");
+        assert_eq!(session.target_team, TeamId(1));
+        assert_eq!(session.votes, 1);
+    }
+
+    #[test]
+    fn vote_command_records_yes_no_and_rejects_duplicate_same_vote_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name) in [
+                (90, "sender"),
+                (91, "target"),
+                (92, "yesvoter"),
+                (93, "novoter"),
+                (94, "observer"),
+            ] {
+                let mut connection =
+                    ready_chat_connection(&format!("9.9.9.{id}"), &format!("uuid-{name}"));
+                connection.name = name.into();
+                connection.team = TeamId(1);
+                state.connection_states.insert(id, connection);
+            }
+        }
+
+        send_chat(&server, 90, "/votekick target griefing");
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 92, "/vote yes");
+        {
+            let messages = captured_send_messages(&sent);
+            let vote_message = "[lightgray]yesvoter[lightgray] has voted on kicking[orange] target[lightgray].[accent] (2/3)\n[lightgray]Type[orange] /vote <y/n>[] to agree.";
+            assert_eq!(
+                messages,
+                vec![
+                    (90, vote_message.to_string()),
+                    (91, vote_message.to_string()),
+                    (92, vote_message.to_string()),
+                    (93, vote_message.to_string()),
+                    (94, vote_message.to_string()),
+                ]
+            );
+        }
+        assert_eq!(
+            server
+                .state()
+                .lock()
+                .unwrap()
+                .currently_kicking
+                .as_ref()
+                .unwrap()
+                .votes,
+            2
+        );
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 92, "/vote yes");
+        assert_eq!(
+            captured_send_messages(&sent),
+            vec![(
+                92,
+                "[scarlet]You've already voted yes. Sit down.".to_string()
+            )]
+        );
+        assert_eq!(
+            server
+                .state()
+                .lock()
+                .unwrap()
+                .currently_kicking
+                .as_ref()
+                .unwrap()
+                .votes,
+            2
+        );
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 93, "/vote n");
+        {
+            let messages = captured_send_messages(&sent);
+            let vote_message = "[lightgray]novoter[lightgray] has voted on kicking[orange] target[lightgray].[accent] (1/3)\n[lightgray]Type[orange] /vote <y/n>[] to agree.";
+            assert_eq!(
+                messages,
+                vec![
+                    (90, vote_message.to_string()),
+                    (91, vote_message.to_string()),
+                    (92, vote_message.to_string()),
+                    (93, vote_message.to_string()),
+                    (94, vote_message.to_string()),
+                ]
+            );
+        }
+        assert_eq!(
+            server
+                .state()
+                .lock()
+                .unwrap()
+                .currently_kicking
+                .as_ref()
+                .unwrap()
+                .votes,
+            1
+        );
+    }
+
+    #[test]
+    fn vote_command_rejects_invalid_target_self_and_other_team_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name, team) in [
+                (100, "sender", TeamId(1)),
+                (101, "target", TeamId(1)),
+                (102, "teammate", TeamId(1)),
+                (103, "opponent", TeamId(2)),
+            ] {
+                let mut connection =
+                    ready_chat_connection(&format!("10.10.10.{id}"), &format!("uuid-{name}"));
+                connection.name = name.into();
+                connection.team = team;
+                state.connection_states.insert(id, connection);
+            }
+        }
+
+        send_chat(&server, 100, "/votekick target griefing");
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 101, "/vote y");
+        assert_eq!(
+            captured_send_messages(&sent),
+            vec![(
+                101,
+                "[scarlet]You can't vote on your own trial.".to_string()
+            )]
+        );
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 103, "/vote y");
+        assert_eq!(
+            captured_send_messages(&sent),
+            vec![(103, "[scarlet]You can't vote for other teams.".to_string())]
+        );
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 102, "/vote maybe");
+        assert_eq!(
+            captured_send_messages(&sent),
+            vec![(
+                102,
+                "[scarlet]Vote either 'y' (yes) or 'n' (no).".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn vote_session_passes_and_kicks_target_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name) in [(120, "sender"), (121, "target"), (122, "yesvoter")] {
+                let mut connection =
+                    ready_chat_connection(&format!("12.12.12.{id}"), &format!("uuid-{name}"));
+                connection.name = name.into();
+                connection.team = TeamId(1);
+                state.connection_states.insert(id, connection);
+            }
+        }
+
+        send_chat(&server, 120, "/votekick target griefing");
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 122, "/vote y");
+
+        let sent_packets = sent.lock().unwrap();
+        assert_eq!(sent_packets.len(), 7);
+        let vote_message = "[lightgray]yesvoter[lightgray] has voted on kicking[orange] target[lightgray].[accent] (2/2)\n[lightgray]Type[orange] /vote <y/n>[] to agree.";
+        let pass_message =
+            "[orange]Vote passed.[scarlet] target[orange] will be banned from the server for 60 minutes.";
+        for (index, connection_id) in [120, 121, 122].into_iter().enumerate() {
+            assert_eq!(sent_packets[index].0, connection_id);
+            assert!(matches!(
+                &sent_packets[index].1,
+                PacketKind::SendMessageCallPacket2(packet) if packet.message == vote_message
+            ));
+        }
+        for (offset, connection_id) in [120, 121, 122].into_iter().enumerate() {
+            let index = 3 + offset;
+            assert_eq!(sent_packets[index].0, connection_id);
+            assert!(matches!(
+                &sent_packets[index].1,
+                PacketKind::SendMessageCallPacket2(packet) if packet.message == pass_message
+            ));
+        }
+        assert_eq!(sent_packets[6].0, 121);
+        assert!(matches!(
+            sent_packets[6].1,
+            PacketKind::KickCallPacket2(packet) if packet.reason == KickReason::Vote
+        ));
+        drop(sent_packets);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert!(state.currently_kicking.is_none());
+        assert_eq!(state.last_kick_connection_id, Some(121));
+        assert_eq!(state.last_kick_reason, Some(KickReason::Vote));
+        assert_eq!(state.kick_packets_sent, 1);
+        let target = state.connection_states.get(&121).unwrap();
+        assert!(target.kicked);
+        assert!(target.has_disconnected);
+    }
+
+    #[test]
+    fn vote_command_admin_cancel_broadcasts_and_clears_session_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name, team) in [
+                (110, "sender", TeamId(1)),
+                (111, "target", TeamId(1)),
+                (112, "admin", TeamId(2)),
+            ] {
+                let mut connection =
+                    ready_chat_connection(&format!("11.11.11.{id}"), &format!("uuid-{name}"));
+                connection.name = name.into();
+                connection.team = team;
+                state.connection_states.insert(id, connection);
+            }
+            state.administration.admin_player("uuid-admin", "AAAAAAAA");
+        }
+
+        send_chat(&server, 110, "/votekick target griefing");
+        sent.lock().unwrap().clear();
+
+        send_chat(&server, 112, "/vote c");
+
+        let cancel_message = "[lightgray]Vote canceled by admin[orange] admin[lightgray].";
+        assert_eq!(
+            captured_send_messages(&sent),
+            vec![
+                (110, cancel_message.to_string()),
+                (111, cancel_message.to_string()),
+                (112, cancel_message.to_string()),
+            ]
+        );
+        assert!(server.state().lock().unwrap().currently_kicking.is_none());
     }
 
     #[test]
