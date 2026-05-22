@@ -34,6 +34,10 @@ pub enum StatValue {
         display_name: bool,
         time_period: Option<f32>,
     },
+    FilteredItems {
+        stacks: Vec<ItemStack>,
+        time_period: Option<f32>,
+    },
     Liquid {
         name: String,
         amount: f32,
@@ -42,6 +46,10 @@ pub enum StatValue {
     Liquids {
         stacks: Vec<LiquidStack>,
         time_period: f32,
+        per_second: bool,
+    },
+    FilteredLiquids {
+        stacks: Vec<LiquidStack>,
         per_second: bool,
     },
     Blocks {
@@ -63,8 +71,10 @@ impl StatValue {
             StatValue::PercentModifier { .. } => "percentModifier",
             StatValue::Item { .. } => "item",
             StatValue::Items { .. } => "items",
+            StatValue::FilteredItems { .. } => "items",
             StatValue::Liquid { .. } => "liquid",
             StatValue::Liquids { .. } => "liquids",
+            StatValue::FilteredLiquids { .. } => "liquids",
             StatValue::Blocks { .. } => "blocks",
         }
     }
@@ -167,6 +177,28 @@ impl StatValue {
                     }
                 })
                 .collect(),
+            StatValue::FilteredItems {
+                stacks,
+                time_period,
+            } => {
+                let mut tokens = Vec::new();
+                for (index, stack) in stacks.iter().enumerate() {
+                    if let Some(time_period) = time_period {
+                        tokens.push(format!(
+                            "item:{}:{}:perSecond:{}:name",
+                            stack.item,
+                            stack.amount,
+                            fix_value(stack.amount as f32 / (*time_period / 60.0))
+                        ));
+                    } else {
+                        tokens.push(format!("item:{}:{}:name", stack.item, stack.amount));
+                    }
+                    if index != stacks.len() - 1 {
+                        tokens.push("/".to_string());
+                    }
+                }
+                tokens
+            }
             StatValue::Liquid {
                 name,
                 amount,
@@ -191,6 +223,21 @@ impl StatValue {
                     )
                 })
                 .collect(),
+            StatValue::FilteredLiquids { stacks, per_second } => {
+                let mut tokens = Vec::new();
+                for (index, stack) in stacks.iter().enumerate() {
+                    tokens.push(format!(
+                        "liquid:{}:{}:{}",
+                        stack.liquid,
+                        fix_value(stack.amount),
+                        if *per_second { "perSecond" } else { "raw" }
+                    ));
+                    if index != stacks.len() - 1 {
+                        tokens.push("/".to_string());
+                    }
+                }
+                tokens
+            }
             StatValue::Blocks {
                 attribute,
                 floating,
@@ -294,6 +341,14 @@ mod tests {
             vec!["item:copper:2:icon", "item:lead:3:icon"]
         );
         assert_eq!(
+            StatValue::FilteredItems {
+                stacks: vec![ItemStack::new("copper", 0), ItemStack::new("lead", 0)],
+                time_period: None
+            }
+            .display_tokens(),
+            vec!["item:copper:0:name", "/", "item:lead:0:name"]
+        );
+        assert_eq!(
             StatValue::Liquids {
                 stacks: vec![LiquidStack::new("water", 30.0)],
                 time_period: 120.0,
@@ -301,6 +356,18 @@ mod tests {
             }
             .display_tokens(),
             vec!["liquid:water:15:perSecond"]
+        );
+        assert_eq!(
+            StatValue::FilteredLiquids {
+                stacks: vec![LiquidStack::new("water", 1.5), LiquidStack::new("oil", 0.5)],
+                per_second: true
+            }
+            .display_tokens(),
+            vec![
+                "liquid:water:1.5:perSecond",
+                "/",
+                "liquid:oil:0.5:perSecond"
+            ]
         );
     }
 }

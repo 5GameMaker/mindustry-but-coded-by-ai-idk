@@ -1,5 +1,5 @@
 use super::{Attribute, StatUnit, StatValue};
-use crate::mindustry::r#type::{ItemStack, LiquidStack};
+use crate::mindustry::r#type::{Item, ItemStack, Liquid, LiquidStack};
 
 pub struct StatValues;
 
@@ -87,12 +87,49 @@ impl StatValues {
         }
     }
 
+    pub fn items_filtered<'a>(
+        items: impl IntoIterator<Item = &'a Item>,
+        filter: impl Fn(&Item) -> bool,
+    ) -> StatValue {
+        Self::items_filtered_per_time(-1.0, items, filter)
+    }
+
+    pub fn items_filtered_per_time<'a>(
+        time_period: f32,
+        items: impl IntoIterator<Item = &'a Item>,
+        filter: impl Fn(&Item) -> bool,
+    ) -> StatValue {
+        let stacks = items
+            .into_iter()
+            .filter(|item| filter(item) && item.base.unlocked() && !item.is_hidden())
+            .map(|item| ItemStack::new(item.name(), if time_period <= 0.0 { 0 } else { 1 }))
+            .collect();
+        StatValue::FilteredItems {
+            stacks,
+            time_period: (time_period > 0.0).then_some(time_period),
+        }
+    }
+
     pub fn liquid(name: impl Into<String>, amount: f32, per_second: bool) -> StatValue {
         StatValue::Liquid {
             name: name.into(),
             amount,
             per_second,
         }
+    }
+
+    pub fn liquids_filtered<'a>(
+        liquids: impl IntoIterator<Item = &'a Liquid>,
+        filter: impl Fn(&Liquid) -> bool,
+        amount: f32,
+        per_second: bool,
+    ) -> StatValue {
+        let stacks = liquids
+            .into_iter()
+            .filter(|liquid| filter(liquid) && liquid.base.unlocked() && !liquid.is_hidden())
+            .map(|liquid| LiquidStack::new(liquid.name(), amount))
+            .collect();
+        StatValue::FilteredLiquids { stacks, per_second }
     }
 
     pub fn liquids(time_period: f32, stacks: Vec<LiquidStack>) -> StatValue {
@@ -174,7 +211,48 @@ mod tests {
             StatValues::items_per_time(120.0, vec![ItemStack::new("silicon", 30)]).display_tokens(),
             vec!["item:silicon:30:perSecond:15:name"]
         );
+        let mut copper = Item::new(0, "copper");
+        copper.always_unlocked();
+        let mut lead = Item::new(1, "lead");
+        lead.always_unlocked();
+        let mut hidden = Item::new(2, "hidden");
+        hidden.always_unlocked();
+        hidden.hidden = true;
+        let locked = Item::new(3, "locked");
+        assert_eq!(
+            StatValues::items_filtered([&copper, &lead, &hidden, &locked], |item| {
+                item.name() != "lead"
+            })
+            .display_tokens(),
+            vec!["item:copper:0:name"]
+        );
+        assert_eq!(
+            StatValues::items_filtered_per_time(120.0, [&copper, &lead], |_| true).display_tokens(),
+            vec![
+                "item:copper:1:perSecond:0.5:name",
+                "/",
+                "item:lead:1:perSecond:0.5:name"
+            ]
+        );
         assert_eq!(StatValues::liquid("water", 1.5, true).kind(), "liquid");
+        let mut water = Liquid::new(0, "water");
+        water.base.unlock();
+        let mut oil = Liquid::new(1, "oil");
+        oil.base.unlock();
+        let mut hidden_liquid = Liquid::new(2, "hidden-liquid");
+        hidden_liquid.base.unlock();
+        hidden_liquid.hidden = true;
+        let locked_liquid = Liquid::new(3, "locked-liquid");
+        assert_eq!(
+            StatValues::liquids_filtered(
+                [&water, &oil, &hidden_liquid, &locked_liquid],
+                |liquid| liquid.name() != "oil",
+                1.5,
+                true
+            )
+            .display_tokens(),
+            vec!["liquid:water:1.5:perSecond"]
+        );
         assert_eq!(
             StatValues::liquids(
                 30.0,
