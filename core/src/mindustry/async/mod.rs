@@ -2,6 +2,10 @@
 
 pub mod async_core;
 pub mod async_process;
+pub mod avoidance_process;
 
 pub use async_core::{AsyncCore, AsyncCoreBeginPlan};
 pub use async_process::AsyncProcess;
+pub use avoidance_process::{
+    AvoidanceProcess, AvoidanceRequest, AvoidanceUnit, AVOIDANCE_LAYER_GROUND,
+};
