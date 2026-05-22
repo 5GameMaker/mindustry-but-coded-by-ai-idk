@@ -30,7 +30,10 @@ pub use abilities::{
     SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
     SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
-pub use bullet::{BulletCreatePlan, BulletType};
+pub use bullet::{
+    empty_bullet_type, explosion_bullet_type, BulletCreatePlan, BulletType, FireBulletType,
+    FireBulletUpdatePlan, LightningBulletType,
+};
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
 pub use comp::{apply_armor, ShieldComp};

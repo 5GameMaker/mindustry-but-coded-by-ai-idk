@@ -11,6 +11,15 @@ pub struct BulletType {
     pub hit_size: f32,
     pub draw_size: f32,
     pub drag: f32,
+    pub hittable: bool,
+    pub collides_tiles: bool,
+    pub collides_ground: bool,
+    pub collides_air: bool,
+    pub collides: bool,
+    pub keep_velocity: bool,
+    pub instant_disappear: bool,
+    pub kill_shooter: bool,
+    pub scaled_splash_damage: bool,
     pub pierce: bool,
     pub pierce_building: bool,
     pub pierce_cap: i32,
@@ -28,8 +37,8 @@ pub struct BulletType {
     pub frag_bullets: i32,
     pub splash_damage_radius: f32,
     pub lightning: i32,
-    pub collides_air: bool,
-    pub collides_ground: bool,
+    pub lightning_length: i32,
+    pub lightning_length_rand: i32,
     pub despawn_hit: bool,
     pub set_defaults: bool,
     pub trail_length: i32,
@@ -55,6 +64,15 @@ impl Default for BulletType {
             hit_size: 4.0,
             draw_size: 40.0,
             drag: 0.0,
+            hittable: true,
+            collides_tiles: true,
+            collides_ground: true,
+            collides_air: true,
+            collides: true,
+            keep_velocity: true,
+            instant_disappear: false,
+            kill_shooter: false,
+            scaled_splash_damage: false,
             pierce: false,
             pierce_building: false,
             pierce_cap: -1,
@@ -72,8 +90,8 @@ impl Default for BulletType {
             frag_bullets: 9,
             splash_damage_radius: -1.0,
             lightning: 0,
-            collides_air: true,
-            collides_ground: true,
+            lightning_length: 5,
+            lightning_length_rand: 0,
             despawn_hit: false,
             set_defaults: true,
             trail_length: -1,
@@ -84,6 +102,140 @@ impl Default for BulletType {
             despawn_unit_dps: None,
             cached_dps: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FireBulletUpdatePlan {
+    pub create_fire: bool,
+    pub trail_effect: bool,
+    pub secondary_trail_effect: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FireBulletType {
+    pub base: BulletType,
+    pub radius: f32,
+    pub vel_min: f32,
+    pub vel_max: f32,
+    pub fire_trail_chance: f32,
+    pub fire_effect_chance: f32,
+    pub fire_effect_chance2: f32,
+}
+
+impl Default for FireBulletType {
+    fn default() -> Self {
+        let base = BulletType {
+            pierce: true,
+            collides_tiles: false,
+            collides: false,
+            drag: 0.03,
+            ..Default::default()
+        };
+        Self {
+            base,
+            radius: 3.0,
+            vel_min: 0.6,
+            vel_max: 2.6,
+            fire_trail_chance: 0.04,
+            fire_effect_chance: 0.1,
+            fire_effect_chance2: 0.1,
+        }
+    }
+}
+
+impl FireBulletType {
+    pub fn new(speed: f32, damage: f32) -> Self {
+        let mut out = Self::default();
+        out.base.speed = speed;
+        out.base.damage = damage;
+        out
+    }
+
+    pub fn initial_velocity_len(&self, random_len: f32) -> f32 {
+        random_len.clamp(self.vel_min, self.vel_max)
+    }
+
+    pub fn draw_radius(&self, fout: f32) -> f32 {
+        self.radius * fout.clamp(0.0, 1.0)
+    }
+
+    pub fn update_plan(
+        &self,
+        fire_trail_triggered: bool,
+        fire_effect_triggered: bool,
+        second_effect_triggered: bool,
+    ) -> FireBulletUpdatePlan {
+        FireBulletUpdatePlan {
+            create_fire: fire_trail_triggered,
+            trail_effect: fire_effect_triggered,
+            secondary_trail_effect: second_effect_triggered,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LightningBulletType {
+    pub base: BulletType,
+}
+
+impl Default for LightningBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                damage: 1.0,
+                speed: 0.0,
+                lifetime: 1.0,
+                keep_velocity: false,
+                hittable: false,
+                lightning_length: 25,
+                lightning_length_rand: 0,
+                ..Default::default()
+            },
+        }
+    }
+}
+
+impl LightningBulletType {
+    pub fn calculate_range(&self) -> f32 {
+        (self.base.lightning_length as f32 + self.base.lightning_length_rand as f32 / 2.0) * 6.0
+    }
+
+    pub fn estimate_dps(&mut self) -> f32 {
+        self.base.estimate_dps() * (self.base.lightning_length as f32 / 10.0).max(1.0)
+    }
+
+    pub fn lightning_length(&self, random_length: i32) -> i32 {
+        self.base.lightning_length + random_length.clamp(0, self.base.lightning_length_rand.max(0))
+    }
+}
+
+pub fn empty_bullet_type() -> BulletType {
+    BulletType {
+        hittable: false,
+        collides_ground: false,
+        collides_air: false,
+        collides_tiles: false,
+        speed: 0.0,
+        keep_velocity: false,
+        ..Default::default()
+    }
+}
+
+pub fn explosion_bullet_type(splash_damage: f32, splash_damage_radius: f32) -> BulletType {
+    BulletType {
+        splash_damage,
+        splash_damage_radius,
+        hittable: false,
+        lifetime: 1.0,
+        speed: 0.0,
+        range_override: 20.0_f32.max(splash_damage_radius * 2.0 / 3.0),
+        instant_disappear: true,
+        scaled_splash_damage: true,
+        kill_shooter: true,
+        collides: false,
+        keep_velocity: false,
+        ..Default::default()
     }
 }
 
@@ -296,5 +448,55 @@ mod tests {
         let ignored = bullet.create_plan(30.0, 5.0, -2.0, Some(9.0), 1.0, 1.0, true);
         assert_eq!(ignored.angle, 0.0);
         assert_eq!(ignored.damage, 9.0);
+    }
+
+    #[test]
+    fn empty_and_explosion_bullets_apply_upstream_constructor_defaults() {
+        let empty = empty_bullet_type();
+        assert!(!empty.hittable);
+        assert!(!empty.collides_ground);
+        assert!(!empty.collides_air);
+        assert!(!empty.collides_tiles);
+        assert_eq!(empty.speed, 0.0);
+        assert!(!empty.keep_velocity);
+
+        let explosion = explosion_bullet_type(100.0, 90.0);
+        assert_eq!(explosion.splash_damage, 100.0);
+        assert_eq!(explosion.splash_damage_radius, 90.0);
+        assert_eq!(explosion.range_override, 60.0);
+        assert!(explosion.instant_disappear);
+        assert!(explosion.scaled_splash_damage);
+        assert!(explosion.kill_shooter);
+        assert!(!explosion.collides);
+    }
+
+    #[test]
+    fn fire_bullet_plans_velocity_radius_and_update_effects() {
+        let fire = FireBulletType::new(2.0, 5.0);
+        assert!(fire.base.pierce);
+        assert!(!fire.base.collides_tiles);
+        assert!(!fire.base.collides);
+        assert_eq!(fire.base.drag, 0.03);
+        assert_eq!(fire.initial_velocity_len(9.0), fire.vel_max);
+        assert_eq!(fire.initial_velocity_len(0.1), fire.vel_min);
+        assert_eq!(fire.draw_radius(0.5), 1.5);
+
+        let plan = fire.update_plan(true, false, true);
+        assert!(plan.create_fire);
+        assert!(!plan.trail_effect);
+        assert!(plan.secondary_trail_effect);
+    }
+
+    #[test]
+    fn lightning_bullet_range_dps_and_length_match_overrides() {
+        let mut lightning = LightningBulletType::default();
+        lightning.base.damage = 4.0;
+        lightning.base.lightning_length = 25;
+        lightning.base.lightning_length_rand = 6;
+
+        assert_eq!(lightning.calculate_range(), 168.0);
+        assert_eq!(lightning.estimate_dps(), 10.0);
+        assert_eq!(lightning.lightning_length(4), 29);
+        assert_eq!(lightning.lightning_length(99), 31);
     }
 }
