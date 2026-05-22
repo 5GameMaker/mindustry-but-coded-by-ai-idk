@@ -1728,6 +1728,7 @@ impl NetServer {
         let current_millis = Self::current_millis();
         let player = Self::connection_player_label(state, connection_id);
         let player_uuid = Self::connection_uuid(state, connection_id);
+        let command_message = packet.message.starts_with('/');
 
         state.last_connection_id = connection_id;
         state.last_chat_connection_id = connection_id;
@@ -1762,7 +1763,19 @@ impl NetServer {
             return None;
         }
 
-        let filtered = if packet.message.starts_with('/') {
+        if !command_message {
+            if let Some(uuid) = player_uuid.as_deref() {
+                let info = state.administration.get_info(uuid.to_string());
+                if info.last_sent_message.as_deref() == Some(packet.message.as_str())
+                    && current_millis - info.last_message_time < 10_000
+                {
+                    state.chat_packets_filtered += 1;
+                    return None;
+                }
+            }
+        }
+
+        let filtered = if command_message {
             Some(packet.message.clone())
         } else {
             state
@@ -1775,10 +1788,12 @@ impl NetServer {
             return None;
         };
 
-        if let Some(uuid) = player_uuid {
-            let info = state.administration.get_info(uuid);
-            info.last_message_time = current_millis;
-            info.last_sent_message = Some(message.clone());
+        if !command_message {
+            if let Some(uuid) = player_uuid {
+                let info = state.administration.get_info(uuid);
+                info.last_message_time = current_millis;
+                info.last_sent_message = Some(packet.message.clone());
+            }
         }
 
         let packet = SendChatMessageCallPacket { message };
@@ -2852,9 +2867,57 @@ mod tests {
                 .administration
                 .get_info_optional("uuid-chat")
                 .and_then(|info| info.last_sent_message.as_deref()),
-            Some("/foo")
+            Some("foo")
         );
         assert_eq!(state.events.len(), 2);
+    }
+
+    #[test]
+    fn repeated_chat_messages_inside_java_duplicate_window_are_suppressed() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("2.2.2.2");
+            connection.uuid = "uuid-repeat".into();
+            state.connection_states.insert(22, connection);
+        }
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if let PacketKind::SendChatMessageCallPacket(packet) = packet {
+                seen_handler.lock().unwrap().push(packet.message.clone());
+            }
+        });
+
+        {
+            let mut net = server.net_mut();
+            for _ in 0..2 {
+                net.handle_server_received_from_connection(
+                    Some(22),
+                    true,
+                    PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                        message: "same".into(),
+                    }),
+                );
+            }
+        }
+
+        assert_eq!(*seen.lock().unwrap(), vec!["same"]);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.chat_packets_seen, 2);
+        assert_eq!(state.chat_packets_filtered, 1);
+        assert_eq!(
+            state
+                .administration
+                .get_info_optional("uuid-repeat")
+                .and_then(|info| info.last_sent_message.as_deref()),
+            Some("same")
+        );
     }
 
     #[test]
