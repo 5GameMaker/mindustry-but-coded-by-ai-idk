@@ -11,7 +11,7 @@ pub use input_handler::{
     client_unit_clear_packet, client_unit_control_packet, payload_dropped, picked_build_payload,
     picked_unit_payload, request_build_payload, request_drop_payload, request_item,
     request_unit_payload, rotate_block, tile_config, tile_tap, transfer_inventory, unit_clear,
-    unit_control, BuildPayloadPickupKind, BuildingControlSelectContext,
+    unit_control, unit_entered_payload, BuildPayloadPickupKind, BuildingControlSelectContext,
     BuildingControlSelectOutcome, BuildingControlSelectRejectReason, PayloadDroppedOutcome,
     PayloadDroppedRejectReason, PickedBuildPayloadOutcome, PickedBuildPayloadRejectReason,
     PickedUnitPayloadOutcome, PickedUnitPayloadRejectReason, RequestBuildPayloadContext,
@@ -23,6 +23,7 @@ pub use input_handler::{
     TileConfigRejectReason, TileConfigRollbackPlan, TileTapContext, TileTapOutcome,
     TransferInventoryContext, TransferInventoryOutcome, TransferInventoryRejectReason,
     UnitClearContext, UnitClearOutcome, UnitClearRejectReason, UnitControlContext,
-    UnitControlOutcome, UnitControlRejectReason,
+    UnitControlOutcome, UnitControlRejectReason, UnitEnteredPayloadOutcome,
+    UnitEnteredPayloadRejectReason,
 };
 pub use place_mode::PlaceMode;

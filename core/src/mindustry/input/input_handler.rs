@@ -16,6 +16,7 @@ use crate::mindustry::net::{
     RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
     TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
     TransferItemToCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::meta::BuildVisibility;
@@ -356,6 +357,20 @@ pub struct PayloadDroppedOutcome {
     pub packet: Option<PayloadDroppedCallPacket>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitEnteredPayloadRejectReason {
+    MissingUnit,
+    MissingBuild,
+    TeamMismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitEnteredPayloadOutcome {
+    pub accepted: bool,
+    pub rejection: Option<UnitEnteredPayloadRejectReason>,
+    pub packet: Option<UnitEnteredPayloadCallPacket>,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -556,6 +571,16 @@ impl RequestDropPayloadOutcome {
 
 impl PayloadDroppedOutcome {
     fn rejected(reason: PayloadDroppedRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            packet: None,
+        }
+    }
+}
+
+impl UnitEnteredPayloadOutcome {
+    fn rejected(reason: UnitEnteredPayloadRejectReason) -> Self {
         Self {
             accepted: false,
             rejection: Some(reason),
@@ -1566,6 +1591,32 @@ pub fn payload_dropped(unit: Option<UnitRef>, x: f32, y: f32) -> PayloadDroppedO
     }
 }
 
+pub fn unit_entered_payload(
+    unit: Option<&UnitComp>,
+    build: Option<&BuildingComp>,
+) -> UnitEnteredPayloadOutcome {
+    let Some(unit) = unit else {
+        return UnitEnteredPayloadOutcome::rejected(UnitEnteredPayloadRejectReason::MissingUnit);
+    };
+
+    let Some(build) = build else {
+        return UnitEnteredPayloadOutcome::rejected(UnitEnteredPayloadRejectReason::MissingBuild);
+    };
+
+    if unit.team_id() != build.team {
+        return UnitEnteredPayloadOutcome::rejected(UnitEnteredPayloadRejectReason::TeamMismatch);
+    }
+
+    UnitEnteredPayloadOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(UnitEnteredPayloadCallPacket {
+            unit: UnitRef::Unit { id: unit.id() },
+            build: BuildingRef::new(build.tile_pos),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -2444,5 +2495,33 @@ mod tests {
         assert_eq!((request_drop.x, request_drop.y), (3.0, 4.0));
         assert!(dropped.accepted);
         assert_eq!(dropped.packet.unwrap().unit, UnitRef::Unit { id: 66 });
+    }
+
+    #[test]
+    fn unit_entered_payload_accepts_same_team_unit_and_building() {
+        let unit = UnitComp::new(67, unit_type(10), TeamId(1));
+        let building = BuildingComp::new(point2_pack(32, 33), item_block(), TeamId(1));
+
+        let outcome = unit_entered_payload(Some(&unit), Some(&building));
+
+        assert!(outcome.accepted);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 67 });
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(32, 33)));
+    }
+
+    #[test]
+    fn unit_entered_payload_rejects_team_mismatch_without_packet() {
+        let unit = UnitComp::new(68, unit_type(10), TeamId(2));
+        let building = BuildingComp::new(point2_pack(32, 33), item_block(), TeamId(1));
+
+        let outcome = unit_entered_payload(Some(&unit), Some(&building));
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(UnitEnteredPayloadRejectReason::TeamMismatch)
+        );
+        assert!(outcome.packet.is_none());
     }
 }
