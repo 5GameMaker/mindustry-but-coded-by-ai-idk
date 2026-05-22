@@ -917,6 +917,132 @@ impl Ability for SuppressionFieldAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveEffectPlan {
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub amount: i32,
+    pub timer: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveEffectAbility {
+    pub base: BasicAbility,
+    pub min_velocity: f32,
+    pub interval: f32,
+    pub chance: f32,
+    pub amount: i32,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub range_x: f32,
+    pub range_y: f32,
+    pub range_length_min: f32,
+    pub range_length_max: f32,
+    pub rotate_effect: bool,
+    pub effect_param: f32,
+    pub team_color: bool,
+    pub parentize_effects: bool,
+    pub counter: f32,
+}
+
+impl Default for MoveEffectAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility {
+                visible: false,
+                data: 0.0,
+            },
+            min_velocity: 0.08,
+            interval: 3.0,
+            chance: 0.0,
+            amount: 1,
+            x: 0.0,
+            y: 0.0,
+            rotation: 0.0,
+            range_x: 0.0,
+            range_y: 0.0,
+            range_length_min: 0.0,
+            range_length_max: 0.0,
+            rotate_effect: false,
+            effect_param: 3.0,
+            team_color: false,
+            parentize_effects: false,
+            counter: 0.0,
+        }
+    }
+}
+
+impl MoveEffectAbility {
+    pub fn new(x: f32, y: f32, interval: f32) -> Self {
+        Self {
+            x,
+            y,
+            interval,
+            ..Default::default()
+        }
+    }
+
+    pub fn update_plan(
+        &mut self,
+        delta: f32,
+        velocity_len2: f32,
+        in_fog: bool,
+        chance_triggered: bool,
+        unit_x: f32,
+        unit_y: f32,
+        unit_rotation: f32,
+        random_offset: (f32, f32),
+    ) -> Option<MoveEffectPlan> {
+        self.counter += delta;
+
+        let moving = velocity_len2 >= self.min_velocity * self.min_velocity;
+        let timed = self.counter >= self.interval;
+        let chance = self.chance > 0.0 && chance_triggered;
+        if !moving || !(timed || chance) || in_fog {
+            return None;
+        }
+
+        let (local_x, local_y) = if self.range_length_max > 0.0 {
+            (self.x + random_offset.0, self.y + random_offset.1)
+        } else {
+            (
+                self.x + random_offset.0.clamp(-self.range_x, self.range_x),
+                self.y + random_offset.1.clamp(-self.range_y, self.range_y),
+            )
+        };
+        let (offset_x, offset_y) = rotate_offset(local_x, local_y, unit_rotation - 90.0);
+        self.counter %= self.interval;
+
+        Some(MoveEffectPlan {
+            x: unit_x + offset_x,
+            y: unit_y + offset_y,
+            rotation: (if self.rotate_effect {
+                unit_rotation
+            } else {
+                self.effect_param
+            }) + self.rotation,
+            amount: self.amount,
+            timer: self.counter,
+        })
+    }
+}
+
+impl Ability for MoveEffectAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
@@ -985,8 +1111,9 @@ fn polygon_vertex(
 mod tests {
     use super::{
         Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
-        RegenAbility, RepairFieldAbility, RepairFieldTarget, ShieldRegenFieldAbility,
-        ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility,
+        MoveEffectAbility, RegenAbility, RepairFieldAbility, RepairFieldTarget,
+        ShieldRegenFieldAbility, ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility,
+        SuppressionFieldAbility,
     };
 
     #[derive(Clone)]
@@ -1272,5 +1399,48 @@ mod tests {
 
         assert!(ability.update_state(10.0, 0.0, 0.0, 0.0).is_none());
         assert_eq!(ability.timer, 0.0);
+    }
+
+    #[test]
+    fn move_effect_emits_when_moving_and_interval_elapsed() {
+        let mut ability = MoveEffectAbility::new(0.0, 10.0, 3.0);
+        ability.rotate_effect = true;
+        ability.rotation = 5.0;
+        ability.amount = 2;
+
+        assert!(ability
+            .update_plan(2.0, 1.0, false, false, 100.0, 200.0, 90.0, (0.0, 0.0))
+            .is_none());
+
+        let plan = ability
+            .update_plan(1.0, 1.0, false, false, 100.0, 200.0, 90.0, (0.0, 0.0))
+            .expect("elapsed interval should emit effect");
+        assert!((plan.x - 100.0).abs() < 0.0001);
+        assert!((plan.y - 210.0).abs() < 0.0001);
+        assert_eq!(plan.rotation, 95.0);
+        assert_eq!(plan.amount, 2);
+        assert_eq!(plan.timer, 0.0);
+    }
+
+    #[test]
+    fn move_effect_respects_velocity_fog_chance_and_range_offsets() {
+        let mut ability = MoveEffectAbility::new(1.0, 2.0, 100.0);
+        ability.chance = 1.0;
+        ability.range_x = 3.0;
+        ability.range_y = 4.0;
+
+        assert!(ability
+            .update_plan(1.0, 0.0, false, true, 0.0, 0.0, 0.0, (0.0, 0.0))
+            .is_none());
+        assert!(ability
+            .update_plan(1.0, 1.0, true, true, 0.0, 0.0, 0.0, (0.0, 0.0))
+            .is_none());
+
+        let plan = ability
+            .update_plan(1.0, 1.0, false, true, 10.0, 20.0, 0.0, (99.0, -99.0))
+            .expect("chance trigger should emit");
+        assert!((plan.x - 8.0).abs() < 0.0001);
+        assert!((plan.y - 16.0).abs() < 0.0001);
+        assert_eq!(plan.rotation, 3.0);
     }
 }

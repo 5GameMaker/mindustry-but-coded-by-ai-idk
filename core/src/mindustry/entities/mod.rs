@@ -21,10 +21,10 @@ pub mod units;
 
 pub use abilities::{
     Ability, BasicAbility, ForceFieldAbility, ForceFieldHit, ForceFieldUpdate,
-    LiquidExplodeAbility, LiquidRegenAbility, RegenAbility, RepairFieldAbility, RepairFieldPulse,
-    RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
-    SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
-    SuppressionFieldPulse,
+    LiquidExplodeAbility, LiquidRegenAbility, MoveEffectAbility, MoveEffectPlan, RegenAbility,
+    RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldRegenFieldAbility,
+    ShieldRegenFieldPulse, ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility,
+    StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
