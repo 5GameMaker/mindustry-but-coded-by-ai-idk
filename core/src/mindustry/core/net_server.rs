@@ -11,8 +11,9 @@ use crate::mindustry::net::{
     ConnectPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, Disconnect,
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2,
     KickReason, Net, NetConnection, PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket,
-    SendChatMessageCallPacket, SendMessageCallPacket2, SentPacket, StateSnapshotCallPacket,
-    SteamAdminData, Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
+    SendChatMessageCallPacket, SendMessageCallPacket2, SentPacket, ServerResponse,
+    StateSnapshotCallPacket, SteamAdminData, Streamable, TileConfigCallPacket, TileTapCallPacket,
+    WorldDataBeginCallPacket,
 };
 use crate::mindustry::vars::MAX_TEXT_LENGTH;
 
@@ -29,6 +30,34 @@ pub const JAVA_PACKET_SPAM_WINDOW_MS: i64 = 3_000;
 pub const JAVA_PACKET_SPAM_LIMIT: i32 = 300;
 pub const JAVA_DEFAULT_KICK_DURATION_MS: i64 = 30_000;
 pub const JAVA_DEFAULT_VOTE_KICK_DURATION_MS: i64 = 60 * 60 * 1_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientCommandSpec {
+    pub text: &'static str,
+    pub param_text: &'static str,
+    pub description: &'static str,
+    pub min_args: usize,
+    pub max_args: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientCommandResponse {
+    NoCommand,
+    Valid {
+        command: ClientCommandSpec,
+        args: Vec<String>,
+    },
+    Unknown {
+        run_command: String,
+        suggestion: Option<String>,
+    },
+    FewArguments {
+        command: ClientCommandSpec,
+    },
+    ManyArguments {
+        command: ClientCommandSpec,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerPreviewPlanSource {
@@ -209,6 +238,8 @@ pub struct NetServerState {
     pub chat_packets_rate_limited: u64,
     pub last_client_command_connection_id: Option<i32>,
     pub last_client_command: Option<String>,
+    pub last_client_command_received_at: Option<Instant>,
+    pub last_client_command_response: Option<String>,
     pub client_commands_seen: u64,
     pub packet_rate_limited: u64,
     pub last_state_snapshot_connection_id: Option<i32>,
@@ -1643,6 +1674,54 @@ impl NetServer {
                 }
             });
         }
+
+        {
+            let state = Arc::clone(state);
+            net.handle_server_response(move |connection_id, packet| {
+                let PacketKind::SendChatMessageCallPacket(chat) = packet else {
+                    return None;
+                };
+                let connection_id = connection_id?;
+                let sanitized_message = Self::sanitize_chat_message(&chat.message);
+                let command_response = Self::handle_client_command_message(&sanitized_message);
+                let message = Self::client_command_private_reply(&command_response)?;
+                let packet = PacketKind::SendMessageCallPacket2(SendMessageCallPacket2 {
+                    message: message.clone(),
+                    unformatted: String::new(),
+                    player_sender: EntityRef::null(),
+                });
+
+                {
+                    let mut state = state.lock().expect("NetServerState mutex poisoned");
+                    if state.last_client_command_connection_id != Some(connection_id)
+                        || state.last_client_command.as_deref() != Some(sanitized_message.as_str())
+                        || state.last_client_command_received_at != state.last_chat_received_at
+                    {
+                        return None;
+                    }
+
+                    state.last_client_command_response = Some(message.clone());
+                    state.last_send_message_connection_id = Some(connection_id);
+                    state.last_send_message = Some(message);
+                    state.last_updated_at = Some(Instant::now());
+                    state.send_message_packets_sent =
+                        state.send_message_packets_sent.saturating_add(1);
+                    state.last_send_message_error = None;
+                    Self::record_connection_sent(
+                        &mut state,
+                        connection_id,
+                        "SendMessageCallPacket2",
+                        true,
+                    );
+                }
+
+                Some(ServerResponse {
+                    connection_id,
+                    packet,
+                    reliable: true,
+                })
+            });
+        }
     }
 
     fn dispatch_packet_handlers(
@@ -1878,6 +1957,224 @@ impl NetServer {
             .and_then(|connection| (!connection.uuid.is_empty()).then(|| connection.uuid.clone()))
     }
 
+    pub fn default_client_commands() -> [ClientCommandSpec; 6] {
+        [
+            ClientCommandSpec {
+                text: "help",
+                param_text: "[page]",
+                description: "Lists all commands.",
+                min_args: 0,
+                max_args: Some(1),
+            },
+            ClientCommandSpec {
+                text: "t",
+                param_text: "<message...>",
+                description: "Send a message only to your teammates.",
+                min_args: 1,
+                max_args: None,
+            },
+            ClientCommandSpec {
+                text: "a",
+                param_text: "<message...>",
+                description: "Send a message only to admins.",
+                min_args: 1,
+                max_args: None,
+            },
+            ClientCommandSpec {
+                text: "votekick",
+                param_text: "[player] [reason...]",
+                description: "Vote to kick a player with a valid reason.",
+                min_args: 0,
+                max_args: None,
+            },
+            ClientCommandSpec {
+                text: "vote",
+                param_text: "<y/n/c>",
+                description:
+                    "Vote to kick the current player. Admins can cancel the voting with 'c'.",
+                min_args: 1,
+                max_args: Some(1),
+            },
+            ClientCommandSpec {
+                text: "sync",
+                param_text: "",
+                description: "Re-synchronize world state.",
+                min_args: 0,
+                max_args: Some(0),
+            },
+        ]
+    }
+
+    pub fn handle_client_command_message(message: &str) -> ClientCommandResponse {
+        let Some(command_line) = message.strip_prefix('/') else {
+            return ClientCommandResponse::NoCommand;
+        };
+
+        let (run_command, rest) = Self::split_client_command(command_line);
+        let commands = Self::default_client_commands();
+        if run_command.is_empty() {
+            return ClientCommandResponse::Unknown {
+                run_command: String::new(),
+                suggestion: None,
+            };
+        }
+
+        let Some(command) = commands
+            .iter()
+            .find(|command| command.text.eq_ignore_ascii_case(run_command))
+            .cloned()
+        else {
+            return ClientCommandResponse::Unknown {
+                run_command: run_command.to_string(),
+                suggestion: Self::closest_client_command(run_command),
+            };
+        };
+
+        let args = Self::parse_client_command_args(&command, rest);
+        if args.len() < command.min_args {
+            ClientCommandResponse::FewArguments { command }
+        } else if command
+            .max_args
+            .is_some_and(|max_args| args.len() > max_args)
+        {
+            ClientCommandResponse::ManyArguments { command }
+        } else {
+            ClientCommandResponse::Valid { command, args }
+        }
+    }
+
+    pub fn client_command_private_reply(response: &ClientCommandResponse) -> Option<String> {
+        match response {
+            ClientCommandResponse::FewArguments { command } => Some(format!(
+                "[scarlet]Too few arguments. Usage:[lightgray] {}[gray] {}",
+                command.text, command.param_text
+            )),
+            ClientCommandResponse::ManyArguments { command } => Some(format!(
+                "[scarlet]Too many arguments. Usage:[lightgray] {}[gray] {}",
+                command.text, command.param_text
+            )),
+            ClientCommandResponse::Unknown {
+                suggestion: Some(suggestion),
+                ..
+            } => Some(format!(
+                "[scarlet]Unknown command. Did you mean \"[lightgray]{}[]\"?",
+                suggestion
+            )),
+            ClientCommandResponse::Unknown {
+                suggestion: None, ..
+            } => Some("[scarlet]Unknown command. Check [lightgray]/help[scarlet].".to_string()),
+            ClientCommandResponse::Valid { command, args } if command.text == "help" => {
+                Some(Self::client_help_message(args))
+            }
+            _ => None,
+        }
+    }
+
+    fn split_client_command(command_line: &str) -> (&str, &str) {
+        let trimmed = command_line.trim_start();
+        match trimmed.find(char::is_whitespace) {
+            Some(index) => (&trimmed[..index], trimmed[index..].trim_start()),
+            None => (trimmed, ""),
+        }
+    }
+
+    fn parse_client_command_args(command: &ClientCommandSpec, rest: &str) -> Vec<String> {
+        if rest.is_empty() {
+            return Vec::new();
+        }
+
+        if command.param_text.contains("...") {
+            let mut split = rest.splitn(2, char::is_whitespace);
+            let first = split.next().unwrap_or_default();
+            let remainder = split.next().unwrap_or_default().trim_start();
+            if command.param_text.starts_with('<') {
+                vec![rest.to_string()]
+            } else if remainder.is_empty() {
+                vec![first.to_string()]
+            } else {
+                vec![first.to_string(), remainder.to_string()]
+            }
+        } else {
+            rest.split_whitespace().map(ToOwned::to_owned).collect()
+        }
+    }
+
+    fn client_help_message(args: &[String]) -> String {
+        let commands = Self::default_client_commands();
+        let commands_per_page = 6usize;
+        let pages = commands.len().div_ceil(commands_per_page);
+        let page = if let Some(raw_page) = args.first() {
+            let Ok(page) = raw_page.parse::<usize>() else {
+                return "[scarlet]'page' must be a number.".to_string();
+            };
+            page
+        } else {
+            1
+        };
+
+        if page == 0 || page > pages {
+            return format!(
+                "[scarlet]'page' must be a number between[orange] 1[] and[orange] {}[scarlet].",
+                pages
+            );
+        }
+
+        let page_index = page - 1;
+        let mut result = format!(
+            "[orange]-- Commands Page[lightgray] {}[gray]/[lightgray]{}[orange] --\n\n",
+            page, pages
+        );
+        let start = commands_per_page * page_index;
+        let end = (start + commands_per_page).min(commands.len());
+        for command in &commands[start..end] {
+            result.push_str(&format!(
+                "[orange] /{}[white] {}[lightgray] - {}\n",
+                command.text, command.param_text, command.description
+            ));
+        }
+        result
+    }
+
+    fn closest_client_command(run_command: &str) -> Option<String> {
+        Self::default_client_commands()
+            .iter()
+            .filter_map(|command| {
+                let distance = Self::levenshtein(
+                    &command.text.to_ascii_lowercase(),
+                    &run_command.to_ascii_lowercase(),
+                );
+                (distance < 3).then_some((distance, command.text.to_string()))
+            })
+            .min_by_key(|(distance, _)| *distance)
+            .map(|(_, command)| command)
+    }
+
+    fn levenshtein(a: &str, b: &str) -> usize {
+        if a.is_empty() {
+            return b.chars().count();
+        }
+        if b.is_empty() {
+            return a.chars().count();
+        }
+
+        let b_chars: Vec<char> = b.chars().collect();
+        let mut costs: Vec<usize> = (0..=b_chars.len()).collect();
+
+        for (i, ca) in a.chars().enumerate() {
+            let mut previous = costs[0];
+            costs[0] = i + 1;
+            for (j, &cb) in b_chars.iter().enumerate() {
+                let insertion = costs[j + 1] + 1;
+                let deletion = costs[j] + 1;
+                let substitution = previous + usize::from(ca != cb);
+                previous = costs[j + 1];
+                costs[j + 1] = insertion.min(deletion).min(substitution);
+            }
+        }
+
+        costs[b_chars.len()]
+    }
+
     fn record_chat_message(
         state: &mut NetServerState,
         connection_id: Option<i32>,
@@ -1936,6 +2233,8 @@ impl NetServer {
         if command_message {
             state.last_client_command_connection_id = connection_id;
             state.last_client_command = Some(sanitized_message);
+            state.last_client_command_received_at = Some(now);
+            state.last_client_command_response = None;
             state.client_commands_seen = state.client_commands_seen.saturating_add(1);
             return None;
         }
@@ -3100,6 +3399,109 @@ mod tests {
         assert_eq!(state.rotate_block_packets_seen, 0);
         assert_eq!(state.last_tile_config_connection_id, None);
         assert!(state.last_rotate_block.is_none());
+    }
+
+    #[test]
+    fn client_command_handler_matches_java_invalid_replies() {
+        let unknown = NetServer::handle_client_command_message("/doesnotexist");
+        assert_eq!(
+            NetServer::client_command_private_reply(&unknown).as_deref(),
+            Some("[scarlet]Unknown command. Check [lightgray]/help[scarlet].")
+        );
+
+        let suggested = NetServer::handle_client_command_message("/hlep");
+        assert_eq!(
+            NetServer::client_command_private_reply(&suggested).as_deref(),
+            Some("[scarlet]Unknown command. Did you mean \"[lightgray]help[]\"?")
+        );
+
+        let few = NetServer::handle_client_command_message("/vote");
+        assert_eq!(
+            NetServer::client_command_private_reply(&few).as_deref(),
+            Some("[scarlet]Too few arguments. Usage:[lightgray] vote[gray] <y/n/c>")
+        );
+
+        let many = NetServer::handle_client_command_message("/sync now");
+        assert_eq!(
+            NetServer::client_command_private_reply(&many).as_deref(),
+            Some("[scarlet]Too many arguments. Usage:[lightgray] sync[gray] ")
+        );
+    }
+
+    #[test]
+    fn help_client_command_builds_java_style_private_page() {
+        let response = NetServer::handle_client_command_message("/help");
+        let reply = NetServer::client_command_private_reply(&response).unwrap();
+
+        assert!(reply.starts_with("[orange]-- Commands Page[lightgray] 1[gray]/[lightgray]1"));
+        assert!(reply.contains("[orange] /help[white] [page][lightgray] - Lists all commands."));
+        assert!(reply.contains("[orange] /sync[white] [lightgray] - Re-synchronize world state."));
+
+        let bad_page = NetServer::handle_client_command_message("/help nope");
+        assert_eq!(
+            NetServer::client_command_private_reply(&bad_page).as_deref(),
+            Some("[scarlet]'page' must be a number.")
+        );
+    }
+
+    #[test]
+    fn chat_unknown_commands_send_private_invalid_reply_to_same_connection() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(14, ready_chat_connection("4.4.4.4", "uuid-command"));
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(14),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/doesnotexist".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 14);
+        assert!(sent[0].2);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]Unknown command. Check [lightgray]/help[scarlet]."
+                    && packet.unformatted.is_empty()
+                    && packet.player_sender == EntityRef::null()
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.client_commands_seen, 1);
+        assert_eq!(state.last_client_command.as_deref(), Some("/doesnotexist"));
+        assert_eq!(
+            state.last_client_command_response.as_deref(),
+            Some("[scarlet]Unknown command. Check [lightgray]/help[scarlet].")
+        );
+        assert_eq!(state.last_send_message_connection_id, Some(14));
+        assert_eq!(state.send_message_packets_sent, 1);
+
+        let connection = state.connection_states.get(&14).unwrap();
+        assert!(matches!(
+            &connection.sent[0].0,
+            SentPacket::Other(name) if name == "SendMessageCallPacket2"
+        ));
+        assert!(connection.sent[0].1);
     }
 
     #[test]

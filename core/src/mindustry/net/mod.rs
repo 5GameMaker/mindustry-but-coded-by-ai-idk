@@ -20,7 +20,7 @@ pub use arc_net_provider::{
 pub use host::Host;
 pub use net::{
     ClientListener, ConnectFilter, DoneCallback, HostCallback, Net, NetProvider, NoopNetProvider,
-    PacketKind, ProviderEvent, ServerListener,
+    PacketKind, ProviderEvent, ServerListener, ServerResponse, ServerResponseListener,
 };
 pub use net_connection::{NetConnection, Ratekeeper, SentPacket};
 pub use network_io::{read_server_data, write_server_data, ServerData};

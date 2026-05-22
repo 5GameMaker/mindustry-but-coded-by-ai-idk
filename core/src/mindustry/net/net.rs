@@ -576,8 +576,17 @@ pub type HostCallback = Box<dyn Fn(Host) + Send + 'static>;
 pub type DoneCallback = Box<dyn Fn() + Send + 'static>;
 pub type ClientListener = Box<dyn FnMut(&PacketKind) + Send + 'static>;
 pub type ServerListener = Box<dyn FnMut(Option<i32>, &PacketKind) + Send + 'static>;
+pub type ServerResponseListener =
+    Box<dyn FnMut(Option<i32>, &PacketKind) -> Option<ServerResponse> + Send + 'static>;
 pub type ClientTypedListener<T> = Box<dyn FnMut(&T) + Send + 'static>;
 pub type ServerTypedListener<T> = Box<dyn FnMut(Option<i32>, &T) + Send + 'static>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerResponse {
+    pub connection_id: i32,
+    pub packet: PacketKind,
+    pub reliable: bool,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderEvent {
@@ -733,6 +742,7 @@ pub struct Net {
     server_connections: HashMap<i32, NetConnection>,
     client_listeners: Vec<ClientListener>,
     server_listeners: Vec<ServerListener>,
+    server_response_listeners: Vec<ServerResponseListener>,
     client_connect_listeners: Vec<ClientTypedListener<Connect>>,
     client_disconnect_listeners: Vec<ClientTypedListener<Disconnect>>,
     client_world_stream_listeners: Vec<ClientTypedListener<Streamable>>,
@@ -756,6 +766,10 @@ impl std::fmt::Debug for Net {
             .field("server_connections", &self.server_connections)
             .field("client_listeners", &self.client_listeners.len())
             .field("server_listeners", &self.server_listeners.len())
+            .field(
+                "server_response_listeners",
+                &self.server_response_listeners.len(),
+            )
             .field(
                 "client_connect_listeners",
                 &self.client_connect_listeners.len(),
@@ -809,6 +823,7 @@ impl Net {
             server_connections: HashMap::new(),
             client_listeners: Vec::new(),
             server_listeners: Vec::new(),
+            server_response_listeners: Vec::new(),
             client_connect_listeners: Vec::new(),
             client_disconnect_listeners: Vec::new(),
             client_world_stream_listeners: Vec::new(),
@@ -919,6 +934,13 @@ impl Net {
         F: FnMut(Option<i32>, &PacketKind) + Send + 'static,
     {
         self.server_listeners.push(Box::new(listener));
+    }
+
+    pub fn handle_server_response<F>(&mut self, listener: F)
+    where
+        F: FnMut(Option<i32>, &PacketKind) -> Option<ServerResponse> + Send + 'static,
+    {
+        self.server_response_listeners.push(Box::new(listener));
     }
 
     /// Registers the Rust equivalent of Java `net.handleServer(Connect.class, ...)`.
@@ -1218,6 +1240,15 @@ impl Net {
         for listener in &mut self.server_listeners {
             listener(connection_id, &packet);
         }
+        let mut responses = Vec::new();
+        for listener in &mut self.server_response_listeners {
+            if let Some(response) = listener(connection_id, &packet) {
+                responses.push(response);
+            }
+        }
+        for response in responses {
+            let _ = self.send_to(response.connection_id, &response.packet, response.reliable);
+        }
         self.handled_server_packets.push(packet);
     }
 
@@ -1425,6 +1456,55 @@ mod tests {
     }
 
     #[test]
+    fn server_response_listeners_send_response_packets_to_target_connection() {
+        let sent_to = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let provider = RecordingProvider {
+            sent: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            sent_to: sent_to.clone(),
+            closed: std::sync::Arc::new(std::sync::Mutex::new(false)),
+        };
+        let mut net = Net::new(Box::new(provider));
+        net.handle_server_response(move |connection_id, packet| match packet {
+            PacketKind::Other { id, .. } if *id == 33 => Some(ServerResponse {
+                connection_id: connection_id.unwrap(),
+                packet: PacketKind::Other {
+                    id: 44,
+                    priority: 1,
+                    allow_client: true,
+                    allow_server: true,
+                },
+                reliable: false,
+            }),
+            _ => None,
+        });
+
+        net.handle_server_received_from_connection(
+            Some(7),
+            true,
+            PacketKind::Other {
+                id: 33,
+                priority: 1,
+                allow_client: true,
+                allow_server: true,
+            },
+        );
+
+        assert_eq!(
+            *sent_to.lock().unwrap(),
+            vec![(
+                7,
+                PacketKind::Other {
+                    id: 44,
+                    priority: 1,
+                    allow_client: true,
+                    allow_server: true,
+                },
+                false
+            )]
+        );
+    }
+
+    #[test]
     fn typed_listeners_receive_core_connectivity_packets_before_generic_listeners() {
         let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut net = Net::default();
@@ -1593,9 +1673,11 @@ mod tests {
     #[test]
     fn close_server_sends_server_close_kick_before_disposing_provider() {
         let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sent_to = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let closed = std::sync::Arc::new(std::sync::Mutex::new(false));
         let provider = RecordingProvider {
             sent: sent.clone(),
+            sent_to: sent_to.clone(),
             closed: closed.clone(),
         };
         let mut net = Net::new(Box::new(provider));
@@ -1691,6 +1773,7 @@ mod tests {
     #[derive(Clone)]
     struct RecordingProvider {
         sent: std::sync::Arc<std::sync::Mutex<Vec<(PacketKind, bool)>>>,
+        sent_to: std::sync::Arc<std::sync::Mutex<Vec<(i32, PacketKind, bool)>>>,
         closed: std::sync::Arc<std::sync::Mutex<bool>>,
     }
 
@@ -1710,6 +1793,19 @@ mod tests {
 
         fn send_server(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
             self.sent.lock().unwrap().push((object.clone(), reliable));
+            Ok(())
+        }
+
+        fn send_server_to(
+            &mut self,
+            connection_id: i32,
+            object: &PacketKind,
+            reliable: bool,
+        ) -> io::Result<()> {
+            self.sent_to
+                .lock()
+                .unwrap()
+                .push((connection_id, object.clone(), reliable));
             Ok(())
         }
 
