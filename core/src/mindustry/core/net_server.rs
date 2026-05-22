@@ -7,7 +7,8 @@ use crate::mindustry::entities::comp::building::{BuildingComp, BuildingConfigCha
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
     packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-    ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
+    ClientSnapshotCallPacket, Connect, ConnectPacket, DebugStatusClientCallPacket,
+    DebugStatusClientUnreliableCallPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection,
     PacketKind, ProviderEvent, RotateBlockCallPacket, SentPacket, StateSnapshotCallPacket,
     Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
@@ -147,6 +148,12 @@ pub struct NetServerState {
     pub ping_requests_seen: u64,
     pub ping_responses_sent: u64,
     pub last_ping_error: Option<String>,
+    pub last_debug_status_connection_id: Option<i32>,
+    pub last_debug_status: Option<DebugStatusClientCallPacket>,
+    pub debug_status_requests_seen: u64,
+    pub debug_status_responses_sent: u64,
+    pub pending_debug_status_connections: Vec<i32>,
+    pub last_debug_status_error: Option<String>,
     pub last_client_snapshot_connection_id: Option<i32>,
     pub last_client_snapshot: Option<ClientSnapshotCallPacket>,
     pub last_client_snapshot_received_at: Option<Instant>,
@@ -785,6 +792,7 @@ impl NetServer {
 
     pub fn update(&self) {
         self.flush_pending_connect_kicks();
+        self.flush_pending_debug_status();
 
         let connections = {
             let net = self.net.lock().expect("Net mutex poisoned");
@@ -836,6 +844,93 @@ impl NetServer {
             Err(error)
         } else {
             Ok(sent)
+        }
+    }
+
+    pub fn debug_status_for_connection(
+        state: &NetServerState,
+        connection_id: i32,
+    ) -> DebugStatusClientCallPacket {
+        let Some(connection) = state.connection_states.get(&connection_id) else {
+            return DebugStatusClientCallPacket {
+                value: 0,
+                last_client_snapshot: -1,
+                snapshots_sent: 0,
+            };
+        };
+
+        let value = (if connection.has_disconnected { 1 } else { 0 })
+            | (if connection.has_connected { 2 } else { 0 })
+            | (if connection.player_added { 4 } else { 0 })
+            | (if connection.has_begun_connecting {
+                8
+            } else {
+                0
+            });
+
+        DebugStatusClientCallPacket {
+            value,
+            last_client_snapshot: connection.last_received_client_snapshot,
+            snapshots_sent: connection.snapshots_sent,
+        }
+    }
+
+    pub fn send_debug_status(&self, connection_id: i32) -> io::Result<()> {
+        let packet = {
+            let state = self.state.lock().expect("NetServerState mutex poisoned");
+            Self::debug_status_for_connection(&state, connection_id)
+        };
+
+        let reliable = PacketKind::DebugStatusClientCallPacket(packet);
+        let unreliable = PacketKind::DebugStatusClientUnreliableCallPacket(
+            DebugStatusClientUnreliableCallPacket(packet),
+        );
+
+        let mut first_error = None;
+        {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            if let Err(error) = net.send_to(connection_id, &reliable, true) {
+                first_error = Some(error);
+            } else if let Err(error) = net.send_to(connection_id, &unreliable, false) {
+                first_error = Some(error);
+            }
+        }
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        state.last_debug_status_connection_id = Some(connection_id);
+        state.last_debug_status = Some(packet);
+        state.last_updated_at = Some(Instant::now());
+
+        if let Some(error) = first_error {
+            state.last_debug_status_error = Some(error.to_string());
+            return Err(error);
+        }
+
+        state.debug_status_responses_sent = state.debug_status_responses_sent.saturating_add(2);
+        state.last_debug_status_error = None;
+        Self::record_connection_sent(
+            &mut state,
+            connection_id,
+            "DebugStatusClientCallPacket",
+            true,
+        );
+        Self::record_connection_sent(
+            &mut state,
+            connection_id,
+            "DebugStatusClientUnreliableCallPacket",
+            false,
+        );
+        Ok(())
+    }
+
+    fn flush_pending_debug_status(&self) {
+        let pending = {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            std::mem::take(&mut state.pending_debug_status_connections)
+        };
+
+        for connection_id in pending {
+            let _ = self.send_debug_status(connection_id);
         }
     }
 
@@ -1235,6 +1330,7 @@ impl NetServer {
                             .entry(connection_id)
                             .or_insert_with(|| NetConnection::new(String::new()));
                         connection.has_disconnected = true;
+                        connection.player_added = false;
                     }
                     state.events.push(ProviderEvent::ServerDisconnected {
                         connection_id: connection_id.unwrap_or(-1),
@@ -1277,6 +1373,7 @@ impl NetServer {
                             .entry(connection_id)
                             .or_insert_with(|| NetConnection::new(String::new()));
                         connection.has_begun_connecting = true;
+                        connection.player_added = true;
                         connection.has_connected = true;
                     }
                     state.events.push(ProviderEvent::ServerPacket {
@@ -1313,6 +1410,25 @@ impl NetServer {
                         &packet_handlers,
                         &PacketKind::PingCallPacket(*ping),
                     );
+                }
+                PacketKind::RequestDebugStatusCallPacket(request) => {
+                    let packet = PacketKind::RequestDebugStatusCallPacket(*request);
+                    {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        state.last_connection_id = connection_id;
+                        state.debug_status_requests_seen =
+                            state.debug_status_requests_seen.saturating_add(1);
+                        if let Some(connection_id) = connection_id {
+                            state.pending_debug_status_connections.push(connection_id);
+                        }
+                        state.events.push(ProviderEvent::ServerPacket {
+                            connection_id: connection_id.unwrap_or(-1),
+                            packet: packet.clone(),
+                        });
+                        state.last_updated_at = Some(Instant::now());
+                    }
+
+                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
                 }
                 PacketKind::ClientSnapshotCallPacket(snapshot) => {
                     let packet = PacketKind::ClientSnapshotCallPacket(snapshot.clone());
@@ -1540,6 +1656,7 @@ impl NetServer {
                 let has_connected = connection.has_connected;
                 let has_begun_connecting = connection.has_begun_connecting;
                 let has_disconnected = connection.has_disconnected;
+                let player_added = connection.player_added;
                 let name = connection.name.clone();
                 let locale = connection.locale.clone();
                 let color = connection.color;
@@ -1557,6 +1674,7 @@ impl NetServer {
                 connection.has_connected = has_connected;
                 connection.has_begun_connecting = has_begun_connecting;
                 connection.has_disconnected |= has_disconnected;
+                connection.player_added = player_added;
                 connection.name = name;
                 connection.locale = locale;
                 connection.color = color;
@@ -1578,6 +1696,7 @@ impl NetServer {
                 let has_connected = connection.has_connected;
                 let has_begun_connecting = connection.has_begun_connecting;
                 let has_disconnected = connection.has_disconnected;
+                let player_added = connection.player_added;
                 let name = connection.name.clone();
                 let locale = connection.locale.clone();
                 let color = connection.color;
@@ -1595,6 +1714,7 @@ impl NetServer {
                 connection.has_connected = has_connected;
                 connection.has_begun_connecting = has_begun_connecting;
                 connection.has_disconnected |= has_disconnected;
+                connection.player_added = player_added;
                 connection.name = name;
                 connection.locale = locale;
                 connection.color = color;
@@ -1633,8 +1753,8 @@ mod tests {
         ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
         DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback,
         KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
-        PingResponseCallPacket, ProviderEvent, RotateBlockCallPacket, SentPacket,
-        StateSnapshotCallPacket, TileConfigCallPacket, TileTapCallPacket,
+        PingResponseCallPacket, ProviderEvent, RequestDebugStatusCallPacket, RotateBlockCallPacket,
+        SentPacket, StateSnapshotCallPacket, TileConfigCallPacket, TileTapCallPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
     use crate::mindustry::world::block::Block;
@@ -1892,6 +2012,7 @@ mod tests {
         assert!(connection.has_connected);
         assert!(connection.has_begun_connecting);
         assert!(connection.has_disconnected);
+        assert!(!connection.player_added);
         assert_eq!(state.last_connect_validation_connection_id, Some(12));
         assert!(state
             .last_connect_validation_plan
@@ -2787,5 +2908,94 @@ mod tests {
         assert_eq!(state.ping_requests_seen, 1);
         assert_eq!(state.ping_responses_sent, 1);
         assert!(state.last_ping_error.is_none());
+    }
+
+    #[test]
+    fn request_debug_status_sends_reliable_and_unreliable_java_flags_on_update() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if matches!(packet, PacketKind::RequestDebugStatusCallPacket(_)) {
+                seen_handler.lock().unwrap().push("debug");
+            }
+        });
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(61),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "10.0.0.61:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(61),
+                false,
+                PacketKind::ConnectPacket(connect_packet("player")),
+            );
+            net.handle_server_received_from_connection(
+                Some(61),
+                false,
+                PacketKind::ConnectConfirmCallPacket(ConnectConfirmCallPacket),
+            );
+            net.handle_server_received_from_connection(
+                Some(61),
+                true,
+                PacketKind::RequestDebugStatusCallPacket(RequestDebugStatusCallPacket),
+            );
+        }
+
+        {
+            let state = server.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.debug_status_requests_seen, 1);
+            assert_eq!(state.pending_debug_status_connections, vec![61]);
+            let connection = state.connection_states.get(&61).unwrap();
+            assert!(connection.has_connected);
+            assert!(connection.has_begun_connecting);
+            assert!(connection.player_added);
+        }
+
+        server.update();
+
+        assert_eq!(*seen.lock().unwrap(), vec!["debug"]);
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0].0, 61);
+        assert_eq!(sent[1].0, 61);
+        assert!(sent[0].2);
+        assert!(!sent[1].2);
+
+        let expected_value = 2 | 4 | 8;
+        assert!(matches!(
+            sent[0].1,
+            PacketKind::DebugStatusClientCallPacket(packet)
+                if packet.value == expected_value
+                    && packet.last_client_snapshot == -1
+                    && packet.snapshots_sent == 0
+        ));
+        assert!(matches!(
+            sent[1].1,
+            PacketKind::DebugStatusClientUnreliableCallPacket(packet)
+                if packet.0.value == expected_value
+                    && packet.0.last_client_snapshot == -1
+                    && packet.0.snapshots_sent == 0
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert!(state.pending_debug_status_connections.is_empty());
+        assert_eq!(state.last_debug_status_connection_id, Some(61));
+        assert_eq!(state.last_debug_status.unwrap().value, expected_value);
+        assert_eq!(state.debug_status_responses_sent, 2);
+        assert!(state.last_debug_status_error.is_none());
     }
 }
