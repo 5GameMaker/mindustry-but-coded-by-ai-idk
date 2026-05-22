@@ -21,7 +21,8 @@ pub mod units;
 
 pub use abilities::{
     Ability, BasicAbility, ForceFieldAbility, ForceFieldHit, ForceFieldUpdate,
-    LiquidExplodeAbility, LiquidRegenAbility, RegenAbility, SpawnDeathAbility,
+    LiquidExplodeAbility, LiquidRegenAbility, RegenAbility, RepairFieldAbility, RepairFieldPulse,
+    RepairFieldTarget, SpawnDeathAbility,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;

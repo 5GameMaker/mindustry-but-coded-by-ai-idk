@@ -482,6 +482,128 @@ impl Ability for ForceFieldAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RepairFieldTarget {
+    pub damaged: bool,
+    pub max_health: f32,
+    pub same_type: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepairFieldPulse {
+    pub heals: Vec<f32>,
+    pub active_effect: bool,
+    pub timer: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepairFieldAbility {
+    pub base: BasicAbility,
+    pub amount: f32,
+    pub reload: f32,
+    pub range: f32,
+    pub heal_percent: f32,
+    pub parentize_effects: bool,
+    /// Multiplies healing to units of the same type by this amount.
+    pub same_type_heal_mult: f32,
+    pub timer: f32,
+    pub was_healed: bool,
+}
+
+impl Default for RepairFieldAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            amount: 1.0,
+            reload: 100.0,
+            range: 60.0,
+            heal_percent: 0.0,
+            parentize_effects: false,
+            same_type_heal_mult: 1.0,
+            timer: 0.0,
+            was_healed: false,
+        }
+    }
+}
+
+impl RepairFieldAbility {
+    pub fn new(amount: f32, reload: f32, range: f32) -> Self {
+        Self {
+            amount,
+            reload,
+            range,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_percent(amount: f32, reload: f32, range: f32, heal_percent: f32) -> Self {
+        Self {
+            amount,
+            reload,
+            range,
+            heal_percent,
+            ..Default::default()
+        }
+    }
+
+    pub fn heal_amount_for(&self, target: RepairFieldTarget) -> f32 {
+        let heal_mult = if target.same_type {
+            self.same_type_heal_mult
+        } else {
+            1.0
+        };
+        (self.amount + self.heal_percent / 100.0 * target.max_health) * heal_mult
+    }
+
+    pub fn update_targets(
+        &mut self,
+        delta: f32,
+        targets: &[RepairFieldTarget],
+    ) -> Option<RepairFieldPulse> {
+        self.timer += delta;
+
+        if self.timer < self.reload {
+            return None;
+        }
+
+        self.was_healed = targets.iter().any(|target| target.damaged);
+        let heals = targets
+            .iter()
+            .copied()
+            .map(|target| self.heal_amount_for(target))
+            .collect::<Vec<_>>();
+        self.timer = 0.0;
+
+        Some(RepairFieldPulse {
+            heals,
+            active_effect: self.was_healed,
+            timer: self.timer,
+        })
+    }
+
+    pub fn repairs_per_second(&self) -> f32 {
+        self.amount * 60.0 / self.reload
+    }
+
+    pub fn repair_percent_per_second(&self) -> f32 {
+        self.heal_percent * 60.0 / self.reload
+    }
+}
+
+impl Ability for RepairFieldAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
@@ -534,7 +656,7 @@ fn polygon_vertex(
 mod tests {
     use super::{
         Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
-        RegenAbility, SpawnDeathAbility,
+        RegenAbility, RepairFieldAbility, RepairFieldTarget, SpawnDeathAbility,
     };
 
     #[derive(Clone)]
@@ -660,5 +782,54 @@ mod tests {
         assert!(ability
             .absorb_bullet(50.0, 1, 2, true, (30.0, 0.0), (0.0, 0.0), 7.0)
             .is_none());
+    }
+
+    #[test]
+    fn repair_field_pulses_after_reload_and_heals_all_nearby_targets() {
+        let mut ability = RepairFieldAbility::with_percent(4.0, 10.0, 60.0, 5.0);
+        ability.same_type_heal_mult = 2.0;
+        let targets = [
+            RepairFieldTarget {
+                damaged: true,
+                max_health: 100.0,
+                same_type: false,
+            },
+            RepairFieldTarget {
+                damaged: false,
+                max_health: 200.0,
+                same_type: true,
+            },
+        ];
+
+        assert!(ability.update_targets(9.0, &targets).is_none());
+        let pulse = ability
+            .update_targets(1.0, &targets)
+            .expect("reload threshold should fire a pulse");
+
+        assert_eq!(pulse.heals, vec![9.0, 28.0]);
+        assert!(pulse.active_effect);
+        assert_eq!(pulse.timer, 0.0);
+        assert!(ability.was_healed);
+        assert_eq!(ability.repairs_per_second(), 24.0);
+        assert_eq!(ability.repair_percent_per_second(), 30.0);
+    }
+
+    #[test]
+    fn repair_field_can_pulse_without_active_effect_when_no_target_was_damaged() {
+        let mut ability = RepairFieldAbility::new(3.0, 5.0, 40.0);
+        let pulse = ability
+            .update_targets(
+                5.0,
+                &[RepairFieldTarget {
+                    damaged: false,
+                    max_health: 50.0,
+                    same_type: false,
+                }],
+            )
+            .expect("reload threshold should fire");
+
+        assert_eq!(pulse.heals, vec![3.0]);
+        assert!(!pulse.active_effect);
+        assert!(!ability.was_healed);
     }
 }
