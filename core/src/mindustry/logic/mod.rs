@@ -1,5 +1,6 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
+pub mod controllable;
 pub mod cutscene_action;
 pub mod fetch_type;
 pub mod l_readable;
@@ -9,6 +10,7 @@ pub mod query_shape;
 pub mod query_type;
 pub mod tile_layer;
 
+pub use controllable::Controllable;
 pub use cutscene_action::CutsceneAction;
 pub use fetch_type::FetchType;
 pub use l_readable::{LReadable, LReadable as LogicReadable};
@@ -10118,14 +10120,6 @@ impl LCategory {
     pub fn description_key(self) -> String {
         format!("lcategory.{}.description", self.name)
     }
-}
-
-pub trait Controllable {
-    type Object;
-
-    fn control(&mut self, access: LAccess, p1: f64, p2: f64, p3: f64, p4: f64);
-    fn control_object(&mut self, access: LAccess, p1: Self::Object, p2: f64, p3: f64, p4: f64);
-    fn team(&self) -> u8;
 }
 
 pub trait Ranged {
