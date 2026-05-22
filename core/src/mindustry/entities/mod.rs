@@ -9,6 +9,7 @@ pub mod leg_destroy_data;
 pub mod mover;
 pub mod pattern;
 pub mod predict;
+pub mod puddles;
 pub mod sized;
 pub mod target_priority;
 pub mod unit_sorts;
@@ -76,6 +77,10 @@ pub use pattern::{
     ShootSummon, Shot,
 };
 pub use predict::{intercept, intercept_positions};
+pub use puddles::{
+    react_puddle, PuddleDepositContext, PuddleDepositOutcome, PuddleDepositResult, PuddleEntry,
+    PuddleLiquidInfo, PuddleReactionResult, PuddleTileView, Puddles, MAX_LIQUID,
+};
 pub use sized::{EntityPosition, SizedEntity};
 pub use target_priority as TargetPriority;
 pub use unit_sorts::{
