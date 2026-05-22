@@ -433,6 +433,151 @@ impl EffectSpawnerPart {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapePartKind {
+    Circle,
+    Polygon { sides: i32 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapePartDrawItem {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub rotation: f32,
+    pub kind: ShapePartKind,
+    pub hollow: bool,
+    pub stroke: f32,
+    pub color: String,
+    pub color_to: Option<String>,
+    pub color_mix: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapePartDrawPlan {
+    pub layer: Option<f32>,
+    pub layer_offset: f32,
+    pub under_turret_shading: bool,
+    pub shapes: Vec<ShapePartDrawItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapePart {
+    pub config: DrawPartConfig,
+    pub circle: bool,
+    pub hollow: bool,
+    pub sides: i32,
+    pub radius: f32,
+    pub radius_to: f32,
+    pub stroke: f32,
+    pub stroke_to: f32,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub move_x: f32,
+    pub move_y: f32,
+    pub move_rot: f32,
+    pub rotate_speed: f32,
+    pub color: String,
+    pub color_to: Option<String>,
+    pub mirror: bool,
+    pub clamp_progress: bool,
+    pub progress: PartProgress,
+    pub layer: f32,
+    pub layer_offset: f32,
+}
+
+impl Default for ShapePart {
+    fn default() -> Self {
+        Self {
+            config: DrawPartConfig::default(),
+            circle: false,
+            hollow: false,
+            sides: 3,
+            radius: 3.0,
+            radius_to: -1.0,
+            stroke: 1.0,
+            stroke_to: -1.0,
+            x: 0.0,
+            y: 0.0,
+            rotation: 0.0,
+            move_x: 0.0,
+            move_y: 0.0,
+            move_rot: 0.0,
+            rotate_speed: 0.0,
+            color: "white".into(),
+            color_to: None,
+            mirror: false,
+            clamp_progress: true,
+            progress: PartProgress::Warmup,
+            layer: -1.0,
+            layer_offset: 0.0,
+        }
+    }
+}
+
+impl ShapePart {
+    pub fn draw_plan(&self, params: &PartParams, time: f32) -> ShapePartDrawPlan {
+        let prog = self.progress.get_clamp(params, time, self.clamp_progress);
+        let base_rot = time * self.rotate_speed;
+        let radius = if self.radius_to < 0.0 {
+            self.radius
+        } else {
+            lerp(self.radius, self.radius_to, prog)
+        };
+        let stroke = if self.stroke_to < 0.0 {
+            self.stroke
+        } else {
+            lerp(self.stroke, self.stroke_to, prog)
+        };
+        let len = if self.mirror && params.side_override == -1 {
+            2
+        } else {
+            1
+        };
+
+        let mut shapes = Vec::with_capacity(len);
+        for side in 0..len {
+            let i = if params.side_override == -1 {
+                side as i32
+            } else {
+                params.side_override
+            };
+            let sign = (if i == 0 { 1.0 } else { -1.0 }) * params.side_multiplier as f32;
+            let offset = rotate_offset(
+                params.rotation - 90.0,
+                (self.x + self.move_x * prog) * sign,
+                self.y + self.move_y * prog,
+            );
+            shapes.push(ShapePartDrawItem {
+                x: params.x + offset.0,
+                y: params.y + offset.1,
+                radius,
+                rotation: self.move_rot * prog * sign + params.rotation - 90.0 * sign
+                    + self.rotation * sign
+                    + base_rot * sign,
+                kind: if self.circle {
+                    ShapePartKind::Circle
+                } else {
+                    ShapePartKind::Polygon { sides: self.sides }
+                },
+                hollow: self.hollow,
+                stroke,
+                color: self.color.clone(),
+                color_to: self.color_to.clone(),
+                color_mix: prog,
+            });
+        }
+
+        ShapePartDrawPlan {
+            layer: (self.layer > 0.0).then_some(self.layer),
+            layer_offset: self.layer_offset,
+            under_turret_shading: self.config.under && self.config.turret_shading,
+            shapes,
+        }
+    }
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -461,7 +606,7 @@ fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
 mod tests {
     use super::{
         DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, PartMove, PartParams,
-        PartProgress,
+        PartProgress, ShapePart, ShapePartKind,
     };
 
     #[test]
@@ -618,5 +763,56 @@ mod tests {
         let paused = part.draw_plan(&params, 0.0, 1.0, true, &[0.0, 0.0], &[]);
         assert!(paused.spawns.is_empty());
         assert_eq!(paused.debug_rects.len(), 2);
+    }
+
+    #[test]
+    fn shape_part_draw_plan_interpolates_progress_mirroring_and_shape_rotation() {
+        let mut params = PartParams::default();
+        params.set(0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 200.0, 90.0);
+
+        let part = ShapePart {
+            mirror: true,
+            sides: 4,
+            radius: 3.0,
+            radius_to: 9.0,
+            stroke: 1.0,
+            stroke_to: 3.0,
+            x: 10.0,
+            y: 2.0,
+            rotation: 15.0,
+            move_x: 4.0,
+            move_y: 6.0,
+            move_rot: 20.0,
+            rotate_speed: 2.0,
+            color: "from".into(),
+            color_to: Some("to".into()),
+            layer: 5.0,
+            layer_offset: 0.25,
+            ..Default::default()
+        };
+
+        let plan = part.draw_plan(&params, 3.0);
+        assert_eq!(plan.layer, Some(5.0));
+        assert_eq!(plan.layer_offset, 0.25);
+        assert_eq!(plan.shapes.len(), 2);
+        assert_eq!(plan.shapes[0].kind, ShapePartKind::Polygon { sides: 4 });
+        assert_eq!(plan.shapes[0].radius, 6.0);
+        assert_eq!(plan.shapes[0].stroke, 2.0);
+        assert_eq!(plan.shapes[0].color, "from");
+        assert_eq!(plan.shapes[0].color_to.as_deref(), Some("to"));
+        assert_eq!(plan.shapes[0].color_mix, 0.5);
+        assert_eq!((plan.shapes[0].x, plan.shapes[0].y), (112.0, 205.0));
+        assert_eq!(plan.shapes[0].rotation, 31.0);
+        assert_eq!((plan.shapes[1].x, plan.shapes[1].y), (88.0, 205.0));
+        assert_eq!(plan.shapes[1].rotation, 149.0);
+
+        let circle = ShapePart {
+            circle: true,
+            hollow: true,
+            ..Default::default()
+        }
+        .draw_plan(&params, 0.0);
+        assert_eq!(circle.shapes[0].kind, ShapePartKind::Circle);
+        assert!(circle.shapes[0].hollow);
     }
 }
