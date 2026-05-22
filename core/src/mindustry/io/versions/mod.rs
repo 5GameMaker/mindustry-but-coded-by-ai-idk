@@ -12,11 +12,13 @@ use crate::mindustry::io::{
 
 pub mod save1;
 pub mod save2;
+pub mod save3;
 pub mod save4;
 pub mod save9;
 
 pub use save1::Save1;
 pub use save2::Save2;
+pub use save3::Save3;
 pub use save4::Save4;
 pub use save9::Save9;
 
@@ -150,6 +152,42 @@ pub fn read_legacy_team_blocks<R: Read>(read: &mut R) -> io::Result<LegacyTeamBl
                     config,
                 });
             }
+        }
+        groups.push(LegacyTeamBlockGroup { team_id, plans });
+    }
+
+    Ok(LegacyTeamBlocks { groups })
+}
+
+pub fn read_legacy_int_config_team_blocks<R: Read>(read: &mut R) -> io::Result<LegacyTeamBlocks> {
+    let team_count = read_i32(read)?;
+    if team_count < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "negative legacy team block group count",
+        ));
+    }
+
+    let mut groups = Vec::with_capacity(team_count as usize);
+    for _ in 0..team_count {
+        let team_id = read_i32(read)?;
+        let block_count = read_i32(read)?;
+        if block_count < 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "negative legacy team block plan count",
+            ));
+        }
+
+        let mut plans = Vec::with_capacity(block_count as usize);
+        for _ in 0..block_count {
+            plans.push(LegacyTeamBlockPlan {
+                x: read_i16(read)?,
+                y: read_i16(read)?,
+                rotation: read_i16(read)?,
+                block_id: read_i16(read)?,
+                config: TypeValue::Int(read_i32(read)?),
+            });
         }
         groups.push(LegacyTeamBlockGroup { team_id, plans });
     }
