@@ -21,6 +21,8 @@ pub type BinaryPacketHandler = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send + 'static>>
 pub const PLAN_PREVIEW_SYNC_INTERVAL_MS: i64 = 500;
 pub const PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
 pub const JAVA_MAX_NAME_BYTES: usize = 40;
+pub const JAVA_CHAT_SPAM_WINDOW_MS: i64 = 2_000;
+pub const JAVA_CHAT_SPAM_LIMIT: i32 = 20;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerPreviewPlanSource {
@@ -194,6 +196,7 @@ pub struct NetServerState {
     pub last_chat_received_at: Option<Instant>,
     pub chat_packets_seen: u64,
     pub chat_packets_filtered: u64,
+    pub chat_packets_rate_limited: u64,
     pub last_state_snapshot_connection_id: Option<i32>,
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_sent_at: Option<Instant>,
@@ -1734,6 +1737,31 @@ impl NetServer {
         state.chat_packets_seen += 1;
         state.last_updated_at = Some(now);
 
+        let rate_limited_address = connection_id.and_then(|connection_id| {
+            state
+                .connection_states
+                .get_mut(&connection_id)
+                .and_then(|connection| {
+                    if connection.chat_rate.allow(
+                        JAVA_CHAT_SPAM_WINDOW_MS,
+                        JAVA_CHAT_SPAM_LIMIT,
+                        current_millis,
+                    ) {
+                        None
+                    } else {
+                        connection.kick_reason(KickReason::Kick);
+                        Some(connection.address.clone())
+                    }
+                })
+        });
+
+        if let Some(address) = rate_limited_address {
+            state.chat_packets_filtered += 1;
+            state.chat_packets_rate_limited += 1;
+            state.administration.blacklist_dos(address);
+            return None;
+        }
+
         let filtered = if packet.message.starts_with('/') {
             Some(packet.message.clone())
         } else {
@@ -2827,6 +2855,57 @@ mod tests {
             Some("/foo")
         );
         assert_eq!(state.events.len(), 2);
+    }
+
+    #[test]
+    fn chat_spam_rate_limit_kicks_and_blacklists_like_java_entry_guard() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("9.9.9.9");
+            connection.name = "spammer".into();
+            connection.uuid = "uuid-spam".into();
+            state.connection_states.insert(21, connection);
+        }
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if let PacketKind::SendChatMessageCallPacket(packet) = packet {
+                seen_handler.lock().unwrap().push(packet.message.clone());
+            }
+        });
+
+        {
+            let mut net = server.net_mut();
+            for index in 0..=20 {
+                net.handle_server_received_from_connection(
+                    Some(21),
+                    true,
+                    PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                        message: format!("msg-{index}"),
+                    }),
+                );
+            }
+        }
+
+        assert_eq!(seen.lock().unwrap().len(), 20);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.chat_packets_seen, 21);
+        assert_eq!(state.chat_packets_filtered, 1);
+        assert_eq!(state.chat_packets_rate_limited, 1);
+        assert!(state.administration.is_dos_blacklisted("9.9.9.9"));
+        let connection = state.connection_states.get(&21).unwrap();
+        assert!(connection.kicked);
+        assert!(connection.has_disconnected);
+        assert!(matches!(
+            connection.sent.last(),
+            Some((SentPacket::KickReason(KickReason::Kick), true))
+        ));
     }
 
     #[test]
