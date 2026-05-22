@@ -398,6 +398,52 @@ impl SeqEffect {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WrapEffect {
+    pub base: Effect,
+    pub effect: Effect,
+    pub color: DecalColor,
+    pub rotation: f32,
+}
+
+impl Default for WrapEffect {
+    fn default() -> Self {
+        Self {
+            base: Effect::default(),
+            effect: Effect::default(),
+            color: DecalColor::WHITE,
+            rotation: 0.0,
+        }
+    }
+}
+
+impl WrapEffect {
+    pub fn new(effect: Effect, color: DecalColor, rotation: f32) -> Self {
+        Self {
+            effect,
+            color,
+            rotation,
+            ..Default::default()
+        }
+    }
+
+    pub fn init_defaults(&mut self) {
+        self.base.clip = self.effect.clip;
+        self.base.lifetime = self.effect.lifetime;
+    }
+
+    pub fn create_plan(
+        &mut self,
+        x: f32,
+        y: f32,
+        data: Option<String>,
+        context: EffectCreateContext,
+    ) -> Option<EffectCreatePlan> {
+        self.effect
+            .create_plan(x, y, self.rotation, self.color, data, None, context)
+    }
+}
+
 pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: f32) -> f32 {
     let dx = x - camera_x;
     let dy = y - camera_y;
@@ -674,6 +720,37 @@ mod tests {
                 data: None,
             })
             .is_none());
+    }
+
+    #[test]
+    fn wrap_effect_syncs_child_lifetime_and_forwards_fixed_color_rotation() {
+        let child = Effect::with_lifetime(4, 33.0, 77.0).base_rotation(5.0);
+        let color = DecalColor {
+            r: 0.2,
+            g: 0.4,
+            b: 0.6,
+            a: 0.8,
+        };
+        let mut wrap = WrapEffect::new(child, color, 90.0);
+
+        wrap.init_defaults();
+        assert_eq!(wrap.base.lifetime, 33.0);
+        assert_eq!(wrap.base.clip, 77.0);
+
+        let plan = wrap
+            .create_plan(
+                3.0,
+                4.0,
+                Some("wrapped".into()),
+                EffectCreateContext::default(),
+            )
+            .expect("wrapped child should create");
+        assert_eq!(plan.spawn.effect_id, 4);
+        assert_eq!(plan.spawn.x, 3.0);
+        assert_eq!(plan.spawn.y, 4.0);
+        assert_eq!(plan.spawn.rotation, 95.0);
+        assert_eq!(plan.spawn.color, color);
+        assert_eq!(plan.spawn.data.as_deref(), Some("wrapped"));
     }
 
     #[test]
