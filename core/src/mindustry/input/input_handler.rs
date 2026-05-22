@@ -6,13 +6,15 @@
 
 use crate::mindustry::entities::comp::{
     building::{BuildingConfigChange, BuildingConfigRollback},
+    player::PlayerUnitState,
     BuildingComp, PayloadState, PlayerComp, UnitComp,
 };
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
 use crate::mindustry::net::{
-    PickedBuildPayloadCallPacket, RequestBuildPayloadCallPacket, RequestItemCallPacket,
-    RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, TransferItemToCallPacket,
+    BuildingControlSelectCallPacket, PickedBuildPayloadCallPacket, RequestBuildPayloadCallPacket,
+    RequestItemCallPacket, RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
+    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket,
 };
 use crate::mindustry::world::meta::BuildVisibility;
 
@@ -196,6 +198,82 @@ pub struct PickedBuildPayloadOutcome {
     pub packet: Option<PickedBuildPayloadCallPacket>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildingControlSelectRejectReason {
+    MissingPlayer,
+    MissingBuild,
+    PlayerDead,
+    AdminDenied,
+    TeamMismatch,
+    CannotControl,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BuildingControlSelectContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildingControlSelectOutcome {
+    pub accepted: bool,
+    pub rejection: Option<BuildingControlSelectRejectReason>,
+    pub packet: Option<BuildingControlSelectCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitControlRejectReason {
+    MissingPlayer,
+    MissingUnit,
+    AdminDenied,
+    PossessionDisabled,
+    InvalidUnit,
+    TeamMismatch,
+    CannotControl,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UnitControlContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+    pub possession_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitControlOutcome {
+    pub accepted: bool,
+    pub rejection: Option<UnitControlRejectReason>,
+    pub previous_unit: Option<UnitRef>,
+    pub current_unit: Option<UnitRef>,
+    pub packet: Option<UnitControlCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitClearRejectReason {
+    MissingPlayer,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UnitClearContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+    pub dock_respawn_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitClearOutcome {
+    pub accepted: bool,
+    pub rejection: Option<UnitClearRejectReason>,
+    pub previous_unit: Option<UnitRef>,
+    pub cleared_unit: bool,
+    pub dock_respawn: bool,
+    pub packet: Option<UnitClearCallPacket>,
+    pub should_raise_validate: bool,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -297,6 +375,58 @@ impl PickedBuildPayloadOutcome {
             accepted: false,
             rejection: Some(reason),
             packet: None,
+        }
+    }
+}
+
+impl BuildingControlSelectOutcome {
+    fn rejected(
+        context: &BuildingControlSelectContext,
+        reason: BuildingControlSelectRejectReason,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl UnitControlOutcome {
+    fn rejected(
+        context: &UnitControlContext,
+        reason: UnitControlRejectReason,
+        previous_unit: Option<UnitRef>,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            previous_unit,
+            current_unit: previous_unit,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl UnitClearOutcome {
+    fn rejected(
+        context: &UnitClearContext,
+        reason: UnitClearRejectReason,
+        previous_unit: Option<UnitRef>,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            previous_unit,
+            cleared_unit: false,
+            dock_respawn: false,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
         }
     }
 }
@@ -849,6 +979,238 @@ pub fn picked_build_payload(
             build_pos: Some(build.tile_pos),
             on_ground,
         }),
+    }
+}
+
+pub fn building_control_select<A, C>(
+    context: BuildingControlSelectContext,
+    player: Option<&PlayerComp>,
+    build: Option<&BuildingComp>,
+    admin_allows: A,
+    can_control_select: C,
+) -> BuildingControlSelectOutcome
+where
+    A: FnOnce(&PlayerComp, &BuildingComp) -> bool,
+    C: FnOnce(&PlayerComp, &BuildingComp) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return BuildingControlSelectOutcome::rejected(
+            &context,
+            BuildingControlSelectRejectReason::MissingPlayer,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    let Some(build) = build else {
+        return BuildingControlSelectOutcome::rejected(
+            &context,
+            BuildingControlSelectRejectReason::MissingBuild,
+            false,
+        );
+    };
+
+    if player.dead() {
+        return BuildingControlSelectOutcome::rejected(
+            &context,
+            BuildingControlSelectRejectReason::PlayerDead,
+            false,
+        );
+    }
+
+    if !admin_allows(player, build) {
+        return BuildingControlSelectOutcome::rejected(
+            &context,
+            BuildingControlSelectRejectReason::AdminDenied,
+            true,
+        );
+    }
+
+    if player.team != build.team {
+        return BuildingControlSelectOutcome::rejected(
+            &context,
+            BuildingControlSelectRejectReason::TeamMismatch,
+            false,
+        );
+    }
+
+    if !can_control_select(player, build) {
+        return BuildingControlSelectOutcome::rejected(
+            &context,
+            BuildingControlSelectRejectReason::CannotControl,
+            false,
+        );
+    }
+
+    BuildingControlSelectOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(BuildingControlSelectCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            build: BuildingRef::new(build.tile_pos),
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_building_control_select_packet(
+    build: &BuildingComp,
+) -> BuildingControlSelectCallPacket {
+    BuildingControlSelectCallPacket {
+        player: EntityRef::null(),
+        build: BuildingRef::new(build.tile_pos),
+    }
+}
+
+pub fn unit_control<A>(
+    context: UnitControlContext,
+    player: Option<&mut PlayerComp>,
+    unit: Option<&UnitComp>,
+    is_ai: bool,
+    player_controllable: bool,
+    admin_allows: A,
+) -> UnitControlOutcome
+where
+    A: FnOnce(&PlayerComp, Option<&UnitComp>) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return UnitControlOutcome::rejected(
+            &context,
+            UnitControlRejectReason::MissingPlayer,
+            None,
+            false,
+        );
+    }
+    let player = player.unwrap();
+    let previous_unit = player.unit_ref();
+
+    if !context.possession_allowed {
+        return UnitControlOutcome::rejected(
+            &context,
+            UnitControlRejectReason::PossessionDisabled,
+            previous_unit,
+            true,
+        );
+    }
+
+    if !admin_allows(player, unit) {
+        return UnitControlOutcome::rejected(
+            &context,
+            UnitControlRejectReason::AdminDenied,
+            previous_unit,
+            true,
+        );
+    }
+
+    let Some(unit) = unit else {
+        return UnitControlOutcome::rejected(
+            &context,
+            UnitControlRejectReason::MissingUnit,
+            previous_unit,
+            false,
+        );
+    };
+
+    if unit.health.dead || !unit.is_valid() || !is_ai {
+        return UnitControlOutcome::rejected(
+            &context,
+            UnitControlRejectReason::InvalidUnit,
+            previous_unit,
+            true,
+        );
+    }
+
+    if unit.team_id() != player.team {
+        return UnitControlOutcome::rejected(
+            &context,
+            UnitControlRejectReason::TeamMismatch,
+            previous_unit,
+            true,
+        );
+    }
+
+    if !player_controllable {
+        return UnitControlOutcome::rejected(
+            &context,
+            UnitControlRejectReason::CannotControl,
+            previous_unit,
+            true,
+        );
+    }
+
+    let current_unit = UnitRef::Unit { id: unit.id() };
+    player.set_unit_state(PlayerUnitState::unit(unit.id()).with_valid(true));
+
+    UnitControlOutcome {
+        accepted: true,
+        rejection: None,
+        previous_unit,
+        current_unit: Some(current_unit),
+        packet: Some(UnitControlCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            unit: current_unit,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_unit_control_packet(unit: Option<UnitRef>) -> UnitControlCallPacket {
+    UnitControlCallPacket {
+        player: EntityRef::null(),
+        unit: unit.unwrap_or(UnitRef::Null),
+    }
+}
+
+pub fn unit_clear<A>(
+    context: UnitClearContext,
+    player: Option<&mut PlayerComp>,
+    admin_allows: A,
+) -> UnitClearOutcome
+where
+    A: FnOnce(&PlayerComp) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return UnitClearOutcome::rejected(
+            &context,
+            UnitClearRejectReason::MissingPlayer,
+            None,
+            false,
+        );
+    }
+    let player = player.unwrap();
+    let previous_unit = player.unit_ref();
+
+    if !admin_allows(player) {
+        return UnitClearOutcome::rejected(
+            &context,
+            UnitClearRejectReason::AdminDenied,
+            previous_unit,
+            true,
+        );
+    }
+
+    let mut cleared_unit = false;
+    if !context.dock_respawn_available {
+        player.clear_unit();
+        cleared_unit = true;
+    }
+
+    UnitClearOutcome {
+        accepted: true,
+        rejection: None,
+        previous_unit,
+        cleared_unit,
+        dock_respawn: context.dock_respawn_available,
+        packet: Some(UnitClearCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_unit_clear_packet() -> UnitClearCallPacket {
+    UnitClearCallPacket {
+        player: EntityRef::null(),
     }
 }
 
@@ -1409,5 +1771,172 @@ mod tests {
 
         assert_eq!(packet.player, EntityRef::null());
         assert_eq!(packet.build, BuildingRef::new(point2_pack(26, 27)));
+    }
+
+    #[test]
+    fn building_control_select_accepts_valid_build_and_records_packet() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(51).with_valid(true));
+        let building = BuildingComp::new(point2_pack(28, 29), item_block(), TeamId(1));
+
+        let outcome = building_control_select(
+            BuildingControlSelectContext {
+                player: Some(EntityRef::new(12)),
+                local_player: false,
+            },
+            Some(&player),
+            Some(&building),
+            |player, build| player.team == build.team,
+            |_, _| true,
+        );
+
+        assert!(outcome.accepted);
+        assert!(!outcome.should_raise_validate);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(12));
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(28, 29)));
+    }
+
+    #[test]
+    fn building_control_select_rejects_admin_denied_as_validate_error() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(51).with_valid(true));
+        let building = BuildingComp::new(point2_pack(28, 29), item_block(), TeamId(1));
+
+        let outcome = building_control_select(
+            BuildingControlSelectContext {
+                player: Some(EntityRef::new(12)),
+                local_player: false,
+            },
+            Some(&player),
+            Some(&building),
+            |_, _| false,
+            |_, _| true,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(BuildingControlSelectRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn unit_control_accepts_valid_unit_and_updates_player_unit() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(51).with_valid(true));
+        let mut unit = UnitComp::new(52, unit_type(10), TeamId(1));
+        unit.add();
+
+        let outcome = unit_control(
+            UnitControlContext {
+                player: Some(EntityRef::new(13)),
+                local_player: false,
+                possession_allowed: true,
+            },
+            Some(&mut player),
+            Some(&unit),
+            true,
+            true,
+            |player, unit| unit.is_some_and(|unit| player.team == unit.team_id()),
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.previous_unit, Some(UnitRef::Unit { id: 51 }));
+        assert_eq!(outcome.current_unit, Some(UnitRef::Unit { id: 52 }));
+        assert_eq!(player.unit_ref(), Some(UnitRef::Unit { id: 52 }));
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(13));
+        assert_eq!(packet.unit, UnitRef::Unit { id: 52 });
+    }
+
+    #[test]
+    fn unit_control_rejects_team_mismatch_without_mutating_player() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(51).with_valid(true));
+        let mut unit = UnitComp::new(53, unit_type(10), TeamId(2));
+        unit.add();
+
+        let outcome = unit_control(
+            UnitControlContext {
+                player: Some(EntityRef::new(13)),
+                local_player: false,
+                possession_allowed: true,
+            },
+            Some(&mut player),
+            Some(&unit),
+            true,
+            true,
+            |_, _| true,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(UnitControlRejectReason::TeamMismatch)
+        );
+        assert!(outcome.should_raise_validate);
+        assert_eq!(player.unit_ref(), Some(UnitRef::Unit { id: 51 }));
+    }
+
+    #[test]
+    fn unit_clear_accepts_respawn_and_clears_player_unit() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(54).with_valid(true));
+
+        let outcome = unit_clear(
+            UnitClearContext {
+                player: Some(EntityRef::new(14)),
+                local_player: false,
+                dock_respawn_available: false,
+            },
+            Some(&mut player),
+            |_| true,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.previous_unit, Some(UnitRef::Unit { id: 54 }));
+        assert!(outcome.cleared_unit);
+        assert!(!outcome.dock_respawn);
+        assert_eq!(player.unit_ref(), None);
+        assert_eq!(outcome.packet.unwrap().player, EntityRef::new(14));
+    }
+
+    #[test]
+    fn unit_clear_rejects_forbidden_respawn_without_packet() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(54).with_valid(true));
+
+        let outcome = unit_clear(
+            UnitClearContext {
+                player: Some(EntityRef::new(14)),
+                local_player: false,
+                dock_respawn_available: false,
+            },
+            Some(&mut player),
+            |_| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(outcome.rejection, Some(UnitClearRejectReason::AdminDenied));
+        assert!(outcome.should_raise_validate);
+        assert_eq!(player.unit_ref(), Some(UnitRef::Unit { id: 54 }));
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn control_client_packets_use_client_payload_shape() {
+        let building = BuildingComp::new(point2_pack(30, 31), item_block(), TeamId(1));
+        let build_packet = client_building_control_select_packet(&building);
+        let unit_packet = client_unit_control_packet(Some(UnitRef::Unit { id: 55 }));
+        let clear_packet = client_unit_clear_packet();
+
+        assert_eq!(build_packet.player, EntityRef::null());
+        assert_eq!(build_packet.build, BuildingRef::new(point2_pack(30, 31)));
+        assert_eq!(unit_packet.player, EntityRef::null());
+        assert_eq!(unit_packet.unit, UnitRef::Unit { id: 55 });
+        assert_eq!(clear_packet.player, EntityRef::null());
     }
 }
