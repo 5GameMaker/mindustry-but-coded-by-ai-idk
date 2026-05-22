@@ -8,6 +8,7 @@ pub mod graphics_type;
 pub mod l_category;
 pub mod l_locate;
 pub mod l_readable;
+pub mod l_unit_control;
 pub mod l_writable;
 pub mod logic_rule;
 pub mod message_type;
@@ -28,6 +29,7 @@ pub use graphics_type::GraphicsType;
 pub use l_category::LCategory;
 pub use l_locate::LLocate;
 pub use l_readable::{LReadable, LReadable as LogicReadable};
+pub use l_unit_control::LUnitControl;
 pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use logic_rule::LogicRule;
 pub use message_type::MessageType;
@@ -9482,122 +9484,6 @@ impl RadarUnitView {
             is_boss: false,
             is_grounded: false,
             targetable: true,
-        }
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LUnitControl {
-    Idle,
-    Stop,
-    Move,
-    Approach,
-    Pathfind,
-    AutoPathfind,
-    Boost,
-    Target,
-    Targetp,
-    ItemDrop,
-    ItemTake,
-    PayDrop,
-    PayTake,
-    PayEnter,
-    Mine,
-    Flag,
-    Build,
-    Deconstruct,
-    GetBlock,
-    Within,
-    Unbind,
-}
-
-impl LUnitControl {
-    pub const ALL: [LUnitControl; 21] = [
-        LUnitControl::Idle,
-        LUnitControl::Stop,
-        LUnitControl::Move,
-        LUnitControl::Approach,
-        LUnitControl::Pathfind,
-        LUnitControl::AutoPathfind,
-        LUnitControl::Boost,
-        LUnitControl::Target,
-        LUnitControl::Targetp,
-        LUnitControl::ItemDrop,
-        LUnitControl::ItemTake,
-        LUnitControl::PayDrop,
-        LUnitControl::PayTake,
-        LUnitControl::PayEnter,
-        LUnitControl::Mine,
-        LUnitControl::Flag,
-        LUnitControl::Build,
-        LUnitControl::Deconstruct,
-        LUnitControl::GetBlock,
-        LUnitControl::Within,
-        LUnitControl::Unbind,
-    ];
-
-    pub const WIRE_NAMES: [&'static str; 21] = [
-        "idle",
-        "stop",
-        "move",
-        "approach",
-        "pathfind",
-        "autoPathfind",
-        "boost",
-        "target",
-        "targetp",
-        "itemDrop",
-        "itemTake",
-        "payDrop",
-        "payTake",
-        "payEnter",
-        "mine",
-        "flag",
-        "build",
-        "deconstruct",
-        "getBlock",
-        "within",
-        "unbind",
-    ];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn wire_name(self) -> &'static str {
-        Self::WIRE_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_wire_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|value| value.wire_name() == name)
-    }
-
-    pub const fn params(self) -> &'static [&'static str] {
-        match self {
-            LUnitControl::Move => &["x", "y"],
-            LUnitControl::Approach => &["x", "y", "radius"],
-            LUnitControl::Pathfind => &["x", "y"],
-            LUnitControl::Boost => &["enable"],
-            LUnitControl::Target => &["x", "y", "shoot"],
-            LUnitControl::Targetp => &["unit", "shoot"],
-            LUnitControl::ItemDrop => &["to", "amount"],
-            LUnitControl::ItemTake => &["from", "item", "amount"],
-            LUnitControl::PayTake => &["takeUnits"],
-            LUnitControl::Mine => &["x", "y"],
-            LUnitControl::Flag => &["value"],
-            LUnitControl::Build => &["x", "y", "block", "rotation", "config"],
-            LUnitControl::Deconstruct => &["x", "y"],
-            LUnitControl::GetBlock => &["x", "y", "type", "building", "floor"],
-            LUnitControl::Within => &["x", "y", "radius", "result"],
-            _ => &[],
         }
     }
 }
