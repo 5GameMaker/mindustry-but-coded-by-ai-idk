@@ -157,7 +157,99 @@ pub fn load() -> Vec<StatusEffect> {
     dynamic.permanent = true;
     statuses.push(dynamic);
 
+    wire_status_effect_relationships(&mut statuses);
     statuses
+}
+
+fn wire_status_effect_relationships(statuses: &mut [StatusEffect]) {
+    wire_opposite(statuses, "burning", "wet");
+    wire_opposite(statuses, "burning", "freezing");
+    wire_affinity(statuses, "burning", "tarred");
+
+    wire_opposite(statuses, "freezing", "melting");
+    wire_opposite(statuses, "freezing", "burning");
+    wire_affinity(statuses, "freezing", "blasted");
+
+    wire_opposite(statuses, "slow", "fast");
+    wire_opposite(statuses, "fast", "slow");
+
+    wire_affinity(statuses, "wet", "shocked");
+    wire_opposite(statuses, "wet", "burning");
+    wire_opposite(statuses, "wet", "melting");
+
+    wire_opposite(statuses, "melting", "wet");
+    wire_opposite(statuses, "melting", "freezing");
+    wire_affinity(statuses, "melting", "tarred");
+
+    wire_affinity(statuses, "tarred", "melting");
+    wire_affinity(statuses, "tarred", "burning");
+}
+
+fn wire_affinity(statuses: &mut [StatusEffect], source_name: &str, target_name: &str) {
+    let Some((source_index, target_index)) =
+        status_pair_indices(statuses, source_name, target_name)
+    else {
+        return;
+    };
+
+    let source_name = statuses[source_index].name().to_string();
+    let target_name = statuses[target_index].name().to_string();
+    let Some((source, target)) = pair_mut(statuses, source_index, target_index) else {
+        return;
+    };
+
+    source.add_affinity(target_name);
+    push_unique_name(&mut target.affinities, source_name);
+}
+
+fn wire_opposite(statuses: &mut [StatusEffect], first_name: &str, second_name: &str) {
+    let Some((first_index, second_index)) = status_pair_indices(statuses, first_name, second_name)
+    else {
+        return;
+    };
+
+    let first_name = statuses[first_index].name().to_string();
+    let second_name = statuses[second_index].name().to_string();
+    let Some((first, second)) = pair_mut(statuses, first_index, second_index) else {
+        return;
+    };
+
+    first.add_opposite(second_name);
+    second.add_opposite(first_name);
+}
+
+fn status_pair_indices(
+    statuses: &[StatusEffect],
+    first_name: &str,
+    second_name: &str,
+) -> Option<(usize, usize)> {
+    let first = status_index(statuses, first_name)?;
+    let second = status_index(statuses, second_name)?;
+    Some((first, second))
+}
+
+fn status_index(statuses: &[StatusEffect], name: &str) -> Option<usize> {
+    statuses.iter().position(|status| status.name() == name)
+}
+
+fn pair_mut<T>(values: &mut [T], first: usize, second: usize) -> Option<(&mut T, &mut T)> {
+    if first == second || first >= values.len() || second >= values.len() {
+        return None;
+    }
+
+    if first < second {
+        let (left, right) = values.split_at_mut(second);
+        Some((&mut left[first], &mut right[0]))
+    } else {
+        let (left, right) = values.split_at_mut(first);
+        Some((&mut right[0], &mut left[second]))
+    }
+}
+
+fn push_unique_name(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
 }
 
 #[cfg(test)]
@@ -172,6 +264,12 @@ mod tests {
             .iter()
             .find(|status| status.base.mappable.name == name)
             .unwrap_or_else(|| panic!("missing status effect: {name}"))
+    }
+
+    fn sorted_names(values: &[String]) -> Vec<&str> {
+        let mut values = values.iter().map(String::as_str).collect::<Vec<_>>();
+        values.sort_unstable();
+        values
     }
 
     #[test]
@@ -287,5 +385,89 @@ mod tests {
         assert!(dynamic.dynamic);
         assert!(dynamic.permanent);
         assert!(!dynamic.show);
+    }
+
+    #[test]
+    fn vanilla_status_effect_affinities_and_opposites_match_upstream_init_blocks() {
+        let statuses = load();
+
+        assert_eq!(
+            sorted_names(&status(&statuses, "burning").opposites),
+            vec!["freezing", "wet"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "burning").affinities),
+            vec!["tarred"]
+        );
+
+        assert_eq!(
+            sorted_names(&status(&statuses, "freezing").opposites),
+            vec!["burning", "melting"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "freezing").affinities),
+            vec!["blasted"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "blasted").affinities),
+            vec!["freezing"]
+        );
+
+        assert_eq!(
+            sorted_names(&status(&statuses, "slow").opposites),
+            vec!["fast"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "fast").opposites),
+            vec!["slow"]
+        );
+
+        assert_eq!(
+            sorted_names(&status(&statuses, "wet").opposites),
+            vec!["burning", "melting"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "wet").affinities),
+            vec!["shocked"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "shocked").affinities),
+            vec!["wet"]
+        );
+
+        assert_eq!(
+            sorted_names(&status(&statuses, "melting").opposites),
+            vec!["freezing", "wet"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "melting").affinities),
+            vec!["tarred"]
+        );
+        assert_eq!(
+            sorted_names(&status(&statuses, "tarred").affinities),
+            vec!["burning", "melting"]
+        );
+    }
+
+    #[test]
+    fn vanilla_status_effect_transition_directions_match_java_affinity_and_opposite_rules() {
+        let statuses = load();
+
+        assert!(status(&statuses, "burning").reacts_with_name("wet"));
+        assert!(status(&statuses, "wet").reacts_with_name("burning"));
+        assert!(status(&statuses, "freezing").reacts_with_name("melting"));
+        assert!(status(&statuses, "melting").reacts_with_name("freezing"));
+        assert!(status(&statuses, "slow").reacts_with_name("fast"));
+        assert!(status(&statuses, "fast").reacts_with_name("slow"));
+
+        assert!(status(&statuses, "burning").reacts_with_name("tarred"));
+        assert!(status(&statuses, "tarred").reacts_with_name("burning"));
+        assert!(status(&statuses, "melting").reacts_with_name("tarred"));
+        assert!(status(&statuses, "tarred").reacts_with_name("melting"));
+
+        assert!(status(&statuses, "freezing").reacts_with_name("blasted"));
+        assert!(!status(&statuses, "blasted").reacts_with_name("freezing"));
+        assert!(status(&statuses, "wet").reacts_with_name("shocked"));
+        assert!(!status(&statuses, "shocked").reacts_with_name("wet"));
     }
 }
