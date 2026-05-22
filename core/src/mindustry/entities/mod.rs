@@ -7,6 +7,7 @@ pub mod leg_destroy_data;
 pub mod mover;
 pub mod pattern;
 pub mod sized;
+pub mod target_priority;
 pub mod unit_sorts;
 pub mod units;
 
@@ -67,6 +68,7 @@ pub use pattern::{
     ShootSummon, Shot,
 };
 pub use sized::{EntityPosition, SizedEntity};
+pub use target_priority as TargetPriority;
 pub use unit_sorts::{
     building_default, building_water, closest, farthest, strongest, weakest,
     BuildingPriorityTarget, SortTarget,
