@@ -8,8 +8,9 @@ use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
     packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
     ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, Net, NetConnection, PacketKind, ProviderEvent, SentPacket,
-    StateSnapshotCallPacket, Streamable, TileConfigCallPacket, WorldDataBeginCallPacket,
+    HiddenSnapshotCallPacket, Net, NetConnection, PacketKind, ProviderEvent, RotateBlockCallPacket,
+    SentPacket, StateSnapshotCallPacket, Streamable, TileConfigCallPacket, TileTapCallPacket,
+    WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -78,6 +79,14 @@ pub struct NetServerState {
     pub last_tile_config_rollback_at: Option<Instant>,
     pub tile_config_rollbacks_sent: u64,
     pub last_tile_config_rollback_error: Option<String>,
+    pub last_rotate_block_connection_id: Option<i32>,
+    pub last_rotate_block: Option<RotateBlockCallPacket>,
+    pub last_rotate_block_received_at: Option<Instant>,
+    pub rotate_block_packets_seen: u64,
+    pub last_tile_tap_connection_id: Option<i32>,
+    pub last_tile_tap: Option<TileTapCallPacket>,
+    pub last_tile_tap_received_at: Option<Instant>,
+    pub tile_tap_packets_seen: u64,
     pub last_state_snapshot_connection_id: Option<i32>,
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_sent_at: Option<Instant>,
@@ -871,6 +880,24 @@ impl NetServer {
 
                     Self::dispatch_packet_handlers(&packet_handlers, &packet);
                 }
+                PacketKind::RotateBlockCallPacket(rotate) => {
+                    let packet = PacketKind::RotateBlockCallPacket(rotate.clone());
+                    {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        Self::record_rotate_block(&mut state, connection_id, rotate);
+                    }
+
+                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                }
+                PacketKind::TileTapCallPacket(tile_tap) => {
+                    let packet = PacketKind::TileTapCallPacket(tile_tap.clone());
+                    {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        Self::record_tile_tap(&mut state, connection_id, tile_tap);
+                    }
+
+                    Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                }
                 _ => {}
             });
         }
@@ -968,6 +995,44 @@ impl NetServer {
         state.events.push(ProviderEvent::ServerPacket {
             connection_id: connection_id.unwrap_or(-1),
             packet: PacketKind::TileConfigCallPacket(packet.clone()),
+        });
+    }
+
+    fn record_rotate_block(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        packet: &RotateBlockCallPacket,
+    ) {
+        let now = Instant::now();
+        state.last_connection_id = connection_id;
+        state.last_rotate_block_connection_id = connection_id;
+        state.last_rotate_block = Some(packet.clone());
+        state.last_rotate_block_received_at = Some(now);
+        state.rotate_block_packets_seen += 1;
+        state.last_updated_at = Some(now);
+
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id: connection_id.unwrap_or(-1),
+            packet: PacketKind::RotateBlockCallPacket(packet.clone()),
+        });
+    }
+
+    fn record_tile_tap(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        packet: &TileTapCallPacket,
+    ) {
+        let now = Instant::now();
+        state.last_connection_id = connection_id;
+        state.last_tile_tap_connection_id = connection_id;
+        state.last_tile_tap = Some(packet.clone());
+        state.last_tile_tap_received_at = Some(now);
+        state.tile_tap_packets_seen += 1;
+        state.last_updated_at = Some(now);
+
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id: connection_id.unwrap_or(-1),
+            packet: PacketKind::TileTapCallPacket(packet.clone()),
         });
     }
 
@@ -1083,7 +1148,8 @@ mod tests {
         ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
         DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
         NetConnection, NetProvider, PacketKind, PingCallPacket, PingResponseCallPacket,
-        ProviderEvent, SentPacket, StateSnapshotCallPacket, TileConfigCallPacket,
+        ProviderEvent, RotateBlockCallPacket, SentPacket, StateSnapshotCallPacket,
+        TileConfigCallPacket, TileTapCallPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
     use crate::mindustry::world::block::Block;
@@ -1401,6 +1467,75 @@ mod tests {
                 connection_id: 9,
                 packet: PacketKind::TileConfigCallPacket(_)
             })
+        ));
+    }
+
+    #[test]
+    fn rotate_and_tile_tap_packets_are_recorded_and_dispatched() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let build_pos = crate::mindustry::world::point2_pack(4, 5);
+        let tap_pos = crate::mindustry::world::point2_pack(6, 7);
+        let rotate = RotateBlockCallPacket {
+            player: EntityRef::null(),
+            build: BuildingRef::new(build_pos),
+            direction: true,
+        };
+        let tap = TileTapCallPacket {
+            player: EntityRef::null(),
+            tile: Some(tap_pos),
+        };
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            let label = match packet {
+                PacketKind::RotateBlockCallPacket(_) => "rotate",
+                PacketKind::TileTapCallPacket(_) => "tap",
+                _ => return,
+            };
+            seen_handler.lock().unwrap().push(label.to_string());
+        });
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(11),
+                true,
+                PacketKind::RotateBlockCallPacket(rotate.clone()),
+            );
+            net.handle_server_received_from_connection(
+                Some(11),
+                true,
+                PacketKind::TileTapCallPacket(tap.clone()),
+            );
+        }
+
+        assert_eq!(*seen.lock().unwrap(), vec!["rotate", "tap"]);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_rotate_block_connection_id, Some(11));
+        assert_eq!(state.last_rotate_block.as_ref(), Some(&rotate));
+        assert_eq!(state.rotate_block_packets_seen, 1);
+        assert!(state.last_rotate_block_received_at.is_some());
+        assert_eq!(state.last_tile_tap_connection_id, Some(11));
+        assert_eq!(state.last_tile_tap.as_ref(), Some(&tap));
+        assert_eq!(state.tile_tap_packets_seen, 1);
+        assert!(state.last_tile_tap_received_at.is_some());
+        assert_eq!(state.events.len(), 2);
+        assert!(matches!(
+            state.events[0],
+            ProviderEvent::ServerPacket {
+                connection_id: 11,
+                packet: PacketKind::RotateBlockCallPacket(_)
+            }
+        ));
+        assert!(matches!(
+            state.events[1],
+            ProviderEvent::ServerPacket {
+                connection_id: 11,
+                packet: PacketKind::TileTapCallPacket(_)
+            }
         ));
     }
 
