@@ -1588,10 +1588,7 @@ mod tests {
         assert_eq!(sent.len(), 2);
         assert!(matches!(
             sent[0].0,
-            PacketKind::ClientSnapshotCallPacket(ClientSnapshotCallPacket {
-                snapshot_id: 0,
-                ..
-            })
+            PacketKind::ClientSnapshotCallPacket(ClientSnapshotCallPacket { snapshot_id: 0, .. })
         ));
         assert!(matches!(
             sent[1].0,
