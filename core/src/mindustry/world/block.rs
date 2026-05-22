@@ -1,5 +1,6 @@
 use crate::mindustry::{
     ctype::ContentId,
+    io::TypeValue,
     vars::TILE_SIZE,
     world::meta::{BlockFlag, BlockGroup, BuildVisibility, Env},
 };
@@ -34,6 +35,19 @@ pub struct Block {
     pub destructible: bool,
     pub save_data: bool,
     pub sync: bool,
+    pub configurable: bool,
+    pub editor_configurable: bool,
+    pub save_config: bool,
+    pub copy_config: bool,
+    pub clear_on_double_tap: bool,
+    pub logic_configurable: bool,
+    pub ignore_resize_config: bool,
+    pub commandable: bool,
+    pub allow_config_inventory: bool,
+    pub selection_rows: i32,
+    pub selection_columns: i32,
+    pub consumes_tap: bool,
+    pub last_config: Option<TypeValue>,
 
     pub solid: bool,
     pub fills_tile: bool,
@@ -45,6 +59,13 @@ pub struct Block {
     pub unit_move_breakable: bool,
     pub targetable: bool,
     pub health: i32,
+
+    pub rotate: bool,
+    pub rotate_draw: bool,
+    pub rotate_draw_editor: bool,
+    pub lock_rotation: bool,
+    pub ignore_line_rotation: bool,
+    pub invert_flip: bool,
 
     pub size: i32,
     pub offset: f32,
@@ -103,6 +124,19 @@ impl Block {
             destructible: false,
             save_data: false,
             sync: false,
+            configurable: false,
+            editor_configurable: false,
+            save_config: false,
+            copy_config: true,
+            clear_on_double_tap: false,
+            logic_configurable: false,
+            ignore_resize_config: false,
+            commandable: false,
+            allow_config_inventory: true,
+            selection_rows: 5,
+            selection_columns: 4,
+            consumes_tap: false,
+            last_config: None,
             solid: false,
             fills_tile: true,
             force_dark: false,
@@ -113,6 +147,12 @@ impl Block {
             unit_move_breakable: true,
             targetable: true,
             health: 40,
+            rotate: false,
+            rotate_draw: true,
+            rotate_draw_editor: true,
+            lock_rotation: true,
+            ignore_line_rotation: false,
+            invert_flip: false,
             size: 1,
             offset: 0.0,
             size_offset: 0,
@@ -188,6 +228,33 @@ impl Block {
     pub fn display_name(&self) -> &str {
         self.localized_name.as_deref().unwrap_or(&self.name)
     }
+
+    pub fn plan_rotation(&self, rotation: i32) -> i32 {
+        if !self.rotate && self.lock_rotation {
+            0
+        } else {
+            rotation.rem_euclid(4)
+        }
+    }
+
+    pub fn set_last_config(&mut self, config: TypeValue) {
+        self.last_config = match config {
+            TypeValue::Null => None,
+            config => Some(config),
+        };
+    }
+
+    pub fn next_config(&self) -> Option<TypeValue> {
+        if self.save_config {
+            self.last_config.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn config_clearable(&self) -> bool {
+        self.configurable && self.clear_on_double_tap
+    }
 }
 
 impl Default for Block {
@@ -198,6 +265,8 @@ impl Default for Block {
 
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::io::TypeValue;
+
     use super::{Block, CacheLayer};
 
     #[test]
@@ -236,5 +305,56 @@ mod tests {
         assert!(block.synthetic());
         block.cache_layer = CacheLayer::Walls;
         assert!(block.is_static());
+    }
+
+    #[test]
+    fn block_config_metadata_matches_upstream_defaults_and_helpers() {
+        let mut block = Block::new(2, "router");
+
+        assert!(!block.configurable);
+        assert!(!block.editor_configurable);
+        assert!(!block.save_config);
+        assert!(block.copy_config);
+        assert!(!block.clear_on_double_tap);
+        assert!(!block.logic_configurable);
+        assert!(!block.ignore_resize_config);
+        assert!(!block.commandable);
+        assert!(block.allow_config_inventory);
+        assert_eq!((block.selection_rows, block.selection_columns), (5, 4));
+        assert!(!block.consumes_tap);
+        assert_eq!(block.next_config(), None);
+        assert!(!block.config_clearable());
+
+        block.configurable = true;
+        block.clear_on_double_tap = true;
+        assert!(block.config_clearable());
+
+        block.set_last_config(TypeValue::String("cfg".into()));
+        assert_eq!(block.next_config(), None);
+        block.save_config = true;
+        assert_eq!(block.next_config(), Some(TypeValue::String("cfg".into())));
+
+        block.set_last_config(TypeValue::Null);
+        assert_eq!(block.next_config(), None);
+    }
+
+    #[test]
+    fn block_rotation_metadata_matches_plan_rotation_rules() {
+        let mut block = Block::new(3, "sorter");
+
+        assert!(!block.rotate);
+        assert!(block.rotate_draw);
+        assert!(block.rotate_draw_editor);
+        assert!(block.lock_rotation);
+        assert!(!block.ignore_line_rotation);
+        assert!(!block.invert_flip);
+        assert_eq!(block.plan_rotation(3), 0);
+
+        block.rotate = true;
+        assert_eq!(block.plan_rotation(5), 1);
+
+        block.rotate = false;
+        block.lock_rotation = false;
+        assert_eq!(block.plan_rotation(-1), 3);
     }
 }
