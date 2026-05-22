@@ -801,6 +801,44 @@ impl NetServer {
         std::mem::take(&mut state.pending_world_data_connections)
     }
 
+    pub fn send_pending_world_data<F>(&self, mut world_data: F) -> io::Result<usize>
+    where
+        F: FnMut(i32) -> Vec<u8>,
+    {
+        let pending = self.take_pending_world_data_connections();
+        let mut sent = 0;
+        let mut first_error = None;
+        let mut unsent = Vec::new();
+
+        for connection_id in pending {
+            if first_error.is_some() {
+                unsent.push(connection_id);
+                continue;
+            }
+
+            match self.send_world_data(connection_id, world_data(connection_id)) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    unsent.push(connection_id);
+                    first_error = Some(error);
+                }
+            }
+        }
+
+        if !unsent.is_empty() {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            let mut restored = unsent;
+            restored.extend(std::mem::take(&mut state.pending_world_data_connections));
+            state.pending_world_data_connections = restored;
+        }
+
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
+    }
+
     fn flush_pending_connect_kicks(&self) {
         let pending = {
             let mut state = self.state.lock().expect("NetServerState mutex poisoned");
@@ -1897,6 +1935,55 @@ mod tests {
 
         assert_eq!(server.take_pending_world_data_connections(), vec![51]);
         assert!(server.take_pending_world_data_connections().is_empty());
+    }
+
+    #[test]
+    fn send_pending_world_data_streams_accepted_connections_without_begin_packet() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(52),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "10.0.0.52:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(52),
+                false,
+                PacketKind::ConnectPacket(connect_packet("player")),
+            );
+        }
+
+        let sent_count = server
+            .send_pending_world_data(|connection_id| vec![connection_id as u8, 1, 2])
+            .unwrap();
+        assert_eq!(sent_count, 1);
+        assert!(server.take_pending_world_data_connections().is_empty());
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0].0, 52);
+        assert_eq!(sent[1].0, 52);
+        assert!(sent.iter().all(|(_, _, reliable)| *reliable));
+        assert!(matches!(sent[0].1, PacketKind::StreamBegin(_)));
+        assert!(matches!(sent[1].1, PacketKind::StreamChunk(_)));
+        assert!(!sent
+            .iter()
+            .any(|(_, packet, _)| matches!(packet, PacketKind::WorldDataBeginCallPacket(_))));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_world_data_connection_id, Some(52));
+        assert_eq!(state.last_world_data_bytes, Some(3));
+        assert_eq!(state.world_streams_sent, 1);
     }
 
     #[test]
