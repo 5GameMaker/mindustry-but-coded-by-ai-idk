@@ -10,15 +10,15 @@ use crate::mindustry::entities::comp::{
     BuildingComp, PayloadState, PlayerComp, UnitComp,
 };
 use crate::mindustry::entities::units::BuildPlan;
-use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
+use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, DeletePlansCallPacket, DropItemCallPacket,
-    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-    PingLocationCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
-    TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-    TransferItemToCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    BuildingControlSelectCallPacket, CommandUnitsCallPacket, DeletePlansCallPacket,
+    DropItemCallPacket, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, PingLocationCallPacket, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::{meta::BuildVisibility, point2_pack};
@@ -449,6 +449,28 @@ pub struct DeletePlansOutcome {
     pub should_raise_validate: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandUnitsRejectReason {
+    MissingPlayer,
+    MissingUnits,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CommandUnitsContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandUnitsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<CommandUnitsRejectReason>,
+    pub commanded: usize,
+    pub packet: Option<CommandUnitsCallPacket>,
+    pub should_raise_validate: bool,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -708,6 +730,22 @@ impl DeletePlansOutcome {
             accepted: false,
             rejection: Some(reason),
             removed: 0,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl CommandUnitsOutcome {
+    fn rejected(
+        context: &CommandUnitsContext,
+        reason: CommandUnitsRejectReason,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            commanded: 0,
             packet: None,
             should_raise_validate: validate_rejection && !context.local_player,
         }
@@ -1896,6 +1934,84 @@ pub fn client_delete_plans_packet(positions: Vec<i32>) -> DeletePlansCallPacket 
     }
 }
 
+pub fn command_units<A>(
+    context: CommandUnitsContext,
+    unit_ids: Vec<i32>,
+    build_target: Option<&BuildingComp>,
+    unit_target: Option<UnitRef>,
+    pos_target: Vec2,
+    queue_command: bool,
+    final_batch: bool,
+    admin_allows: A,
+) -> CommandUnitsOutcome
+where
+    A: FnOnce(&[i32]) -> bool,
+{
+    if context.player.is_none() {
+        return CommandUnitsOutcome::rejected(
+            &context,
+            CommandUnitsRejectReason::MissingPlayer,
+            false,
+        );
+    }
+
+    if unit_ids.is_empty() {
+        return CommandUnitsOutcome::rejected(
+            &context,
+            CommandUnitsRejectReason::MissingUnits,
+            false,
+        );
+    }
+
+    if !admin_allows(&unit_ids) {
+        return CommandUnitsOutcome::rejected(
+            &context,
+            CommandUnitsRejectReason::AdminDenied,
+            true,
+        );
+    }
+
+    let commanded = unit_ids.len();
+    CommandUnitsOutcome {
+        accepted: true,
+        rejection: None,
+        commanded,
+        packet: Some(CommandUnitsCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            unit_ids,
+            build_target: build_target
+                .map(|build| BuildingRef::new(build.tile_pos))
+                .unwrap_or_else(BuildingRef::null),
+            unit_target: unit_target.unwrap_or(UnitRef::Null),
+            pos_target,
+            queue_command,
+            final_batch,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_command_units_packet(
+    unit_ids: Vec<i32>,
+    build_target: Option<&BuildingComp>,
+    unit_target: Option<UnitRef>,
+    pos_target: Vec2,
+    queue_command: bool,
+    final_batch: bool,
+) -> CommandUnitsCallPacket {
+    CommandUnitsCallPacket {
+        player: EntityRef::null(),
+        unit_ids,
+        build_target: build_target
+            .map(|build| BuildingRef::new(build.tile_pos))
+            .unwrap_or_else(BuildingRef::null),
+        unit_target: unit_target.unwrap_or(UnitRef::Null),
+        pos_target,
+        queue_command,
+        final_batch,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -2979,5 +3095,77 @@ mod tests {
 
         assert_eq!(packet.player_id, None);
         assert_eq!(packet.positions, vec![point2_pack(5, 6)]);
+    }
+
+    #[test]
+    fn command_units_accepts_targets_and_records_packet() {
+        let building = BuildingComp::new(point2_pack(7, 8), item_block(), TeamId(1));
+        let outcome = command_units(
+            CommandUnitsContext {
+                player: Some(EntityRef::new(72)),
+                local_player: false,
+            },
+            vec![1, 2, 3],
+            Some(&building),
+            Some(UnitRef::Unit { id: 4 }),
+            Vec2::new(9.0, 10.0),
+            true,
+            false,
+            |ids| ids == [1, 2, 3].as_slice(),
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.commanded, 3);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(72));
+        assert_eq!(packet.unit_ids, vec![1, 2, 3]);
+        assert_eq!(packet.build_target, BuildingRef::new(point2_pack(7, 8)));
+        assert_eq!(packet.unit_target, UnitRef::Unit { id: 4 });
+        assert_eq!(packet.pos_target, Vec2::new(9.0, 10.0));
+        assert!(packet.queue_command);
+        assert!(!packet.final_batch);
+    }
+
+    #[test]
+    fn command_units_rejects_admin_denied_as_validate_error() {
+        let outcome = command_units(
+            CommandUnitsContext {
+                player: Some(EntityRef::new(72)),
+                local_player: false,
+            },
+            vec![1],
+            None,
+            None,
+            Vec2::new(0.0, 0.0),
+            false,
+            true,
+            |_| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(CommandUnitsRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn client_command_units_packet_uses_client_payload_shape() {
+        let packet = client_command_units_packet(
+            vec![9],
+            None,
+            Some(UnitRef::Unit { id: 10 }),
+            Vec2::new(1.0, 2.0),
+            false,
+            true,
+        );
+
+        assert_eq!(packet.player, EntityRef::null());
+        assert_eq!(packet.unit_ids, vec![9]);
+        assert_eq!(packet.build_target, BuildingRef::null());
+        assert_eq!(packet.unit_target, UnitRef::Unit { id: 10 });
+        assert!(packet.final_batch);
     }
 }
