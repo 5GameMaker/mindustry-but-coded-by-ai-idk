@@ -27,7 +27,10 @@ pub struct BulletType {
     pub pierce: bool,
     pub pierce_building: bool,
     pub remove_after_pierce: bool,
+    pub laser_absorb: bool,
     pub optimal_life_fract: f32,
+    pub ammo_multiplier: f32,
+    pub pierce_armor: bool,
     pub pierce_cap: i32,
     pub splash_damage: f32,
     pub shield_damage_multiplier: f32,
@@ -91,7 +94,10 @@ impl Default for BulletType {
             pierce: false,
             pierce_building: false,
             remove_after_pierce: true,
+            laser_absorb: true,
             optimal_life_fract: 0.0,
+            ammo_multiplier: 2.0,
+            pierce_armor: false,
             pierce_cap: -1,
             splash_damage: 0.0,
             shield_damage_multiplier: 1.0,
@@ -706,6 +712,249 @@ impl PointLaserBulletType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContinuousDamagePlan {
+    pub length: f32,
+    pub damage: f32,
+    pub large_hit: bool,
+    pub laser_absorb: bool,
+    pub pierce_cap: i32,
+    pub shake: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContinuousBulletType {
+    pub base: BulletType,
+    pub length: f32,
+    pub shake: f32,
+    pub damage_interval: f32,
+    pub large_hit: bool,
+    pub continuous: bool,
+    pub timescale_damage: bool,
+}
+
+impl Default for ContinuousBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                remove_after_pierce: false,
+                pierce_cap: -1,
+                speed: 0.0,
+                lifetime: 16.0,
+                impact: true,
+                keep_velocity: false,
+                collides: false,
+                pierce: true,
+                hittable: false,
+                absorbable: false,
+                ..Default::default()
+            },
+            length: 220.0,
+            shake: 0.0,
+            damage_interval: 5.0,
+            large_hit: false,
+            continuous: true,
+            timescale_damage: false,
+        }
+    }
+}
+
+impl ContinuousBulletType {
+    pub fn continuous_damage(&self) -> f32 {
+        if self.continuous {
+            self.base.damage / self.damage_interval * 60.0
+        } else {
+            -1.0
+        }
+    }
+
+    pub fn estimate_dps(&mut self) -> f32 {
+        if self.continuous {
+            self.base.damage * 100.0 / self.damage_interval * 3.0
+        } else {
+            self.base.estimate_dps()
+        }
+    }
+
+    pub fn calculate_range(&self) -> f32 {
+        self.length.max(self.base.max_range)
+    }
+
+    pub fn init_defaults(&mut self) {
+        self.base.init_defaults();
+        self.base.draw_size = self.base.draw_size.max(self.length * 2.0);
+    }
+
+    pub fn current_length(&self) -> f32 {
+        self.length
+    }
+
+    pub fn damage_plan(&self, owner_timescale: f32) -> ContinuousDamagePlan {
+        ContinuousDamagePlan {
+            length: self.current_length(),
+            damage: if self.timescale_damage {
+                self.base.damage * owner_timescale
+            } else {
+                self.base.damage
+            },
+            large_hit: self.large_hit,
+            laser_absorb: self.base.laser_absorb,
+            pierce_cap: self.base.pierce_cap,
+            shake: self.shake,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContinuousLaserBulletType {
+    pub base: ContinuousBulletType,
+    pub fade_time: f32,
+    pub light_stroke: f32,
+    pub divisions: i32,
+    pub stroke_from: f32,
+    pub stroke_to: f32,
+    pub pointy_scaling: f32,
+    pub back_length: f32,
+    pub front_length: f32,
+    pub width: f32,
+    pub osc_scl: f32,
+    pub osc_mag: f32,
+}
+
+impl Default for ContinuousLaserBulletType {
+    fn default() -> Self {
+        let mut base = ContinuousBulletType::default();
+        base.shake = 1.0;
+        base.large_hit = true;
+        base.base.hit_size = 4.0;
+        base.base.draw_size = 420.0;
+        base.base.lifetime = 16.0;
+        base.base.light_opacity = 0.7;
+        Self {
+            base,
+            fade_time: 16.0,
+            light_stroke: 40.0,
+            divisions: 13,
+            stroke_from: 2.0,
+            stroke_to: 0.5,
+            pointy_scaling: 0.75,
+            back_length: 7.0,
+            front_length: 35.0,
+            width: 9.0,
+            osc_scl: 0.8,
+            osc_mag: 1.5,
+        }
+    }
+}
+
+impl ContinuousLaserBulletType {
+    pub fn new(damage: f32) -> Self {
+        let mut out = Self::default();
+        out.base.base.damage = damage;
+        out
+    }
+
+    pub fn fade_out(&self, time: f32) -> f32 {
+        if time > self.base.base.lifetime - self.fade_time {
+            (1.0 - (time - (self.base.base.lifetime - self.fade_time)) / self.fade_time)
+                .clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    }
+
+    pub fn current_length(&self, time: f32) -> f32 {
+        self.base.length * self.fade_out(time)
+    }
+
+    pub fn stroke(&self, color_fin: f32, fout: f32, absin: f32) -> f32 {
+        let base_stroke = self.stroke_from + (self.stroke_to - self.stroke_from) * color_fin;
+        (self.width + absin) * fout * base_stroke
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContinuousFlameBulletType {
+    pub base: ContinuousBulletType,
+    pub light_stroke: f32,
+    pub width: f32,
+    pub osc_scl: f32,
+    pub osc_mag: f32,
+    pub divisions: i32,
+    pub draw_flare: bool,
+    pub flare_width: f32,
+    pub flare_length: f32,
+    pub flare_rot_speed: f32,
+    pub rotate_flare: bool,
+    pub length_width_pans: Vec<(f32, f32, f32)>,
+}
+
+impl Default for ContinuousFlameBulletType {
+    fn default() -> Self {
+        let mut base = ContinuousBulletType::default();
+        base.base.optimal_life_fract = 0.5;
+        base.length = 120.0;
+        base.base.hit_size = 4.0;
+        base.base.draw_size = 420.0;
+        base.base.lifetime = 16.0;
+        base.base.light_opacity = 0.7;
+        base.base.laser_absorb = false;
+        base.base.ammo_multiplier = 1.0;
+        base.base.pierce_armor = true;
+        Self {
+            base,
+            light_stroke: 40.0,
+            width: 3.7,
+            osc_scl: 1.2,
+            osc_mag: 0.02,
+            divisions: 25,
+            draw_flare: true,
+            flare_width: 3.0,
+            flare_length: 40.0,
+            flare_rot_speed: 1.2,
+            rotate_flare: false,
+            length_width_pans: vec![
+                (1.12, 1.3, 0.32),
+                (1.0, 1.0, 0.3),
+                (0.8, 0.9, 0.2),
+                (0.5, 0.8, 0.15),
+                (0.25, 0.7, 0.1),
+            ],
+        }
+    }
+}
+
+impl ContinuousFlameBulletType {
+    pub fn new(damage: f32) -> Self {
+        let mut out = Self::default();
+        out.base.base.damage = damage;
+        out
+    }
+
+    pub fn current_length(&self, fin_slope: f32) -> f32 {
+        self.base.length * fin_slope
+    }
+
+    pub fn flame_segment(
+        &self,
+        index: usize,
+        real_length: f32,
+        mult: f32,
+        sin: f32,
+    ) -> (f32, f32, f32) {
+        let (length_scl, width_scl, pan) = self.length_width_pans[index];
+        (
+            real_length * length_scl * (1.0 - sin),
+            self.width * width_scl * mult * (1.0 + sin),
+            pan,
+        )
+    }
+
+    pub fn flare_angle(&self, time: f32, rotation: f32) -> f32 {
+        time * self.flare_rot_speed + if self.rotate_flare { rotation } else { 0.0 }
+    }
+}
+
 pub fn empty_bullet_type() -> BulletType {
     BulletType {
         hittable: false,
@@ -1194,5 +1443,72 @@ mod tests {
         assert!(plan.collide_point);
         assert!(!plan.beam_effect);
         assert_eq!(plan.shake, 2.0);
+    }
+
+    #[test]
+    fn continuous_bullet_defaults_damage_range_and_timescale_plan_match_java() {
+        let mut continuous = ContinuousBulletType::default();
+        continuous.base.damage = 10.0;
+        assert!(!continuous.base.remove_after_pierce);
+        assert_eq!(continuous.base.pierce_cap, -1);
+        assert_eq!(continuous.base.speed, 0.0);
+        assert_eq!(continuous.base.lifetime, 16.0);
+        assert!(continuous.base.impact);
+        assert!(!continuous.base.keep_velocity);
+        assert!(!continuous.base.collides);
+        assert!(continuous.base.pierce);
+        assert!(!continuous.base.hittable);
+        assert!(!continuous.base.absorbable);
+
+        assert_eq!(continuous.continuous_damage(), 120.0);
+        assert_eq!(continuous.estimate_dps(), 600.0);
+        assert_eq!(continuous.calculate_range(), 220.0);
+        continuous.init_defaults();
+        assert_eq!(continuous.base.draw_size, 440.0);
+
+        continuous.timescale_damage = true;
+        continuous.large_hit = true;
+        continuous.shake = 2.0;
+        let plan = continuous.damage_plan(1.5);
+        assert_eq!(plan.length, 220.0);
+        assert_eq!(plan.damage, 15.0);
+        assert!(plan.large_hit);
+        assert!(plan.laser_absorb);
+        assert_eq!(plan.pierce_cap, -1);
+        assert_eq!(plan.shake, 2.0);
+    }
+
+    #[test]
+    fn continuous_laser_fades_length_and_stroke() {
+        let laser = ContinuousLaserBulletType::new(25.0);
+        assert_eq!(laser.base.base.damage, 25.0);
+        assert_eq!(laser.base.shake, 1.0);
+        assert!(laser.base.large_hit);
+        assert_eq!(laser.base.base.draw_size, 420.0);
+        assert_eq!(laser.base.base.light_opacity, 0.7);
+
+        assert_eq!(laser.fade_out(0.0), 1.0);
+        assert_eq!(laser.fade_out(8.0), 0.5);
+        assert_eq!(laser.current_length(8.0), 110.0);
+        assert_eq!(laser.stroke(0.5, 0.5, 1.0), 6.25);
+    }
+
+    #[test]
+    fn continuous_flame_defaults_length_segments_and_flare_angle() {
+        let mut flame = ContinuousFlameBulletType::new(30.0);
+        assert_eq!(flame.base.base.damage, 30.0);
+        assert_eq!(flame.base.base.optimal_life_fract, 0.5);
+        assert_eq!(flame.base.length, 120.0);
+        assert!(!flame.base.base.laser_absorb);
+        assert_eq!(flame.base.base.ammo_multiplier, 1.0);
+        assert!(flame.base.base.pierce_armor);
+        assert_eq!(flame.current_length(0.5), 60.0);
+        let segment = flame.flame_segment(0, 100.0, 0.5, 0.1);
+        assert!((segment.0 - 100.799995).abs() < f32::EPSILON);
+        assert!((segment.1 - 2.6455).abs() < f32::EPSILON);
+        assert!((segment.2 - 0.32).abs() < f32::EPSILON);
+        assert_eq!(flame.flare_angle(10.0, 90.0), 12.0);
+        flame.rotate_flare = true;
+        assert_eq!(flame.flare_angle(10.0, 90.0), 102.0);
     }
 }
