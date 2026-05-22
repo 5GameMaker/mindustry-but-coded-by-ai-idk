@@ -7,6 +7,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::mindustry::game::Trigger;
+
 use super::{Achievement, AchievementService, SStat, StatService};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +198,57 @@ pub struct GameServiceClientChatSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceResearchSnapshot {
+    pub router_unlocked: bool,
+    pub micro_processor_unlocked: bool,
+    pub all_researched: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceUnlockSnapshot {
+    pub content_name: Option<String>,
+    pub research: GameServiceResearchSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameServiceTriggerSnapshot {
+    pub trigger: Trigger,
+    pub campaign: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceWaveSnapshot {
+    pub campaign: bool,
+    pub wave: i32,
+    pub buildings_built: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceLaunchItemSnapshot {
+    pub campaign: bool,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServicePickupSnapshot {
+    pub campaign: bool,
+    pub carrier_player: bool,
+    pub unit_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceUnitDrownSnapshot {
+    pub campaign: bool,
+    pub player_unit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceNewGameSnapshot {
+    pub campaign: bool,
+    pub core_items_total: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameServiceUnitControlSnapshot {
     pub controlled_router_block: bool,
     pub controlled_turret_build: bool,
@@ -233,6 +286,7 @@ impl GameServiceSectorCaptureSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameServiceEventPlan {
     pub stat_additions: Vec<SStat>,
+    pub stat_amount_additions: Vec<(SStat, i32)>,
     pub stat_sets: Vec<(SStat, i32)>,
     pub stat_max_updates: Vec<(SStat, i32)>,
     pub achievements: BTreeSet<Achievement>,
@@ -241,6 +295,7 @@ pub struct GameServiceEventPlan {
 impl GameServiceEventPlan {
     pub fn is_empty(&self) -> bool {
         self.stat_additions.is_empty()
+            && self.stat_amount_additions.is_empty()
             && self.stat_sets.is_empty()
             && self.stat_max_updates.is_empty()
             && self.achievements.is_empty()
@@ -529,6 +584,155 @@ impl GameServiceState {
         let mut plan = GameServiceEventPlan::default();
         if snapshot.contains_alphaaaa {
             plan.achievements.insert(Achievement::UseAnimdustryEmoji);
+        }
+        plan
+    }
+
+    pub fn research_plan(&self, snapshot: GameServiceResearchSnapshot) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.router_unlocked {
+            plan.achievements.insert(Achievement::ResearchRouter);
+        }
+        if snapshot.micro_processor_unlocked {
+            plan.achievements.insert(Achievement::ResearchLogic);
+        }
+        if snapshot.all_researched {
+            plan.achievements.insert(Achievement::ResearchAll);
+        }
+        plan
+    }
+
+    pub fn unlock_plan(&self, snapshot: GameServiceUnlockSnapshot) -> GameServiceEventPlan {
+        let mut plan = self.research_plan(snapshot.research);
+        match snapshot.content_name.as_deref() {
+            Some("thorium") => {
+                plan.achievements.insert(Achievement::ObtainThorium);
+            }
+            Some("titanium") => {
+                plan.achievements.insert(Achievement::ObtainTitanium);
+            }
+            _ => {}
+        }
+        plan
+    }
+
+    pub fn trigger_plan(&self, snapshot: GameServiceTriggerSnapshot) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+
+        match snapshot.trigger {
+            Trigger::OpenConsole => {
+                plan.achievements.insert(Achievement::OpenConsole);
+            }
+            Trigger::OpenWiki => {
+                plan.achievements.insert(Achievement::OpenWiki);
+            }
+            Trigger::ImportMod => {
+                plan.achievements.insert(Achievement::InstallMod);
+            }
+            Trigger::ExclusionDeath => {
+                plan.achievements.insert(Achievement::DieExclusion);
+            }
+            Trigger::EnablePixelation => {
+                plan.achievements.insert(Achievement::EnablePixelation);
+            }
+            Trigger::UnitCommandAttack if snapshot.campaign => {
+                plan.achievements.insert(Achievement::IssueAttackCommand);
+            }
+            Trigger::UnitCommandBoost if snapshot.campaign => {
+                plan.achievements.insert(Achievement::BoostUnit);
+            }
+            Trigger::ThoriumReactorOverheat if snapshot.campaign => {
+                plan.stat_additions.push(SStat::ReactorsOverheated);
+            }
+            Trigger::ImpactPower if snapshot.campaign => {
+                plan.achievements.insert(Achievement::PowerupImpactReactor);
+            }
+            Trigger::FlameAmmo if snapshot.campaign => {
+                plan.achievements.insert(Achievement::UseFlameAmmo);
+            }
+            Trigger::TurretCool if snapshot.campaign => {
+                plan.achievements.insert(Achievement::CoolTurret);
+            }
+            Trigger::SuicideBomb if snapshot.campaign => {
+                plan.achievements.insert(Achievement::SuicideBomb);
+            }
+            Trigger::BlastGenerator if snapshot.campaign => {
+                plan.achievements.insert(Achievement::BlastGenerator);
+            }
+            Trigger::ForceProjectorBreak if snapshot.campaign => {
+                plan.achievements.insert(Achievement::BreakForceProjector);
+            }
+            Trigger::NeoplasmReact if snapshot.campaign => {
+                plan.achievements.insert(Achievement::NeoplasmWater);
+            }
+            Trigger::ShockwaveTowerUse if snapshot.campaign => {
+                plan.achievements.insert(Achievement::ShockwaveTowerUse);
+            }
+            Trigger::Shock if snapshot.campaign => {
+                plan.achievements.insert(Achievement::ShockWetEnemy);
+            }
+            Trigger::BlastFreeze if snapshot.campaign => {
+                plan.achievements.insert(Achievement::BlastFrozenUnit);
+            }
+            _ => {}
+        }
+
+        plan
+    }
+
+    pub fn wave_plan(&self, snapshot: GameServiceWaveSnapshot) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign {
+            plan.stat_max_updates
+                .push((SStat::MaxWavesSurvived, snapshot.wave));
+            if snapshot.buildings_built == 0 && snapshot.wave >= 10 {
+                plan.achievements
+                    .insert(Achievement::Survive10WavesNoBlocks);
+            }
+        }
+        plan
+    }
+
+    pub fn launch_item_plan(
+        &self,
+        snapshot: GameServiceLaunchItemSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan {
+            stat_amount_additions: vec![(SStat::ItemsLaunched, snapshot.amount)],
+            ..Default::default()
+        };
+        if snapshot.campaign {
+            plan.achievements.insert(Achievement::LaunchItemPad);
+        }
+        plan
+    }
+
+    pub fn pickup_plan(&self, snapshot: GameServicePickupSnapshot) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign
+            && snapshot.carrier_player
+            && snapshot
+                .unit_name
+                .as_deref()
+                .is_some_and(|unit| self.t5s.contains(unit))
+        {
+            plan.achievements.insert(Achievement::PickupT5);
+        }
+        plan
+    }
+
+    pub fn unit_drown_plan(&self, snapshot: GameServiceUnitDrownSnapshot) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign && snapshot.player_unit {
+            plan.achievements.insert(Achievement::Drown);
+        }
+        plan
+    }
+
+    pub fn new_game_plan(&self, snapshot: GameServiceNewGameSnapshot) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign && snapshot.core_items_total >= 10_000 {
+            plan.achievements.insert(Achievement::Drop10kitems);
         }
         plan
     }
@@ -1098,5 +1302,197 @@ mod tests {
                 player_count: 99,
             })
             .is_empty());
+    }
+
+    #[test]
+    fn research_and_unlock_plans_match_java_check_unlocks_branches() {
+        let state = GameServiceState::default();
+
+        let research_plan = state.research_plan(GameServiceResearchSnapshot {
+            router_unlocked: true,
+            micro_processor_unlocked: true,
+            all_researched: true,
+        });
+        assert!(research_plan
+            .achievements
+            .contains(&Achievement::ResearchRouter));
+        assert!(research_plan
+            .achievements
+            .contains(&Achievement::ResearchLogic));
+        assert!(research_plan
+            .achievements
+            .contains(&Achievement::ResearchAll));
+
+        let unlock_plan = state.unlock_plan(GameServiceUnlockSnapshot {
+            content_name: Some("thorium".into()),
+            research: GameServiceResearchSnapshot {
+                router_unlocked: true,
+                micro_processor_unlocked: false,
+                all_researched: false,
+            },
+        });
+        assert!(unlock_plan
+            .achievements
+            .contains(&Achievement::ObtainThorium));
+        assert!(unlock_plan
+            .achievements
+            .contains(&Achievement::ResearchRouter));
+        assert!(!unlock_plan
+            .achievements
+            .contains(&Achievement::ObtainTitanium));
+
+        let titanium_plan = state.unlock_plan(GameServiceUnlockSnapshot {
+            content_name: Some("titanium".into()),
+            research: GameServiceResearchSnapshot::default(),
+        });
+        assert!(titanium_plan
+            .achievements
+            .contains(&Achievement::ObtainTitanium));
+    }
+
+    #[test]
+    fn trigger_plan_maps_java_game_service_triggers() {
+        let state = GameServiceState::default();
+
+        assert!(state
+            .trigger_plan(GameServiceTriggerSnapshot {
+                trigger: Trigger::OpenConsole,
+                campaign: false,
+            })
+            .achievements
+            .contains(&Achievement::OpenConsole));
+        assert!(state
+            .trigger_plan(GameServiceTriggerSnapshot {
+                trigger: Trigger::OpenWiki,
+                campaign: false,
+            })
+            .achievements
+            .contains(&Achievement::OpenWiki));
+        assert!(state
+            .trigger_plan(GameServiceTriggerSnapshot {
+                trigger: Trigger::ImportMod,
+                campaign: false,
+            })
+            .achievements
+            .contains(&Achievement::InstallMod));
+        assert!(state
+            .trigger_plan(GameServiceTriggerSnapshot {
+                trigger: Trigger::ExclusionDeath,
+                campaign: false,
+            })
+            .achievements
+            .contains(&Achievement::DieExclusion));
+        assert!(state
+            .trigger_plan(GameServiceTriggerSnapshot {
+                trigger: Trigger::EnablePixelation,
+                campaign: false,
+            })
+            .achievements
+            .contains(&Achievement::EnablePixelation));
+
+        let campaign_trigger_cases = [
+            (Trigger::UnitCommandAttack, Achievement::IssueAttackCommand),
+            (Trigger::UnitCommandBoost, Achievement::BoostUnit),
+            (Trigger::ImpactPower, Achievement::PowerupImpactReactor),
+            (Trigger::FlameAmmo, Achievement::UseFlameAmmo),
+            (Trigger::TurretCool, Achievement::CoolTurret),
+            (Trigger::SuicideBomb, Achievement::SuicideBomb),
+            (Trigger::BlastGenerator, Achievement::BlastGenerator),
+            (
+                Trigger::ForceProjectorBreak,
+                Achievement::BreakForceProjector,
+            ),
+            (Trigger::NeoplasmReact, Achievement::NeoplasmWater),
+            (Trigger::ShockwaveTowerUse, Achievement::ShockwaveTowerUse),
+            (Trigger::Shock, Achievement::ShockWetEnemy),
+            (Trigger::BlastFreeze, Achievement::BlastFrozenUnit),
+        ];
+
+        for (trigger, achievement) in campaign_trigger_cases {
+            assert!(state
+                .trigger_plan(GameServiceTriggerSnapshot {
+                    trigger,
+                    campaign: true,
+                })
+                .achievements
+                .contains(&achievement));
+            assert!(state
+                .trigger_plan(GameServiceTriggerSnapshot {
+                    trigger,
+                    campaign: false,
+                })
+                .is_empty());
+        }
+
+        let overheat_plan = state.trigger_plan(GameServiceTriggerSnapshot {
+            trigger: Trigger::ThoriumReactorOverheat,
+            campaign: true,
+        });
+        assert_eq!(
+            overheat_plan.stat_additions,
+            vec![SStat::ReactorsOverheated]
+        );
+    }
+
+    #[test]
+    fn wave_launch_pickup_drown_and_new_game_plans_match_java_events() {
+        let mut state = GameServiceState::default();
+        state.seed_java_t5_units();
+
+        let wave_plan = state.wave_plan(GameServiceWaveSnapshot {
+            campaign: true,
+            wave: 10,
+            buildings_built: 0,
+        });
+        assert_eq!(
+            wave_plan.stat_max_updates,
+            vec![(SStat::MaxWavesSurvived, 10)]
+        );
+        assert!(wave_plan
+            .achievements
+            .contains(&Achievement::Survive10WavesNoBlocks));
+
+        assert!(state
+            .wave_plan(GameServiceWaveSnapshot {
+                campaign: false,
+                wave: 100,
+                buildings_built: 0,
+            })
+            .is_empty());
+
+        let launch_plan = state.launch_item_plan(GameServiceLaunchItemSnapshot {
+            campaign: true,
+            amount: 250,
+        });
+        assert_eq!(
+            launch_plan.stat_amount_additions,
+            vec![(SStat::ItemsLaunched, 250)]
+        );
+        assert!(launch_plan
+            .achievements
+            .contains(&Achievement::LaunchItemPad));
+
+        let pickup_plan = state.pickup_plan(GameServicePickupSnapshot {
+            campaign: true,
+            carrier_player: true,
+            unit_name: Some("omura".into()),
+        });
+        assert!(pickup_plan.achievements.contains(&Achievement::PickupT5));
+
+        assert!(state
+            .unit_drown_plan(GameServiceUnitDrownSnapshot {
+                campaign: true,
+                player_unit: true,
+            })
+            .achievements
+            .contains(&Achievement::Drown));
+
+        assert!(state
+            .new_game_plan(GameServiceNewGameSnapshot {
+                campaign: true,
+                core_items_total: 10_000,
+            })
+            .achievements
+            .contains(&Achievement::Drop10kitems));
     }
 }
