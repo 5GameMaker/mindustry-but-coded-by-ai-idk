@@ -30,6 +30,17 @@ pub struct GameServiceState {
     pub all_serpulo_blocks: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceRegisterSnapshot {
+    pub thorium_unlocked: bool,
+    pub titanium_unlocked: bool,
+    pub origin_captured: bool,
+    pub planetary_terminal_captured: bool,
+    pub mods_installed: bool,
+    pub yes_bundle_is_router: bool,
+    pub all_serpulo_sectors_captured: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GameServiceUpdateSnapshot {
     pub campaign: bool,
@@ -265,6 +276,38 @@ pub struct GameServiceNewGameSnapshot {
     pub core_items_total: i32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameServiceFrameUpdateSnapshot {
+    pub campaign: bool,
+    pub hover_unit_liquid_already_achieved: bool,
+    pub hover_check_due: bool,
+    pub elude_on_liquid: bool,
+    pub player_dead: bool,
+    pub player_unit_can_boost: bool,
+    pub player_unit_elevation: f32,
+}
+
+impl GameServiceFrameUpdateSnapshot {
+    pub fn non_campaign() -> Self {
+        Self {
+            campaign: false,
+            hover_unit_liquid_already_achieved: false,
+            hover_check_due: false,
+            elude_on_liquid: false,
+            player_dead: false,
+            player_unit_can_boost: false,
+            player_unit_elevation: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceNucleusGroundZeroSnapshot {
+    pub campaign: bool,
+    pub sector_preset_name: Option<String>,
+    pub block_name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameServiceBuildingBulletDestroySnapshot {
     pub campaign: bool,
@@ -379,6 +422,46 @@ impl GameServiceState {
 
     pub fn seed_java_t5_units(&mut self) {
         self.t5s = java_t5_units();
+    }
+
+    pub fn register_initial_plan(
+        &self,
+        snapshot: GameServiceRegisterSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+
+        if snapshot.thorium_unlocked {
+            plan.achievements.insert(Achievement::ObtainThorium);
+        }
+        if snapshot.titanium_unlocked {
+            plan.achievements.insert(Achievement::ObtainTitanium);
+        }
+        if snapshot.origin_captured {
+            plan.achievements.insert(Achievement::CompleteErekir);
+        }
+        if snapshot.planetary_terminal_captured {
+            plan.achievements.insert(Achievement::CompleteSerpulo);
+        }
+        if snapshot.mods_installed {
+            plan.achievements.insert(Achievement::InstallMod);
+        }
+        if snapshot.yes_bundle_is_router {
+            plan.achievements.insert(Achievement::RouterLanguage);
+        }
+        if snapshot.all_serpulo_sectors_captured {
+            plan.achievements.insert(Achievement::CaptureAllSectors);
+        }
+        if !self.all_erekir_blocks.is_empty() && self.has_all_blocks_built(&self.all_erekir_blocks)
+        {
+            plan.achievements.insert(Achievement::AllBlocksErekir);
+        }
+        if !self.all_serpulo_blocks.is_empty()
+            && self.has_all_blocks_built(&self.all_serpulo_blocks)
+        {
+            plan.achievements.insert(Achievement::AllBlocksSerpulo);
+        }
+
+        plan
     }
 
     pub fn check_update_plan(&self, snapshot: GameServiceUpdateSnapshot) -> GameServiceUpdatePlan {
@@ -821,6 +904,46 @@ impl GameServiceState {
         plan
     }
 
+    pub fn frame_update_plan(
+        &self,
+        snapshot: GameServiceFrameUpdateSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if !snapshot.campaign {
+            return plan;
+        }
+
+        if !snapshot.hover_unit_liquid_already_achieved
+            && snapshot.hover_check_due
+            && snapshot.elude_on_liquid
+        {
+            plan.achievements.insert(Achievement::HoverUnitLiquid);
+        }
+
+        if !snapshot.player_dead
+            && snapshot.player_unit_can_boost
+            && snapshot.player_unit_elevation >= 0.25
+        {
+            plan.achievements.insert(Achievement::BoostUnit);
+        }
+
+        plan
+    }
+
+    pub fn nucleus_ground_zero_plan(
+        &self,
+        snapshot: GameServiceNucleusGroundZeroSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.campaign
+            && snapshot.sector_preset_name.as_deref() == Some("groundZero")
+            && snapshot.block_name == "core-nucleus"
+        {
+            plan.achievements.insert(Achievement::NucleusGroundZero);
+        }
+        plan
+    }
+
     pub fn building_bullet_destroy_plan(
         &self,
         snapshot: GameServiceBuildingBulletDestroySnapshot,
@@ -1057,6 +1180,46 @@ mod tests {
         assert_eq!(service.state().t5s, java_t5_units());
         assert!(service.state().t5s.contains("omura"));
         assert!(service.state().t5s.contains("corvus"));
+    }
+
+    #[test]
+    fn register_initial_plan_matches_java_one_time_startup_checks() {
+        let mut state = GameServiceState {
+            all_serpulo_blocks: vec!["router".into(), "conveyor".into()],
+            all_erekir_blocks: vec!["duct".into()],
+            ..Default::default()
+        };
+        state.mark_block_built("router");
+        state.mark_block_built("conveyor");
+        state.mark_block_built("duct");
+
+        let plan = state.register_initial_plan(GameServiceRegisterSnapshot {
+            thorium_unlocked: true,
+            titanium_unlocked: true,
+            origin_captured: true,
+            planetary_terminal_captured: true,
+            mods_installed: true,
+            yes_bundle_is_router: true,
+            all_serpulo_sectors_captured: true,
+        });
+
+        for achievement in [
+            Achievement::ObtainThorium,
+            Achievement::ObtainTitanium,
+            Achievement::CompleteErekir,
+            Achievement::CompleteSerpulo,
+            Achievement::InstallMod,
+            Achievement::RouterLanguage,
+            Achievement::CaptureAllSectors,
+            Achievement::AllBlocksErekir,
+            Achievement::AllBlocksSerpulo,
+        ] {
+            assert!(plan.achievements.contains(&achievement), "{achievement:?}");
+        }
+
+        assert!(GameServiceState::default()
+            .register_initial_plan(GameServiceRegisterSnapshot::default())
+            .is_empty());
     }
 
     #[test]
@@ -1673,6 +1836,49 @@ mod tests {
             })
             .achievements
             .contains(&Achievement::Drop10kitems));
+    }
+
+    #[test]
+    fn frame_update_and_ground_zero_nucleus_plans_match_java_branches() {
+        let state = GameServiceState::default();
+
+        let frame_plan = state.frame_update_plan(GameServiceFrameUpdateSnapshot {
+            campaign: true,
+            hover_unit_liquid_already_achieved: false,
+            hover_check_due: true,
+            elude_on_liquid: true,
+            player_dead: false,
+            player_unit_can_boost: true,
+            player_unit_elevation: 0.25,
+        });
+        assert!(frame_plan
+            .achievements
+            .contains(&Achievement::HoverUnitLiquid));
+        assert!(frame_plan.achievements.contains(&Achievement::BoostUnit));
+
+        assert!(state
+            .frame_update_plan(GameServiceFrameUpdateSnapshot::non_campaign())
+            .is_empty());
+        assert!(state
+            .frame_update_plan(GameServiceFrameUpdateSnapshot {
+                campaign: true,
+                hover_unit_liquid_already_achieved: true,
+                hover_check_due: true,
+                elude_on_liquid: true,
+                player_dead: true,
+                player_unit_can_boost: true,
+                player_unit_elevation: 1.0,
+            })
+            .is_empty());
+
+        let nucleus_plan = state.nucleus_ground_zero_plan(GameServiceNucleusGroundZeroSnapshot {
+            campaign: true,
+            sector_preset_name: Some("groundZero".into()),
+            block_name: "core-nucleus".into(),
+        });
+        assert!(nucleus_plan
+            .achievements
+            .contains(&Achievement::NucleusGroundZero));
     }
 
     #[test]
