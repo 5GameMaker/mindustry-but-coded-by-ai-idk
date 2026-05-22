@@ -210,6 +210,93 @@ impl LightningBulletType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BasicBulletDrawPlan {
+    pub width: f32,
+    pub height: f32,
+    pub rotation: f32,
+    pub mix_t: f32,
+    pub draw_back: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BasicBulletType {
+    pub base: BulletType,
+    pub width: f32,
+    pub height: f32,
+    pub shrink_x: f32,
+    pub shrink_y: f32,
+    pub spin: f32,
+    pub rotation_offset: f32,
+    pub sprite: String,
+    pub back_sprite: Option<String>,
+}
+
+impl Default for BasicBulletType {
+    fn default() -> Self {
+        Self::new(1.0, 1.0, "bullet")
+    }
+}
+
+impl BasicBulletType {
+    pub fn new(speed: f32, damage: f32, sprite: impl Into<String>) -> Self {
+        Self {
+            base: BulletType {
+                speed,
+                damage,
+                ..Default::default()
+            },
+            width: 5.0,
+            height: 7.0,
+            shrink_x: 0.0,
+            shrink_y: 0.5,
+            spin: 0.0,
+            rotation_offset: 0.0,
+            sprite: sprite.into(),
+            back_sprite: None,
+        }
+    }
+
+    pub fn default_with_sprite(speed: f32, damage: f32) -> Self {
+        Self::new(speed, damage, "bullet")
+    }
+
+    pub fn back_region_name(&self) -> String {
+        self.back_sprite
+            .clone()
+            .unwrap_or_else(|| format!("{}-back", self.sprite))
+    }
+
+    pub fn draw_plan(
+        &self,
+        fin: f32,
+        fout: f32,
+        bullet_rotation: f32,
+        bullet_time: f32,
+        spin_seed_degrees: f32,
+        back_region_found: bool,
+    ) -> BasicBulletDrawPlan {
+        let shrink = fout.clamp(0.0, 1.0);
+        let height = self.height * ((1.0 - self.shrink_y) + self.shrink_y * shrink);
+        let width = self.width * ((1.0 - self.shrink_x) + self.shrink_x * shrink);
+        let offset = -90.0
+            + if self.spin != 0.0 {
+                spin_seed_degrees + bullet_time * self.spin
+            } else {
+                0.0
+            }
+            + self.rotation_offset;
+
+        BasicBulletDrawPlan {
+            width,
+            height,
+            rotation: bullet_rotation + offset,
+            mix_t: fin.clamp(0.0, 1.0),
+            draw_back: back_region_found,
+        }
+    }
+}
+
 pub fn empty_bullet_type() -> BulletType {
     BulletType {
         hittable: false,
@@ -498,5 +585,30 @@ mod tests {
         assert_eq!(lightning.estimate_dps(), 10.0);
         assert_eq!(lightning.lightning_length(4), 29);
         assert_eq!(lightning.lightning_length(99), 31);
+    }
+
+    #[test]
+    fn basic_bullet_draw_plan_matches_shrink_spin_and_sprite_rules() {
+        let mut basic = BasicBulletType::new(3.0, 9.0, "shell");
+        basic.width = 10.0;
+        basic.height = 20.0;
+        basic.shrink_x = 0.5;
+        basic.shrink_y = 0.25;
+        basic.spin = 2.0;
+        basic.rotation_offset = 5.0;
+
+        assert_eq!(basic.base.speed, 3.0);
+        assert_eq!(basic.base.damage, 9.0);
+        assert_eq!(basic.back_region_name(), "shell-back");
+
+        let plan = basic.draw_plan(0.25, 0.5, 45.0, 10.0, 30.0, true);
+        assert_eq!(plan.width, 7.5);
+        assert_eq!(plan.height, 17.5);
+        assert_eq!(plan.rotation, 10.0);
+        assert_eq!(plan.mix_t, 0.25);
+        assert!(plan.draw_back);
+
+        basic.back_sprite = Some("custom-back".into());
+        assert_eq!(basic.back_region_name(), "custom-back");
     }
 }

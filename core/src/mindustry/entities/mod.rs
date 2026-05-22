@@ -31,8 +31,8 @@ pub use abilities::{
     SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 pub use bullet::{
-    empty_bullet_type, explosion_bullet_type, BulletCreatePlan, BulletType, FireBulletType,
-    FireBulletUpdatePlan, LightningBulletType,
+    empty_bullet_type, explosion_bullet_type, BasicBulletDrawPlan, BasicBulletType,
+    BulletCreatePlan, BulletType, FireBulletType, FireBulletUpdatePlan, LightningBulletType,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
