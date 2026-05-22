@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::mindustry::ctype::{ContentId, ContentType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +39,20 @@ impl PayloadStack {
             .map(|(content_type, id, name, amount)| Self::new(*content_type, *id, *name, *amount))
             .collect()
     }
+
+    pub fn list(pairs: &[(ContentType, ContentId, &str, i32)]) -> Vec<Self> {
+        Self::with(pairs)
+    }
+}
+
+impl fmt::Display for PayloadStack {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "BlockStack{{item={}, amount={}}}",
+            self.name, self.amount
+        )
+    }
 }
 
 impl PartialOrd for PayloadStack {
@@ -65,6 +81,12 @@ mod tests {
         assert_eq!(default.content_type, ContentType::Block);
         assert_eq!(default.name, "router");
         assert_eq!(default.amount, 1);
+        assert_eq!(default.to_string(), "BlockStack{item=router, amount=1}");
+        assert_eq!(
+            PayloadStack::single(ContentType::Unit, 3, "dagger"),
+            PayloadStack::new(ContentType::Unit, 3, "dagger", 1)
+        );
+
         let stacks = PayloadStack::with(&[
             (ContentType::Unit, 3, "dagger", 2),
             (ContentType::Block, 5, "router", 4),
@@ -72,5 +94,9 @@ mod tests {
         assert_eq!(stacks.len(), 2);
         assert_eq!(stacks[0].amount, 2);
         assert!(stacks[1] < stacks[0]);
+        assert_eq!(
+            PayloadStack::list(&[(ContentType::Block, 5, "router", 4)]).len(),
+            1
+        );
     }
 }
