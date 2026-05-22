@@ -43,5 +43,5 @@ pub use versions::{
     LegacyEntityMapping, LegacyEntityMappingEntry, LegacyMapBlockRecord, LegacyMapFloorRecord,
     LegacyMapTileData, LegacyShortChunkMap, LegacyTeamBlockGroup, LegacyTeamBlockPlan,
     LegacyTeamBlocks, LegacyWorldEntities, LegacyWorldEntityChunk, Save1, Save2, Save3, Save4,
-    Save5, Save6, Save7, Save9,
+    Save5, Save6, Save7, Save8, Save9,
 };
