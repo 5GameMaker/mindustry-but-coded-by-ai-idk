@@ -13,12 +13,12 @@ use crate::mindustry::net::{
     DeletePlansCallPacket, Disconnect, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net,
     PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
     PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket, ProviderEvent,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
-    SetLiquidCallPacket, SetLiquidsCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
-    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket,
+    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, StateSnapshotCallPacket,
+    StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -229,6 +229,9 @@ pub struct NetClientState {
     pub last_unit_clear: Option<UnitClearCallPacket>,
     pub last_unit_clear_at: Option<Instant>,
     pub unit_clear_packets_seen: u64,
+    pub last_remove_queue_block: Option<RemoveQueueBlockCallPacket>,
+    pub last_remove_queue_block_at: Option<Instant>,
+    pub remove_queue_block_packets_seen: u64,
     pub last_tile_config: Option<TileConfigCallPacket>,
     pub last_tile_config_at: Option<Instant>,
     pub tile_config_packets_seen: u64,
@@ -378,6 +381,10 @@ impl fmt::Debug for NetClientState {
             )
             .field("unit_control_packets_seen", &self.unit_control_packets_seen)
             .field("unit_clear_packets_seen", &self.unit_clear_packets_seen)
+            .field(
+                "remove_queue_block_packets_seen",
+                &self.remove_queue_block_packets_seen,
+            )
             .field("tile_config_packets_seen", &self.tile_config_packets_seen)
             .field("rotate_block_packets_seen", &self.rotate_block_packets_seen)
             .field("tile_tap_packets_seen", &self.tile_tap_packets_seen)
@@ -1272,6 +1279,13 @@ impl NetClient {
                         state.last_unit_clear_at = Some(now);
                         false
                     }
+                    PacketKind::RemoveQueueBlockCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.remove_queue_block_packets_seen += 1;
+                        state.last_remove_queue_block = Some(*packet);
+                        state.last_remove_queue_block_at = Some(now);
+                        false
+                    }
                     PacketKind::TileConfigCallPacket(packet) => {
                         let now = Instant::now();
                         state.tile_config_packets_seen += 1;
@@ -1462,13 +1476,13 @@ mod tests {
         Disconnect, DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
         HostCallback, Net, NetConnection, NetProvider, PacketKind, PayloadDroppedCallPacket,
         PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-        PingResponseCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
-        SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TileConfigCallPacket,
-        TileTapCallPacket, TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket,
-        UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
-        WorldDataBeginCallPacket,
+        PingResponseCallPacket, RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket,
+        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+        RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
+        SetLiquidsCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
+        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -2158,6 +2172,11 @@ mod tests {
         let rotate_block =
             RotateBlockCallPacket::server(EntityRef::new(7), BuildingRef::new(build_pos), true);
         let tile_tap = TileTapCallPacket::server(EntityRef::new(7), Some(tap_pos));
+        let remove_queue_block = RemoveQueueBlockCallPacket {
+            x: 3,
+            y: 4,
+            breaking: true,
+        };
 
         {
             let mut net = client.net_mut();
@@ -2165,6 +2184,7 @@ mod tests {
             net.handle_client_received(PacketKind::TileConfigCallPacket(tile_config.clone()));
             net.handle_client_received(PacketKind::RotateBlockCallPacket(rotate_block));
             net.handle_client_received(PacketKind::TileTapCallPacket(tile_tap.clone()));
+            net.handle_client_received(PacketKind::RemoveQueueBlockCallPacket(remove_queue_block));
         }
 
         client.update();
@@ -2180,9 +2200,15 @@ mod tests {
         assert_eq!(state.tile_tap_packets_seen, 1);
         assert_eq!(state.last_tile_tap.as_ref(), Some(&tile_tap));
         assert!(state.last_tile_tap_at.is_some());
+        assert_eq!(state.remove_queue_block_packets_seen, 1);
+        assert_eq!(
+            state.last_remove_queue_block.as_ref(),
+            Some(&remove_queue_block)
+        );
+        assert!(state.last_remove_queue_block_at.is_some());
         assert!(matches!(
             state.last_packet,
-            Some(PacketKind::TileTapCallPacket(_))
+            Some(PacketKind::RemoveQueueBlockCallPacket(_))
         ));
     }
 
