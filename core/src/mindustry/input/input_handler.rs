@@ -4,12 +4,15 @@
 //! outside. Callers provide validation predicates and receive explicit plans
 //! such as tile-config rollback packets.
 
+use crate::mindustry::ai::{unit_command::UnitCommand, unit_stance::UnitStance};
+use crate::mindustry::ctype::Content;
 use crate::mindustry::entities::comp::{
     building::{BuildingConfigChange, BuildingConfigRollback},
     player::PlayerUnitState,
-    BuildingComp, PayloadState, PlayerComp, UnitComp,
+    BuildingComp, PayloadState, PlayerComp, UnitComp, UnitControllerState,
 };
 use crate::mindustry::entities::units::BuildPlan;
+use crate::mindustry::io::type_io::CommandWire;
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
@@ -17,9 +20,10 @@ use crate::mindustry::net::{
     PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
     RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
     RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket,
-    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, TakeItemsCallPacket,
-    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket,
-    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket,
+    SetUnitStanceCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
@@ -541,6 +545,52 @@ pub struct CommandUnitsOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetUnitCommandRejectReason {
+    MissingPlayer,
+    MissingUnits,
+    MissingCommand,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SetUnitCommandContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetUnitCommandOutcome {
+    pub accepted: bool,
+    pub rejection: Option<SetUnitCommandRejectReason>,
+    pub commanded: usize,
+    pub packet: Option<SetUnitCommandCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetUnitStanceRejectReason {
+    MissingPlayer,
+    MissingUnits,
+    MissingStance,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SetUnitStanceContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetUnitStanceOutcome {
+    pub accepted: bool,
+    pub rejection: Option<SetUnitStanceRejectReason>,
+    pub commanded: usize,
+    pub packet: Option<SetUnitStanceCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoveQueueBlockRejectReason {
     MissingUnit,
 }
@@ -891,6 +941,38 @@ impl CommandUnitsOutcome {
     fn rejected(
         context: &CommandUnitsContext,
         reason: CommandUnitsRejectReason,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            commanded: 0,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl SetUnitCommandOutcome {
+    fn rejected(
+        context: &SetUnitCommandContext,
+        reason: SetUnitCommandRejectReason,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            commanded: 0,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl SetUnitStanceOutcome {
+    fn rejected(
+        context: &SetUnitStanceContext,
+        reason: SetUnitStanceRejectReason,
         validate_rejection: bool,
     ) -> Self {
         Self {
@@ -2387,6 +2469,237 @@ pub fn client_command_units_packet(
     }
 }
 
+fn command_wire_mut(unit: &mut UnitComp) -> Option<&mut CommandWire> {
+    match &mut unit.controller {
+        UnitControllerState::Command(command) => Some(command),
+        _ => None,
+    }
+}
+
+pub fn set_unit_command<A>(
+    context: SetUnitCommandContext,
+    player: Option<&PlayerComp>,
+    units: &mut [UnitComp],
+    unit_ids: Vec<i32>,
+    command: Option<&UnitCommand>,
+    admin_allows: A,
+) -> SetUnitCommandOutcome
+where
+    A: FnOnce(&[i32]) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return SetUnitCommandOutcome::rejected(
+            &context,
+            SetUnitCommandRejectReason::MissingPlayer,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    if unit_ids.is_empty() {
+        return SetUnitCommandOutcome::rejected(
+            &context,
+            SetUnitCommandRejectReason::MissingUnits,
+            false,
+        );
+    }
+
+    let Some(command) = command else {
+        return SetUnitCommandOutcome::rejected(
+            &context,
+            SetUnitCommandRejectReason::MissingCommand,
+            false,
+        );
+    };
+
+    if !admin_allows(&unit_ids) {
+        return SetUnitCommandOutcome::rejected(
+            &context,
+            SetUnitCommandRejectReason::AdminDenied,
+            true,
+        );
+    }
+
+    let command_name = command.name().to_string();
+    let command_id = command.id();
+    let colored_name = player.colored_name();
+    let mut commanded = 0usize;
+
+    for id in &unit_ids {
+        let Some(unit) = units.iter_mut().find(|unit| unit.id() == *id) else {
+            continue;
+        };
+        if unit.team.team != player.team
+            || !unit
+                .type_info
+                .commands
+                .iter()
+                .any(|allowed| allowed == &command_name)
+        {
+            continue;
+        }
+
+        let applied = if let Some(command_wire) = command_wire_mut(unit) {
+            command_wire.command_id = Some(command_id);
+            if command.reset_target {
+                command_wire.target_pos = None;
+                command_wire.attack_target = None;
+            }
+            true
+        } else {
+            false
+        };
+
+        if applied {
+            unit.last_commanded = Some(colored_name.clone());
+            commanded += 1;
+        }
+    }
+
+    SetUnitCommandOutcome {
+        accepted: true,
+        rejection: None,
+        commanded,
+        packet: Some(SetUnitCommandCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            unit_ids,
+            command: command_name,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_set_unit_command_packet(
+    unit_ids: Vec<i32>,
+    command: impl Into<String>,
+) -> SetUnitCommandCallPacket {
+    SetUnitCommandCallPacket {
+        player: EntityRef::null(),
+        unit_ids,
+        command: command.into(),
+    }
+}
+
+pub fn set_unit_stance<A>(
+    context: SetUnitStanceContext,
+    player: Option<&PlayerComp>,
+    units: &mut [UnitComp],
+    unit_ids: Vec<i32>,
+    stance: Option<&UnitStance>,
+    enable: bool,
+    admin_allows: A,
+) -> SetUnitStanceOutcome
+where
+    A: FnOnce(&[i32]) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return SetUnitStanceOutcome::rejected(
+            &context,
+            SetUnitStanceRejectReason::MissingPlayer,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    if unit_ids.is_empty() {
+        return SetUnitStanceOutcome::rejected(
+            &context,
+            SetUnitStanceRejectReason::MissingUnits,
+            false,
+        );
+    }
+
+    let Some(stance) = stance else {
+        return SetUnitStanceOutcome::rejected(
+            &context,
+            SetUnitStanceRejectReason::MissingStance,
+            false,
+        );
+    };
+
+    if !admin_allows(&unit_ids) {
+        return SetUnitStanceOutcome::rejected(
+            &context,
+            SetUnitStanceRejectReason::AdminDenied,
+            true,
+        );
+    }
+
+    let stance_name = stance.name().to_string();
+    let stance_id = stance.id();
+    let colored_name = player.colored_name();
+    let mut commanded = 0usize;
+
+    for id in &unit_ids {
+        let Some(unit) = units.iter_mut().find(|unit| unit.id() == *id) else {
+            continue;
+        };
+        if unit.team.team != player.team {
+            continue;
+        }
+
+        let allowed_stance = stance_name == "stop"
+            || unit
+                .type_info
+                .stances
+                .iter()
+                .any(|allowed| allowed == &stance_name);
+
+        if !allowed_stance {
+            continue;
+        }
+
+        let applied = if let Some(command_wire) = command_wire_mut(unit) {
+            if stance_name == "stop" {
+                command_wire.target_pos = None;
+                command_wire.attack_target = None;
+                command_wire.command_queue.clear();
+                command_wire.stances.clear();
+            } else if !stance.toggle || enable {
+                if !command_wire.stances.contains(&stance_id) {
+                    command_wire.stances.push(stance_id);
+                }
+            } else {
+                command_wire.stances.retain(|id| *id != stance_id);
+            }
+            true
+        } else {
+            false
+        };
+
+        if applied {
+            unit.last_commanded = Some(colored_name.clone());
+            commanded += 1;
+        }
+    }
+
+    SetUnitStanceOutcome {
+        accepted: true,
+        rejection: None,
+        commanded,
+        packet: Some(SetUnitStanceCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            unit_ids,
+            stance: stance_name,
+            enable,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_set_unit_stance_packet(
+    unit_ids: Vec<i32>,
+    stance: impl Into<String>,
+    enable: bool,
+) -> SetUnitStanceCallPacket {
+    SetUnitStanceCallPacket {
+        player: EntityRef::null(),
+        unit_ids,
+        stance: stance.into(),
+        enable,
+    }
+}
+
 pub fn remove_queue_block(
     unit: Option<&mut UnitComp>,
     x: i32,
@@ -3767,6 +4080,163 @@ mod tests {
         assert_eq!(packet.build_target, BuildingRef::null());
         assert_eq!(packet.unit_target, UnitRef::Unit { id: 10 });
         assert!(packet.final_batch);
+    }
+
+    #[test]
+    fn set_unit_command_updates_command_ai_units_and_records_packet() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.name = "commander".into();
+        player.color = 0x1122_3344;
+        let mut type_info = unit_type(10);
+        type_info.commands.push("rebuild".into());
+        let mut unit = UnitComp::new(80, type_info, TeamId(1));
+        let mut command_wire = CommandWire::new();
+        command_wire.target_pos = Some(Vec2::new(1.0, 2.0));
+        unit.controller = UnitControllerState::Command(command_wire);
+
+        let mut enemy_type = unit_type(10);
+        enemy_type.commands.push("rebuild".into());
+        let mut enemy = UnitComp::new(81, enemy_type, TeamId(2));
+        enemy.controller = UnitControllerState::Command(CommandWire::new());
+        let mut units = vec![unit, enemy];
+        let command = UnitCommand::new(2, "rebuild", "hammer", None::<String>, None::<String>);
+
+        let outcome = set_unit_command(
+            SetUnitCommandContext {
+                player: Some(EntityRef::new(70)),
+                local_player: false,
+            },
+            Some(&player),
+            &mut units,
+            vec![80, 81],
+            Some(&command),
+            |ids| ids == [80, 81].as_slice(),
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.commanded, 1);
+        assert_eq!(
+            units[0].last_commanded.as_deref(),
+            Some("[#11223344]commander")
+        );
+        match &units[0].controller {
+            UnitControllerState::Command(command_wire) => {
+                assert_eq!(command_wire.command_id, Some(2));
+                assert!(command_wire.target_pos.is_none());
+            }
+            other => panic!("expected command controller, got {other:?}"),
+        }
+        assert!(units[1].last_commanded.is_none());
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(70));
+        assert_eq!(packet.unit_ids, vec![80, 81]);
+        assert_eq!(packet.command, "rebuild");
+    }
+
+    #[test]
+    fn set_unit_command_rejects_admin_denied_as_validate_error() {
+        let player = PlayerComp::new(TeamId(1));
+        let mut type_info = unit_type(10);
+        type_info.commands.push("move".into());
+        let mut unit = UnitComp::new(80, type_info, TeamId(1));
+        unit.controller = UnitControllerState::Command(CommandWire::new());
+        let mut units = vec![unit];
+        let command = UnitCommand::new(0, "move", "right", None::<String>, None::<String>);
+
+        let outcome = set_unit_command(
+            SetUnitCommandContext {
+                player: Some(EntityRef::new(70)),
+                local_player: false,
+            },
+            Some(&player),
+            &mut units,
+            vec![80],
+            Some(&command),
+            |_| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(SetUnitCommandRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        match &units[0].controller {
+            UnitControllerState::Command(command_wire) => {
+                assert!(command_wire.command_id.is_none())
+            }
+            other => panic!("expected command controller, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_unit_stance_toggles_allowed_stance_and_records_packet() {
+        let player = PlayerComp::new(TeamId(1));
+        let mut type_info = unit_type(10);
+        type_info.stances.push("holdfire".into());
+        let mut unit = UnitComp::new(82, type_info, TeamId(1));
+        unit.controller = UnitControllerState::Command(CommandWire::new());
+        let mut units = vec![unit];
+        let stance = UnitStance::new(3, "holdfire", "pause", None::<String>, true);
+
+        let enabled = set_unit_stance(
+            SetUnitStanceContext {
+                player: Some(EntityRef::new(71)),
+                local_player: false,
+            },
+            Some(&player),
+            &mut units,
+            vec![82],
+            Some(&stance),
+            true,
+            |_| true,
+        );
+
+        assert!(enabled.accepted);
+        assert_eq!(enabled.commanded, 1);
+        match &units[0].controller {
+            UnitControllerState::Command(command_wire) => {
+                assert_eq!(command_wire.stances, vec![3]);
+            }
+            other => panic!("expected command controller, got {other:?}"),
+        }
+        let packet = enabled.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(71));
+        assert_eq!(packet.stance, "holdfire");
+        assert!(packet.enable);
+
+        let disabled = set_unit_stance(
+            SetUnitStanceContext {
+                player: Some(EntityRef::new(71)),
+                local_player: false,
+            },
+            Some(&player),
+            &mut units,
+            vec![82],
+            Some(&stance),
+            false,
+            |_| true,
+        );
+
+        assert!(disabled.accepted);
+        match &units[0].controller {
+            UnitControllerState::Command(command_wire) => assert!(command_wire.stances.is_empty()),
+            other => panic!("expected command controller, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unit_command_client_packets_use_client_payload_shape() {
+        let command = client_set_unit_command_packet(vec![1, 2], "move");
+        assert_eq!(command.player, EntityRef::null());
+        assert_eq!(command.unit_ids, vec![1, 2]);
+        assert_eq!(command.command, "move");
+
+        let stance = client_set_unit_stance_packet(vec![3], "stop", false);
+        assert_eq!(stance.player, EntityRef::null());
+        assert_eq!(stance.unit_ids, vec![3]);
+        assert_eq!(stance.stance, "stop");
+        assert!(!stance.enable);
     }
 
     #[test]
