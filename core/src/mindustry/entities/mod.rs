@@ -145,6 +145,6 @@ pub use unit_sorts::{
     building_default, building_water, closest, farthest, strongest, weakest,
     BuildingPriorityTarget, SortTarget,
 };
-pub use units::{BuildPlan, StatusEntry, WeaponMount};
+pub use units::{BuildPlan, StatusEntry, UnitController, WeaponMount};
 
 // Mirrors upstream core/src/mindustry/entities. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.

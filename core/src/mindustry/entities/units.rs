@@ -1,6 +1,34 @@
-use crate::mindustry::io::{Point2, TypeValue};
+use crate::mindustry::io::{EntityRef, Point2, TypeValue};
 use crate::mindustry::r#type::{StatusEffect, Weapon};
 use crate::mindustry::world::block::Block;
+
+/// Controller contract mirrored from upstream `mindustry.entities.units.UnitController`.
+///
+/// Java overloads `unit(Unit)` as setter and `unit()` as nullable getter; Rust
+/// keeps the nullable entity handle as `EntityRef` and names the setter
+/// explicitly to avoid overloading.
+pub trait UnitController {
+    fn set_unit(&mut self, unit: EntityRef);
+
+    fn unit(&self) -> EntityRef;
+
+    fn hit(&mut self, _bullet: EntityRef) {}
+
+    fn is_valid_controller(&self) -> bool {
+        true
+    }
+
+    /// Returns whether logic AI can take over.
+    fn is_logic_controllable(&self) -> bool {
+        false
+    }
+
+    fn update_unit(&mut self) {}
+
+    fn removed(&mut self, _unit: EntityRef) {}
+
+    fn after_read(&mut self, _unit: EntityRef) {}
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusEntry {
@@ -311,11 +339,114 @@ impl Default for BuildPlan {
 
 #[cfg(test)]
 mod tests {
-    use crate::mindustry::io::{Point2, TypeValue};
+    use crate::mindustry::io::{EntityRef, Point2, TypeValue};
     use crate::mindustry::r#type::{StatusEffect, Weapon};
     use crate::mindustry::world::block::Block;
 
-    use super::{BuildPlan, StatusEntry, WeaponMount};
+    use super::{BuildPlan, StatusEntry, UnitController, WeaponMount};
+
+    #[derive(Debug)]
+    struct MockUnitController {
+        unit: EntityRef,
+        hits: Vec<EntityRef>,
+        updates: usize,
+        removed: Vec<EntityRef>,
+        after_reads: Vec<EntityRef>,
+    }
+
+    impl Default for MockUnitController {
+        fn default() -> Self {
+            Self {
+                unit: EntityRef::null(),
+                hits: Vec::new(),
+                updates: 0,
+                removed: Vec::new(),
+                after_reads: Vec::new(),
+            }
+        }
+    }
+
+    impl UnitController for MockUnitController {
+        fn set_unit(&mut self, unit: EntityRef) {
+            self.unit = unit;
+        }
+
+        fn unit(&self) -> EntityRef {
+            self.unit
+        }
+
+        fn hit(&mut self, bullet: EntityRef) {
+            self.hits.push(bullet);
+        }
+
+        fn update_unit(&mut self) {
+            self.updates += 1;
+        }
+
+        fn removed(&mut self, unit: EntityRef) {
+            self.removed.push(unit);
+        }
+
+        fn after_read(&mut self, unit: EntityRef) {
+            self.after_reads.push(unit);
+        }
+    }
+
+    #[derive(Debug)]
+    struct DefaultOnlyController {
+        unit: EntityRef,
+    }
+
+    impl Default for DefaultOnlyController {
+        fn default() -> Self {
+            Self {
+                unit: EntityRef::null(),
+            }
+        }
+    }
+
+    impl UnitController for DefaultOnlyController {
+        fn set_unit(&mut self, unit: EntityRef) {
+            self.unit = unit;
+        }
+
+        fn unit(&self) -> EntityRef {
+            self.unit
+        }
+    }
+
+    #[test]
+    fn unit_controller_required_unit_accessors_and_defaults_match_java_interface() {
+        let mut controller = DefaultOnlyController::default();
+        assert_eq!(controller.unit(), EntityRef::null());
+
+        controller.set_unit(EntityRef::new(42));
+        assert_eq!(controller.unit(), EntityRef::new(42));
+        assert!(controller.is_valid_controller());
+        assert!(!controller.is_logic_controllable());
+
+        controller.hit(EntityRef::new(7));
+        controller.update_unit();
+        controller.removed(EntityRef::new(42));
+        controller.after_read(EntityRef::new(42));
+        assert_eq!(controller.unit(), EntityRef::new(42));
+    }
+
+    #[test]
+    fn unit_controller_hooks_can_be_overridden_by_runtime_controllers() {
+        let mut controller = MockUnitController::default();
+        controller.set_unit(EntityRef::new(3));
+        controller.hit(EntityRef::new(9));
+        controller.update_unit();
+        controller.removed(EntityRef::new(3));
+        controller.after_read(EntityRef::new(4));
+
+        assert_eq!(controller.unit(), EntityRef::new(3));
+        assert_eq!(controller.hits, vec![EntityRef::new(9)]);
+        assert_eq!(controller.updates, 1);
+        assert_eq!(controller.removed, vec![EntityRef::new(3)]);
+        assert_eq!(controller.after_reads, vec![EntityRef::new(4)]);
+    }
 
     #[test]
     fn status_entry_set_attaches_effect_and_time() {
