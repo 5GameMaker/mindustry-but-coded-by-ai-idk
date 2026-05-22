@@ -7,6 +7,7 @@ pub mod l_writable;
 pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
+pub mod tile_layer;
 
 pub use cutscene_action::CutsceneAction;
 pub use fetch_type::FetchType;
@@ -15,6 +16,7 @@ pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
+pub use tile_layer::TileLayer;
 
 use crate::mindustry::{content::ContentCatalog, ctype::ContentType, world::meta::BlockFlag};
 
@@ -9894,49 +9896,6 @@ impl GraphicsType {
             .iter()
             .copied()
             .find(|value| value.wire_name() == name)
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TileLayer {
-    Floor,
-    Ore,
-    Block,
-    Building,
-}
-
-impl TileLayer {
-    pub const ALL: [TileLayer; 4] = [
-        TileLayer::Floor,
-        TileLayer::Ore,
-        TileLayer::Block,
-        TileLayer::Building,
-    ];
-    pub const SETTABLE: [TileLayer; 3] = [TileLayer::Floor, TileLayer::Ore, TileLayer::Block];
-    pub const WIRE_NAMES: [&'static str; 4] = ["floor", "ore", "block", "building"];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn wire_name(self) -> &'static str {
-        Self::WIRE_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_wire_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|value| value.wire_name() == name)
-    }
-
-    pub const fn is_settable(self) -> bool {
-        matches!(self, TileLayer::Floor | TileLayer::Ore | TileLayer::Block)
     }
 }
 
