@@ -578,6 +578,128 @@ impl ShapePart {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlareTrianglePlan {
+    pub color: String,
+    pub width: f32,
+    pub length: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlarePartDrawPlan {
+    pub x: f32,
+    pub y: f32,
+    pub layer: f32,
+    pub triangles: Vec<FlareTrianglePlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlarePart {
+    pub config: DrawPartConfig,
+    pub sides: i32,
+    pub radius: f32,
+    pub radius_to: f32,
+    pub stroke: f32,
+    pub inner_scl: f32,
+    pub inner_rad_scl: f32,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub rot_move: f32,
+    pub spin_speed: f32,
+    pub follow_rotation: bool,
+    pub color1: String,
+    pub color2: String,
+    pub clamp_progress: bool,
+    pub progress: PartProgress,
+    pub layer: f32,
+}
+
+impl Default for FlarePart {
+    fn default() -> Self {
+        Self {
+            config: DrawPartConfig::default(),
+            sides: 4,
+            radius: 100.0,
+            radius_to: -1.0,
+            stroke: 6.0,
+            inner_scl: 0.5,
+            inner_rad_scl: 0.33,
+            x: 0.0,
+            y: 0.0,
+            rotation: 0.0,
+            rot_move: 0.0,
+            spin_speed: 0.0,
+            follow_rotation: false,
+            color1: "techBlue".into(),
+            color2: "white".into(),
+            clamp_progress: true,
+            progress: PartProgress::Warmup,
+            layer: 110.0,
+        }
+    }
+}
+
+impl FlarePart {
+    pub fn draw_plan(&self, params: &PartParams, time: f32) -> FlarePartDrawPlan {
+        let prog = self.progress.get_clamp(params, time, self.clamp_progress);
+        let side = if params.side_override == -1 {
+            0
+        } else {
+            params.side_override
+        };
+        let sign = (if side == 0 { 1.0 } else { -1.0 }) * params.side_multiplier as f32;
+        let offset = rotate_offset(params.rotation - 90.0, self.x * sign, self.y);
+        let x = params.x + offset.0;
+        let y = params.y + offset.1;
+        let base_rotation = if self.follow_rotation {
+            params.rotation
+        } else {
+            0.0
+        } + self.rot_move * prog
+            + self.rotation
+            + time * self.spin_speed;
+        let radius = if self.radius_to < 0.0 {
+            self.radius
+        } else {
+            lerp(self.radius, self.radius_to, prog)
+        };
+
+        let mut triangles = Vec::with_capacity(self.sides.max(0) as usize * 2);
+        for color_pass in 0..2 {
+            for j in 0..self.sides.max(0) {
+                let inner = color_pass == 1;
+                triangles.push(FlareTrianglePlan {
+                    color: if inner {
+                        self.color2.clone()
+                    } else {
+                        self.color1.clone()
+                    },
+                    width: if inner {
+                        self.stroke * self.inner_scl
+                    } else {
+                        self.stroke
+                    },
+                    length: if inner {
+                        radius * self.inner_rad_scl
+                    } else {
+                        radius
+                    },
+                    rotation: j as f32 * 360.0 / self.sides.max(1) as f32 + base_rotation,
+                });
+            }
+        }
+
+        FlarePartDrawPlan {
+            x,
+            y,
+            layer: self.layer,
+            triangles,
+        }
+    }
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -605,7 +727,7 @@ fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, PartMove, PartParams,
+        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, PartMove, PartParams,
         PartProgress, ShapePart, ShapePartKind,
     };
 
@@ -814,5 +936,38 @@ mod tests {
         .draw_plan(&params, 0.0);
         assert_eq!(circle.shapes[0].kind, ShapePartKind::Circle);
         assert!(circle.shapes[0].hollow);
+    }
+
+    #[test]
+    fn flare_part_draw_plan_emits_outer_and_inner_triangles() {
+        let mut params = PartParams::default();
+        params.set(0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 200.0, 90.0);
+
+        let part = FlarePart {
+            sides: 2,
+            radius: 10.0,
+            radius_to: 20.0,
+            stroke: 6.0,
+            x: 5.0,
+            y: 0.0,
+            rotation: 10.0,
+            rot_move: 20.0,
+            spin_speed: 2.0,
+            follow_rotation: true,
+            ..Default::default()
+        };
+
+        let plan = part.draw_plan(&params, 3.0);
+        assert_eq!((plan.x, plan.y), (105.0, 200.0));
+        assert_eq!(plan.layer, 110.0);
+        assert_eq!(plan.triangles.len(), 4);
+        assert_eq!(plan.triangles[0].color, "techBlue");
+        assert_eq!(plan.triangles[0].width, 6.0);
+        assert_eq!(plan.triangles[0].length, 15.0);
+        assert_eq!(plan.triangles[0].rotation, 116.0);
+        assert_eq!(plan.triangles[1].rotation, 296.0);
+        assert_eq!(plan.triangles[2].color, "white");
+        assert_eq!(plan.triangles[2].width, 3.0);
+        assert!((plan.triangles[2].length - 4.95).abs() < 0.0001);
     }
 }
