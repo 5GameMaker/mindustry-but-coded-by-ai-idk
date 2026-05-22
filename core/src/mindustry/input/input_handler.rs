@@ -9,17 +9,19 @@ use crate::mindustry::entities::comp::{
     player::PlayerUnitState,
     BuildingComp, PayloadState, PlayerComp, UnitComp,
 };
+use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
-    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    BuildingControlSelectCallPacket, DeletePlansCallPacket, DropItemCallPacket,
+    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    PingLocationCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+    TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+    TransferItemToCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::TILE_SIZE;
-use crate::mindustry::world::meta::BuildVisibility;
+use crate::mindustry::world::{meta::BuildVisibility, point2_pack};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileConfigRejectReason {
@@ -426,6 +428,27 @@ pub struct PingLocationOutcome {
     pub should_raise_validate: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeletePlansRejectReason {
+    MissingPlayer,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DeletePlansContext {
+    pub player_id: Option<i32>,
+    pub local_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletePlansOutcome {
+    pub accepted: bool,
+    pub rejection: Option<DeletePlansRejectReason>,
+    pub removed: usize,
+    pub packet: Option<DeletePlansCallPacket>,
+    pub should_raise_validate: bool,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -671,6 +694,22 @@ impl PingLocationOutcome {
             displayed_text: None,
             packet: None,
             should_raise_validate: !context.local_player,
+        }
+    }
+}
+
+impl DeletePlansOutcome {
+    fn rejected(
+        context: &DeletePlansContext,
+        reason: DeletePlansRejectReason,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            removed: 0,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
         }
     }
 }
@@ -1812,6 +1851,51 @@ pub fn client_ping_location_packet(x: f32, y: f32, text: Option<String>) -> Ping
     }
 }
 
+pub fn delete_plans<A>(
+    context: DeletePlansContext,
+    player_present: bool,
+    plans: &mut Vec<BuildPlan>,
+    positions: &[i32],
+    admin_allows: A,
+) -> DeletePlansOutcome
+where
+    A: FnOnce(&[i32]) -> bool,
+{
+    if !admin_allows(positions) {
+        return DeletePlansOutcome::rejected(&context, DeletePlansRejectReason::AdminDenied, true);
+    }
+
+    if !player_present {
+        return DeletePlansOutcome::rejected(
+            &context,
+            DeletePlansRejectReason::MissingPlayer,
+            false,
+        );
+    }
+
+    let before = plans.len();
+    plans.retain(|plan| !positions.contains(&point2_pack(plan.x, plan.y)));
+    let removed = before - plans.len();
+
+    DeletePlansOutcome {
+        accepted: true,
+        rejection: None,
+        removed,
+        packet: Some(DeletePlansCallPacket {
+            player_id: context.player_id,
+            positions: positions.to_vec(),
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_delete_plans_packet(positions: Vec<i32>) -> DeletePlansCallPacket {
+    DeletePlansCallPacket {
+        player_id: None,
+        positions,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -2834,5 +2918,66 @@ mod tests {
         assert_eq!(packet.player_id, None);
         assert_eq!((packet.x, packet.y), (5.0, 6.0));
         assert_eq!(packet.text, "go");
+    }
+
+    #[test]
+    fn delete_plans_removes_matching_positions_and_records_packet() {
+        let mut plans = vec![
+            BuildPlan::new_place(1, 2, 0, "router"),
+            BuildPlan::new_place(3, 4, 0, "duo"),
+        ];
+        let remove = vec![point2_pack(1, 2)];
+
+        let outcome = delete_plans(
+            DeletePlansContext {
+                player_id: Some(71),
+                local_player: false,
+            },
+            true,
+            &mut plans,
+            &remove,
+            |positions| positions == remove.as_slice(),
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.removed, 1);
+        assert_eq!(plans.len(), 1);
+        assert_eq!((plans[0].x, plans[0].y), (3, 4));
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player_id, Some(71));
+        assert_eq!(packet.positions, remove);
+    }
+
+    #[test]
+    fn delete_plans_rejects_admin_denied_as_validate_error() {
+        let mut plans = vec![BuildPlan::new_place(1, 2, 0, "router")];
+
+        let outcome = delete_plans(
+            DeletePlansContext {
+                player_id: Some(71),
+                local_player: false,
+            },
+            true,
+            &mut plans,
+            &[point2_pack(1, 2)],
+            |_| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(DeletePlansRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert_eq!(plans.len(), 1);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn client_delete_plans_packet_uses_client_payload_shape() {
+        let packet = client_delete_plans_packet(vec![point2_pack(5, 6)]);
+
+        assert_eq!(packet.player_id, None);
+        assert_eq!(packet.positions, vec![point2_pack(5, 6)]);
     }
 }
