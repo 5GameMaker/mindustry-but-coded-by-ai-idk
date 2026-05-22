@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::mindustry::{
     ctype::{Content, ContentId, ContentType, UnlockableContentBase},
     logic::{LogicWeatherEvent, LogicWeatherState, LOGIC_WEATHER_FADE_TIME},
@@ -261,7 +263,7 @@ impl WeatherEntry {
             max_frequency,
             min_duration,
             max_duration,
-            cooldown: min_frequency,
+            cooldown: random_weather_entry_cooldown(min_frequency, max_frequency),
             intensity: 1.0,
             always: false,
         }
@@ -293,6 +295,34 @@ pub fn logic_weather_event_from_state(state: &WeatherState) -> LogicWeatherEvent
             state.life.min(LOGIC_WEATHER_FADE_TIME).max(0.0)
         },
     }
+}
+
+fn random_weather_entry_cooldown(min_frequency: f32, max_frequency: f32) -> f32 {
+    weather_entry_cooldown(min_frequency, max_frequency, random_unit())
+}
+
+fn weather_entry_cooldown(min_frequency: f32, max_frequency: f32, random_unit: f32) -> f32 {
+    let unit = random_unit.clamp(0.0, 1.0);
+    min_frequency + (max_frequency - min_frequency) * unit
+}
+
+fn random_unit() -> f32 {
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    random_unit_from_seed(seed)
+}
+
+fn random_unit_from_seed(mut seed: u64) -> f32 {
+    if seed == 0 {
+        seed = 0x9e37_79b9_7f4a_7c15;
+    }
+    seed ^= seed >> 12;
+    seed ^= seed << 25;
+    seed ^= seed >> 27;
+    let value = seed.wrapping_mul(0x2545_f491_4f6c_dd1d);
+    ((value >> 40) as f32) / ((1u64 << 24) as f32)
 }
 
 #[cfg(test)]
@@ -393,13 +423,25 @@ mod tests {
         assert_eq!(entry.max_frequency, weather.duration * 6.0);
         assert_eq!(entry.min_duration, weather.duration / 2.0);
         assert_eq!(entry.max_duration, weather.duration * 1.5);
-        assert_eq!(entry.cooldown, entry.min_frequency);
+        assert!(entry.cooldown >= entry.min_frequency);
+        assert!(entry.cooldown <= entry.max_frequency);
         assert_eq!(entry.intensity, 1.0);
         assert!(!entry.always);
 
         let default = WeatherEntry::default();
         assert_eq!(default.weather, "rain");
         assert_eq!(default.intensity, 1.0);
+    }
+
+    #[test]
+    fn weather_entry_cooldown_uses_java_random_range_between_min_and_max() {
+        assert_eq!(weather_entry_cooldown(10.0, 30.0, 0.0), 10.0);
+        assert_eq!(weather_entry_cooldown(10.0, 30.0, 0.25), 15.0);
+        assert_eq!(weather_entry_cooldown(10.0, 30.0, 1.0), 30.0);
+        assert_eq!(weather_entry_cooldown(12.0, 12.0, 0.8), 12.0);
+
+        let reversed = weather_entry_cooldown(30.0, 10.0, 0.25);
+        assert_eq!(reversed, 25.0);
     }
 
     #[test]
