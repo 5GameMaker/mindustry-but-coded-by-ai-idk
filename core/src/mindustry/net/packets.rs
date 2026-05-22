@@ -6593,6 +6593,7 @@ pub struct SetUnitStanceCallPacket {
     pub player: EntityRef,
     pub unit_ids: Vec<i32>,
     pub stance: String,
+    pub enable: bool,
 }
 
 impl SetUnitStanceCallPacket {
@@ -6606,6 +6607,7 @@ impl SetUnitStanceCallPacket {
             stance: read_content_name(read, loader, ContentType::UnitStance)?.ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, "null unit stance id")
             })?,
+            enable: read_bool(read)?,
         })
     }
 
@@ -6615,7 +6617,8 @@ impl SetUnitStanceCallPacket {
         loader: &ContentLoader,
     ) -> std::io::Result<()> {
         write_ints(write, &self.unit_ids)?;
-        write_content_by_name(write, loader, ContentType::UnitStance, Some(&self.stance))
+        write_content_by_name(write, loader, ContentType::UnitStance, Some(&self.stance))?;
+        write_bool(write, self.enable)
     }
 
     pub fn read_from_server_payload_with_loader<R: Read>(
@@ -6628,6 +6631,7 @@ impl SetUnitStanceCallPacket {
             stance: read_content_name(read, loader, ContentType::UnitStance)?.ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, "null unit stance id")
             })?,
+            enable: read_bool(read)?,
         })
     }
 
@@ -6638,7 +6642,8 @@ impl SetUnitStanceCallPacket {
     ) -> std::io::Result<()> {
         write_entity_ref(write, self.player)?;
         write_ints(write, &self.unit_ids)?;
-        write_content_by_name(write, loader, ContentType::UnitStance, Some(&self.stance))
+        write_content_by_name(write, loader, ContentType::UnitStance, Some(&self.stance))?;
+        write_bool(write, self.enable)
     }
 }
 
@@ -8867,6 +8872,79 @@ mod tests {
         assert_eq!(
             CommandUnitsCallPacket::read_from_server_payload(&mut bytes.as_slice()).unwrap(),
             command_units
+        );
+
+        let loader = ContentLoader::create_base_content().unwrap();
+        let set_unit_command = SetUnitCommandCallPacket {
+            player: EntityRef::new(15),
+            unit_ids: vec![301, 302],
+            command: "move".into(),
+        };
+        bytes.clear();
+        set_unit_command
+            .write_client_payload_with_loader(&mut bytes, &loader)
+            .unwrap();
+        assert_eq!(
+            SetUnitCommandCallPacket::read_from_client_payload_with_loader(
+                &mut bytes.as_slice(),
+                &loader
+            )
+            .unwrap(),
+            SetUnitCommandCallPacket {
+                player: EntityRef::null(),
+                unit_ids: set_unit_command.unit_ids.clone(),
+                command: set_unit_command.command.clone()
+            }
+        );
+        bytes.clear();
+        set_unit_command
+            .write_server_payload_with_loader(&mut bytes, &loader)
+            .unwrap();
+        assert_eq!(
+            SetUnitCommandCallPacket::read_from_server_payload_with_loader(
+                &mut bytes.as_slice(),
+                &loader
+            )
+            .unwrap(),
+            set_unit_command
+        );
+
+        let set_unit_stance = SetUnitStanceCallPacket {
+            player: EntityRef::new(16),
+            unit_ids: vec![401, 402],
+            stance: "stop".into(),
+            enable: true,
+        };
+        bytes.clear();
+        set_unit_stance
+            .write_client_payload_with_loader(&mut bytes, &loader)
+            .unwrap();
+        assert_eq!(bytes.last().copied(), Some(1));
+        assert_eq!(
+            SetUnitStanceCallPacket::read_from_client_payload_with_loader(
+                &mut bytes.as_slice(),
+                &loader
+            )
+            .unwrap(),
+            SetUnitStanceCallPacket {
+                player: EntityRef::null(),
+                unit_ids: set_unit_stance.unit_ids.clone(),
+                stance: set_unit_stance.stance.clone(),
+                enable: true
+            }
+        );
+        bytes.clear();
+        set_unit_stance
+            .write_server_payload_with_loader(&mut bytes, &loader)
+            .unwrap();
+        assert_eq!(bytes.last().copied(), Some(1));
+        assert_eq!(
+            SetUnitStanceCallPacket::read_from_server_payload_with_loader(
+                &mut bytes.as_slice(),
+                &loader
+            )
+            .unwrap(),
+            set_unit_stance
         );
     }
 
