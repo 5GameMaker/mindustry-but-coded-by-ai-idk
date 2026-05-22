@@ -4,6 +4,7 @@ pub mod condition_op;
 pub mod controllable;
 pub mod cutscene_action;
 pub mod fetch_type;
+pub mod l_category;
 pub mod l_readable;
 pub mod l_writable;
 pub mod message_type;
@@ -20,6 +21,7 @@ pub use condition_op::{ConditionOp, ConditionValue};
 pub use controllable::Controllable;
 pub use cutscene_action::CutsceneAction;
 pub use fetch_type::FetchType;
+pub use l_category::LCategory;
 pub use l_readable::{LReadable, LReadable as LogicReadable};
 pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use message_type::MessageType;
@@ -9828,73 +9830,6 @@ impl LLocate {
             .iter()
             .copied()
             .find(|value| value.wire_name() == name)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LCategory {
-    pub id: u8,
-    pub name: &'static str,
-    pub color_rgba: u32,
-    pub icon: Option<&'static str>,
-}
-
-impl LCategory {
-    pub const ALL: [LCategory; 7] = [
-        LCategory {
-            id: 0,
-            name: "unknown",
-            color_rgba: 0x4c4c4cff,
-            icon: None,
-        },
-        LCategory {
-            id: 1,
-            name: "io",
-            color_rgba: 0xa08a8aff,
-            icon: Some("logicSmall"),
-        },
-        LCategory {
-            id: 2,
-            name: "block",
-            color_rgba: 0xd4816bff,
-            icon: Some("effectSmall"),
-        },
-        LCategory {
-            id: 3,
-            name: "operation",
-            color_rgba: 0x877badff,
-            icon: Some("settingsSmall"),
-        },
-        LCategory {
-            id: 4,
-            name: "control",
-            color_rgba: 0x6bb2b2ff,
-            icon: Some("rotateSmall"),
-        },
-        LCategory {
-            id: 5,
-            name: "unit",
-            color_rgba: 0xc7b59dff,
-            icon: Some("unitsSmall"),
-        },
-        LCategory {
-            id: 6,
-            name: "world",
-            color_rgba: 0x6b84d4ff,
-            icon: Some("terrainSmall"),
-        },
-    ];
-
-    pub fn by_name(name: &str) -> Option<&'static LCategory> {
-        Self::ALL.iter().find(|category| category.name == name)
-    }
-
-    pub fn localized_key(self) -> String {
-        format!("lcategory.{}", self.name)
-    }
-
-    pub fn description_key(self) -> String {
-        format!("lcategory.{}.description", self.name)
     }
 }
 
