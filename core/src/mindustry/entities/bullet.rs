@@ -32,6 +32,7 @@ pub struct BulletType {
     pub status_duration: f32,
     pub pierce: bool,
     pub pierce_building: bool,
+    pub pierce_damage_factor: f32,
     pub remove_after_pierce: bool,
     pub laser_absorb: bool,
     pub optimal_life_fract: f32,
@@ -103,6 +104,7 @@ impl Default for BulletType {
             status_duration: 60.0 * 8.0,
             pierce: false,
             pierce_building: false,
+            pierce_damage_factor: 0.0,
             remove_after_pierce: true,
             laser_absorb: true,
             optimal_life_fract: 0.0,
@@ -1410,6 +1412,149 @@ impl MultiBulletType {
         plans: &'a [MultiBulletCreatePlan],
     ) -> Option<&'a BulletCreatePlan> {
         plans.last().map(|plan| &plan.plan)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RailPiercePlan {
+    pub damage_after: f32,
+    pub fdata_after: f32,
+    pub spawn_pierce_effect: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RailPointEffectPlan {
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RailInitPlan {
+    pub result_length: f32,
+    pub point_effects: Vec<RailPointEffectPlan>,
+    pub end_effect: Option<RailPointEffectPlan>,
+    pub line_effect: Option<((f32, f32), (f32, f32))>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RailBulletType {
+    pub base: BulletType,
+    pub pierce_effect: String,
+    pub point_effect: String,
+    pub line_effect: String,
+    pub end_effect: String,
+    pub length: f32,
+    pub point_effect_space: f32,
+    pub hit_effect: String,
+    pub despawn_effect: String,
+    pub delay_frags: bool,
+}
+
+impl Default for RailBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                speed: 0.0,
+                pierce_building: true,
+                pierce: true,
+                reflectable: false,
+                collides: false,
+                keep_velocity: false,
+                lifetime: 1.0,
+                ..Default::default()
+            },
+            pierce_effect: "hitBulletSmall".into(),
+            point_effect: "none".into(),
+            line_effect: "none".into(),
+            end_effect: "none".into(),
+            length: 100.0,
+            point_effect_space: 20.0,
+            hit_effect: "none".into(),
+            despawn_effect: "none".into(),
+            delay_frags: true,
+        }
+    }
+}
+
+impl RailBulletType {
+    pub fn calculate_range(&self) -> f32 {
+        self.length
+    }
+
+    pub fn handle_pierce_plan(
+        &self,
+        current_damage: f32,
+        current_fdata: f32,
+        bullet_x: f32,
+        bullet_y: f32,
+        hit_x: f32,
+        hit_y: f32,
+        initial_health: f32,
+    ) -> RailPiercePlan {
+        let hit_dst = dst(bullet_x, bullet_y, hit_x, hit_y);
+        let sub = (initial_health * self.base.pierce_damage_factor).max(0.0);
+        if current_damage <= 0.0 {
+            return RailPiercePlan {
+                damage_after: current_damage,
+                fdata_after: current_fdata.min(hit_dst),
+                spawn_pierce_effect: false,
+            };
+        }
+
+        let damage_after = current_damage - current_damage.min(sub);
+        RailPiercePlan {
+            damage_after,
+            fdata_after: if damage_after <= 0.0 {
+                current_fdata.min(hit_dst)
+            } else {
+                current_fdata
+            },
+            spawn_pierce_effect: true,
+        }
+    }
+
+    pub fn init_plan(
+        &self,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        result_length: f32,
+        collided_count: usize,
+    ) -> RailInitPlan {
+        let mut point_effects = Vec::new();
+        if self.point_effect != "none" && self.point_effect_space > 0.0 {
+            let mut distance = 0.0;
+            while distance <= result_length {
+                point_effects.push(RailPointEffectPlan {
+                    x: x + trnsx(rotation, distance),
+                    y: y + trnsy(rotation, distance),
+                    rotation,
+                });
+                distance += self.point_effect_space;
+            }
+        }
+
+        let end = (
+            x + trnsx(rotation, result_length),
+            y + trnsy(rotation, result_length),
+        );
+        RailInitPlan {
+            result_length,
+            point_effects,
+            end_effect: (collided_count == 0 && self.end_effect != "none").then_some(
+                RailPointEffectPlan {
+                    x: end.0,
+                    y: end.1,
+                    rotation,
+                },
+            ),
+            line_effect: (self.line_effect != "none").then_some(((x, y), end)),
+        }
+    }
+
+    pub fn test_collision(&self, bullet_team: i32, tile_team: i32) -> bool {
+        bullet_team != tile_team
     }
 }
 
@@ -2862,6 +3007,84 @@ mod tests {
             multi.last_created_plan(&plans).map(|plan| plan.angle),
             Some(16.5)
         );
+    }
+
+    #[test]
+    fn rail_bullet_pierce_line_effects_and_collision_rules_match_java() {
+        let mut rail = RailBulletType::default();
+        assert_eq!(rail.base.speed, 0.0);
+        assert!(rail.base.pierce_building);
+        assert!(rail.base.pierce);
+        assert!(!rail.base.reflectable);
+        assert_eq!(rail.hit_effect, "none");
+        assert_eq!(rail.despawn_effect, "none");
+        assert!(!rail.base.collides);
+        assert!(!rail.base.keep_velocity);
+        assert_eq!(rail.base.lifetime, 1.0);
+        assert!(rail.delay_frags);
+        assert_eq!(rail.pierce_effect, "hitBulletSmall");
+        assert_eq!(rail.point_effect, "none");
+        assert_eq!(rail.line_effect, "none");
+        assert_eq!(rail.end_effect, "none");
+        assert_eq!(rail.length, 100.0);
+        assert_eq!(rail.point_effect_space, 20.0);
+        assert_eq!(rail.calculate_range(), 100.0);
+
+        rail.base.pierce_damage_factor = 0.5;
+        let kept = rail.handle_pierce_plan(50.0, 100.0, 0.0, 0.0, 30.0, 40.0, 60.0);
+        assert_eq!(kept.damage_after, 20.0);
+        assert_eq!(kept.fdata_after, 100.0);
+        assert!(kept.spawn_pierce_effect);
+
+        let stopped = rail.handle_pierce_plan(20.0, 100.0, 0.0, 0.0, 30.0, 40.0, 60.0);
+        assert_eq!(stopped.damage_after, 0.0);
+        assert_eq!(stopped.fdata_after, 50.0);
+        assert!(stopped.spawn_pierce_effect);
+
+        let already_stopped = rail.handle_pierce_plan(0.0, 80.0, 0.0, 0.0, 0.0, 30.0, 60.0);
+        assert_eq!(already_stopped.damage_after, 0.0);
+        assert_eq!(already_stopped.fdata_after, 30.0);
+        assert!(!already_stopped.spawn_pierce_effect);
+
+        rail.point_effect = "railPoint".into();
+        rail.end_effect = "railEnd".into();
+        rail.line_effect = "railLine".into();
+        let init = rail.init_plan(0.0, 0.0, 0.0, 45.0, 0);
+        assert_eq!(init.result_length, 45.0);
+        assert_eq!(
+            init.point_effects,
+            vec![
+                RailPointEffectPlan {
+                    x: 0.0,
+                    y: 0.0,
+                    rotation: 0.0,
+                },
+                RailPointEffectPlan {
+                    x: 20.0,
+                    y: 0.0,
+                    rotation: 0.0,
+                },
+                RailPointEffectPlan {
+                    x: 40.0,
+                    y: 0.0,
+                    rotation: 0.0,
+                },
+            ]
+        );
+        assert_eq!(
+            init.end_effect,
+            Some(RailPointEffectPlan {
+                x: 45.0,
+                y: 0.0,
+                rotation: 0.0,
+            })
+        );
+        assert_eq!(init.line_effect, Some(((0.0, 0.0), (45.0, 0.0))));
+
+        let collided = rail.init_plan(0.0, 0.0, 0.0, 45.0, 1);
+        assert!(collided.end_effect.is_none());
+        assert!(!rail.test_collision(1, 1));
+        assert!(rail.test_collision(1, 2));
     }
 
     #[test]

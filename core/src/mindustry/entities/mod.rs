@@ -41,9 +41,10 @@ pub use bullet::{
     LaserLightningPlan, LightningBulletType, LiquidBulletType, LiquidDrawPlan, LiquidHitPlan,
     LiquidUpdatePlan, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan,
     MassDriverUpdatePlan, MultiBulletCreatePlan, MultiBulletType, PointBulletType,
-    PointLaserBulletType, PointLaserUpdatePlan, SapBulletType, SapDataPlan, SapDrawPlan,
-    SapInitPlan, SapTargetInfo, SapTargetKind, ShrapnelBulletType, ShrapnelDrawPlan,
-    ShrapnelTrianglePlan, SpaceLiquidBulletType,
+    PointLaserBulletType, PointLaserUpdatePlan, RailBulletType, RailInitPlan, RailPiercePlan,
+    RailPointEffectPlan, SapBulletType, SapDataPlan, SapDrawPlan, SapInitPlan, SapTargetInfo,
+    SapTargetKind, ShrapnelBulletType, ShrapnelDrawPlan, ShrapnelTrianglePlan,
+    SpaceLiquidBulletType,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
