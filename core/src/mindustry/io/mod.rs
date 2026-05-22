@@ -36,8 +36,10 @@ pub use type_io::{
     UnitSyncContainer, UnitSyncWire, Vec2,
 };
 pub use versions::{
-    read_legacy_entity_groups, read_legacy_team_blocks, read_legacy_world_entities,
-    LegacyEntityChunk, LegacyEntityGroup, LegacyEntityGroups, LegacyTeamBlockGroup,
-    LegacyTeamBlockPlan, LegacyTeamBlocks, LegacyWorldEntities, LegacyWorldEntityChunk, Save1,
-    Save2, Save4,
+    read_legacy_entity_groups, read_legacy_entity_mapping, read_legacy_short_chunk_map,
+    read_legacy_short_world_entities, read_legacy_team_blocks, read_legacy_world_entities,
+    LegacyEntityChunk, LegacyEntityGroup, LegacyEntityGroups, LegacyEntityMapping,
+    LegacyEntityMappingEntry, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
+    LegacyShortChunkMap, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
+    LegacyWorldEntities, LegacyWorldEntityChunk, Save1, Save2, Save4, Save9,
 };
