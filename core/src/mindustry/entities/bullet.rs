@@ -7,6 +7,8 @@ pub struct BulletType {
     pub life_scale_rand_min: f32,
     pub life_scale_rand_max: f32,
     pub speed: f32,
+    pub angle_offset: f32,
+    pub random_angle_offset: f32,
     pub velocity_scale_rand_min: f32,
     pub velocity_scale_rand_max: f32,
     pub damage: f32,
@@ -76,6 +78,8 @@ impl Default for BulletType {
             life_scale_rand_min: 1.0,
             life_scale_rand_max: 1.0,
             speed: 1.0,
+            angle_offset: 0.0,
+            random_angle_offset: 0.0,
             velocity_scale_rand_min: 1.0,
             velocity_scale_rand_max: 1.0,
             damage: 1.0,
@@ -1314,6 +1318,98 @@ impl ShrapnelBulletType {
             light_color: self.to_color.clone(),
             light_opacity: self.base.light_opacity,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultiBulletCreatePlan {
+    pub repeat_index: i32,
+    pub child_index: usize,
+    pub plan: BulletCreatePlan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultiBulletType {
+    pub base: BulletType,
+    pub bullets: Vec<BulletType>,
+    pub repeat: i32,
+}
+
+impl Default for MultiBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType::default(),
+            bullets: Vec::new(),
+            repeat: 1,
+        }
+    }
+}
+
+impl MultiBulletType {
+    pub fn with_bullets(bullets: Vec<BulletType>) -> Self {
+        Self {
+            bullets,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_repeat(repeat: i32, bullets: Vec<BulletType>) -> Self {
+        Self {
+            repeat,
+            bullets,
+            ..Default::default()
+        }
+    }
+
+    pub fn estimate_dps(&mut self) -> f32 {
+        self.bullets.iter_mut().map(BulletType::estimate_dps).sum()
+    }
+
+    pub fn calculate_range(&self) -> f32 {
+        self.bullets
+            .iter()
+            .map(BulletType::calculate_range)
+            .fold(0.0, f32::max)
+    }
+
+    pub fn create_plans(
+        &self,
+        angle: f32,
+        damage_override: Option<f32>,
+        velocity_scale: f32,
+        lifetime_scale: f32,
+        random_angle_offsets: &[f32],
+    ) -> Vec<MultiBulletCreatePlan> {
+        let repeat = self.repeat.max(0);
+        let mut out = Vec::with_capacity(repeat as usize * self.bullets.len());
+        let base_angle = angle + self.base.angle_offset;
+        for repeat_index in 0..repeat {
+            for (child_index, bullet) in self.bullets.iter().enumerate() {
+                let random_angle_offset =
+                    random_angle_offsets.get(out.len()).copied().unwrap_or(0.0);
+                out.push(MultiBulletCreatePlan {
+                    repeat_index,
+                    child_index,
+                    plan: bullet.create_plan(
+                        base_angle,
+                        bullet.angle_offset,
+                        random_angle_offset,
+                        damage_override,
+                        velocity_scale,
+                        lifetime_scale,
+                        false,
+                    ),
+                });
+            }
+        }
+        out
+    }
+
+    pub fn last_created_plan<'a>(
+        &self,
+        plans: &'a [MultiBulletCreatePlan],
+    ) -> Option<&'a BulletCreatePlan> {
+        plans.last().map(|plan| &plan.plan)
     }
 }
 
@@ -2716,6 +2812,56 @@ mod tests {
         assert_eq!(draw.light_width, 37.5);
         assert_eq!(draw.light_color, "lancerLaser");
         assert_eq!(draw.light_opacity, 0.6);
+    }
+
+    #[test]
+    fn multi_bullet_sums_dps_range_and_expands_create_order_with_repeat() {
+        let mut first = BulletType {
+            damage: 10.0,
+            speed: 2.0,
+            lifetime: 30.0,
+            angle_offset: 1.0,
+            ..Default::default()
+        };
+        first.init_defaults();
+        let mut second = BulletType {
+            damage: 5.0,
+            splash_damage: 20.0,
+            speed: 4.0,
+            lifetime: 20.0,
+            angle_offset: -2.0,
+            ..Default::default()
+        };
+        second.init_defaults();
+
+        let mut multi = MultiBulletType::with_repeat(2, vec![first, second]);
+        multi.base.angle_offset = 5.0;
+        assert_eq!(multi.repeat, 2);
+        assert_eq!(multi.bullets.len(), 2);
+        assert_eq!(multi.estimate_dps(), 30.0);
+        assert_eq!(multi.calculate_range(), 80.0);
+
+        let plans = multi.create_plans(10.0, Some(99.0), 0.5, 0.25, &[0.5, 1.5, 2.5, 3.5]);
+        assert_eq!(plans.len(), 4);
+        assert_eq!(plans[0].repeat_index, 0);
+        assert_eq!(plans[0].child_index, 0);
+        assert_eq!(plans[0].plan.angle, 16.5);
+        assert_eq!(plans[0].plan.damage, 99.0);
+        assert_eq!(plans[0].plan.velocity_scale, 0.5);
+        assert_eq!(plans[0].plan.lifetime_scale, 0.25);
+        assert_eq!(plans[1].repeat_index, 0);
+        assert_eq!(plans[1].child_index, 1);
+        assert_eq!(plans[1].plan.angle, 14.5);
+        assert_eq!(plans[2].repeat_index, 1);
+        assert_eq!(plans[2].child_index, 0);
+        assert_eq!(plans[2].plan.angle, 18.5);
+        assert_eq!(plans[3].repeat_index, 1);
+        assert_eq!(plans[3].child_index, 1);
+        assert_eq!(plans[3].plan.angle, 16.5);
+        assert_eq!(
+            multi.last_created_plan(&plans).map(|plan| plan.angle),
+            Some(16.5)
+        );
     }
 
     #[test]
