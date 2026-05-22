@@ -23,7 +23,7 @@ impl Item {
     pub fn new(id: ContentId, name: impl Into<String>) -> Self {
         Self {
             base: UnlockableContentBase::new(id, ContentType::Item, name),
-            color_rgba: 0xffffffff,
+            color_rgba: 0x000000ff,
             explosiveness: 0.0,
             flammability: 0.0,
             radioactivity: 0.0,
@@ -120,7 +120,7 @@ mod tests {
         let item = Item::new(7, "copper");
         assert_eq!(item.name(), "copper");
         assert_eq!(item.localized_name(), "copper");
-        assert_eq!(item.color_rgba, 0xffffffff);
+        assert_eq!(item.color_rgba, 0x000000ff);
         assert_eq!(item.explosiveness, 0.0);
         assert_eq!(item.flammability, 0.0);
         assert_eq!(item.radioactivity, 0.0);
