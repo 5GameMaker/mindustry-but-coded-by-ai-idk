@@ -7,8 +7,8 @@ use crate::mindustry::entities::comp::building::{BuildingComp, BuildingConfigCha
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
     packet_ids, ActionType, Administration, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, ConnectPacket,
-    DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, Disconnect,
+    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, ConnectFilter,
+    ConnectPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, Disconnect,
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2,
     KickReason, Net, NetConnection, PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket,
     SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData, Streamable,
@@ -303,6 +303,8 @@ impl NetServer {
         }
 
         let mut net = self.net.lock().expect("Net mutex poisoned");
+        let connect_filter = Self::provider_connect_filter(&self.state);
+        net.set_connect_filter(Some(connect_filter));
         net.host(port)?;
         let connections = net.get_connections();
         drop(net);
@@ -320,6 +322,7 @@ impl NetServer {
         if self.is_active() {
             let mut net = self.net.lock().expect("Net mutex poisoned");
             net.close_server();
+            net.set_connect_filter(None);
         }
 
         let mut state = self.state.lock().expect("NetServerState mutex poisoned");
@@ -1649,6 +1652,31 @@ impl NetServer {
         }
     }
 
+    fn provider_connect_filter(state: &Arc<Mutex<NetServerState>>) -> ConnectFilter {
+        let state = Arc::clone(state);
+        Arc::new(move |address: &str| {
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            Self::accepts_provider_connection(&state, address)
+        })
+    }
+
+    fn accepts_provider_connection(state: &NetServerState, address: &str) -> bool {
+        if state.administration.is_dos_blacklisted(address) {
+            return false;
+        }
+
+        if state.player_limit <= 0 {
+            return true;
+        }
+
+        let live_connections = state
+            .connection_states
+            .values()
+            .filter(|connection| !connection.kicked && !connection.has_disconnected)
+            .count() as i32;
+        live_connections < state.player_limit
+    }
+
     fn record_client_snapshot(
         state: &mut NetServerState,
         connection_id: Option<i32>,
@@ -2098,9 +2126,9 @@ mod tests {
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue};
     use crate::mindustry::net::{
         packet_ids, ActionType, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
-        DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback,
-        KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
+        ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectFilter, ConnectPacket,
+        Disconnect, DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
+        HostCallback, KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
         PingResponseCallPacket, ProviderEvent, RequestDebugStatusCallPacket, RotateBlockCallPacket,
         SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData,
         TileConfigCallPacket, TileTapCallPacket,
@@ -2118,6 +2146,7 @@ mod tests {
     struct CaptureProvider {
         sent: Arc<Mutex<Vec<(i32, PacketKind, bool)>>>,
         fail_server_to: bool,
+        connect_filter: Option<ConnectFilter>,
     }
 
     impl NetProvider for CaptureProvider {
@@ -2175,6 +2204,14 @@ mod tests {
                 .unwrap()
                 .push((connection_id, object.clone(), reliable));
             Ok(())
+        }
+
+        fn set_connect_filter(&mut self, connect_filter: Option<ConnectFilter>) {
+            self.connect_filter = connect_filter;
+        }
+
+        fn get_connect_filter(&self) -> Option<ConnectFilter> {
+            self.connect_filter.clone()
         }
     }
 
@@ -2356,6 +2393,51 @@ mod tests {
             .admin_player(packet.uuid.clone(), packet.usid.clone());
         let context = NetServer::connect_packet_validation_context(&state, 10, &packet);
         assert!(!context.player_limit_reached);
+    }
+
+    #[test]
+    fn open_installs_provider_filter_for_dos_blacklist_and_live_capacity() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state.player_limit = 1;
+            state
+                .connection_states
+                .insert(1, NetConnection::new("10.0.0.1"));
+        }
+
+        server.open(6567).unwrap();
+        let filter = {
+            let net = server.net_mut();
+            net.get_connect_filter().unwrap()
+        };
+
+        assert!(!filter("2.2.2.2"));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .get_mut(&1)
+                .unwrap()
+                .has_disconnected = true;
+            state.administration.blacklist_dos("3.3.3.3");
+        }
+
+        assert!(!filter("3.3.3.3"));
+        assert!(filter("4.4.4.4"));
+
+        server.close();
+        let net = server.net_mut();
+        assert!(net.get_connect_filter().is_none());
     }
 
     #[test]
@@ -3679,6 +3761,7 @@ mod tests {
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
             fail_server_to: true,
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
 
