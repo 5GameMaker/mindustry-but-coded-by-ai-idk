@@ -16,6 +16,7 @@ pub mod l_var;
 pub mod l_writable;
 pub mod logic_assembler;
 pub mod logic_canvas;
+pub mod logic_controllable_object;
 pub mod logic_display_command;
 pub mod logic_fx;
 pub mod logic_memory_object;
@@ -62,6 +63,7 @@ pub use logic_canvas::{
     assign_logic_jump_heights, logic_canvas_use_rows, normalize_logic_jump_range,
     representative_logic_jumps, LogicAlign, LogicJumpPlacement, LogicJumpRange,
 };
+pub use logic_controllable_object::{LogicControlCall, LogicControllableObject};
 pub use logic_display_command::LogicDisplayCommand;
 pub use logic_fx::{
     get_logic_effect, logic_effect_names, LogicEffectEntry, LogicEffectRegistry, LogicEffectSpec,
@@ -3092,51 +3094,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum LogicControlCall {
-    Numeric {
-        access: LAccess,
-        p1: f64,
-        p2: f64,
-        p3: f64,
-        p4: f64,
-    },
-    Object {
-        access: LAccess,
-        p1: Option<String>,
-        p2: f64,
-        p3: f64,
-        p4: f64,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicControllableObject {
-    pub team: u8,
-    pub valid_link: bool,
-    pub enabled: bool,
-    pub no_sleep_calls: usize,
-    pub disabled_by_processor: bool,
-    pub calls: Vec<LogicControlCall>,
-}
-
-impl LogicControllableObject {
-    pub fn new(team: u8) -> Self {
-        Self {
-            team,
-            valid_link: true,
-            enabled: true,
-            no_sleep_calls: 0,
-            disabled_by_processor: false,
-            calls: Vec::new(),
-        }
-    }
-
-    pub fn controllable_by(&self, exec_privileged: bool) -> bool {
-        exec_privileged || self.valid_link
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
