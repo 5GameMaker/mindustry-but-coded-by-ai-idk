@@ -130,6 +130,7 @@ pub struct NetServerState {
     pub connect_packets_accepted: u64,
     pub connect_packets_rejected: u64,
     pub pending_connect_kicks: Vec<(i32, KickReason)>,
+    pub pending_world_data_connections: Vec<i32>,
     pub last_connect_confirm_connection_id: Option<i32>,
     pub last_world_data_connection_id: Option<i32>,
     pub last_world_data_bytes: Option<usize>,
@@ -795,6 +796,11 @@ impl NetServer {
         state.last_updated_at = Some(Instant::now());
     }
 
+    pub fn take_pending_world_data_connections(&self) -> Vec<i32> {
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        std::mem::take(&mut state.pending_world_data_connections)
+    }
+
     fn flush_pending_connect_kicks(&self) {
         let pending = {
             let mut state = self.state.lock().expect("NetServerState mutex poisoned");
@@ -941,6 +947,7 @@ impl NetServer {
             state.pending_connect_kicks.push((connection_id, reason));
         } else {
             state.connect_packets_accepted = state.connect_packets_accepted.saturating_add(1);
+            state.pending_world_data_connections.push(connection_id);
         }
 
         state.events.push(ProviderEvent::ServerPacket {
@@ -1855,7 +1862,41 @@ mod tests {
             .accepted());
         assert_eq!(state.connect_packets_accepted, 1);
         assert_eq!(state.connect_packets_rejected, 0);
+        assert_eq!(state.pending_world_data_connections, vec![12]);
         assert_eq!(state.events.len(), 4);
+    }
+
+    #[test]
+    fn accepted_connect_packet_queues_world_data_connection_for_runtime_adapter() {
+        let server = NetServer::default();
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(51),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "10.0.0.51:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(51),
+                false,
+                PacketKind::ConnectPacket(connect_packet("player")),
+            );
+        }
+
+        {
+            let state = server.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.connect_packets_accepted, 1);
+            assert_eq!(state.connect_packets_rejected, 0);
+            assert!(state.pending_connect_kicks.is_empty());
+            assert_eq!(state.pending_world_data_connections, vec![51]);
+        }
+
+        assert_eq!(server.take_pending_world_data_connections(), vec![51]);
+        assert!(server.take_pending_world_data_connections().is_empty());
     }
 
     #[test]
