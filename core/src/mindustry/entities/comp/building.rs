@@ -5,10 +5,15 @@
 //! Java runtime (`World`, `Events`, `Call`, `PowerGraph`, rendering, logic and
 //! network side effects) is intentionally kept out for now.
 
+use std::io::{self, Read, Write};
+
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
-use crate::mindustry::io::{TeamId, TypeValue};
+use crate::mindustry::io::{
+    type_io::{read_bool, read_f32, read_i32, read_i64, read_u8, write_f32, write_i32, write_i64},
+    TeamId, TypeValue,
+};
 use crate::mindustry::vars::TILE_SIZE;
-use crate::mindustry::world::block::Block;
+use crate::mindustry::world::block::{Block, BlockId};
 use crate::mindustry::world::modules::{ItemModule, LiquidModule, PowerModule};
 use crate::mindustry::world::tile::{point2_pack, point2_x, point2_y, BuildingRef};
 
@@ -143,23 +148,124 @@ impl BuildingComp {
     }
 
     pub fn module_bitmask(&self) -> u8 {
-        let mut bits = 0u8;
-        if self.items.is_some() {
-            bits |= 1;
+        (self.items.is_some() as u8)
+            | ((self.power.is_some() as u8) << 1)
+            | ((self.liquids.is_some() as u8) << 2)
+            | (1 << 3) // legacy consume module bit; Java still writes it for save compatibility.
+            | (((self.time_scale - 1.0).abs() > f32::EPSILON) as u8) << 4
+            | ((self.last_disabler.is_some() as u8) << 5)
+    }
+
+    pub fn write_base<W: Write>(&self, write: &mut W, fog_enabled: bool) -> io::Result<()> {
+        let write_visibility = fog_enabled && self.visible_flags != 0;
+
+        write_f32(write, self.health)?;
+        write.write_all(&[(self.rotation.rem_euclid(128) as u8) | 0b1000_0000])?;
+        write.write_all(&[self.team.0])?;
+        write.write_all(&[if write_visibility { 4 } else { 3 }])?;
+        write.write_all(&[self.enabled as u8])?;
+        write.write_all(&[self.module_bitmask()])?;
+
+        if let Some(items) = &self.items {
+            items.write(write)?;
         }
-        if self.power.is_some() {
-            bits |= 1 << 1;
+        if let Some(power) = &self.power {
+            power.write(write)?;
         }
-        if self.liquids.is_some() {
-            bits |= 1 << 2;
+        if let Some(liquids) = &self.liquids {
+            liquids.write(write)?;
         }
+
         if (self.time_scale - 1.0).abs() > f32::EPSILON {
-            bits |= 1 << 3;
+            write_f32(write, self.time_scale)?;
+            write_f32(write, self.time_scale_duration)?;
         }
-        if self.visible_flags != 0 {
-            bits |= 1 << 4;
+
+        if let Some(last_disabler) = &self.last_disabler {
+            write_i32(write, last_disabler.tile_pos)?;
         }
-        bits
+
+        write.write_all(&[(clamp01(self.efficiency) * 255.0) as u8])?;
+        write.write_all(&[(clamp01(self.optional_efficiency) * 255.0) as u8])?;
+
+        if write_visibility {
+            write_i64(write, self.visible_flags as i64)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn read_base<R: Read>(&mut self, read: &mut R) -> io::Result<()> {
+        self.health = read_f32(read)?.min(self.block.health as f32);
+        let rot = read_u8(read)?;
+        self.team = TeamId(read_u8(read)?);
+        self.rotation = (rot & 0b0111_1111) as i32;
+
+        let mut module_bits = self.module_bitmask();
+        let mut legacy = true;
+        let mut version = 0u8;
+
+        if (rot & 0b1000_0000) != 0 {
+            version = read_u8(read)?;
+            if version >= 1 {
+                self.enabled = read_u8(read)? == 1;
+            }
+            if version >= 2 {
+                module_bits = read_u8(read)?;
+            }
+            legacy = false;
+        }
+
+        if (module_bits & 1) != 0 {
+            let items = self.items.get_or_insert_with(ItemModule::default);
+            items.read(read, legacy)?;
+        }
+        if (module_bits & (1 << 1)) != 0 {
+            let power = self.power.get_or_insert_with(PowerModule::default);
+            power.read(read)?;
+        }
+        if (module_bits & (1 << 2)) != 0 {
+            let liquids = self.liquids.get_or_insert_with(LiquidModule::default);
+            liquids.read(read, legacy)?;
+        }
+
+        if (module_bits & (1 << 4)) != 0 {
+            self.time_scale = read_f32(read)?;
+            self.time_scale_duration = read_f32(read)?;
+        } else {
+            self.time_scale = 1.0;
+            self.time_scale_duration = 0.0;
+        }
+
+        if (module_bits & (1 << 5)) != 0 {
+            self.last_disabler = Some(BuildingRef {
+                tile_pos: read_i32(read)?,
+                block: 0 as BlockId,
+                team: -1,
+                rotation: 0,
+            });
+        } else {
+            self.last_disabler = None;
+        }
+
+        // Java saves a now-unused consume module presence boolean through version 2.
+        if version <= 2 {
+            let _ = read_bool(read)?;
+        }
+
+        if version >= 3 {
+            self.efficiency = read_u8(read)? as f32 / 255.0;
+            self.potential_efficiency = self.efficiency;
+            self.optional_efficiency = read_u8(read)? as f32 / 255.0;
+        }
+
+        if version == 4 {
+            self.visible_flags = read_i64(read)? as u64;
+        } else {
+            self.visible_flags = 0;
+        }
+
+        Ok(())
     }
 
     pub fn apply_boost(&mut self, intensity: f32, duration: f32) {
@@ -282,6 +388,14 @@ impl BuildingComp {
     }
 }
 
+fn clamp01(value: f32) -> f32 {
+    if value.is_nan() {
+        0.0
+    } else {
+        value.clamp(0.0, 1.0)
+    }
+}
+
 impl EntityPosition for BuildingComp {
     fn x(&self) -> f32 {
         self.x
@@ -304,6 +418,7 @@ mod tests {
 
     fn block() -> Block {
         let mut block = Block::new(5, "router");
+        block.health = 100;
         block.has_items = true;
         block.has_liquids = true;
         block.has_power = true;
@@ -330,11 +445,12 @@ mod tests {
     fn building_component_module_bitmask_and_time_scale_helpers_work() {
         let mut building = BuildingComp::new(point2_pack(1, 2), block(), TeamId(1));
 
-        assert_eq!(building.module_bitmask() & 0b111, 0b111);
+        assert_eq!(building.module_bitmask() & 0b1111, 0b1111);
         assert_eq!(building.time_scale(), 1.0);
 
         building.apply_boost(2.0, 5.0);
         assert_eq!(building.time_scale(), 2.0);
+        assert_ne!(building.module_bitmask() & (1 << 4), 0);
         building.apply_slowdown(0.5, 3.0);
         assert_eq!(building.time_scale(), 0.5);
 
@@ -383,5 +499,68 @@ mod tests {
         );
         assert!(building.check_allow_update(true, true));
         assert!(building.active());
+    }
+
+    #[test]
+    fn building_component_write_base_matches_java_v3_layout() {
+        let mut building = BuildingComp::new(point2_pack(3, 4), block(), TeamId(2));
+        building.health = 42.5;
+        building.set_rotation(3);
+        building.enabled = false;
+        building.items.as_mut().unwrap().set(1, 4);
+        building.power.as_mut().unwrap().links = vec![point2_pack(2, 2)];
+        building.power.as_mut().unwrap().status = 0.75;
+        building.liquids.as_mut().unwrap().set(5, 2.5);
+        building.apply_boost(1.5, 9.0);
+        building.efficiency = 0.5;
+        building.optional_efficiency = 1.0;
+
+        let mut bytes = Vec::new();
+        building.write_base(&mut bytes, false).unwrap();
+
+        let mut restored = BuildingComp::new(point2_pack(3, 4), block(), TeamId(0));
+        restored.read_base(&mut bytes.as_slice()).unwrap();
+
+        assert_eq!(restored.health, 42.5);
+        assert_eq!(restored.rotation, 3);
+        assert_eq!(restored.team, TeamId(2));
+        assert!(!restored.enabled);
+        assert_eq!(restored.items.as_ref().unwrap().get(1), 4);
+        assert_eq!(
+            restored.power.as_ref().unwrap().links,
+            vec![point2_pack(2, 2)]
+        );
+        assert_eq!(restored.power.as_ref().unwrap().status, 0.75);
+        assert_eq!(restored.liquids.as_ref().unwrap().get(5), 2.5);
+        assert_eq!(restored.time_scale, 1.5);
+        assert_eq!(restored.time_scale_duration, 9.0);
+        assert!((restored.efficiency - 127.0 / 255.0).abs() < f32::EPSILON);
+        assert_eq!(restored.optional_efficiency, 1.0);
+        assert_eq!(restored.visible_flags, 0);
+    }
+
+    #[test]
+    fn building_component_write_base_can_include_v4_visibility_and_disabler() {
+        let mut building = BuildingComp::new(point2_pack(1, 1), block(), TeamId(1));
+        building.visible_flags = 0x0102_0304_0506_0708;
+        building.last_disabler = Some(BuildingRef {
+            tile_pos: point2_pack(7, 8),
+            block: 99,
+            team: 1,
+            rotation: 2,
+        });
+
+        let mut bytes = Vec::new();
+        building.write_base(&mut bytes, true).unwrap();
+        assert_eq!(bytes[6], 4);
+
+        let mut restored = BuildingComp::new(point2_pack(1, 1), block(), TeamId(0));
+        restored.read_base(&mut bytes.as_slice()).unwrap();
+
+        assert_eq!(restored.visible_flags, 0x0102_0304_0506_0708);
+        assert_eq!(
+            restored.last_disabler.map(|build| build.tile_pos),
+            Some(point2_pack(7, 8))
+        );
     }
 }
