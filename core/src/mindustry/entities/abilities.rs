@@ -1043,6 +1043,143 @@ impl Ability for MoveEffectAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveLightningPlan {
+    pub x: f32,
+    pub y: f32,
+    pub lightning_x: f32,
+    pub lightning_y: f32,
+    pub rotation: f32,
+    pub damage: f32,
+    pub length: i32,
+    pub bullet_rotation: f32,
+    pub side_after: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveLightningAbility {
+    pub base: BasicAbility,
+    pub damage: f32,
+    pub chance: f32,
+    pub length: i32,
+    pub min_speed: f32,
+    pub max_speed: f32,
+    pub y: f32,
+    pub x: f32,
+    pub alternate: bool,
+    pub heat_region: String,
+    pub bullet_angle: f32,
+    pub bullet_spread: f32,
+    pub parentize_effects: bool,
+    pub side: f32,
+}
+
+impl Default for MoveLightningAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            damage: 35.0,
+            chance: 0.15,
+            length: 12,
+            min_speed: 0.8,
+            max_speed: 1.2,
+            y: 0.0,
+            x: 0.0,
+            alternate: true,
+            heat_region: "error".into(),
+            bullet_angle: 0.0,
+            bullet_spread: 0.0,
+            parentize_effects: false,
+            side: 1.0,
+        }
+    }
+}
+
+impl MoveLightningAbility {
+    pub fn new(
+        damage: f32,
+        length: i32,
+        chance: f32,
+        y: f32,
+        min_speed: f32,
+        max_speed: f32,
+    ) -> Self {
+        Self {
+            damage,
+            length,
+            chance,
+            y,
+            min_speed,
+            max_speed,
+            ..Default::default()
+        }
+    }
+
+    pub fn speed_scale(&self, velocity_len: f32) -> f32 {
+        if (self.max_speed - self.min_speed).abs() <= f32::EPSILON {
+            if velocity_len >= self.max_speed {
+                1.0
+            } else {
+                0.0
+            }
+        } else {
+            ((velocity_len - self.min_speed) / (self.max_speed - self.min_speed)).clamp(0.0, 1.0)
+        }
+    }
+
+    pub fn trigger_probability(&self, delta: f32, velocity_len: f32) -> f32 {
+        (delta * self.chance * self.speed_scale(velocity_len)).clamp(0.0, 1.0)
+    }
+
+    pub fn update_plan(
+        &mut self,
+        delta: f32,
+        velocity: (f32, f32),
+        unit_pos: (f32, f32),
+        unit_rotation: f32,
+        chance_triggered: bool,
+        bullet_spread_offset: f32,
+    ) -> Option<MoveLightningPlan> {
+        let velocity_len = (velocity.0 * velocity.0 + velocity.1 * velocity.1).sqrt();
+        if self.trigger_probability(delta, velocity_len) <= 0.0 || !chance_triggered {
+            return None;
+        }
+
+        let (offset_x, offset_y) = rotated_effect_offset(unit_rotation, self.y, self.x * self.side);
+        let x = unit_pos.0 + offset_x;
+        let y = unit_pos.1 + offset_y;
+        if self.alternate {
+            self.side *= -1.0;
+        }
+
+        Some(MoveLightningPlan {
+            x,
+            y,
+            lightning_x: x + velocity.0,
+            lightning_y: y + velocity.1,
+            rotation: unit_rotation,
+            damage: self.damage,
+            length: self.length,
+            bullet_rotation: unit_rotation + self.bullet_angle + bullet_spread_offset,
+            side_after: self.side,
+        })
+    }
+}
+
+impl Ability for MoveLightningAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
@@ -1111,9 +1248,9 @@ fn polygon_vertex(
 mod tests {
     use super::{
         Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
-        MoveEffectAbility, RegenAbility, RepairFieldAbility, RepairFieldTarget,
-        ShieldRegenFieldAbility, ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility,
-        SuppressionFieldAbility,
+        MoveEffectAbility, MoveLightningAbility, RegenAbility, RepairFieldAbility,
+        RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldTarget, SpawnDeathAbility,
+        StatusFieldAbility, SuppressionFieldAbility,
     };
 
     #[derive(Clone)]
@@ -1442,5 +1579,55 @@ mod tests {
         assert!((plan.x - 8.0).abs() < 0.0001);
         assert!((plan.y - 16.0).abs() < 0.0001);
         assert_eq!(plan.rotation, 3.0);
+    }
+
+    #[test]
+    fn move_lightning_scales_chance_with_speed_and_alternates_side() {
+        let mut ability = MoveLightningAbility::new(40.0, 8, 0.5, 10.0, 1.0, 3.0);
+        ability.x = 2.0;
+        ability.bullet_angle = 5.0;
+
+        assert_eq!(ability.speed_scale(0.5), 0.0);
+        assert_eq!(ability.speed_scale(2.0), 0.5);
+        assert_eq!(ability.trigger_probability(2.0, 2.0), 0.5);
+        assert!(ability
+            .update_plan(1.0, (0.5, 0.0), (100.0, 200.0), 90.0, true, 0.0)
+            .is_none());
+
+        let plan = ability
+            .update_plan(1.0, (3.0, 4.0), (100.0, 200.0), 90.0, true, -1.0)
+            .expect("chance trigger at speed should create lightning");
+        assert!((plan.x - 98.0).abs() < 0.0001);
+        assert!((plan.y - 210.0).abs() < 0.0001);
+        assert!((plan.lightning_x - 101.0).abs() < 0.0001);
+        assert!((plan.lightning_y - 214.0).abs() < 0.0001);
+        assert_eq!(plan.rotation, 90.0);
+        assert_eq!(plan.damage, 40.0);
+        assert_eq!(plan.length, 8);
+        assert_eq!(plan.bullet_rotation, 94.0);
+        assert_eq!(plan.side_after, -1.0);
+
+        let second = ability
+            .update_plan(1.0, (3.0, 4.0), (100.0, 200.0), 90.0, true, 0.0)
+            .expect("second trigger should use opposite side");
+        assert!((second.x - 102.0).abs() < 0.0001);
+        assert_eq!(second.side_after, 1.0);
+    }
+
+    #[test]
+    fn move_lightning_can_disable_alternating() {
+        let mut ability = MoveLightningAbility {
+            alternate: false,
+            chance: 1.0,
+            min_speed: 0.0,
+            max_speed: 1.0,
+            ..Default::default()
+        };
+        let plan = ability
+            .update_plan(1.0, (1.0, 0.0), (0.0, 0.0), 0.0, true, 0.0)
+            .expect("always-on chance should create plan");
+
+        assert_eq!(plan.side_after, 1.0);
+        assert_eq!(ability.side, 1.0);
     }
 }
