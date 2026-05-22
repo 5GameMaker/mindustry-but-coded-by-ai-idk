@@ -444,6 +444,92 @@ impl WrapEffect {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RadialEffect {
+    pub base: Effect,
+    pub effect: Effect,
+    pub rotation_spacing: f32,
+    pub rotation_offset: f32,
+    pub effect_rotation_offset: f32,
+    pub length_offset: f32,
+    pub amount: i32,
+}
+
+impl Default for RadialEffect {
+    fn default() -> Self {
+        let mut base = Effect::default();
+        base.clip = 100.0;
+        Self {
+            base,
+            effect: Effect::default(),
+            rotation_spacing: 90.0,
+            rotation_offset: 0.0,
+            effect_rotation_offset: 0.0,
+            length_offset: 0.0,
+            amount: 4,
+        }
+    }
+}
+
+impl RadialEffect {
+    pub fn new(
+        effect: Effect,
+        amount: i32,
+        spacing: f32,
+        length_offset: f32,
+        effect_rotation_offset: f32,
+    ) -> Self {
+        Self {
+            effect,
+            amount,
+            rotation_spacing: spacing,
+            length_offset,
+            effect_rotation_offset,
+            ..Default::default()
+        }
+    }
+
+    pub fn create_plans(
+        &mut self,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: DecalColor,
+        data: Option<String>,
+        context: EffectCreateContext,
+    ) -> Vec<EffectCreatePlan> {
+        if !self.base.should_create(context) {
+            return Vec::new();
+        }
+
+        let mut out = Vec::with_capacity(self.amount.max(0) as usize);
+        let mut current_rotation = rotation + self.rotation_offset;
+        for _ in 0..self.amount.max(0) {
+            if let Some(plan) = self.effect.create_plan(
+                x + trnsx(current_rotation, self.length_offset),
+                y + trnsy(current_rotation, self.length_offset),
+                current_rotation + self.effect_rotation_offset,
+                color,
+                data.clone(),
+                None,
+                context,
+            ) {
+                out.push(plan);
+            }
+            current_rotation += self.rotation_spacing;
+        }
+        out
+    }
+}
+
+fn trnsx(angle: f32, len: f32) -> f32 {
+    angle.to_radians().cos() * len
+}
+
+fn trnsy(angle: f32, len: f32) -> f32 {
+    angle.to_radians().sin() * len
+}
+
 pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: f32) -> f32 {
     let dx = x - camera_x;
     let dy = y - camera_y;
@@ -751,6 +837,50 @@ mod tests {
         assert_eq!(plan.spawn.rotation, 95.0);
         assert_eq!(plan.spawn.color, color);
         assert_eq!(plan.spawn.data.as_deref(), Some("wrapped"));
+    }
+
+    #[test]
+    fn radial_effect_repeats_child_create_at_angle_intervals() {
+        let child = Effect::with_lifetime(9, 10.0, 20.0);
+        let mut radial = RadialEffect::new(child, 4, 90.0, 10.0, 5.0);
+        radial.rotation_offset = 0.0;
+
+        let plans = radial.create_plans(
+            1.0,
+            2.0,
+            0.0,
+            DecalColor::WHITE,
+            Some("radial".into()),
+            EffectCreateContext::default(),
+        );
+
+        assert_eq!(plans.len(), 4);
+        assert_eq!(plans[0].spawn.effect_id, 9);
+        assert!((plans[0].spawn.x - 11.0).abs() < 0.0001);
+        assert!((plans[0].spawn.y - 2.0).abs() < 0.0001);
+        assert_eq!(plans[0].spawn.rotation, 5.0);
+        assert!((plans[1].spawn.x - 1.0).abs() < 0.0001);
+        assert!((plans[1].spawn.y - 12.0).abs() < 0.0001);
+        assert_eq!(plans[1].spawn.rotation, 95.0);
+        assert!((plans[2].spawn.x + 9.0).abs() < 0.0001);
+        assert!((plans[2].spawn.y - 2.0).abs() < 0.0001);
+        assert_eq!(plans[2].spawn.rotation, 185.0);
+        assert!((plans[3].spawn.x - 1.0).abs() < 0.0001);
+        assert!((plans[3].spawn.y + 8.0).abs() < 0.0001);
+        assert_eq!(plans[3].spawn.rotation, 275.0);
+        assert_eq!(plans[3].spawn.data.as_deref(), Some("radial"));
+
+        radial.amount = 0;
+        assert!(radial
+            .create_plans(
+                0.0,
+                0.0,
+                0.0,
+                DecalColor::WHITE,
+                None,
+                EffectCreateContext::default(),
+            )
+            .is_empty());
     }
 
     #[test]

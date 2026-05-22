@@ -95,8 +95,9 @@ pub use damage::{
 };
 pub use effect::{
     shake_intensity, Effect, EffectContainer, EffectCreateContext, EffectCreatePlan, EffectParent,
-    EffectRegistry, EffectRenderParams, EffectSpawnPlan, MultiEffect, SeqEffect, SeqRenderPlan,
-    WrapEffect, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER, DEFAULT_EFFECT_LIFETIME, SHAKE_FALLOFF,
+    EffectRegistry, EffectRenderParams, EffectSpawnPlan, MultiEffect, RadialEffect, SeqEffect,
+    SeqRenderPlan, WrapEffect, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER, DEFAULT_EFFECT_LIFETIME,
+    SHAKE_FALLOFF,
 };
 pub use entity_collisions::{
     collide, legs_solid, move_check_hitbox, move_delta_rect, move_hitbox, move_rect, overlaps_tile,
