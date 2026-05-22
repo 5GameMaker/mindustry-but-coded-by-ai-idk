@@ -11,7 +11,7 @@ pub mod stat_value;
 pub mod stat_values;
 pub mod stats;
 
-pub use attribute::Attribute;
+pub use attribute::{Attribute, AttributeEnvironment, AttributeRegistry};
 pub use block_flag::BlockFlag;
 pub use block_group::BlockGroup;
 pub use block_status::BlockStatus;

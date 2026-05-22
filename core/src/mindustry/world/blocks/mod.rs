@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::mindustry::world::meta::Attribute;
+use crate::mindustry::world::meta::{Attribute, AttributeEnvironment};
 
 pub mod campaign;
 pub mod defense;
@@ -268,6 +268,12 @@ impl Attributes {
         if self.values.len() < len {
             self.values.resize(len, 0.0);
         }
+    }
+}
+
+impl AttributeEnvironment for Attributes {
+    fn attribute_value(&self, attr: &Attribute) -> f32 {
+        self.get(attr)
     }
 }
 
