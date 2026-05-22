@@ -18,6 +18,7 @@ pub mod logic_assembler;
 pub mod logic_canvas;
 pub mod logic_display_command;
 pub mod logic_fx;
+pub mod logic_memory_object;
 pub mod logic_op;
 pub mod logic_parser;
 pub mod logic_rule;
@@ -65,6 +66,7 @@ pub use logic_fx::{
     get_logic_effect, logic_effect_names, LogicEffectEntry, LogicEffectRegistry, LogicEffectSpec,
     LOGIC_EFFECTS,
 };
+pub use logic_memory_object::LogicMemoryObject;
 pub use logic_op::LogicOp;
 pub use logic_parser::{
     check_logic_tokens, parse_logic_statements, LogicParseError, LogicParserOutput,
@@ -3088,46 +3090,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicMemoryObject {
-    pub memory: Vec<f64>,
-    pub team: u8,
-    pub block_privileged: bool,
-    pub valid: bool,
-}
-
-impl LogicMemoryObject {
-    pub fn new(capacity: usize, team: u8) -> Self {
-        Self {
-            memory: vec![0.0; capacity],
-            team,
-            block_privileged: false,
-            valid: true,
-        }
-    }
-
-    pub fn readable_by(&self, exec_privileged: bool, exec_team: u8) -> bool {
-        self.valid && (exec_privileged || (self.team == exec_team && !self.block_privileged))
-    }
-
-    pub fn read(&self, position: &LVar, output: &mut LVar) {
-        let address = position.numi();
-        if address < 0 || address as usize >= self.memory.len() {
-            output.set_num(f64::NAN);
-        } else {
-            output.set_num(self.memory[address as usize]);
-        }
-    }
-
-    pub fn write(&mut self, position: &LVar, value: &LVar) {
-        let address = position.numi();
-        if address < 0 || address as usize >= self.memory.len() {
-            return;
-        }
-        self.memory[address as usize] = value.num();
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
