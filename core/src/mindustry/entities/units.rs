@@ -1,3 +1,4 @@
+use crate::mindustry::io::TypeValue;
 use crate::mindustry::r#type::{StatusEffect, Weapon};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,8 +151,8 @@ pub struct BuildPlan {
     pub block: Option<String>,
     /// Whether this is a break plan.
     pub breaking: bool,
-    /// Config value, kept generic as a local data shell.
-    pub config: Option<String>,
+    /// Config value, matching Java `BuildPlan.config` / `TypeIO.writeObject`.
+    pub config: TypeValue,
 
     /// Last progress.
     pub progress: f32,
@@ -174,7 +175,7 @@ impl BuildPlan {
             rotation,
             block: Some(block.into()),
             breaking: false,
-            config: None,
+            config: TypeValue::Null,
             progress: 0.0,
             initialized: false,
             stuck: false,
@@ -189,12 +190,22 @@ impl BuildPlan {
         y: i32,
         rotation: i32,
         block: impl Into<String>,
-        config: impl Into<String>,
+        config: TypeValue,
     ) -> Self {
         Self {
-            config: Some(config.into()),
+            config,
             ..Self::new_place(x, y, rotation, block)
         }
+    }
+
+    pub fn new_string_config(
+        x: i32,
+        y: i32,
+        rotation: i32,
+        block: impl Into<String>,
+        config: impl Into<String>,
+    ) -> Self {
+        Self::new_config(x, y, rotation, block, TypeValue::String(config.into()))
     }
 
     pub fn new_break(x: i32, y: i32) -> Self {
@@ -204,7 +215,7 @@ impl BuildPlan {
             rotation: -1,
             block: None,
             breaking: true,
-            config: None,
+            config: TypeValue::Null,
             progress: 0.0,
             initialized: false,
             stuck: false,
@@ -245,7 +256,7 @@ impl Default for BuildPlan {
             rotation: 0,
             block: None,
             breaking: false,
-            config: None,
+            config: TypeValue::Null,
             progress: 0.0,
             initialized: false,
             stuck: false,
@@ -258,6 +269,7 @@ impl Default for BuildPlan {
 
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::io::{Point2, TypeValue};
     use crate::mindustry::r#type::{StatusEffect, Weapon};
 
     use super::{BuildPlan, StatusEntry, WeaponMount};
@@ -292,6 +304,14 @@ mod tests {
         assert_eq!(plan.block.as_deref(), Some("duo"));
         assert!(!plan.breaking);
         assert!(plan.same_pos(&BuildPlan::new_break(3, 4)));
+        assert_eq!(plan.config, TypeValue::Null);
+
+        let configured =
+            BuildPlan::new_config(5, 6, 2, "router", TypeValue::Point2(Point2::new(1, 2)));
+        assert_eq!(configured.config, TypeValue::Point2(Point2::new(1, 2)));
+
+        let string_configured = BuildPlan::new_string_config(5, 6, 2, "router", "alpha");
+        assert_eq!(string_configured.config, TypeValue::String("alpha".into()));
 
         plan.set_break();
         assert!(plan.breaking);

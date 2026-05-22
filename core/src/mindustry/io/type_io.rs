@@ -204,11 +204,7 @@ impl BuildPlanWire {
             rotation: plan.rotation,
             block: plan.block.clone(),
             breaking: plan.breaking,
-            config: plan
-                .config
-                .as_ref()
-                .map(|config| TypeValue::String(config.clone()))
-                .unwrap_or(TypeValue::Null),
+            config: plan.config.clone(),
         }
     }
 
@@ -222,9 +218,7 @@ impl BuildPlanWire {
             .as_ref()
             .ok_or_else(|| invalid_data("place plan missing block"))?;
         let mut plan = BuildPlan::new_place(self.x, self.y, self.rotation, block.clone());
-        if let TypeValue::String(config) = &self.config {
-            plan.config = Some(config.clone());
-        }
+        plan.config = self.config.clone();
         Ok(plan)
     }
 }
@@ -1825,9 +1819,7 @@ pub fn get_max_build_plans(plans: &[BuildPlan]) -> usize {
     let mut total_length = 0usize;
 
     for (index, plan) in plans.iter().take(used).enumerate() {
-        if let Some(config) = &plan.config {
-            total_length += config.chars().count();
-        }
+        total_length += build_plan_config_wire_len(&plan.config);
         if total_length > MAX_NET_BUILD_PLAN_CONFIG_CHARS {
             used = index + 1;
             break;
@@ -2987,6 +2979,13 @@ mod tests {
         expected.extend_from_slice(&point2_pack(-1, 2).to_be_bytes());
         assert_eq!(bytes, expected);
         assert_eq!(read_plan(&mut bytes.as_slice(), &loader).unwrap(), breaking);
+
+        let typed_config = TypeValue::Point2(Point2::new(9, 10));
+        let local_plan = BuildPlan::new_config(7, 8, 1, "router", typed_config.clone());
+        bytes.clear();
+        write_build_plan(&mut bytes, &loader, &local_plan).unwrap();
+        let decoded = read_build_plan(&mut bytes.as_slice(), &loader).unwrap();
+        assert_eq!(decoded.config, typed_config);
     }
 
     #[test]
