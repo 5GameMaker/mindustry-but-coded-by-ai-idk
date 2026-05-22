@@ -1,6 +1,7 @@
 use super::packets::{KickReason, StreamBegin, StreamChunk};
 use super::streamable::Streamable;
 use crate::mindustry::entities::units::BuildPlan;
+use crate::mindustry::io::TeamId;
 use crate::mindustry::vars::MAX_TCP_SIZE;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +20,7 @@ pub struct NetConnection {
     pub locale: String,
     pub uuid: String,
     pub usid: String,
+    pub team: TeamId,
     pub color: i32,
     pub mobile: bool,
     pub modclient: bool,
@@ -51,6 +53,7 @@ impl NetConnection {
             locale: "en".into(),
             usid: uuid.clone(),
             uuid,
+            team: TeamId(0),
             color: 0,
             mobile: false,
             modclient: false,

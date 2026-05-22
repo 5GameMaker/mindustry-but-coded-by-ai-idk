@@ -62,7 +62,16 @@ pub enum ClientCommandResponse {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ClientCommandAction {
     PrivateMessage(String),
+    TargetedMessages(Vec<TargetedClientMessage>),
     WorldDataBegin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TargetedClientMessage {
+    connection_id: i32,
+    message: String,
+    unformatted: String,
+    player_sender: EntityRef,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1683,11 +1692,13 @@ impl NetServer {
 
         {
             let state = Arc::clone(state);
-            net.handle_server_response(move |connection_id, packet| {
+            net.handle_server_responses(move |connection_id, packet| {
                 let PacketKind::SendChatMessageCallPacket(chat) = packet else {
-                    return None;
+                    return Vec::new();
                 };
-                let connection_id = connection_id?;
+                let Some(connection_id) = connection_id else {
+                    return Vec::new();
+                };
                 let sanitized_message = Self::sanitize_chat_message(&chat.message);
                 let command_response = Self::handle_client_command_message(&sanitized_message);
 
@@ -1697,33 +1708,19 @@ impl NetServer {
                         || state.last_client_command.as_deref() != Some(sanitized_message.as_str())
                         || state.last_client_command_received_at != state.last_chat_received_at
                     {
-                        return None;
+                        return Vec::new();
                     }
 
-                    let action =
-                        Self::client_command_action(&mut state, connection_id, &command_response)?;
+                    let Some(action) =
+                        Self::client_command_action(&mut state, connection_id, &command_response)
+                    else {
+                        return Vec::new();
+                    };
                     Self::record_client_command_action(&mut state, connection_id, &action);
                     action
                 };
 
-                let packet = match action {
-                    ClientCommandAction::PrivateMessage(message) => {
-                        PacketKind::SendMessageCallPacket2(SendMessageCallPacket2 {
-                            message,
-                            unformatted: String::new(),
-                            player_sender: EntityRef::null(),
-                        })
-                    }
-                    ClientCommandAction::WorldDataBegin => {
-                        PacketKind::WorldDataBeginCallPacket(WorldDataBeginCallPacket)
-                    }
-                };
-
-                Some(ServerResponse {
-                    connection_id,
-                    packet,
-                    reliable: true,
-                })
+                Self::client_command_server_responses(connection_id, action)
             });
         }
     }
@@ -2084,12 +2081,17 @@ impl NetServer {
         }
 
         match response {
-            ClientCommandResponse::Valid { command, .. } if command.text == "a" => {
-                (!Self::connection_is_admin(state, connection_id)).then(|| {
-                    ClientCommandAction::PrivateMessage(
+            ClientCommandResponse::Valid { command, args } if command.text == "t" => {
+                Self::team_chat_command_action(state, connection_id, &args[0])
+            }
+            ClientCommandResponse::Valid { command, args } if command.text == "a" => {
+                if !Self::connection_is_admin(state, connection_id) {
+                    Some(ClientCommandAction::PrivateMessage(
                         "[scarlet]You must be an admin to use this command.".to_string(),
-                    )
-                })
+                    ))
+                } else {
+                    Self::admin_chat_command_action(state, connection_id, &args[0])
+                }
             }
             ClientCommandResponse::Valid { command, .. } if command.text == "vote" => {
                 Some(ClientCommandAction::PrivateMessage(
@@ -2122,6 +2124,130 @@ impl NetServer {
             }
             _ => None,
         }
+    }
+
+    fn client_command_server_responses(
+        connection_id: i32,
+        action: ClientCommandAction,
+    ) -> Vec<ServerResponse> {
+        match action {
+            ClientCommandAction::PrivateMessage(message) => vec![ServerResponse {
+                connection_id,
+                packet: PacketKind::SendMessageCallPacket2(SendMessageCallPacket2 {
+                    message,
+                    unformatted: String::new(),
+                    player_sender: EntityRef::null(),
+                }),
+                reliable: true,
+            }],
+            ClientCommandAction::TargetedMessages(messages) => messages
+                .into_iter()
+                .map(|message| ServerResponse {
+                    connection_id: message.connection_id,
+                    packet: PacketKind::SendMessageCallPacket2(SendMessageCallPacket2 {
+                        message: message.message,
+                        unformatted: message.unformatted,
+                        player_sender: message.player_sender,
+                    }),
+                    reliable: true,
+                })
+                .collect(),
+            ClientCommandAction::WorldDataBegin => vec![ServerResponse {
+                connection_id,
+                packet: PacketKind::WorldDataBeginCallPacket(WorldDataBeginCallPacket),
+                reliable: true,
+            }],
+        }
+    }
+
+    fn team_chat_command_action(
+        state: &NetServerState,
+        connection_id: i32,
+        raw_message: &str,
+    ) -> Option<ClientCommandAction> {
+        let sender = state.connection_states.get(&connection_id)?;
+        let sender_team = sender.team;
+        let sender_name = sender.name.clone();
+        let sender_color = sender.color;
+        let sender_label = Self::connection_player_label(state, Some(connection_id));
+        let message = state
+            .administration
+            .filter_message(sender_label.as_deref(), raw_message)?;
+        let formatted = Self::scoped_chat_message(
+            &Self::team_color_hex(sender_team),
+            "T",
+            &sender_name,
+            sender_color,
+            &message,
+        );
+        let mut messages: Vec<_> = state
+            .connection_states
+            .iter()
+            .filter(|(_, connection)| {
+                connection.team == sender_team && Self::connection_can_receive_message(connection)
+            })
+            .map(|(target_connection_id, _)| TargetedClientMessage {
+                connection_id: *target_connection_id,
+                message: formatted.clone(),
+                unformatted: message.clone(),
+                player_sender: EntityRef::new(connection_id),
+            })
+            .collect();
+        messages.sort_by_key(|message| message.connection_id);
+
+        Some(ClientCommandAction::TargetedMessages(messages))
+    }
+
+    fn admin_chat_command_action(
+        state: &NetServerState,
+        connection_id: i32,
+        raw_message: &str,
+    ) -> Option<ClientCommandAction> {
+        let sender = state.connection_states.get(&connection_id)?;
+        let formatted =
+            Self::scoped_chat_message("ff4000ff", "A", &sender.name, sender.color, raw_message);
+        let mut messages: Vec<_> = state
+            .connection_states
+            .iter()
+            .filter(|(_, connection)| {
+                Self::connection_can_receive_message(connection)
+                    && Self::connection_is_admin_ref(state, connection)
+            })
+            .map(|(target_connection_id, _)| TargetedClientMessage {
+                connection_id: *target_connection_id,
+                message: formatted.clone(),
+                unformatted: raw_message.to_string(),
+                player_sender: EntityRef::new(connection_id),
+            })
+            .collect();
+        messages.sort_by_key(|message| message.connection_id);
+
+        Some(ClientCommandAction::TargetedMessages(messages))
+    }
+
+    fn scoped_chat_message(
+        prefix_color: &str,
+        scope: &str,
+        sender_name: &str,
+        sender_color: i32,
+        message: &str,
+    ) -> String {
+        format!(
+            "[#{}]<{}> [coral][[[#{:08X}]{}[coral]]:[white] {}",
+            prefix_color, scope, sender_color as u32, sender_name, message
+        )
+    }
+
+    fn team_color_hex(team: TeamId) -> String {
+        let teams = crate::mindustry::game::team::vanilla_teams();
+        format!("{:08x}", teams.get(team.0 as i32).color_rgba)
+    }
+
+    fn connection_can_receive_message(connection: &NetConnection) -> bool {
+        connection.has_connected
+            && connection.player_added
+            && !connection.kicked
+            && !connection.has_disconnected
     }
 
     fn votekick_command_action(
@@ -2212,6 +2338,22 @@ impl NetServer {
                 state.send_message_packets_sent = state.send_message_packets_sent.saturating_add(1);
                 state.last_send_message_error = None;
                 Self::record_connection_sent(state, connection_id, "SendMessageCallPacket2", true);
+            }
+            ClientCommandAction::TargetedMessages(messages) => {
+                state.last_client_command_response = None;
+                for message in messages {
+                    state.last_send_message_connection_id = Some(message.connection_id);
+                    state.last_send_message = Some(message.message.clone());
+                    state.send_message_packets_sent =
+                        state.send_message_packets_sent.saturating_add(1);
+                    state.last_send_message_error = None;
+                    Self::record_connection_sent(
+                        state,
+                        message.connection_id,
+                        "SendMessageCallPacket2",
+                        true,
+                    );
+                }
             }
             ClientCommandAction::WorldDataBegin => {
                 state.last_client_command_response = None;
@@ -3773,6 +3915,158 @@ mod tests {
             state.last_client_command_response.as_deref(),
             Some("[scarlet]You must be an admin to use this command.")
         );
+    }
+
+    #[test]
+    fn admin_chat_command_broadcasts_to_admins_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name, uuid, color) in [
+                (50, "sender", "uuid-admin-sender", 0x112233ffu32 as i32),
+                (51, "other-admin", "uuid-admin-other", 0x445566ffu32 as i32),
+                (52, "regular", "uuid-regular", 0x778899ffu32 as i32),
+            ] {
+                let mut connection = ready_chat_connection(&format!("5.5.5.{id}"), uuid);
+                connection.name = name.into();
+                connection.color = color;
+                state.connection_states.insert(id, connection);
+            }
+            state
+                .administration
+                .admin_player("uuid-admin-sender", "AAAAAAAA");
+            state
+                .administration
+                .admin_player("uuid-admin-other", "AAAAAAAA");
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(50),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/a staff hello".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        let targets: Vec<i32> = sent.iter().map(|entry| entry.0).collect();
+        assert_eq!(targets, vec![50, 51]);
+        for (_, packet, reliable) in sent.iter() {
+            assert!(*reliable);
+            assert!(matches!(
+                packet,
+                PacketKind::SendMessageCallPacket2(packet)
+                    if packet.message == "[#ff4000ff]<A> [coral][[[#112233FF]sender[coral]]:[white] staff hello"
+                        && packet.unformatted == "staff hello"
+                        && packet.player_sender == EntityRef::new(50)
+            ));
+        }
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.send_message_packets_sent, 2);
+        assert_eq!(state.last_client_command_response, None);
+        assert_eq!(state.last_send_message_connection_id, Some(51));
+    }
+
+    #[test]
+    fn team_chat_command_broadcasts_filtered_message_to_teammates_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            for (id, name, team) in [
+                (60, "sender", TeamId(1)),
+                (61, "teammate", TeamId(1)),
+                (62, "opponent", TeamId(2)),
+            ] {
+                let mut connection =
+                    ready_chat_connection(&format!("6.6.6.{id}"), &format!("uuid-team-{id}"));
+                connection.name = name.into();
+                connection.team = team;
+                connection.color = 0xabcdef01u32 as i32;
+                state.connection_states.insert(id, connection);
+            }
+            state
+                .administration
+                .add_chat_filter(|_, message| Some(message.replace("raw", "filtered")));
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(60),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/t raw ping".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        let targets: Vec<i32> = sent.iter().map(|entry| entry.0).collect();
+        assert_eq!(targets, vec![60, 61]);
+        for (_, packet, reliable) in sent.iter() {
+            assert!(*reliable);
+            assert!(matches!(
+                packet,
+                PacketKind::SendMessageCallPacket2(packet)
+                    if packet.message == "[#ffd37fff]<T> [coral][[[#ABCDEF01]sender[coral]]:[white] filtered ping"
+                        && packet.unformatted == "filtered ping"
+                        && packet.player_sender == EntityRef::new(60)
+            ));
+        }
+    }
+
+    #[test]
+    fn team_chat_command_filter_can_cancel_message_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = ready_chat_connection("6.6.6.70", "uuid-team-cancel");
+            connection.name = "sender".into();
+            connection.team = TeamId(1);
+            state.connection_states.insert(70, connection);
+            state.administration.add_chat_filter(|_, _| None);
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(70),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/t blocked".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.is_empty());
     }
 
     #[test]
