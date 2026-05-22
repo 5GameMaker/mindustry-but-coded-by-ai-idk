@@ -7,6 +7,7 @@
 
 use std::io::{self, Read, Write};
 
+use crate::mindustry::ctype::ContentType;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
 use crate::mindustry::io::{
     type_io::{read_bool, read_f32, read_i32, read_i64, read_u8, write_f32, write_i32, write_i64},
@@ -21,6 +22,87 @@ const TIME_TO_SLEEP: f32 = 60.0;
 const RECENT_DAMAGE_TIME: f32 = 60.0 * 5.0;
 const RECENT_HEAL_TIME: f32 = 60.0 * 10.0;
 const DEFAULT_SUPPRESS_COLOR_RGBA: u32 = 0x98ff_a9ff;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildingConfigKind {
+    Null,
+    Int,
+    Long,
+    Float,
+    String,
+    Content(ContentType),
+    AnyContent,
+    TechNode,
+    Bool,
+    Double,
+    Building,
+    LogicAccess,
+    Unit,
+    Point2,
+    Vec2,
+    Team,
+    UnitCommand,
+    IntSeq,
+    IntArray,
+    ByteArray,
+    Point2Array,
+    BoolArray,
+    Vec2Array,
+    ObjectArray,
+}
+
+impl BuildingConfigKind {
+    pub fn of(value: &TypeValue) -> Self {
+        match value {
+            TypeValue::Null => Self::Null,
+            TypeValue::Int(_) => Self::Int,
+            TypeValue::Long(_) => Self::Long,
+            TypeValue::Float(_) => Self::Float,
+            TypeValue::String(_) => Self::String,
+            TypeValue::Content(content) => Self::Content(content.content_type),
+            TypeValue::TechNode(_) => Self::TechNode,
+            TypeValue::Bool(_) => Self::Bool,
+            TypeValue::Double(_) => Self::Double,
+            TypeValue::Building(_) => Self::Building,
+            TypeValue::LogicAccess(_) => Self::LogicAccess,
+            TypeValue::Unit(_) => Self::Unit,
+            TypeValue::Point2(_) => Self::Point2,
+            TypeValue::Vec2(_) => Self::Vec2,
+            TypeValue::Team(_) => Self::Team,
+            TypeValue::UnitCommand(_) => Self::UnitCommand,
+            TypeValue::IntSeq(_) => Self::IntSeq,
+            TypeValue::IntArray(_) => Self::IntArray,
+            TypeValue::ByteArray(_) => Self::ByteArray,
+            TypeValue::Point2Array(_) => Self::Point2Array,
+            TypeValue::BoolArray(_) => Self::BoolArray,
+            TypeValue::Vec2Array(_) => Self::Vec2Array,
+            TypeValue::ObjectArray(_) => Self::ObjectArray,
+        }
+    }
+
+    pub fn matches(self, value: &TypeValue) -> bool {
+        matches!(self, Self::AnyContent)
+            && matches!(value, TypeValue::Content(_) | TypeValue::TechNode(_))
+            || self == Self::of(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildingConfigRollback {
+    pub tile_pos: i32,
+    pub value: TypeValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildingConfigChange {
+    pub accepted: bool,
+    pub requested: TypeValue,
+    pub previous: TypeValue,
+    pub current: TypeValue,
+    pub kind: BuildingConfigKind,
+    pub last_accessed: Option<String>,
+    pub rollback: Option<BuildingConfigRollback>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BuildingComp {
@@ -349,8 +431,86 @@ impl BuildingComp {
         self.config = config;
     }
 
+    pub fn config_value(&self) -> TypeValue {
+        self.config.clone().unwrap_or(TypeValue::Null)
+    }
+
+    pub fn set_config_value(&mut self, value: TypeValue) {
+        self.config = match value {
+            TypeValue::Null => None,
+            value => Some(value),
+        };
+    }
+
     pub fn clear_config(&mut self) {
         self.config = None;
+    }
+
+    pub fn configure_any(&mut self, value: TypeValue) -> BuildingConfigChange {
+        self.configure_any_checked(value, |_| true)
+    }
+
+    pub fn configure_any_checked<F>(&mut self, value: TypeValue, accepts: F) -> BuildingConfigChange
+    where
+        F: FnOnce(&TypeValue) -> bool,
+    {
+        self.configure_any_checked_accessed(value, accepts, Option::<String>::None)
+    }
+
+    pub fn configure_any_checked_accessed<F>(
+        &mut self,
+        value: TypeValue,
+        accepts: F,
+        last_accessed: Option<impl Into<String>>,
+    ) -> BuildingConfigChange
+    where
+        F: FnOnce(&TypeValue) -> bool,
+    {
+        let previous = self.config_value();
+        let kind = BuildingConfigKind::of(&value);
+        let accepted = accepts(&value);
+        let last_accessed = last_accessed.map(Into::into);
+
+        if accepted {
+            self.set_config_value(value.clone());
+            if let Some(last_accessed) = &last_accessed {
+                self.last_accessed = last_accessed.clone();
+            }
+            let current = self.config_value();
+            BuildingConfigChange {
+                accepted: true,
+                requested: value,
+                previous,
+                current,
+                kind,
+                last_accessed,
+                rollback: None,
+            }
+        } else {
+            BuildingConfigChange {
+                accepted: false,
+                requested: value,
+                previous: previous.clone(),
+                current: previous.clone(),
+                kind,
+                last_accessed: None,
+                rollback: Some(BuildingConfigRollback {
+                    tile_pos: self.tile_pos,
+                    value: previous,
+                }),
+            }
+        }
+    }
+
+    pub fn configure_any_allowed_kinds(
+        &mut self,
+        value: TypeValue,
+        allowed: impl IntoIterator<Item = BuildingConfigKind>,
+    ) -> BuildingConfigChange {
+        let allowed = allowed.into_iter().collect::<Vec<_>>();
+        self.configure_any_checked(value, |value| {
+            allowed.iter().any(|kind| kind.matches(value))
+        })
     }
 
     pub fn sleep(&mut self) {
@@ -414,6 +574,8 @@ impl SizedEntity for BuildingComp {
 
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::io::{ContentRef, Point2};
+
     use super::*;
 
     fn block() -> Block {
@@ -485,6 +647,88 @@ mod tests {
         assert!(matches!(building.config, Some(TypeValue::String(_))));
         building.clear_config();
         assert!(building.config.is_none());
+    }
+
+    #[test]
+    fn building_component_config_value_uses_java_null_sentinel() {
+        let mut building = BuildingComp::new(point2_pack(2, 2), block(), TeamId(1));
+
+        assert_eq!(building.config_value(), TypeValue::Null);
+
+        building.set_config_value(TypeValue::String("alpha".into()));
+        assert_eq!(building.config_value(), TypeValue::String("alpha".into()));
+
+        building.set_config_value(TypeValue::Null);
+        assert!(building.config.is_none());
+        assert_eq!(building.config_value(), TypeValue::Null);
+    }
+
+    #[test]
+    fn building_component_configure_any_preserves_value_and_access() {
+        let mut building = BuildingComp::new(point2_pack(4, 4), block(), TeamId(1));
+        let value = TypeValue::Point2(Point2::new(7, 9));
+
+        let change = building.configure_any_checked_accessed(
+            value.clone(),
+            |value| BuildingConfigKind::Point2.matches(value),
+            Some("[#ffaa00]frog"),
+        );
+
+        assert!(change.accepted);
+        assert_eq!(change.kind, BuildingConfigKind::Point2);
+        assert_eq!(change.previous, TypeValue::Null);
+        assert_eq!(change.current, value);
+        assert_eq!(change.rollback, None);
+        assert_eq!(building.config_value(), change.current);
+        assert_eq!(building.last_accessed, "[#ffaa00]frog");
+    }
+
+    #[test]
+    fn building_component_rejected_config_returns_rollback_without_mutation() {
+        let mut building = BuildingComp::new(point2_pack(5, 6), block(), TeamId(2));
+        building.set_config_value(TypeValue::String("old".into()));
+
+        let change =
+            building.configure_any_allowed_kinds(TypeValue::Int(99), [BuildingConfigKind::String]);
+
+        assert!(!change.accepted);
+        assert_eq!(change.kind, BuildingConfigKind::Int);
+        assert_eq!(change.previous, TypeValue::String("old".into()));
+        assert_eq!(change.current, TypeValue::String("old".into()));
+        assert_eq!(building.config_value(), TypeValue::String("old".into()));
+        assert_eq!(
+            change.rollback,
+            Some(BuildingConfigRollback {
+                tile_pos: point2_pack(5, 6),
+                value: TypeValue::String("old".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn building_component_allowed_kinds_distinguish_content_types() {
+        let mut building = BuildingComp::new(point2_pack(7, 8), block(), TeamId(1));
+        let item = TypeValue::Content(ContentRef::new(ContentType::Item, 3));
+        let block_config = TypeValue::Content(ContentRef::new(ContentType::Block, 4));
+
+        let rejected = building.configure_any_allowed_kinds(
+            item.clone(),
+            [BuildingConfigKind::Content(ContentType::Block)],
+        );
+        assert!(!rejected.accepted);
+        assert_eq!(building.config_value(), TypeValue::Null);
+
+        let accepted =
+            building.configure_any_allowed_kinds(item.clone(), [BuildingConfigKind::AnyContent]);
+        assert!(accepted.accepted);
+        assert_eq!(building.config_value(), item);
+
+        let block_accepted = building.configure_any_allowed_kinds(
+            block_config.clone(),
+            [BuildingConfigKind::Content(ContentType::Block)],
+        );
+        assert!(block_accepted.accepted);
+        assert_eq!(building.config_value(), block_config);
     }
 
     #[test]
