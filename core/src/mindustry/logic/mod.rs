@@ -1,12 +1,14 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
 pub mod cutscene_action;
+pub mod fetch_type;
 pub mod l_readable;
 pub mod l_writable;
 pub mod query_shape;
 pub mod query_type;
 
 pub use cutscene_action::CutsceneAction;
+pub use fetch_type::FetchType;
 pub use l_readable::{LReadable, LReadable as LogicReadable};
 pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use query_shape::QueryShape;
@@ -9791,62 +9793,6 @@ impl LogicRule {
         "blockDamage",
         "rtsMinWeight",
         "rtsMinSquad",
-    ];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn wire_name(self) -> &'static str {
-        Self::WIRE_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_wire_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|value| value.wire_name() == name)
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FetchType {
-    Unit,
-    UnitCount,
-    Player,
-    PlayerCount,
-    Core,
-    CoreCount,
-    Build,
-    BuildCount,
-}
-
-impl FetchType {
-    pub const ALL: [FetchType; 8] = [
-        FetchType::Unit,
-        FetchType::UnitCount,
-        FetchType::Player,
-        FetchType::PlayerCount,
-        FetchType::Core,
-        FetchType::CoreCount,
-        FetchType::Build,
-        FetchType::BuildCount,
-    ];
-
-    pub const WIRE_NAMES: [&'static str; 8] = [
-        "unit",
-        "unitCount",
-        "player",
-        "playerCount",
-        "core",
-        "coreCount",
-        "build",
-        "buildCount",
     ];
 
     pub const fn ordinal(self) -> u8 {
