@@ -8,7 +8,7 @@ use crate::mindustry::entities::comp::building::{
     BuildingComp, BuildingConfigChange, BuildingConfigRollback,
 };
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue};
-use crate::mindustry::net::{RotateBlockCallPacket, TileConfigCallPacket};
+use crate::mindustry::net::{RotateBlockCallPacket, TileConfigCallPacket, TileTapCallPacket};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileConfigRejectReason {
@@ -64,6 +64,17 @@ pub struct RotateBlockOutcome {
     pub current_rotation: Option<i32>,
     pub packet: Option<RotateBlockCallPacket>,
     pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TileTapContext {
+    pub player: Option<EntityRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TileTapOutcome {
+    pub accepted: bool,
+    pub packet: Option<TileTapCallPacket>,
 }
 
 impl RotateBlockOutcome {
@@ -208,6 +219,30 @@ pub fn client_rotate_block_packet(build: &BuildingComp, direction: bool) -> Rota
         build: BuildingRef::new(build.tile_pos),
         direction,
     }
+}
+
+pub fn tile_tap(context: TileTapContext, tile: Option<i32>) -> TileTapOutcome {
+    let Some(tile) = tile else {
+        return TileTapOutcome {
+            accepted: false,
+            packet: None,
+        };
+    };
+
+    TileTapOutcome {
+        accepted: true,
+        packet: Some(TileTapCallPacket {
+            player: context.player.unwrap_or_else(EntityRef::null),
+            tile: Some(tile),
+        }),
+    }
+}
+
+pub fn client_tile_tap_packet(tile: Option<i32>) -> Option<TileTapCallPacket> {
+    tile.map(|tile| TileTapCallPacket {
+        player: EntityRef::null(),
+        tile: Some(tile),
+    })
 }
 
 #[cfg(test)]
@@ -382,5 +417,40 @@ mod tests {
         assert_eq!(packet.player, EntityRef::null());
         assert_eq!(packet.build, BuildingRef::new(point2_pack(4, 4)));
         assert!(!packet.direction);
+    }
+
+    #[test]
+    fn tile_tap_ignores_null_tile_and_keeps_player_for_event_packet() {
+        let ignored = tile_tap(
+            TileTapContext {
+                player: Some(EntityRef::new(5)),
+            },
+            None,
+        );
+        assert!(!ignored.accepted);
+        assert!(ignored.packet.is_none());
+
+        let tile = point2_pack(1, 2);
+        let outcome = tile_tap(
+            TileTapContext {
+                player: Some(EntityRef::new(5)),
+            },
+            Some(tile),
+        );
+
+        assert!(outcome.accepted);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player, EntityRef::new(5));
+        assert_eq!(packet.tile, Some(tile));
+    }
+
+    #[test]
+    fn client_tile_tap_packet_uses_client_payload_shape() {
+        let tile = point2_pack(3, 4);
+        let packet = client_tile_tap_packet(Some(tile)).unwrap();
+
+        assert_eq!(packet.player, EntityRef::null());
+        assert_eq!(packet.tile, Some(tile));
+        assert!(client_tile_tap_packet(None).is_none());
     }
 }
