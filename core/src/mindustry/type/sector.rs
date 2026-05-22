@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::PlanetData;
 use crate::mindustry::{
     ctype::{Content, ContentId, ContentType},
     game::SectorInfo,
@@ -95,9 +96,29 @@ impl SectorPreset {
         sector: i32,
         override_remap: bool,
     ) {
+        self.initialize_with_planet_data(planet_name, sector, 0, None, override_remap);
+    }
+
+    pub fn initialize_with_planet_data(
+        &mut self,
+        planet_name: impl Into<String>,
+        sector: i32,
+        sector_count: usize,
+        data: Option<&PlanetData>,
+        override_remap: bool,
+    ) {
         self.planet_name = Some(planet_name.into());
         self.original_position = sector;
-        self.sector_id = Some(if sector == -1 { 0 } else { sector });
+        let mut resolved = sector;
+        if !override_remap {
+            if let Some(remapped) = data.and_then(|data| data.presets.get(&self.name)) {
+                resolved = *remapped;
+            }
+        }
+        if sector_count > 0 {
+            resolved %= sector_count as i32;
+        }
+        self.sector_id = Some(if resolved == -1 { 0 } else { resolved });
         if override_remap {
             self.file_name.get_or_insert_with(|| self.name.clone());
         }
@@ -554,6 +575,22 @@ mod tests {
         assert_eq!(unassigned.original_position, -1);
         assert_eq!(unassigned.sector_id, Some(0));
         assert_eq!(unassigned.generator_map_name(), "orphan");
+    }
+
+    #[test]
+    fn sector_preset_initialize_uses_planet_data_remap_unless_overridden() {
+        let mut data = PlanetData::default();
+        data.presets.insert("groundZero".into(), 42);
+
+        let mut preset = SectorPreset::new("groundZero");
+        preset.initialize_with_planet_data("serpulo", 15, 256, Some(&data), false);
+        assert_eq!(preset.original_position, 15);
+        assert_eq!(preset.sector_id, Some(42));
+
+        let mut wrapped = SectorPreset::new("groundZero");
+        wrapped.initialize_with_planet_data("serpulo", 300, 256, Some(&data), true);
+        assert_eq!(wrapped.sector_id, Some(44));
+        assert_eq!(wrapped.file_name.as_deref(), Some("groundZero"));
     }
 
     #[test]
