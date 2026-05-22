@@ -1715,12 +1715,17 @@ pub fn write_items<W: Write>(
     loader: &ContentLoader,
     stack: &ItemStack,
 ) -> io::Result<()> {
-    write_item(write, loader, Some(&stack.item))?;
+    let item = if stack.item.is_empty() {
+        None
+    } else {
+        Some(stack.item.as_str())
+    };
+    write_item(write, loader, item)?;
     write_i32(write, stack.amount)
 }
 
 pub fn read_items<R: Read>(read: &mut R, loader: &ContentLoader) -> io::Result<ItemStack> {
-    let item = read_item(read, loader)?.ok_or_else(|| invalid_data("null item stack item"))?;
+    let item = read_item(read, loader)?.unwrap_or_default();
     Ok(ItemStack::new(item, read_i32(read)?))
 }
 

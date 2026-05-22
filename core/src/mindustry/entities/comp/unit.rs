@@ -7,14 +7,19 @@
 //! left to explicit snapshots or future runtime adapters.
 
 use crate::mindustry::core::world::World;
+use crate::mindustry::ctype::Content;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
-use crate::mindustry::io::type_io::{CommandWire, ControllerWire};
+use crate::mindustry::io::type_io::{
+    BuildPlanWire, CommandWire, ControllerWire, MountWire, UnitSyncWire,
+};
 use crate::mindustry::io::{AbilityWire, TeamId, Vec2};
 use crate::mindustry::logic::{
     LAccess, LOGIC_CTRL_COMMAND, LOGIC_CTRL_PLAYER, LOGIC_CTRL_PROCESSOR,
 };
+use crate::mindustry::r#type::ItemStack;
 use crate::mindustry::r#type::UnitType;
+use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 use super::builder::BuilderComp;
 use super::entity::EntityComp;
@@ -743,6 +748,120 @@ impl UnitComp {
         self.refresh_component_views();
         true
     }
+
+    pub fn to_sync_wire(&self) -> UnitSyncWire {
+        UnitSyncWire {
+            abilities: self.abilities.clone(),
+            ammo: self.weapons.ammo,
+            controller: self.controller.clone().into(),
+            elevation: self.elevation,
+            flag: self.flag,
+            health: self.health.health,
+            is_shooting: self.weapons.is_shooting,
+            mine_tile: self
+                .miner
+                .mine_tile
+                .as_ref()
+                .map(|tile| point2_pack(world_to_tile(tile.world_x), world_to_tile(tile.world_y))),
+            mounts: self
+                .weapons
+                .mounts
+                .iter()
+                .map(|mount| MountWire {
+                    shoot: mount.shoot,
+                    rotate: mount.rotate,
+                    aim_x: mount.aim_x,
+                    aim_y: mount.aim_y,
+                })
+                .collect(),
+            plans: if self.builder.plans.is_empty() {
+                None
+            } else {
+                Some(
+                    self.builder
+                        .plans
+                        .iter()
+                        .map(BuildPlanWire::from_build_plan)
+                        .collect(),
+                )
+            },
+            rotation: self.rotation(),
+            shield: self.shield.shield,
+            spawned_by_core: self.spawned_by_core,
+            stack: ItemStack::new(
+                self.items.item().unwrap_or_default(),
+                self.items.stack.amount,
+            ),
+            statuses: self.status.statuses.clone(),
+            team: self.team.team,
+            type_id: self.type_info.id(),
+            update_building: self.builder.is_building(),
+            vel: self.vel.vel,
+            x: self.x(),
+            y: self.y(),
+        }
+    }
+
+    pub fn apply_sync_wire(&mut self, sync: &UnitSyncWire) {
+        self.abilities = sync.abilities.clone();
+        self.weapons.ammo = sync.ammo;
+        self.controller = sync.controller.clone().into();
+        self.elevation = sync.elevation;
+        self.flag = sync.flag;
+        self.health.health = sync.health;
+        self.weapons.is_shooting = sync.is_shooting;
+        self.miner.mine_tile = sync.mine_tile.map(|tile_pos| mine_tile_from_wire(tile_pos));
+        if self.weapons.mounts.len() != sync.mounts.len() {
+            self.weapons
+                .setup_weapons(self.type_info.weapons.iter().cloned());
+        }
+        for (mount, state) in self.weapons.mounts.iter_mut().zip(sync.mounts.iter()) {
+            mount.shoot = state.shoot;
+            mount.rotate = state.rotate;
+            mount.aim_x = state.aim_x;
+            mount.aim_y = state.aim_y;
+        }
+        self.builder.plans = sync
+            .plans
+            .as_ref()
+            .map(|plans| {
+                plans
+                    .iter()
+                    .filter_map(|plan| plan.to_build_plan().ok())
+                    .collect::<std::collections::VecDeque<_>>()
+            })
+            .unwrap_or_default();
+        self.set_rotation(sync.rotation);
+        self.shield.shield = sync.shield;
+        self.spawned_by_core = sync.spawned_by_core;
+        self.items.stack.item = if sync.stack.item.is_empty() {
+            None
+        } else {
+            Some(sync.stack.item.clone())
+        };
+        self.items.stack.amount = sync.stack.amount;
+        self.status.statuses = sync.statuses.clone();
+        self.team.team = sync.team;
+        self.builder.update_building = sync.update_building;
+        self.vel.vel = sync.vel;
+        self.set_pos(sync.x, sync.y);
+        self.refresh_component_views();
+        let _ = sync.type_id;
+    }
+}
+
+fn world_to_tile(value: i32) -> i32 {
+    (value as f32 / TILE_SIZE).round() as i32
+}
+
+fn mine_tile_from_wire(tile_pos: i32) -> MineTile {
+    crate::mindustry::entities::comp::miner::MineTile {
+        world_x: point2_x(tile_pos) as i32 * TILE_SIZE as i32,
+        world_y: point2_y(tile_pos) as i32 * TILE_SIZE as i32,
+        block_air: false,
+        floor_drop: None,
+        wall_drop: None,
+    }
 }
 
 impl EntityPosition for UnitComp {
@@ -850,6 +969,8 @@ fn lerp(from: f32, to: f32, t: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::mindustry::entities::units::BuildPlan;
+    use crate::mindustry::entities::StatusEntry;
+    use crate::mindustry::io::TypeValue;
     use crate::mindustry::r#type::Weapon;
 
     fn unit_type() -> UnitType {
@@ -1012,5 +1133,80 @@ mod tests {
         assert_eq!(unit.team_id(), TeamId(5));
         assert!(!unit.set_prop_basic(LAccess::Team, 6.0, true));
         assert_eq!(unit.team_id(), TeamId(5));
+    }
+
+    #[test]
+    fn unit_component_sync_wire_roundtrips_the_snapshot_subset() {
+        let mut unit = UnitComp::new(7, unit_type(), TeamId(4));
+        unit.add();
+        unit.set_pos(48.0, 56.0);
+        unit.set_rotation(270.0);
+        unit.elevation = 0.25;
+        unit.flag = 99.5;
+        unit.health.health = 88.0;
+        unit.weapons.is_shooting = true;
+        unit.weapons.ammo = 14.0;
+        unit.weapons.mounts[0].shoot = true;
+        unit.weapons.mounts[0].rotate = true;
+        unit.weapons.mounts[0].aim_x = 11.0;
+        unit.weapons.mounts[0].aim_y = 22.0;
+        unit.items.stack.item = Some("copper".into());
+        unit.items.stack.amount = 8;
+        unit.status.statuses.push(StatusEntry::default());
+        unit.spawned_by_core = true;
+        unit.builder.plans.push_back(BuildPlan::new_config(
+            4,
+            5,
+            1,
+            "router",
+            TypeValue::String("cfg".into()),
+        ));
+        unit.miner.mine_tile = Some(MineTile {
+            world_x: 32,
+            world_y: 40,
+            block_air: true,
+            floor_drop: None,
+            wall_drop: None,
+        });
+        unit.payload = Some(PayloadComp::new(TeamId(4), 12.0));
+        unit.refresh_component_views();
+
+        let wire = unit.to_sync_wire();
+        assert_eq!(wire.mine_tile, Some(point2_pack(4, 5)));
+        assert_eq!(wire.stack.item, "copper");
+        assert_eq!(
+            wire.plans.as_ref().unwrap()[0].config,
+            TypeValue::String("cfg".into())
+        );
+
+        let mut restored = UnitComp::new(7, unit_type(), TeamId(4));
+        restored.apply_sync_wire(&wire);
+
+        assert_eq!(restored.x(), 48.0);
+        assert_eq!(restored.y(), 56.0);
+        assert_eq!(restored.rotation(), 270.0);
+        assert_eq!(restored.elevation, 0.25);
+        assert_eq!(restored.flag, 99.5);
+        assert_eq!(restored.health.health, 88.0);
+        assert_eq!(restored.weapons.ammo, 14.0);
+        assert!(restored.weapons.is_shooting);
+        assert_eq!(restored.weapons.mounts[0].aim_x, 11.0);
+        assert_eq!(restored.items.stack.item.as_deref(), Some("copper"));
+        assert_eq!(restored.items.stack.amount, 8);
+        assert_eq!(restored.status.statuses.len(), 1);
+        assert!(restored.spawned_by_core);
+        assert_eq!(restored.builder.plans.len(), 1);
+        assert_eq!(
+            restored.builder.plans[0].config,
+            TypeValue::String("cfg".into())
+        );
+        assert_eq!(
+            restored
+                .miner
+                .mine_tile
+                .as_ref()
+                .map(|tile| (tile.world_x, tile.world_y)),
+            Some((32, 40))
+        );
     }
 }
