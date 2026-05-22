@@ -101,13 +101,7 @@ impl PlanetMeta {
     }
 
     pub fn get_start_sector<'a>(&self, sectors: &'a [Sector]) -> Option<&'a Sector> {
-        if sectors.is_empty() {
-            None
-        } else {
-            sectors
-                .get(self.start_sector)
-                .or_else(|| sectors.get(sectors.len() - 1))
-        }
+        sectors.get(self.start_sector)
     }
 
     pub fn get_last_sector<'a>(
@@ -291,6 +285,10 @@ mod tests {
 
         meta.has_generator = false;
         assert!(!meta.has_grid(&sectors));
+
+        meta.start_sector = 99;
+        assert_eq!(meta.get_start_sector(&sectors), None);
+        assert_eq!(meta.get_last_sector(&sectors, None).unwrap().id, 2);
     }
 
     #[test]
