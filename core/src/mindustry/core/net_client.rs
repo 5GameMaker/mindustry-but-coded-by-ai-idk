@@ -173,6 +173,15 @@ pub struct NetClientState {
     pub last_message_unformatted: Option<String>,
     pub last_message_sender: Option<EntityRef>,
     pub message_packets_seen: u64,
+    pub last_client_ui_packet: Option<PacketKind>,
+    pub last_client_ui_packet_at: Option<Instant>,
+    pub client_ui_packets_seen: u64,
+    pub last_announcement: Option<String>,
+    pub last_info_message: Option<String>,
+    pub last_toast_message: Option<String>,
+    pub last_hud_text: Option<String>,
+    pub last_open_uri: Option<String>,
+    pub last_clipboard_text: Option<String>,
     pub last_player_disconnect: Option<PlayerDisconnectCallPacket>,
     pub last_player_disconnect_at: Option<Instant>,
     pub player_disconnect_packets_seen: u64,
@@ -409,6 +418,12 @@ impl fmt::Debug for NetClientState {
             .field("last_packet", &self.last_packet)
             .field("last_message", &self.last_message)
             .field("message_packets_seen", &self.message_packets_seen)
+            .field("client_ui_packets_seen", &self.client_ui_packets_seen)
+            .field("last_announcement", &self.last_announcement)
+            .field("last_info_message", &self.last_info_message)
+            .field("last_toast_message", &self.last_toast_message)
+            .field("last_hud_text", &self.last_hud_text)
+            .field("last_open_uri", &self.last_open_uri)
             .field(
                 "player_disconnect_packets_seen",
                 &self.player_disconnect_packets_seen,
@@ -651,6 +666,12 @@ impl NetClientState {
 
     fn clear_timeout_clock(&mut self) {
         self.timeout_deadline = None;
+    }
+
+    fn record_client_ui_packet(&mut self, packet: &PacketKind) {
+        self.client_ui_packets_seen = self.client_ui_packets_seen.saturating_add(1);
+        self.last_client_ui_packet = Some(packet.clone());
+        self.last_client_ui_packet_at = Some(Instant::now());
     }
 
     fn record_server_kick_disconnect(&mut self) {
@@ -1410,6 +1431,67 @@ impl NetClient {
                         state.last_message_sender = Some(packet.player_sender);
                         (false, false)
                     }
+                    PacketKind::AnnounceCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_announcement = Some(ui_packet.message.clone());
+                        (false, false)
+                    }
+                    PacketKind::InfoMessageCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_info_message = Some(ui_packet.message.clone());
+                        (false, false)
+                    }
+                    PacketKind::InfoToastCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_toast_message = Some(ui_packet.message.clone());
+                        (false, false)
+                    }
+                    PacketKind::WarningToastCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_toast_message = Some(ui_packet.text.clone());
+                        (false, false)
+                    }
+                    PacketKind::SetHudTextCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_hud_text = Some(ui_packet.message.clone());
+                        (false, false)
+                    }
+                    PacketKind::SetHudTextReliableCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_hud_text = Some(ui_packet.0.message.clone());
+                        (false, false)
+                    }
+                    PacketKind::HideHudTextCallPacket(_) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_hud_text = None;
+                        (false, false)
+                    }
+                    PacketKind::OpenUriCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_open_uri = Some(ui_packet.uri.clone());
+                        (false, false)
+                    }
+                    PacketKind::CopyToClipboardCallPacket(ui_packet) => {
+                        state.record_client_ui_packet(&packet);
+                        state.last_clipboard_text = Some(ui_packet.text.clone());
+                        (false, false)
+                    }
+                    PacketKind::InfoPopupCallPacket(_)
+                    | PacketKind::InfoPopupCallPacket2(_)
+                    | PacketKind::InfoPopupReliableCallPacket(_)
+                    | PacketKind::InfoPopupReliableCallPacket2(_)
+                    | PacketKind::MenuCallPacket(_)
+                    | PacketKind::FollowUpMenuCallPacket(_)
+                    | PacketKind::HideFollowUpMenuCallPacket(_)
+                    | PacketKind::TextInputCallPacket(_)
+                    | PacketKind::TextInputCallPacket2(_)
+                    | PacketKind::LabelCallPacket(_)
+                    | PacketKind::LabelCallPacket2(_)
+                    | PacketKind::LabelReliableCallPacket(_)
+                    | PacketKind::LabelReliableCallPacket2(_) => {
+                        state.record_client_ui_packet(&packet);
+                        (false, false)
+                    }
                     PacketKind::PlayerDisconnectCallPacket(packet) => {
                         let now = Instant::now();
                         state.player_disconnect_packets_seen += 1;
@@ -1996,26 +2078,29 @@ mod tests {
     use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
-        BlockSnapshotCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
-        ClearLiquidsCallPacket, ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
-        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
-        CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
+        AnnounceCallPacket, BlockSnapshotCallPacket, BuildingControlSelectCallPacket,
+        ClearItemsCallPacket, ClearLiquidsCallPacket, ClearObjectivesCallPacket,
+        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+        ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
+        CompleteObjectiveCallPacket, Connect, ConnectCallPacket, CopyToClipboardCallPacket,
         DeletePlansCallPacket, Disconnect, DoneCallback, EffectCallPacket, EffectCallPacket2,
-        EffectReliableCallPacket, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
-        HostCallback, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection, NetProvider,
-        PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
-        PickedUnitPayloadCallPacket, PingLocationCallPacket, PingResponseCallPacket,
-        PlayerDisconnectCallPacket, RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket,
-        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-        RotateBlockCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
-        SetCameraPositionCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-        SetLiquidsCallPacket, SetObjectivesCallPacket, SetPositionCallPacket, SetRuleCallPacket,
-        SetRulesCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket,
-        SoundCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
-        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
-        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        EffectReliableCallPacket, EntitySnapshotCallPacket, HiddenSnapshotCallPacket,
+        HideHudTextCallPacket, Host, HostCallback, InfoMessageCallPacket, InfoToastCallPacket,
+        KickCallPacket, KickCallPacket2, KickReason, MenuCallPacket, Net, NetConnection,
+        NetProvider, OpenUriCallPacket, PacketKind, PayloadDroppedCallPacket,
+        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
+        PingResponseCallPacket, PlayerDisconnectCallPacket, RemoveQueueBlockCallPacket,
+        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+        RequestUnitPayloadCallPacket, RotateBlockCallPacket, SendMessageCallPacket,
+        SendMessageCallPacket2, SetCameraPositionCallPacket, SetHudTextCallPacket,
+        SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket,
+        SetObjectivesCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
+        TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
+        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        UnitEnteredPayloadCallPacket, WarningToastCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -2175,6 +2260,74 @@ mod tests {
         );
         assert_eq!(state.last_message_unformatted.as_deref(), Some("hello"));
         assert_eq!(state.last_message_sender, Some(EntityRef::new(77)));
+    }
+
+    #[test]
+    fn update_records_client_ui_packets_for_later_frontend_application() {
+        let client = NetClient::default();
+        let announce = AnnounceCallPacket {
+            message: "incoming wave".into(),
+        };
+        let info = InfoMessageCallPacket {
+            message: "server info".into(),
+        };
+        let toast = InfoToastCallPacket {
+            message: "toast".into(),
+            duration: 2.5,
+        };
+        let warning = WarningToastCallPacket {
+            unicode: 0xf071,
+            text: "warning".into(),
+        };
+        let hud = SetHudTextCallPacket {
+            message: "capture the core".into(),
+        };
+        let uri = OpenUriCallPacket {
+            uri: "https://example.invalid".into(),
+        };
+        let clipboard = CopyToClipboardCallPacket {
+            text: "copy me".into(),
+        };
+        let menu = MenuCallPacket {
+            menu_id: 9,
+            title: "title".into(),
+            message: "choose".into(),
+            options: vec![vec![Some("ok".into()), Some("cancel".into())]],
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::AnnounceCallPacket(announce.clone()));
+            net.handle_client_received(PacketKind::InfoMessageCallPacket(info.clone()));
+            net.handle_client_received(PacketKind::InfoToastCallPacket(toast.clone()));
+            net.handle_client_received(PacketKind::WarningToastCallPacket(warning.clone()));
+            net.handle_client_received(PacketKind::SetHudTextCallPacket(hud.clone()));
+            net.handle_client_received(PacketKind::OpenUriCallPacket(uri.clone()));
+            net.handle_client_received(PacketKind::CopyToClipboardCallPacket(clipboard.clone()));
+            net.handle_client_received(PacketKind::MenuCallPacket(menu));
+            net.handle_client_received(PacketKind::HideHudTextCallPacket(HideHudTextCallPacket));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.client_ui_packets_seen, 9);
+        assert!(matches!(
+            state.last_client_ui_packet.as_ref(),
+            Some(PacketKind::HideHudTextCallPacket(_))
+        ));
+        assert!(state.last_client_ui_packet_at.is_some());
+        assert_eq!(state.last_announcement.as_deref(), Some("incoming wave"));
+        assert_eq!(state.last_info_message.as_deref(), Some("server info"));
+        assert_eq!(state.last_toast_message.as_deref(), Some("warning"));
+        assert!(state.last_hud_text.is_none());
+        assert_eq!(
+            state.last_open_uri.as_deref(),
+            Some("https://example.invalid")
+        );
+        assert_eq!(state.last_clipboard_text.as_deref(), Some("copy me"));
     }
 
     #[test]
