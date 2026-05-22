@@ -11,12 +11,12 @@ use crate::mindustry::entities::comp::{
 };
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
-    TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-    TransferItemToCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    BuildingControlSelectCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::meta::BuildVisibility;
@@ -371,6 +371,28 @@ pub struct UnitEnteredPayloadOutcome {
     pub packet: Option<UnitEnteredPayloadCallPacket>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropItemRejectReason {
+    MissingPlayer,
+    MissingUnit,
+    EmptyStack,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DropItemContext {
+    pub local_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropItemOutcome {
+    pub accepted: bool,
+    pub rejection: Option<DropItemRejectReason>,
+    pub previous_item: Option<String>,
+    pub previous_amount: i32,
+    pub packet: Option<DropItemCallPacket>,
+    pub should_raise_validate: bool,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -585,6 +607,25 @@ impl UnitEnteredPayloadOutcome {
             accepted: false,
             rejection: Some(reason),
             packet: None,
+        }
+    }
+}
+
+impl DropItemOutcome {
+    fn rejected(
+        context: &DropItemContext,
+        reason: DropItemRejectReason,
+        previous_item: Option<String>,
+        previous_amount: i32,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            previous_item,
+            previous_amount,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
         }
     }
 }
@@ -1617,6 +1658,59 @@ pub fn unit_entered_payload(
     }
 }
 
+pub fn drop_item(
+    context: DropItemContext,
+    player: Option<&PlayerComp>,
+    unit: Option<&mut UnitComp>,
+    angle: f32,
+) -> DropItemOutcome {
+    if player.is_none() {
+        return DropItemOutcome::rejected(
+            &context,
+            DropItemRejectReason::MissingPlayer,
+            None,
+            0,
+            false,
+        );
+    }
+
+    let Some(unit) = unit else {
+        return DropItemOutcome::rejected(
+            &context,
+            DropItemRejectReason::MissingUnit,
+            None,
+            0,
+            false,
+        );
+    };
+
+    let previous_item = unit.items.item().map(str::to_owned);
+    let previous_amount = unit.items.stack.amount;
+    if previous_amount <= 0 {
+        return DropItemOutcome::rejected(
+            &context,
+            DropItemRejectReason::EmptyStack,
+            previous_item,
+            previous_amount,
+            true,
+        );
+    }
+
+    unit.items.clear_item();
+    DropItemOutcome {
+        accepted: true,
+        rejection: None,
+        previous_item,
+        previous_amount,
+        packet: Some(DropItemCallPacket { angle }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_drop_item_packet(angle: f32) -> DropItemCallPacket {
+    DropItemCallPacket { angle }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -2523,5 +2617,56 @@ mod tests {
             Some(UnitEnteredPayloadRejectReason::TeamMismatch)
         );
         assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn drop_item_clears_unit_stack_and_records_angle_packet() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(69).with_valid(true));
+        let mut unit = UnitComp::new(69, unit_type(10), TeamId(1));
+        unit.items.add_item_amount("copper", 3);
+
+        let outcome = drop_item(
+            DropItemContext {
+                local_player: false,
+            },
+            Some(&player),
+            Some(&mut unit),
+            45.5,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.previous_item.as_deref(), Some("copper"));
+        assert_eq!(outcome.previous_amount, 3);
+        assert_eq!(unit.items.stack.amount, 0);
+        assert_eq!(outcome.packet.unwrap().angle, 45.5);
+    }
+
+    #[test]
+    fn drop_item_rejects_empty_stack_as_validate_error() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(69).with_valid(true));
+        let mut unit = UnitComp::new(69, unit_type(10), TeamId(1));
+
+        let outcome = drop_item(
+            DropItemContext {
+                local_player: false,
+            },
+            Some(&player),
+            Some(&mut unit),
+            -10.0,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(outcome.rejection, Some(DropItemRejectReason::EmptyStack));
+        assert!(outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn client_drop_item_packet_keeps_angle_payload() {
+        let packet = client_drop_item_packet(-45.5);
+
+        assert_eq!(packet.angle, -45.5);
     }
 }
