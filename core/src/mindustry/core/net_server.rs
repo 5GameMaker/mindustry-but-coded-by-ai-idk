@@ -25,6 +25,8 @@ pub const JAVA_CHAT_SPAM_WINDOW_MS: i64 = 2_000;
 pub const JAVA_CHAT_SPAM_LIMIT: i32 = 20;
 pub const JAVA_PACKET_SPAM_WINDOW_MS: i64 = 3_000;
 pub const JAVA_PACKET_SPAM_LIMIT: i32 = 300;
+pub const JAVA_DEFAULT_KICK_DURATION_MS: i64 = 30_000;
+pub const JAVA_DEFAULT_VOTE_KICK_DURATION_MS: i64 = 60 * 60 * 1_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerPreviewPlanSource {
@@ -450,6 +452,24 @@ impl NetServer {
     }
 
     pub fn kick_connection_reason(&self, connection_id: i32, reason: KickReason) -> io::Result<()> {
+        self.kick_connection_reason_with_duration(
+            connection_id,
+            reason,
+            Self::default_reason_kick_duration_millis(reason),
+        )
+    }
+
+    pub fn kick_connection_reason_with_duration(
+        &self,
+        connection_id: i32,
+        reason: KickReason,
+        duration_millis: i64,
+    ) -> io::Result<()> {
+        {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            Self::record_recent_kick(&mut state, connection_id, duration_millis);
+        }
+
         let packet = PacketKind::KickCallPacket2(KickCallPacket2 { reason });
         let result = {
             let mut net = self.net.lock().expect("Net mutex poisoned");
@@ -483,7 +503,25 @@ impl NetServer {
         connection_id: i32,
         reason: impl Into<String>,
     ) -> io::Result<()> {
+        self.kick_connection_message_with_duration(
+            connection_id,
+            reason,
+            JAVA_DEFAULT_KICK_DURATION_MS,
+        )
+    }
+
+    pub fn kick_connection_message_with_duration(
+        &self,
+        connection_id: i32,
+        reason: impl Into<String>,
+        duration_millis: i64,
+    ) -> io::Result<()> {
         let reason = reason.into();
+        {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            Self::record_recent_kick(&mut state, connection_id, duration_millis);
+        }
+
         let packet = PacketKind::KickCallPacket(KickCallPacket {
             reason: reason.clone(),
         });
@@ -1879,6 +1917,35 @@ impl NetServer {
         millis.min(i64::MAX as u128) as i64
     }
 
+    const fn default_reason_kick_duration_millis(reason: KickReason) -> i64 {
+        match reason {
+            KickReason::Kick | KickReason::Banned | KickReason::Vote => {
+                JAVA_DEFAULT_KICK_DURATION_MS
+            }
+            _ => 0,
+        }
+    }
+
+    fn record_recent_kick(state: &mut NetServerState, connection_id: i32, duration_millis: i64) {
+        if duration_millis <= 0 {
+            return;
+        }
+
+        let Some(connection) = state.connection_states.get(&connection_id) else {
+            return;
+        };
+        if connection.address.is_empty() {
+            return;
+        }
+
+        let until_millis = Self::current_millis().saturating_add(duration_millis);
+        state.administration.handle_kicked(
+            connection.uuid.clone(),
+            connection.address.clone(),
+            until_millis,
+        );
+    }
+
     fn record_connection_sent(
         state: &mut NetServerState,
         connection_id: i32,
@@ -2016,12 +2083,13 @@ mod tests {
 
     use super::{
         ConnectPacketValidationContext, NetServer, NetServerState, PlayerPreviewPlanSource,
-        JAVA_PACKET_SPAM_LIMIT, PLAN_PREVIEW_CHUNK_SIZE,
+        JAVA_DEFAULT_KICK_DURATION_MS, JAVA_PACKET_SPAM_LIMIT, PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
     struct CaptureProvider {
         sent: Arc<Mutex<Vec<(i32, PacketKind, bool)>>>,
+        fail_server_to: bool,
     }
 
     impl NetProvider for CaptureProvider {
@@ -2067,6 +2135,13 @@ mod tests {
             object: &PacketKind,
             reliable: bool,
         ) -> io::Result<()> {
+            if self.fail_server_to {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "forced send failure",
+                ));
+            }
+
             self.sent
                 .lock()
                 .unwrap()
@@ -2407,6 +2482,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
 
@@ -2456,6 +2532,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
 
@@ -2540,6 +2617,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -3091,6 +3169,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
         let tile_pos = crate::mindustry::world::point2_pack(4, 5);
@@ -3143,6 +3222,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
         let packet = ClientPlanSnapshotReceivedCallPacket {
@@ -3188,6 +3268,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
         let packet = ClientPlanSnapshotReceivedCallPacket {
@@ -3243,6 +3324,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
         let many_plans: Vec<_> = (0..PLAN_PREVIEW_CHUNK_SIZE + 2)
@@ -3303,6 +3385,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
         let state_packet = StateSnapshotCallPacket {
@@ -3407,6 +3490,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
 
@@ -3459,6 +3543,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
 
@@ -3495,10 +3580,91 @@ mod tests {
     }
 
     #[test]
+    fn kick_connection_reason_records_recent_kick_deadline_before_send() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            fail_server_to: true,
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("7.7.7.7");
+            connection.uuid = "recent-uuid".into();
+            state.connection_states.insert(33, connection);
+        }
+
+        let start = NetServer::current_millis();
+        let error = server
+            .kick_connection_reason(33, KickReason::Kick)
+            .unwrap_err();
+        let end = NetServer::current_millis();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        let deadline = state.administration.get_kick_time("recent-uuid", "7.7.7.7");
+        assert!(deadline >= start + JAVA_DEFAULT_KICK_DURATION_MS);
+        assert!(deadline <= end + JAVA_DEFAULT_KICK_DURATION_MS);
+        assert!(state
+            .administration
+            .is_recently_kicked("recent-uuid", "7.7.7.7", end));
+        let info = state
+            .administration
+            .get_info_optional("recent-uuid")
+            .unwrap();
+        assert_eq!(info.times_kicked, 1);
+        assert_eq!(info.last_kicked, deadline);
+        assert!(state.last_kick_error.is_some());
+        assert!(sent.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn recent_kick_blocks_reconnect_until_deadline() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut kicked = NetConnection::new("8.8.8.8");
+            kicked.uuid = "blocked-uuid".into();
+            state.connection_states.insert(34, kicked);
+        }
+
+        server.kick_connection_reason(34, KickReason::Kick).unwrap();
+
+        let mut reconnect_packet = connect_packet("blocked-player");
+        reconnect_packet.uuid = "blocked-uuid".into();
+        reconnect_packet.usid = "blocked-usid".into();
+        let context = {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(35, NetConnection::new("8.8.8.8"));
+            NetServer::connect_packet_validation_context(&state, 35, &reconnect_packet)
+        };
+
+        assert!(context.recent_kick_active);
+        assert_eq!(
+            NetServer::validate_connect_packet(&reconnect_packet, &context).kick_reason(),
+            Some(KickReason::RecentKick)
+        );
+    }
+
+    #[test]
     fn kick_connection_message_sends_java_string_packet_and_records_message() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
 
@@ -3543,6 +3709,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
 
@@ -3623,6 +3790,7 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
+            ..Default::default()
         };
         let server = NetServer::new(Net::new(Box::new(provider)));
         let seen = Arc::new(Mutex::new(Vec::new()));
