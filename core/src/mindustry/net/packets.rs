@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::{ContentId, ContentType};
+use crate::mindustry::entities::comp::building::BuildingConfigRollback;
 use crate::mindustry::io::type_io::{
     read_action, read_block, read_building_ref, read_bullet_type_id, read_bytes, read_client_plans,
     read_color, read_content_id, read_content_name, read_effect_id, read_entity_ref, read_i32,
@@ -6929,6 +6930,26 @@ pub struct TileConfigCallPacket {
 }
 
 impl TileConfigCallPacket {
+    pub fn client(build: BuildingRef, value: TypeValue) -> Self {
+        Self {
+            player: EntityRef::null(),
+            build,
+            value,
+        }
+    }
+
+    pub fn server(player: EntityRef, build: BuildingRef, value: TypeValue) -> Self {
+        Self {
+            player,
+            build,
+            value,
+        }
+    }
+
+    pub fn rollback_for(player: EntityRef, rollback: BuildingConfigRollback) -> Self {
+        Self::server(player, BuildingRef::new(rollback.tile_pos), rollback.value)
+    }
+
     pub fn read_from_client_payload<R: Read>(read: &mut R) -> std::io::Result<Self> {
         Ok(Self {
             player: EntityRef::null(),
@@ -7602,7 +7623,7 @@ fn write_i16<W: Write>(write: &mut W, value: i16) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mindustry::io::TypeValue;
+    use crate::mindustry::io::{ContentRef, Point2, TypeValue};
 
     #[test]
     fn stream_begin_uses_java_field_order() {
@@ -7629,6 +7650,53 @@ mod tests {
         assert_eq!(bytes, vec![0, 0, 0, 3, 0, 3, 1, 2, 3]);
         let decoded = StreamChunk::read_from(&mut bytes.as_slice()).unwrap();
         assert_eq!(decoded, packet);
+    }
+
+    #[test]
+    fn tile_config_payloads_preserve_type_values_and_rollback_plan() {
+        let tile_pos = crate::mindustry::world::point2_pack(3, 4);
+        let build = BuildingRef::new(tile_pos);
+        let value = TypeValue::ObjectArray(vec![
+            TypeValue::String("cfg".into()),
+            TypeValue::Point2(Point2::new(1, 2)),
+            TypeValue::Content(ContentRef::new(ContentType::Item, 0)),
+        ]);
+
+        let client = TileConfigCallPacket::client(build, value.clone());
+        let mut bytes = Vec::new();
+        client.write_client_payload(&mut bytes).unwrap();
+        assert_eq!(&bytes[..4], &tile_pos.to_be_bytes());
+        assert_eq!(
+            TileConfigCallPacket::read_from_client_payload(&mut bytes.as_slice()).unwrap(),
+            client
+        );
+        assert_eq!(client.player, EntityRef::null());
+
+        let server = TileConfigCallPacket::server(EntityRef::new(9), build, value);
+        bytes.clear();
+        server.write_server_payload(&mut bytes).unwrap();
+        assert_eq!(&bytes[..4], &9i32.to_be_bytes());
+        assert_eq!(&bytes[4..8], &tile_pos.to_be_bytes());
+        assert_eq!(
+            TileConfigCallPacket::read_from_server_payload(&mut bytes.as_slice()).unwrap(),
+            server
+        );
+
+        let rollback = BuildingConfigRollback {
+            tile_pos,
+            value: TypeValue::String("old".into()),
+        };
+        let rollback_packet = TileConfigCallPacket::rollback_for(EntityRef::new(5), rollback);
+        assert_eq!(rollback_packet.player, EntityRef::new(5));
+        assert_eq!(rollback_packet.build, build);
+        assert_eq!(rollback_packet.value, TypeValue::String("old".into()));
+
+        bytes.clear();
+        rollback_packet.write_server_payload(&mut bytes).unwrap();
+        assert_eq!(
+            TileConfigCallPacket::read_from_server_payload(&mut bytes.as_slice()).unwrap(),
+            rollback_packet
+        );
     }
 
     #[test]
