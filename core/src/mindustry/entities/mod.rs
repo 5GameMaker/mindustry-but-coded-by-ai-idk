@@ -6,6 +6,7 @@ pub mod leg;
 pub mod leg_destroy_data;
 pub mod mover;
 pub mod pattern;
+pub mod predict;
 pub mod sized;
 pub mod target_priority;
 pub mod unit_sorts;
@@ -67,6 +68,7 @@ pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSine, ShootSpread,
     ShootSummon, Shot,
 };
+pub use predict::{intercept, intercept_positions};
 pub use sized::{EntityPosition, SizedEntity};
 pub use target_priority as TargetPriority;
 pub use unit_sorts::{
