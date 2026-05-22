@@ -1,5 +1,6 @@
 pub mod abilities;
 pub mod comp;
+pub mod entity_group;
 pub mod entity_indexer;
 pub mod fires;
 pub mod leg;
@@ -59,6 +60,7 @@ pub use comp::{
 pub use comp::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use comp::{WaterCrawlComp, WaterCrawlSolidPred};
 pub use comp::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};
+pub use entity_group::{EntityGroup, EntityGroupItem, Rect, SpatialEntity};
 pub use entity_indexer::EntityIndexer;
 pub use fires::{ExtinguishResult, FireCreateResult, FireRules, Fires, BASE_FIRE_LIFETIME};
 pub use leg::Leg;
