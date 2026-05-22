@@ -122,8 +122,8 @@ pub use lightning::{
 };
 pub use mover::Mover;
 pub use pattern::{
-    BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSine, ShootSpread,
-    ShootSummon, Shot,
+    BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootMulti, ShootPattern, ShootSine,
+    ShootSpread, ShootSummon, Shot,
 };
 pub use predict::{intercept, intercept_positions};
 pub use puddles::{

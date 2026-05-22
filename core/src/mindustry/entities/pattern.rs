@@ -416,6 +416,57 @@ impl Default for ShootSummon {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ShootMulti {
+    pub source: Vec<Shot>,
+    pub dest: Vec<Vec<Shot>>,
+}
+
+impl ShootMulti {
+    pub fn new(source: Vec<Shot>, dest: Vec<Vec<Shot>>) -> Self {
+        Self { source, dest }
+    }
+
+    pub fn flip(&mut self) {
+        for shot in &mut self.source {
+            shot.x *= -1.0;
+            shot.rotation *= -1.0;
+        }
+        for pattern in &mut self.dest {
+            for shot in pattern {
+                shot.x *= -1.0;
+                shot.rotation *= -1.0;
+            }
+        }
+    }
+
+    pub fn shoot_collect(&self) -> Vec<Shot> {
+        let mut out = Vec::new();
+        for source in &self.source {
+            for pattern in &self.dest {
+                for dest in pattern {
+                    out.push(Shot::new(
+                        source.x + dest.x,
+                        source.y + dest.y,
+                        source.rotation + dest.rotation,
+                        source.delay + dest.delay,
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    pub fn shoot<H>(&self, handler: &mut H)
+    where
+        H: BulletHandler + ?Sized,
+    {
+        for shot in self.shoot_collect() {
+            handler.shoot(shot);
+        }
+    }
+}
+
 fn sin_scale(value: f32, scl: f32, mag: f32) -> f32 {
     (value / scl).sin() * mag
 }
@@ -423,8 +474,8 @@ fn sin_scale(value: f32, scl: f32, mag: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSine, ShootSpread, ShootSummon,
-        Shot,
+        ShootAlternate, ShootBarrel, ShootHelix, ShootMulti, ShootPattern, ShootSine, ShootSpread,
+        ShootSummon, Shot,
     };
 
     #[test]
@@ -532,5 +583,37 @@ mod tests {
         assert!((shots[0].x - 1.0).abs() < 0.0001);
         assert!((shots[0].y - 7.0).abs() < 0.0001);
         assert!((shots[0].rotation - 30.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn shoot_multi_combines_source_and_destination_shots_and_flips_deep_copy_shape() {
+        let mut pattern = ShootMulti::new(
+            vec![Shot::new(1.0, 2.0, 10.0, 0.5)],
+            vec![
+                vec![Shot::new(3.0, 4.0, 5.0, 1.0)],
+                vec![Shot::new(-2.0, 1.0, -15.0, 2.0)],
+            ],
+        );
+
+        assert_eq!(
+            pattern.shoot_collect(),
+            vec![
+                Shot::new(4.0, 6.0, 15.0, 1.5),
+                Shot::new(-1.0, 3.0, -5.0, 2.5),
+            ]
+        );
+
+        pattern.flip();
+        assert_eq!(
+            pattern.shoot_collect(),
+            vec![
+                Shot::new(-4.0, 6.0, -15.0, 1.5),
+                Shot::new(1.0, 3.0, 5.0, 2.5),
+            ]
+        );
+
+        let mut emitted = Vec::new();
+        pattern.shoot(&mut |shot| emitted.push(shot));
+        assert_eq!(emitted, pattern.shoot_collect());
     }
 }
