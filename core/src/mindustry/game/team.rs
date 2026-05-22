@@ -82,8 +82,12 @@ impl Team {
         format!("team.{}.name:{}", self.name, self.name)
     }
 
+    pub fn colored_name_with(&self, localized: &str) -> String {
+        format!("{}[#{:08x}]{}[]", self.emoji, self.color_rgba, localized)
+    }
+
     pub fn colored_name_token(&self) -> String {
-        format!("{}[#{:08x}]{}[]", self.emoji, self.color_rgba, self.name)
+        self.colored_name_with(&self.name)
     }
 
     pub fn sense_id(&self) -> f64 {
@@ -248,6 +252,41 @@ mod tests {
             team.palettei(),
             [0x804020ff_u32 as i32, 0x603018ff, 0x402010ff]
         );
+    }
+
+    #[test]
+    fn with_palette_marks_custom_palette_and_restores_display_color_like_java_constructor() {
+        let team = Team::with_palette(
+            42,
+            "custom",
+            0x11223344,
+            [0xaabbccdd, 0x55667788, 0x01020304],
+        );
+
+        assert!(team.has_palette);
+        assert_eq!(team.color_rgba, 0x11223344);
+        assert_eq!(team.palette, [0xaabbccdd, 0x55667788, 0x01020304]);
+        assert_eq!(
+            team.palettei(),
+            [
+                0xaabbccdd_u32 as i32,
+                0x55667788_u32 as i32,
+                0x01020304_u32 as i32,
+            ]
+        );
+    }
+
+    #[test]
+    fn colored_name_token_matches_java_color_markup_shape() {
+        let mut team = Team::new(8, "alpha", 0x0a1b2c3d);
+        assert_eq!(team.colored_name_token(), "[#0a1b2c3d]alpha[]");
+        assert_eq!(
+            team.colored_name_with("Alpha Team"),
+            "[#0a1b2c3d]Alpha Team[]"
+        );
+
+        team.emoji = "⚑".into();
+        assert_eq!(team.colored_name_token(), "⚑[#0a1b2c3d]alpha[]");
     }
 
     #[test]
