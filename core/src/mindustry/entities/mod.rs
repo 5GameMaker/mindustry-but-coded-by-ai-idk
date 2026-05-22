@@ -49,6 +49,9 @@ pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
 pub use comp::{TrailState, WaterMoveComp, WaterMoveDrawPlan};
 pub use comp::{UnderwaterDrawPlan, UnderwaterMoveComp};
+pub use comp::{
+    UnitCollisionLayer, UnitComp, UnitControllerState, UnitFloorSnapshot, UnitTrailState,
+};
 pub use comp::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use comp::{WaterCrawlComp, WaterCrawlSolidPred};
 pub use comp::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};

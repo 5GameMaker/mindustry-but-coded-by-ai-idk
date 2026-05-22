@@ -40,6 +40,7 @@ pub mod timed;
 pub mod timed_kill;
 pub mod timer;
 pub mod underwater_move;
+pub mod unit;
 pub mod unit_tether;
 pub mod vel;
 pub mod water_crawl;
@@ -89,6 +90,9 @@ pub use timed::TimedComp;
 pub use timed_kill::TimedKillComp;
 pub use timer::{Interval, TimerComp};
 pub use underwater_move::{UnderwaterDrawPlan, UnderwaterMoveComp};
+pub use unit::{
+    UnitCollisionLayer, UnitComp, UnitControllerState, UnitFloorSnapshot, UnitTrailState,
+};
 pub use unit_tether::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use vel::VelComp;
 pub use water_crawl::{WaterCrawlComp, WaterCrawlSolidPred};
