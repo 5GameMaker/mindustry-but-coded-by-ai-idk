@@ -11,11 +11,13 @@ use crate::mindustry::entities::comp::{
 };
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, PickedBuildPayloadCallPacket, RequestBuildPayloadCallPacket,
-    RequestItemCallPacket, RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
-    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket,
+    BuildingControlSelectCallPacket, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+    TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+    TransferItemToCallPacket, UnitClearCallPacket, UnitControlCallPacket,
 };
+use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::meta::BuildVisibility;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,6 +276,86 @@ pub struct UnitClearOutcome {
     pub should_raise_validate: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestUnitPayloadRejectReason {
+    MissingPlayer,
+    MissingUnit,
+    MissingPayloadComponent,
+    MissingTarget,
+    TargetNotAi,
+    TargetNotGrounded,
+    OutOfRange,
+    CannotPickup,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RequestUnitPayloadContext {
+    pub player: Option<EntityRef>,
+    pub within_range: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestUnitPayloadOutcome {
+    pub accepted: bool,
+    pub rejection: Option<RequestUnitPayloadRejectReason>,
+    pub packet: Option<PickedUnitPayloadCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickedUnitPayloadRejectReason {
+    MissingUnit,
+    MissingTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickedUnitPayloadOutcome {
+    pub accepted: bool,
+    pub rejection: Option<PickedUnitPayloadRejectReason>,
+    pub packet: Option<PickedUnitPayloadCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestDropPayloadRejectReason {
+    MissingPlayer,
+    ClientSide,
+    PlayerDead,
+    MissingUnit,
+    MissingPayloadComponent,
+    EmptyPayload,
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RequestDropPayloadContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+    pub net_client: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestDropPayloadOutcome {
+    pub accepted: bool,
+    pub rejection: Option<RequestDropPayloadRejectReason>,
+    pub requested_x: f32,
+    pub requested_y: f32,
+    pub clamped_x: f32,
+    pub clamped_y: f32,
+    pub packet: Option<PayloadDroppedCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadDroppedRejectReason {
+    MissingUnit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadDroppedOutcome {
+    pub accepted: bool,
+    pub rejection: Option<PayloadDroppedRejectReason>,
+    pub packet: Option<PayloadDroppedCallPacket>,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -431,8 +513,73 @@ impl UnitClearOutcome {
     }
 }
 
+impl RequestUnitPayloadOutcome {
+    fn rejected(reason: RequestUnitPayloadRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            packet: None,
+        }
+    }
+}
+
+impl PickedUnitPayloadOutcome {
+    fn rejected(reason: PickedUnitPayloadRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            packet: None,
+        }
+    }
+}
+
+impl RequestDropPayloadOutcome {
+    fn rejected(
+        context: &RequestDropPayloadContext,
+        reason: RequestDropPayloadRejectReason,
+        requested_x: f32,
+        requested_y: f32,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            requested_x,
+            requested_y,
+            clamped_x: requested_x,
+            clamped_y: requested_y,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl PayloadDroppedOutcome {
+    fn rejected(reason: PayloadDroppedRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            packet: None,
+        }
+    }
+}
+
 fn player_unit_ref(player: &PlayerComp, unit: &UnitComp) -> UnitRef {
     player.unit_ref().unwrap_or(UnitRef::Unit { id: unit.id() })
+}
+
+fn clamp_drop_position(unit: &UnitComp, x: f32, y: f32) -> (f32, f32) {
+    let max_distance = TILE_SIZE as f32 * 4.0;
+    let dx = x - unit.x();
+    let dy = y - unit.y();
+    let distance = (dx * dx + dy * dy).sqrt();
+
+    if distance <= max_distance || distance <= f32::EPSILON {
+        (x, y)
+    } else {
+        let scale = max_distance / distance;
+        (unit.x() + dx * scale, unit.y() + dy * scale)
+    }
 }
 
 pub fn tile_config<F, A>(
@@ -1214,6 +1361,211 @@ pub fn client_unit_clear_packet() -> UnitClearCallPacket {
     }
 }
 
+pub fn request_unit_payload(
+    context: RequestUnitPayloadContext,
+    player: Option<&PlayerComp>,
+    unit: Option<&UnitComp>,
+    target: Option<&UnitComp>,
+    target_is_ai: bool,
+    target_allowed_in_payloads: bool,
+) -> RequestUnitPayloadOutcome {
+    if context.player.is_none() || player.is_none() {
+        return RequestUnitPayloadOutcome::rejected(RequestUnitPayloadRejectReason::MissingPlayer);
+    }
+    let player = player.unwrap();
+
+    let Some(unit) = unit else {
+        return RequestUnitPayloadOutcome::rejected(RequestUnitPayloadRejectReason::MissingUnit);
+    };
+
+    let Some(payload) = unit.payload.as_ref() else {
+        return RequestUnitPayloadOutcome::rejected(
+            RequestUnitPayloadRejectReason::MissingPayloadComponent,
+        );
+    };
+
+    let Some(target) = target else {
+        return RequestUnitPayloadOutcome::rejected(RequestUnitPayloadRejectReason::MissingTarget);
+    };
+
+    if !target_is_ai {
+        return RequestUnitPayloadOutcome::rejected(RequestUnitPayloadRejectReason::TargetNotAi);
+    }
+
+    if !target.is_grounded() {
+        return RequestUnitPayloadOutcome::rejected(
+            RequestUnitPayloadRejectReason::TargetNotGrounded,
+        );
+    }
+
+    if !context.within_range {
+        return RequestUnitPayloadOutcome::rejected(RequestUnitPayloadRejectReason::OutOfRange);
+    }
+
+    if !payload.can_pickup_unit(
+        target.type_info.hit_size,
+        target.team_id(),
+        target_is_ai,
+        target_allowed_in_payloads,
+    ) {
+        return RequestUnitPayloadOutcome::rejected(RequestUnitPayloadRejectReason::CannotPickup);
+    }
+
+    RequestUnitPayloadOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(PickedUnitPayloadCallPacket {
+            unit: player_unit_ref(player, unit),
+            target: UnitRef::Unit { id: target.id() },
+        }),
+    }
+}
+
+pub fn client_request_unit_payload_packet(target: UnitRef) -> RequestUnitPayloadCallPacket {
+    RequestUnitPayloadCallPacket {
+        player: EntityRef::null(),
+        target,
+    }
+}
+
+pub fn picked_unit_payload(
+    unit: Option<UnitRef>,
+    target: Option<UnitRef>,
+) -> PickedUnitPayloadOutcome {
+    let Some(unit) = unit else {
+        return PickedUnitPayloadOutcome::rejected(PickedUnitPayloadRejectReason::MissingUnit);
+    };
+
+    let Some(target) = target else {
+        return PickedUnitPayloadOutcome::rejected(PickedUnitPayloadRejectReason::MissingTarget);
+    };
+
+    PickedUnitPayloadOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(PickedUnitPayloadCallPacket { unit, target }),
+    }
+}
+
+pub fn request_drop_payload<A>(
+    context: RequestDropPayloadContext,
+    player: Option<&PlayerComp>,
+    unit: Option<&UnitComp>,
+    x: f32,
+    y: f32,
+    admin_allows: A,
+) -> RequestDropPayloadOutcome
+where
+    A: FnOnce(&PlayerComp, &UnitComp) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return RequestDropPayloadOutcome::rejected(
+            &context,
+            RequestDropPayloadRejectReason::MissingPlayer,
+            x,
+            y,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    if context.net_client {
+        return RequestDropPayloadOutcome::rejected(
+            &context,
+            RequestDropPayloadRejectReason::ClientSide,
+            x,
+            y,
+            false,
+        );
+    }
+
+    if player.dead() {
+        return RequestDropPayloadOutcome::rejected(
+            &context,
+            RequestDropPayloadRejectReason::PlayerDead,
+            x,
+            y,
+            false,
+        );
+    }
+
+    let Some(unit) = unit else {
+        return RequestDropPayloadOutcome::rejected(
+            &context,
+            RequestDropPayloadRejectReason::MissingUnit,
+            x,
+            y,
+            false,
+        );
+    };
+
+    let Some(payload) = unit.payload.as_ref() else {
+        return RequestDropPayloadOutcome::rejected(
+            &context,
+            RequestDropPayloadRejectReason::MissingPayloadComponent,
+            x,
+            y,
+            false,
+        );
+    };
+
+    if !payload.has_payload() {
+        return RequestDropPayloadOutcome::rejected(
+            &context,
+            RequestDropPayloadRejectReason::EmptyPayload,
+            x,
+            y,
+            false,
+        );
+    }
+
+    if !admin_allows(player, unit) {
+        return RequestDropPayloadOutcome::rejected(
+            &context,
+            RequestDropPayloadRejectReason::AdminDenied,
+            x,
+            y,
+            true,
+        );
+    }
+
+    let (clamped_x, clamped_y) = clamp_drop_position(unit, x, y);
+    RequestDropPayloadOutcome {
+        accepted: true,
+        rejection: None,
+        requested_x: x,
+        requested_y: y,
+        clamped_x,
+        clamped_y,
+        packet: Some(PayloadDroppedCallPacket {
+            unit: player_unit_ref(player, unit),
+            x: clamped_x,
+            y: clamped_y,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_request_drop_payload_packet(x: f32, y: f32) -> RequestDropPayloadCallPacket {
+    RequestDropPayloadCallPacket {
+        player: EntityRef::null(),
+        x,
+        y,
+    }
+}
+
+pub fn payload_dropped(unit: Option<UnitRef>, x: f32, y: f32) -> PayloadDroppedOutcome {
+    let Some(unit) = unit else {
+        return PayloadDroppedOutcome::rejected(PayloadDroppedRejectReason::MissingUnit);
+    };
+
+    PayloadDroppedOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(PayloadDroppedCallPacket { unit, x, y }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -1938,5 +2290,159 @@ mod tests {
         assert_eq!(unit_packet.player, EntityRef::null());
         assert_eq!(unit_packet.unit, UnitRef::Unit { id: 55 });
         assert_eq!(clear_packet.player, EntityRef::null());
+    }
+
+    #[test]
+    fn request_unit_payload_accepts_ai_grounded_target() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(60).with_valid(true));
+        let mut unit = payload_unit(60, TeamId(1), 512.0);
+        unit.payload.as_mut().unwrap().pickup_units = true;
+        let target = UnitComp::new(61, unit_type(10), TeamId(1));
+
+        let outcome = request_unit_payload(
+            RequestUnitPayloadContext {
+                player: Some(EntityRef::new(15)),
+                within_range: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&target),
+            true,
+            true,
+        );
+
+        assert!(outcome.accepted);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 60 });
+        assert_eq!(packet.target, UnitRef::Unit { id: 61 });
+    }
+
+    #[test]
+    fn request_unit_payload_rejects_out_of_range_without_packet() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(60).with_valid(true));
+        let mut unit = payload_unit(60, TeamId(1), 512.0);
+        unit.payload.as_mut().unwrap().pickup_units = true;
+        let target = UnitComp::new(61, unit_type(10), TeamId(1));
+
+        let outcome = request_unit_payload(
+            RequestUnitPayloadContext {
+                player: Some(EntityRef::new(15)),
+                within_range: false,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&target),
+            true,
+            true,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(RequestUnitPayloadRejectReason::OutOfRange)
+        );
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn picked_unit_payload_records_unit_and_target_refs() {
+        let picked = picked_unit_payload(
+            Some(UnitRef::Unit { id: 62 }),
+            Some(UnitRef::Unit { id: 63 }),
+        );
+        let missing = picked_unit_payload(Some(UnitRef::Unit { id: 62 }), None);
+
+        assert!(picked.accepted);
+        let packet = picked.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 62 });
+        assert_eq!(packet.target, UnitRef::Unit { id: 63 });
+        assert_eq!(
+            missing.rejection,
+            Some(PickedUnitPayloadRejectReason::MissingTarget)
+        );
+        assert!(missing.packet.is_none());
+    }
+
+    #[test]
+    fn request_drop_payload_clamps_to_java_margin_and_plans_drop_packet() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(64).with_valid(true));
+        let mut unit = payload_unit(64, TeamId(1), 512.0);
+        unit.set_pos(0.0, 0.0);
+        unit.payload.as_mut().unwrap().add_payload(PayloadState {
+            kind: PayloadKind::Build,
+            size: 2.0,
+        });
+
+        let outcome = request_drop_payload(
+            RequestDropPayloadContext {
+                player: Some(EntityRef::new(16)),
+                local_player: false,
+                net_client: false,
+            },
+            Some(&player),
+            Some(&unit),
+            100.0,
+            0.0,
+            |player, unit| player.team == unit.team_id(),
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.requested_x, 100.0);
+        assert_eq!(outcome.requested_y, 0.0);
+        assert!((outcome.clamped_x - TILE_SIZE as f32 * 4.0).abs() <= f32::EPSILON);
+        assert_eq!(outcome.clamped_y, 0.0);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 64 });
+        assert_eq!(packet.x, outcome.clamped_x);
+        assert_eq!(packet.y, outcome.clamped_y);
+    }
+
+    #[test]
+    fn request_drop_payload_rejects_admin_denied_as_validate_error() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(64).with_valid(true));
+        let mut unit = payload_unit(64, TeamId(1), 512.0);
+        unit.payload.as_mut().unwrap().add_payload(PayloadState {
+            kind: PayloadKind::Build,
+            size: 2.0,
+        });
+
+        let outcome = request_drop_payload(
+            RequestDropPayloadContext {
+                player: Some(EntityRef::new(16)),
+                local_player: false,
+                net_client: false,
+            },
+            Some(&player),
+            Some(&unit),
+            1.0,
+            2.0,
+            |_, _| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(RequestDropPayloadRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn unit_payload_client_packets_use_client_payload_shape() {
+        let request_unit = client_request_unit_payload_packet(UnitRef::Unit { id: 65 });
+        let request_drop = client_request_drop_payload_packet(3.0, 4.0);
+        let dropped = payload_dropped(Some(UnitRef::Unit { id: 66 }), 5.0, 6.0);
+
+        assert_eq!(request_unit.player, EntityRef::null());
+        assert_eq!(request_unit.target, UnitRef::Unit { id: 65 });
+        assert_eq!(request_drop.player, EntityRef::null());
+        assert_eq!((request_drop.x, request_drop.y), (3.0, 4.0));
+        assert!(dropped.accepted);
+        assert_eq!(dropped.packet.unwrap().unit, UnitRef::Unit { id: 66 });
     }
 }
