@@ -65,7 +65,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::{
     atomic::{AtomicBool, AtomicI32, Ordering},
-    Arc, Mutex, MutexGuard,
+    Arc, Mutex, MutexGuard, OnceLock,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -99,6 +99,11 @@ impl PacketSerializer {
     pub const COMPRESSION_NONE: u8 = 0;
     pub const COMPRESSION_LZ4: u8 = 1;
     pub const COMPRESS_THRESHOLD: usize = 36;
+
+    fn default_content_loader() -> &'static ContentLoader {
+        static DEFAULT_CONTENT_LOADER: OnceLock<ContentLoader> = OnceLock::new();
+        DEFAULT_CONTENT_LOADER.get_or_init(ContentLoader::create_base_content_or_panic)
+    }
 
     pub fn write_framework(message: &FrameworkMessage, out: &mut Vec<u8>) {
         match message {
@@ -221,6 +226,12 @@ impl PacketSerializer {
     }
 
     pub fn packet_kind_to_envelope(packet: &PacketKind) -> Result<PacketEnvelope, SerializerError> {
+        Self::packet_kind_to_envelope_with_loader(packet, Self::default_content_loader())
+    }
+
+    fn packet_kind_to_envelope_without_loader(
+        packet: &PacketKind,
+    ) -> Result<PacketEnvelope, SerializerError> {
         if matches!(
             packet,
             PacketKind::ClientPlanSnapshotCallPacket(_)
@@ -983,7 +994,7 @@ impl PacketSerializer {
                 packet.write_to(&mut payload)?;
                 packet_ids::WARNING_TOAST_CALL_PACKET
             }
-            _ => return Self::packet_kind_to_envelope(packet),
+            _ => return Self::packet_kind_to_envelope_without_loader(packet),
         };
 
         Self::packet_payload_to_envelope(packet, id, payload)
@@ -1012,6 +1023,12 @@ impl PacketSerializer {
     }
 
     pub fn packet_kind_from_envelope(
+        envelope: &PacketEnvelope,
+    ) -> Result<PacketKind, SerializerError> {
+        Self::packet_kind_from_envelope_with_loader(envelope, Self::default_content_loader())
+    }
+
+    fn packet_kind_from_envelope_without_loader(
         envelope: &PacketEnvelope,
     ) -> Result<PacketKind, SerializerError> {
         if let PacketEnvelope::Packet { id, .. } = envelope {
@@ -1756,7 +1773,7 @@ impl PacketSerializer {
                             )?,
                         ))
                     }
-                    _ => Self::packet_kind_from_envelope(envelope),
+                    _ => Self::packet_kind_from_envelope_without_loader(envelope),
                 }
             }
             PacketEnvelope::Framework(_) => Err(SerializerError::ExpectedPacketEnvelope),
@@ -3336,19 +3353,16 @@ mod tests {
             group_id: 77,
             plans: Some(plans.clone()),
         });
-        assert_eq!(
-            PacketSerializer::write_packet_kind(&packet).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
-        let bytes = PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap();
+        let bytes = PacketSerializer::write_packet_kind(&packet).unwrap();
         assert_eq!(bytes[0], packet_ids::CLIENT_PLAN_SNAPSHOT_CALL_PACKET);
-        assert_eq!(
-            PacketSerializer::read_packet_kind(&bytes).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), packet);
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
             packet
+        );
+        assert_eq!(
+            PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap(),
+            bytes
         );
 
         let received = PacketKind::ClientPlanSnapshotReceivedCallPacket(
@@ -3362,6 +3376,10 @@ mod tests {
         assert_eq!(
             bytes[0],
             packet_ids::CLIENT_PLAN_SNAPSHOT_RECEIVED_CALL_PACKET
+        );
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            received
         );
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
@@ -3397,19 +3415,16 @@ mod tests {
             view_width: 16.0,
             view_height: 17.0,
         });
-        assert_eq!(
-            PacketSerializer::write_packet_kind(&packet).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
-        let bytes = PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap();
+        let bytes = PacketSerializer::write_packet_kind(&packet).unwrap();
         assert_eq!(bytes[0], packet_ids::CLIENT_SNAPSHOT_CALL_PACKET);
-        assert_eq!(
-            PacketSerializer::read_packet_kind(&bytes).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), packet);
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
             packet
+        );
+        assert_eq!(
+            PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap(),
+            bytes
         );
     }
 
@@ -3426,19 +3441,16 @@ mod tests {
             team: TeamId(6),
             config: TypeValue::Content(ContentRef::new(ContentType::Item, 0)),
         });
-        assert_eq!(
-            PacketSerializer::write_packet_kind(&packet).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
-        let bytes = PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap();
+        let bytes = PacketSerializer::write_packet_kind(&packet).unwrap();
         assert_eq!(bytes[0], packet_ids::CONSTRUCT_FINISH_CALL_PACKET);
-        assert_eq!(
-            PacketSerializer::read_packet_kind(&bytes).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), packet);
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
             packet
+        );
+        assert_eq!(
+            PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap(),
+            bytes
         );
     }
 
@@ -3450,19 +3462,16 @@ mod tests {
             block: Some("router".into()),
             builder: UnitRef::Unit { id: 1234 },
         });
-        assert_eq!(
-            PacketSerializer::write_packet_kind(&packet).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
-        let bytes = PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap();
+        let bytes = PacketSerializer::write_packet_kind(&packet).unwrap();
         assert_eq!(bytes[0], packet_ids::DECONSTRUCT_FINISH_CALL_PACKET);
-        assert_eq!(
-            PacketSerializer::read_packet_kind(&bytes).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
+        assert_eq!(PacketSerializer::read_packet_kind(&bytes).unwrap(), packet);
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
             packet
+        );
+        assert_eq!(
+            PacketSerializer::write_packet_kind_with_loader(&packet, &loader).unwrap(),
+            bytes
         );
     }
 
@@ -4084,15 +4093,19 @@ mod tests {
                 crate::mindustry::world::point2_pack(3, 4),
             ],
         });
-        assert_eq!(
-            PacketSerializer::write_packet_kind(&tile_floors).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
-        let bytes = PacketSerializer::write_packet_kind_with_loader(&tile_floors, &loader).unwrap();
+        let bytes = PacketSerializer::write_packet_kind(&tile_floors).unwrap();
         assert_eq!(bytes[0], packet_ids::SET_TILE_FLOORS_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            tile_floors
+        );
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
             tile_floors
+        );
+        assert_eq!(
+            PacketSerializer::write_packet_kind_with_loader(&tile_floors, &loader).unwrap(),
+            bytes
         );
 
         let unit_command = PacketKind::SetUnitCommandCallPacket(SetUnitCommandCallPacket {
@@ -4100,16 +4113,19 @@ mod tests {
             unit_ids: vec![11, 12, 13],
             command: "move".into(),
         });
-        assert_eq!(
-            PacketSerializer::write_packet_kind(&unit_command).unwrap_err(),
-            SerializerError::RequiresContentLoader
-        );
-        let bytes =
-            PacketSerializer::write_packet_kind_with_loader(&unit_command, &loader).unwrap();
+        let bytes = PacketSerializer::write_packet_kind(&unit_command).unwrap();
         assert_eq!(bytes[0], packet_ids::SET_UNIT_COMMAND_CALL_PACKET);
+        assert_eq!(
+            PacketSerializer::read_packet_kind(&bytes).unwrap(),
+            unit_command
+        );
         assert_eq!(
             PacketSerializer::read_packet_kind_with_loader(&bytes, &loader).unwrap(),
             unit_command
+        );
+        assert_eq!(
+            PacketSerializer::write_packet_kind_with_loader(&unit_command, &loader).unwrap(),
+            bytes
         );
 
         let building_ref = BuildingRef::new(crate::mindustry::world::point2_pack(5, 6));
