@@ -15,28 +15,15 @@ pub struct CellLiquid {
 
 impl CellLiquid {
     pub fn new(name: impl Into<String>) -> Self {
-        Self::with_color(name, 0xffffffff)
+        Self::from(Liquid::new(0, name))
     }
 
     pub fn with_color(name: impl Into<String>, color_rgba: u32) -> Self {
-        let liquid = Liquid::new(0, name);
-        Self {
-            liquid,
-            color_from_rgba: 0xffffffff,
-            color_to_rgba: 0xffffffff,
-            cells: 6,
-            spread_target: None,
-            max_spread: 0.75,
-            spread_conversion: 1.2,
-            spread_damage: 0.11,
-            remove_scaling: 0.25,
-        }
-        .with_base_color(color_rgba)
+        Self::new(name).with_base_color(color_rgba)
     }
 
     pub fn with_base_color(mut self, color_rgba: u32) -> Self {
         self.liquid.color_rgba = color_rgba;
-        self.liquid.gas_color_rgba = color_rgba;
         self
     }
 
@@ -76,10 +63,10 @@ mod tests {
 
     #[test]
     fn cell_liquid_defaults_match_java_field_initializers() {
-        let cell = CellLiquid::with_color("neoplasm", 0xff795eff);
+        let cell = CellLiquid::new("neoplasm");
         assert_eq!(cell.liquid.name(), "neoplasm");
-        assert_eq!(cell.liquid.color_rgba, 0xff795eff);
-        assert_eq!(cell.liquid.gas_color_rgba, 0xff795eff);
+        assert_eq!(cell.liquid.color_rgba, 0x000000ff);
+        assert_eq!(cell.liquid.gas_color_rgba, 0xbfbfbfff);
         assert_eq!(cell.color_from_rgba, 0xffffffff);
         assert_eq!(cell.color_to_rgba, 0xffffffff);
         assert_eq!(cell.cells, 6);
@@ -88,6 +75,13 @@ mod tests {
         assert_eq!(cell.spread_conversion, 1.2);
         assert_eq!(cell.spread_damage, 0.11);
         assert_eq!(cell.remove_scaling, 0.25);
+    }
+
+    #[test]
+    fn cell_liquid_color_constructor_only_replaces_base_liquid_color_like_java() {
+        let cell = CellLiquid::with_color("neoplasm", 0xff795eff);
+        assert_eq!(cell.liquid.color_rgba, 0xff795eff);
+        assert_eq!(cell.liquid.gas_color_rgba, 0xbfbfbfff);
     }
 
     #[test]
