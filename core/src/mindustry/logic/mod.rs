@@ -4,6 +4,7 @@ pub mod condition_op;
 pub mod controllable;
 pub mod cutscene_action;
 pub mod fetch_type;
+pub mod graphics_type;
 pub mod l_category;
 pub mod l_locate;
 pub mod l_readable;
@@ -23,6 +24,7 @@ pub use condition_op::{ConditionOp, ConditionValue};
 pub use controllable::Controllable;
 pub use cutscene_action::CutsceneAction;
 pub use fetch_type::FetchType;
+pub use graphics_type::GraphicsType;
 pub use l_category::LCategory;
 pub use l_locate::LLocate;
 pub use l_readable::{LReadable, LReadable as LogicReadable};
@@ -9481,86 +9483,6 @@ impl RadarUnitView {
             is_grounded: false,
             targetable: true,
         }
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GraphicsType {
-    Clear,
-    Color,
-    Col,
-    Stroke,
-    Line,
-    Rect,
-    LineRect,
-    Poly,
-    LinePoly,
-    Triangle,
-    Image,
-    Print,
-    Translate,
-    Scale,
-    Rotate,
-    Reset,
-}
-
-impl GraphicsType {
-    pub const ALL: [GraphicsType; 16] = [
-        GraphicsType::Clear,
-        GraphicsType::Color,
-        GraphicsType::Col,
-        GraphicsType::Stroke,
-        GraphicsType::Line,
-        GraphicsType::Rect,
-        GraphicsType::LineRect,
-        GraphicsType::Poly,
-        GraphicsType::LinePoly,
-        GraphicsType::Triangle,
-        GraphicsType::Image,
-        GraphicsType::Print,
-        GraphicsType::Translate,
-        GraphicsType::Scale,
-        GraphicsType::Rotate,
-        GraphicsType::Reset,
-    ];
-
-    pub const WIRE_NAMES: [&'static str; 16] = [
-        "clear",
-        "color",
-        "col",
-        "stroke",
-        "line",
-        "rect",
-        "lineRect",
-        "poly",
-        "linePoly",
-        "triangle",
-        "image",
-        "print",
-        "translate",
-        "scale",
-        "rotate",
-        "reset",
-    ];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn wire_name(self) -> &'static str {
-        Self::WIRE_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_wire_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|value| value.wire_name() == name)
     }
 }
 
