@@ -8,6 +8,7 @@ pub mod l_writable;
 pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
+pub mod settable;
 pub mod tile_layer;
 
 pub use controllable::Controllable;
@@ -18,6 +19,7 @@ pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
+pub use settable::Settable;
 pub use tile_layer::TileLayer;
 
 use crate::mindustry::{content::ContentCatalog, ctype::ContentType, world::meta::BlockFlag};
@@ -10142,15 +10144,6 @@ pub trait Senseable {
     fn sense_object(&self, _sensor: LAccess) -> Option<Self::Object> {
         None
     }
-}
-
-pub trait Settable {
-    type Content;
-    type Object;
-
-    fn set_prop(&mut self, prop: LAccess, value: f64);
-    fn set_prop_object(&mut self, prop: LAccess, value: Self::Object);
-    fn set_content_prop(&mut self, content: Self::Content, value: f64);
 }
 
 /// Mirrors upstream `mindustry.logic.LMarkerControl`.
