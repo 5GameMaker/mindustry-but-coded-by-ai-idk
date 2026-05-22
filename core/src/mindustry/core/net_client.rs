@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -14,7 +14,7 @@ use crate::mindustry::net::{
     ConnectPacket, DeletePlansCallPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
     PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
-    PingLocationCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
+    PingLocationCallPacket, PlayerDisconnectCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
     RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
     SetLiquidCallPacket, SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket,
@@ -169,6 +169,10 @@ pub struct NetClientState {
     pub last_message_unformatted: Option<String>,
     pub last_message_sender: Option<EntityRef>,
     pub message_packets_seen: u64,
+    pub last_player_disconnect: Option<PlayerDisconnectCallPacket>,
+    pub last_player_disconnect_at: Option<Instant>,
+    pub player_disconnect_packets_seen: u64,
+    pub removed_entity_ids: BTreeSet<i32>,
     pub connect_config: Option<ClientConnectConfig>,
     pub connect_packet_sent: bool,
     pub last_sent_connect_packet: Option<ConnectPacket>,
@@ -355,6 +359,11 @@ impl fmt::Debug for NetClientState {
             .field("last_packet", &self.last_packet)
             .field("last_message", &self.last_message)
             .field("message_packets_seen", &self.message_packets_seen)
+            .field(
+                "player_disconnect_packets_seen",
+                &self.player_disconnect_packets_seen,
+            )
+            .field("removed_entity_ids", &self.removed_entity_ids)
             .field("connect_config", &self.connect_config)
             .field("connect_packet_sent", &self.connect_packet_sent)
             .field("last_sent_connect_packet", &self.last_sent_connect_packet)
@@ -562,6 +571,7 @@ impl NetClientState {
         self.last_world_data_begin_at = Some(Instant::now());
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.removed_entity_ids.clear();
         self.reset_client_gameplay_sync_state();
         self.clear_loading_stream_tracking();
         self.reset_loading_timeout();
@@ -605,6 +615,7 @@ impl NetClientState {
         self.last_connect_packet_error = None;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.removed_entity_ids.clear();
         self.reset_ping_state();
         self.reset_client_gameplay_sync_state();
         self.clear_loading_stream_tracking();
@@ -620,6 +631,7 @@ impl NetClientState {
         self.connect_packet_sent = false;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.removed_entity_ids.clear();
         self.reset_ping_state();
         self.reset_client_gameplay_sync_state();
         self.clear_loading_stream_tracking();
@@ -707,6 +719,7 @@ impl NetClient {
         state.last_connect_packet_error = None;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.removed_entity_ids.clear();
         state.reset_ping_state();
         state.reset_client_gameplay_sync_state();
         state.clear_loading_stream_tracking();
@@ -733,6 +746,7 @@ impl NetClient {
         state.last_connect_packet_error = None;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.removed_entity_ids.clear();
         state.reset_ping_state();
         state.reset_client_gameplay_sync_state();
         state.clear_loading_stream_tracking();
@@ -1237,6 +1251,14 @@ impl NetClient {
                         state.last_message_sender = Some(packet.player_sender);
                         (false, false)
                     }
+                    PacketKind::PlayerDisconnectCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.player_disconnect_packets_seen += 1;
+                        state.removed_entity_ids.insert(packet.player_id);
+                        state.last_player_disconnect = Some(*packet);
+                        state.last_player_disconnect_at = Some(now);
+                        (false, false)
+                    }
                     PacketKind::PingResponseCallPacket(response) => {
                         let now = Self::current_millis();
                         state.ping_responses_received += 1;
@@ -1611,6 +1633,7 @@ impl NetClient {
         state.connect_packet_sent = false;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.removed_entity_ids.clear();
         state.reset_ping_state();
         state.clear_loading_stream_tracking();
         state.clear_timeout_clock();
@@ -1702,16 +1725,16 @@ mod tests {
         DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
         HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
         PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-        PingLocationCallPacket, PingResponseCallPacket, RemoveQueueBlockCallPacket,
-        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-        RequestUnitPayloadCallPacket, RotateBlockCallPacket, SendMessageCallPacket,
-        SendMessageCallPacket2, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-        SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetUnitCommandCallPacket,
-        SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
-        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        PingLocationCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
+        RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+        SendMessageCallPacket, SendMessageCallPacket2, SetItemCallPacket, SetItemsCallPacket,
+        SetLiquidCallPacket, SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+        SetUnitCommandCallPacket, SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin,
+        StreamChunk, Streamable, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
+        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -1871,6 +1894,51 @@ mod tests {
         );
         assert_eq!(state.last_message_unformatted.as_deref(), Some("hello"));
         assert_eq!(state.last_message_sender, Some(EntityRef::new(77)));
+    }
+
+    #[test]
+    fn update_records_player_disconnect_as_removed_entity_like_java_client() {
+        let client = NetClient::default();
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::PlayerDisconnectCallPacket(
+                PlayerDisconnectCallPacket { player_id: 41 },
+            ));
+            net.handle_client_received(PacketKind::PlayerDisconnectCallPacket(
+                PlayerDisconnectCallPacket { player_id: 42 },
+            ));
+        }
+
+        client.update();
+
+        {
+            let state = client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.player_disconnect_packets_seen, 2);
+            assert_eq!(
+                state.last_player_disconnect,
+                Some(PlayerDisconnectCallPacket { player_id: 42 })
+            );
+            assert!(state.last_player_disconnect_at.is_some());
+            assert!(state.removed_entity_ids.contains(&41));
+            assert!(state.removed_entity_ids.contains(&42));
+        }
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::WorldDataBeginCallPacket(
+                WorldDataBeginCallPacket,
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert!(state.removed_entity_ids.is_empty());
+        assert!(state.world_data_loading);
     }
 
     #[test]
