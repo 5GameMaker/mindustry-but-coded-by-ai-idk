@@ -3,6 +3,7 @@ pub mod astar;
 pub mod base_builder_ai;
 pub mod base_registry;
 pub mod block_indexer;
+pub mod control_pathfinder;
 pub mod item_unit_stance;
 pub mod pathfind_queue;
 pub mod pathfinder;
@@ -23,6 +24,15 @@ pub use base_builder_ai::{
 pub use base_registry::{BasePart, BasePartTile, BasePartTileKind, BaseRegistry};
 pub use block_indexer::{
     quadrant_dimensions, quadrant_for_tile, BlockIndexer, IndexedTile, QUADRANT_SIZE,
+};
+pub use control_pathfinder::{
+    avoid_cost, cluster_astar, control_ground_cost, control_hover_cost, control_legs_cost,
+    control_naval_cost, control_path_cost, inner_astar, make_node_index, near_passable_cost,
+    passable_cost, portal_position, raycast_fast, raycast_fast_avoid, raycast_rect,
+    rebuild_inner_edges, scan_cluster_portals, solid_cost, Cluster, FieldIndex, GridPoint,
+    IntraEdge, NodeIndex, PortalRange, CLUSTER_SIZE, COST_ID_GROUND, COST_ID_HOVER, COST_ID_LEGS,
+    COST_ID_NAVAL, INVALIDATE_CHECK_INTERVAL_MS, SOLID_CAP, UPDATE_FPS, UPDATE_INTERVAL_MS,
+    UPDATE_STEP_INTERVAL, WALL_IMPASSABLE_CAP,
 };
 pub use item_unit_stance::{ItemUnitStance, ItemUnitStanceRegistry};
 pub use pathfind_queue::PathfindQueue;
