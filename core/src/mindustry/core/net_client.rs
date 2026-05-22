@@ -8,21 +8,24 @@ use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::{BuildPlanWire, EntityRef};
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
-    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
-    CommandBuildingCallPacket, CommandUnitsCallPacket, Connect, ConnectConfirmCallPacket,
-    ConnectPacket, DeletePlansCallPacket, Disconnect, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
-    PingLocationCallPacket, PlayerDisconnectCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
-    SetLiquidCallPacket, SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket,
-    SetUnitCommandCallPacket, SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBuilder,
-    Streamable, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
-    TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
-    TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    BlockSnapshotCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
+    ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+    ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket, Connect,
+    ConnectConfirmCallPacket, ConnectPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket,
+    EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
+    HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, Net, PacketKind,
+    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    PingCallPacket, PingLocationCallPacket, PlayerDisconnectCallPacket, ProviderEvent,
+    RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+    SetCameraPositionCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
+    SetLiquidsCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+    SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
+    StateSnapshotCallPacket, StreamBuilder, Streamable, TakeItemsCallPacket, TileConfigCallPacket,
+    TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
+    TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -176,6 +179,36 @@ pub struct NetClientState {
     pub last_trace_info: Option<TraceInfoCallPacket>,
     pub last_trace_info_at: Option<Instant>,
     pub trace_info_packets_seen: u64,
+    pub last_sound: Option<SoundCallPacket>,
+    pub last_sound_at: Option<Instant>,
+    pub sound_packets_seen: u64,
+    pub last_sound_at_packet: Option<SoundAtCallPacket>,
+    pub last_sound_at_packet_at: Option<Instant>,
+    pub sound_at_packets_seen: u64,
+    pub last_effect: Option<EffectCallPacket>,
+    pub last_effect_at: Option<Instant>,
+    pub effect_packets_seen: u64,
+    pub last_effect_with_data: Option<EffectCallPacket2>,
+    pub last_effect_with_data_at: Option<Instant>,
+    pub effect_with_data_packets_seen: u64,
+    pub last_reliable_effect: Option<EffectReliableCallPacket>,
+    pub last_reliable_effect_at: Option<Instant>,
+    pub reliable_effect_packets_seen: u64,
+    pub last_camera_position: Option<SetCameraPositionCallPacket>,
+    pub last_camera_position_at: Option<Instant>,
+    pub camera_position_packets_seen: u64,
+    pub last_set_position: Option<SetPositionCallPacket>,
+    pub last_set_position_at: Option<Instant>,
+    pub set_position_packets_seen: u64,
+    pub kicked: bool,
+    pub last_kick: Option<KickCallPacket>,
+    pub last_kick_at: Option<Instant>,
+    pub last_kick_reason: Option<KickCallPacket2>,
+    pub last_kick_reason_at: Option<Instant>,
+    pub kick_packets_seen: u64,
+    pub last_block_snapshot: Option<BlockSnapshotCallPacket>,
+    pub last_block_snapshot_at: Option<Instant>,
+    pub block_snapshot_packets_seen: u64,
     pub connect_config: Option<ClientConnectConfig>,
     pub connect_packet_sent: bool,
     pub last_sent_connect_packet: Option<ConnectPacket>,
@@ -368,6 +401,28 @@ impl fmt::Debug for NetClientState {
             )
             .field("removed_entity_ids", &self.removed_entity_ids)
             .field("trace_info_packets_seen", &self.trace_info_packets_seen)
+            .field("sound_packets_seen", &self.sound_packets_seen)
+            .field("sound_at_packets_seen", &self.sound_at_packets_seen)
+            .field("effect_packets_seen", &self.effect_packets_seen)
+            .field(
+                "effect_with_data_packets_seen",
+                &self.effect_with_data_packets_seen,
+            )
+            .field(
+                "reliable_effect_packets_seen",
+                &self.reliable_effect_packets_seen,
+            )
+            .field(
+                "camera_position_packets_seen",
+                &self.camera_position_packets_seen,
+            )
+            .field("set_position_packets_seen", &self.set_position_packets_seen)
+            .field("kicked", &self.kicked)
+            .field("kick_packets_seen", &self.kick_packets_seen)
+            .field(
+                "block_snapshot_packets_seen",
+                &self.block_snapshot_packets_seen,
+            )
             .field("connect_config", &self.connect_config)
             .field("connect_packet_sent", &self.connect_packet_sent)
             .field("last_sent_connect_packet", &self.last_sent_connect_packet)
@@ -567,10 +622,27 @@ impl NetClientState {
         self.timeout_deadline = None;
     }
 
+    fn record_server_kick_disconnect(&mut self) {
+        self.quiet = true;
+        self.connecting = false;
+        self.connected = false;
+        self.world_data_loading = false;
+        self.kicked = true;
+        self.connect_packet_sent = false;
+        self.connect_confirm_sent = false;
+        self.last_connect_confirm_error = None;
+        self.removed_entity_ids.clear();
+        self.reset_ping_state();
+        self.reset_client_gameplay_sync_state();
+        self.clear_loading_stream_tracking();
+        self.clear_timeout_clock();
+    }
+
     fn record_world_data_begin(&mut self) {
         self.connecting = true;
         self.connected = false;
         self.world_data_loading = true;
+        self.kicked = false;
         self.world_data_begin_packets_seen = self.world_data_begin_packets_seen.saturating_add(1);
         self.last_world_data_begin_at = Some(Instant::now());
         self.connect_confirm_sent = false;
@@ -611,6 +683,7 @@ impl NetClientState {
         self.connecting = false;
         self.connected = true;
         self.world_data_loading = false;
+        self.kicked = false;
         self.connect_events += 1;
         self.last_connect = Some(connect.clone());
         self.last_packet = Some(PacketKind::Connect(connect.clone()));
@@ -723,6 +796,7 @@ impl NetClient {
         state.last_connect_packet_error = None;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.kicked = false;
         state.removed_entity_ids.clear();
         state.reset_ping_state();
         state.reset_client_gameplay_sync_state();
@@ -750,6 +824,7 @@ impl NetClient {
         state.last_connect_packet_error = None;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.kicked = false;
         state.removed_entity_ids.clear();
         state.reset_ping_state();
         state.reset_client_gameplay_sync_state();
@@ -778,6 +853,7 @@ impl NetClient {
         state.connect_packet_sent = false;
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
+        state.kicked = false;
         state.reset_ping_state();
         state.reset_client_gameplay_sync_state();
         state.clear_loading_stream_tracking();
@@ -1114,6 +1190,31 @@ impl NetClient {
         }
     }
 
+    pub fn apply_set_position_packet(
+        player: &mut PlayerComp,
+        unit: Option<&mut UnitComp>,
+        packet: &SetPositionCallPacket,
+    ) -> bool {
+        if player.dead() {
+            return false;
+        }
+
+        if let Some(unit) = unit {
+            unit.set_pos(packet.x, packet.y);
+        }
+        player.x = packet.x;
+        player.y = packet.y;
+        true
+    }
+
+    pub fn apply_set_camera_position_packet(
+        camera: &mut ClientCameraView,
+        packet: &SetCameraPositionCallPacket,
+    ) {
+        camera.x = packet.x;
+        camera.y = packet.y;
+    }
+
     pub fn apply_received_preview_plans_to_player(
         player: &mut PlayerComp,
         packet: &ClientPlanSnapshotReceivedCallPacket,
@@ -1186,6 +1287,11 @@ impl NetClient {
         };
 
         for packet in new_packets {
+            let disconnect_due_to_kick = matches!(
+                &packet,
+                PacketKind::KickCallPacket(_) | PacketKind::KickCallPacket2(_)
+            );
+
             let connect_packet_to_send = {
                 let mut state = self.state.lock().unwrap();
                 if let PacketKind::Connect(_) = &packet {
@@ -1270,6 +1376,71 @@ impl NetClient {
                         state.last_trace_info_at = Some(now);
                         (false, false)
                     }
+                    PacketKind::SoundCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.sound_packets_seen += 1;
+                        state.last_sound = Some(packet.clone());
+                        state.last_sound_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::SoundAtCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.sound_at_packets_seen += 1;
+                        state.last_sound_at_packet = Some(packet.clone());
+                        state.last_sound_at_packet_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::EffectCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.effect_packets_seen += 1;
+                        state.last_effect = Some(*packet);
+                        state.last_effect_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::EffectCallPacket2(packet) => {
+                        let now = Instant::now();
+                        state.effect_with_data_packets_seen += 1;
+                        state.last_effect_with_data = Some(packet.clone());
+                        state.last_effect_with_data_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::EffectReliableCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.reliable_effect_packets_seen += 1;
+                        state.last_reliable_effect = Some(*packet);
+                        state.last_reliable_effect_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::SetCameraPositionCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.camera_position_packets_seen += 1;
+                        state.last_camera_position = Some(*packet);
+                        state.last_camera_position_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::SetPositionCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_position_packets_seen += 1;
+                        state.last_set_position = Some(*packet);
+                        state.last_set_position_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::KickCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.kick_packets_seen += 1;
+                        state.last_kick = Some(packet.clone());
+                        state.last_kick_at = Some(now);
+                        state.record_server_kick_disconnect();
+                        (false, false)
+                    }
+                    PacketKind::KickCallPacket2(packet) => {
+                        let now = Instant::now();
+                        state.kick_packets_seen += 1;
+                        state.last_kick_reason = Some(*packet);
+                        state.last_kick_reason_at = Some(now);
+                        state.record_server_kick_disconnect();
+                        (false, false)
+                    }
                     PacketKind::PingResponseCallPacket(response) => {
                         let now = Self::current_millis();
                         state.ping_responses_received += 1;
@@ -1301,6 +1472,14 @@ impl NetClient {
                         state.last_state_snapshot_at = Some(now);
                         state.last_state_snapshot_mirror =
                             Some(ClientGameStateMirror::from(snapshot));
+                        state.last_server_snapshot_at = Some(now);
+                        (false, false)
+                    }
+                    PacketKind::BlockSnapshotCallPacket(snapshot) => {
+                        let now = Instant::now();
+                        state.block_snapshot_packets_seen += 1;
+                        state.last_block_snapshot = Some(snapshot.clone());
+                        state.last_block_snapshot_at = Some(now);
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
@@ -1569,6 +1748,10 @@ impl NetClient {
                 self.net.lock().unwrap().set_client_loaded(false);
             }
 
+            if disconnect_due_to_kick {
+                self.net.lock().unwrap().disconnect();
+            }
+
             if quiet {
                 if connect_confirm_to_send {
                     self.finish_connecting_and_send_confirm();
@@ -1727,24 +1910,27 @@ mod tests {
 
     use crate::mindustry::entities::comp::{PlayerComp, PlayerUnitState, UnitComp};
     use crate::mindustry::entities::units::BuildPlan;
+    use crate::mindustry::io::type_io::RgbaColor;
     use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
-        BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
-        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+        BlockSnapshotCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
+        ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket, Connect,
-        DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
-        HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
-        PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-        PingLocationCallPacket, PingResponseCallPacket, PlayerDisconnectCallPacket,
-        RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
-        SendMessageCallPacket, SendMessageCallPacket2, SetItemCallPacket, SetItemsCallPacket,
-        SetLiquidCallPacket, SetLiquidsCallPacket, SetRuleCallPacket, SetRulesCallPacket,
-        SetUnitCommandCallPacket, SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin,
-        StreamChunk, Streamable, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
-        TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
-        TransferItemToCallPacket, TransferItemToUnitCallPacket,
+        DeletePlansCallPacket, Disconnect, DoneCallback, EffectCallPacket, EffectCallPacket2,
+        EffectReliableCallPacket, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
+        HostCallback, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection, NetProvider,
+        PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
+        PickedUnitPayloadCallPacket, PingLocationCallPacket, PingResponseCallPacket,
+        PlayerDisconnectCallPacket, RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket,
+        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+        RotateBlockCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
+        SetCameraPositionCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
+        SetLiquidsCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
+        TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
+        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
         UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
@@ -1985,6 +2171,197 @@ mod tests {
         assert_eq!(state.trace_info_packets_seen, 1);
         assert_eq!(state.last_trace_info.as_ref(), Some(&packet));
         assert!(state.last_trace_info_at.is_some());
+    }
+
+    #[test]
+    fn update_records_sound_and_effect_packets_for_client_mirrors() {
+        let client = NetClient::default();
+        let sound = SoundCallPacket {
+            sound_id: 3,
+            volume: 0.75,
+            pitch: 1.25,
+            pan: -0.5,
+        };
+        let sound_at = SoundAtCallPacket {
+            sound_id: 4,
+            x: 10.0,
+            y: -20.0,
+            volume: 0.5,
+            pitch: 2.0,
+        };
+        let effect = EffectCallPacket {
+            effect_id: 7,
+            x: 1.0,
+            y: 2.0,
+            rotation: 90.0,
+            color: RgbaColor::new(0x11223344),
+        };
+        let effect_with_data = EffectCallPacket2 {
+            effect,
+            data: TypeValue::String("payload".into()),
+        };
+        let reliable_effect = EffectReliableCallPacket(effect);
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SoundCallPacket(sound.clone()));
+            net.handle_client_received(PacketKind::SoundAtCallPacket(sound_at.clone()));
+            net.handle_client_received(PacketKind::EffectCallPacket(effect));
+            net.handle_client_received(PacketKind::EffectCallPacket2(effect_with_data.clone()));
+            net.handle_client_received(PacketKind::EffectReliableCallPacket(reliable_effect));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.sound_packets_seen, 1);
+        assert_eq!(state.last_sound.as_ref(), Some(&sound));
+        assert!(state.last_sound_at.is_some());
+        assert_eq!(state.sound_at_packets_seen, 1);
+        assert_eq!(state.last_sound_at_packet.as_ref(), Some(&sound_at));
+        assert!(state.last_sound_at_packet_at.is_some());
+        assert_eq!(state.effect_packets_seen, 1);
+        assert_eq!(state.last_effect.as_ref(), Some(&effect));
+        assert!(state.last_effect_at.is_some());
+        assert_eq!(state.effect_with_data_packets_seen, 1);
+        assert_eq!(
+            state.last_effect_with_data.as_ref(),
+            Some(&effect_with_data)
+        );
+        assert!(state.last_effect_with_data_at.is_some());
+        assert_eq!(state.reliable_effect_packets_seen, 1);
+        assert_eq!(state.last_reliable_effect.as_ref(), Some(&reliable_effect));
+        assert!(state.last_reliable_effect_at.is_some());
+    }
+
+    #[test]
+    fn update_records_position_packets_and_applies_lightweight_helpers() {
+        let client = NetClient::default();
+        let camera_packet = SetCameraPositionCallPacket { x: 30.0, y: 40.0 };
+        let position_packet = SetPositionCallPacket { x: -5.0, y: 9.0 };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetCameraPositionCallPacket(camera_packet));
+            net.handle_client_received(PacketKind::SetPositionCallPacket(position_packet));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.camera_position_packets_seen, 1);
+        assert_eq!(state.last_camera_position, Some(camera_packet));
+        assert!(state.last_camera_position_at.is_some());
+        assert_eq!(state.set_position_packets_seen, 1);
+        assert_eq!(state.last_set_position, Some(position_packet));
+        assert!(state.last_set_position_at.is_some());
+        drop(state);
+
+        let mut camera = ClientCameraView {
+            width: 80.0,
+            height: 45.0,
+            ..ClientCameraView::default()
+        };
+        NetClient::apply_set_camera_position_packet(&mut camera, &camera_packet);
+        assert_eq!(camera.x, camera_packet.x);
+        assert_eq!(camera.y, camera_packet.y);
+        assert_eq!(camera.width, 80.0);
+        assert_eq!(camera.height, 45.0);
+
+        let mut player = PlayerComp::default();
+        player.set_unit_state(PlayerUnitState::unit(34).with_valid(true));
+        let mut unit = UnitComp::new(34, unit_type(), TeamId(2));
+        assert!(NetClient::apply_set_position_packet(
+            &mut player,
+            Some(&mut unit),
+            &position_packet
+        ));
+        assert_eq!((player.x, player.y), (position_packet.x, position_packet.y));
+        assert_eq!((unit.x(), unit.y()), (position_packet.x, position_packet.y));
+
+        let mut dead_player = PlayerComp::default();
+        let mut dead_unit = UnitComp::new(35, unit_type(), TeamId(2));
+        assert!(!NetClient::apply_set_position_packet(
+            &mut dead_player,
+            Some(&mut dead_unit),
+            &position_packet
+        ));
+        assert_eq!((dead_player.x, dead_player.y), (0.0, 0.0));
+        assert_eq!((dead_unit.x(), dead_unit.y()), (0.0, 0.0));
+    }
+
+    #[test]
+    fn update_records_kick_packets_and_marks_client_disconnected_quietly() {
+        let client = NetClient::default();
+        client.begin_connecting();
+        let kick_reason = KickCallPacket2 {
+            reason: KickReason::ServerRestarting,
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::KickCallPacket2(kick_reason));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.kick_packets_seen, 1);
+        assert_eq!(state.last_kick_reason, Some(kick_reason));
+        assert!(state.last_kick_reason_at.is_some());
+        assert!(state.kicked);
+        assert!(state.quiet);
+        assert!(!state.connecting);
+        assert!(!state.connected);
+        assert!(state.timeout_deadline.is_none());
+        assert_eq!(state.manual_disconnects, 0);
+        drop(state);
+
+        let kick = KickCallPacket {
+            reason: "custom reason".into(),
+        };
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::KickCallPacket(kick.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.kick_packets_seen, 2);
+        assert_eq!(state.last_kick.as_ref(), Some(&kick));
+        assert!(state.last_kick_at.is_some());
+        assert!(state.kicked);
+    }
+
+    #[test]
+    fn update_records_block_snapshot_metadata_for_later_world_application() {
+        let client = NetClient::default();
+        let packet = BlockSnapshotCallPacket {
+            amount: 2,
+            data: vec![1, 2, 3, 4, 5, 6],
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::BlockSnapshotCallPacket(packet.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.block_snapshot_packets_seen, 1);
+        assert_eq!(state.last_block_snapshot.as_ref(), Some(&packet));
+        assert!(state.last_block_snapshot_at.is_some());
+        assert!(state.last_server_snapshot_at.is_some());
     }
 
     #[test]
