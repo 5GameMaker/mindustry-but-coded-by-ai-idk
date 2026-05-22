@@ -124,9 +124,10 @@ pub use lightning::{
 pub use mover::Mover;
 pub use part::{
     DrawPartConfig, EffectSpawnerDrawPlan, EffectSpawnerPart, EffectSpawnerRectPlan,
-    EffectSpawnerSpawnPlan, FlarePart, FlarePartDrawPlan, FlareTrianglePlan, HoverCirclePlan,
-    HoverPart, HoverPartDrawPlan, PartMove, PartParams, PartProgress, ShapePart, ShapePartDrawItem,
-    ShapePartDrawPlan, ShapePartKind,
+    EffectSpawnerSpawnPlan, FlarePart, FlarePartDrawPlan, FlareTrianglePlan, HaloPart,
+    HaloPartDrawPlan, HaloShapeKind, HaloShapePlan, HoverCirclePlan, HoverPart, HoverPartDrawPlan,
+    PartMove, PartParams, PartProgress, ShapePart, ShapePartDrawItem, ShapePartDrawPlan,
+    ShapePartKind,
 };
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootMulti, ShootPattern, ShootSine,

@@ -800,6 +800,185 @@ impl HoverPart {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HaloShapeKind {
+    Triangle,
+    Polygon { sides: i32 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HaloShapePlan {
+    pub x: f32,
+    pub y: f32,
+    pub kind: HaloShapeKind,
+    pub radius: f32,
+    pub length: f32,
+    pub stroke: f32,
+    pub rotation: f32,
+    pub hollow: bool,
+    pub color: String,
+    pub color_to: Option<String>,
+    pub color_mix: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HaloPartDrawPlan {
+    pub layer: Option<f32>,
+    pub layer_offset: f32,
+    pub under_turret_shading: bool,
+    pub shapes: Vec<HaloShapePlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HaloPart {
+    pub config: DrawPartConfig,
+    pub hollow: bool,
+    pub tri: bool,
+    pub shapes: i32,
+    pub sides: i32,
+    pub radius: f32,
+    pub radius_to: f32,
+    pub stroke: f32,
+    pub stroke_to: f32,
+    pub tri_length: f32,
+    pub tri_length_to: f32,
+    pub halo_radius: f32,
+    pub halo_radius_to: f32,
+    pub x: f32,
+    pub y: f32,
+    pub shape_rotation: f32,
+    pub move_x: f32,
+    pub move_y: f32,
+    pub shape_move_rot: f32,
+    pub halo_rotate_speed: f32,
+    pub halo_rotation: f32,
+    pub rotate_speed: f32,
+    pub color: String,
+    pub color_to: Option<String>,
+    pub mirror: bool,
+    pub clamp_progress: bool,
+    pub progress: PartProgress,
+    pub layer: f32,
+    pub layer_offset: f32,
+}
+
+impl Default for HaloPart {
+    fn default() -> Self {
+        Self {
+            config: DrawPartConfig::default(),
+            hollow: false,
+            tri: false,
+            shapes: 3,
+            sides: 3,
+            radius: 3.0,
+            radius_to: -1.0,
+            stroke: 1.0,
+            stroke_to: -1.0,
+            tri_length: 1.0,
+            tri_length_to: -1.0,
+            halo_radius: 10.0,
+            halo_radius_to: -1.0,
+            x: 0.0,
+            y: 0.0,
+            shape_rotation: 0.0,
+            move_x: 0.0,
+            move_y: 0.0,
+            shape_move_rot: 0.0,
+            halo_rotate_speed: 0.0,
+            halo_rotation: 0.0,
+            rotate_speed: 0.0,
+            color: "white".into(),
+            color_to: None,
+            mirror: false,
+            clamp_progress: true,
+            progress: PartProgress::Warmup,
+            layer: -1.0,
+            layer_offset: 0.0,
+        }
+    }
+}
+
+impl HaloPart {
+    pub fn draw_plan(&self, params: &PartParams, time: f32) -> HaloPartDrawPlan {
+        let prog = self.progress.get_clamp(params, time, self.clamp_progress);
+        let base_rot = time * self.rotate_speed;
+        let radius = if self.radius_to < 0.0 {
+            self.radius
+        } else {
+            lerp(self.radius, self.radius_to, prog)
+        };
+        let tri_length = if self.tri_length_to < 0.0 {
+            self.tri_length
+        } else {
+            lerp(self.tri_length, self.tri_length_to, prog)
+        };
+        let stroke = if self.stroke_to < 0.0 {
+            self.stroke
+        } else {
+            lerp(self.stroke, self.stroke_to, prog)
+        };
+        let halo_radius = if self.halo_radius_to < 0.0 {
+            self.halo_radius
+        } else {
+            lerp(self.halo_radius, self.halo_radius_to, prog)
+        };
+        let len = if self.mirror && params.side_override == -1 {
+            2
+        } else {
+            1
+        };
+        let mut shapes = Vec::new();
+        for side in 0..len {
+            let i = if params.side_override == -1 {
+                side as i32
+            } else {
+                params.side_override
+            };
+            let sign = (if i == 0 { 1.0 } else { -1.0 }) * params.side_multiplier as f32;
+            let center_offset = rotate_offset(
+                params.rotation - 90.0,
+                (self.x + self.move_x * prog) * sign,
+                self.y + self.move_y * prog,
+            );
+            let rx = params.x + center_offset.0;
+            let ry = params.y + center_offset.1;
+            let halo_rot = (self.halo_rotation + self.halo_rotate_speed * time) * sign;
+
+            for v in 0..self.shapes.max(0) {
+                let rot = halo_rot + v as f32 * 360.0 / self.shapes.max(1) as f32 + params.rotation;
+                let shape_offset = rotate_offset(rot, halo_radius, 0.0);
+                shapes.push(HaloShapePlan {
+                    x: rx + shape_offset.0,
+                    y: ry + shape_offset.1,
+                    kind: if self.tri {
+                        HaloShapeKind::Triangle
+                    } else {
+                        HaloShapeKind::Polygon { sides: self.sides }
+                    },
+                    radius,
+                    length: tri_length,
+                    stroke,
+                    rotation: rot
+                        + self.shape_move_rot * prog * sign
+                        + self.shape_rotation * sign
+                        + base_rot * sign,
+                    hollow: self.hollow,
+                    color: self.color.clone(),
+                    color_to: self.color_to.clone(),
+                    color_mix: prog,
+                });
+            }
+        }
+
+        HaloPartDrawPlan {
+            layer: (self.layer > 0.0).then_some(self.layer),
+            layer_offset: self.layer_offset,
+            under_turret_shading: self.config.under && self.config.turret_shading,
+            shapes,
+        }
+    }
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -827,8 +1006,8 @@ fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, HoverPart, PartMove,
-        PartParams, PartProgress, ShapePart, ShapePartKind,
+        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, HaloPart,
+        HaloShapeKind, HoverPart, PartMove, PartParams, PartProgress, ShapePart, ShapePartKind,
     };
 
     #[test]
@@ -1105,5 +1284,47 @@ mod tests {
         assert_eq!(plan.circles[2].fin, 0.75);
         assert_eq!(plan.circles[2].radius, 7.5);
         assert_eq!(plan.circles[2].stroke, 1.5);
+    }
+
+    #[test]
+    fn halo_part_draw_plan_places_shapes_around_halo_radius() {
+        let mut params = PartParams::default();
+        params.set(0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 200.0, 90.0);
+
+        let part = HaloPart {
+            tri: true,
+            shapes: 2,
+            radius: 3.0,
+            radius_to: 5.0,
+            tri_length: 2.0,
+            tri_length_to: 6.0,
+            halo_radius: 10.0,
+            halo_radius_to: 20.0,
+            x: 0.0,
+            y: 0.0,
+            shape_rotation: 10.0,
+            shape_move_rot: 20.0,
+            halo_rotation: 0.0,
+            halo_rotate_speed: 0.0,
+            rotate_speed: 2.0,
+            color: "from".into(),
+            color_to: Some("to".into()),
+            ..Default::default()
+        };
+
+        let plan = part.draw_plan(&params, 3.0);
+        assert_eq!(plan.shapes.len(), 2);
+        assert_eq!(plan.shapes[0].kind, HaloShapeKind::Triangle);
+        assert!((plan.shapes[0].x - 100.0).abs() < 0.0001);
+        assert!((plan.shapes[0].y - 215.0).abs() < 0.0001);
+        assert_eq!(plan.shapes[0].radius, 4.0);
+        assert_eq!(plan.shapes[0].length, 4.0);
+        assert_eq!(plan.shapes[0].rotation, 116.0);
+        assert_eq!(plan.shapes[0].color, "from");
+        assert_eq!(plan.shapes[0].color_to.as_deref(), Some("to"));
+        assert_eq!(plan.shapes[0].color_mix, 0.5);
+        assert!((plan.shapes[1].x - 100.0).abs() < 0.0001);
+        assert!((plan.shapes[1].y - 185.0).abs() < 0.0001);
+        assert_eq!(plan.shapes[1].rotation, 296.0);
     }
 }
