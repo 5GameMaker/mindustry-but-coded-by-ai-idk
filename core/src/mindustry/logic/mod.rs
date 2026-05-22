@@ -8,6 +8,7 @@ pub mod l_writable;
 pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
+pub mod senseable;
 pub mod settable;
 pub mod tile_layer;
 
@@ -19,6 +20,7 @@ pub use l_writable::{LWritable, LWritable as LogicWritable};
 pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
+pub use senseable::Senseable;
 pub use settable::Settable;
 pub use tile_layer::TileLayer;
 
@@ -10129,21 +10131,6 @@ pub trait Ranged {
     fn y(&self) -> f32;
     fn team(&self) -> u8;
     fn range(&self) -> f32;
-}
-
-pub trait Senseable {
-    type Content;
-    type Object;
-
-    fn sense(&self, sensor: LAccess) -> f64;
-
-    fn sense_content(&self, _content: &Self::Content) -> f64 {
-        0.0
-    }
-
-    fn sense_object(&self, _sensor: LAccess) -> Option<Self::Object> {
-        None
-    }
 }
 
 /// Mirrors upstream `mindustry.logic.LMarkerControl`.
