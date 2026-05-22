@@ -18,6 +18,7 @@ pub mod logic_assembler;
 pub mod logic_canvas;
 pub mod logic_controllable_object;
 pub mod logic_display_command;
+pub mod logic_events;
 pub mod logic_fx;
 pub mod logic_memory_object;
 pub mod logic_op;
@@ -68,6 +69,11 @@ pub use logic_canvas::{
 };
 pub use logic_controllable_object::{LogicControlCall, LogicControllableObject};
 pub use logic_display_command::LogicDisplayCommand;
+pub use logic_events::{
+    LogicBulletEvent, LogicClientDataEvent, LogicCutsceneState, LogicEffectEvent,
+    LogicExplosionEvent, LogicMessageEvent, LogicMessageState, LogicSoundEvent, LogicSpawnEvent,
+    LogicSyncEvent, LogicWeatherEvent, LogicWeatherState,
+};
 pub use logic_fx::{
     get_logic_effect, logic_effect_names, LogicEffectEntry, LogicEffectRegistry, LogicEffectSpec,
     LOGIC_EFFECTS,
@@ -3100,139 +3106,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicSpawnEvent {
-    pub unit_name: String,
-    pub type_name: String,
-    pub team: u8,
-    pub x: f32,
-    pub y: f32,
-    pub rotation: f32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicEffectEvent {
-    pub type_name: String,
-    pub effect_name: String,
-    pub x: f32,
-    pub y: f32,
-    pub rotation: f32,
-    pub color: f64,
-    pub data: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicExplosionEvent {
-    pub team: Option<u8>,
-    pub x: f32,
-    pub y: f32,
-    pub radius: f32,
-    pub damage: f32,
-    pub air: bool,
-    pub ground: bool,
-    pub pierce: bool,
-    pub effect: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicMessageEvent {
-    pub type_: MessageType,
-    pub text: String,
-    pub duration: f32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicCutsceneState {
-    pub active: bool,
-    pub pan_x: f32,
-    pub pan_y: f32,
-    pub speed: f32,
-    pub zoom: f32,
-}
-
-impl Default for LogicCutsceneState {
-    fn default() -> Self {
-        Self {
-            active: false,
-            pan_x: 0.0,
-            pan_y: 0.0,
-            speed: 0.0,
-            zoom: 1.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct LogicMessageState {
-    pub announcement_active: bool,
-    pub toast_active: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicWeatherState {
-    pub active: bool,
-    pub life: f32,
-}
-
-impl Default for LogicWeatherState {
-    fn default() -> Self {
-        Self {
-            active: false,
-            life: 0.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicWeatherEvent {
-    pub weather_name: String,
-    pub active: bool,
-    pub life: f32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicBulletEvent {
-    pub bullet_name: String,
-    pub from_name: String,
-    pub weapon: LVarValue,
-    pub team: u8,
-    pub x: f32,
-    pub y: f32,
-    pub rotation: f32,
-    pub owner: Option<String>,
-    pub damage: f32,
-    pub velocity_scl: f32,
-    pub life_scl: f32,
-    pub aim_x: f32,
-    pub aim_y: f32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicClientDataEvent {
-    pub channel: String,
-    pub value: LVarValue,
-    pub reliable: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicSyncEvent {
-    pub variable_id: i32,
-    pub value: LVarValue,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicSoundEvent {
-    pub positional: bool,
-    pub sound_id: i32,
-    pub sound_name: Option<String>,
-    pub volume: f32,
-    pub pitch: f32,
-    pub pan: f32,
-    pub x: Option<f32>,
-    pub y: Option<f32>,
-    pub limit: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
