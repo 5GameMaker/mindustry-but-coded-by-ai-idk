@@ -8,9 +8,9 @@ use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
     packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
     ClientSnapshotCallPacket, Connect, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, Net, NetConnection, PacketKind, ProviderEvent, RotateBlockCallPacket,
-    SentPacket, StateSnapshotCallPacket, Streamable, TileConfigCallPacket, TileTapCallPacket,
-    WorldDataBeginCallPacket,
+    HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection,
+    PacketKind, ProviderEvent, RotateBlockCallPacket, SentPacket, StateSnapshotCallPacket,
+    Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -52,6 +52,11 @@ pub struct NetServerState {
     pub world_data_begin_sent: u64,
     pub world_streams_sent: u64,
     pub last_world_data_error: Option<String>,
+    pub last_kick_connection_id: Option<i32>,
+    pub last_kick_reason: Option<KickReason>,
+    pub last_kick_message: Option<String>,
+    pub kick_packets_sent: u64,
+    pub last_kick_error: Option<String>,
     pub last_ping_connection_id: Option<i32>,
     pub last_ping_time: Option<i64>,
     pub ping_requests_seen: u64,
@@ -334,6 +339,71 @@ impl NetServer {
                 .map(|(_, sent_packet, reliable)| (sent_packet, reliable)),
         );
         Ok(())
+    }
+
+    pub fn kick_connection_reason(&self, connection_id: i32, reason: KickReason) -> io::Result<()> {
+        let packet = PacketKind::KickCallPacket2(KickCallPacket2 { reason });
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet, true)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        state.last_kick_connection_id = Some(connection_id);
+        state.last_kick_reason = Some(reason);
+        state.last_kick_message = None;
+        state.last_updated_at = Some(Instant::now());
+        match &result {
+            Ok(()) => {
+                state.kick_packets_sent += 1;
+                state.last_kick_error = None;
+                state
+                    .connection_states
+                    .entry(connection_id)
+                    .or_insert_with(|| NetConnection::new(String::new()))
+                    .kick_reason(reason);
+            }
+            Err(error) => {
+                state.last_kick_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn kick_connection_message(
+        &self,
+        connection_id: i32,
+        reason: impl Into<String>,
+    ) -> io::Result<()> {
+        let reason = reason.into();
+        let packet = PacketKind::KickCallPacket(KickCallPacket {
+            reason: reason.clone(),
+        });
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet, true)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        state.last_kick_connection_id = Some(connection_id);
+        state.last_kick_reason = None;
+        state.last_kick_message = Some(reason.clone());
+        state.last_updated_at = Some(Instant::now());
+        match &result {
+            Ok(()) => {
+                state.kick_packets_sent += 1;
+                state.last_kick_error = None;
+                state
+                    .connection_states
+                    .entry(connection_id)
+                    .or_insert_with(|| NetConnection::new(String::new()))
+                    .kick_message(reason);
+            }
+            Err(error) => {
+                state.last_kick_error = Some(error.to_string());
+            }
+        }
+        result
     }
 
     pub fn resend_world_data(
@@ -1146,10 +1216,10 @@ mod tests {
     use crate::mindustry::net::{
         packet_ids, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect,
-        DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
-        NetConnection, NetProvider, PacketKind, PingCallPacket, PingResponseCallPacket,
-        ProviderEvent, RotateBlockCallPacket, SentPacket, StateSnapshotCallPacket,
-        TileConfigCallPacket, TileTapCallPacket,
+        DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback,
+        KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
+        PingResponseCallPacket, ProviderEvent, RotateBlockCallPacket, SentPacket,
+        StateSnapshotCallPacket, TileConfigCallPacket, TileTapCallPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
     use crate::mindustry::world::block::Block;
@@ -1905,6 +1975,90 @@ mod tests {
         assert!(matches!(connection.sent[1].0, SentPacket::StreamBegin(_)));
         assert!(matches!(connection.sent[2].0, SentPacket::StreamChunk(_)));
         assert!(matches!(connection.sent[3].0, SentPacket::StreamChunk(_)));
+    }
+
+    #[test]
+    fn kick_connection_reason_sends_java_reason_packet_and_closes_connection_state() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        server
+            .kick_connection_reason(31, KickReason::TypeMismatch)
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 31);
+        assert!(sent[0].2);
+        assert!(matches!(
+            sent[0].1,
+            PacketKind::KickCallPacket2(packet) if packet.reason == KickReason::TypeMismatch
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_kick_connection_id, Some(31));
+        assert_eq!(state.last_kick_reason, Some(KickReason::TypeMismatch));
+        assert_eq!(state.last_kick_message, None);
+        assert_eq!(state.kick_packets_sent, 1);
+        assert!(state.last_kick_error.is_none());
+
+        let connection = state.connection_states.get(&31).unwrap();
+        assert!(connection.kicked);
+        assert!(connection.has_disconnected);
+        assert!(matches!(
+            connection.sent[0].0,
+            SentPacket::KickReason(KickReason::TypeMismatch)
+        ));
+        assert!(connection.sent[0].1);
+    }
+
+    #[test]
+    fn kick_connection_message_sends_java_string_packet_and_records_message() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        server
+            .kick_connection_message(32, "[accent]Incompatible mods![]")
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 32);
+        assert!(sent[0].2);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::KickCallPacket(packet)
+                if packet.reason == "[accent]Incompatible mods![]"
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_kick_connection_id, Some(32));
+        assert_eq!(state.last_kick_reason, None);
+        assert_eq!(
+            state.last_kick_message.as_deref(),
+            Some("[accent]Incompatible mods![]")
+        );
+        assert_eq!(state.kick_packets_sent, 1);
+        assert!(state.last_kick_error.is_none());
+
+        let connection = state.connection_states.get(&32).unwrap();
+        assert!(connection.kicked);
+        assert!(connection.has_disconnected);
+        assert!(matches!(
+            &connection.sent[0].0,
+            SentPacket::KickMessage(message) if message == "[accent]Incompatible mods![]"
+        ));
+        assert!(connection.sent[0].1);
     }
 
     #[test]
