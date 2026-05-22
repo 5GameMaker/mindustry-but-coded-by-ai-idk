@@ -7,8 +7,9 @@ use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
-    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
-    Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
+    BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
+    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect,
+    ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, Net, PacketKind, PickedBuildPayloadCallPacket, PingCallPacket,
     ProviderEvent, RequestBuildPayloadCallPacket, RequestItemCallPacket, RotateBlockCallPacket,
     StateSnapshotCallPacket, StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
@@ -170,6 +171,9 @@ pub struct NetClientState {
     pub last_picked_build_payload: Option<PickedBuildPayloadCallPacket>,
     pub last_picked_build_payload_at: Option<Instant>,
     pub picked_build_payload_packets_seen: u64,
+    pub last_building_control_select: Option<BuildingControlSelectCallPacket>,
+    pub last_building_control_select_at: Option<Instant>,
+    pub building_control_select_packets_seen: u64,
     pub last_unit_building_control_select: Option<UnitBuildingControlSelectCallPacket>,
     pub last_unit_building_control_select_at: Option<Instant>,
     pub unit_building_control_select_packets_seen: u64,
@@ -279,6 +283,10 @@ impl fmt::Debug for NetClientState {
             .field(
                 "picked_build_payload_packets_seen",
                 &self.picked_build_payload_packets_seen,
+            )
+            .field(
+                "building_control_select_packets_seen",
+                &self.building_control_select_packets_seen,
             )
             .field(
                 "unit_building_control_select_packets_seen",
@@ -1054,6 +1062,13 @@ impl NetClient {
                         state.last_picked_build_payload_at = Some(now);
                         false
                     }
+                    PacketKind::BuildingControlSelectCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.building_control_select_packets_seen += 1;
+                        state.last_building_control_select = Some(packet.clone());
+                        state.last_building_control_select_at = Some(now);
+                        false
+                    }
                     PacketKind::UnitBuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.unit_building_control_select_packets_seen += 1;
@@ -1259,14 +1274,15 @@ mod tests {
     use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
-        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, Connect, Disconnect, DoneCallback, EntitySnapshotCallPacket,
-        HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
-        PickedBuildPayloadCallPacket, PingResponseCallPacket, RequestBuildPayloadCallPacket,
-        RequestItemCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin,
-        StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket,
-        TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, WorldDataBeginCallPacket,
+        BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, Disconnect,
+        DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
+        NetConnection, NetProvider, PacketKind, PickedBuildPayloadCallPacket,
+        PingResponseCallPacket, RequestBuildPayloadCallPacket, RequestItemCallPacket,
+        RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
+        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -2008,6 +2024,10 @@ mod tests {
             build_pos: Some(22_003),
             on_ground: true,
         };
+        let building_control_select = BuildingControlSelectCallPacket {
+            player: EntityRef::new(306),
+            build: primary_build,
+        };
         let unit_building_control_select = UnitBuildingControlSelectCallPacket {
             unit: UnitRef::Unit { id: 402 },
             build: secondary_build,
@@ -2038,6 +2058,9 @@ mod tests {
             ));
             net.handle_client_received(PacketKind::UnitControlCallPacket(unit_control.clone()));
             net.handle_client_received(PacketKind::UnitClearCallPacket(unit_clear.clone()));
+            net.handle_client_received(PacketKind::BuildingControlSelectCallPacket(
+                building_control_select.clone(),
+            ));
         }
 
         client.update();
@@ -2065,6 +2088,12 @@ mod tests {
             Some(&picked_build_payload)
         );
         assert!(state.last_picked_build_payload_at.is_some());
+        assert_eq!(state.building_control_select_packets_seen, 1);
+        assert_eq!(
+            state.last_building_control_select.as_ref(),
+            Some(&building_control_select)
+        );
+        assert!(state.last_building_control_select_at.is_some());
         assert_eq!(state.unit_building_control_select_packets_seen, 1);
         assert_eq!(
             state.last_unit_building_control_select.as_ref(),
@@ -2079,7 +2108,7 @@ mod tests {
         assert!(state.last_unit_clear_at.is_some());
         assert!(matches!(
             state.last_packet,
-            Some(PacketKind::UnitClearCallPacket(_))
+            Some(PacketKind::BuildingControlSelectCallPacket(_))
         ));
     }
 
