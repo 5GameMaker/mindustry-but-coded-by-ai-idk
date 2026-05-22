@@ -109,6 +109,32 @@ impl GameServiceBlockBuildPlan {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameServiceUnitCreateSnapshot {
+    pub campaign: bool,
+    pub default_team_unit: bool,
+    pub unit_name: String,
+    pub visible_unit_names: Vec<String>,
+}
+
+impl GameServiceUnitCreateSnapshot {
+    pub fn default_team(unit_name: impl Into<String>) -> Self {
+        Self {
+            campaign: true,
+            default_team_unit: true,
+            unit_name: unit_name.into(),
+            visible_unit_names: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceUnitCreatePlan {
+    pub stat_max_updates: Vec<(SStat, i32)>,
+    pub achievements: BTreeSet<Achievement>,
+    pub saved_built_sets: bool,
+}
+
 impl GameServiceState {
     pub fn mark_block_built(&mut self, block: impl Into<String>) {
         self.blocks_built.insert(block.into());
@@ -246,6 +272,33 @@ impl GameServiceState {
 
         if snapshot.conveyor_loop {
             plan.achievements.insert(Achievement::CircleConveyor);
+        }
+
+        plan
+    }
+
+    pub fn unit_create_plan(
+        &mut self,
+        snapshot: GameServiceUnitCreateSnapshot,
+    ) -> GameServiceUnitCreatePlan {
+        let mut plan = GameServiceUnitCreatePlan::default();
+        if !snapshot.campaign || !snapshot.default_team_unit {
+            return plan;
+        }
+
+        if self.units_built.insert(snapshot.unit_name.clone()) {
+            let visible_built = snapshot
+                .visible_unit_names
+                .iter()
+                .filter(|unit| self.units_built.contains(unit.as_str()))
+                .count() as i32;
+            plan.stat_max_updates
+                .push((SStat::UnitTypesBuilt, visible_built));
+            plan.saved_built_sets = true;
+        }
+
+        if self.t5s.contains(&snapshot.unit_name) {
+            plan.achievements.insert(Achievement::BuildT5);
         }
 
         plan
@@ -483,5 +536,40 @@ mod tests {
         assert_eq!(plan.stat_additions, vec![SStat::BouldersDeconstructed]);
         assert!(plan.achievements.is_empty());
         assert!(!plan.saved_built_sets);
+    }
+
+    #[test]
+    fn unit_create_plan_tracks_new_default_team_units_and_t5_completion() {
+        let mut state = GameServiceState::default();
+        state.seed_java_t5_units();
+
+        let mut snapshot = GameServiceUnitCreateSnapshot::default_team("omura");
+        snapshot.visible_unit_names = vec!["dagger".into(), "omura".into()];
+
+        let plan = state.unit_create_plan(snapshot);
+
+        assert_eq!(plan.stat_max_updates, vec![(SStat::UnitTypesBuilt, 1)]);
+        assert!(plan.achievements.contains(&Achievement::BuildT5));
+        assert!(plan.saved_built_sets);
+        assert!(state.units_built.contains("omura"));
+    }
+
+    #[test]
+    fn unit_create_plan_ignores_non_campaign_or_enemy_units() {
+        let mut state = GameServiceState::default();
+
+        let mut snapshot = GameServiceUnitCreateSnapshot::default_team("dagger");
+        snapshot.campaign = false;
+        assert_eq!(
+            state.unit_create_plan(snapshot),
+            GameServiceUnitCreatePlan::default()
+        );
+
+        let mut snapshot = GameServiceUnitCreateSnapshot::default_team("dagger");
+        snapshot.default_team_unit = false;
+        assert_eq!(
+            state.unit_create_plan(snapshot),
+            GameServiceUnitCreatePlan::default()
+        );
     }
 }

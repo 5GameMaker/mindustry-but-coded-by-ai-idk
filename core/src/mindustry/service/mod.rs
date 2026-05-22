@@ -9,6 +9,7 @@ pub use achievement::{
 };
 pub use game_service::{
     DefaultGameService, GameService, GameServiceBlockBuildPlan, GameServiceBlockBuildSnapshot,
-    GameServiceInitAction, GameServiceState, GameServiceUpdatePlan, GameServiceUpdateSnapshot,
+    GameServiceInitAction, GameServiceState, GameServiceUnitCreatePlan,
+    GameServiceUnitCreateSnapshot, GameServiceUpdatePlan, GameServiceUpdateSnapshot,
 };
 pub use s_stat::{SStat, StatService};
