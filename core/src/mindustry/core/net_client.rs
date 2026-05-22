@@ -9,17 +9,17 @@ use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
-    CommandUnitsCallPacket, Connect, ConnectConfirmCallPacket, ConnectPacket,
-    DeletePlansCallPacket, Disconnect, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net,
-    PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket, ProviderEvent,
-    RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket,
-    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket,
-    SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
-    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    CommandBuildingCallPacket, CommandUnitsCallPacket, Connect, ConnectConfirmCallPacket,
+    ConnectPacket, DeletePlansCallPacket, Disconnect, EntitySnapshotCallPacket,
+    HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
+    PingLocationCallPacket, ProviderEvent, RemoveQueueBlockCallPacket,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
+    SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+    StateSnapshotCallPacket, StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -215,6 +215,9 @@ pub struct NetClientState {
     pub last_delete_plans: Option<DeletePlansCallPacket>,
     pub last_delete_plans_at: Option<Instant>,
     pub delete_plans_packets_seen: u64,
+    pub last_command_building: Option<CommandBuildingCallPacket>,
+    pub last_command_building_at: Option<Instant>,
+    pub command_building_packets_seen: u64,
     pub last_command_units: Option<CommandUnitsCallPacket>,
     pub last_command_units_at: Option<Instant>,
     pub command_units_packets_seen: u64,
@@ -374,6 +377,10 @@ impl fmt::Debug for NetClientState {
                 &self.ping_location_packets_seen,
             )
             .field("delete_plans_packets_seen", &self.delete_plans_packets_seen)
+            .field(
+                "command_building_packets_seen",
+                &self.command_building_packets_seen,
+            )
             .field(
                 "command_units_packets_seen",
                 &self.command_units_packets_seen,
@@ -1259,6 +1266,13 @@ impl NetClient {
                         state.last_delete_plans_at = Some(now);
                         false
                     }
+                    PacketKind::CommandBuildingCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.command_building_packets_seen += 1;
+                        state.last_command_building = Some(packet.clone());
+                        state.last_command_building_at = Some(now);
+                        false
+                    }
                     PacketKind::CommandUnitsCallPacket(packet) => {
                         let now = Instant::now();
                         state.command_units_packets_seen += 1;
@@ -1501,18 +1515,18 @@ mod tests {
     use crate::mindustry::net::{
         BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, CommandUnitsCallPacket, Connect, DeletePlansCallPacket,
-        Disconnect, DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
-        HostCallback, Net, NetConnection, NetProvider, PacketKind, PayloadDroppedCallPacket,
-        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
-        PingResponseCallPacket, RemoveQueueBlockCallPacket, RequestBuildPayloadCallPacket,
-        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-        RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-        SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TileConfigCallPacket,
-        TileTapCallPacket, TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket,
-        UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
-        WorldDataBeginCallPacket,
+        ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket, Connect,
+        DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
+        HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
+        PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+        PingLocationCallPacket, PingResponseCallPacket, RemoveQueueBlockCallPacket,
+        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+        RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
+        SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket,
+        SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
+        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -2325,6 +2339,11 @@ mod tests {
             player_id: Some(310),
             positions: vec![1, 2, 3],
         };
+        let command_building = CommandBuildingCallPacket {
+            player: EntityRef::new(314),
+            buildings: vec![22_004, 22_005],
+            target: Vec2::new(7.0, 8.0),
+        };
         let command_units = CommandUnitsCallPacket {
             player: EntityRef::new(311),
             unit_ids: vec![77, 78],
@@ -2397,6 +2416,9 @@ mod tests {
             ));
             net.handle_client_received(PacketKind::PingLocationCallPacket(ping_location.clone()));
             net.handle_client_received(PacketKind::DeletePlansCallPacket(delete_plans.clone()));
+            net.handle_client_received(PacketKind::CommandBuildingCallPacket(
+                command_building.clone(),
+            ));
             net.handle_client_received(PacketKind::CommandUnitsCallPacket(command_units.clone()));
             net.handle_client_received(PacketKind::SetUnitCommandCallPacket(
                 set_unit_command.clone(),
@@ -2490,6 +2512,12 @@ mod tests {
         assert_eq!(state.delete_plans_packets_seen, 1);
         assert_eq!(state.last_delete_plans.as_ref(), Some(&delete_plans));
         assert!(state.last_delete_plans_at.is_some());
+        assert_eq!(state.command_building_packets_seen, 1);
+        assert_eq!(
+            state.last_command_building.as_ref(),
+            Some(&command_building)
+        );
+        assert!(state.last_command_building_at.is_some());
         assert_eq!(state.command_units_packets_seen, 1);
         assert_eq!(state.last_command_units.as_ref(), Some(&command_units));
         assert!(state.last_command_units_at.is_some());
