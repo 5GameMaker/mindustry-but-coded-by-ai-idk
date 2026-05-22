@@ -9,9 +9,11 @@ use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
     Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, Net, PacketKind, PingCallPacket, ProviderEvent,
-    RotateBlockCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
-    TileConfigCallPacket, TileTapCallPacket,
+    HiddenSnapshotCallPacket, Net, PacketKind, PickedBuildPayloadCallPacket, PingCallPacket,
+    ProviderEvent, RequestBuildPayloadCallPacket, RequestItemCallPacket, RotateBlockCallPacket,
+    StateSnapshotCallPacket, StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -156,6 +158,27 @@ pub struct NetClientState {
     pub last_client_plan_snapshot_received: Option<ClientPlanSnapshotReceivedCallPacket>,
     pub last_client_plan_snapshot_received_at: Option<Instant>,
     pub client_plan_snapshot_received_packets_seen: u64,
+    pub last_request_item: Option<RequestItemCallPacket>,
+    pub last_request_item_at: Option<Instant>,
+    pub request_item_packets_seen: u64,
+    pub last_transfer_inventory: Option<TransferInventoryCallPacket>,
+    pub last_transfer_inventory_at: Option<Instant>,
+    pub transfer_inventory_packets_seen: u64,
+    pub last_request_build_payload: Option<RequestBuildPayloadCallPacket>,
+    pub last_request_build_payload_at: Option<Instant>,
+    pub request_build_payload_packets_seen: u64,
+    pub last_picked_build_payload: Option<PickedBuildPayloadCallPacket>,
+    pub last_picked_build_payload_at: Option<Instant>,
+    pub picked_build_payload_packets_seen: u64,
+    pub last_unit_building_control_select: Option<UnitBuildingControlSelectCallPacket>,
+    pub last_unit_building_control_select_at: Option<Instant>,
+    pub unit_building_control_select_packets_seen: u64,
+    pub last_unit_control: Option<UnitControlCallPacket>,
+    pub last_unit_control_at: Option<Instant>,
+    pub unit_control_packets_seen: u64,
+    pub last_unit_clear: Option<UnitClearCallPacket>,
+    pub last_unit_clear_at: Option<Instant>,
+    pub unit_clear_packets_seen: u64,
     pub last_tile_config: Option<TileConfigCallPacket>,
     pub last_tile_config_at: Option<Instant>,
     pub tile_config_packets_seen: u64,
@@ -244,6 +267,25 @@ impl fmt::Debug for NetClientState {
                 "client_plan_snapshot_received_packets_seen",
                 &self.client_plan_snapshot_received_packets_seen,
             )
+            .field("request_item_packets_seen", &self.request_item_packets_seen)
+            .field(
+                "transfer_inventory_packets_seen",
+                &self.transfer_inventory_packets_seen,
+            )
+            .field(
+                "request_build_payload_packets_seen",
+                &self.request_build_payload_packets_seen,
+            )
+            .field(
+                "picked_build_payload_packets_seen",
+                &self.picked_build_payload_packets_seen,
+            )
+            .field(
+                "unit_building_control_select_packets_seen",
+                &self.unit_building_control_select_packets_seen,
+            )
+            .field("unit_control_packets_seen", &self.unit_control_packets_seen)
+            .field("unit_clear_packets_seen", &self.unit_clear_packets_seen)
             .field("tile_config_packets_seen", &self.tile_config_packets_seen)
             .field("rotate_block_packets_seen", &self.rotate_block_packets_seen)
             .field("tile_tap_packets_seen", &self.tile_tap_packets_seen)
@@ -984,6 +1026,55 @@ impl NetClient {
                         state.last_client_plan_snapshot_received_at = Some(now);
                         false
                     }
+                    PacketKind::RequestItemCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.request_item_packets_seen += 1;
+                        state.last_request_item = Some(packet.clone());
+                        state.last_request_item_at = Some(now);
+                        false
+                    }
+                    PacketKind::TransferInventoryCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.transfer_inventory_packets_seen += 1;
+                        state.last_transfer_inventory = Some(packet.clone());
+                        state.last_transfer_inventory_at = Some(now);
+                        false
+                    }
+                    PacketKind::RequestBuildPayloadCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.request_build_payload_packets_seen += 1;
+                        state.last_request_build_payload = Some(packet.clone());
+                        state.last_request_build_payload_at = Some(now);
+                        false
+                    }
+                    PacketKind::PickedBuildPayloadCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.picked_build_payload_packets_seen += 1;
+                        state.last_picked_build_payload = Some(packet.clone());
+                        state.last_picked_build_payload_at = Some(now);
+                        false
+                    }
+                    PacketKind::UnitBuildingControlSelectCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.unit_building_control_select_packets_seen += 1;
+                        state.last_unit_building_control_select = Some(packet.clone());
+                        state.last_unit_building_control_select_at = Some(now);
+                        false
+                    }
+                    PacketKind::UnitControlCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.unit_control_packets_seen += 1;
+                        state.last_unit_control = Some(packet.clone());
+                        state.last_unit_control_at = Some(now);
+                        false
+                    }
+                    PacketKind::UnitClearCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.unit_clear_packets_seen += 1;
+                        state.last_unit_clear = Some(packet.clone());
+                        state.last_unit_clear_at = Some(now);
+                        false
+                    }
                     PacketKind::TileConfigCallPacket(packet) => {
                         let now = Instant::now();
                         state.tile_config_packets_seen += 1;
@@ -1165,13 +1256,17 @@ mod tests {
 
     use crate::mindustry::entities::comp::{PlayerComp, PlayerUnitState, UnitComp};
     use crate::mindustry::entities::units::BuildPlan;
+    use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, Connect, Disconnect, DoneCallback, EntitySnapshotCallPacket,
         HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
-        PingResponseCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin,
-        StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
+        PickedBuildPayloadCallPacket, PingResponseCallPacket, RequestBuildPayloadCallPacket,
+        RequestItemCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin,
+        StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket,
+        TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -1886,6 +1981,105 @@ mod tests {
         assert!(matches!(
             state.last_packet,
             Some(PacketKind::TileTapCallPacket(_))
+        ));
+    }
+
+    #[test]
+    fn update_records_server_forwarded_inventory_payload_and_unit_packets() {
+        let client = NetClient::default();
+        let primary_build = BuildingRef::new(22_001);
+        let secondary_build = BuildingRef::new(22_002);
+        let request_item = RequestItemCallPacket {
+            player: EntityRef::new(301),
+            build: primary_build,
+            item: Some("copper".into()),
+            amount: 77,
+        };
+        let transfer_inventory = TransferInventoryCallPacket {
+            player: EntityRef::new(302),
+            build: secondary_build,
+        };
+        let request_build_payload = RequestBuildPayloadCallPacket {
+            player: EntityRef::new(303),
+            build: primary_build,
+        };
+        let picked_build_payload = PickedBuildPayloadCallPacket {
+            unit: UnitRef::Unit { id: 401 },
+            build_pos: Some(22_003),
+            on_ground: true,
+        };
+        let unit_building_control_select = UnitBuildingControlSelectCallPacket {
+            unit: UnitRef::Unit { id: 402 },
+            build: secondary_build,
+        };
+        let unit_control = UnitControlCallPacket {
+            player: EntityRef::new(304),
+            unit: UnitRef::Unit { id: 403 },
+        };
+        let unit_clear = UnitClearCallPacket {
+            player: EntityRef::new(305),
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::RequestItemCallPacket(request_item.clone()));
+            net.handle_client_received(PacketKind::TransferInventoryCallPacket(
+                transfer_inventory.clone(),
+            ));
+            net.handle_client_received(PacketKind::RequestBuildPayloadCallPacket(
+                request_build_payload.clone(),
+            ));
+            net.handle_client_received(PacketKind::PickedBuildPayloadCallPacket(
+                picked_build_payload,
+            ));
+            net.handle_client_received(PacketKind::UnitBuildingControlSelectCallPacket(
+                unit_building_control_select.clone(),
+            ));
+            net.handle_client_received(PacketKind::UnitControlCallPacket(unit_control.clone()));
+            net.handle_client_received(PacketKind::UnitClearCallPacket(unit_clear.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.request_item_packets_seen, 1);
+        assert_eq!(state.last_request_item.as_ref(), Some(&request_item));
+        assert!(state.last_request_item_at.is_some());
+        assert_eq!(state.transfer_inventory_packets_seen, 1);
+        assert_eq!(
+            state.last_transfer_inventory.as_ref(),
+            Some(&transfer_inventory)
+        );
+        assert!(state.last_transfer_inventory_at.is_some());
+        assert_eq!(state.request_build_payload_packets_seen, 1);
+        assert_eq!(
+            state.last_request_build_payload.as_ref(),
+            Some(&request_build_payload)
+        );
+        assert!(state.last_request_build_payload_at.is_some());
+        assert_eq!(state.picked_build_payload_packets_seen, 1);
+        assert_eq!(
+            state.last_picked_build_payload.as_ref(),
+            Some(&picked_build_payload)
+        );
+        assert!(state.last_picked_build_payload_at.is_some());
+        assert_eq!(state.unit_building_control_select_packets_seen, 1);
+        assert_eq!(
+            state.last_unit_building_control_select.as_ref(),
+            Some(&unit_building_control_select)
+        );
+        assert!(state.last_unit_building_control_select_at.is_some());
+        assert_eq!(state.unit_control_packets_seen, 1);
+        assert_eq!(state.last_unit_control.as_ref(), Some(&unit_control));
+        assert!(state.last_unit_control_at.is_some());
+        assert_eq!(state.unit_clear_packets_seen, 1);
+        assert_eq!(state.last_unit_clear.as_ref(), Some(&unit_clear));
+        assert!(state.last_unit_clear_at.is_some());
+        assert!(matches!(
+            state.last_packet,
+            Some(PacketKind::UnitClearCallPacket(_))
         ));
     }
 
