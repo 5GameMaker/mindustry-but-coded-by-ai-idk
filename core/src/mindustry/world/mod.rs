@@ -1,5 +1,6 @@
 pub mod block;
 pub mod blocks;
+pub mod build;
 pub mod cached_tile;
 pub mod color_mapper;
 pub mod consumers;
@@ -17,6 +18,10 @@ pub mod world_context;
 pub mod world_params;
 
 pub use block::{Block, BlockId, CacheLayer};
+pub use build::{
+    check_no_unit_overlap, contacts_ground, contacts_shallows, footprint_tiles, placement_bounds,
+    satisfies_water_requirement, valid_break, BuildBounds, ORTHOGONAL_NEIGHBORS,
+};
 pub use cached_tile::CachedTile;
 pub use color_mapper::{ColorMapper, BLACK_AIR_RGBA};
 pub use directional_item_buffer::{BufferItem, BufferItemLegacy, DirectionalItemBuffer};
