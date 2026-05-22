@@ -1,4 +1,5 @@
 pub mod abilities;
+pub mod bullet;
 pub mod comp;
 pub mod damage;
 pub mod effect;
@@ -29,6 +30,7 @@ pub use abilities::{
     SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
     SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
+pub use bullet::{BulletCreatePlan, BulletType};
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
 pub use comp::{apply_armor, ShieldComp};
