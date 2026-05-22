@@ -381,13 +381,20 @@ impl SaveRegion {
                 SaveRegion::Markers,
                 SaveRegion::Custom,
             ]
-        } else {
+        } else if version >= 7 {
             &[
                 SaveRegion::Meta,
                 SaveRegion::Content,
                 SaveRegion::Map,
                 SaveRegion::Entities,
                 SaveRegion::Custom,
+            ]
+        } else {
+            &[
+                SaveRegion::Meta,
+                SaveRegion::Content,
+                SaveRegion::Map,
+                SaveRegion::Entities,
             ]
         }
     }
@@ -1054,8 +1061,19 @@ mod tests {
         assert_eq!(SaveRegion::manifest_for_version(11), SaveRegion::manifest());
         assert!(!SaveRegion::manifest_for_version(10).contains(&SaveRegion::Patches));
         assert!(SaveRegion::manifest_for_version(10).contains(&SaveRegion::Markers));
+        assert!(SaveRegion::manifest_for_version(7).contains(&SaveRegion::Custom));
         assert!(!SaveRegion::manifest_for_version(7).contains(&SaveRegion::Patches));
         assert!(!SaveRegion::manifest_for_version(7).contains(&SaveRegion::Markers));
+        assert!(!SaveRegion::manifest_for_version(6).contains(&SaveRegion::Custom));
+        assert_eq!(
+            SaveRegion::manifest_for_version(4),
+            &[
+                SaveRegion::Meta,
+                SaveRegion::Content,
+                SaveRegion::Map,
+                SaveRegion::Entities,
+            ]
+        );
     }
 
     #[test]
