@@ -1,5 +1,6 @@
 // Mirrors upstream core/src/mindustry/ai. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 pub mod block_indexer;
+pub mod item_unit_stance;
 pub mod pathfind_queue;
 pub mod pathfinder;
 pub mod unit_command;
@@ -8,6 +9,7 @@ pub mod unit_stance;
 pub use block_indexer::{
     quadrant_dimensions, quadrant_for_tile, BlockIndexer, IndexedTile, QUADRANT_SIZE,
 };
+pub use item_unit_stance::{ItemUnitStance, ItemUnitStanceRegistry};
 pub use pathfind_queue::PathfindQueue;
 pub use pathfinder::{
     ground_cost, hover_cost, legs_cost, naval_cost, neoplasm_cost, none_cost, path_cost, Flowfield,
