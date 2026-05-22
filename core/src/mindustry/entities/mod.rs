@@ -145,6 +145,13 @@ pub use unit_sorts::{
     building_default, building_water, closest, farthest, strongest, weakest,
     BuildingPriorityTarget, SortTarget,
 };
-pub use units::{BuildPlan, StatusEntry, UnitController, WeaponMount};
+pub use units::{
+    AiBlockStatus, AiCircleAttackInput, AiCircleInput, AiCircleTarget, AiController,
+    AiControllerTimers, AiFaceMovementInput, AiFacePlan, AiFaceTargetInput, AiFlaggedTarget,
+    AiMountInput, AiMountPlan, AiMovePlan, AiMoveToInput, AiPathfindInput, AiTargetSnapshot,
+    AiUnloadPayloadInput, AiVisualInput, AiVisualPlan, AiWeaponInfo, AiWeaponPlan,
+    AiWeaponUpdateInput, BuildPlan, StatusEntry, UnitController, WeaponMount, AI_ROTATE_BACK_TIMER,
+    AI_TIMER_COUNT, AI_TIMER_TARGET, AI_TIMER_TARGET2, AI_TIMER_TARGET3, AI_TIMER_TARGET4,
+};
 
 // Mirrors upstream core/src/mindustry/entities. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.

@@ -1,4 +1,4 @@
-use crate::mindustry::io::{EntityRef, Point2, TypeValue};
+use crate::mindustry::io::{EntityRef, Point2, TeamId, TypeValue, Vec2};
 use crate::mindustry::r#type::{StatusEffect, Weapon};
 use crate::mindustry::world::block::Block;
 
@@ -28,6 +28,754 @@ pub trait UnitController {
     fn removed(&mut self, _unit: EntityRef) {}
 
     fn after_read(&mut self, _unit: EntityRef) {}
+}
+
+pub const AI_ROTATE_BACK_TIMER: f32 = 60.0 * 5.0;
+pub const AI_TIMER_TARGET: usize = 0;
+pub const AI_TIMER_TARGET2: usize = 1;
+pub const AI_TIMER_TARGET3: usize = 2;
+pub const AI_TIMER_TARGET4: usize = 3;
+pub const AI_TIMER_COUNT: usize = 4;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AiControllerTimers {
+    pub values: [f32; AI_TIMER_COUNT],
+}
+
+impl AiControllerTimers {
+    pub const fn new() -> Self {
+        Self {
+            values: [0.0; AI_TIMER_COUNT],
+        }
+    }
+
+    pub fn reset(&mut self, timer: usize, value: f32) {
+        if let Some(slot) = self.values.get_mut(timer) {
+            *slot = value;
+        }
+    }
+
+    pub fn reset_target_timers(&mut self, target: f32, target2: f32) {
+        self.reset(AI_TIMER_TARGET, target);
+        self.reset(AI_TIMER_TARGET2, target2);
+    }
+
+    pub fn advance(&mut self, timer: usize, delta: f32) {
+        if let Some(slot) = self.values.get_mut(timer) {
+            *slot += delta;
+        }
+    }
+
+    pub fn ready(&mut self, timer: usize, interval: f32) -> bool {
+        if interval <= 0.0 {
+            return true;
+        }
+
+        let Some(slot) = self.values.get_mut(timer) else {
+            return false;
+        };
+
+        if *slot >= interval {
+            *slot %= interval;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Default for AiControllerTimers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AiController {
+    unit: EntityRef,
+    pub timer: AiControllerTimers,
+    pub fallback: Option<EntityRef>,
+    pub no_target_time: f32,
+    pub target: EntityRef,
+    pub bomber_target: EntityRef,
+    pub turning_away: bool,
+}
+
+impl AiController {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset_timers(&mut self, target: f32, target2: f32) {
+        self.timer.reset_target_timers(target, target2);
+    }
+
+    pub fn keep_state(&self) -> bool {
+        false
+    }
+
+    pub fn fallback(&self) -> Option<EntityRef> {
+        None
+    }
+
+    pub fn use_fallback(&self) -> bool {
+        false
+    }
+
+    pub fn should_fire(&self) -> bool {
+        true
+    }
+
+    pub fn should_shoot(&self) -> bool {
+        true
+    }
+
+    pub fn init(&mut self) {}
+
+    pub fn stop_shooting(mounts: &mut [WeaponMount]) {
+        for mount in mounts {
+            mount.shoot = false;
+        }
+    }
+
+    pub fn target_invalidated(&mut self) {
+        self.timer.reset(AI_TIMER_TARGET, -1.0);
+    }
+
+    pub fn retarget(&mut self, delta: f32, has_target: bool) -> bool {
+        self.timer.advance(AI_TIMER_TARGET, delta);
+        self.timer
+            .ready(AI_TIMER_TARGET, if has_target { 90.0 } else { 40.0 })
+    }
+
+    pub fn update_visuals_plan(input: AiVisualInput) -> AiVisualPlan {
+        if input.is_flying {
+            AiVisualPlan {
+                wobble: input.type_wobble,
+                look_at: Some(input.pref_rotation),
+            }
+        } else {
+            AiVisualPlan {
+                wobble: false,
+                look_at: None,
+            }
+        }
+    }
+
+    pub fn face_target_plan(input: AiFaceTargetInput) -> AiFacePlan {
+        if !(input.omni_movement || input.mech) {
+            return AiFacePlan { look_at: None };
+        }
+
+        if input.target_valid && input.face_target && input.has_weapons {
+            if let Some(intercept) = input.intercept {
+                return AiFacePlan {
+                    look_at: Some(angle_to(input.unit_position, intercept)),
+                };
+            }
+        }
+
+        if input.moving {
+            AiFacePlan {
+                look_at: Some(vec_angle(input.velocity)),
+            }
+        } else {
+            AiFacePlan { look_at: None }
+        }
+    }
+
+    pub fn face_movement_plan(input: AiFaceMovementInput) -> AiFacePlan {
+        if (input.omni_movement || input.mech) && input.moving {
+            AiFacePlan {
+                look_at: Some(vec_angle(input.velocity)),
+            }
+        } else {
+            AiFacePlan { look_at: None }
+        }
+    }
+
+    pub fn invalid(target: Option<&AiTargetSnapshot>) -> bool {
+        target.map(|target| !target.valid).unwrap_or(true)
+    }
+
+    pub fn check_target(target: Option<&AiTargetSnapshot>, x: f32, y: f32, range: f32) -> bool {
+        target
+            .map(|target| !target.valid || !within(target.position, Vec2::new(x, y), range))
+            .unwrap_or(true)
+    }
+
+    pub fn update_weapons_plan(&mut self, input: AiWeaponUpdateInput) -> AiWeaponPlan {
+        if input.retarget {
+            self.target = input
+                .main_target
+                .map(|target| target.entity)
+                .unwrap_or_else(EntityRef::null);
+        }
+
+        self.no_target_time += input.delta;
+        if let Some(target) = input
+            .main_target
+            .filter(|target| target.entity == self.target)
+        {
+            if !target.valid {
+                self.target_invalidated();
+                self.target = EntityRef::null();
+            } else {
+                self.no_target_time = 0.0;
+            }
+        } else if self.target.id.is_some() && input.single_target {
+            self.target = EntityRef::null();
+        }
+
+        let mut plan = AiWeaponPlan {
+            unit_aim: None,
+            is_shooting: false,
+            mounts: Vec::with_capacity(input.mounts.len()),
+        };
+
+        for (index, mount) in input.mounts.iter().enumerate() {
+            let mount_offset = rotate_vec(
+                Vec2::new(mount.weapon.x, mount.weapon.y),
+                input.unit_rotation - 90.0,
+            );
+            let mount_position = Vec2::new(
+                input.unit_position.x + mount_offset.x,
+                input.unit_position.y + mount_offset.y,
+            );
+
+            if !mount.weapon.controllable || mount.weapon.no_attack {
+                plan.mounts.push(AiMountPlan {
+                    target: mount.target.map(|target| target.entity),
+                    aim: None,
+                    shoot: false,
+                    rotate: false,
+                    mount_position,
+                    rotate_back: false,
+                });
+                continue;
+            }
+
+            if !mount.weapon.ai_controllable {
+                plan.mounts.push(AiMountPlan {
+                    target: mount.target.map(|target| target.entity),
+                    aim: None,
+                    shoot: false,
+                    rotate: false,
+                    mount_position,
+                    rotate_back: false,
+                });
+                continue;
+            }
+
+            let mut target = if input.single_target {
+                input
+                    .main_target
+                    .filter(|target| target.entity == self.target)
+            } else if input.retarget {
+                input
+                    .mount_targets
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .or(mount.target)
+            } else {
+                mount.target
+            };
+
+            if Self::check_target(
+                target.as_ref(),
+                mount_position.x,
+                mount_position.y,
+                mount.weapon.range,
+            ) {
+                target = None;
+            }
+
+            let mut shoot_intent = false;
+            let mut aim = None;
+            if let Some(target) = target {
+                shoot_intent = within(
+                    target.position,
+                    mount_position,
+                    mount.weapon.range + target.hit_size / 2.0,
+                ) && input.should_shoot;
+                aim = Some(target.position);
+            }
+
+            let rotate = shoot_intent;
+            let shoot = shoot_intent && input.should_fire;
+            plan.is_shooting |= shoot;
+            if shoot_intent {
+                plan.unit_aim = aim;
+            }
+
+            let rotate_back = target.is_none()
+                && !shoot_intent
+                && !within_angle(mount.rotation, mount.weapon.base_rotation, 0.01)
+                && self.no_target_time >= AI_ROTATE_BACK_TIMER;
+            let (rotate, aim) = if rotate_back {
+                let return_offset =
+                    vec_from_angle(input.unit_rotation + mount.weapon.base_rotation, 5.0);
+                (
+                    true,
+                    Some(Vec2::new(
+                        mount_position.x + return_offset.x,
+                        mount_position.y + return_offset.y,
+                    )),
+                )
+            } else {
+                (rotate, aim)
+            };
+
+            plan.mounts.push(AiMountPlan {
+                target: target.map(|target| target.entity),
+                aim,
+                shoot,
+                rotate,
+                mount_position,
+                rotate_back,
+            });
+        }
+
+        plan
+    }
+
+    pub fn target_flag<'a>(
+        team: TeamId,
+        derelict: TeamId,
+        x: f32,
+        y: f32,
+        targets: &'a [AiFlaggedTarget],
+        flag: &str,
+        enemy: bool,
+    ) -> Option<&'a AiFlaggedTarget> {
+        if team == derelict {
+            return None;
+        }
+
+        targets
+            .iter()
+            .filter(|target| target.flag == flag && target.enemy == enemy)
+            .min_by(|left, right| {
+                dst2(Vec2::new(x, y), left.position)
+                    .partial_cmp(&dst2(Vec2::new(x, y), right.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    pub fn target_flag_active<'a>(
+        team: TeamId,
+        derelict: TeamId,
+        x: f32,
+        y: f32,
+        targets: &'a [AiFlaggedTarget],
+        flag: &str,
+        enemy: bool,
+    ) -> Option<&'a AiFlaggedTarget> {
+        if team == derelict {
+            return None;
+        }
+
+        targets
+            .iter()
+            .filter(|target| {
+                target.flag == flag
+                    && target.enemy == enemy
+                    && target.targetable
+                    && (target.has_items || target.status != AiBlockStatus::NoInput)
+            })
+            .min_by(|left, right| {
+                dst2(Vec2::new(x, y), left.position)
+                    .partial_cmp(&dst2(Vec2::new(x, y), right.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    pub fn pathfind_plan(input: AiPathfindInput) -> Option<Vec2> {
+        if (input.tile == input.target_tile && input.stop_at_target_tile) || !input.can_pass_target
+        {
+            return None;
+        }
+
+        Some(vec_from_angle(
+            angle_to(input.tile_world, input.target_tile_world),
+            input.pref_speed,
+        ))
+    }
+
+    pub fn alter_pathfind(vec: Vec2) -> Vec2 {
+        vec
+    }
+
+    pub fn unload_payloads_plan(input: AiUnloadPayloadInput) -> bool {
+        input.has_payload
+            && input.target_is_building
+            && input.last_payload_is_unit
+            && input.target_within_drop_range
+    }
+
+    pub fn circle_plan(target: Option<Vec2>, input: AiCircleInput) -> Option<Vec2> {
+        let target = target?;
+        let mut vec = Vec2::new(
+            target.x - input.unit_position.x,
+            target.y - input.unit_position.y,
+        );
+        let len = vec_len(vec);
+
+        if len < input.circle_length && input.circle_length > 0.0 {
+            vec = rotate_vec(
+                vec,
+                (input.circle_length - len) / input.circle_length * 180.0,
+            );
+        }
+
+        Some(set_length(vec, input.speed))
+    }
+
+    pub fn circle_attack_plan(input: AiCircleAttackInput) -> Option<AiMovePlan> {
+        let target = input.target?;
+        let mut vec = Vec2::new(
+            target.position.x - input.unit_position.x,
+            target.position.y - input.unit_position.y,
+        );
+        let target_angle = angle_to(input.unit_position, target.position);
+        let diff = angle_dist(target_angle, input.unit_rotation);
+        let len = vec_len(vec);
+
+        if target.same_collision_layer {
+            let avoid_dist = target.physic_size + 30.0;
+            if input.turning_away {
+                return Some(AiMovePlan {
+                    movement: Some(set_length(vec, input.pref_speed * -1.0)),
+                    look_at: None,
+                    direct_move: false,
+                });
+            } else if len <= avoid_dist {
+                return Some(AiMovePlan {
+                    movement: Some(set_length(vec, input.pref_speed * -1.0)),
+                    look_at: None,
+                    direct_move: false,
+                });
+            }
+        }
+
+        if diff > 70.0 && len < input.circle_length {
+            vec = vec_from_angle(vec_angle(input.unit_velocity), len.max(1.0));
+        } else if input.omni_movement {
+            vec = vec_from_angle(
+                move_toward_angle(vec_angle(input.unit_velocity), vec_angle(vec), 6.0),
+                len.max(1.0),
+            );
+        }
+
+        Some(AiMovePlan {
+            movement: Some(set_length(vec, input.pref_speed)),
+            look_at: None,
+            direct_move: false,
+        })
+    }
+
+    pub fn move_to_plan(target: Option<Vec2>, input: AiMoveToInput) -> Option<AiMovePlan> {
+        let target = target?;
+        let speed = input.pref_speed;
+        let mut vec = Vec2::new(
+            target.x - input.unit_position.x,
+            target.y - input.unit_position.y,
+        );
+        let distance = vec_len(vec);
+        let length = if input.circle_length <= 0.001 {
+            1.0
+        } else {
+            ((distance - input.circle_length) / input.smooth).clamp(-1.0, 1.0)
+        };
+
+        vec = set_length(vec, speed * length);
+
+        if input.arrive && length > 0.0 && input.accel.abs() > f32::EPSILON {
+            let brake = Vec2::new(
+                -input.velocity.x / input.accel * 2.0 + (target.x - input.unit_position.x),
+                -input.velocity.y / input.accel * 2.0 + (target.y - input.unit_position.y),
+            );
+
+            if input.omni_movement || input.rotate_move_first {
+                vec = limit_vec(Vec2::new(vec.x + brake.x, vec.y + brake.y), speed * length);
+            } else {
+                return Some(AiMovePlan {
+                    movement: Some(limit_vec(brake, speed * length)),
+                    look_at: None,
+                    direct_move: true,
+                });
+            }
+        }
+
+        if length < -0.5 {
+            if input.keep_distance {
+                vec = rotate_vec(vec, 180.0);
+            } else {
+                vec = Vec2::new(0.0, 0.0);
+            }
+        } else if length < 0.0 {
+            vec = Vec2::new(0.0, 0.0);
+        }
+
+        if let Some(offset) = input.offset {
+            vec = Vec2::new(vec.x + offset.x, vec.y + offset.y);
+            vec = set_length(vec, speed * length);
+        }
+
+        if invalid_vec(vec) || is_zero_vec(vec) {
+            return None;
+        }
+
+        if !input.omni_movement && input.rotate_move_first {
+            let angle = vec_angle(vec);
+            Some(AiMovePlan {
+                movement: within_angle(input.unit_rotation, angle, 3.0).then_some(vec),
+                look_at: Some(angle),
+                direct_move: false,
+            })
+        } else {
+            Some(AiMovePlan {
+                movement: Some(vec),
+                look_at: None,
+                direct_move: false,
+            })
+        }
+    }
+}
+
+impl Default for AiController {
+    fn default() -> Self {
+        let mut controller = Self {
+            unit: EntityRef::null(),
+            timer: AiControllerTimers::default(),
+            fallback: None,
+            no_target_time: 0.0,
+            target: EntityRef::null(),
+            bomber_target: EntityRef::null(),
+            turning_away: false,
+        };
+        controller.reset_timers(0.0, 0.0);
+        controller
+    }
+}
+
+impl UnitController for AiController {
+    fn set_unit(&mut self, unit: EntityRef) {
+        if self.unit != unit {
+            self.unit = unit;
+            self.init();
+        }
+    }
+
+    fn unit(&self) -> EntityRef {
+        self.unit
+    }
+
+    fn is_logic_controllable(&self) -> bool {
+        true
+    }
+
+    fn after_read(&mut self, _unit: EntityRef) {}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiVisualInput {
+    pub is_flying: bool,
+    pub type_wobble: bool,
+    pub pref_rotation: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiVisualPlan {
+    pub wobble: bool,
+    pub look_at: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiFaceTargetInput {
+    pub omni_movement: bool,
+    pub mech: bool,
+    pub moving: bool,
+    pub face_target: bool,
+    pub has_weapons: bool,
+    pub target_valid: bool,
+    pub unit_position: Vec2,
+    pub velocity: Vec2,
+    pub intercept: Option<Vec2>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiFaceMovementInput {
+    pub omni_movement: bool,
+    pub mech: bool,
+    pub moving: bool,
+    pub velocity: Vec2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiFacePlan {
+    pub look_at: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiTargetSnapshot {
+    pub entity: EntityRef,
+    pub position: Vec2,
+    pub hit_size: f32,
+    pub valid: bool,
+    pub added: bool,
+    pub flying: bool,
+    pub collision_layer: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiWeaponInfo {
+    pub x: f32,
+    pub y: f32,
+    pub range: f32,
+    pub base_rotation: f32,
+    pub controllable: bool,
+    pub ai_controllable: bool,
+    pub no_attack: bool,
+}
+
+impl Default for AiWeaponInfo {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            range: 0.0,
+            base_rotation: 0.0,
+            controllable: true,
+            ai_controllable: true,
+            no_attack: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiMountInput {
+    pub weapon: AiWeaponInfo,
+    pub rotation: f32,
+    pub target: Option<AiTargetSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AiWeaponUpdateInput {
+    pub unit_position: Vec2,
+    pub unit_rotation: f32,
+    pub delta: f32,
+    pub single_target: bool,
+    pub retarget: bool,
+    pub main_target: Option<AiTargetSnapshot>,
+    pub mount_targets: Vec<Option<AiTargetSnapshot>>,
+    pub mounts: Vec<AiMountInput>,
+    pub should_fire: bool,
+    pub should_shoot: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiMountPlan {
+    pub target: Option<EntityRef>,
+    pub aim: Option<Vec2>,
+    pub shoot: bool,
+    pub rotate: bool,
+    pub mount_position: Vec2,
+    pub rotate_back: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AiWeaponPlan {
+    pub unit_aim: Option<Vec2>,
+    pub is_shooting: bool,
+    pub mounts: Vec<AiMountPlan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiBlockStatus {
+    NoInput,
+    Active,
+    NoOutput,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AiFlaggedTarget {
+    pub entity: EntityRef,
+    pub position: Vec2,
+    pub flag: String,
+    pub enemy: bool,
+    pub has_items: bool,
+    pub status: AiBlockStatus,
+    pub targetable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiPathfindInput {
+    pub tile: (i32, i32),
+    pub tile_world: Vec2,
+    pub target_tile: (i32, i32),
+    pub target_tile_world: Vec2,
+    pub stop_at_target_tile: bool,
+    pub can_pass_target: bool,
+    pub pref_speed: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiUnloadPayloadInput {
+    pub has_payload: bool,
+    pub target_is_building: bool,
+    pub last_payload_is_unit: bool,
+    pub target_within_drop_range: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiCircleInput {
+    pub unit_position: Vec2,
+    pub circle_length: f32,
+    pub speed: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiCircleTarget {
+    pub position: Vec2,
+    pub same_collision_layer: bool,
+    pub physic_size: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiCircleAttackInput {
+    pub unit_position: Vec2,
+    pub unit_rotation: f32,
+    pub unit_velocity: Vec2,
+    pub pref_speed: f32,
+    pub circle_length: f32,
+    pub omni_movement: bool,
+    pub turning_away: bool,
+    pub target: Option<AiCircleTarget>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiMoveToInput {
+    pub unit_position: Vec2,
+    pub unit_rotation: f32,
+    pub velocity: Vec2,
+    pub pref_speed: f32,
+    pub accel: f32,
+    pub circle_length: f32,
+    pub smooth: f32,
+    pub keep_distance: bool,
+    pub arrive: bool,
+    pub offset: Option<Vec2>,
+    pub omni_movement: bool,
+    pub rotate_move_first: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AiMovePlan {
+    pub movement: Option<Vec2>,
+    pub look_at: Option<f32>,
+    pub direct_move: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -337,13 +1085,98 @@ impl Default for BuildPlan {
     }
 }
 
+fn dst2(left: Vec2, right: Vec2) -> f32 {
+    let dx = right.x - left.x;
+    let dy = right.y - left.y;
+    dx * dx + dy * dy
+}
+
+fn within(left: Vec2, right: Vec2, range: f32) -> bool {
+    dst2(left, right) <= range * range
+}
+
+fn vec_len(vec: Vec2) -> f32 {
+    (vec.x * vec.x + vec.y * vec.y).sqrt()
+}
+
+fn is_zero_vec(vec: Vec2) -> bool {
+    vec.x.abs() <= f32::EPSILON && vec.y.abs() <= f32::EPSILON
+}
+
+fn invalid_vec(vec: Vec2) -> bool {
+    !vec.x.is_finite() || !vec.y.is_finite()
+}
+
+fn vec_angle(vec: Vec2) -> f32 {
+    vec.y.atan2(vec.x).to_degrees().rem_euclid(360.0)
+}
+
+fn angle_to(from: Vec2, to: Vec2) -> f32 {
+    vec_angle(Vec2::new(to.x - from.x, to.y - from.y))
+}
+
+fn vec_from_angle(angle: f32, length: f32) -> Vec2 {
+    let rad = angle.to_radians();
+    Vec2::new(rad.cos() * length, rad.sin() * length)
+}
+
+fn set_length(vec: Vec2, length: f32) -> Vec2 {
+    let current = vec_len(vec);
+    if current <= f32::EPSILON {
+        Vec2::new(0.0, 0.0)
+    } else {
+        let scale = length / current;
+        Vec2::new(vec.x * scale, vec.y * scale)
+    }
+}
+
+fn limit_vec(vec: Vec2, limit: f32) -> Vec2 {
+    let len = vec_len(vec);
+    if len > limit.abs() && len > f32::EPSILON {
+        set_length(vec, limit)
+    } else {
+        vec
+    }
+}
+
+fn rotate_vec(vec: Vec2, degrees: f32) -> Vec2 {
+    let rad = degrees.to_radians();
+    Vec2::new(
+        vec.x * rad.cos() - vec.y * rad.sin(),
+        vec.x * rad.sin() + vec.y * rad.cos(),
+    )
+}
+
+fn angle_dist(a: f32, b: f32) -> f32 {
+    let diff = (a - b).rem_euclid(360.0).abs();
+    diff.min(360.0 - diff)
+}
+
+fn within_angle(a: f32, b: f32, margin: f32) -> bool {
+    angle_dist(a, b) <= margin
+}
+
+fn move_toward_angle(from: f32, to: f32, step: f32) -> f32 {
+    let delta = ((to - from + 540.0).rem_euclid(360.0)) - 180.0;
+    if delta.abs() <= step {
+        to.rem_euclid(360.0)
+    } else {
+        (from + step * delta.signum()).rem_euclid(360.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::mindustry::io::{EntityRef, Point2, TypeValue};
+    use crate::mindustry::io::{EntityRef, Point2, TeamId, TypeValue, Vec2};
     use crate::mindustry::r#type::{StatusEffect, Weapon};
     use crate::mindustry::world::block::Block;
 
-    use super::{BuildPlan, StatusEntry, UnitController, WeaponMount};
+    use super::{
+        AiBlockStatus, AiCircleInput, AiController, AiFaceMovementInput, AiFaceTargetInput,
+        AiFlaggedTarget, AiMountInput, AiMoveToInput, AiPathfindInput, AiTargetSnapshot,
+        AiUnloadPayloadInput, AiVisualInput, AiWeaponInfo, AiWeaponUpdateInput, BuildPlan,
+        StatusEntry, UnitController, WeaponMount, AI_ROTATE_BACK_TIMER, AI_TIMER_TARGET,
+    };
 
     #[derive(Debug)]
     struct MockUnitController {
@@ -446,6 +1279,258 @@ mod tests {
         assert_eq!(controller.updates, 1);
         assert_eq!(controller.removed, vec![EntityRef::new(3)]);
         assert_eq!(controller.after_reads, vec![EntityRef::new(4)]);
+    }
+
+    #[test]
+    fn ai_controller_defaults_timers_and_unit_assignment_match_java_shell() {
+        let mut controller = AiController::new();
+        assert_eq!(controller.unit(), EntityRef::null());
+        assert!(controller.is_logic_controllable());
+        assert!(!controller.keep_state());
+        assert!(!controller.use_fallback());
+        assert_eq!(controller.fallback(), None);
+        assert!(controller.should_fire());
+        assert!(controller.should_shoot());
+
+        controller.set_unit(EntityRef::new(12));
+        controller.set_unit(EntityRef::new(12));
+        assert_eq!(controller.unit(), EntityRef::new(12));
+
+        controller.reset_timers(39.0, 11.0);
+        assert!(!controller.retarget(0.5, false));
+        assert!(controller.retarget(0.5, false));
+        assert!(!controller.retarget(1.0, true));
+
+        controller.target_invalidated();
+        assert_eq!(controller.timer.values[AI_TIMER_TARGET], -1.0);
+
+        let mut weapon = Weapon::new("duo");
+        weapon.base_rotation = 15.0;
+        let mut mounts = vec![WeaponMount::new(weapon)];
+        mounts[0].shoot = true;
+        AiController::stop_shooting(&mut mounts);
+        assert!(!mounts[0].shoot);
+    }
+
+    #[test]
+    fn ai_controller_visual_and_facing_plans_follow_java_branches() {
+        let visual = AiController::update_visuals_plan(AiVisualInput {
+            is_flying: true,
+            type_wobble: true,
+            pref_rotation: 135.0,
+        });
+        assert!(visual.wobble);
+        assert_eq!(visual.look_at, Some(135.0));
+
+        let grounded = AiController::update_visuals_plan(AiVisualInput {
+            is_flying: false,
+            type_wobble: true,
+            pref_rotation: 90.0,
+        });
+        assert_eq!(grounded.look_at, None);
+        assert!(!grounded.wobble);
+
+        let face_target = AiController::face_target_plan(AiFaceTargetInput {
+            omni_movement: true,
+            mech: false,
+            moving: true,
+            face_target: true,
+            has_weapons: true,
+            target_valid: true,
+            unit_position: Vec2::new(0.0, 0.0),
+            velocity: Vec2::new(0.0, 1.0),
+            intercept: Some(Vec2::new(10.0, 0.0)),
+        });
+        assert_eq!(face_target.look_at, Some(0.0));
+
+        let face_movement = AiController::face_movement_plan(AiFaceMovementInput {
+            omni_movement: false,
+            mech: true,
+            moving: true,
+            velocity: Vec2::new(0.0, -3.0),
+        });
+        assert_eq!(face_movement.look_at, Some(270.0));
+    }
+
+    #[test]
+    fn ai_controller_target_flag_pathfind_payload_and_movement_are_pure_plans() {
+        let targets = vec![
+            AiFlaggedTarget {
+                entity: EntityRef::new(1),
+                position: Vec2::new(5.0, 0.0),
+                flag: "core".into(),
+                enemy: true,
+                has_items: false,
+                status: AiBlockStatus::NoInput,
+                targetable: true,
+            },
+            AiFlaggedTarget {
+                entity: EntityRef::new(2),
+                position: Vec2::new(8.0, 0.0),
+                flag: "core".into(),
+                enemy: true,
+                has_items: true,
+                status: AiBlockStatus::Active,
+                targetable: true,
+            },
+        ];
+        let derelict = TeamId(255);
+        let closest =
+            AiController::target_flag(TeamId(1), derelict, 0.0, 0.0, &targets, "core", true)
+                .unwrap();
+        assert_eq!(closest.entity, EntityRef::new(1));
+        let active =
+            AiController::target_flag_active(TeamId(1), derelict, 0.0, 0.0, &targets, "core", true)
+                .unwrap();
+        assert_eq!(active.entity, EntityRef::new(2));
+        assert!(
+            AiController::target_flag(derelict, derelict, 0.0, 0.0, &targets, "core", true)
+                .is_none()
+        );
+
+        let invalid = AiTargetSnapshot {
+            entity: EntityRef::new(5),
+            position: Vec2::new(100.0, 0.0),
+            hit_size: 4.0,
+            valid: false,
+            added: false,
+            flying: false,
+            collision_layer: 0,
+        };
+        assert!(AiController::invalid(Some(&invalid)));
+        assert!(AiController::check_target(Some(&invalid), 0.0, 0.0, 10.0));
+
+        let path = AiController::pathfind_plan(AiPathfindInput {
+            tile: (0, 0),
+            tile_world: Vec2::new(0.0, 0.0),
+            target_tile: (1, 0),
+            target_tile_world: Vec2::new(8.0, 0.0),
+            stop_at_target_tile: true,
+            can_pass_target: true,
+            pref_speed: 2.0,
+        })
+        .unwrap();
+        assert_eq!(path, Vec2::new(2.0, 0.0));
+
+        assert!(AiController::pathfind_plan(AiPathfindInput {
+            tile: (1, 0),
+            tile_world: Vec2::new(8.0, 0.0),
+            target_tile: (1, 0),
+            target_tile_world: Vec2::new(8.0, 0.0),
+            stop_at_target_tile: true,
+            can_pass_target: true,
+            pref_speed: 2.0,
+        })
+        .is_none());
+
+        assert!(AiController::unload_payloads_plan(AiUnloadPayloadInput {
+            has_payload: true,
+            target_is_building: true,
+            last_payload_is_unit: true,
+            target_within_drop_range: true,
+        }));
+
+        let circle = AiController::circle_plan(
+            Some(Vec2::new(10.0, 0.0)),
+            AiCircleInput {
+                unit_position: Vec2::new(0.0, 0.0),
+                circle_length: 20.0,
+                speed: 4.0,
+            },
+        )
+        .unwrap();
+        assert!((circle.x - 0.0).abs() < 0.0001);
+        assert!((circle.y - 4.0).abs() < 0.0001);
+
+        let move_plan = AiController::move_to_plan(
+            Some(Vec2::new(100.0, 0.0)),
+            AiMoveToInput {
+                unit_position: Vec2::new(0.0, 0.0),
+                unit_rotation: 90.0,
+                velocity: Vec2::new(0.0, 0.0),
+                pref_speed: 5.0,
+                accel: 1.0,
+                circle_length: 10.0,
+                smooth: 100.0,
+                keep_distance: false,
+                arrive: false,
+                offset: None,
+                omni_movement: false,
+                rotate_move_first: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(move_plan.look_at, Some(0.0));
+        assert_eq!(move_plan.movement, None);
+    }
+
+    #[test]
+    fn ai_controller_weapon_plan_handles_single_target_fire_gate_and_rotate_back() {
+        let target = AiTargetSnapshot {
+            entity: EntityRef::new(77),
+            position: Vec2::new(10.0, 0.0),
+            hit_size: 4.0,
+            valid: true,
+            added: true,
+            flying: false,
+            collision_layer: 0,
+        };
+        let weapon = AiWeaponInfo {
+            range: 20.0,
+            base_rotation: 0.0,
+            controllable: true,
+            ai_controllable: true,
+            no_attack: false,
+            ..Default::default()
+        };
+        let mut controller = AiController::new();
+        let plan = controller.update_weapons_plan(AiWeaponUpdateInput {
+            unit_position: Vec2::new(0.0, 0.0),
+            unit_rotation: 90.0,
+            delta: 1.0,
+            single_target: true,
+            retarget: true,
+            main_target: Some(target),
+            mount_targets: Vec::new(),
+            mounts: vec![AiMountInput {
+                weapon,
+                rotation: 0.0,
+                target: None,
+            }],
+            should_fire: false,
+            should_shoot: true,
+        });
+
+        assert_eq!(controller.target, EntityRef::new(77));
+        assert_eq!(plan.unit_aim, Some(Vec2::new(10.0, 0.0)));
+        assert!(!plan.is_shooting);
+        assert_eq!(plan.mounts[0].target, Some(EntityRef::new(77)));
+        assert!(!plan.mounts[0].shoot);
+        assert!(plan.mounts[0].rotate);
+
+        controller.target = EntityRef::null();
+        controller.no_target_time = AI_ROTATE_BACK_TIMER;
+        let rotate_back = controller.update_weapons_plan(AiWeaponUpdateInput {
+            unit_position: Vec2::new(0.0, 0.0),
+            unit_rotation: 90.0,
+            delta: 0.0,
+            single_target: false,
+            retarget: false,
+            main_target: None,
+            mount_targets: Vec::new(),
+            mounts: vec![AiMountInput {
+                weapon,
+                rotation: 45.0,
+                target: None,
+            }],
+            should_fire: true,
+            should_shoot: true,
+        });
+        assert!(rotate_back.mounts[0].rotate_back);
+        assert!(rotate_back.mounts[0].rotate);
+        let aim = rotate_back.mounts[0].aim.unwrap();
+        assert!(aim.x.abs() < 0.0001);
+        assert!((aim.y - 5.0).abs() < 0.0001);
     }
 
     #[test]
