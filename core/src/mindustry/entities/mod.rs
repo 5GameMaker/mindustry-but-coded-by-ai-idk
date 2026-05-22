@@ -146,12 +146,21 @@ pub use unit_sorts::{
     BuildingPriorityTarget, SortTarget,
 };
 pub use units::{
-    AiBlockStatus, AiCircleAttackInput, AiCircleInput, AiCircleTarget, AiController,
-    AiControllerTimers, AiFaceMovementInput, AiFacePlan, AiFaceTargetInput, AiFlaggedTarget,
-    AiMountInput, AiMountPlan, AiMovePlan, AiMoveToInput, AiPathfindInput, AiTargetSnapshot,
-    AiUnloadPayloadInput, AiVisualInput, AiVisualPlan, AiWeaponInfo, AiWeaponPlan,
-    AiWeaponUpdateInput, BuildPlan, StatusEntry, UnitController, WeaponMount, AI_ROTATE_BACK_TIMER,
-    AI_TIMER_COUNT, AI_TIMER_TARGET, AI_TIMER_TARGET2, AI_TIMER_TARGET3, AI_TIMER_TARGET4,
+    units_any, units_any_entities, units_any_entities_centered, units_best_enemy,
+    units_best_target, units_can_create, units_can_interact, units_closest, units_closest_building,
+    units_closest_enemy, units_closest_in_range, units_closest_overlap, units_closest_target,
+    units_count, units_find_enemy_tile, units_get_cap, units_get_string_cap,
+    units_invalidate_target, units_is_hittable, units_near_enemy, units_unit_cap_death_plan,
+    units_unit_death_plan, units_unit_despawn_plan, units_unit_destroy_plan,
+    units_unit_env_death_plan, units_unit_safe_death_plan, AiBlockStatus, AiCircleAttackInput,
+    AiCircleInput, AiCircleTarget, AiController, AiControllerTimers, AiFaceMovementInput,
+    AiFacePlan, AiFaceTargetInput, AiFlaggedTarget, AiMountInput, AiMountPlan, AiMovePlan,
+    AiMoveToInput, AiPathfindInput, AiTargetSnapshot, AiUnloadPayloadInput, AiVisualInput,
+    AiVisualPlan, AiWeaponInfo, AiWeaponPlan, AiWeaponUpdateInput, BuildPlan, StatusEntry,
+    UnitCapRules, UnitCapTeam, UnitCapType, UnitController, UnitLifecycleEffect, UnitLifecyclePlan,
+    UnitLifecycleSnapshot, UnitsEntityTileSnapshot, UnitsRect, UnitsTargetKind,
+    UnitsTargetSnapshot, UnitsTeamPresence, WeaponMount, AI_ROTATE_BACK_TIMER, AI_TIMER_COUNT,
+    AI_TIMER_TARGET, AI_TIMER_TARGET2, AI_TIMER_TARGET3, AI_TIMER_TARGET4, UNITS_CAP_INFINITY,
 };
 
 // Mirrors upstream core/src/mindustry/entities. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.

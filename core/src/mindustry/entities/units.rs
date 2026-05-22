@@ -778,6 +778,663 @@ pub struct AiMovePlan {
     pub direct_move: bool,
 }
 
+pub const UNITS_CAP_INFINITY: i32 = i32::MAX;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnitCapRules {
+    pub wave_team: TeamId,
+    pub pvp: bool,
+    pub campaign: bool,
+    pub disable_unit_cap: bool,
+    pub unit_cap_variable: bool,
+    pub unit_cap: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnitCapTeam {
+    pub team: TeamId,
+    pub ignore_unit_cap: bool,
+    pub data_unit_cap: i32,
+    pub type_count: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnitCapType {
+    pub use_unit_cap: bool,
+    pub banned: bool,
+}
+
+pub fn units_get_cap(team: UnitCapTeam, rules: UnitCapRules) -> i32 {
+    if (team.team == rules.wave_team && !rules.pvp)
+        || (rules.campaign && team.team == rules.wave_team)
+        || rules.disable_unit_cap
+        || team.ignore_unit_cap
+    {
+        UNITS_CAP_INFINITY
+    } else if rules.unit_cap_variable {
+        (rules.unit_cap + team.data_unit_cap).max(0)
+    } else {
+        rules.unit_cap.max(0)
+    }
+}
+
+pub fn units_get_string_cap(team: UnitCapTeam, rules: UnitCapRules) -> String {
+    let cap = units_get_cap(team, rules);
+    if cap >= UNITS_CAP_INFINITY - 1 {
+        "∞".into()
+    } else {
+        cap.to_string()
+    }
+}
+
+pub fn units_can_create(team: UnitCapTeam, unit_type: UnitCapType, rules: UnitCapRules) -> bool {
+    !unit_type.use_unit_cap || (team.type_count < units_get_cap(team, rules) && !unit_type.banned)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitsRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl UnitsRect {
+    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    pub fn centered(x: f32, y: f32, size: f32) -> Self {
+        Self::new(x - size / 2.0, y - size / 2.0, size, size)
+    }
+
+    pub fn overlaps(self, other: Self) -> bool {
+        self.x < other.x + other.width
+            && self.x + self.width > other.x
+            && self.y < other.y + other.height
+            && self.y + self.height > other.y
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitsTargetKind {
+    Unit,
+    Building,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitsTargetSnapshot {
+    pub entity: EntityRef,
+    pub kind: UnitsTargetKind,
+    pub team: TeamId,
+    pub position: Vec2,
+    pub hit_size: f32,
+    pub valid: bool,
+    pub dead: bool,
+    pub targetable: bool,
+    pub in_fog: bool,
+    pub flying: bool,
+    pub target_priority: f32,
+}
+
+impl UnitsTargetSnapshot {
+    pub fn unit(entity_id: i32, team: TeamId, x: f32, y: f32) -> Self {
+        Self {
+            entity: EntityRef::new(entity_id),
+            kind: UnitsTargetKind::Unit,
+            team,
+            position: Vec2::new(x, y),
+            hit_size: 8.0,
+            valid: true,
+            dead: false,
+            targetable: true,
+            in_fog: false,
+            flying: false,
+            target_priority: 0.0,
+        }
+    }
+
+    pub fn building(entity_id: i32, team: TeamId, x: f32, y: f32) -> Self {
+        Self {
+            kind: UnitsTargetKind::Building,
+            ..Self::unit(entity_id, team, x, y)
+        }
+    }
+
+    pub fn dst2(self, x: f32, y: f32) -> f32 {
+        dst2(self.position, Vec2::new(x, y))
+    }
+
+    pub fn dst(self, x: f32, y: f32) -> f32 {
+        self.dst2(x, y).sqrt()
+    }
+
+    pub fn check_target(self, air: bool, ground: bool) -> bool {
+        match self.kind {
+            UnitsTargetKind::Building => ground,
+            UnitsTargetKind::Unit => (self.flying && air) || (!self.flying && ground),
+            UnitsTargetKind::Other => air || ground,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitsEntityTileSnapshot {
+    pub entity: EntityRef,
+    pub tile_rect: UnitsRect,
+    pub grounded: bool,
+    pub allow_leg_step: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitLifecycleEffect {
+    UnitCapKill,
+    UnitEnvKill,
+    UnitDespawn,
+    DeathExplosion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitLifecyclePlan {
+    pub unit: EntityRef,
+    pub mark_dead: bool,
+    pub killed: bool,
+    pub destroy: bool,
+    pub remove: bool,
+    pub post_destroy_call: bool,
+    pub removed_entity_id: Option<i32>,
+    pub effect: Option<UnitLifecycleEffect>,
+    pub shake: Option<f32>,
+    pub sound_volume: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitLifecycleSnapshot {
+    pub unit: EntityRef,
+    pub x: f32,
+    pub y: f32,
+    pub hit_size: f32,
+    pub death_shake: f32,
+    pub death_sound_volume: f32,
+}
+
+pub fn units_unit_cap_death_plan(unit: Option<EntityRef>) -> Option<UnitLifecyclePlan> {
+    unit.map(|unit| UnitLifecyclePlan {
+        unit,
+        mark_dead: true,
+        killed: false,
+        destroy: false,
+        remove: false,
+        post_destroy_call: true,
+        removed_entity_id: unit.id,
+        effect: Some(UnitLifecycleEffect::UnitCapKill),
+        shake: None,
+        sound_volume: None,
+    })
+}
+
+pub fn units_unit_env_death_plan(unit: Option<EntityRef>) -> Option<UnitLifecyclePlan> {
+    unit.map(|unit| UnitLifecyclePlan {
+        unit,
+        mark_dead: true,
+        killed: false,
+        destroy: false,
+        remove: false,
+        post_destroy_call: true,
+        removed_entity_id: unit.id,
+        effect: Some(UnitLifecycleEffect::UnitEnvKill),
+        shake: None,
+        sound_volume: None,
+    })
+}
+
+pub fn units_unit_death_plan(uid: i32, unit_exists: bool) -> UnitLifecyclePlan {
+    UnitLifecyclePlan {
+        unit: EntityRef::new(uid),
+        mark_dead: false,
+        killed: unit_exists,
+        destroy: false,
+        remove: false,
+        post_destroy_call: false,
+        removed_entity_id: Some(uid),
+        effect: None,
+        shake: None,
+        sound_volume: None,
+    }
+}
+
+pub fn units_unit_destroy_plan(uid: i32, unit_exists: bool) -> UnitLifecyclePlan {
+    UnitLifecyclePlan {
+        destroy: unit_exists,
+        ..units_unit_death_plan(uid, false)
+    }
+}
+
+pub fn units_unit_despawn_plan(unit: Option<EntityRef>) -> Option<UnitLifecyclePlan> {
+    unit.map(|unit| UnitLifecyclePlan {
+        unit,
+        mark_dead: false,
+        killed: false,
+        destroy: false,
+        remove: true,
+        post_destroy_call: false,
+        removed_entity_id: None,
+        effect: Some(UnitLifecycleEffect::UnitDespawn),
+        shake: None,
+        sound_volume: None,
+    })
+}
+
+pub fn units_unit_safe_death_plan(
+    unit: Option<UnitLifecycleSnapshot>,
+) -> Option<UnitLifecyclePlan> {
+    unit.map(|unit| UnitLifecyclePlan {
+        unit: unit.unit,
+        mark_dead: false,
+        killed: false,
+        destroy: false,
+        remove: true,
+        post_destroy_call: false,
+        removed_entity_id: None,
+        effect: Some(UnitLifecycleEffect::DeathExplosion),
+        shake: Some(if unit.death_shake < 0.0 {
+            unit.hit_size / 3.0
+        } else {
+            unit.death_shake
+        }),
+        sound_volume: Some(unit.death_sound_volume),
+    })
+}
+
+pub fn units_can_interact(
+    player_team: Option<TeamId>,
+    tile_team: Option<TeamId>,
+    tile_interactable: bool,
+    editor: bool,
+) -> bool {
+    player_team.is_none() || tile_team.is_none() || tile_interactable || editor
+}
+
+pub fn units_is_hittable(target: Option<&UnitsTargetSnapshot>, air: bool, ground: bool) -> bool {
+    target
+        .map(|target| target.check_target(air, ground))
+        .unwrap_or(false)
+}
+
+pub fn units_invalidate_target(
+    target: Option<&UnitsTargetSnapshot>,
+    team: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+) -> bool {
+    let Some(target) = target else {
+        return true;
+    };
+
+    (range < f32::MAX / 2.0
+        && !within(
+            target.position,
+            Vec2::new(x, y),
+            range + target.hit_size / 2.0,
+        ))
+        || target.team == team
+        || !target.valid
+        || (target.kind == UnitsTargetKind::Unit && !target.targetable)
+}
+
+pub fn units_any_entities(
+    entities: &[UnitsEntityTileSnapshot],
+    rect: UnitsRect,
+    ground: bool,
+) -> bool {
+    entities.iter().any(|unit| {
+        (unit.grounded && !unit.allow_leg_step) == ground && unit.tile_rect.overlaps(rect)
+    })
+}
+
+pub fn units_any_entities_centered(
+    entities: &[UnitsEntityTileSnapshot],
+    x: f32,
+    y: f32,
+    size: f32,
+    ground: bool,
+) -> bool {
+    units_any_entities(entities, UnitsRect::centered(x, y, size), ground)
+}
+
+pub fn units_count<F>(units: &[UnitsTargetSnapshot], rect: UnitsRect, mut filter: F) -> usize
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    units
+        .iter()
+        .filter(|unit| {
+            filter(unit)
+                && UnitsRect::new(
+                    unit.position.x - unit.hit_size / 2.0,
+                    unit.position.y - unit.hit_size / 2.0,
+                    unit.hit_size,
+                    unit.hit_size,
+                )
+                .overlaps(rect)
+        })
+        .count()
+}
+
+pub fn units_any<F>(units: &[UnitsTargetSnapshot], rect: UnitsRect, filter: F) -> bool
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    units_count(units, rect, filter) > 0
+}
+
+pub fn units_find_enemy_tile<F>(
+    buildings: &[UnitsTargetSnapshot],
+    team: TeamId,
+    derelict: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+    mut pred: F,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    if team == derelict {
+        return None;
+    }
+
+    buildings
+        .iter()
+        .copied()
+        .filter(|target| {
+            target.kind == UnitsTargetKind::Building
+                && target.team != team
+                && target.team != derelict
+                && pred(target)
+                && within(
+                    target.position,
+                    Vec2::new(x, y),
+                    range + target.hit_size / 2.0,
+                )
+        })
+        .min_by(|left, right| {
+            left.dst2(x, y)
+                .partial_cmp(&right.dst2(x, y))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+pub fn units_closest_building<F>(
+    buildings: &[UnitsTargetSnapshot],
+    team: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+    mut pred: F,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    buildings
+        .iter()
+        .copied()
+        .filter(|building| {
+            building.kind == UnitsTargetKind::Building
+                && building.team == team
+                && pred(building)
+                && building.dst(x, y) - building.hit_size / 2.0 <= range
+        })
+        .min_by(|left, right| {
+            left.dst(x, y)
+                .partial_cmp(&right.dst(x, y))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+pub fn units_closest_enemy<F>(
+    units: &[UnitsTargetSnapshot],
+    team: TeamId,
+    derelict: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+    mut predicate: F,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    if team == derelict {
+        return None;
+    }
+
+    let mut result = None;
+    let mut cdist = 0.0;
+    let mut cpriority = -99999.0;
+    for unit in units.iter().copied() {
+        if unit.kind != UnitsTargetKind::Unit
+            || unit.dead
+            || !predicate(&unit)
+            || unit.team == team
+            || unit.team == derelict
+            || !unit.targetable
+            || unit.in_fog
+        {
+            continue;
+        }
+
+        let distance = unit.dst2(x, y) - unit.hit_size * unit.hit_size;
+        if distance < range * range
+            && (result.is_none() || distance < cdist || unit.target_priority > cpriority)
+            && unit.target_priority >= cpriority
+        {
+            result = Some(unit);
+            cdist = distance;
+            cpriority = unit.target_priority;
+        }
+    }
+    result
+}
+
+pub fn units_best_enemy<F, S>(
+    units: &[UnitsTargetSnapshot],
+    team: TeamId,
+    derelict: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+    mut predicate: F,
+    mut sort: S,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+    S: FnMut(&UnitsTargetSnapshot, f32, f32) -> f32,
+{
+    if team == derelict {
+        return None;
+    }
+
+    let mut result = None;
+    let mut cdist = 0.0;
+    let mut cpriority = -99999.0;
+    for unit in units.iter().copied() {
+        if unit.kind != UnitsTargetKind::Unit
+            || unit.dead
+            || !predicate(&unit)
+            || unit.team == team
+            || unit.team == derelict
+            || !within(unit.position, Vec2::new(x, y), range + unit.hit_size / 2.0)
+            || !unit.targetable
+            || unit.in_fog
+        {
+            continue;
+        }
+
+        let cost = sort(&unit, x, y);
+        if (result.is_none() || cost < cdist || unit.target_priority > cpriority)
+            && unit.target_priority >= cpriority
+        {
+            result = Some(unit);
+            cdist = cost;
+            cpriority = unit.target_priority;
+        }
+    }
+    result
+}
+
+pub fn units_closest_target<F, B>(
+    units: &[UnitsTargetSnapshot],
+    buildings: &[UnitsTargetSnapshot],
+    team: TeamId,
+    derelict: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+    unit_pred: F,
+    tile_pred: B,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+    B: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    units_closest_enemy(units, team, derelict, x, y, range, unit_pred)
+        .or_else(|| units_find_enemy_tile(buildings, team, derelict, x, y, range, tile_pred))
+}
+
+pub fn units_best_target<F, B, S>(
+    units: &[UnitsTargetSnapshot],
+    buildings: &[UnitsTargetSnapshot],
+    team: TeamId,
+    derelict: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+    unit_pred: F,
+    tile_pred: B,
+    sort: S,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+    B: FnMut(&UnitsTargetSnapshot) -> bool,
+    S: FnMut(&UnitsTargetSnapshot, f32, f32) -> f32,
+{
+    units_best_enemy(units, team, derelict, x, y, range, unit_pred, sort)
+        .or_else(|| units_find_enemy_tile(buildings, team, derelict, x, y, range, tile_pred))
+}
+
+pub fn units_closest<F>(
+    units: &[UnitsTargetSnapshot],
+    team: TeamId,
+    x: f32,
+    y: f32,
+    mut predicate: F,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    units
+        .iter()
+        .copied()
+        .filter(|unit| unit.team == team && predicate(unit))
+        .min_by(|left, right| {
+            left.dst2(x, y)
+                .partial_cmp(&right.dst2(x, y))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+pub fn units_closest_in_range<F>(
+    units: &[UnitsTargetSnapshot],
+    team: TeamId,
+    x: f32,
+    y: f32,
+    range: f32,
+    mut predicate: F,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    units
+        .iter()
+        .copied()
+        .filter(|unit| {
+            unit.team == team
+                && unit.valid
+                && predicate(unit)
+                && within(unit.position, Vec2::new(x, y), range + unit.hit_size / 2.0)
+        })
+        .min_by(|left, right| {
+            left.dst2(x, y)
+                .partial_cmp(&right.dst2(x, y))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+pub fn units_closest_overlap<F>(
+    units: &[UnitsTargetSnapshot],
+    team: TeamId,
+    rect: UnitsRect,
+    mut predicate: F,
+) -> Option<UnitsTargetSnapshot>
+where
+    F: FnMut(&UnitsTargetSnapshot) -> bool,
+{
+    units
+        .iter()
+        .copied()
+        .filter(|unit| {
+            unit.team == team
+                && unit.valid
+                && predicate(unit)
+                && UnitsRect::new(
+                    unit.position.x - unit.hit_size / 2.0,
+                    unit.position.y - unit.hit_size / 2.0,
+                    unit.hit_size,
+                    unit.hit_size,
+                )
+                .overlaps(rect)
+        })
+        .min_by(|left, right| {
+            left.dst2(rect.x, rect.y)
+                .partial_cmp(&right.dst2(rect.x, rect.y))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitsTeamPresence {
+    pub team: TeamId,
+    pub unit_rects: Vec<UnitsRect>,
+    pub turret_rects: Vec<UnitsRect>,
+}
+
+pub fn units_near_enemy(
+    teams: &[UnitsTeamPresence],
+    team: TeamId,
+    derelict: TeamId,
+    rect: UnitsRect,
+) -> bool {
+    teams.iter().any(|other| {
+        other.team != team
+            && other.team != derelict
+            && (other
+                .unit_rects
+                .iter()
+                .any(|candidate| candidate.overlaps(rect))
+                || other
+                    .turret_rects
+                    .iter()
+                    .any(|candidate| candidate.overlaps(rect)))
+    })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusEntry {
     pub effect: Option<StatusEffect>,
@@ -1172,10 +1829,17 @@ mod tests {
     use crate::mindustry::world::block::Block;
 
     use super::{
-        AiBlockStatus, AiCircleInput, AiController, AiFaceMovementInput, AiFaceTargetInput,
-        AiFlaggedTarget, AiMountInput, AiMoveToInput, AiPathfindInput, AiTargetSnapshot,
-        AiUnloadPayloadInput, AiVisualInput, AiWeaponInfo, AiWeaponUpdateInput, BuildPlan,
-        StatusEntry, UnitController, WeaponMount, AI_ROTATE_BACK_TIMER, AI_TIMER_TARGET,
+        units_any, units_any_entities_centered, units_best_enemy, units_can_create,
+        units_can_interact, units_closest_building, units_closest_enemy, units_closest_in_range,
+        units_closest_target, units_count, units_get_cap, units_get_string_cap,
+        units_invalidate_target, units_is_hittable, units_near_enemy, units_unit_cap_death_plan,
+        units_unit_death_plan, units_unit_safe_death_plan, AiBlockStatus, AiCircleInput,
+        AiController, AiFaceMovementInput, AiFaceTargetInput, AiFlaggedTarget, AiMountInput,
+        AiMoveToInput, AiPathfindInput, AiTargetSnapshot, AiUnloadPayloadInput, AiVisualInput,
+        AiWeaponInfo, AiWeaponUpdateInput, BuildPlan, StatusEntry, UnitCapRules, UnitCapTeam,
+        UnitCapType, UnitController, UnitLifecycleEffect, UnitLifecycleSnapshot,
+        UnitsEntityTileSnapshot, UnitsRect, UnitsTargetSnapshot, UnitsTeamPresence, WeaponMount,
+        AI_ROTATE_BACK_TIMER, AI_TIMER_TARGET, UNITS_CAP_INFINITY,
     };
 
     #[derive(Debug)]
@@ -1531,6 +2195,194 @@ mod tests {
         let aim = rotate_back.mounts[0].aim.unwrap();
         assert!(aim.x.abs() < 0.0001);
         assert!((aim.y - 5.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn units_cap_create_and_lifecycle_plans_follow_upstream_branches() {
+        let rules = UnitCapRules {
+            wave_team: TeamId(2),
+            pvp: false,
+            campaign: false,
+            disable_unit_cap: false,
+            unit_cap_variable: true,
+            unit_cap: 10,
+        };
+        let team = UnitCapTeam {
+            team: TeamId(1),
+            ignore_unit_cap: false,
+            data_unit_cap: 3,
+            type_count: 12,
+        };
+        assert_eq!(units_get_cap(team, rules), 13);
+        assert_eq!(units_get_string_cap(team, rules), "13");
+        assert!(units_can_create(
+            team,
+            UnitCapType {
+                use_unit_cap: true,
+                banned: false,
+            },
+            rules
+        ));
+
+        let capped = UnitCapTeam {
+            type_count: 13,
+            ..team
+        };
+        assert!(!units_can_create(
+            capped,
+            UnitCapType {
+                use_unit_cap: true,
+                banned: false,
+            },
+            rules
+        ));
+
+        let wave = UnitCapTeam {
+            team: TeamId(2),
+            ..team
+        };
+        assert_eq!(units_get_cap(wave, rules), UNITS_CAP_INFINITY);
+        assert_eq!(units_get_string_cap(wave, rules), "∞");
+
+        let cap_death = units_unit_cap_death_plan(Some(EntityRef::new(5))).unwrap();
+        assert!(cap_death.mark_dead);
+        assert!(cap_death.post_destroy_call);
+        assert_eq!(cap_death.effect, Some(UnitLifecycleEffect::UnitCapKill));
+
+        let death = units_unit_death_plan(6, true);
+        assert_eq!(death.removed_entity_id, Some(6));
+        assert!(death.killed);
+
+        let safe = units_unit_safe_death_plan(Some(UnitLifecycleSnapshot {
+            unit: EntityRef::new(7),
+            x: 10.0,
+            y: 20.0,
+            hit_size: 30.0,
+            death_shake: -1.0,
+            death_sound_volume: 0.6,
+        }))
+        .unwrap();
+        assert!(safe.remove);
+        assert_eq!(safe.effect, Some(UnitLifecycleEffect::DeathExplosion));
+        assert_eq!(safe.shake, Some(10.0));
+        assert_eq!(safe.sound_volume, Some(0.6));
+    }
+
+    #[test]
+    fn units_target_validation_hittable_and_entity_rect_checks_are_pure() {
+        let team = TeamId(1);
+        let enemy = TeamId(2);
+        let mut flying = UnitsTargetSnapshot::unit(1, enemy, 10.0, 0.0);
+        flying.flying = true;
+        flying.hit_size = 4.0;
+        assert!(units_is_hittable(Some(&flying), true, false));
+        assert!(!units_is_hittable(Some(&flying), false, true));
+        assert!(!units_invalidate_target(Some(&flying), team, 0.0, 0.0, 8.0));
+        assert!(units_invalidate_target(Some(&flying), team, 0.0, 0.0, 1.0));
+
+        let same_team = UnitsTargetSnapshot::unit(2, team, 0.0, 0.0);
+        assert!(units_invalidate_target(
+            Some(&same_team),
+            team,
+            0.0,
+            0.0,
+            f32::MAX
+        ));
+        assert!(units_invalidate_target(None, team, 0.0, 0.0, f32::MAX));
+
+        assert!(units_can_interact(Some(team), Some(enemy), true, false));
+        assert!(units_can_interact(None, Some(enemy), false, false));
+        assert!(units_can_interact(Some(team), Some(enemy), false, true));
+        assert!(!units_can_interact(Some(team), Some(enemy), false, false));
+
+        let entities = vec![
+            UnitsEntityTileSnapshot {
+                entity: EntityRef::new(1),
+                tile_rect: UnitsRect::new(-2.0, -2.0, 4.0, 4.0),
+                grounded: true,
+                allow_leg_step: false,
+            },
+            UnitsEntityTileSnapshot {
+                entity: EntityRef::new(2),
+                tile_rect: UnitsRect::new(20.0, 20.0, 4.0, 4.0),
+                grounded: true,
+                allow_leg_step: true,
+            },
+        ];
+        assert!(units_any_entities_centered(&entities, 0.0, 0.0, 8.0, true));
+        assert!(!units_any_entities_centered(
+            &entities, 0.0, 0.0, 8.0, false
+        ));
+    }
+
+    #[test]
+    fn units_selection_helpers_match_enemy_priority_and_fallback_order() {
+        let team = TeamId(1);
+        let enemy = TeamId(2);
+        let derelict = TeamId(255);
+        let mut close = UnitsTargetSnapshot::unit(1, enemy, 5.0, 0.0);
+        close.hit_size = 1.0;
+        close.target_priority = 0.0;
+        let mut far_priority = UnitsTargetSnapshot::unit(2, enemy, 20.0, 0.0);
+        far_priority.hit_size = 1.0;
+        far_priority.target_priority = 10.0;
+        let ally = UnitsTargetSnapshot::unit(3, team, 1.0, 0.0);
+        let units = vec![close, far_priority, ally];
+
+        let selected =
+            units_closest_enemy(&units, team, derelict, 0.0, 0.0, 30.0, |_| true).unwrap();
+        assert_eq!(selected.entity, EntityRef::new(2));
+
+        let best = units_best_enemy(
+            &units,
+            team,
+            derelict,
+            0.0,
+            0.0,
+            30.0,
+            |_| true,
+            |unit, _, _| {
+                if unit.entity == EntityRef::new(1) {
+                    0.0
+                } else {
+                    100.0
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(best.entity, EntityRef::new(2));
+
+        let buildings = vec![UnitsTargetSnapshot::building(10, enemy, 3.0, 0.0)];
+        let no_units = units_closest_target(
+            &[],
+            &buildings,
+            team,
+            derelict,
+            0.0,
+            0.0,
+            10.0,
+            |_| true,
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(no_units.entity, EntityRef::new(10));
+
+        let closest_ally = units_closest_in_range(&units, team, 0.0, 0.0, 5.0, |_| true).unwrap();
+        assert_eq!(closest_ally.entity, EntityRef::new(3));
+
+        let building = units_closest_building(&buildings, enemy, 0.0, 0.0, 10.0, |_| true).unwrap();
+        assert_eq!(building.entity, EntityRef::new(10));
+
+        let rect = UnitsRect::new(-1.0, -1.0, 8.0, 8.0);
+        assert_eq!(units_count(&units, rect, |_| true), 2);
+        assert!(units_any(&units, rect, |unit| unit.team == enemy));
+
+        let present = vec![UnitsTeamPresence {
+            team: enemy,
+            unit_rects: vec![UnitsRect::new(2.0, 2.0, 4.0, 4.0)],
+            turret_rects: Vec::new(),
+        }];
+        assert!(units_near_enemy(&present, team, derelict, rect));
     }
 
     #[test]
