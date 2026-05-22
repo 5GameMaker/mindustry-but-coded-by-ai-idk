@@ -2108,6 +2108,90 @@ mod tests {
     }
 
     #[test]
+    fn accepted_connect_then_world_data_then_connect_confirm_completes_join_flags() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(53),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "10.0.0.53:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(53),
+                false,
+                PacketKind::ConnectPacket(connect_packet("player")),
+            );
+        }
+
+        {
+            let state = server.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.pending_world_data_connections, vec![53]);
+            let connection = state.connection_states.get(&53).unwrap();
+            assert!(connection.has_begun_connecting);
+            assert!(!connection.has_connected);
+            assert!(!connection.player_added);
+        }
+
+        let sent_count = server
+            .send_pending_world_data(|connection_id| vec![connection_id as u8, 1, 2, 3])
+            .unwrap();
+        assert_eq!(sent_count, 1);
+
+        {
+            let sent = sent.lock().unwrap();
+            assert_eq!(sent.len(), 2);
+            assert_eq!(sent[0].0, 53);
+            assert_eq!(sent[1].0, 53);
+            assert!(sent.iter().all(|(_, _, reliable)| *reliable));
+            match &sent[0].1 {
+                PacketKind::StreamBegin(begin) => {
+                    assert_eq!(begin.id, 0);
+                    assert_eq!(begin.total, 4);
+                    assert_eq!(begin.packet_type, packet_ids::WORLD_STREAM);
+                }
+                other => panic!("unexpected first world stream packet: {other:?}"),
+            }
+            match &sent[1].1 {
+                PacketKind::StreamChunk(chunk) => assert_eq!(chunk.data, vec![53, 1, 2, 3]),
+                other => panic!("unexpected second world stream packet: {other:?}"),
+            }
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(53),
+                false,
+                PacketKind::ConnectConfirmCallPacket(ConnectConfirmCallPacket),
+            );
+        }
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert!(state.pending_world_data_connections.is_empty());
+        assert_eq!(state.last_world_data_connection_id, Some(53));
+        assert_eq!(state.last_world_data_bytes, Some(4));
+        assert_eq!(state.world_streams_sent, 1);
+        assert_eq!(state.last_connect_confirm_connection_id, Some(53));
+        let connection = state.connection_states.get(&53).unwrap();
+        assert!(connection.has_begun_connecting);
+        assert!(connection.has_connected);
+        assert!(connection.player_added);
+        assert_eq!(connection.sent.len(), 2);
+        assert!(matches!(connection.sent[0].0, SentPacket::StreamBegin(_)));
+        assert!(matches!(connection.sent[1].0, SentPacket::StreamChunk(_)));
+    }
+
+    #[test]
     fn connect_packet_listener_validates_and_flushes_kick_without_recursive_net_lock() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
