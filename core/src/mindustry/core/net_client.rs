@@ -11,10 +11,11 @@ use crate::mindustry::net::{
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect,
     ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket, ProviderEvent,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBuilder,
-    Streamable, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
+    PingLocationCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    RotateBlockCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
     UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
     UnitEnteredPayloadCallPacket,
 };
@@ -188,6 +189,9 @@ pub struct NetClientState {
     pub last_unit_entered_payload: Option<UnitEnteredPayloadCallPacket>,
     pub last_unit_entered_payload_at: Option<Instant>,
     pub unit_entered_payload_packets_seen: u64,
+    pub last_ping_location: Option<PingLocationCallPacket>,
+    pub last_ping_location_at: Option<Instant>,
+    pub ping_location_packets_seen: u64,
     pub last_building_control_select: Option<BuildingControlSelectCallPacket>,
     pub last_building_control_select_at: Option<Instant>,
     pub building_control_select_packets_seen: u64,
@@ -320,6 +324,10 @@ impl fmt::Debug for NetClientState {
             .field(
                 "unit_entered_payload_packets_seen",
                 &self.unit_entered_payload_packets_seen,
+            )
+            .field(
+                "ping_location_packets_seen",
+                &self.ping_location_packets_seen,
             )
             .field(
                 "building_control_select_packets_seen",
@@ -1134,6 +1142,13 @@ impl NetClient {
                         state.last_unit_entered_payload_at = Some(now);
                         false
                     }
+                    PacketKind::PingLocationCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.ping_location_packets_seen += 1;
+                        state.last_ping_location = Some(packet.clone());
+                        state.last_ping_location_at = Some(now);
+                        false
+                    }
                     PacketKind::BuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.building_control_select_packets_seen += 1;
@@ -1350,12 +1365,13 @@ mod tests {
         ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, Disconnect,
         DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback, Net,
         NetConnection, NetProvider, PacketKind, PayloadDroppedCallPacket,
-        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingResponseCallPacket,
-        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-        RequestUnitPayloadCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin,
-        StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket,
-        TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
+        PingResponseCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TileConfigCallPacket,
+        TileTapCallPacket, TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket,
+        UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+        WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -2119,6 +2135,12 @@ mod tests {
             unit: UnitRef::Unit { id: 408 },
             build: secondary_build,
         };
+        let ping_location = PingLocationCallPacket {
+            player_id: Some(309),
+            x: 11.5,
+            y: 22.5,
+            text: "go".into(),
+        };
         let building_control_select = BuildingControlSelectCallPacket {
             player: EntityRef::new(306),
             build: primary_build,
@@ -2163,6 +2185,7 @@ mod tests {
             net.handle_client_received(PacketKind::UnitEnteredPayloadCallPacket(
                 unit_entered_payload.clone(),
             ));
+            net.handle_client_received(PacketKind::PingLocationCallPacket(ping_location.clone()));
             net.handle_client_received(PacketKind::UnitBuildingControlSelectCallPacket(
                 unit_building_control_select.clone(),
             ));
@@ -2225,6 +2248,9 @@ mod tests {
             Some(&unit_entered_payload)
         );
         assert!(state.last_unit_entered_payload_at.is_some());
+        assert_eq!(state.ping_location_packets_seen, 1);
+        assert_eq!(state.last_ping_location.as_ref(), Some(&ping_location));
+        assert!(state.last_ping_location_at.is_some());
         assert_eq!(state.building_control_select_packets_seen, 1);
         assert_eq!(
             state.last_building_control_select.as_ref(),
