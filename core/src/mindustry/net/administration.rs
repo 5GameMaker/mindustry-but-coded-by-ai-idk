@@ -103,6 +103,20 @@ impl Administration {
         info.last_kicked = info.last_kicked.max(until_millis);
     }
 
+    pub fn get_kick_time(&self, uuid: &str, ip: &str) -> i64 {
+        let info_kick = self
+            .player_info
+            .get(uuid)
+            .map(|info| info.last_kicked)
+            .unwrap_or_default();
+        let ip_kick = self.kicked_ips.get(ip).copied().unwrap_or_default();
+        info_kick.max(ip_kick)
+    }
+
+    pub fn is_recently_kicked(&self, uuid: &str, ip: &str, now_millis: i64) -> bool {
+        self.get_kick_time(uuid, ip) > now_millis
+    }
+
     pub fn update_player_joined(
         &mut self,
         id: impl Into<String>,
@@ -152,6 +166,30 @@ impl Administration {
             .get(id)
             .map(|info| info.banned)
             .unwrap_or(false)
+    }
+
+    pub fn ban_name_pattern(&mut self, pattern: impl Into<String>) -> bool {
+        let pattern = pattern.into();
+        if self
+            .banned_names
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&pattern))
+        {
+            return false;
+        }
+        self.banned_names.push(pattern);
+        true
+    }
+
+    pub fn is_name_banned(&self, name: &str) -> bool {
+        if self.banned_names.is_empty() {
+            return false;
+        }
+
+        let name = name.to_ascii_lowercase();
+        self.banned_names
+            .iter()
+            .any(|pattern| name.contains(&pattern.to_ascii_lowercase()))
     }
 
     pub fn get_admins(&self) -> Vec<PlayerInfo> {
@@ -785,6 +823,21 @@ mod tests {
         assert!(admin.unadmin_player("uuid"));
         assert!(!admin.unadmin_player("uuid"));
         assert!(!admin.is_admin("uuid", "usid-b"));
+    }
+
+    #[test]
+    fn kick_time_and_name_bans_feed_java_connection_guards() {
+        let mut admin = Administration::default();
+        admin.handle_kicked("uuid", "1.2.3.4", 2_000);
+
+        assert_eq!(admin.get_kick_time("uuid", "1.2.3.4"), 2_000);
+        assert!(admin.is_recently_kicked("uuid", "1.2.3.4", 1_999));
+        assert!(!admin.is_recently_kicked("uuid", "1.2.3.4", 2_000));
+
+        assert!(admin.ban_name_pattern("blocked"));
+        assert!(!admin.ban_name_pattern("BLOCKED"));
+        assert!(admin.is_name_banned("my Blocked player"));
+        assert!(!admin.is_name_banned("ordinary"));
     }
 
     #[test]

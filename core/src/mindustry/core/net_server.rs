@@ -122,6 +122,7 @@ pub struct NetServerState {
     pub server: bool,
     pub administration: Administration,
     pub steam_admin_data: SteamAdminData,
+    pub player_limit: i32,
     pub listen_port: Option<u16>,
     pub connections: Vec<NetConnection>,
     pub connection_states: HashMap<i32, NetConnection>,
@@ -1011,9 +1012,28 @@ impl NetServer {
             || state
                 .steam_admin_data
                 .is_banned(&context.connection_address);
+        context.name_banned = state.administration.is_name_banned(&packet.name);
+        context.recent_kick_active = state.administration.is_recently_kicked(
+            &normalized_uuid,
+            &context.connection_address,
+            Self::current_millis(),
+        );
         context.whitelisted = state
             .administration
             .is_whitelisted(&normalized_uuid, &packet.usid);
+        let is_admin = state
+            .administration
+            .is_admin(&normalized_uuid, &packet.usid)
+            || state.steam_admin_data.is_admin(&context.connection_address);
+        let connected_players = state
+            .connection_states
+            .values()
+            .filter(|connection| {
+                connection.player_added && !connection.kicked && !connection.has_disconnected
+            })
+            .count() as i32;
+        context.player_limit_reached =
+            state.player_limit > 0 && connected_players >= state.player_limit && !is_admin;
 
         for (other_connection_id, other) in &state.connection_states {
             if *other_connection_id == connection_id || other.kicked || other.has_disconnected {
@@ -1966,6 +1986,46 @@ mod tests {
 
         let plan = NetServer::validate_connect_packet(&packet, &context);
         assert_eq!(plan.kick_reason(), Some(KickReason::Banned));
+    }
+
+    #[test]
+    fn connect_packet_context_fills_name_recent_kick_and_player_limit_rejections() {
+        let mut packet = connect_packet("blocked-name");
+        packet.uuid = "limited".into();
+        packet.usid = "limited-usid".into();
+
+        let mut state = NetServerState {
+            player_limit: 1,
+            ..Default::default()
+        };
+        state
+            .connection_states
+            .insert(10, NetConnection::new("5.5.5.5"));
+        let mut existing = NetConnection::new("6.6.6.6");
+        existing.player_added = true;
+        state.connection_states.insert(11, existing);
+        state.administration.ban_name_pattern("blocked");
+        state.administration.handle_kicked(
+            "limited",
+            "5.5.5.5",
+            NetServer::current_millis() + 60_000,
+        );
+
+        let context = NetServer::connect_packet_validation_context(&state, 10, &packet);
+
+        assert!(context.name_banned);
+        assert!(context.recent_kick_active);
+        assert!(context.player_limit_reached);
+        assert_eq!(
+            NetServer::validate_connect_packet(&packet, &context).kick_reason(),
+            Some(KickReason::Banned)
+        );
+
+        state
+            .administration
+            .admin_player(packet.uuid.clone(), packet.usid.clone());
+        let context = NetServer::connect_packet_validation_context(&state, 10, &packet);
+        assert!(!context.player_limit_reached);
     }
 
     #[test]
