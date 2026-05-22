@@ -35,7 +35,8 @@ pub use bullet::{
     ArtilleryBulletType, ArtilleryTrailPlan, BasicBulletDrawPlan, BasicBulletType,
     BulletCreatePlan, BulletType, FireBulletType, FireBulletUpdatePlan, FlakBulletType,
     FlakUpdatePlan, InterceptorBulletType, InterceptorHitPlan, LaserBoltBulletType,
-    LaserBoltDrawPlan, LightningBulletType,
+    LaserBoltDrawPlan, LightningBulletType, PointBulletType, PointLaserBulletType,
+    PointLaserUpdatePlan, SpaceLiquidBulletType,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;

@@ -13,6 +13,7 @@ pub struct BulletType {
     pub drag: f32,
     pub hittable: bool,
     pub reflectable: bool,
+    pub absorbable: bool,
     pub collides_tiles: bool,
     pub collides_ground: bool,
     pub collides_air: bool,
@@ -22,8 +23,11 @@ pub struct BulletType {
     pub instant_disappear: bool,
     pub kill_shooter: bool,
     pub scaled_splash_damage: bool,
+    pub impact: bool,
     pub pierce: bool,
     pub pierce_building: bool,
+    pub remove_after_pierce: bool,
+    pub optimal_life_fract: f32,
     pub pierce_cap: i32,
     pub splash_damage: f32,
     pub shield_damage_multiplier: f32,
@@ -73,6 +77,7 @@ impl Default for BulletType {
             drag: 0.0,
             hittable: true,
             reflectable: true,
+            absorbable: true,
             collides_tiles: true,
             collides_ground: true,
             collides_air: true,
@@ -82,8 +87,11 @@ impl Default for BulletType {
             instant_disappear: false,
             kill_shooter: false,
             scaled_splash_damage: false,
+            impact: false,
             pierce: false,
             pierce_building: false,
+            remove_after_pierce: true,
+            optimal_life_fract: 0.0,
             pierce_cap: -1,
             splash_damage: 0.0,
             shield_damage_multiplier: 1.0,
@@ -551,6 +559,153 @@ impl InterceptorBulletType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointBulletType {
+    pub base: BulletType,
+    pub trail_spacing: f32,
+}
+
+impl Default for PointBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                scale_life: true,
+                lifetime: 100.0,
+                collides: false,
+                reflectable: false,
+                keep_velocity: false,
+                ..Default::default()
+            },
+            trail_spacing: 10.0,
+        }
+    }
+}
+
+impl PointBulletType {
+    pub fn end_position(&self, x: f32, y: f32, vel_x: f32, vel_y: f32) -> (f32, f32) {
+        (
+            x + self.base.lifetime * vel_x,
+            y + self.base.lifetime * vel_y,
+        )
+    }
+
+    pub fn trail_points(&self, x: f32, y: f32, end_x: f32, end_y: f32) -> Vec<(f32, f32)> {
+        let dx = end_x - x;
+        let dy = end_y - y;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= f32::EPSILON || self.trail_spacing <= 0.0 {
+            return vec![(x, y)];
+        }
+
+        let steps = (len / self.trail_spacing).floor() as i32;
+        (0..=steps)
+            .map(|i| {
+                let t = (i as f32 * self.trail_spacing / len).min(1.0);
+                (x + dx * t, y + dy * t)
+            })
+            .chain(std::iter::once((end_x, end_y)))
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpaceLiquidBulletType {
+    pub base: BulletType,
+    pub orb_size: f32,
+}
+
+impl Default for SpaceLiquidBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                speed: 3.5,
+                damage: 0.0,
+                collides: false,
+                lifetime: 90.0,
+                drag: 0.002,
+                hittable: false,
+                ..Default::default()
+            },
+            orb_size: 5.5,
+        }
+    }
+}
+
+impl SpaceLiquidBulletType {
+    pub fn draw_radius(&self, fslope: f32) -> f32 {
+        pow3_out(fslope.clamp(0.0, 1.0)) * self.orb_size
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointLaserUpdatePlan {
+    pub collide_point: bool,
+    pub beam_effect: bool,
+    pub shake: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointLaserBulletType {
+    pub base: BulletType,
+    pub sprite: String,
+    pub beam_effect_interval: f32,
+    pub beam_effect_size: f32,
+    pub osc_scl: f32,
+    pub osc_mag: f32,
+    pub damage_interval: f32,
+    pub shake: f32,
+}
+
+impl Default for PointLaserBulletType {
+    fn default() -> Self {
+        Self {
+            base: BulletType {
+                remove_after_pierce: false,
+                speed: 0.0,
+                lifetime: 20.0,
+                impact: true,
+                keep_velocity: false,
+                collides: false,
+                pierce: true,
+                hittable: false,
+                absorbable: false,
+                optimal_life_fract: 0.5,
+                draw_size: 1000.0,
+                ..Default::default()
+            },
+            sprite: "point-laser".into(),
+            beam_effect_interval: 3.0,
+            beam_effect_size: 3.5,
+            osc_scl: 2.0,
+            osc_mag: 0.3,
+            damage_interval: 5.0,
+            shake: 0.0,
+        }
+    }
+}
+
+impl PointLaserBulletType {
+    pub fn continuous_damage(&self) -> f32 {
+        self.base.damage / self.damage_interval * 60.0
+    }
+
+    pub fn estimate_dps(&self) -> f32 {
+        self.base.damage * 100.0 / self.damage_interval * 3.0
+    }
+
+    pub fn laser_width_scale(&self, fslope: f32, absin: f32) -> f32 {
+        fslope * (1.0 - self.osc_mag + absin)
+    }
+
+    pub fn update_plan(&self, damage_timer: bool, beam_timer: bool) -> PointLaserUpdatePlan {
+        PointLaserUpdatePlan {
+            collide_point: damage_timer,
+            beam_effect: beam_timer,
+            shake: self.shake,
+        }
+    }
+}
+
 pub fn empty_bullet_type() -> BulletType {
     BulletType {
         hittable: false,
@@ -578,6 +733,10 @@ pub fn explosion_bullet_type(splash_damage: f32, splash_damage_radius: f32) -> B
         keep_velocity: false,
         ..Default::default()
     }
+}
+
+fn pow3_out(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -977,5 +1136,63 @@ mod tests {
             .expect("missing target clears bullet data");
         assert!(cleared.clear_data);
         assert!(!cleared.remove_self);
+    }
+
+    #[test]
+    fn point_bullet_computes_instant_end_position_and_trail_points() {
+        let point = PointBulletType::default();
+        assert!(point.base.scale_life);
+        assert_eq!(point.base.lifetime, 100.0);
+        assert!(!point.base.collides);
+        assert!(!point.base.reflectable);
+        assert!(!point.base.keep_velocity);
+
+        let end = point.end_position(0.0, 0.0, 1.0, 0.0);
+        assert_eq!(end, (100.0, 0.0));
+
+        let points = point.trail_points(0.0, 0.0, 25.0, 0.0);
+        assert_eq!(
+            points,
+            vec![(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (25.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn space_liquid_bullet_defaults_and_orb_radius_match_pow3out() {
+        let liquid = SpaceLiquidBulletType::default();
+        assert_eq!(liquid.base.speed, 3.5);
+        assert_eq!(liquid.base.damage, 0.0);
+        assert!(!liquid.base.collides);
+        assert_eq!(liquid.base.lifetime, 90.0);
+        assert_eq!(liquid.base.drag, 0.002);
+        assert!(!liquid.base.hittable);
+        assert_eq!(liquid.draw_radius(0.5), 4.8125);
+    }
+
+    #[test]
+    fn point_laser_defaults_damage_and_update_plan_are_pure() {
+        let mut laser = PointLaserBulletType::default();
+        laser.base.damage = 20.0;
+        laser.shake = 2.0;
+
+        assert!(!laser.base.remove_after_pierce);
+        assert_eq!(laser.base.speed, 0.0);
+        assert_eq!(laser.base.lifetime, 20.0);
+        assert!(laser.base.impact);
+        assert!(!laser.base.keep_velocity);
+        assert!(!laser.base.collides);
+        assert!(laser.base.pierce);
+        assert!(!laser.base.hittable);
+        assert!(!laser.base.absorbable);
+        assert_eq!(laser.base.optimal_life_fract, 0.5);
+        assert_eq!(laser.base.draw_size, 1000.0);
+
+        assert_eq!(laser.continuous_damage(), 240.0);
+        assert_eq!(laser.estimate_dps(), 1200.0);
+        assert_eq!(laser.laser_width_scale(0.5, 0.3), 0.5);
+        let plan = laser.update_plan(true, false);
+        assert!(plan.collide_point);
+        assert!(!plan.beam_effect);
+        assert_eq!(plan.shake, 2.0);
     }
 }
