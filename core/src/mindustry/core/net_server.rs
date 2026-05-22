@@ -11,8 +11,8 @@ use crate::mindustry::net::{
     DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, Disconnect,
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2,
     KickReason, Net, NetConnection, PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket,
-    SentPacket, StateSnapshotCallPacket, SteamAdminData, Streamable, TileConfigCallPacket,
-    TileTapCallPacket, WorldDataBeginCallPacket,
+    SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData, Streamable,
+    TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
 };
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
@@ -188,6 +188,12 @@ pub struct NetServerState {
     pub last_tile_tap: Option<TileTapCallPacket>,
     pub last_tile_tap_received_at: Option<Instant>,
     pub tile_tap_packets_seen: u64,
+    pub last_chat_connection_id: Option<i32>,
+    pub last_chat_message: Option<String>,
+    pub last_chat_unfiltered_message: Option<String>,
+    pub last_chat_received_at: Option<Instant>,
+    pub chat_packets_seen: u64,
+    pub chat_packets_filtered: u64,
     pub last_state_snapshot_connection_id: Option<i32>,
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_sent_at: Option<Instant>,
@@ -1524,6 +1530,16 @@ impl NetServer {
 
                     Self::dispatch_packet_handlers(&packet_handlers, &packet);
                 }
+                PacketKind::SendChatMessageCallPacket(chat) => {
+                    let packet = {
+                        let mut state = state.lock().expect("NetServerState mutex poisoned");
+                        Self::record_chat_message(&mut state, connection_id, chat)
+                    };
+
+                    if let Some(packet) = packet {
+                        Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                    }
+                }
                 _ => {}
             });
         }
@@ -1668,7 +1684,17 @@ impl NetServer {
         connection_id: Option<i32>,
         action_type: ActionType,
     ) -> PlayerAction {
-        let player = connection_id.and_then(|connection_id| {
+        PlayerAction::new(
+            Self::connection_player_label(state, connection_id),
+            action_type,
+        )
+    }
+
+    fn connection_player_label(
+        state: &NetServerState,
+        connection_id: Option<i32>,
+    ) -> Option<String> {
+        connection_id.and_then(|connection_id| {
             state
                 .connection_states
                 .get(&connection_id)
@@ -1681,9 +1707,60 @@ impl NetServer {
                         connection_id.to_string()
                     }
                 })
+        })
+    }
+
+    fn connection_uuid(state: &NetServerState, connection_id: Option<i32>) -> Option<String> {
+        connection_id
+            .and_then(|connection_id| state.connection_states.get(&connection_id))
+            .and_then(|connection| (!connection.uuid.is_empty()).then(|| connection.uuid.clone()))
+    }
+
+    fn record_chat_message(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        packet: &SendChatMessageCallPacket,
+    ) -> Option<PacketKind> {
+        let now = Instant::now();
+        let current_millis = Self::current_millis();
+        let player = Self::connection_player_label(state, connection_id);
+        let player_uuid = Self::connection_uuid(state, connection_id);
+
+        state.last_connection_id = connection_id;
+        state.last_chat_connection_id = connection_id;
+        state.last_chat_unfiltered_message = Some(packet.message.clone());
+        state.last_chat_message = None;
+        state.last_chat_received_at = Some(now);
+        state.chat_packets_seen += 1;
+        state.last_updated_at = Some(now);
+
+        let filtered = if packet.message.starts_with('/') {
+            Some(packet.message.clone())
+        } else {
+            state
+                .administration
+                .filter_message(player.as_deref(), &packet.message)
+        };
+
+        let Some(message) = filtered else {
+            state.chat_packets_filtered += 1;
+            return None;
+        };
+
+        if let Some(uuid) = player_uuid {
+            let info = state.administration.get_info(uuid);
+            info.last_message_time = current_millis;
+            info.last_sent_message = Some(message.clone());
+        }
+
+        let packet = SendChatMessageCallPacket { message };
+        state.last_chat_message = Some(packet.message.clone());
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id: connection_id.unwrap_or(-1),
+            packet: PacketKind::SendChatMessageCallPacket(packet.clone()),
         });
 
-        PlayerAction::new(player, action_type)
+        Some(PacketKind::SendChatMessageCallPacket(packet))
     }
 
     fn record_tile_tap(
@@ -1842,8 +1919,8 @@ mod tests {
         DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host, HostCallback,
         KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
         PingResponseCallPacket, ProviderEvent, RequestDebugStatusCallPacket, RotateBlockCallPacket,
-        SentPacket, StateSnapshotCallPacket, SteamAdminData, TileConfigCallPacket,
-        TileTapCallPacket,
+        SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData,
+        TileConfigCallPacket, TileTapCallPacket,
     };
     use crate::mindustry::vars::MAX_TCP_SIZE;
     use crate::mindustry::world::block::Block;
@@ -2677,6 +2754,79 @@ mod tests {
         assert_eq!(state.rotate_block_packets_seen, 0);
         assert_eq!(state.last_tile_config_connection_id, None);
         assert!(state.last_rotate_block.is_none());
+    }
+
+    #[test]
+    fn chat_messages_are_filtered_recorded_and_commands_bypass_filters() {
+        let server = NetServer::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("1.2.3.4");
+            connection.name = "talker".into();
+            connection.uuid = "uuid-chat".into();
+            state.connection_states.insert(12, connection);
+            state
+                .administration
+                .add_chat_filter(|_player, message| Some(message.replace("foo", "bar")));
+            state.administration.add_chat_filter(|_player, message| {
+                (message != "blocked").then(|| message.to_string())
+            });
+        }
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            if let PacketKind::SendChatMessageCallPacket(packet) = packet {
+                seen_handler.lock().unwrap().push(packet.message.clone());
+            }
+        });
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(12),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "foo".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(12),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/foo".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(12),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "blocked".into(),
+                }),
+            );
+        }
+
+        assert_eq!(*seen.lock().unwrap(), vec!["bar", "/foo"]);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.chat_packets_seen, 3);
+        assert_eq!(state.chat_packets_filtered, 1);
+        assert_eq!(
+            state.last_chat_unfiltered_message.as_deref(),
+            Some("blocked")
+        );
+        assert_eq!(state.last_chat_message, None);
+        assert_eq!(
+            state
+                .administration
+                .get_info_optional("uuid-chat")
+                .and_then(|info| info.last_sent_message.as_deref()),
+            Some("/foo")
+        );
+        assert_eq!(state.events.len(), 2);
     }
 
     #[test]
