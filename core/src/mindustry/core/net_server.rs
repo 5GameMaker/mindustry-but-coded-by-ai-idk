@@ -11,8 +11,8 @@ use crate::mindustry::net::{
     ConnectPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, Disconnect,
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2,
     KickReason, Net, NetConnection, PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket,
-    SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData, Streamable,
-    TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
+    SendChatMessageCallPacket, SendMessageCallPacket2, SentPacket, StateSnapshotCallPacket,
+    SteamAdminData, Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
 };
 use crate::mindustry::vars::MAX_TEXT_LENGTH;
 
@@ -155,6 +155,10 @@ pub struct NetServerState {
     pub last_kick_message: Option<String>,
     pub kick_packets_sent: u64,
     pub last_kick_error: Option<String>,
+    pub last_send_message_connection_id: Option<i32>,
+    pub last_send_message: Option<String>,
+    pub send_message_packets_sent: u64,
+    pub last_send_message_error: Option<String>,
     pub last_ping_connection_id: Option<i32>,
     pub last_ping_time: Option<i64>,
     pub ping_requests_seen: u64,
@@ -555,6 +559,44 @@ impl NetServer {
             }
             Err(error) => {
                 state.last_kick_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn send_message_to(
+        &self,
+        connection_id: i32,
+        message: impl Into<String>,
+    ) -> io::Result<()> {
+        let message = message.into();
+        let packet = PacketKind::SendMessageCallPacket2(SendMessageCallPacket2 {
+            message: message.clone(),
+            unformatted: String::new(),
+            player_sender: EntityRef::null(),
+        });
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet, true)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        state.last_send_message_connection_id = Some(connection_id);
+        state.last_send_message = Some(message);
+        state.last_updated_at = Some(Instant::now());
+        match &result {
+            Ok(()) => {
+                state.send_message_packets_sent += 1;
+                state.last_send_message_error = None;
+                Self::record_connection_sent(
+                    &mut state,
+                    connection_id,
+                    "SendMessageCallPacket2",
+                    true,
+                );
+            }
+            Err(error) => {
+                state.last_send_message_error = Some(error.to_string());
             }
         }
         result
@@ -3964,6 +4006,50 @@ mod tests {
         assert!(matches!(
             &connection.sent[0].0,
             SentPacket::KickMessage(message) if message == "[accent]Incompatible mods![]"
+        ));
+        assert!(connection.sent[0].1);
+    }
+
+    #[test]
+    fn send_message_to_targets_connection_with_java_player_message_packet() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        server
+            .send_message_to(36, "[scarlet]Unknown command. Check /help.")
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 36);
+        assert!(sent[0].2);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]Unknown command. Check /help."
+                    && packet.unformatted.is_empty()
+                    && packet.player_sender == EntityRef::null()
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_send_message_connection_id, Some(36));
+        assert_eq!(
+            state.last_send_message.as_deref(),
+            Some("[scarlet]Unknown command. Check /help.")
+        );
+        assert_eq!(state.send_message_packets_sent, 1);
+        assert!(state.last_send_message_error.is_none());
+
+        let connection = state.connection_states.get(&36).unwrap();
+        assert!(matches!(
+            &connection.sent[0].0,
+            SentPacket::Other(name) if name == "SendMessageCallPacket2"
         ));
         assert!(connection.sent[0].1);
     }
