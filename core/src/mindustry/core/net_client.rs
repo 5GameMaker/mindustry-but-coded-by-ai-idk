@@ -17,9 +17,10 @@ use crate::mindustry::net::{
     RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
     SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
-    StateSnapshotCallPacket, StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    StateSnapshotCallPacket, StreamBuilder, Streamable, TakeItemsCallPacket, TileConfigCallPacket,
+    TileTapCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
+    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -182,6 +183,18 @@ pub struct NetClientState {
     pub last_clear_liquids: Option<ClearLiquidsCallPacket>,
     pub last_clear_liquids_at: Option<Instant>,
     pub clear_liquids_packets_seen: u64,
+    pub last_take_items: Option<TakeItemsCallPacket>,
+    pub last_take_items_at: Option<Instant>,
+    pub take_items_packets_seen: u64,
+    pub last_transfer_item_effect: Option<TransferItemEffectCallPacket>,
+    pub last_transfer_item_effect_at: Option<Instant>,
+    pub transfer_item_effect_packets_seen: u64,
+    pub last_transfer_item_to: Option<TransferItemToCallPacket>,
+    pub last_transfer_item_to_at: Option<Instant>,
+    pub transfer_item_to_packets_seen: u64,
+    pub last_transfer_item_to_unit: Option<TransferItemToUnitCallPacket>,
+    pub last_transfer_item_to_unit_at: Option<Instant>,
+    pub transfer_item_to_unit_packets_seen: u64,
     pub last_request_item: Option<RequestItemCallPacket>,
     pub last_request_item_at: Option<Instant>,
     pub request_item_packets_seen: u64,
@@ -338,6 +351,19 @@ impl fmt::Debug for NetClientState {
             .field(
                 "clear_liquids_packets_seen",
                 &self.clear_liquids_packets_seen,
+            )
+            .field("take_items_packets_seen", &self.take_items_packets_seen)
+            .field(
+                "transfer_item_effect_packets_seen",
+                &self.transfer_item_effect_packets_seen,
+            )
+            .field(
+                "transfer_item_to_packets_seen",
+                &self.transfer_item_to_packets_seen,
+            )
+            .field(
+                "transfer_item_to_unit_packets_seen",
+                &self.transfer_item_to_unit_packets_seen,
             )
             .field("request_item_packets_seen", &self.request_item_packets_seen)
             .field(
@@ -1189,6 +1215,34 @@ impl NetClient {
                         state.last_clear_liquids_at = Some(now);
                         false
                     }
+                    PacketKind::TakeItemsCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.take_items_packets_seen += 1;
+                        state.last_take_items = Some(packet.clone());
+                        state.last_take_items_at = Some(now);
+                        false
+                    }
+                    PacketKind::TransferItemEffectCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.transfer_item_effect_packets_seen += 1;
+                        state.last_transfer_item_effect = Some(packet.clone());
+                        state.last_transfer_item_effect_at = Some(now);
+                        false
+                    }
+                    PacketKind::TransferItemToCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.transfer_item_to_packets_seen += 1;
+                        state.last_transfer_item_to = Some(packet.clone());
+                        state.last_transfer_item_to_at = Some(now);
+                        false
+                    }
+                    PacketKind::TransferItemToUnitCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.transfer_item_to_unit_packets_seen += 1;
+                        state.last_transfer_item_to_unit = Some(packet.clone());
+                        state.last_transfer_item_to_unit_at = Some(now);
+                        false
+                    }
                     PacketKind::RequestItemCallPacket(packet) => {
                         let now = Instant::now();
                         state.request_item_packets_seen += 1;
@@ -1524,7 +1578,8 @@ mod tests {
         RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
         SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket,
         SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
         UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
@@ -2288,6 +2343,32 @@ mod tests {
         let clear_liquids = ClearLiquidsCallPacket {
             build: secondary_build,
         };
+        let take_items = TakeItemsCallPacket {
+            build: primary_build,
+            item: Some("copper".into()),
+            amount: 5,
+            to: UnitRef::Unit { id: 410 },
+        };
+        let transfer_item_effect = TransferItemEffectCallPacket {
+            item: Some("lead".into()),
+            x: 10.5,
+            y: 20.25,
+            to: EntityRef::new(315),
+        };
+        let transfer_item_to = TransferItemToCallPacket {
+            unit: UnitRef::Unit { id: 411 },
+            item: Some("scrap".into()),
+            amount: 9,
+            x: 30.5,
+            y: 40.25,
+            build: secondary_build,
+        };
+        let transfer_item_to_unit = TransferItemToUnitCallPacket {
+            item: Some("titanium".into()),
+            x: 50.5,
+            y: 60.25,
+            to: EntityRef::new(316),
+        };
         let request_item = RequestItemCallPacket {
             player: EntityRef::new(301),
             build: primary_build,
@@ -2389,6 +2470,16 @@ mod tests {
             net.handle_client_received(PacketKind::SetLiquidCallPacket(set_liquid.clone()));
             net.handle_client_received(PacketKind::SetLiquidsCallPacket(set_liquids.clone()));
             net.handle_client_received(PacketKind::ClearLiquidsCallPacket(clear_liquids));
+            net.handle_client_received(PacketKind::TakeItemsCallPacket(take_items.clone()));
+            net.handle_client_received(PacketKind::TransferItemEffectCallPacket(
+                transfer_item_effect.clone(),
+            ));
+            net.handle_client_received(PacketKind::TransferItemToCallPacket(
+                transfer_item_to.clone(),
+            ));
+            net.handle_client_received(PacketKind::TransferItemToUnitCallPacket(
+                transfer_item_to_unit.clone(),
+            ));
             net.handle_client_received(PacketKind::RequestItemCallPacket(request_item.clone()));
             net.handle_client_received(PacketKind::TransferInventoryCallPacket(
                 transfer_inventory.clone(),
@@ -2458,6 +2549,27 @@ mod tests {
         assert_eq!(state.clear_liquids_packets_seen, 1);
         assert_eq!(state.last_clear_liquids.as_ref(), Some(&clear_liquids));
         assert!(state.last_clear_liquids_at.is_some());
+        assert_eq!(state.take_items_packets_seen, 1);
+        assert_eq!(state.last_take_items.as_ref(), Some(&take_items));
+        assert!(state.last_take_items_at.is_some());
+        assert_eq!(state.transfer_item_effect_packets_seen, 1);
+        assert_eq!(
+            state.last_transfer_item_effect.as_ref(),
+            Some(&transfer_item_effect)
+        );
+        assert!(state.last_transfer_item_effect_at.is_some());
+        assert_eq!(state.transfer_item_to_packets_seen, 1);
+        assert_eq!(
+            state.last_transfer_item_to.as_ref(),
+            Some(&transfer_item_to)
+        );
+        assert!(state.last_transfer_item_to_at.is_some());
+        assert_eq!(state.transfer_item_to_unit_packets_seen, 1);
+        assert_eq!(
+            state.last_transfer_item_to_unit.as_ref(),
+            Some(&transfer_item_to_unit)
+        );
+        assert!(state.last_transfer_item_to_unit_at.is_some());
         assert_eq!(state.request_item_packets_seen, 1);
         assert_eq!(state.last_request_item.as_ref(), Some(&request_item));
         assert!(state.last_request_item_at.is_some());
