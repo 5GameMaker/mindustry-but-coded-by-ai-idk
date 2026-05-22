@@ -24,9 +24,10 @@ pub use abilities::{
     EnergyFieldAction, EnergyFieldHit, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility,
     ForceFieldHit, ForceFieldUpdate, LiquidExplodeAbility, LiquidRegenAbility, MoveEffectAbility,
     MoveEffectPlan, MoveLightningAbility, MoveLightningPlan, RegenAbility, RepairFieldAbility,
-    RepairFieldPulse, RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse,
-    ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse,
-    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
+    RepairFieldPulse, RepairFieldTarget, ShieldArcAbility, ShieldArcHit, ShieldArcHitAction,
+    ShieldArcUpdate, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
+    SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
+    SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;

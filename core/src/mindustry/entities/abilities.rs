@@ -1549,6 +1549,199 @@ impl Ability for EnergyFieldAbility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldArcUpdate {
+    pub data: f32,
+    pub width_scale: f32,
+    pub alpha: f32,
+    pub active: bool,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShieldArcHitAction {
+    None,
+    Absorb,
+    Deflect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldArcHit {
+    pub action: ShieldArcHitAction,
+    pub data_after: f32,
+    pub alpha: f32,
+    pub broke: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShieldArcAbility {
+    pub base: BasicAbility,
+    pub radius: f32,
+    pub regen: f32,
+    pub max: f32,
+    pub cooldown: f32,
+    pub angle: f32,
+    pub angle_offset: f32,
+    pub x: f32,
+    pub y: f32,
+    pub when_shooting: bool,
+    pub width: f32,
+    pub chance_deflect: f32,
+    pub reflect_building_damage: f32,
+    pub reflect_vel: f32,
+    pub reflect_time: f32,
+    pub missile_unit_multiplier: f32,
+    pub draw_arc: bool,
+    pub offset_region: bool,
+    pub push_units: bool,
+    pub data: f32,
+    pub width_scale: f32,
+    pub alpha: f32,
+}
+
+impl Default for ShieldArcAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            radius: 60.0,
+            regen: 0.1,
+            max: 200.0,
+            cooldown: 60.0 * 5.0,
+            angle: 80.0,
+            angle_offset: 0.0,
+            x: 0.0,
+            y: 0.0,
+            when_shooting: true,
+            width: 6.0,
+            chance_deflect: -1.0,
+            reflect_building_damage: 1.0,
+            reflect_vel: 1.0,
+            reflect_time: 1.0 - 0.5,
+            missile_unit_multiplier: 2.0,
+            draw_arc: true,
+            offset_region: false,
+            push_units: true,
+            data: 0.0,
+            width_scale: 0.0,
+            alpha: 0.0,
+        }
+    }
+}
+
+impl ShieldArcAbility {
+    pub fn created_shield(&mut self) -> f32 {
+        self.data = self.max;
+        self.data
+    }
+
+    pub fn shield_position(&self, unit_x: f32, unit_y: f32, unit_rotation: f32) -> (f32, f32) {
+        let (offset_x, offset_y) = rotate_offset(self.x, self.y, unit_rotation - 90.0);
+        (unit_x + offset_x, unit_y + offset_y)
+    }
+
+    pub fn update_state(
+        &mut self,
+        delta: f32,
+        is_shooting: bool,
+        unit_x: f32,
+        unit_y: f32,
+        unit_rotation: f32,
+    ) -> ShieldArcUpdate {
+        if self.data < self.max {
+            self.data += delta * self.regen;
+        }
+
+        let active = self.data > 0.0 && (is_shooting || !self.when_shooting);
+        self.alpha = (self.alpha - delta / 10.0).max(0.0);
+        self.width_scale = if active {
+            lerp_delta(self.width_scale, 1.0, 0.06, delta)
+        } else {
+            lerp_delta(self.width_scale, 0.0, 0.11, delta)
+        };
+        let (x, y) = self.shield_position(unit_x, unit_y, unit_rotation);
+
+        ShieldArcUpdate {
+            data: self.data,
+            width_scale: self.width_scale,
+            alpha: self.alpha,
+            active,
+            x,
+            y,
+        }
+    }
+
+    pub fn contains_point(
+        &self,
+        shield_x: f32,
+        shield_y: f32,
+        unit_rotation: f32,
+        point_x: f32,
+        point_y: f32,
+    ) -> bool {
+        let dist = distance2(shield_x, shield_y, point_x, point_y).sqrt();
+        let in_ring = dist >= self.radius - self.width && dist <= self.radius + self.width;
+        let angle = angle_to(shield_x, shield_y, point_x, point_y);
+        in_ring && angle_within(angle, unit_rotation + self.angle_offset, self.angle / 2.0)
+    }
+
+    pub fn apply_bullet_hit(
+        &mut self,
+        bullet_damage: f32,
+        shield_damage: f32,
+        reflectable: bool,
+        velocity_len: f32,
+        deflect_chance_passed: bool,
+    ) -> ShieldArcHit {
+        if self.data <= 0.0 {
+            return ShieldArcHit {
+                action: ShieldArcHitAction::None,
+                data_after: self.data,
+                alpha: self.alpha,
+                broke: false,
+            };
+        }
+
+        let action = if self.chance_deflect > 0.0
+            && velocity_len >= 0.1
+            && reflectable
+            && deflect_chance_passed
+        {
+            ShieldArcHitAction::Deflect
+        } else {
+            ShieldArcHitAction::Absorb
+        };
+
+        let broke = self.data <= bullet_damage;
+        if broke {
+            self.data -= self.cooldown * self.regen;
+        }
+        self.data -= shield_damage;
+        self.alpha = 1.0;
+
+        ShieldArcHit {
+            action,
+            data_after: self.data,
+            alpha: self.alpha,
+            broke,
+        }
+    }
+}
+
+impl Ability for ShieldArcAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
@@ -1562,6 +1755,14 @@ fn distance2(x: f32, y: f32, tx: f32, ty: f32) -> f32 {
 
 fn angle_to(x: f32, y: f32, tx: f32, ty: f32) -> f32 {
     (ty - y).atan2(tx - x).to_degrees()
+}
+
+fn angle_within(angle: f32, target: f32, margin: f32) -> bool {
+    let mut diff = (angle - target).rem_euclid(360.0).abs();
+    if diff > 180.0 {
+        diff = 360.0 - diff;
+    }
+    diff <= margin
 }
 
 fn rotate_offset(x: f32, y: f32, rotation: f32) -> (f32, f32) {
@@ -1629,8 +1830,9 @@ mod tests {
         Ability, ArmorPlateAbility, BasicAbility, EnergyFieldAbility, EnergyFieldAction,
         EnergyFieldTarget, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
         MoveEffectAbility, MoveLightningAbility, RegenAbility, RepairFieldAbility,
-        RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldTarget, SpawnDeathAbility,
-        StatusFieldAbility, SuppressionFieldAbility, UnitSpawnAbility,
+        RepairFieldTarget, ShieldArcAbility, ShieldArcHitAction, ShieldRegenFieldAbility,
+        ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility,
+        UnitSpawnAbility,
     };
 
     #[derive(Clone)]
@@ -2143,5 +2345,64 @@ mod tests {
             .expect("ammo is ignored when unit ammo rule is disabled");
         assert!(!pulse.any_nearby);
         assert_eq!(pulse.ammo_after, 0);
+    }
+
+    #[test]
+    fn shield_arc_regenerates_activates_and_scales_width() {
+        let mut ability = ShieldArcAbility::default();
+        ability.data = 50.0;
+        ability.x = 0.0;
+        ability.y = 10.0;
+
+        let update = ability.update_state(1.0, true, 100.0, 200.0, 90.0);
+        assert!((update.data - 50.1).abs() < 0.0001);
+        assert!(update.active);
+        assert!((update.width_scale - 0.06).abs() < 0.0001);
+        assert!((update.x - 100.0).abs() < 0.0001);
+        assert!((update.y - 210.0).abs() < 0.0001);
+
+        ability.when_shooting = true;
+        let inactive = ability.update_state(1.0, false, 100.0, 200.0, 90.0);
+        assert!(!inactive.active);
+        assert!(inactive.width_scale < update.width_scale);
+
+        assert_eq!(ability.created_shield(), ability.max);
+    }
+
+    #[test]
+    fn shield_arc_contains_points_in_ring_and_angle() {
+        let ability = ShieldArcAbility {
+            radius: 10.0,
+            width: 2.0,
+            angle: 90.0,
+            angle_offset: 0.0,
+            ..Default::default()
+        };
+
+        assert!(ability.contains_point(0.0, 0.0, 0.0, 10.0, 0.0));
+        assert!(!ability.contains_point(0.0, 0.0, 0.0, 0.0, 10.0));
+        assert!(!ability.contains_point(0.0, 0.0, 0.0, 20.0, 0.0));
+    }
+
+    #[test]
+    fn shield_arc_absorbs_deflects_and_breaks_from_bullet_hits() {
+        let mut ability = ShieldArcAbility {
+            data: 20.0,
+            chance_deflect: 1.0,
+            cooldown: 100.0,
+            regen: 0.1,
+            ..Default::default()
+        };
+
+        let deflect = ability.apply_bullet_hit(5.0, 3.0, true, 1.0, true);
+        assert_eq!(deflect.action, ShieldArcHitAction::Deflect);
+        assert_eq!(deflect.data_after, 17.0);
+        assert_eq!(deflect.alpha, 1.0);
+        assert!(!deflect.broke);
+
+        let absorb = ability.apply_bullet_hit(30.0, 2.0, false, 1.0, false);
+        assert_eq!(absorb.action, ShieldArcHitAction::Absorb);
+        assert!(absorb.broke);
+        assert_eq!(absorb.data_after, 5.0);
     }
 }
