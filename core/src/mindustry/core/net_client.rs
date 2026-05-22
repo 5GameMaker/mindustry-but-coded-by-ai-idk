@@ -7,17 +7,17 @@ use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::BuildPlanWire;
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
+    BuildingControlSelectCallPacket, ClearItemsCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandUnitsCallPacket,
     Connect, ConnectConfirmCallPacket, ConnectPacket, DeletePlansCallPacket, Disconnect,
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
     PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
     PingLocationCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
     RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    RotateBlockCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
-    TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, StateSnapshotCallPacket,
+    StreamBuilder, Streamable, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -162,6 +162,15 @@ pub struct NetClientState {
     pub last_client_plan_snapshot_received: Option<ClientPlanSnapshotReceivedCallPacket>,
     pub last_client_plan_snapshot_received_at: Option<Instant>,
     pub client_plan_snapshot_received_packets_seen: u64,
+    pub last_set_item: Option<SetItemCallPacket>,
+    pub last_set_item_at: Option<Instant>,
+    pub set_item_packets_seen: u64,
+    pub last_set_items: Option<SetItemsCallPacket>,
+    pub last_set_items_at: Option<Instant>,
+    pub set_items_packets_seen: u64,
+    pub last_clear_items: Option<ClearItemsCallPacket>,
+    pub last_clear_items_at: Option<Instant>,
+    pub clear_items_packets_seen: u64,
     pub last_request_item: Option<RequestItemCallPacket>,
     pub last_request_item_at: Option<Instant>,
     pub request_item_packets_seen: u64,
@@ -298,6 +307,9 @@ impl fmt::Debug for NetClientState {
                 "client_plan_snapshot_received_packets_seen",
                 &self.client_plan_snapshot_received_packets_seen,
             )
+            .field("set_item_packets_seen", &self.set_item_packets_seen)
+            .field("set_items_packets_seen", &self.set_items_packets_seen)
+            .field("clear_items_packets_seen", &self.clear_items_packets_seen)
             .field("request_item_packets_seen", &self.request_item_packets_seen)
             .field(
                 "transfer_inventory_packets_seen",
@@ -1090,6 +1102,27 @@ impl NetClient {
                         state.last_client_plan_snapshot_received_at = Some(now);
                         false
                     }
+                    PacketKind::SetItemCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_item_packets_seen += 1;
+                        state.last_set_item = Some(packet.clone());
+                        state.last_set_item_at = Some(now);
+                        false
+                    }
+                    PacketKind::SetItemsCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.set_items_packets_seen += 1;
+                        state.last_set_items = Some(packet.clone());
+                        state.last_set_items_at = Some(now);
+                        false
+                    }
+                    PacketKind::ClearItemsCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.clear_items_packets_seen += 1;
+                        state.last_clear_items = Some(*packet);
+                        state.last_clear_items_at = Some(now);
+                        false
+                    }
                     PacketKind::RequestItemCallPacket(packet) => {
                         let now = Instant::now();
                         state.request_item_packets_seen += 1;
@@ -1386,19 +1419,19 @@ mod tests {
     use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
-        BuildingControlSelectCallPacket, ClientPlanSnapshotCallPacket,
+        BuildingControlSelectCallPacket, ClearItemsCallPacket, ClientPlanSnapshotCallPacket,
         ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandUnitsCallPacket,
         Connect, DeletePlansCallPacket, Disconnect, DoneCallback, EntitySnapshotCallPacket,
         HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
         PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
         PingLocationCallPacket, PingResponseCallPacket, RequestBuildPayloadCallPacket,
         RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-        RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
+        RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket, StateSnapshotCallPacket,
+        StreamBegin, StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket,
+        TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
-    use crate::mindustry::r#type::UnitType;
+    use crate::mindustry::r#type::{ItemStack, UnitType};
     use crate::mindustry::world::block::Block;
 
     use super::{
@@ -2119,6 +2152,18 @@ mod tests {
         let client = NetClient::default();
         let primary_build = BuildingRef::new(22_001);
         let secondary_build = BuildingRef::new(22_002);
+        let set_item = SetItemCallPacket {
+            build: primary_build,
+            item: Some("copper".into()),
+            amount: 42,
+        };
+        let set_items = SetItemsCallPacket {
+            build: secondary_build,
+            items: vec![ItemStack::new("lead", 3), ItemStack::new("scrap", 4)],
+        };
+        let clear_items = ClearItemsCallPacket {
+            build: secondary_build,
+        };
         let request_item = RequestItemCallPacket {
             player: EntityRef::new(301),
             build: primary_build,
@@ -2198,6 +2243,9 @@ mod tests {
         {
             let mut net = client.net_mut();
             net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetItemCallPacket(set_item.clone()));
+            net.handle_client_received(PacketKind::SetItemsCallPacket(set_items.clone()));
+            net.handle_client_received(PacketKind::ClearItemsCallPacket(clear_items));
             net.handle_client_received(PacketKind::RequestItemCallPacket(request_item.clone()));
             net.handle_client_received(PacketKind::TransferInventoryCallPacket(
                 transfer_inventory.clone(),
@@ -2240,6 +2288,15 @@ mod tests {
 
         let state = client.state();
         let state = state.lock().unwrap();
+        assert_eq!(state.set_item_packets_seen, 1);
+        assert_eq!(state.last_set_item.as_ref(), Some(&set_item));
+        assert!(state.last_set_item_at.is_some());
+        assert_eq!(state.set_items_packets_seen, 1);
+        assert_eq!(state.last_set_items.as_ref(), Some(&set_items));
+        assert!(state.last_set_items_at.is_some());
+        assert_eq!(state.clear_items_packets_seen, 1);
+        assert_eq!(state.last_clear_items.as_ref(), Some(&clear_items));
+        assert!(state.last_clear_items_at.is_some());
         assert_eq!(state.request_item_packets_seen, 1);
         assert_eq!(state.last_request_item.as_ref(), Some(&request_item));
         assert!(state.last_request_item_at.is_some());
