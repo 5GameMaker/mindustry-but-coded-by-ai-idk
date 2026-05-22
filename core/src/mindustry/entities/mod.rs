@@ -1,6 +1,7 @@
 pub mod abilities;
 pub mod comp;
 pub mod damage;
+pub mod entity_collisions;
 pub mod entity_group;
 pub mod entity_indexer;
 pub mod fires;
@@ -67,6 +68,10 @@ pub use comp::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};
 pub use damage::{
     calculate_damage, complete_damage_tiles, find_length, pierce_result_length,
     tile_damage_edge_scaled_damage, tile_damage_ray_count, DAMAGE_FALLOFF,
+};
+pub use entity_collisions::{
+    collide, legs_solid, move_check_hitbox, move_delta_rect, move_hitbox, move_rect, overlaps_tile,
+    solid, water_solid, CollisionMoveResult, CollisionPoint, MAX_DELTA, SEGMENT,
 };
 pub use entity_group::{EntityGroup, EntityGroupItem, Rect, SpatialEntity};
 pub use entity_indexer::EntityIndexer;
