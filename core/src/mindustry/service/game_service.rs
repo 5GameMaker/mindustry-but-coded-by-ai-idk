@@ -175,6 +175,27 @@ impl GameServiceSectorLaunchLoadoutSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceWinSnapshot {
+    pub pvp: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServicePlayerJoinSnapshot {
+    pub server: bool,
+    pub player_count: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceClientPreConnectSnapshot {
+    pub host_address: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceClientChatSnapshot {
+    pub contains_alphaaaa: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameServiceUnitControlSnapshot {
     pub controlled_router_block: bool,
     pub controlled_turret_build: bool,
@@ -213,12 +234,16 @@ impl GameServiceSectorCaptureSnapshot {
 pub struct GameServiceEventPlan {
     pub stat_additions: Vec<SStat>,
     pub stat_sets: Vec<(SStat, i32)>,
+    pub stat_max_updates: Vec<(SStat, i32)>,
     pub achievements: BTreeSet<Achievement>,
 }
 
 impl GameServiceEventPlan {
     pub fn is_empty(&self) -> bool {
-        self.stat_additions.is_empty() && self.stat_sets.is_empty() && self.achievements.is_empty()
+        self.stat_additions.is_empty()
+            && self.stat_sets.is_empty()
+            && self.stat_max_updates.is_empty()
+            && self.achievements.is_empty()
     }
 }
 
@@ -439,6 +464,71 @@ impl GameServiceState {
         let mut plan = GameServiceEventPlan::default();
         if snapshot.planet_name.as_deref() == Some("serpulo") && !snapshot.default_loadout {
             plan.achievements.insert(Achievement::LaunchCoreSchematic);
+        }
+        plan
+    }
+
+    pub fn map_make_plan(&self) -> GameServiceEventPlan {
+        GameServiceEventPlan {
+            stat_additions: vec![SStat::MapsMade],
+            ..Default::default()
+        }
+    }
+
+    pub fn map_publish_plan(&self) -> GameServiceEventPlan {
+        GameServiceEventPlan {
+            stat_additions: vec![SStat::MapsPublished],
+            ..Default::default()
+        }
+    }
+
+    pub fn sector_launch_plan(&self) -> GameServiceEventPlan {
+        GameServiceEventPlan {
+            stat_additions: vec![SStat::TimesLaunched],
+            ..Default::default()
+        }
+    }
+
+    pub fn win_plan(&self, snapshot: GameServiceWinSnapshot) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.pvp {
+            plan.stat_additions.push(SStat::PvpsWon);
+        }
+        plan
+    }
+
+    pub fn player_join_plan(
+        &self,
+        snapshot: GameServicePlayerJoinSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.server {
+            plan.stat_max_updates
+                .push((SStat::MaxPlayersServer, snapshot.player_count));
+        }
+        plan
+    }
+
+    pub fn client_pre_connect_plan(
+        &self,
+        snapshot: GameServiceClientPreConnectSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if let Some(host_address) = snapshot.host_address.as_deref() {
+            if !host_address.starts_with("steam:") && !host_address.starts_with("192.") {
+                plan.achievements.insert(Achievement::JoinCommunityServer);
+            }
+        }
+        plan
+    }
+
+    pub fn client_chat_plan(
+        &self,
+        snapshot: GameServiceClientChatSnapshot,
+    ) -> GameServiceEventPlan {
+        let mut plan = GameServiceEventPlan::default();
+        if snapshot.contains_alphaaaa {
+            plan.achievements.insert(Achievement::UseAnimdustryEmoji);
         }
         plan
     }
@@ -921,5 +1011,92 @@ mod tests {
         assert!(!plan
             .achievements
             .contains(&Achievement::CaptureNoBlocksBroken));
+    }
+
+    #[test]
+    fn simple_event_plans_match_java_stat_and_achievement_branches() {
+        let state = GameServiceState::default();
+
+        assert_eq!(
+            state.map_make_plan(),
+            GameServiceEventPlan {
+                stat_additions: vec![SStat::MapsMade],
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            state.map_publish_plan(),
+            GameServiceEventPlan {
+                stat_additions: vec![SStat::MapsPublished],
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            state.sector_launch_plan(),
+            GameServiceEventPlan {
+                stat_additions: vec![SStat::TimesLaunched],
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            state.win_plan(GameServiceWinSnapshot { pvp: true }),
+            GameServiceEventPlan {
+                stat_additions: vec![SStat::PvpsWon],
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            state.player_join_plan(GameServicePlayerJoinSnapshot {
+                server: true,
+                player_count: 42,
+            }),
+            GameServiceEventPlan {
+                stat_max_updates: vec![(SStat::MaxPlayersServer, 42)],
+                ..Default::default()
+            }
+        );
+
+        let join_community_plan =
+            state.client_pre_connect_plan(GameServiceClientPreConnectSnapshot {
+                host_address: Some("example.org".into()),
+            });
+        assert!(join_community_plan
+            .achievements
+            .contains(&Achievement::JoinCommunityServer));
+        assert!(state
+            .client_pre_connect_plan(GameServiceClientPreConnectSnapshot {
+                host_address: Some("steam:123".into()),
+            })
+            .is_empty());
+        assert!(state
+            .client_pre_connect_plan(GameServiceClientPreConnectSnapshot {
+                host_address: Some("192.168.0.1".into()),
+            })
+            .is_empty());
+        assert!(state
+            .client_pre_connect_plan(GameServiceClientPreConnectSnapshot { host_address: None })
+            .is_empty());
+
+        let emoji_plan = state.client_chat_plan(GameServiceClientChatSnapshot {
+            contains_alphaaaa: true,
+        });
+        assert!(emoji_plan
+            .achievements
+            .contains(&Achievement::UseAnimdustryEmoji));
+        assert!(state
+            .client_chat_plan(GameServiceClientChatSnapshot {
+                contains_alphaaaa: false,
+            })
+            .is_empty());
+
+        assert!(state
+            .win_plan(GameServiceWinSnapshot { pvp: false })
+            .is_empty());
+        assert!(state
+            .player_join_plan(GameServicePlayerJoinSnapshot {
+                server: false,
+                player_count: 99,
+            })
+            .is_empty());
     }
 }

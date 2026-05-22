@@ -9,10 +9,12 @@ pub use achievement::{
 };
 pub use game_service::{
     DefaultGameService, GameService, GameServiceBlockBuildPlan, GameServiceBlockBuildSnapshot,
-    GameServiceBlockDestroySnapshot, GameServiceEventPlan, GameServiceInitAction,
-    GameServiceSectorCaptureSnapshot, GameServiceSectorLaunchLoadoutSnapshot, GameServiceState,
-    GameServiceTurnPlan, GameServiceTurnSnapshot, GameServiceUnitControlSnapshot,
-    GameServiceUnitCreatePlan, GameServiceUnitCreateSnapshot, GameServiceUnitDestroySnapshot,
-    GameServiceUpdatePlan, GameServiceUpdateSnapshot,
+    GameServiceBlockDestroySnapshot, GameServiceClientChatSnapshot,
+    GameServiceClientPreConnectSnapshot, GameServiceEventPlan, GameServiceInitAction,
+    GameServicePlayerJoinSnapshot, GameServiceSectorCaptureSnapshot,
+    GameServiceSectorLaunchLoadoutSnapshot, GameServiceState, GameServiceTurnPlan,
+    GameServiceTurnSnapshot, GameServiceUnitControlSnapshot, GameServiceUnitCreatePlan,
+    GameServiceUnitCreateSnapshot, GameServiceUnitDestroySnapshot, GameServiceUpdatePlan,
+    GameServiceUpdateSnapshot, GameServiceWinSnapshot,
 };
 pub use s_stat::{SStat, StatService};
