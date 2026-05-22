@@ -12,6 +12,7 @@ pub struct BulletType {
     pub draw_size: f32,
     pub drag: f32,
     pub hittable: bool,
+    pub reflectable: bool,
     pub collides_tiles: bool,
     pub collides_ground: bool,
     pub collides_air: bool,
@@ -42,7 +43,10 @@ pub struct BulletType {
     pub despawn_hit: bool,
     pub set_defaults: bool,
     pub trail_length: i32,
+    pub trail_chance: f32,
+    pub homing_power: f32,
     pub light_radius: f32,
+    pub light_opacity: f32,
     pub spawn_unit_range: Option<f32>,
     pub despawn_unit_range: Option<f32>,
     pub spawn_unit_dps: Option<f32>,
@@ -65,6 +69,7 @@ impl Default for BulletType {
             draw_size: 40.0,
             drag: 0.0,
             hittable: true,
+            reflectable: true,
             collides_tiles: true,
             collides_ground: true,
             collides_air: true,
@@ -95,7 +100,10 @@ impl Default for BulletType {
             despawn_hit: false,
             set_defaults: true,
             trail_length: -1,
+            trail_chance: -0.0001,
+            homing_power: 0.0,
             light_radius: -1.0,
+            light_opacity: 0.0,
             spawn_unit_range: None,
             despawn_unit_range: None,
             spawn_unit_dps: None,
@@ -293,6 +301,75 @@ impl BasicBulletType {
             rotation: bullet_rotation + offset,
             mix_t: fin.clamp(0.0, 1.0),
             draw_back: back_region_found,
+        }
+    }
+}
+
+pub fn bomb_bullet_type(damage: f32, radius: f32, sprite: impl Into<String>) -> BasicBulletType {
+    let mut bullet = BasicBulletType::new(0.7, 0.0, sprite);
+    bullet.base.splash_damage_radius = radius;
+    bullet.base.splash_damage = damage;
+    bullet.base.collides_tiles = false;
+    bullet.base.collides = false;
+    bullet.shrink_y = 0.7;
+    bullet.base.lifetime = 30.0;
+    bullet.base.drag = 0.05;
+    bullet.base.keep_velocity = false;
+    bullet.base.collides_air = false;
+    bullet
+}
+
+pub fn missile_bullet_type(speed: f32, damage: f32, sprite: impl Into<String>) -> BasicBulletType {
+    let mut bullet = BasicBulletType::new(speed, damage, sprite);
+    bullet.base.homing_power = 0.08;
+    bullet.shrink_y = 0.0;
+    bullet.width = 8.0;
+    bullet.height = 8.0;
+    bullet.base.trail_chance = 0.2;
+    bullet.base.lifetime = 52.0;
+    bullet
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaserBoltDrawPlan {
+    pub line_width: f32,
+    pub back_length: f32,
+    pub front_length: f32,
+    pub rotation: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaserBoltBulletType {
+    pub base: BasicBulletType,
+    pub line_width: f32,
+    pub line_height: f32,
+}
+
+impl Default for LaserBoltBulletType {
+    fn default() -> Self {
+        Self::new(1.0, 1.0)
+    }
+}
+
+impl LaserBoltBulletType {
+    pub fn new(speed: f32, damage: f32) -> Self {
+        let mut base = BasicBulletType::default_with_sprite(speed, damage);
+        base.base.hittable = false;
+        base.base.reflectable = false;
+        base.base.light_opacity = 0.6;
+        Self {
+            base,
+            line_width: 2.0,
+            line_height: 7.0,
+        }
+    }
+
+    pub fn draw_plan(&self, bullet_rotation: f32) -> LaserBoltDrawPlan {
+        LaserBoltDrawPlan {
+            line_width: self.line_width,
+            back_length: self.line_height,
+            front_length: self.line_height / 2.0,
+            rotation: bullet_rotation,
         }
     }
 }
@@ -610,5 +687,46 @@ mod tests {
 
         basic.back_sprite = Some("custom-back".into());
         assert_eq!(basic.back_region_name(), "custom-back");
+    }
+
+    #[test]
+    fn bomb_and_missile_bullet_constructors_match_upstream_presets() {
+        let bomb = bomb_bullet_type(60.0, 24.0, "shell");
+        assert_eq!(bomb.base.speed, 0.7);
+        assert_eq!(bomb.base.damage, 0.0);
+        assert_eq!(bomb.base.splash_damage, 60.0);
+        assert_eq!(bomb.base.splash_damage_radius, 24.0);
+        assert!(!bomb.base.collides_tiles);
+        assert!(!bomb.base.collides);
+        assert!(!bomb.base.keep_velocity);
+        assert!(!bomb.base.collides_air);
+        assert_eq!(bomb.shrink_y, 0.7);
+        assert_eq!(bomb.base.lifetime, 30.0);
+        assert_eq!(bomb.base.drag, 0.05);
+
+        let missile = missile_bullet_type(3.0, 10.0, "missile");
+        assert_eq!(missile.base.speed, 3.0);
+        assert_eq!(missile.base.damage, 10.0);
+        assert_eq!(missile.base.homing_power, 0.08);
+        assert_eq!(missile.shrink_y, 0.0);
+        assert_eq!((missile.width, missile.height), (8.0, 8.0));
+        assert_eq!(missile.base.trail_chance, 0.2);
+        assert_eq!(missile.base.lifetime, 52.0);
+    }
+
+    #[test]
+    fn laser_bolt_constructor_and_draw_plan_cover_line_overlay() {
+        let laser = LaserBoltBulletType::new(5.0, 12.0);
+        assert_eq!(laser.base.base.speed, 5.0);
+        assert_eq!(laser.base.base.damage, 12.0);
+        assert!(!laser.base.base.hittable);
+        assert!(!laser.base.base.reflectable);
+        assert_eq!(laser.base.base.light_opacity, 0.6);
+
+        let plan = laser.draw_plan(45.0);
+        assert_eq!(plan.line_width, 2.0);
+        assert_eq!(plan.back_length, 7.0);
+        assert_eq!(plan.front_length, 3.5);
+        assert_eq!(plan.rotation, 45.0);
     }
 }
