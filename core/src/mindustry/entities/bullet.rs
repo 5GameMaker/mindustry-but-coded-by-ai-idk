@@ -18,6 +18,7 @@ pub struct BulletType {
     pub collides_air: bool,
     pub collides: bool,
     pub keep_velocity: bool,
+    pub scale_life: bool,
     pub instant_disappear: bool,
     pub kill_shooter: bool,
     pub scaled_splash_damage: bool,
@@ -44,7 +45,9 @@ pub struct BulletType {
     pub set_defaults: bool,
     pub trail_length: i32,
     pub trail_chance: f32,
+    pub trail_rotation: bool,
     pub homing_power: f32,
+    pub hit_shake: f32,
     pub light_radius: f32,
     pub light_opacity: f32,
     pub spawn_unit_range: Option<f32>,
@@ -75,6 +78,7 @@ impl Default for BulletType {
             collides_air: true,
             collides: true,
             keep_velocity: true,
+            scale_life: false,
             instant_disappear: false,
             kill_shooter: false,
             scaled_splash_damage: false,
@@ -101,7 +105,9 @@ impl Default for BulletType {
             set_defaults: true,
             trail_length: -1,
             trail_chance: -0.0001,
+            trail_rotation: false,
             homing_power: 0.0,
+            hit_shake: 0.0,
             light_radius: -1.0,
             light_opacity: 0.0,
             spawn_unit_range: None,
@@ -371,6 +377,112 @@ impl LaserBoltBulletType {
             front_length: self.line_height / 2.0,
             rotation: bullet_rotation,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArtilleryTrailPlan {
+    pub interval: f32,
+    pub param: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtilleryBulletType {
+    pub base: BasicBulletType,
+    pub trail_mult: f32,
+    pub trail_size: f32,
+}
+
+impl Default for ArtilleryBulletType {
+    fn default() -> Self {
+        Self::new(1.0, 1.0, "shell")
+    }
+}
+
+impl ArtilleryBulletType {
+    pub fn new(speed: f32, damage: f32, sprite: impl Into<String>) -> Self {
+        let mut base = BasicBulletType::new(speed, damage, sprite);
+        base.base.collides_tiles = false;
+        base.base.collides = false;
+        base.base.collides_air = false;
+        base.base.scale_life = true;
+        base.base.hit_shake = 1.0;
+        base.shrink_x = 0.15;
+        base.shrink_y = 0.5;
+        Self {
+            base,
+            trail_mult: 1.0,
+            trail_size: 4.0,
+        }
+    }
+
+    pub fn trail_plan(&self, fslope: f32, rotation: f32) -> ArtilleryTrailPlan {
+        ArtilleryTrailPlan {
+            interval: (3.0 + fslope * 2.0) * self.trail_mult,
+            param: if self.base.base.trail_rotation {
+                rotation
+            } else {
+                fslope * self.trail_size
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlakUpdatePlan {
+    pub prime: bool,
+    pub explode_delay: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlakBulletType {
+    pub base: BasicBulletType,
+    pub explode_range: f32,
+    pub explode_delay: f32,
+    pub flak_delay: f32,
+    pub flak_interval: f32,
+}
+
+impl Default for FlakBulletType {
+    fn default() -> Self {
+        Self::new(1.0, 1.0)
+    }
+}
+
+impl FlakBulletType {
+    pub fn new(speed: f32, damage: f32) -> Self {
+        let mut base = BasicBulletType::new(speed, damage, "shell");
+        base.base.splash_damage = 15.0;
+        base.base.splash_damage_radius = 34.0;
+        base.width = 8.0;
+        base.height = 10.0;
+        base.base.collides_ground = false;
+        Self {
+            base,
+            explode_range: 30.0,
+            explode_delay: 5.0,
+            flak_delay: 0.0,
+            flak_interval: 6.0,
+        }
+    }
+
+    pub fn update_plan(
+        &self,
+        bullet_time: f32,
+        fdata: f32,
+        timer_ready: bool,
+        target_within_range: bool,
+    ) -> FlakUpdatePlan {
+        let prime =
+            bullet_time >= self.flak_delay && fdata >= 0.0 && timer_ready && target_within_range;
+        FlakUpdatePlan {
+            prime,
+            explode_delay: self.explode_delay,
+        }
+    }
+
+    pub fn target_radius(&self, unit_hit_size: f32) -> f32 {
+        self.explode_range + unit_hit_size / 2.0
     }
 }
 
@@ -728,5 +840,46 @@ mod tests {
         assert_eq!(plan.back_length, 7.0);
         assert_eq!(plan.front_length, 3.5);
         assert_eq!(plan.rotation, 45.0);
+    }
+
+    #[test]
+    fn artillery_bullet_constructor_and_trail_plan_match_update_formula() {
+        let mut artillery = ArtilleryBulletType::new(2.5, 20.0, "shell");
+        assert!(!artillery.base.base.collides_tiles);
+        assert!(!artillery.base.base.collides);
+        assert!(!artillery.base.base.collides_air);
+        assert!(artillery.base.base.scale_life);
+        assert_eq!(artillery.base.base.hit_shake, 1.0);
+        assert_eq!(artillery.base.shrink_x, 0.15);
+        assert_eq!(artillery.base.shrink_y, 0.5);
+
+        artillery.trail_mult = 2.0;
+        artillery.trail_size = 5.0;
+        let plan = artillery.trail_plan(0.5, 90.0);
+        assert_eq!(plan.interval, 8.0);
+        assert_eq!(plan.param, 2.5);
+
+        artillery.base.base.trail_rotation = true;
+        assert_eq!(artillery.trail_plan(0.5, 90.0).param, 90.0);
+    }
+
+    #[test]
+    fn flak_bullet_primes_only_after_delay_timer_and_target_match() {
+        let mut flak = FlakBulletType::new(3.0, 7.0);
+        flak.flak_delay = 5.0;
+        assert_eq!(flak.base.base.splash_damage, 15.0);
+        assert_eq!(flak.base.base.splash_damage_radius, 34.0);
+        assert_eq!((flak.base.width, flak.base.height), (8.0, 10.0));
+        assert!(!flak.base.base.collides_ground);
+        assert_eq!(flak.target_radius(12.0), 36.0);
+
+        assert!(!flak.update_plan(0.0, 0.0, true, true).prime);
+        assert!(!flak.update_plan(10.0, -1.0, true, true).prime);
+        assert!(!flak.update_plan(10.0, 0.0, false, true).prime);
+        assert!(!flak.update_plan(10.0, 0.0, true, false).prime);
+
+        let plan = flak.update_plan(10.0, 0.0, true, true);
+        assert!(plan.prime);
+        assert_eq!(plan.explode_delay, 5.0);
     }
 }

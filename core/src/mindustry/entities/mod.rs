@@ -32,8 +32,9 @@ pub use abilities::{
 };
 pub use bullet::{
     bomb_bullet_type, empty_bullet_type, explosion_bullet_type, missile_bullet_type,
-    BasicBulletDrawPlan, BasicBulletType, BulletCreatePlan, BulletType, FireBulletType,
-    FireBulletUpdatePlan, LaserBoltBulletType, LaserBoltDrawPlan, LightningBulletType,
+    ArtilleryBulletType, ArtilleryTrailPlan, BasicBulletDrawPlan, BasicBulletType,
+    BulletCreatePlan, BulletType, FireBulletType, FireBulletUpdatePlan, FlakBulletType,
+    FlakUpdatePlan, LaserBoltBulletType, LaserBoltDrawPlan, LightningBulletType,
 };
 pub use comp::BuildingComp;
 pub use comp::WeaponsComp;
