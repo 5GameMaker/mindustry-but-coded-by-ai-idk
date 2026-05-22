@@ -16,6 +16,7 @@ use crate::mindustry::net::{
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBuilder,
     Streamable, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
     UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -184,6 +185,9 @@ pub struct NetClientState {
     pub last_payload_dropped: Option<PayloadDroppedCallPacket>,
     pub last_payload_dropped_at: Option<Instant>,
     pub payload_dropped_packets_seen: u64,
+    pub last_unit_entered_payload: Option<UnitEnteredPayloadCallPacket>,
+    pub last_unit_entered_payload_at: Option<Instant>,
+    pub unit_entered_payload_packets_seen: u64,
     pub last_building_control_select: Option<BuildingControlSelectCallPacket>,
     pub last_building_control_select_at: Option<Instant>,
     pub building_control_select_packets_seen: u64,
@@ -312,6 +316,10 @@ impl fmt::Debug for NetClientState {
             .field(
                 "payload_dropped_packets_seen",
                 &self.payload_dropped_packets_seen,
+            )
+            .field(
+                "unit_entered_payload_packets_seen",
+                &self.unit_entered_payload_packets_seen,
             )
             .field(
                 "building_control_select_packets_seen",
@@ -1119,6 +1127,13 @@ impl NetClient {
                         state.last_payload_dropped_at = Some(now);
                         false
                     }
+                    PacketKind::UnitEnteredPayloadCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.unit_entered_payload_packets_seen += 1;
+                        state.last_unit_entered_payload = Some(packet.clone());
+                        state.last_unit_entered_payload_at = Some(now);
+                        false
+                    }
                     PacketKind::BuildingControlSelectCallPacket(packet) => {
                         let now = Instant::now();
                         state.building_control_select_packets_seen += 1;
@@ -1340,7 +1355,7 @@ mod tests {
         RequestUnitPayloadCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin,
         StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket,
         TransferInventoryCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, WorldDataBeginCallPacket,
+        UnitControlCallPacket, UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -2100,6 +2115,10 @@ mod tests {
             x: 321.75,
             y: 654.25,
         };
+        let unit_entered_payload = UnitEnteredPayloadCallPacket {
+            unit: UnitRef::Unit { id: 408 },
+            build: secondary_build,
+        };
         let building_control_select = BuildingControlSelectCallPacket {
             player: EntityRef::new(306),
             build: primary_build,
@@ -2140,6 +2159,9 @@ mod tests {
             ));
             net.handle_client_received(PacketKind::PayloadDroppedCallPacket(
                 payload_dropped.clone(),
+            ));
+            net.handle_client_received(PacketKind::UnitEnteredPayloadCallPacket(
+                unit_entered_payload.clone(),
             ));
             net.handle_client_received(PacketKind::UnitBuildingControlSelectCallPacket(
                 unit_building_control_select.clone(),
@@ -2197,6 +2219,12 @@ mod tests {
         assert_eq!(state.payload_dropped_packets_seen, 1);
         assert_eq!(state.last_payload_dropped.as_ref(), Some(&payload_dropped));
         assert!(state.last_payload_dropped_at.is_some());
+        assert_eq!(state.unit_entered_payload_packets_seen, 1);
+        assert_eq!(
+            state.last_unit_entered_payload.as_ref(),
+            Some(&unit_entered_payload)
+        );
+        assert!(state.last_unit_entered_payload_at.is_some());
         assert_eq!(state.building_control_select_packets_seen, 1);
         assert_eq!(
             state.last_building_control_select.as_ref(),
