@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
-use crate::mindustry::io::BuildPlanWire;
+use crate::mindustry::io::{BuildPlanWire, EntityRef};
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
@@ -132,6 +132,10 @@ pub struct NetClientState {
     pub last_disconnect: Option<Disconnect>,
     pub last_world_stream: Option<Streamable>,
     pub last_packet: Option<PacketKind>,
+    pub last_message: Option<String>,
+    pub last_message_unformatted: Option<String>,
+    pub last_message_sender: Option<EntityRef>,
+    pub message_packets_seen: u64,
     pub connect_config: Option<ClientConnectConfig>,
     pub connect_packet_sent: bool,
     pub last_sent_connect_packet: Option<ConnectPacket>,
@@ -304,6 +308,8 @@ impl fmt::Debug for NetClientState {
             .field("last_disconnect", &self.last_disconnect)
             .field("last_world_stream", &self.last_world_stream)
             .field("last_packet", &self.last_packet)
+            .field("last_message", &self.last_message)
+            .field("message_packets_seen", &self.message_packets_seen)
             .field("connect_config", &self.connect_config)
             .field("connect_packet_sent", &self.connect_packet_sent)
             .field("last_sent_connect_packet", &self.last_sent_connect_packet)
@@ -1134,6 +1140,20 @@ impl NetClient {
                             false
                         }
                     }
+                    PacketKind::SendMessageCallPacket(packet) => {
+                        state.message_packets_seen += 1;
+                        state.last_message = Some(packet.message.clone());
+                        state.last_message_unformatted = None;
+                        state.last_message_sender = None;
+                        false
+                    }
+                    PacketKind::SendMessageCallPacket2(packet) => {
+                        state.message_packets_seen += 1;
+                        state.last_message = Some(packet.message.clone());
+                        state.last_message_unformatted = Some(packet.unformatted.clone());
+                        state.last_message_sender = Some(packet.player_sender);
+                        false
+                    }
                     PacketKind::PingResponseCallPacket(response) => {
                         let now = Self::current_millis();
                         state.ping_responses_received += 1;
@@ -1575,10 +1595,11 @@ mod tests {
         PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
         PingLocationCallPacket, PingResponseCallPacket, RemoveQueueBlockCallPacket,
         RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-        RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
-        SetLiquidCallPacket, SetLiquidsCallPacket, SetUnitCommandCallPacket,
-        SetUnitStanceCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
+        RequestUnitPayloadCallPacket, RotateBlockCallPacket, SendMessageCallPacket,
+        SendMessageCallPacket2, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
+        SetLiquidsCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
+        TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
         TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
         UnitEnteredPayloadCallPacket, WorldDataBeginCallPacket,
@@ -1708,6 +1729,39 @@ mod tests {
 
         assert_eq!(*packet_count.lock().unwrap(), 1);
         assert_eq!(*binary_payloads.lock().unwrap(), vec![vec![7, 8, 9]]);
+    }
+
+    #[test]
+    fn update_records_server_messages_like_java_client_chatfrag_inputs() {
+        let client = NetClient::default();
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SendMessageCallPacket(SendMessageCallPacket {
+                message: "[scarlet]Server warning".into(),
+            }));
+            net.handle_client_received(PacketKind::SendMessageCallPacket2(
+                SendMessageCallPacket2 {
+                    message: "[coral][[#ff00ffff]player[coral]]:[white] hello".into(),
+                    unformatted: "hello".into(),
+                    player_sender: EntityRef::new(77),
+                },
+            ));
+        }
+
+        client.update();
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.message_packets_seen, 2);
+        assert_eq!(
+            state.last_message.as_deref(),
+            Some("[coral][[#ff00ffff]player[coral]]:[white] hello")
+        );
+        assert_eq!(state.last_message_unformatted.as_deref(), Some("hello"));
+        assert_eq!(state.last_message_sender, Some(EntityRef::new(77)));
     }
 
     #[test]
