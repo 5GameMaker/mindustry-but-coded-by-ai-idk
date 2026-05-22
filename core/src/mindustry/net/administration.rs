@@ -589,6 +589,109 @@ impl TraceInfo {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SteamAdminData {
+    pub bans: HashSet<String>,
+    pub admins: HashSet<String>,
+}
+
+impl SteamAdminData {
+    pub fn from_lists(
+        bans: impl IntoIterator<Item = impl Into<String>>,
+        admins: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            bans: bans.into_iter().map(Into::into).collect(),
+            admins: admins.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn from_json_text(text: &str) -> Result<Self, SteamAdminParseError> {
+        Ok(Self::from_lists(
+            parse_json_string_array(text, "bans")?,
+            parse_json_string_array(text, "admins")?,
+        ))
+    }
+
+    pub fn is_banned(&self, id: &str) -> bool {
+        steam_id(id).is_some_and(|id| self.bans.contains(id))
+    }
+
+    pub fn is_admin(&self, id: &str) -> bool {
+        steam_id(id).is_some_and(|id| self.admins.contains(id))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SteamAdminParseError {
+    MissingArray(String),
+    UnterminatedArray(String),
+    UnterminatedString(String),
+}
+
+fn steam_id(id: &str) -> Option<&str> {
+    id.strip_prefix("steam:")
+}
+
+fn parse_json_string_array(text: &str, key: &str) -> Result<Vec<String>, SteamAdminParseError> {
+    let quoted_key = format!("\"{key}\"");
+    let Some(key_index) = text.find(&quoted_key) else {
+        return Err(SteamAdminParseError::MissingArray(key.to_string()));
+    };
+    let Some(array_start) = text[key_index + quoted_key.len()..].find('[') else {
+        return Err(SteamAdminParseError::MissingArray(key.to_string()));
+    };
+    let mut chars = text[key_index + quoted_key.len() + array_start + 1..]
+        .chars()
+        .peekable();
+    let mut values = Vec::new();
+
+    loop {
+        while matches!(chars.peek(), Some(ch) if ch.is_whitespace() || *ch == ',') {
+            chars.next();
+        }
+
+        match chars.peek() {
+            Some(']') => {
+                chars.next();
+                return Ok(values);
+            }
+            Some('"') => {
+                chars.next();
+                let mut value = String::new();
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some('"') => value.push('"'),
+                            Some('\\') => value.push('\\'),
+                            Some('/') => value.push('/'),
+                            Some('n') => value.push('\n'),
+                            Some('r') => value.push('\r'),
+                            Some('t') => value.push('\t'),
+                            Some(other) => value.push(other),
+                            None => {
+                                return Err(SteamAdminParseError::UnterminatedString(
+                                    key.to_string(),
+                                ))
+                            }
+                        },
+                        Some(ch) => value.push(ch),
+                        None => {
+                            return Err(SteamAdminParseError::UnterminatedString(key.to_string()))
+                        }
+                    }
+                }
+                values.push(value);
+            }
+            Some(_) => {
+                chars.next();
+            }
+            None => return Err(SteamAdminParseError::UnterminatedArray(key.to_string())),
+        }
+    }
+}
+
 pub type ChatFilter = Arc<dyn Fn(Option<&str>, &str) -> Option<String> + Send + Sync>;
 pub type ActionFilter = Arc<dyn Fn(&PlayerAction) -> bool + Send + Sync>;
 
@@ -783,6 +886,36 @@ mod tests {
         assert_eq!(
             admin.get_info_optional("uuid-a").unwrap().plain_last_name(),
             "Alice"
+        );
+    }
+
+    #[test]
+    fn steam_admin_data_only_matches_prefixed_steam_ids() {
+        let data = SteamAdminData::from_lists(["111", "222"], ["333"]);
+
+        assert!(data.is_banned("steam:111"));
+        assert!(data.is_banned("steam:222"));
+        assert!(!data.is_banned("111"));
+        assert!(!data.is_banned("steam:333"));
+        assert!(data.is_admin("steam:333"));
+        assert!(!data.is_admin("333"));
+    }
+
+    #[test]
+    fn steam_admin_data_parses_mindustry_bans_json_shape() {
+        let text = r#"{
+            "bans": ["111", "222"],
+            "admins": ["333", "escaped\"id"]
+        }"#;
+        let data = SteamAdminData::from_json_text(text).unwrap();
+
+        assert!(data.is_banned("steam:111"));
+        assert!(data.is_banned("steam:222"));
+        assert!(data.is_admin("steam:333"));
+        assert!(data.is_admin("steam:escaped\"id"));
+        assert_eq!(
+            SteamAdminData::from_json_text(r#"{"bans":[]}"#).unwrap_err(),
+            SteamAdminParseError::MissingArray("admins".into())
         );
     }
 }

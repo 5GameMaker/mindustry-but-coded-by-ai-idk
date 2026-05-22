@@ -12,7 +12,7 @@ pub mod validate_exception;
 
 pub use administration::{
     ActionFilter, ActionType, Administration, ChatFilter, Config, ConfigValue, PlayerAction,
-    PlayerInfo, TraceInfo,
+    PlayerInfo, SteamAdminData, SteamAdminParseError, TraceInfo,
 };
 pub use arc_net_provider::{
     ArcNetProvider, ArcTransport, FrameworkMessage, PacketEnvelope, PacketSerializer,
