@@ -716,9 +716,128 @@ impl Ability for ShieldRegenFieldAbility {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusFieldPulse {
+    pub effect: String,
+    pub duration: f32,
+    pub target_count: usize,
+    pub active_x: f32,
+    pub active_y: f32,
+    pub active_param: f32,
+    pub timer: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusFieldAbility {
+    pub base: BasicAbility,
+    pub effect: String,
+    pub duration: f32,
+    pub reload: f32,
+    pub range: f32,
+    pub on_shoot: bool,
+    pub effect_x: f32,
+    pub effect_y: f32,
+    pub parentize_effects: bool,
+    pub effect_size_param: bool,
+    pub color: String,
+    pub timer: f32,
+}
+
+impl Default for StatusFieldAbility {
+    fn default() -> Self {
+        Self {
+            base: BasicAbility::default(),
+            effect: String::new(),
+            duration: 60.0,
+            reload: 100.0,
+            range: 20.0,
+            on_shoot: false,
+            effect_x: 0.0,
+            effect_y: 0.0,
+            parentize_effects: false,
+            effect_size_param: true,
+            color: "accent".into(),
+            timer: 0.0,
+        }
+    }
+}
+
+impl StatusFieldAbility {
+    pub fn new(effect: impl Into<String>, duration: f32, reload: f32, range: f32) -> Self {
+        Self {
+            effect: effect.into(),
+            duration,
+            reload,
+            range,
+            ..Default::default()
+        }
+    }
+
+    pub fn update_targets(
+        &mut self,
+        delta: f32,
+        is_shooting: bool,
+        unit_x: f32,
+        unit_y: f32,
+        unit_rotation: f32,
+        target_count: usize,
+    ) -> Option<StatusFieldPulse> {
+        self.timer += delta;
+
+        if self.timer < self.reload || (self.on_shoot && !is_shooting) {
+            return None;
+        }
+
+        let (offset_x, offset_y) =
+            rotated_effect_offset(unit_rotation, self.effect_y, self.effect_x);
+        let active_param = if self.effect_size_param {
+            self.range
+        } else {
+            unit_rotation
+        };
+        self.timer = 0.0;
+
+        Some(StatusFieldPulse {
+            effect: self.effect.clone(),
+            duration: self.duration,
+            target_count,
+            active_x: unit_x + offset_x,
+            active_y: unit_y + offset_y,
+            active_param,
+            timer: self.timer,
+        })
+    }
+
+    pub fn pulses_per_second(&self) -> f32 {
+        60.0 / self.reload
+    }
+}
+
+impl Ability for StatusFieldAbility {
+    fn is_visible(&self) -> bool {
+        self.base.visible
+    }
+
+    fn data(&self) -> f32 {
+        self.base.data
+    }
+
+    fn set_data(&mut self, data: f32) {
+        self.base.data = data;
+    }
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let scaled = 1.0 - (1.0 - alpha).powf(delta.max(0.0));
     from + (to - from) * scaled
+}
+
+fn rotated_effect_offset(rotation: f32, forward: f32, sideways: f32) -> (f32, f32) {
+    let radians = rotation.to_radians();
+    (
+        radians.cos() * forward - radians.sin() * sideways,
+        radians.sin() * forward + radians.cos() * sideways,
+    )
 }
 
 fn point_in_regular_polygon(
@@ -769,7 +888,7 @@ mod tests {
     use super::{
         Ability, BasicAbility, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
         RegenAbility, RepairFieldAbility, RepairFieldTarget, ShieldRegenFieldAbility,
-        ShieldRegenFieldTarget, SpawnDeathAbility,
+        ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility,
     };
 
     #[derive(Clone)]
@@ -978,5 +1097,44 @@ mod tests {
         assert_eq!(pulse.shields, vec![50.0]);
         assert!(!pulse.active_effect);
         assert!(!ability.applied);
+    }
+
+    #[test]
+    fn status_field_pulses_after_reload_and_offsets_active_effect() {
+        let mut ability = StatusFieldAbility::new("overdrive", 120.0, 10.0, 30.0);
+        ability.effect_x = 2.0;
+        ability.effect_y = 4.0;
+
+        assert!(ability
+            .update_targets(9.0, false, 10.0, 20.0, 90.0, 3)
+            .is_none());
+        let pulse = ability
+            .update_targets(1.0, false, 10.0, 20.0, 90.0, 3)
+            .expect("reload threshold should fire");
+
+        assert_eq!(pulse.effect, "overdrive");
+        assert_eq!(pulse.duration, 120.0);
+        assert_eq!(pulse.target_count, 3);
+        assert!((pulse.active_x - 8.0).abs() < 0.0001);
+        assert!((pulse.active_y - 24.0).abs() < 0.0001);
+        assert_eq!(pulse.active_param, 30.0);
+        assert_eq!(pulse.timer, 0.0);
+        assert_eq!(ability.pulses_per_second(), 6.0);
+    }
+
+    #[test]
+    fn status_field_can_require_shooting_and_use_rotation_as_effect_param() {
+        let mut ability = StatusFieldAbility::new("boost", 30.0, 5.0, 10.0);
+        ability.on_shoot = true;
+        ability.effect_size_param = false;
+
+        assert!(ability
+            .update_targets(5.0, false, 0.0, 0.0, 45.0, 1)
+            .is_none());
+        let pulse = ability
+            .update_targets(0.0, true, 0.0, 0.0, 45.0, 1)
+            .expect("stored timer should fire once shooting starts");
+
+        assert_eq!(pulse.active_param, 45.0);
     }
 }
