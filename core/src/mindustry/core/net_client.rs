@@ -10,7 +10,8 @@ use crate::mindustry::net::{
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
     Connect, ConnectConfirmCallPacket, ConnectPacket, Disconnect, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, Net, PacketKind, PingCallPacket, ProviderEvent,
-    StateSnapshotCallPacket, StreamBuilder, Streamable,
+    RotateBlockCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    TileConfigCallPacket, TileTapCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 
@@ -155,6 +156,15 @@ pub struct NetClientState {
     pub last_client_plan_snapshot_received: Option<ClientPlanSnapshotReceivedCallPacket>,
     pub last_client_plan_snapshot_received_at: Option<Instant>,
     pub client_plan_snapshot_received_packets_seen: u64,
+    pub last_tile_config: Option<TileConfigCallPacket>,
+    pub last_tile_config_at: Option<Instant>,
+    pub tile_config_packets_seen: u64,
+    pub last_rotate_block: Option<RotateBlockCallPacket>,
+    pub last_rotate_block_at: Option<Instant>,
+    pub rotate_block_packets_seen: u64,
+    pub last_tile_tap: Option<TileTapCallPacket>,
+    pub last_tile_tap_at: Option<Instant>,
+    pub tile_tap_packets_seen: u64,
     pub last_server_snapshot_at: Option<Instant>,
     pub last_sent_client_snapshot_id: i32,
     pub last_sent_client_snapshot: Option<ClientSnapshotCallPacket>,
@@ -234,6 +244,9 @@ impl fmt::Debug for NetClientState {
                 "client_plan_snapshot_received_packets_seen",
                 &self.client_plan_snapshot_received_packets_seen,
             )
+            .field("tile_config_packets_seen", &self.tile_config_packets_seen)
+            .field("rotate_block_packets_seen", &self.rotate_block_packets_seen)
+            .field("tile_tap_packets_seen", &self.tile_tap_packets_seen)
             .field("last_server_snapshot_at", &self.last_server_snapshot_at)
             .field(
                 "last_sent_client_snapshot_id",
@@ -971,6 +984,27 @@ impl NetClient {
                         state.last_client_plan_snapshot_received_at = Some(now);
                         false
                     }
+                    PacketKind::TileConfigCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.tile_config_packets_seen += 1;
+                        state.last_tile_config = Some(packet.clone());
+                        state.last_tile_config_at = Some(now);
+                        false
+                    }
+                    PacketKind::RotateBlockCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.rotate_block_packets_seen += 1;
+                        state.last_rotate_block = Some(packet.clone());
+                        state.last_rotate_block_at = Some(now);
+                        false
+                    }
+                    PacketKind::TileTapCallPacket(packet) => {
+                        let now = Instant::now();
+                        state.tile_tap_packets_seen += 1;
+                        state.last_tile_tap = Some(packet.clone());
+                        state.last_tile_tap_at = Some(now);
+                        false
+                    }
                     _ => false,
                 }
             };
@@ -1131,13 +1165,13 @@ mod tests {
 
     use crate::mindustry::entities::comp::{PlayerComp, PlayerUnitState, UnitComp};
     use crate::mindustry::entities::units::BuildPlan;
-    use crate::mindustry::io::{BuildPlanWire, TeamId, TypeValue, Vec2};
+    use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::net::{
         ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, Connect, Disconnect, DoneCallback, EntitySnapshotCallPacket,
         HiddenSnapshotCallPacket, Host, HostCallback, Net, NetConnection, NetProvider, PacketKind,
-        PingResponseCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable,
-        WorldDataBeginCallPacket,
+        PingResponseCallPacket, RotateBlockCallPacket, StateSnapshotCallPacket, StreamBegin,
+        StreamChunk, Streamable, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -1812,6 +1846,47 @@ mod tests {
         let current = player.get_preview_plans(110);
         assert_eq!(current.len(), 1);
         assert_eq!(current[0].config, TypeValue::String("cfg".into()));
+    }
+
+    #[test]
+    fn update_records_server_forwarded_input_packets() {
+        let client = NetClient::default();
+        let build_pos = 12_345;
+        let tap_pos = 54_321;
+        let tile_config = TileConfigCallPacket::server(
+            EntityRef::new(7),
+            BuildingRef::new(build_pos),
+            TypeValue::String("cfg".into()),
+        );
+        let rotate_block =
+            RotateBlockCallPacket::server(EntityRef::new(7), BuildingRef::new(build_pos), true);
+        let tile_tap = TileTapCallPacket::server(EntityRef::new(7), Some(tap_pos));
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::TileConfigCallPacket(tile_config.clone()));
+            net.handle_client_received(PacketKind::RotateBlockCallPacket(rotate_block));
+            net.handle_client_received(PacketKind::TileTapCallPacket(tile_tap.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.tile_config_packets_seen, 1);
+        assert_eq!(state.last_tile_config.as_ref(), Some(&tile_config));
+        assert!(state.last_tile_config_at.is_some());
+        assert_eq!(state.rotate_block_packets_seen, 1);
+        assert_eq!(state.last_rotate_block.as_ref(), Some(&rotate_block));
+        assert!(state.last_rotate_block_at.is_some());
+        assert_eq!(state.tile_tap_packets_seen, 1);
+        assert_eq!(state.last_tile_tap.as_ref(), Some(&tile_tap));
+        assert!(state.last_tile_tap_at.is_some());
+        assert!(matches!(
+            state.last_packet,
+            Some(PacketKind::TileTapCallPacket(_))
+        ));
     }
 
     #[test]
