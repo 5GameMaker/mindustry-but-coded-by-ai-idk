@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemStack {
     pub item: String,
     pub amount: i32,
@@ -67,6 +67,18 @@ impl fmt::Display for ItemStack {
     }
 }
 
+impl PartialOrd for ItemStack {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ItemStack {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.item.cmp(&other.item)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +118,9 @@ mod tests {
         );
         assert_eq!(ItemStack::copy_all(&stacks), stacks);
         assert!(ItemStack::new("copper", 99) < ItemStack::new("lead", 1));
+        assert_eq!(
+            ItemStack::new("copper", 1).cmp(&ItemStack::new("copper", 999)),
+            std::cmp::Ordering::Equal
+        );
     }
 }
