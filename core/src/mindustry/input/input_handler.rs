@@ -12,16 +12,16 @@ use crate::mindustry::entities::comp::{
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
-    BuildingControlSelectCallPacket, ClearItemsCallPacket, CommandUnitsCallPacket,
-    DeletePlansCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
+    BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
+    CommandUnitsCallPacket, DeletePlansCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
     PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
     RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetItemCallPacket, SetItemsCallPacket,
-    TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket, TransferInventoryCallPacket,
-    TransferItemToCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    SetLiquidCallPacket, SetLiquidsCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
+    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
+    UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
-use crate::mindustry::r#type::ItemStack;
+use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::{meta::BuildVisibility, point2_pack};
 
@@ -154,6 +154,40 @@ pub struct ClearItemsOutcome {
     pub rejection: Option<ItemSyncRejectReason>,
     pub cleared_total: i32,
     pub packet: Option<ClearItemsCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiquidSyncRejectReason {
+    MissingBuild,
+    MissingLiquidStorage,
+    MissingLiquid,
+    UnknownLiquid,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLiquidOutcome {
+    pub accepted: bool,
+    pub rejection: Option<LiquidSyncRejectReason>,
+    pub previous_amount: f32,
+    pub new_amount: f32,
+    pub packet: Option<SetLiquidCallPacket>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLiquidsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<LiquidSyncRejectReason>,
+    pub applied_entries: usize,
+    pub packet: Option<SetLiquidsCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClearLiquidsOutcome {
+    pub accepted: bool,
+    pub rejection: Option<LiquidSyncRejectReason>,
+    pub cleared_current: Option<i16>,
+    pub cleared_amount: f32,
+    pub packet: Option<ClearLiquidsCallPacket>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -596,6 +630,41 @@ impl ClearItemsOutcome {
             accepted: false,
             rejection: Some(reason),
             cleared_total: 0,
+            packet: None,
+        }
+    }
+}
+
+impl SetLiquidOutcome {
+    fn rejected(reason: LiquidSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            previous_amount: 0.0,
+            new_amount: 0.0,
+            packet: None,
+        }
+    }
+}
+
+impl SetLiquidsOutcome {
+    fn rejected(reason: LiquidSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            applied_entries: 0,
+            packet: None,
+        }
+    }
+}
+
+impl ClearLiquidsOutcome {
+    fn rejected(reason: LiquidSyncRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            cleared_current: None,
+            cleared_amount: 0.0,
             packet: None,
         }
     }
@@ -1194,6 +1263,115 @@ pub fn clear_items(build: Option<&mut BuildingComp>) -> ClearItemsOutcome {
         rejection: None,
         cleared_total,
         packet: Some(ClearItemsCallPacket { build: build_ref }),
+    }
+}
+
+pub fn set_liquid<R>(
+    build: Option<&mut BuildingComp>,
+    liquid: Option<String>,
+    amount: f32,
+    resolve_liquid_id: R,
+) -> SetLiquidOutcome
+where
+    R: FnOnce(&str) -> Option<i16>,
+{
+    let Some(build) = build else {
+        return SetLiquidOutcome::rejected(LiquidSyncRejectReason::MissingBuild);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+
+    let Some(liquids) = build.liquids.as_mut() else {
+        return SetLiquidOutcome::rejected(LiquidSyncRejectReason::MissingLiquidStorage);
+    };
+
+    let Some(liquid_name) = liquid else {
+        return SetLiquidOutcome::rejected(LiquidSyncRejectReason::MissingLiquid);
+    };
+
+    let Some(liquid_id) = resolve_liquid_id(&liquid_name) else {
+        return SetLiquidOutcome::rejected(LiquidSyncRejectReason::UnknownLiquid);
+    };
+
+    let previous_amount = liquids.get(liquid_id);
+    liquids.set(liquid_id, amount);
+
+    SetLiquidOutcome {
+        accepted: true,
+        rejection: None,
+        previous_amount,
+        new_amount: amount,
+        packet: Some(SetLiquidCallPacket {
+            build: build_ref,
+            liquid: Some(liquid_name),
+            amount,
+        }),
+    }
+}
+
+pub fn set_liquids<R>(
+    build: Option<&mut BuildingComp>,
+    stacks: Vec<LiquidStack>,
+    mut resolve_liquid_id: R,
+) -> SetLiquidsOutcome
+where
+    R: FnMut(&str) -> Option<i16>,
+{
+    let Some(build) = build else {
+        return SetLiquidsOutcome::rejected(LiquidSyncRejectReason::MissingBuild);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+
+    if build.liquids.is_none() {
+        return SetLiquidsOutcome::rejected(LiquidSyncRejectReason::MissingLiquidStorage);
+    }
+
+    let mut resolved = Vec::with_capacity(stacks.len());
+    for stack in &stacks {
+        let Some(liquid_id) = resolve_liquid_id(&stack.liquid) else {
+            return SetLiquidsOutcome::rejected(LiquidSyncRejectReason::UnknownLiquid);
+        };
+        resolved.push((liquid_id, stack.amount));
+    }
+
+    let liquids = build
+        .liquids
+        .as_mut()
+        .expect("checked liquid module presence");
+    for (liquid_id, amount) in resolved {
+        liquids.set(liquid_id, amount);
+    }
+
+    SetLiquidsOutcome {
+        accepted: true,
+        rejection: None,
+        applied_entries: stacks.len(),
+        packet: Some(SetLiquidsCallPacket {
+            build: build_ref,
+            liquids: stacks,
+        }),
+    }
+}
+
+pub fn clear_liquids(build: Option<&mut BuildingComp>) -> ClearLiquidsOutcome {
+    let Some(build) = build else {
+        return ClearLiquidsOutcome::rejected(LiquidSyncRejectReason::MissingBuild);
+    };
+    let build_ref = BuildingRef::new(build.tile_pos);
+
+    let Some(liquids) = build.liquids.as_mut() else {
+        return ClearLiquidsOutcome::rejected(LiquidSyncRejectReason::MissingLiquidStorage);
+    };
+
+    let cleared_current = liquids.current();
+    let cleared_amount = liquids.current_amount();
+    liquids.clear();
+
+    ClearLiquidsOutcome {
+        accepted: true,
+        rejection: None,
+        cleared_current,
+        cleared_amount,
+        packet: Some(ClearLiquidsCallPacket { build: build_ref }),
     }
 }
 
@@ -2208,11 +2386,27 @@ mod tests {
         block
     }
 
+    fn liquid_block() -> Block {
+        let mut block = block();
+        block.has_liquids = true;
+        block.liquid_capacity = 40.0;
+        block
+    }
+
     fn item_id(name: &str) -> Option<i16> {
         match name {
             "copper" => Some(0),
             "lead" => Some(1),
             "scrap" => Some(2),
+            _ => None,
+        }
+    }
+
+    fn liquid_id(name: &str) -> Option<i16> {
+        match name {
+            "water" => Some(0),
+            "slag" => Some(1),
+            "oil" => Some(2),
             _ => None,
         }
     }
@@ -2613,6 +2807,99 @@ mod tests {
         assert_eq!(
             outcome.rejection,
             Some(ItemSyncRejectReason::MissingItemStorage)
+        );
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn set_liquid_updates_building_liquids_and_records_packet() {
+        let mut building = BuildingComp::new(point2_pack(17, 19), liquid_block(), TeamId(1));
+        building.liquids.as_mut().unwrap().set(0, 2.5);
+
+        let outcome = set_liquid(Some(&mut building), Some("water".into()), 8.75, liquid_id);
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.previous_amount, 2.5);
+        assert_eq!(outcome.new_amount, 8.75);
+        assert_eq!(building.liquids.as_ref().unwrap().get(0), 8.75);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(17, 19)));
+        assert_eq!(packet.liquid.as_deref(), Some("water"));
+        assert_eq!(packet.amount, 8.75);
+    }
+
+    #[test]
+    fn set_liquids_applies_all_stacks_without_clearing_absent_liquids() {
+        let mut building = BuildingComp::new(point2_pack(18, 20), liquid_block(), TeamId(1));
+        building.liquids.as_mut().unwrap().set(2, 9.0);
+
+        let stacks = vec![
+            LiquidStack::new("water", 1.5),
+            LiquidStack::new("slag", 2.25),
+        ];
+        let outcome = set_liquids(Some(&mut building), stacks.clone(), liquid_id);
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.applied_entries, 2);
+        let liquids = building.liquids.as_ref().unwrap();
+        assert_eq!(liquids.get(0), 1.5);
+        assert_eq!(liquids.get(1), 2.25);
+        assert_eq!(liquids.get(2), 9.0);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(18, 20)));
+        assert_eq!(packet.liquids, stacks);
+    }
+
+    #[test]
+    fn set_liquids_rejects_unknown_liquid_without_partial_mutation() {
+        let mut building = BuildingComp::new(point2_pack(19, 21), liquid_block(), TeamId(1));
+        building.liquids.as_mut().unwrap().set(0, 5.0);
+
+        let outcome = set_liquids(
+            Some(&mut building),
+            vec![
+                LiquidStack::new("water", 1.0),
+                LiquidStack::new("missing", 2.0),
+            ],
+            liquid_id,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(LiquidSyncRejectReason::UnknownLiquid)
+        );
+        assert_eq!(building.liquids.as_ref().unwrap().get(0), 5.0);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn clear_liquids_clears_module_and_records_packet() {
+        let mut building = BuildingComp::new(point2_pack(20, 22), liquid_block(), TeamId(1));
+        let liquids = building.liquids.as_mut().unwrap();
+        liquids.set(0, 5.0);
+        liquids.set(1, 6.0);
+
+        let outcome = clear_liquids(Some(&mut building));
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.cleared_current, Some(1));
+        assert_eq!(outcome.cleared_amount, 6.0);
+        assert_eq!(building.liquids.as_ref().unwrap().current(), None);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(20, 22)));
+    }
+
+    #[test]
+    fn clear_liquids_rejects_building_without_liquid_module() {
+        let mut building = BuildingComp::new(point2_pack(21, 23), block(), TeamId(1));
+
+        let outcome = clear_liquids(Some(&mut building));
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(LiquidSyncRejectReason::MissingLiquidStorage)
         );
         assert!(outcome.packet.is_none());
     }
