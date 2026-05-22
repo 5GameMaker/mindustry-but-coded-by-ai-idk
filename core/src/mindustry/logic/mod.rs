@@ -15,6 +15,7 @@ pub mod l_unit_control;
 pub mod l_var;
 pub mod l_writable;
 pub mod logic_assembler;
+pub mod logic_building_object;
 pub mod logic_canvas;
 pub mod logic_controllable_object;
 pub mod logic_display_command;
@@ -64,6 +65,7 @@ pub use logic_assembler::{
     parse_logic_double, parse_logic_long, parse_named_logic_color, rgba_to_double_bits,
     rgba_u32_to_double_bits, unpack_double_color, LogicAssembler, LogicValue,
 };
+pub use logic_building_object::LogicBuildingObject;
 pub use logic_canvas::{
     assign_logic_jump_heights, logic_canvas_use_rows, normalize_logic_jump_range,
     representative_logic_jumps, LogicAlign, LogicJumpPlacement, LogicJumpRange,
@@ -3108,89 +3110,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicBuildingObject {
-    pub block_name: String,
-    pub team: u8,
-    pub x: f32,
-    pub y: f32,
-    pub hit_size: f32,
-    pub valid: bool,
-    pub flags: BTreeSet<BlockFlag>,
-    pub damaged: bool,
-    pub block_privileged: bool,
-    pub display_commands: Vec<u64>,
-    pub message: String,
-    pub prop_values: BTreeMap<LAccess, LVarValue>,
-    pub content_props: BTreeMap<String, f64>,
-}
-
-impl LogicBuildingObject {
-    pub fn new(block_name: impl Into<String>, team: u8, x: f32, y: f32) -> Self {
-        Self {
-            block_name: block_name.into(),
-            team,
-            x,
-            y,
-            hit_size: LOGIC_TILE_SIZE,
-            valid: true,
-            flags: BTreeSet::new(),
-            damaged: false,
-            block_privileged: false,
-            display_commands: Vec::new(),
-            message: String::new(),
-            prop_values: BTreeMap::new(),
-            content_props: BTreeMap::new(),
-        }
-    }
-
-    pub fn has_flag(&self, flag: BlockFlag) -> bool {
-        self.flags.contains(&flag)
-    }
-
-    fn sense_access(&self, access: LAccess) -> Option<LVarValue> {
-        match access {
-            LAccess::Health => Some(LVarValue::Number((!self.damaged) as u8 as f64)),
-            LAccess::X => Some(LVarValue::Number(logic_conv(self.x) as f64)),
-            LAccess::Y => Some(LVarValue::Number(logic_conv(self.y) as f64)),
-            LAccess::Team => Some(LVarValue::Number(self.team as f64)),
-            LAccess::Type => Some(LVarValue::Object(Some(logic_object_name(&self.block_name)))),
-            LAccess::Dead => Some(LVarValue::Number((!self.valid) as u8 as f64)),
-            _ => self.prop_values.get(&access).cloned(),
-        }
-    }
-
-    fn sense_content(&self, content_name: &str) -> f64 {
-        *self.content_props.get(content_name).unwrap_or(&0.0)
-    }
-
-    fn set_prop(&mut self, access: LAccess, value: LVarValue) {
-        match (&access, &value) {
-            (LAccess::Health, LVarValue::Number(value)) => {
-                self.damaged = *value <= 0.0;
-                self.valid = *value > 0.0;
-            }
-            (LAccess::Team, LVarValue::Number(value)) => {
-                if (0.0..=255.0).contains(value) {
-                    self.team = *value as u8;
-                }
-            }
-            (LAccess::Team, LVarValue::Object(Some(value))) => {
-                if let Some(team) = logic_team_from_name(value) {
-                    self.team = team;
-                }
-            }
-            _ => {}
-        }
-        self.prop_values.insert(access, value);
-    }
-
-    fn set_content_prop(&mut self, content_name: impl Into<String>, value: f64) {
-        self.content_props
-            .insert(logic_object_name(&content_name.into()), value);
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
