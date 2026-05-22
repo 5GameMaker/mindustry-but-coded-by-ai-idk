@@ -20,6 +20,7 @@ pub mod logic_controllable_object;
 pub mod logic_display_command;
 pub mod logic_events;
 pub mod logic_fx;
+pub mod logic_marker_object;
 pub mod logic_memory_object;
 pub mod logic_op;
 pub mod logic_parser;
@@ -78,6 +79,7 @@ pub use logic_fx::{
     get_logic_effect, logic_effect_names, LogicEffectEntry, LogicEffectRegistry, LogicEffectSpec,
     LOGIC_EFFECTS,
 };
+pub use logic_marker_object::{LogicMarkerControlEvent, LogicMarkerEvent, LogicMarkerObject};
 pub use logic_memory_object::LogicMemoryObject;
 pub use logic_op::LogicOp;
 pub use logic_parser::{
@@ -3106,76 +3108,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicMarkerControlEvent {
-    pub id: i32,
-    pub control: LMarkerControl,
-    pub p1: f64,
-    pub p2: f64,
-    pub p3: f64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum LogicMarkerEvent {
-    Created {
-        id: i32,
-        type_name: String,
-        x: f32,
-        y: f32,
-        replaced: bool,
-    },
-    Removed {
-        id: i32,
-    },
-    Controlled(LogicMarkerControlEvent),
-    Text {
-        id: i32,
-        text: String,
-        fetch: bool,
-    },
-    Texture {
-        id: i32,
-        texture: LVarValue,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicMarkerObject {
-    pub type_name: String,
-    pub x: f32,
-    pub y: f32,
-    pub text: String,
-    pub text_fetch: bool,
-    pub texture: LVarValue,
-    pub controls: Vec<LogicMarkerControlEvent>,
-}
-
-impl LogicMarkerObject {
-    pub fn new(type_name: impl Into<String>, x: f32, y: f32) -> Self {
-        Self {
-            type_name: type_name.into(),
-            x,
-            y,
-            text: String::new(),
-            text_fetch: false,
-            texture: LVarValue::Object(None),
-            controls: Vec::new(),
-        }
-    }
-
-    pub fn control(&mut self, event: LogicMarkerControlEvent) {
-        if event.control == LMarkerControl::Pos {
-            if !event.p1.is_nan() {
-                self.x = logic_unconv(event.p1 as f32);
-            }
-            if !event.p2.is_nan() {
-                self.y = logic_unconv(event.p2 as f32);
-            }
-        }
-        self.controls.push(event);
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
