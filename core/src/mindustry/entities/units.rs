@@ -1,4 +1,4 @@
-use crate::mindustry::io::TypeValue;
+use crate::mindustry::io::{Point2, TypeValue};
 use crate::mindustry::r#type::{StatusEffect, Weapon};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -243,6 +243,26 @@ impl BuildPlan {
         self.breaking = true;
     }
 
+    pub fn point_config_value<F>(config: &TypeValue, mut transform: F) -> TypeValue
+    where
+        F: FnMut(Point2) -> Point2,
+    {
+        match config {
+            TypeValue::Point2(point) => TypeValue::Point2(transform(*point)),
+            TypeValue::Point2Array(points) => {
+                TypeValue::Point2Array(points.iter().copied().map(transform).collect())
+            }
+            _ => config.clone(),
+        }
+    }
+
+    pub fn point_config<F>(&mut self, transform: F)
+    where
+        F: FnMut(Point2) -> Point2,
+    {
+        self.config = Self::point_config_value(&self.config, transform);
+    }
+
     pub fn copy(&self) -> Self {
         self.clone()
     }
@@ -320,5 +340,31 @@ mod tests {
 
         let copy = plan.copy();
         assert_eq!(copy, plan);
+    }
+
+    #[test]
+    fn build_plan_point_config_transforms_point_values_without_losing_type() {
+        let mut plan =
+            BuildPlan::new_config(10, 20, 0, "router", TypeValue::Point2(Point2::new(1, 2)));
+
+        plan.point_config(|point| Point2::new(point.x + 10, point.y - 1));
+
+        assert_eq!(plan.config, TypeValue::Point2(Point2::new(11, 1)));
+
+        plan.config = TypeValue::Point2Array(vec![Point2::new(0, 0), Point2::new(2, 3)]);
+        plan.point_config(|point| Point2::new(point.x * 2, point.y * 3));
+
+        assert_eq!(
+            plan.config,
+            TypeValue::Point2Array(vec![Point2::new(0, 0), Point2::new(4, 9)])
+        );
+
+        let string_config = TypeValue::String("unchanged".into());
+        assert_eq!(
+            BuildPlan::point_config_value(&string_config, |point| {
+                Point2::new(point.x + 1, point.y + 1)
+            }),
+            string_config
+        );
     }
 }
