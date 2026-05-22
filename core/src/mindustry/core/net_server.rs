@@ -59,6 +59,12 @@ pub enum ClientCommandResponse {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ClientCommandAction {
+    PrivateMessage(String),
+    WorldDataBegin,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerPreviewPlanSource {
     pub player_id: i32,
@@ -1684,14 +1690,8 @@ impl NetServer {
                 let connection_id = connection_id?;
                 let sanitized_message = Self::sanitize_chat_message(&chat.message);
                 let command_response = Self::handle_client_command_message(&sanitized_message);
-                let message = Self::client_command_private_reply(&command_response)?;
-                let packet = PacketKind::SendMessageCallPacket2(SendMessageCallPacket2 {
-                    message: message.clone(),
-                    unformatted: String::new(),
-                    player_sender: EntityRef::null(),
-                });
 
-                {
+                let action = {
                     let mut state = state.lock().expect("NetServerState mutex poisoned");
                     if state.last_client_command_connection_id != Some(connection_id)
                         || state.last_client_command.as_deref() != Some(sanitized_message.as_str())
@@ -1700,20 +1700,24 @@ impl NetServer {
                         return None;
                     }
 
-                    state.last_client_command_response = Some(message.clone());
-                    state.last_send_message_connection_id = Some(connection_id);
-                    state.last_send_message = Some(message);
-                    state.last_updated_at = Some(Instant::now());
-                    state.send_message_packets_sent =
-                        state.send_message_packets_sent.saturating_add(1);
-                    state.last_send_message_error = None;
-                    Self::record_connection_sent(
-                        &mut state,
-                        connection_id,
-                        "SendMessageCallPacket2",
-                        true,
-                    );
-                }
+                    let action =
+                        Self::client_command_action(&mut state, connection_id, &command_response)?;
+                    Self::record_client_command_action(&mut state, connection_id, &action);
+                    action
+                };
+
+                let packet = match action {
+                    ClientCommandAction::PrivateMessage(message) => {
+                        PacketKind::SendMessageCallPacket2(SendMessageCallPacket2 {
+                            message,
+                            unformatted: String::new(),
+                            player_sender: EntityRef::null(),
+                        })
+                    }
+                    ClientCommandAction::WorldDataBegin => {
+                        PacketKind::WorldDataBeginCallPacket(WorldDataBeginCallPacket)
+                    }
+                };
 
                 Some(ServerResponse {
                     connection_id,
@@ -2068,6 +2072,94 @@ impl NetServer {
             }
             _ => None,
         }
+    }
+
+    fn client_command_action(
+        state: &mut NetServerState,
+        connection_id: i32,
+        response: &ClientCommandResponse,
+    ) -> Option<ClientCommandAction> {
+        if let Some(message) = Self::client_command_private_reply(response) {
+            return Some(ClientCommandAction::PrivateMessage(message));
+        }
+
+        match response {
+            ClientCommandResponse::Valid { command, .. } if command.text == "a" => {
+                (!Self::connection_is_admin(state, connection_id)).then(|| {
+                    ClientCommandAction::PrivateMessage(
+                        "[scarlet]You must be an admin to use this command.".to_string(),
+                    )
+                })
+            }
+            ClientCommandResponse::Valid { command, .. } if command.text == "vote" => {
+                Some(ClientCommandAction::PrivateMessage(
+                    "[scarlet]Nobody is being voted on.".to_string(),
+                ))
+            }
+            ClientCommandResponse::Valid { command, .. } if command.text == "sync" => {
+                let current_millis = Self::current_millis();
+                let connection = state
+                    .connection_states
+                    .entry(connection_id)
+                    .or_insert_with(|| NetConnection::new(String::new()));
+                if current_millis.saturating_sub(connection.sync_time) < 5_000 {
+                    Some(ClientCommandAction::PrivateMessage(
+                        "[scarlet]You may only /sync every 5 seconds.".to_string(),
+                    ))
+                } else {
+                    connection.sync_time = current_millis;
+                    if !state
+                        .pending_world_data_connections
+                        .contains(&connection_id)
+                    {
+                        state.pending_world_data_connections.push(connection_id);
+                    }
+                    Some(ClientCommandAction::WorldDataBegin)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn record_client_command_action(
+        state: &mut NetServerState,
+        connection_id: i32,
+        action: &ClientCommandAction,
+    ) {
+        state.last_updated_at = Some(Instant::now());
+        match action {
+            ClientCommandAction::PrivateMessage(message) => {
+                state.last_client_command_response = Some(message.clone());
+                state.last_send_message_connection_id = Some(connection_id);
+                state.last_send_message = Some(message.clone());
+                state.send_message_packets_sent = state.send_message_packets_sent.saturating_add(1);
+                state.last_send_message_error = None;
+                Self::record_connection_sent(state, connection_id, "SendMessageCallPacket2", true);
+            }
+            ClientCommandAction::WorldDataBegin => {
+                state.last_client_command_response = None;
+                state.last_world_data_connection_id = Some(connection_id);
+                state.world_data_begin_sent = state.world_data_begin_sent.saturating_add(1);
+                state.last_world_data_error = None;
+                state
+                    .connection_states
+                    .entry(connection_id)
+                    .or_insert_with(|| NetConnection::new(String::new()))
+                    .send(SentPacket::Other("WorldDataBeginCallPacket".into()), true);
+            }
+        }
+    }
+
+    fn connection_is_admin(state: &NetServerState, connection_id: i32) -> bool {
+        state
+            .connection_states
+            .get(&connection_id)
+            .is_some_and(|connection| {
+                state
+                    .administration
+                    .is_admin(&connection.uuid, &connection.usid)
+                    || state.steam_admin_data.is_admin(&connection.address)
+            })
     }
 
     fn split_client_command(command_line: &str) -> (&str, &str) {
@@ -3502,6 +3594,193 @@ mod tests {
             SentPacket::Other(name) if name == "SendMessageCallPacket2"
         ));
         assert!(connection.sent[0].1);
+    }
+
+    #[test]
+    fn admin_chat_command_replies_admin_required_for_non_admins() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(15, ready_chat_connection("4.4.4.5", "uuid-non-admin"));
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(15),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/a staff hello".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 15);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]You must be an admin to use this command."
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.last_client_command_response.as_deref(),
+            Some("[scarlet]You must be an admin to use this command.")
+        );
+    }
+
+    #[test]
+    fn vote_command_without_active_vote_replies_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(16, ready_chat_connection("4.4.4.6", "uuid-vote"));
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(16),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/vote y".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 16);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]Nobody is being voted on."
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.last_client_command_response.as_deref(),
+            Some("[scarlet]Nobody is being voted on.")
+        );
+    }
+
+    #[test]
+    fn sync_command_sends_world_data_begin_and_queues_pending_world_data() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state
+                .connection_states
+                .insert(17, ready_chat_connection("4.4.4.7", "uuid-sync"));
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(17),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/sync".into(),
+                }),
+            );
+        }
+
+        {
+            let sent = sent.lock().unwrap();
+            assert_eq!(sent.len(), 1);
+            assert_eq!(sent[0].0, 17);
+            assert!(sent[0].2);
+            assert!(matches!(sent[0].1, PacketKind::WorldDataBeginCallPacket(_)));
+        }
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.pending_world_data_connections, vec![17]);
+        assert_eq!(state.world_data_begin_sent, 1);
+        assert_eq!(state.last_world_data_connection_id, Some(17));
+        assert!(state
+            .connection_states
+            .get(&17)
+            .is_some_and(|connection| connection.sync_time > 0));
+        assert!(state.last_client_command_response.is_none());
+    }
+
+    #[test]
+    fn sync_command_rate_limit_replies_like_java() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = ready_chat_connection("4.4.4.8", "uuid-sync-limited");
+            connection.sync_time = NetServer::current_millis();
+            state.connection_states.insert(18, connection);
+        }
+
+        {
+            let mut net = server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(18),
+                true,
+                PacketKind::SendChatMessageCallPacket(SendChatMessageCallPacket {
+                    message: "/sync".into(),
+                }),
+            );
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 18);
+        assert!(matches!(
+            &sent[0].1,
+            PacketKind::SendMessageCallPacket2(packet)
+                if packet.message == "[scarlet]You may only /sync every 5 seconds."
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert!(state.pending_world_data_connections.is_empty());
+        assert_eq!(
+            state.last_client_command_response.as_deref(),
+            Some("[scarlet]You may only /sync every 5 seconds.")
+        );
     }
 
     #[test]
