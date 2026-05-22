@@ -15,6 +15,7 @@ pub mod save2;
 pub mod save3;
 pub mod save4;
 pub mod save5;
+pub mod save6;
 pub mod save9;
 
 pub use save1::Save1;
@@ -22,6 +23,7 @@ pub use save2::Save2;
 pub use save3::Save3;
 pub use save4::Save4;
 pub use save5::Save5;
+pub use save6::Save6;
 pub use save9::Save9;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
