@@ -11,6 +11,7 @@ use crate::mindustry::io::{
 };
 
 pub mod save1;
+pub mod save10;
 pub mod save2;
 pub mod save3;
 pub mod save4;
@@ -21,6 +22,7 @@ pub mod save8;
 pub mod save9;
 
 pub use save1::Save1;
+pub use save10::Save10;
 pub use save2::Save2;
 pub use save3::Save3;
 pub use save4::Save4;
@@ -510,6 +512,105 @@ pub fn read_legacy_short_chunk_map<R: Read>(read: &mut R) -> io::Result<LegacySh
             is_center,
             new_data,
             old_data,
+            building,
+            consecutives,
+        });
+
+        i += consecutives as usize + 1;
+    }
+
+    Ok(LegacyShortChunkMap {
+        width,
+        height,
+        floors,
+        blocks,
+    })
+}
+
+pub fn read_chunk_map<R: Read>(read: &mut R) -> io::Result<LegacyShortChunkMap> {
+    let width = read_u16(read)?;
+    let height = read_u16(read)?;
+    let tile_count = width as usize * height as usize;
+
+    let mut floors = Vec::new();
+    let mut i = 0usize;
+    while i < tile_count {
+        let floor_id = read_i16(read)?;
+        let ore_id = read_i16(read)?;
+        let consecutives = read_u8(read)?;
+        let len = consecutives as usize + 1;
+        if i + len > tile_count {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "floor run exceeds map bounds",
+            ));
+        }
+        floors.push(LegacyMapFloorRecord {
+            index: i,
+            floor_id,
+            ore_id,
+            consecutives,
+        });
+        i += len;
+    }
+
+    let mut blocks = Vec::new();
+    let mut i = 0usize;
+    while i < tile_count {
+        let block_id = read_i16(read)?;
+        let packed_flags = read_u8(read)?;
+        let has_entity = (packed_flags & 1) != 0;
+        let has_old_data = (packed_flags & 2) != 0;
+        let has_new_data = (packed_flags & 4) != 0;
+
+        let new_data = if has_new_data {
+            Some(LegacyMapTileData {
+                data: read_u8(read)?,
+                floor_data: read_u8(read)?,
+                overlay_data: read_u8(read)?,
+                extra_data: read_i32(read)?,
+            })
+        } else {
+            None
+        };
+
+        let is_center = if has_entity {
+            read_u8(read)? != 0
+        } else {
+            true
+        };
+
+        let (building, consecutives) = if has_entity {
+            let building = if is_center {
+                Some(read_chunk(read)?)
+            } else {
+                None
+            };
+            (building, 0)
+        } else if has_new_data {
+            (None, 0)
+        } else {
+            let consecutives = read_u8(read)?;
+            let len = consecutives as usize + 1;
+            if i + len > tile_count {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "block run exceeds map bounds",
+                ));
+            }
+            (None, consecutives)
+        };
+
+        blocks.push(LegacyMapBlockRecord {
+            index: i,
+            block_id,
+            packed_flags,
+            has_entity,
+            has_old_data,
+            has_new_data,
+            is_center,
+            new_data,
+            old_data: None,
             building,
             consecutives,
         });
