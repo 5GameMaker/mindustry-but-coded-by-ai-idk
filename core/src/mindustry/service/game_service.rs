@@ -30,6 +30,14 @@ pub struct GameServiceState {
     pub all_serpulo_blocks: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameServiceContentSeed {
+    pub all_transport_serpulo: Vec<String>,
+    pub all_transport_erekir: Vec<String>,
+    pub all_erekir_blocks: Vec<String>,
+    pub all_serpulo_blocks: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameServiceRegisterSnapshot {
     pub thorium_unlocked: bool,
@@ -422,6 +430,13 @@ impl GameServiceState {
 
     pub fn seed_java_t5_units(&mut self) {
         self.t5s = java_t5_units();
+    }
+
+    pub fn apply_content_seed(&mut self, seed: GameServiceContentSeed) {
+        self.all_transport_serpulo = seed.all_transport_serpulo;
+        self.all_transport_erekir = seed.all_transport_erekir;
+        self.all_erekir_blocks = seed.all_erekir_blocks;
+        self.all_serpulo_blocks = seed.all_serpulo_blocks;
     }
 
     pub fn register_initial_plan(
@@ -1103,6 +1118,12 @@ impl DefaultGameService {
         Self::default()
     }
 
+    pub fn with_content_seed(seed: GameServiceContentSeed) -> Self {
+        let mut service = Self::new();
+        service.apply_content_seed(seed);
+        service
+    }
+
     pub fn state(&self) -> &GameServiceState {
         &self.state
     }
@@ -1113,6 +1134,10 @@ impl DefaultGameService {
 
     pub fn events_registered(&self) -> bool {
         self.events_registered
+    }
+
+    pub fn apply_content_seed(&mut self, seed: GameServiceContentSeed) {
+        self.state.apply_content_seed(seed);
     }
 }
 
@@ -1180,6 +1205,35 @@ mod tests {
         assert_eq!(service.state().t5s, java_t5_units());
         assert!(service.state().t5s.contains("omura"));
         assert!(service.state().t5s.contains("corvus"));
+    }
+
+    #[test]
+    fn content_seed_injects_java_startup_block_lists_without_content_registry_guessing() {
+        let seed = GameServiceContentSeed {
+            all_transport_serpulo: vec!["conveyor".into(), "router".into()],
+            all_transport_erekir: vec!["duct".into()],
+            all_erekir_blocks: vec!["duct".into(), "beam-node".into()],
+            all_serpulo_blocks: vec!["router".into(), "conveyor".into()],
+        };
+        let mut service = DefaultGameService::with_content_seed(seed);
+
+        assert_eq!(
+            service.state().all_transport_serpulo,
+            vec!["conveyor", "router"]
+        );
+        assert_eq!(service.state().all_transport_erekir, vec!["duct"]);
+
+        service.state_mut().mark_block_built("router");
+        service.state_mut().mark_block_built("conveyor");
+        service.state_mut().mark_block_built("duct");
+        service.state_mut().mark_block_built("beam-node");
+
+        let plan = service
+            .state()
+            .register_initial_plan(GameServiceRegisterSnapshot::default());
+
+        assert!(plan.achievements.contains(&Achievement::AllBlocksSerpulo));
+        assert!(plan.achievements.contains(&Achievement::AllBlocksErekir));
     }
 
     #[test]
