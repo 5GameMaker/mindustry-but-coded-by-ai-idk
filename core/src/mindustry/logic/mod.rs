@@ -22,6 +22,7 @@ pub mod logic_fx;
 pub mod logic_memory_object;
 pub mod logic_op;
 pub mod logic_parser;
+pub mod logic_radar_source;
 pub mod logic_rule;
 pub mod logic_sanitize;
 pub mod logic_sense_object;
@@ -75,6 +76,7 @@ pub use logic_parser::{
     check_logic_tokens, parse_logic_statements, LogicParseError, LogicParserOutput,
     LogicStatementKind, LOGIC_PARSER_MAX_JUMPS, LOGIC_PARSER_MAX_TOKENS,
 };
+pub use logic_radar_source::LogicRadarSource;
 pub use logic_rule::LogicRule;
 pub use logic_sanitize::sanitize_logic_value;
 pub use logic_sense_object::LogicSenseObject;
@@ -3094,31 +3096,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicRadarSource {
-    pub x: f32,
-    pub y: f32,
-    pub team: u8,
-    pub range: f32,
-    pub block_privileged: bool,
-}
-
-impl LogicRadarSource {
-    pub const fn new(x: f32, y: f32, team: u8, range: f32) -> Self {
-        Self {
-            x,
-            y,
-            team,
-            range,
-            block_privileged: false,
-        }
-    }
-
-    pub fn usable_by(&self, exec_privileged: bool, exec_team: u8) -> bool {
-        (exec_privileged || self.team == exec_team) && (!self.block_privileged || exec_privileged)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
