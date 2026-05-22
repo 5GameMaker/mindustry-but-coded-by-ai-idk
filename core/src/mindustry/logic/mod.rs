@@ -24,6 +24,7 @@ pub mod logic_op;
 pub mod logic_parser;
 pub mod logic_radar_source;
 pub mod logic_rule;
+pub mod logic_rules_state;
 pub mod logic_sanitize;
 pub mod logic_sense_object;
 pub mod logic_unit_object;
@@ -79,6 +80,7 @@ pub use logic_parser::{
 };
 pub use logic_radar_source::LogicRadarSource;
 pub use logic_rule::LogicRule;
+pub use logic_rules_state::{LogicRulesState, LogicTeamRules};
 pub use logic_sanitize::sanitize_logic_value;
 pub use logic_sense_object::LogicSenseObject;
 pub use logic_unit_object::LogicUnitObject;
@@ -3098,90 +3100,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicRulesState {
-    pub wave_timer: bool,
-    pub wave: i32,
-    pub wave_time: f32,
-    pub waves: bool,
-    pub wave_sending: bool,
-    pub attack_mode: bool,
-    pub wave_spacing: f32,
-    pub enemy_core_build_radius: f32,
-    pub drop_zone_radius: f32,
-    pub unit_cap: i32,
-    pub lighting: bool,
-    pub can_game_over: bool,
-    pub pause_disabled: bool,
-    pub ambient_light: f64,
-    pub solar_multiplier: f32,
-    pub drag_multiplier: f32,
-    pub map_area: Option<(i32, i32, i32, i32)>,
-    pub banned_blocks: BTreeSet<String>,
-    pub banned_units: BTreeSet<String>,
-    pub team_rules: BTreeMap<u8, LogicTeamRules>,
-    pub mission: String,
-}
-
-impl Default for LogicRulesState {
-    fn default() -> Self {
-        Self {
-            wave_timer: false,
-            wave: 1,
-            wave_time: 0.0,
-            waves: false,
-            wave_sending: false,
-            attack_mode: false,
-            wave_spacing: 0.0,
-            enemy_core_build_radius: 0.0,
-            drop_zone_radius: 0.0,
-            unit_cap: 0,
-            lighting: false,
-            can_game_over: true,
-            pause_disabled: false,
-            ambient_light: 0.0,
-            solar_multiplier: 1.0,
-            drag_multiplier: 1.0,
-            map_area: None,
-            banned_blocks: BTreeSet::new(),
-            banned_units: BTreeSet::new(),
-            team_rules: BTreeMap::new(),
-            mission: String::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicTeamRules {
-    pub build_speed_multiplier: f32,
-    pub unit_health_multiplier: f32,
-    pub unit_build_speed_multiplier: f32,
-    pub unit_mine_speed_multiplier: f32,
-    pub unit_cost_multiplier: f32,
-    pub unit_damage_multiplier: f32,
-    pub block_health_multiplier: f32,
-    pub block_damage_multiplier: f32,
-    pub rts_min_weight: f32,
-    pub rts_min_squad: i32,
-}
-
-impl Default for LogicTeamRules {
-    fn default() -> Self {
-        Self {
-            build_speed_multiplier: 1.0,
-            unit_health_multiplier: 1.0,
-            unit_build_speed_multiplier: 1.0,
-            unit_mine_speed_multiplier: 1.0,
-            unit_cost_multiplier: 1.0,
-            unit_damage_multiplier: 1.0,
-            block_health_multiplier: 1.0,
-            block_damage_multiplier: 1.0,
-            rts_min_weight: 0.0,
-            rts_min_squad: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
