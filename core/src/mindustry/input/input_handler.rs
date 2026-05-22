@@ -12,10 +12,10 @@ use crate::mindustry::entities::comp::{
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, DropItemCallPacket, PayloadDroppedCallPacket,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, RequestBuildPayloadCallPacket,
-    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
-    TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
+    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket, UnitClearCallPacket,
     UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::TILE_SIZE;
@@ -393,6 +393,39 @@ pub struct DropItemOutcome {
     pub should_raise_validate: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PingLocationRejectReason {
+    AdminDenied,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PingLocationContext {
+    pub player_id: Option<i32>,
+    pub local_player: bool,
+    pub same_team_visible: bool,
+    pub max_text_len: usize,
+}
+
+impl Default for PingLocationContext {
+    fn default() -> Self {
+        Self {
+            player_id: None,
+            local_player: false,
+            same_team_visible: false,
+            max_text_len: 40,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PingLocationOutcome {
+    pub accepted: bool,
+    pub rejection: Option<PingLocationRejectReason>,
+    pub displayed_text: Option<String>,
+    pub packet: Option<PingLocationCallPacket>,
+    pub should_raise_validate: bool,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -626,6 +659,18 @@ impl DropItemOutcome {
             previous_amount,
             packet: None,
             should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl PingLocationOutcome {
+    fn rejected(context: &PingLocationContext, reason: PingLocationRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            displayed_text: None,
+            packet: None,
+            should_raise_validate: !context.local_player,
         }
     }
 }
@@ -1711,6 +1756,62 @@ pub fn client_drop_item_packet(angle: f32) -> DropItemCallPacket {
     DropItemCallPacket { angle }
 }
 
+pub fn ping_location<A>(
+    context: PingLocationContext,
+    player: Option<&mut PlayerComp>,
+    x: f32,
+    y: f32,
+    text: Option<String>,
+    admin_allows: A,
+) -> PingLocationOutcome
+where
+    A: FnOnce(Option<&PlayerComp>, f32, f32, Option<&str>) -> bool,
+{
+    if !admin_allows(player.as_deref(), x, y, text.as_deref()) {
+        return PingLocationOutcome::rejected(&context, PingLocationRejectReason::AdminDenied);
+    }
+
+    let text = text.unwrap_or_default();
+    let displayed_text = if text.is_empty() {
+        None
+    } else if text.chars().count() > context.max_text_len {
+        Some(text.chars().take(context.max_text_len).collect::<String>() + "...")
+    } else {
+        Some(text.clone())
+    };
+
+    if context.same_team_visible {
+        if let Some(player) = player {
+            player.ping_x = x;
+            player.ping_y = y;
+            player.ping_time = 1.0;
+            player.ping_text = displayed_text.clone();
+        }
+    }
+
+    PingLocationOutcome {
+        accepted: true,
+        rejection: None,
+        displayed_text,
+        packet: Some(PingLocationCallPacket {
+            player_id: context.player_id,
+            x,
+            y,
+            text,
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn client_ping_location_packet(x: f32, y: f32, text: Option<String>) -> PingLocationCallPacket {
+    PingLocationCallPacket {
+        player_id: None,
+        x,
+        y,
+        text: text.unwrap_or_default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
@@ -2668,5 +2769,70 @@ mod tests {
         let packet = client_drop_item_packet(-45.5);
 
         assert_eq!(packet.angle, -45.5);
+    }
+
+    #[test]
+    fn ping_location_updates_visible_same_team_player_and_truncates_text() {
+        let mut player = PlayerComp::new(TeamId(1));
+
+        let outcome = ping_location(
+            PingLocationContext {
+                player_id: Some(70),
+                local_player: false,
+                same_team_visible: true,
+                max_text_len: 4,
+            },
+            Some(&mut player),
+            12.0,
+            34.0,
+            Some("abcdef".into()),
+            |_, x, y, text| x == 12.0 && y == 34.0 && text == Some("abcdef"),
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.displayed_text.as_deref(), Some("abcd..."));
+        assert_eq!((player.ping_x, player.ping_y), (12.0, 34.0));
+        assert_eq!(player.ping_time, 1.0);
+        assert_eq!(player.ping_text.as_deref(), Some("abcd..."));
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.player_id, Some(70));
+        assert_eq!(packet.text, "abcdef");
+    }
+
+    #[test]
+    fn ping_location_rejects_admin_denied_as_validate_error() {
+        let mut player = PlayerComp::new(TeamId(1));
+
+        let outcome = ping_location(
+            PingLocationContext {
+                player_id: Some(70),
+                local_player: false,
+                same_team_visible: true,
+                max_text_len: 40,
+            },
+            Some(&mut player),
+            12.0,
+            34.0,
+            Some("blocked".into()),
+            |_, _, _, _| false,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(PingLocationRejectReason::AdminDenied)
+        );
+        assert!(outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+        assert_eq!(player.ping_time, 0.0);
+    }
+
+    #[test]
+    fn client_ping_location_packet_uses_client_payload_shape() {
+        let packet = client_ping_location_packet(5.0, 6.0, Some("go".into()));
+
+        assert_eq!(packet.player_id, None);
+        assert_eq!((packet.x, packet.y), (5.0, 6.0));
+        assert_eq!(packet.text, "go");
     }
 }
