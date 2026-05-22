@@ -8,6 +8,7 @@ pub mod pathfinder;
 pub mod unit_command;
 pub mod unit_group;
 pub mod unit_stance;
+pub mod wave_spawner;
 
 pub use astar::{manhattan, pathfind_grid, pathfind_grid_manhattan, D4};
 pub use base_registry::{BasePart, BasePartTile, BasePartTileKind, BaseRegistry};
@@ -26,4 +27,9 @@ pub use pathfinder::{
 pub use unit_group::{
     calculate_relative_positions, update_raycast_position, UnitGroup, UnitGroupMember,
     LAYER_FLYING, LAYER_GROUND, LAYER_LEGS, LAYER_UNDERWATER, PHYSICS_LAYERS,
+};
+pub use wave_spawner::{
+    count_flyer_spawns, count_ground_spawns, flyer_edge_spawn, flyer_spawns, ground_spawns,
+    is_spawning, player_near, spawn_effect_plan, spawn_rotation, FlyerSpawn, GroundSpawn,
+    SpawnEffectPlan, SpawnTile, CORE_MARGIN, MAX_CORE_SPAWN_STEPS, SPAWN_MARGIN,
 };
