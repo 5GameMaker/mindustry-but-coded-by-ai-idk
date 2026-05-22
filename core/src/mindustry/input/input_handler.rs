@@ -6,13 +6,15 @@
 
 use crate::mindustry::entities::comp::{
     building::{BuildingConfigChange, BuildingConfigRollback},
-    BuildingComp, PlayerComp, UnitComp,
+    BuildingComp, PayloadState, PlayerComp, UnitComp,
 };
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef};
 use crate::mindustry::net::{
-    RequestItemCallPacket, RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket,
-    TileTapCallPacket, TransferInventoryCallPacket, TransferItemToCallPacket,
+    PickedBuildPayloadCallPacket, RequestBuildPayloadCallPacket, RequestItemCallPacket,
+    RotateBlockCallPacket, TakeItemsCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TransferInventoryCallPacket, TransferItemToCallPacket,
 };
+use crate::mindustry::world::meta::BuildVisibility;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileConfigRejectReason {
@@ -146,6 +148,54 @@ pub struct TransferInventoryOutcome {
     pub should_raise_validate: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildPayloadPickupKind {
+    StoredPayload,
+    WholeBuild,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestBuildPayloadRejectReason {
+    MissingPlayer,
+    MissingBuild,
+    MissingUnit,
+    MissingPayloadComponent,
+    OutOfRange,
+    AdminDenied,
+    CannotInteract,
+    NoPickupTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RequestBuildPayloadContext {
+    pub player: Option<EntityRef>,
+    pub local_player: bool,
+    pub within_range: bool,
+    pub teams_can_interact: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestBuildPayloadOutcome {
+    pub accepted: bool,
+    pub rejection: Option<RequestBuildPayloadRejectReason>,
+    pub pickup: Option<BuildPayloadPickupKind>,
+    pub packet: Option<PickedBuildPayloadCallPacket>,
+    pub should_raise_validate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickedBuildPayloadRejectReason {
+    MissingUnit,
+    MissingBuild,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickedBuildPayloadOutcome {
+    pub accepted: bool,
+    pub rejection: Option<PickedBuildPayloadRejectReason>,
+    pub packet: Option<PickedBuildPayloadCallPacket>,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -221,6 +271,32 @@ impl TransferInventoryOutcome {
             accepted_amount: 0,
             packet: None,
             should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl RequestBuildPayloadOutcome {
+    fn rejected(
+        context: &RequestBuildPayloadContext,
+        reason: RequestBuildPayloadRejectReason,
+        validate_rejection: bool,
+    ) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            pickup: None,
+            packet: None,
+            should_raise_validate: validate_rejection && !context.local_player,
+        }
+    }
+}
+
+impl PickedBuildPayloadOutcome {
+    fn rejected(reason: PickedBuildPayloadRejectReason) -> Self {
+        Self {
+            accepted: false,
+            rejection: Some(reason),
+            packet: None,
         }
     }
 }
@@ -636,9 +712,149 @@ pub fn client_transfer_inventory_packet(build: &BuildingComp) -> TransferInvento
     }
 }
 
+pub fn request_build_payload<A>(
+    context: RequestBuildPayloadContext,
+    player: Option<&PlayerComp>,
+    unit: Option<&UnitComp>,
+    build: Option<&BuildingComp>,
+    stored_payload: Option<&PayloadState>,
+    build_can_pickup: bool,
+    admin_allows: A,
+) -> RequestBuildPayloadOutcome
+where
+    A: FnOnce(&PlayerComp, &BuildingComp, &UnitComp) -> bool,
+{
+    if context.player.is_none() || player.is_none() {
+        return RequestBuildPayloadOutcome::rejected(
+            &context,
+            RequestBuildPayloadRejectReason::MissingPlayer,
+            false,
+        );
+    }
+    let player = player.unwrap();
+
+    let Some(unit) = unit else {
+        return RequestBuildPayloadOutcome::rejected(
+            &context,
+            RequestBuildPayloadRejectReason::MissingUnit,
+            false,
+        );
+    };
+
+    let Some(build) = build else {
+        return RequestBuildPayloadOutcome::rejected(
+            &context,
+            RequestBuildPayloadRejectReason::MissingBuild,
+            false,
+        );
+    };
+
+    let Some(payload) = unit.payload.as_ref() else {
+        return RequestBuildPayloadOutcome::rejected(
+            &context,
+            RequestBuildPayloadRejectReason::MissingPayloadComponent,
+            false,
+        );
+    };
+
+    if !context.within_range {
+        return RequestBuildPayloadOutcome::rejected(
+            &context,
+            RequestBuildPayloadRejectReason::OutOfRange,
+            false,
+        );
+    }
+
+    if !admin_allows(player, build, unit) {
+        return RequestBuildPayloadOutcome::rejected(
+            &context,
+            RequestBuildPayloadRejectReason::AdminDenied,
+            true,
+        );
+    }
+
+    if !context.teams_can_interact {
+        return RequestBuildPayloadOutcome::rejected(
+            &context,
+            RequestBuildPayloadRejectReason::CannotInteract,
+            false,
+        );
+    }
+
+    let unit_ref = player_unit_ref(player, unit);
+    if let Some(current) = stored_payload {
+        if payload.can_pickup_payload(current) {
+            return RequestBuildPayloadOutcome {
+                accepted: true,
+                rejection: None,
+                pickup: Some(BuildPayloadPickupKind::StoredPayload),
+                packet: Some(PickedBuildPayloadCallPacket {
+                    unit: unit_ref,
+                    build_pos: Some(build.tile_pos),
+                    on_ground: false,
+                }),
+                should_raise_validate: false,
+            };
+        }
+    }
+
+    if build.block.build_visibility != BuildVisibility::Hidden
+        && payload.can_pickup_build(build.block.size as f32, build.team, build_can_pickup)
+    {
+        return RequestBuildPayloadOutcome {
+            accepted: true,
+            rejection: None,
+            pickup: Some(BuildPayloadPickupKind::WholeBuild),
+            packet: Some(PickedBuildPayloadCallPacket {
+                unit: unit_ref,
+                build_pos: Some(build.tile_pos),
+                on_ground: true,
+            }),
+            should_raise_validate: false,
+        };
+    }
+
+    RequestBuildPayloadOutcome::rejected(
+        &context,
+        RequestBuildPayloadRejectReason::NoPickupTarget,
+        false,
+    )
+}
+
+pub fn client_request_build_payload_packet(build: &BuildingComp) -> RequestBuildPayloadCallPacket {
+    RequestBuildPayloadCallPacket {
+        player: EntityRef::null(),
+        build: BuildingRef::new(build.tile_pos),
+    }
+}
+
+pub fn picked_build_payload(
+    unit: Option<UnitRef>,
+    build: Option<&BuildingComp>,
+    on_ground: bool,
+) -> PickedBuildPayloadOutcome {
+    let Some(unit) = unit else {
+        return PickedBuildPayloadOutcome::rejected(PickedBuildPayloadRejectReason::MissingUnit);
+    };
+
+    let Some(build) = build else {
+        return PickedBuildPayloadOutcome::rejected(PickedBuildPayloadRejectReason::MissingBuild);
+    };
+
+    PickedBuildPayloadOutcome {
+        accepted: true,
+        rejection: None,
+        packet: Some(PickedBuildPayloadCallPacket {
+            unit,
+            build_pos: Some(build.tile_pos),
+            on_ground,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::mindustry::entities::comp::PlayerUnitState;
+    use crate::mindustry::entities::comp::{PayloadComp, PayloadKind, PlayerUnitState};
     use crate::mindustry::io::TeamId;
     use crate::mindustry::r#type::UnitType;
     use crate::mindustry::world::block::Block;
@@ -663,6 +879,14 @@ mod tests {
         let mut unit_type = UnitType::new(1, "alpha");
         unit_type.item_capacity = item_capacity;
         unit_type
+    }
+
+    fn payload_unit(id: i32, team: TeamId, capacity: f32) -> UnitComp {
+        let mut unit_type = unit_type(10);
+        unit_type.payload_capacity = capacity;
+        let mut unit = UnitComp::new(id, unit_type, team);
+        unit.payload = Some(PayloadComp::new(team, capacity));
+        unit
     }
 
     #[test]
@@ -1044,5 +1268,146 @@ mod tests {
 
         assert_eq!(packet.player, EntityRef::null());
         assert_eq!(packet.build, BuildingRef::new(point2_pack(14, 15)));
+    }
+
+    #[test]
+    fn request_build_payload_prefers_stored_payload_when_pickable() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(46).with_valid(true));
+        let unit = payload_unit(46, TeamId(1), 256.0);
+        let building = BuildingComp::new(point2_pack(16, 17), item_block(), TeamId(1));
+        let stored = PayloadState {
+            kind: PayloadKind::Build,
+            size: 2.0,
+        };
+
+        let outcome = request_build_payload(
+            RequestBuildPayloadContext {
+                player: Some(EntityRef::new(9)),
+                local_player: false,
+                within_range: true,
+                teams_can_interact: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            Some(&stored),
+            true,
+            |player, build, unit| player.team == build.team && unit.team_id() == build.team,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.pickup, Some(BuildPayloadPickupKind::StoredPayload));
+        assert!(!outcome.should_raise_validate);
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 46 });
+        assert_eq!(packet.build_pos, Some(point2_pack(16, 17)));
+        assert!(!packet.on_ground);
+    }
+
+    #[test]
+    fn request_build_payload_picks_whole_build_when_no_stored_payload() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(47).with_valid(true));
+        let unit = payload_unit(47, TeamId(1), 1024.0);
+        let mut block = item_block();
+        block.size = 2;
+        let building = BuildingComp::new(point2_pack(18, 19), block, TeamId(1));
+
+        let outcome = request_build_payload(
+            RequestBuildPayloadContext {
+                player: Some(EntityRef::new(10)),
+                local_player: false,
+                within_range: true,
+                teams_can_interact: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            None,
+            true,
+            |_, _, _| true,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.pickup, Some(BuildPayloadPickupKind::WholeBuild));
+        let packet = outcome.packet.unwrap();
+        assert_eq!(packet.unit, UnitRef::Unit { id: 47 });
+        assert_eq!(packet.build_pos, Some(point2_pack(18, 19)));
+        assert!(packet.on_ground);
+    }
+
+    #[test]
+    fn request_build_payload_rejects_out_of_range_without_packet() {
+        let mut player = PlayerComp::new(TeamId(1));
+        player.set_unit_state(PlayerUnitState::unit(48).with_valid(true));
+        let unit = payload_unit(48, TeamId(1), 1024.0);
+        let building = BuildingComp::new(point2_pack(20, 21), item_block(), TeamId(1));
+
+        let outcome = request_build_payload(
+            RequestBuildPayloadContext {
+                player: Some(EntityRef::new(11)),
+                local_player: false,
+                within_range: false,
+                teams_can_interact: true,
+            },
+            Some(&player),
+            Some(&unit),
+            Some(&building),
+            None,
+            true,
+            |_, _, _| true,
+        );
+
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.rejection,
+            Some(RequestBuildPayloadRejectReason::OutOfRange)
+        );
+        assert!(!outcome.should_raise_validate);
+        assert!(outcome.packet.is_none());
+    }
+
+    #[test]
+    fn picked_build_payload_records_ground_and_payload_variants() {
+        let building = BuildingComp::new(point2_pack(22, 23), item_block(), TeamId(1));
+        let ground = picked_build_payload(Some(UnitRef::Unit { id: 49 }), Some(&building), true);
+        let stored = picked_build_payload(Some(UnitRef::Unit { id: 49 }), Some(&building), false);
+
+        assert!(ground.accepted);
+        assert!(ground.packet.as_ref().unwrap().on_ground);
+        assert!(stored.accepted);
+        assert!(!stored.packet.as_ref().unwrap().on_ground);
+        assert_eq!(
+            stored.packet.as_ref().unwrap().build_pos,
+            Some(point2_pack(22, 23))
+        );
+    }
+
+    #[test]
+    fn picked_build_payload_rejects_missing_target_without_packet() {
+        let building = BuildingComp::new(point2_pack(24, 25), item_block(), TeamId(1));
+        let missing_unit = picked_build_payload(None, Some(&building), true);
+        let missing_build = picked_build_payload(Some(UnitRef::Unit { id: 50 }), None, true);
+
+        assert_eq!(
+            missing_unit.rejection,
+            Some(PickedBuildPayloadRejectReason::MissingUnit)
+        );
+        assert!(missing_unit.packet.is_none());
+        assert_eq!(
+            missing_build.rejection,
+            Some(PickedBuildPayloadRejectReason::MissingBuild)
+        );
+        assert!(missing_build.packet.is_none());
+    }
+
+    #[test]
+    fn client_request_build_payload_packet_uses_client_payload_shape() {
+        let building = BuildingComp::new(point2_pack(26, 27), item_block(), TeamId(1));
+        let packet = client_request_build_payload_packet(&building);
+
+        assert_eq!(packet.player, EntityRef::null());
+        assert_eq!(packet.build, BuildingRef::new(point2_pack(26, 27)));
     }
 }
