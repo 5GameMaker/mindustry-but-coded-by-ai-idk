@@ -1,5 +1,6 @@
 // Mirrors upstream core/src/mindustry/logic. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
+pub mod condition_op;
 pub mod controllable;
 pub mod cutscene_action;
 pub mod fetch_type;
@@ -13,6 +14,7 @@ pub mod senseable;
 pub mod settable;
 pub mod tile_layer;
 
+pub use condition_op::{ConditionOp, ConditionValue};
 pub use controllable::Controllable;
 pub use cutscene_action::CutsceneAction;
 pub use fetch_type::FetchType;
@@ -9413,121 +9415,6 @@ impl LogicOp {
 }
 
 impl fmt::Display for LogicOp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.symbol())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ConditionValue<'a> {
-    Number(f64),
-    Object(&'a str),
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ConditionOp {
-    Equal,
-    NotEqual,
-    LessThan,
-    LessThanEq,
-    GreaterThan,
-    GreaterThanEq,
-    StrictEqual,
-    Always,
-}
-
-impl ConditionOp {
-    pub const ALL: [ConditionOp; 8] = [
-        ConditionOp::Equal,
-        ConditionOp::NotEqual,
-        ConditionOp::LessThan,
-        ConditionOp::LessThanEq,
-        ConditionOp::GreaterThan,
-        ConditionOp::GreaterThanEq,
-        ConditionOp::StrictEqual,
-        ConditionOp::Always,
-    ];
-
-    pub const SYMBOLS: [&'static str; 8] = ["==", "not", "<", "<=", ">", ">=", "===", "always"];
-
-    pub const JAVA_NAMES: [&'static str; 8] = [
-        "equal",
-        "notEqual",
-        "lessThan",
-        "lessThanEq",
-        "greaterThan",
-        "greaterThanEq",
-        "strictEqual",
-        "always",
-    ];
-
-    pub const fn ordinal(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_ordinal(ordinal: u8) -> Option<Self> {
-        Self::ALL.get(ordinal as usize).copied()
-    }
-
-    pub fn symbol(self) -> &'static str {
-        Self::SYMBOLS[self.ordinal() as usize]
-    }
-
-    pub fn java_name(self) -> &'static str {
-        Self::JAVA_NAMES[self.ordinal() as usize]
-    }
-
-    pub fn by_java_name(name: &str) -> Option<Self> {
-        match name {
-            "equal" => Some(ConditionOp::Equal),
-            "notEqual" => Some(ConditionOp::NotEqual),
-            "lessThan" => Some(ConditionOp::LessThan),
-            "lessThanEq" => Some(ConditionOp::LessThanEq),
-            "greaterThan" => Some(ConditionOp::GreaterThan),
-            "greaterThanEq" => Some(ConditionOp::GreaterThanEq),
-            "strictEqual" => Some(ConditionOp::StrictEqual),
-            "always" => Some(ConditionOp::Always),
-            _ => None,
-        }
-    }
-
-    pub fn test_numbers(self, a: f64, b: f64) -> bool {
-        match self {
-            ConditionOp::Equal => (a - b).abs() < 0.000001,
-            ConditionOp::NotEqual => (a - b).abs() >= 0.000001,
-            ConditionOp::LessThan => a < b,
-            ConditionOp::LessThanEq => a <= b,
-            ConditionOp::GreaterThan => a > b,
-            ConditionOp::GreaterThanEq => a >= b,
-            ConditionOp::StrictEqual => a == b,
-            ConditionOp::Always => true,
-        }
-    }
-
-    pub fn test_values(self, a: ConditionValue<'_>, b: ConditionValue<'_>) -> bool {
-        match self {
-            ConditionOp::StrictEqual => a == b,
-            ConditionOp::Equal => match (a, b) {
-                (ConditionValue::Object(a), ConditionValue::Object(b)) => a == b,
-                (ConditionValue::Number(a), ConditionValue::Number(b)) => self.test_numbers(a, b),
-                _ => false,
-            },
-            ConditionOp::NotEqual => match (a, b) {
-                (ConditionValue::Object(a), ConditionValue::Object(b)) => a != b,
-                (ConditionValue::Number(a), ConditionValue::Number(b)) => self.test_numbers(a, b),
-                _ => true,
-            },
-            ConditionOp::Always => true,
-            _ => match (a, b) {
-                (ConditionValue::Number(a), ConditionValue::Number(b)) => self.test_numbers(a, b),
-                _ => false,
-            },
-        }
-    }
-}
-
-impl fmt::Display for ConditionOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.symbol())
     }
