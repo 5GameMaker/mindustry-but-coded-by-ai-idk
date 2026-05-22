@@ -130,6 +130,8 @@ pub struct NetClientState {
     pub connect_confirm_sent: bool,
     pub last_connect_confirm_error: Option<String>,
     pub next_ping_at: Option<Instant>,
+    pub next_client_snapshot_at: Option<Instant>,
+    pub next_client_plan_snapshot_at: Option<Instant>,
     pub ping_requests_sent: u64,
     pub ping_responses_received: u64,
     pub last_ping_request_time: Option<i64>,
@@ -204,6 +206,11 @@ impl fmt::Debug for NetClientState {
                 &self.last_connect_confirm_error,
             )
             .field("next_ping_at", &self.next_ping_at)
+            .field("next_client_snapshot_at", &self.next_client_snapshot_at)
+            .field(
+                "next_client_plan_snapshot_at",
+                &self.next_client_plan_snapshot_at,
+            )
             .field("ping_requests_sent", &self.ping_requests_sent)
             .field("ping_responses_received", &self.ping_responses_received)
             .field("last_ping_request_time", &self.last_ping_request_time)
@@ -267,6 +274,11 @@ impl NetClientState {
         self.ping_ms = 0;
     }
 
+    fn reset_client_gameplay_sync_state(&mut self) {
+        self.next_client_snapshot_at = None;
+        self.next_client_plan_snapshot_at = None;
+    }
+
     fn clear_loading_stream_tracking(&mut self) {
         self.last_stream_id = None;
         self.last_stream_len = 0;
@@ -314,6 +326,7 @@ impl NetClientState {
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
         self.reset_ping_state();
+        self.reset_client_gameplay_sync_state();
         self.clear_loading_stream_tracking();
     }
 
@@ -327,6 +340,7 @@ impl NetClientState {
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
         self.reset_ping_state();
+        self.reset_client_gameplay_sync_state();
         self.clear_loading_stream_tracking();
         self.clear_timeout_clock();
     }
@@ -339,6 +353,7 @@ impl NetClientState {
         self.last_binary_stream = Some(stream.stream.clone());
         self.last_packet = Some(PacketKind::Streamable(stream.clone()));
         self.next_ping_at = Some(Instant::now() + PING_INTERVAL);
+        self.reset_client_gameplay_sync_state();
         self.clear_loading_stream_tracking();
         self.clear_timeout_clock();
     }
@@ -411,6 +426,7 @@ impl NetClient {
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
         state.reset_ping_state();
+        state.reset_client_gameplay_sync_state();
         state.clear_loading_stream_tracking();
         state.clear_timeout_clock();
     }
@@ -435,6 +451,7 @@ impl NetClient {
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
         state.reset_ping_state();
+        state.reset_client_gameplay_sync_state();
         state.clear_loading_stream_tracking();
         drop(state);
         self.reset_timeout();
@@ -460,6 +477,7 @@ impl NetClient {
         state.connect_confirm_sent = false;
         state.last_connect_confirm_error = None;
         state.reset_ping_state();
+        state.reset_client_gameplay_sync_state();
         state.clear_loading_stream_tracking();
         state.clear_timeout_clock();
     }
@@ -570,6 +588,96 @@ impl NetClient {
         let snapshot = self.next_client_snapshot_packet(player, unit, input, camera);
         self.send_client_snapshot(snapshot.clone())?;
         Ok(snapshot)
+    }
+
+    pub fn tick_client_gameplay_sync(
+        &self,
+        player: &mut PlayerComp,
+        unit: Option<&UnitComp>,
+        input: ClientInputSnapshot,
+        camera: ClientCameraView,
+        preview_plans: &[BuildPlan],
+    ) -> io::Result<()> {
+        let mut first_error = None;
+
+        if let Err(error) = self.tick_client_snapshot_sync(&*player, unit, input, camera) {
+            first_error = Some(error);
+        }
+
+        if let Err(error) = self.tick_client_plan_sync(player, preview_plans) {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn tick_client_snapshot_sync(
+        &self,
+        player: &PlayerComp,
+        unit: Option<&UnitComp>,
+        input: ClientInputSnapshot,
+        camera: ClientCameraView,
+    ) -> io::Result<()> {
+        let now = Instant::now();
+        let should_send = {
+            let mut state = self.state.lock().unwrap();
+            if !state.connected || !state.connect_confirm_sent {
+                return Ok(());
+            }
+
+            match state.next_client_snapshot_at {
+                Some(deadline) if now < deadline => false,
+                _ => {
+                    state.next_client_snapshot_at =
+                        Some(now + Duration::from_millis(CLIENT_PLAYER_SYNC_INTERVAL_MS as u64));
+                    true
+                }
+            }
+        };
+
+        if should_send {
+            self.send_next_client_snapshot(player, unit, input, camera)?;
+        }
+
+        Ok(())
+    }
+
+    fn tick_client_plan_sync(
+        &self,
+        player: &mut PlayerComp,
+        preview_plans: &[BuildPlan],
+    ) -> io::Result<()> {
+        let now = Instant::now();
+        let should_send = {
+            let mut state = self.state.lock().unwrap();
+            if !state.connected || !state.connect_confirm_sent {
+                return Ok(());
+            }
+
+            match state.next_client_plan_snapshot_at {
+                Some(deadline) if now < deadline => false,
+                _ => {
+                    state.next_client_plan_snapshot_at =
+                        Some(now + Duration::from_millis(CLIENT_PLAN_SYNC_INTERVAL_MS as u64));
+                    true
+                }
+            }
+        };
+
+        if should_send {
+            self.send_client_plan_snapshots_with_limit(
+                player,
+                preview_plans,
+                MAX_PLAYER_PREVIEW_PLANS,
+            )?;
+        }
+
+        Ok(())
     }
 
     pub fn client_snapshot_packet(
@@ -1422,6 +1530,125 @@ mod tests {
             })
         ));
         assert!(sent.iter().all(|(_, reliable)| !*reliable));
+    }
+
+    #[test]
+    fn tick_client_gameplay_sync_sends_due_snapshot_and_preview_plan_packets() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+        let mut player = PlayerComp::default();
+        player.set_unit_state(
+            PlayerUnitState::unit(34)
+                .with_valid(true)
+                .with_can_build(true),
+        );
+
+        let mut unit = UnitComp::new(34, unit_type(), TeamId(2));
+        unit.set_pos(10.0, 20.0);
+        unit.set_rotation(90.0);
+        unit.vel.vel = Vec2::new(1.5, -2.5);
+        unit.weapons.aim_x = 30.0;
+        unit.weapons.aim_y = 40.0;
+
+        let preview_plans = vec![BuildPlan::new_place(4, 5, 0, "router")];
+        let start = Instant::now();
+
+        {
+            let state = client.state();
+            let mut state = state.lock().unwrap();
+            state.connected = true;
+            state.connect_confirm_sent = true;
+            state.next_client_snapshot_at = Some(start - Duration::from_millis(1));
+            state.next_client_plan_snapshot_at = Some(start - Duration::from_millis(1));
+        }
+
+        client
+            .tick_client_gameplay_sync(
+                &mut player,
+                Some(&unit),
+                ClientInputSnapshot {
+                    chatting: true,
+                    building: true,
+                    base_rotation: 15.0,
+                },
+                ClientCameraView {
+                    x: 7.0,
+                    y: 8.0,
+                    width: 9.0,
+                    height: 10.0,
+                },
+                &preview_plans,
+            )
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert!(matches!(
+            sent[0].0,
+            PacketKind::ClientSnapshotCallPacket(ClientSnapshotCallPacket {
+                snapshot_id: 0,
+                ..
+            })
+        ));
+        assert!(matches!(
+            sent[1].0,
+            PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+                group_id: 0,
+                ..
+            })
+        ));
+        assert!(sent.iter().all(|(_, reliable)| !*reliable));
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.client_snapshot_packets_sent, 1);
+        assert_eq!(state.client_plan_snapshot_packets_sent, 1);
+        assert!(state.next_client_snapshot_at.unwrap() > start);
+        assert!(state.next_client_plan_snapshot_at.unwrap() > start);
+    }
+
+    #[test]
+    fn tick_client_gameplay_sync_skips_when_deadlines_are_in_the_future() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+        let mut player = PlayerComp::default();
+        let preview_plans = vec![BuildPlan::new_place(4, 5, 0, "router")];
+        let future = Instant::now() + Duration::from_secs(1);
+
+        {
+            let state = client.state();
+            let mut state = state.lock().unwrap();
+            state.connected = true;
+            state.connect_confirm_sent = true;
+            state.next_client_snapshot_at = Some(future);
+            state.next_client_plan_snapshot_at = Some(future);
+        }
+
+        client
+            .tick_client_gameplay_sync(
+                &mut player,
+                None,
+                ClientInputSnapshot::default(),
+                ClientCameraView::default(),
+                &preview_plans,
+            )
+            .unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.is_empty());
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.client_snapshot_packets_sent, 0);
+        assert_eq!(state.client_plan_snapshot_packets_sent, 0);
+        assert_eq!(state.next_client_snapshot_at, Some(future));
+        assert_eq!(state.next_client_plan_snapshot_at, Some(future));
     }
 
     #[test]
