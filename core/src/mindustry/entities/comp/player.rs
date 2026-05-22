@@ -22,6 +22,7 @@ pub struct PlayerUnitState {
     pub valid: bool,
     pub can_build: bool,
     pub block_unit: bool,
+    pub remote: bool,
 }
 
 impl PlayerUnitState {
@@ -31,6 +32,7 @@ impl PlayerUnitState {
             valid: true,
             can_build: false,
             block_unit: false,
+            remote: false,
         }
     }
 
@@ -40,6 +42,7 @@ impl PlayerUnitState {
             valid: true,
             can_build: false,
             block_unit: true,
+            remote: false,
         }
     }
 
@@ -58,6 +61,11 @@ impl PlayerUnitState {
         self
     }
 
+    pub fn with_remote(mut self, remote: bool) -> Self {
+        self.remote = remote;
+        self
+    }
+
     pub fn is_dead(self) -> bool {
         !self.valid
     }
@@ -70,8 +78,34 @@ impl Default for PlayerUnitState {
             valid: false,
             can_build: false,
             block_unit: false,
+            remote: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerUnitSwitchContext {
+    pub is_local: bool,
+    pub headless: bool,
+    pub net_client: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerUnitSwitchPlan {
+    pub old_unit: Option<PlayerUnitState>,
+    pub new_unit: Option<PlayerUnitState>,
+    pub refused_recent_local_switch: bool,
+    pub changed: bool,
+    pub clear_selected_block: bool,
+    pub snap_remote_interpolation: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerAfterSyncPlan {
+    pub corrected_recent_local_switch: bool,
+    pub correction_window_exhausted: bool,
+    pub switch_plan: PlayerUnitSwitchPlan,
+    pub should_aim_and_control: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,11 +194,108 @@ impl PlayerComp {
     }
 
     pub fn set_unit_state(&mut self, unit: PlayerUnitState) {
-        self.unit = Some(unit);
+        self.switch_unit_state(Some(unit), PlayerUnitSwitchContext::default());
     }
 
     pub fn clear_unit(&mut self) {
-        self.unit = None;
+        self.switch_unit_state(None, PlayerUnitSwitchContext::default());
+    }
+
+    pub fn switch_unit_state(
+        &mut self,
+        unit: Option<PlayerUnitState>,
+        context: PlayerUnitSwitchContext,
+    ) -> PlayerUnitSwitchPlan {
+        if context.is_local
+            && unit == self.just_switch_from
+            && self.just_switch_from.is_some()
+            && self.just_switch_to.is_some()
+        {
+            return PlayerUnitSwitchPlan {
+                old_unit: self.unit,
+                new_unit: unit,
+                refused_recent_local_switch: true,
+                ..PlayerUnitSwitchPlan::default()
+            };
+        }
+
+        if self.unit == unit {
+            return PlayerUnitSwitchPlan {
+                old_unit: self.unit,
+                new_unit: unit,
+                ..PlayerUnitSwitchPlan::default()
+            };
+        }
+
+        let old_unit = self.unit;
+        self.unit = unit;
+
+        let clear_selected_block = unit.is_some() && context.is_local && !context.headless;
+        if clear_selected_block {
+            self.selected_block = None;
+        }
+
+        PlayerUnitSwitchPlan {
+            old_unit,
+            new_unit: unit,
+            changed: true,
+            clear_selected_block,
+            snap_remote_interpolation: unit.is_some_and(|unit| unit.remote) && !context.net_client,
+            ..PlayerUnitSwitchPlan::default()
+        }
+    }
+
+    pub fn mark_recent_local_unit_switch(
+        &mut self,
+        from: Option<PlayerUnitState>,
+        to: Option<PlayerUnitState>,
+    ) {
+        self.just_switch_from = from;
+        self.just_switch_to = to;
+        self.wrong_read_units = 0;
+    }
+
+    pub fn record_read_unit(&mut self, unit: Option<PlayerUnitState>) {
+        self.last_read_unit = unit;
+    }
+
+    pub fn after_sync_unit_state(
+        &mut self,
+        context: PlayerUnitSwitchContext,
+    ) -> PlayerAfterSyncPlan {
+        let mut corrected_recent_local_switch = false;
+        let mut correction_window_exhausted = false;
+
+        if context.is_local
+            && self.unit == self.just_switch_from
+            && self.just_switch_from.is_some()
+            && self.just_switch_to.is_some()
+        {
+            self.unit = self.just_switch_to;
+            corrected_recent_local_switch = true;
+            self.wrong_read_units += 1;
+            if self.wrong_read_units >= 2 {
+                self.just_switch_from = None;
+                self.wrong_read_units = 0;
+                correction_window_exhausted = true;
+            }
+        } else {
+            self.just_switch_from = None;
+            self.just_switch_to = None;
+            self.wrong_read_units = 0;
+        }
+
+        let set = self.unit;
+        self.unit = self.last_read_unit;
+        let switch_plan = self.switch_unit_state(set, context);
+        self.last_read_unit = self.unit;
+
+        PlayerAfterSyncPlan {
+            corrected_recent_local_switch,
+            correction_window_exhausted,
+            switch_plan,
+            should_aim_and_control: self.unit.is_some(),
+        }
     }
 
     pub fn core_with<F>(&self, lookup: F) -> Option<CoreInfo>
@@ -410,6 +541,81 @@ mod tests {
         assert!(player.display_ammo(true));
         assert!(player.is_pinging());
         assert_eq!(player.unit_ref(), Some(UnitRef::Block { tile_pos: 42 }));
+    }
+
+    #[test]
+    fn unit_switching_tracks_recent_local_corrections_and_side_effect_plan() {
+        let mut player = PlayerComp::default();
+        player.selected_block = Some(Block::new(1, "duo"));
+        let old = PlayerUnitState::unit(1);
+        let new = PlayerUnitState::unit(2)
+            .with_can_build(true)
+            .with_remote(true);
+
+        player.set_unit_state(old);
+        let plan = player.switch_unit_state(
+            Some(new),
+            PlayerUnitSwitchContext {
+                is_local: true,
+                headless: false,
+                net_client: false,
+            },
+        );
+
+        assert!(plan.changed);
+        assert_eq!(plan.old_unit, Some(old));
+        assert_eq!(plan.new_unit, Some(new));
+        assert!(plan.clear_selected_block);
+        assert!(plan.snap_remote_interpolation);
+        assert_eq!(player.unit, Some(new));
+        assert!(player.selected_block.is_none());
+
+        player.mark_recent_local_unit_switch(Some(old), Some(new));
+        let refused = player.switch_unit_state(
+            Some(old),
+            PlayerUnitSwitchContext {
+                is_local: true,
+                headless: true,
+                net_client: true,
+            },
+        );
+
+        assert!(refused.refused_recent_local_switch);
+        assert_eq!(player.unit, Some(new));
+    }
+
+    #[test]
+    fn after_sync_corrects_recent_local_unit_rubberbanding() {
+        let mut player = PlayerComp::default();
+        let old = PlayerUnitState::unit(3);
+        let new = PlayerUnitState::unit(4);
+        let context = PlayerUnitSwitchContext {
+            is_local: true,
+            headless: true,
+            net_client: true,
+        };
+
+        player.unit = Some(old);
+        player.record_read_unit(Some(old));
+        player.mark_recent_local_unit_switch(Some(old), Some(new));
+
+        let first = player.after_sync_unit_state(context);
+
+        assert!(first.corrected_recent_local_switch);
+        assert!(first.switch_plan.changed);
+        assert!(first.should_aim_and_control);
+        assert_eq!(player.unit, Some(new));
+        assert_eq!(player.last_read_unit, Some(new));
+        assert_eq!(player.wrong_read_units, 1);
+
+        player.unit = Some(old);
+        let second = player.after_sync_unit_state(context);
+
+        assert!(second.corrected_recent_local_switch);
+        assert!(second.correction_window_exhausted);
+        assert_eq!(player.unit, Some(new));
+        assert_eq!(player.just_switch_from, None);
+        assert_eq!(player.wrong_read_units, 0);
     }
 
     #[test]
