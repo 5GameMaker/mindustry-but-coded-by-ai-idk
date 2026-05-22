@@ -23,6 +23,7 @@ pub mod logic_op;
 pub mod logic_parser;
 pub mod logic_rule;
 pub mod logic_sanitize;
+pub mod logic_sense_object;
 pub mod message_type;
 pub mod query_shape;
 pub mod query_type;
@@ -74,6 +75,7 @@ pub use logic_parser::{
 };
 pub use logic_rule::LogicRule;
 pub use logic_sanitize::sanitize_logic_value;
+pub use logic_sense_object::LogicSenseObject;
 pub use message_type::MessageType;
 pub use query_shape::QueryShape;
 pub use query_type::QueryType;
@@ -3090,23 +3092,6 @@ pub fn assemble_logic_source(
 
 fn java_boolean_value_of(value: &str) -> bool {
     value.eq_ignore_ascii_case("true")
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicSenseObject {
-    pub numeric_senses: BTreeMap<LAccess, f64>,
-    pub object_senses: BTreeMap<LAccess, Option<String>>,
-    pub content_senses: BTreeMap<String, f64>,
-}
-
-impl Default for LogicSenseObject {
-    fn default() -> Self {
-        Self {
-            numeric_senses: BTreeMap::new(),
-            object_senses: BTreeMap::new(),
-            content_senses: BTreeMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
