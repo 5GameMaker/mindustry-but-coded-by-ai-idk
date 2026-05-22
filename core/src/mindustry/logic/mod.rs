@@ -25,6 +25,7 @@ pub mod logic_marker_object;
 pub mod logic_memory_object;
 pub mod logic_op;
 pub mod logic_parser;
+pub mod logic_query_view;
 pub mod logic_radar_source;
 pub mod logic_rule;
 pub mod logic_rules_state;
@@ -90,6 +91,7 @@ pub use logic_parser::{
     check_logic_tokens, parse_logic_statements, LogicParseError, LogicParserOutput,
     LogicStatementKind, LOGIC_PARSER_MAX_JUMPS, LOGIC_PARSER_MAX_TOKENS,
 };
+pub use logic_query_view::{LogicLocateResult, RadarUnitView};
 pub use logic_radar_source::LogicRadarSource;
 pub use logic_rule::LogicRule;
 pub use logic_rules_state::{LogicRulesState, LogicTeamRules};
@@ -5915,13 +5917,6 @@ pub fn logic_conv(coord: f32) -> f32 {
     coord / LOGIC_TILE_SIZE
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogicLocateResult {
-    pub x: f32,
-    pub y: f32,
-    pub building: Option<String>,
-}
-
 fn find_closest_ore(
     exec: &LogicExecutor,
     unit: &LogicUnitObject,
@@ -6109,43 +6104,6 @@ pub fn logic_team_from_name(name: &str) -> Option<u8> {
         "blue" => Some(5),
         "neoplastic" => Some(6),
         _ => name.parse::<u8>().ok(),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RadarUnitView {
-    pub x: f32,
-    pub y: f32,
-    pub health: f32,
-    pub shield: f32,
-    pub armor: f32,
-    pub max_health: f32,
-    pub team: u8,
-    pub is_player: bool,
-    pub can_shoot: bool,
-    pub is_flying: bool,
-    pub is_boss: bool,
-    pub is_grounded: bool,
-    pub targetable: bool,
-}
-
-impl RadarUnitView {
-    pub const fn new(x: f32, y: f32, team: u8) -> Self {
-        Self {
-            x,
-            y,
-            health: 0.0,
-            shield: 0.0,
-            armor: 0.0,
-            max_health: 0.0,
-            team,
-            is_player: false,
-            can_shoot: false,
-            is_flying: false,
-            is_boss: false,
-            is_grounded: false,
-            targetable: true,
-        }
     }
 }
 
