@@ -8,11 +8,11 @@ use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::{BuildPlanWire, EntityRef};
 use crate::mindustry::net::{
-    BlockSnapshotCallPacket, BuildDestroyedCallPacket, BuildingControlSelectCallPacket,
-    ClearItemsCallPacket, ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
-    CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
-    ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
+    BlockSnapshotCallPacket, BuildDestroyedCallPacket, BuildHealthUpdateCallPacket,
+    BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
+    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
+    CommandBuildingCallPacket, CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect,
+    ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
     DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
     DeconstructFinishCallPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket,
     EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
@@ -24,14 +24,15 @@ use crate::mindustry::net::{
     RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetCameraPositionCallPacket,
     SetFloorCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
     SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket, SetPositionCallPacket,
-    SetRuleCallPacket, SetRulesCallPacket, SetTileBlocksCallPacket, SetTileCallPacket,
-    SetTileFloorsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
-    SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
-    SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
-    TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
-    TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
-    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
-    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket, SetTeamsCallPacket,
+    SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket, SetTileItemsCallPacket,
+    SetTileLiquidsCallPacket, SetTileOverlaysCallPacket, SetUnitCommandCallPacket,
+    SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
+    StreamBuilder, Streamable, TakeItemsCallPacket, TextInputResultCallPacket,
+    TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
+    TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
+    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+    UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 use crate::mindustry::world::{BlockId, BuildingRef as WorldBuildingRef, Tile, Tiles};
@@ -85,6 +86,8 @@ pub enum ClientTileBlockKind {
 pub struct ClientTileStorageMirror {
     pub items: BTreeMap<String, i32>,
     pub liquids: BTreeMap<String, f32>,
+    pub team: Option<i32>,
+    pub health: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1386,6 +1389,20 @@ impl NetClient {
             .and_then(|tile| tile.build.map(|build| build.tile_pos))
     }
 
+    fn apply_team_to_build_refs(tiles: &mut Tiles, build_pos: i32, team: i32) -> usize {
+        let mut updated = 0;
+        for tile in tiles.iter_mut() {
+            if let Some(mut build) = tile.build {
+                if build.tile_pos == build_pos {
+                    build.team = team;
+                    tile.build = Some(build);
+                    updated += 1;
+                }
+            }
+        }
+        updated
+    }
+
     fn clear_tile_block(tile: &mut Tile) {
         tile.block = Tile::AIR;
         tile.build = None;
@@ -1670,6 +1687,65 @@ impl NetClient {
         };
         storage.entry(build_pos).or_default().liquids.clear();
         true
+    }
+
+    pub fn apply_set_team_packet(
+        tiles: &mut Tiles,
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetTeamCallPacket,
+    ) -> bool {
+        let Some(build_pos) = packet.build.tile_pos else {
+            return false;
+        };
+        let team = i32::from(packet.team.0);
+        if Self::apply_team_to_build_refs(tiles, build_pos, team) == 0 {
+            return false;
+        }
+        storage.entry(build_pos).or_default().team = Some(team);
+        true
+    }
+
+    pub fn apply_set_teams_packet(
+        tiles: &mut Tiles,
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetTeamsCallPacket,
+    ) -> usize {
+        let team = i32::from(packet.team.0);
+        let mut seen = BTreeSet::new();
+        let mut applied = 0;
+
+        for &pos in &packet.positions {
+            let Some(build_pos) = Self::build_pos_by_packed_pos(tiles, pos) else {
+                continue;
+            };
+            if !seen.insert(build_pos) {
+                continue;
+            }
+            if Self::apply_team_to_build_refs(tiles, build_pos, team) > 0 {
+                storage.entry(build_pos).or_default().team = Some(team);
+                applied += 1;
+            }
+        }
+
+        applied
+    }
+
+    pub fn apply_build_health_update_packet(
+        tiles: &Tiles,
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &BuildHealthUpdateCallPacket,
+    ) -> usize {
+        let mut applied = 0;
+        for pair in packet.buildings.chunks_exact(2) {
+            let pos = pair[0];
+            let Some(build_pos) = Self::build_pos_by_packed_pos(tiles, pos) else {
+                continue;
+            };
+            let health = f32::from_bits(pair[1] as u32);
+            storage.entry(build_pos).or_default().health = Some(health);
+            applied += 1;
+        }
+        applied
     }
 
     pub fn apply_set_floor_packet<F>(
@@ -2675,16 +2751,16 @@ mod tests {
         SendMessageCallPacket, SendMessageCallPacket2, SetCameraPositionCallPacket,
         SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket, SetItemsCallPacket,
         SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket,
-        SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTileBlocksCallPacket,
-        SetTileCallPacket, SetTileFloorsCallPacket, SetTileItemsCallPacket,
-        SetTileLiquidsCallPacket, SetTileOverlaysCallPacket, SetUnitCommandCallPacket,
-        SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
-        StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket, TextInputResultCallPacket,
-        TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
-        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
-        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, WarningToastCallPacket,
-        WorldDataBeginCallPacket,
+        SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket,
+        SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket,
+        SetTileItemsCallPacket, SetTileLiquidsCallPacket, SetTileOverlaysCallPacket,
+        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
+        TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
+        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
+        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
+        UnitControlCallPacket, UnitDeathCallPacket, UnitEnteredPayloadCallPacket,
+        WarningToastCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -3734,6 +3810,86 @@ mod tests {
                 build,
                 liquid: None,
                 amount: 1.0,
+            },
+        ));
+    }
+
+    #[test]
+    fn apply_building_team_and_health_packets_updates_lightweight_mirror() {
+        let mut tiles = Tiles::new(4, 4);
+        let center = point2_pack(1, 1);
+        let proxy = point2_pack(2, 1);
+        let empty = point2_pack(0, 0);
+        NetClient::apply_set_tile_packet(
+            &mut tiles,
+            &SetTileCallPacket {
+                tile: Some(center),
+                block: Some("router".into()),
+                team: TeamId(2),
+                rotation: 0,
+            },
+            |name| match name {
+                "router" => Some(10),
+                _ => None,
+            },
+        )
+        .unwrap();
+        let build = tiles.get(1, 1).unwrap().build.unwrap();
+        tiles.get_mut(2, 1).unwrap().build = Some(build);
+
+        let mut storage = BTreeMap::<i32, ClientTileStorageMirror>::new();
+        assert!(NetClient::apply_set_team_packet(
+            &mut tiles,
+            &mut storage,
+            &SetTeamCallPacket {
+                build: BuildingRef::new(center),
+                team: TeamId(5),
+            },
+        ));
+        assert_eq!(tiles.get(1, 1).unwrap().build.unwrap().team, 5);
+        assert_eq!(tiles.get(2, 1).unwrap().build.unwrap().team, 5);
+        assert_eq!(storage.get(&center).unwrap().team, Some(5));
+
+        assert_eq!(
+            NetClient::apply_set_teams_packet(
+                &mut tiles,
+                &mut storage,
+                &SetTeamsCallPacket {
+                    positions: vec![proxy, empty, point2_pack(9, 9)],
+                    team: TeamId(6),
+                },
+            ),
+            1
+        );
+        assert_eq!(tiles.get(1, 1).unwrap().build.unwrap().team, 6);
+        assert_eq!(tiles.get(2, 1).unwrap().build.unwrap().team, 6);
+        assert_eq!(storage.get(&center).unwrap().team, Some(6));
+
+        let health = 123.5f32;
+        assert_eq!(
+            NetClient::apply_build_health_update_packet(
+                &tiles,
+                &mut storage,
+                &BuildHealthUpdateCallPacket {
+                    buildings: vec![
+                        center,
+                        health.to_bits() as i32,
+                        empty,
+                        999.0f32.to_bits() as i32,
+                        center,
+                    ],
+                },
+            ),
+            1
+        );
+        assert_eq!(storage.get(&center).unwrap().health, Some(health));
+
+        assert!(!NetClient::apply_set_team_packet(
+            &mut tiles,
+            &mut storage,
+            &SetTeamCallPacket {
+                build: BuildingRef::null(),
+                team: TeamId(1),
             },
         ));
     }
