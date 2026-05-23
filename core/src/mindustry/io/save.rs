@@ -821,6 +821,10 @@ impl MarkerRegionBytes {
     pub fn ubjson_summary(&self) -> io::Result<MarkerRegionSummary> {
         summarize_marker_region_bytes(&self.bytes)
     }
+
+    pub fn ubjson_markers(&self) -> io::Result<MapMarkers> {
+        parse_marker_region_bytes(&self.bytes)
+    }
 }
 
 pub fn write_marker_region_bytes<W: Write>(
@@ -958,7 +962,99 @@ fn parse_marker_entry(marker: &UbjsonContainer<'_>) -> Option<ObjectiveMarker> {
         common.draw_layer = draw_layer;
     }
 
+    match &mut marker {
+        ObjectiveMarker::ShapeText(value) => {
+            apply_pos_fields(&mut value.pos, fields.get("pos"));
+            apply_string_field(&mut value.text, fields.get("text"));
+            apply_f32_field(&mut value.font_size, fields.get("fontSize"));
+            apply_f32_field(&mut value.text_height, fields.get("textHeight"));
+            apply_u8_field(&mut value.flags, fields.get("flags"));
+            apply_i32_field(&mut value.text_align, fields.get("textAlign"));
+            apply_i32_field(&mut value.line_align, fields.get("lineAlign"));
+            apply_f32_field(&mut value.radius, fields.get("radius"));
+            apply_f32_field(&mut value.rotation, fields.get("rotation"));
+            apply_i32_field(&mut value.sides, fields.get("sides"));
+        }
+        ObjectiveMarker::Point(value) => {
+            apply_pos_fields(&mut value.pos, fields.get("pos"));
+            apply_f32_field(&mut value.radius, fields.get("radius"));
+            apply_f32_field(&mut value.stroke, fields.get("stroke"));
+        }
+        ObjectiveMarker::Shape(value) => {
+            apply_pos_fields(&mut value.pos, fields.get("pos"));
+            apply_f32_field(&mut value.radius, fields.get("radius"));
+            apply_f32_field(&mut value.rotation, fields.get("rotation"));
+            apply_f32_field(&mut value.stroke, fields.get("stroke"));
+            apply_f32_field(&mut value.start_angle, fields.get("startAngle"));
+            apply_f32_field(&mut value.end_angle, fields.get("endAngle"));
+            apply_bool_field(&mut value.fill, fields.get("fill"));
+            apply_bool_field(&mut value.outline, fields.get("outline"));
+            apply_i32_field(&mut value.sides, fields.get("sides"));
+        }
+        ObjectiveMarker::Text(value) => {
+            apply_pos_fields(&mut value.pos, fields.get("pos"));
+            apply_string_field(&mut value.text, fields.get("text"));
+            apply_f32_field(&mut value.font_size, fields.get("fontSize"));
+            apply_u8_field(&mut value.flags, fields.get("flags"));
+            apply_i32_field(&mut value.text_align, fields.get("textAlign"));
+            apply_i32_field(&mut value.line_align, fields.get("lineAlign"));
+        }
+        ObjectiveMarker::Line(value) => {
+            apply_pos_fields(&mut value.pos, fields.get("pos"));
+            apply_pos_fields(&mut value.end_pos, fields.get("endPos"));
+            apply_f32_field(&mut value.stroke, fields.get("stroke"));
+            apply_bool_field(&mut value.outline, fields.get("outline"));
+        }
+        ObjectiveMarker::Texture(value) => {
+            apply_pos_fields(&mut value.pos, fields.get("pos"));
+            apply_f32_field(&mut value.rotation, fields.get("rotation"));
+            apply_f32_field(&mut value.width, fields.get("width"));
+            apply_f32_field(&mut value.height, fields.get("height"));
+            if let Some(texture) = fields.get("texture").and_then(ubjson_texture_holder) {
+                value.texture = texture;
+            }
+        }
+        ObjectiveMarker::Quad(_) => {}
+    }
+
     Some(marker)
+}
+
+fn apply_pos_fields(pos: &mut crate::mindustry::game::Vec2, value: Option<&UbjsonContainer<'_>>) {
+    if let Some((x, y)) = value.and_then(ubjson_vec2) {
+        pos.x = x;
+        pos.y = y;
+    }
+}
+
+fn apply_string_field(target: &mut String, value: Option<&UbjsonContainer<'_>>) {
+    if let Some(value) = value.and_then(ubjson_string) {
+        *target = value.to_string();
+    }
+}
+
+fn apply_f32_field(target: &mut f32, value: Option<&UbjsonContainer<'_>>) {
+    if let Some(value) = value.and_then(ubjson_f32) {
+        *target = value;
+    }
+}
+
+fn apply_i32_field(target: &mut i32, value: Option<&UbjsonContainer<'_>>) {
+    if let Some(value) = value.and_then(ubjson_i32) {
+        *target = value;
+    }
+}
+
+fn apply_u8_field(target: &mut u8, value: Option<&UbjsonContainer<'_>>) {
+    if let Some(value) = value.and_then(ubjson_u8) {
+        *target = value;
+    }
+}
+
+fn apply_bool_field(target: &mut bool, value: Option<&UbjsonContainer<'_>>) {
+    if let Some(value) = value.and_then(ubjson_bool) {
+        *target = value;
+    }
 }
 
 fn marker_class_tag<'a>(marker: &'a UbjsonContainer<'a>) -> Option<&'a str> {
@@ -985,6 +1081,28 @@ fn ubjson_bool(value: &UbjsonContainer<'_>) -> Option<bool> {
     }
 }
 
+fn ubjson_i32(value: &UbjsonContainer<'_>) -> Option<i32> {
+    match value {
+        UbjsonContainer::Int8(value) => Some(*value as i32),
+        UbjsonContainer::Uint8(value) => Some(*value as i32),
+        UbjsonContainer::Int16(value) => Some(*value as i32),
+        UbjsonContainer::Int32(value) => Some(*value),
+        UbjsonContainer::Int64(value) => i32::try_from(*value).ok(),
+        _ => None,
+    }
+}
+
+fn ubjson_u8(value: &UbjsonContainer<'_>) -> Option<u8> {
+    match value {
+        UbjsonContainer::Int8(value) => u8::try_from(*value).ok(),
+        UbjsonContainer::Uint8(value) => Some(*value),
+        UbjsonContainer::Int16(value) => u8::try_from(*value).ok(),
+        UbjsonContainer::Int32(value) => u8::try_from(*value).ok(),
+        UbjsonContainer::Int64(value) => u8::try_from(*value).ok(),
+        _ => None,
+    }
+}
+
 fn ubjson_f32(value: &UbjsonContainer<'_>) -> Option<f32> {
     match value {
         UbjsonContainer::Float32(value) => Some(*value),
@@ -995,6 +1113,43 @@ fn ubjson_f32(value: &UbjsonContainer<'_>) -> Option<f32> {
         UbjsonContainer::Int32(value) => Some(*value as f32),
         UbjsonContainer::Int64(value) => Some(*value as f32),
         _ => None,
+    }
+}
+
+fn ubjson_vec2(value: &UbjsonContainer<'_>) -> Option<(f32, f32)> {
+    match value {
+        UbjsonContainer::Object(fields) => Some((
+            fields.get("x").and_then(ubjson_f32)?,
+            fields.get("y").and_then(ubjson_f32)?,
+        )),
+        UbjsonContainer::Array(values) if values.len() >= 2 => {
+            Some((ubjson_f32(&values[0])?, ubjson_f32(&values[1])?))
+        }
+        _ => None,
+    }
+}
+
+fn ubjson_texture_holder(
+    value: &UbjsonContainer<'_>,
+) -> Option<crate::mindustry::game::map_objectives::TextureHolder> {
+    let fields = match value {
+        UbjsonContainer::Object(fields) => fields,
+        _ => return None,
+    };
+
+    if let Some(value) = fields.get("string").and_then(ubjson_string) {
+        Some(crate::mindustry::game::map_objectives::TextureHolder::String(
+            value.to_string(),
+        ))
+    } else if let Some(value) = fields.get("content").and_then(ubjson_string) {
+        Some(crate::mindustry::game::map_objectives::TextureHolder::Content(
+            value.to_string(),
+        ))
+    } else {
+        fields
+            .get("building")
+            .and_then(ubjson_i32)
+            .map(crate::mindustry::game::map_objectives::TextureHolder::Building)
     }
 }
 
@@ -1629,7 +1784,7 @@ mod tests {
             )]),
         };
 
-        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
+        let decoded = markers.ubjson_markers().unwrap();
         assert_eq!(decoded.size(), 1);
         assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![7]);
         let marker = decoded.get(7).unwrap();
@@ -1642,21 +1797,21 @@ mod tests {
     }
 
     #[test]
-    fn marker_region_ubjson_parse_rebuilds_ids_in_stable_numeric_order() {
+    fn marker_region_ubjson_parse_preserves_marker_id_and_array_index_semantics() {
         let markers = MarkerRegionBytes {
             bytes: ubjson_object(vec![
-                ("9", ubjson_marker_object(Some("Text"))),
                 ("2", ubjson_marker_object(Some("Shape"))),
-                ("7", ubjson_marker_object(Some("Minimap"))),
+                ("9", ubjson_marker_object(Some("Text"))),
+                ("9", ubjson_marker_object(Some("Minimap"))),
             ]),
         };
 
-        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
-        assert_eq!(decoded.size(), 3);
-        assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![2, 7, 9]);
+        let decoded = markers.ubjson_markers().unwrap();
+        assert_eq!(decoded.size(), 2);
+        assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![2, 9]);
         assert_eq!(decoded.get(2).unwrap().common().array_index, 0);
-        assert_eq!(decoded.get(7).unwrap().common().array_index, 1);
-        assert_eq!(decoded.get(9).unwrap().common().array_index, 2);
+        assert_eq!(decoded.get(9).unwrap().type_name(), "Point");
+        assert_eq!(decoded.get(9).unwrap().common().array_index, 1);
     }
 
     #[test]
@@ -1669,10 +1824,187 @@ mod tests {
             ]),
         };
 
-        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
+        let decoded = markers.ubjson_markers().unwrap();
         assert_eq!(decoded.size(), 1);
         assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![3]);
         assert_eq!(decoded.get(3).unwrap().type_name(), "Shape");
+    }
+
+    #[test]
+    fn marker_region_ubjson_parse_point_text_and_shape_text_fields() {
+        let markers = MarkerRegionBytes {
+            bytes: ubjson_object(vec![
+                (
+                    "4",
+                    ubjson_marker_object_with_extra_fields(
+                        Some("Minimap"),
+                        vec![
+                            ubjson_vec2_field("pos", 16.0, 24.0),
+                            ubjson_f32_field("radius", 3.5),
+                            ubjson_f32_field("stroke", 9.0),
+                        ],
+                    ),
+                ),
+                (
+                    "5",
+                    ubjson_marker_object_with_extra_fields(
+                        Some("Text"),
+                        vec![
+                            ubjson_vec2_field("pos", 2.0, 4.0),
+                            ubjson_string_field_bytes("text", "hello"),
+                            ubjson_f32_field("fontSize", 1.5),
+                            ubjson_i32_field("flags", 3),
+                            ubjson_i32_field("textAlign", 5),
+                            ubjson_i32_field("lineAlign", 1),
+                        ],
+                    ),
+                ),
+                (
+                    "6",
+                    ubjson_marker_object_with_extra_fields(
+                        Some("ShapeText"),
+                        vec![
+                            ubjson_vec2_field("pos", 8.0, 12.0),
+                            ubjson_string_field_bytes("text", "alert"),
+                            ubjson_f32_field("fontSize", 2.0),
+                            ubjson_f32_field("textHeight", 11.0),
+                            ubjson_f32_field("radius", 7.0),
+                            ubjson_f32_field("rotation", 30.0),
+                            ubjson_i32_field("sides", 5),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
+
+        match decoded.get(4).unwrap() {
+            ObjectiveMarker::Point(point) => {
+                assert_eq!(point.pos, crate::mindustry::game::Vec2::new(16.0, 24.0));
+                assert!((point.radius - 3.5).abs() < f32::EPSILON);
+                assert!((point.stroke - 9.0).abs() < f32::EPSILON);
+            }
+            other => panic!("expected Point marker, got {other:?}"),
+        }
+
+        match decoded.get(5).unwrap() {
+            ObjectiveMarker::Text(text) => {
+                assert_eq!(text.pos, crate::mindustry::game::Vec2::new(2.0, 4.0));
+                assert_eq!(text.text, "hello");
+                assert!((text.font_size - 1.5).abs() < f32::EPSILON);
+                assert_eq!(text.flags, 3);
+                assert_eq!(text.text_align, 5);
+                assert_eq!(text.line_align, 1);
+            }
+            other => panic!("expected Text marker, got {other:?}"),
+        }
+
+        match decoded.get(6).unwrap() {
+            ObjectiveMarker::ShapeText(text) => {
+                assert_eq!(text.pos, crate::mindustry::game::Vec2::new(8.0, 12.0));
+                assert_eq!(text.text, "alert");
+                assert!((text.font_size - 2.0).abs() < f32::EPSILON);
+                assert!((text.text_height - 11.0).abs() < f32::EPSILON);
+                assert!((text.radius - 7.0).abs() < f32::EPSILON);
+                assert!((text.rotation - 30.0).abs() < f32::EPSILON);
+                assert_eq!(text.sides, 5);
+            }
+            other => panic!("expected ShapeText marker, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn marker_region_ubjson_parse_shape_line_and_texture_fields() {
+        let markers = MarkerRegionBytes {
+            bytes: ubjson_object(vec![
+                (
+                    "7",
+                    ubjson_marker_object_with_extra_fields(
+                        Some("Shape"),
+                        vec![
+                            ubjson_vec2_field("pos", 1.0, 3.0),
+                            ubjson_f32_field("radius", 4.0),
+                            ubjson_f32_field("rotation", 45.0),
+                            ubjson_f32_field("stroke", 2.5),
+                            ubjson_bool_field_bytes("fill", true),
+                            ubjson_bool_field_bytes("outline", false),
+                            ubjson_i32_field("sides", 6),
+                            ubjson_f32_field("startAngle", 15.0),
+                            ubjson_f32_field("endAngle", 180.0),
+                        ],
+                    ),
+                ),
+                (
+                    "8",
+                    ubjson_marker_object_with_extra_fields(
+                        Some("Line"),
+                        vec![
+                            ubjson_vec2_field("pos", 0.0, 1.0),
+                            ubjson_vec2_field("endPos", 4.0, 5.0),
+                            ubjson_f32_field("stroke", 3.0),
+                            ubjson_bool_field_bytes("outline", false),
+                        ],
+                    ),
+                ),
+                (
+                    "9",
+                    ubjson_marker_object_with_extra_fields(
+                        Some("Texture"),
+                        vec![
+                            ubjson_vec2_field("pos", 9.0, 10.0),
+                            ubjson_f32_field("rotation", 90.0),
+                            ubjson_f32_field("width", 32.0),
+                            ubjson_f32_field("height", 64.0),
+                            ubjson_texture_holder_field("texture", "string", "router"),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
+
+        match decoded.get(7).unwrap() {
+            ObjectiveMarker::Shape(shape) => {
+                assert_eq!(shape.pos, crate::mindustry::game::Vec2::new(1.0, 3.0));
+                assert!((shape.radius - 4.0).abs() < f32::EPSILON);
+                assert!((shape.rotation - 45.0).abs() < f32::EPSILON);
+                assert!((shape.stroke - 2.5).abs() < f32::EPSILON);
+                assert!(shape.fill);
+                assert!(!shape.outline);
+                assert_eq!(shape.sides, 6);
+                assert!((shape.start_angle - 15.0).abs() < f32::EPSILON);
+                assert!((shape.end_angle - 180.0).abs() < f32::EPSILON);
+            }
+            other => panic!("expected Shape marker, got {other:?}"),
+        }
+
+        match decoded.get(8).unwrap() {
+            ObjectiveMarker::Line(line) => {
+                assert_eq!(line.pos, crate::mindustry::game::Vec2::new(0.0, 1.0));
+                assert_eq!(line.end_pos, crate::mindustry::game::Vec2::new(4.0, 5.0));
+                assert!((line.stroke - 3.0).abs() < f32::EPSILON);
+                assert!(!line.outline);
+            }
+            other => panic!("expected Line marker, got {other:?}"),
+        }
+
+        match decoded.get(9).unwrap() {
+            ObjectiveMarker::Texture(texture) => {
+                assert_eq!(texture.pos, crate::mindustry::game::Vec2::new(9.0, 10.0));
+                assert!((texture.rotation - 90.0).abs() < f32::EPSILON);
+                assert!((texture.width - 32.0).abs() < f32::EPSILON);
+                assert!((texture.height - 64.0).abs() < f32::EPSILON);
+                assert_eq!(
+                    texture.texture,
+                    crate::mindustry::game::map_objectives::TextureHolder::String(
+                        "router".into()
+                    )
+                );
+            }
+            other => panic!("expected Texture marker, got {other:?}"),
+        }
     }
 
     fn ubjson_object(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
@@ -1723,6 +2055,22 @@ mod tests {
         bytes
     }
 
+    fn ubjson_marker_object_with_extra_fields(
+        class: Option<&str>,
+        extra_fields: Vec<Vec<u8>>,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(b'{');
+        if let Some(class) = class {
+            write_ubjson_string_field(&mut bytes, "class", class);
+        }
+        for field in extra_fields {
+            bytes.extend_from_slice(&field);
+        }
+        bytes.push(b'}');
+        bytes
+    }
+
     fn write_ubjson_string_map_entry(write: &mut Vec<u8>, key: &str, value: &[u8]) {
         write.push(b'U');
         write.push(key.len() as u8);
@@ -1753,6 +2101,63 @@ mod tests {
         write.extend_from_slice(key.as_bytes());
         write.push(b'd');
         write.extend_from_slice(&value.to_be_bytes());
+    }
+
+    fn ubjson_string_field_bytes(key: &str, value: &str) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_ubjson_string_field(&mut bytes, key, value);
+        bytes
+    }
+
+    fn ubjson_bool_field_bytes(key: &str, value: bool) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_ubjson_bool_field(&mut bytes, key, value);
+        bytes
+    }
+
+    fn ubjson_f32_field(key: &str, value: f32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_ubjson_f32_field(&mut bytes, key, value);
+        bytes
+    }
+
+    fn ubjson_i32_field(key: &str, value: i32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(b'U');
+        bytes.push(key.len() as u8);
+        bytes.extend_from_slice(key.as_bytes());
+        bytes.push(b'l');
+        bytes.extend_from_slice(&value.to_be_bytes());
+        bytes
+    }
+
+    fn ubjson_vec2_field(key: &str, x: f32, y: f32) -> Vec<u8> {
+        let mut value = Vec::new();
+        value.push(b'{');
+        write_ubjson_f32_field(&mut value, "x", x);
+        write_ubjson_f32_field(&mut value, "y", y);
+        value.push(b'}');
+
+        let mut bytes = Vec::new();
+        bytes.push(b'U');
+        bytes.push(key.len() as u8);
+        bytes.extend_from_slice(key.as_bytes());
+        bytes.extend_from_slice(&value);
+        bytes
+    }
+
+    fn ubjson_texture_holder_field(key: &str, nested_key: &str, value: &str) -> Vec<u8> {
+        let mut nested = Vec::new();
+        nested.push(b'{');
+        write_ubjson_string_field(&mut nested, nested_key, value);
+        nested.push(b'}');
+
+        let mut bytes = Vec::new();
+        bytes.push(b'U');
+        bytes.push(key.len() as u8);
+        bytes.extend_from_slice(key.as_bytes());
+        bytes.extend_from_slice(&nested);
+        bytes
     }
 
     #[test]
