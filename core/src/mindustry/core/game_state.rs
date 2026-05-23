@@ -305,6 +305,8 @@ impl GameState {
         self.wave = snapshot.wave;
         self.enemies = snapshot.enemies;
         self.server_tps = snapshot.tps as i32;
+        self.rand_seed0 = snapshot.rand0;
+        self.rand_seed1 = snapshot.rand1;
 
         let state_change = if self.is_menu() {
             None
@@ -767,6 +769,8 @@ mod tests {
         assert_eq!(state.enemies, snapshot.enemies);
         assert_eq!(state.game_over, snapshot.game_over);
         assert_eq!(state.server_tps, 255);
+        assert_eq!(state.rand_seed0, 11);
+        assert_eq!(state.rand_seed1, 22);
         assert!(state.is_paused());
 
         let next = StateSnapshotCallPacket {
@@ -798,6 +802,8 @@ mod tests {
         assert_eq!(state.wave, next.wave);
         assert_eq!(state.enemies, next.enemies);
         assert_eq!(state.server_tps, 60);
+        assert_eq!(state.rand_seed0, 33);
+        assert_eq!(state.rand_seed1, 44);
         assert!(state.is_playing());
     }
 
@@ -827,5 +833,7 @@ mod tests {
         assert_eq!(state.wave, snapshot.wave);
         assert_eq!(state.enemies, snapshot.enemies);
         assert_eq!(state.server_tps, 30);
+        assert_eq!(state.rand_seed0, 0);
+        assert_eq!(state.rand_seed1, 0);
     }
 }
