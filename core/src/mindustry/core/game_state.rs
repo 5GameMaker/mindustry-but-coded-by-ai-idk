@@ -106,6 +106,10 @@ pub struct GameState {
     pub wavetime: f32,
     /// Logic tick.
     pub tick: f64,
+    /// Mirror of upstream `GlobalVars.rand.seed0` loaded from network world data.
+    pub rand_seed0: i64,
+    /// Mirror of upstream `GlobalVars.rand.seed1` loaded from network world data.
+    pub rand_seed1: i64,
     /// Continuously ticks up every non-paused update.
     pub update_id: i64,
     /// Whether the game is in game over state.
@@ -163,6 +167,8 @@ impl GameState {
             wave: 1,
             wavetime: 0.0,
             tick: 0.0,
+            rand_seed0: 0,
+            rand_seed1: 0,
             update_id: 0,
             game_over: false,
             after_game_over: false,
@@ -321,6 +327,8 @@ impl GameState {
         self.wave = world_data.wave;
         self.wavetime = world_data.wave_time;
         self.tick = world_data.tick;
+        self.rand_seed0 = world_data.rand_seed0;
+        self.rand_seed1 = world_data.rand_seed1;
 
         let map_width = world_data
             .map_snapshot
@@ -411,6 +419,8 @@ mod tests {
         assert_eq!(state.wave, 1);
         assert_eq!(state.wavetime, 0.0);
         assert_eq!(state.tick, 0.0);
+        assert_eq!(state.rand_seed0, 0);
+        assert_eq!(state.rand_seed1, 0);
         assert_eq!(state.update_id, 0);
         assert!(!state.game_over);
         assert!(!state.after_game_over);
@@ -450,6 +460,8 @@ mod tests {
             wave: 12,
             wave_time: 30.5,
             tick: 99.25,
+            rand_seed0: 123,
+            rand_seed1: 456,
             content_patches_snapshot: Some(ContentPatchSet {
                 patches: vec![b"one".to_vec(), b"two".to_vec()],
             }),
@@ -484,6 +496,8 @@ mod tests {
         assert_eq!(state.wave, 12);
         assert_eq!(state.wavetime, 30.5);
         assert_eq!(state.tick, 99.25);
+        assert_eq!(state.rand_seed0, 123);
+        assert_eq!(state.rand_seed1, 456);
         assert_eq!(state.map.name(), "Network Map");
         assert_eq!(state.map.width, 3);
         assert_eq!(state.map.height, 2);
