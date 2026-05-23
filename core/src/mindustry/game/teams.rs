@@ -232,6 +232,19 @@ impl Teams {
         &self.active
     }
 
+    pub fn replace_plans(
+        &mut self,
+        plans_by_team: impl IntoIterator<Item = (u8, Vec<BlockPlan>)>,
+    ) {
+        for data in self.map.iter_mut().flatten() {
+            data.plans.clear();
+        }
+
+        for (team, plans) in plans_by_team {
+            self.get(team).plans = plans;
+        }
+    }
+
     pub fn update_active(&mut self, team: u8) {
         if self.is_active(team) && !self.active.contains(&team) {
             self.active.push(team);
@@ -463,5 +476,48 @@ mod tests {
         assert!(!plan.removed);
         plan.removed = true;
         assert!(plan.removed);
+    }
+
+    #[test]
+    fn replace_plans_clears_existing_entries_and_replaces_target_teams() {
+        let mut teams = Teams::default();
+        teams
+            .get(crate::mindustry::game::TEAM_SHARDED)
+            .plans
+            .push(BlockPlan::new(1, 2, 0, "duo", None));
+        teams
+            .get(crate::mindustry::game::TEAM_CRUX)
+            .plans
+            .push(BlockPlan::new(3, 4, 1, "router", Some("cfg".into())));
+
+        teams.replace_plans([
+            (
+                crate::mindustry::game::TEAM_MALIS,
+                vec![BlockPlan::new(5, 6, 2, "wall", Some("9".into()))],
+            ),
+            (crate::mindustry::game::TEAM_SHARDED, Vec::new()),
+        ]);
+
+        assert!(
+            teams
+                .get_or_null(crate::mindustry::game::TEAM_CRUX)
+                .unwrap()
+                .plans
+                .is_empty()
+        );
+        assert!(
+            teams
+                .get_or_null(crate::mindustry::game::TEAM_SHARDED)
+                .unwrap()
+                .plans
+                .is_empty()
+        );
+        assert_eq!(
+            teams
+                .get_or_null(crate::mindustry::game::TEAM_MALIS)
+                .unwrap()
+                .plans,
+            vec![BlockPlan::new(5, 6, 2, "wall", Some("9".into()))]
+        );
     }
 }
