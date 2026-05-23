@@ -1,6 +1,7 @@
 use super::Host;
 use crate::mindustry::ctype::ContentId;
-use crate::mindustry::game::Gamemode;
+use crate::mindustry::game::{Gamemode, MapMarkers};
+use crate::mindustry::io::save::parse_marker_region_bytes;
 use crate::mindustry::io::type_io::{
     read_bool as read_io_bool, read_color, read_command_id, read_f32 as read_io_f32,
     read_i16 as read_io_i16, read_i32 as read_io_i32, read_string as read_io_string, read_team,
@@ -83,6 +84,7 @@ pub struct NetworkWorldData {
     pub content_patches_snapshot: Option<ContentPatchSet>,
     pub map_snapshot: Option<LegacyShortChunkMap>,
     pub team_blocks_snapshot: Option<LegacyTeamBlocks>,
+    pub markers_snapshot: Option<MapMarkers>,
     pub marker_summary: Option<MarkerRegionSummary>,
     pub content_header: Vec<u8>,
     pub content_patches: Vec<u8>,
@@ -111,6 +113,7 @@ impl Default for NetworkWorldData {
             content_patches_snapshot: None,
             map_snapshot: None,
             team_blocks_snapshot: None,
+            markers_snapshot: None,
             marker_summary: None,
             content_header: Vec::new(),
             content_patches: Vec::new(),
@@ -288,6 +291,7 @@ pub fn read_world_data_raw(bytes: &[u8]) -> Result<NetworkWorldData, NetworkIoEr
         content_patches_snapshot: tail.content_patches_snapshot,
         map_snapshot: tail.map_snapshot,
         team_blocks_snapshot: tail.team_blocks_snapshot,
+        markers_snapshot: tail.markers_snapshot,
         marker_summary: tail.marker_summary,
         content_header: tail.content_header,
         content_patches: tail.content_patches,
@@ -326,6 +330,7 @@ struct ParsedWorldTail {
     content_patches_snapshot: Option<ContentPatchSet>,
     map_snapshot: Option<LegacyShortChunkMap>,
     team_blocks_snapshot: Option<LegacyTeamBlocks>,
+    markers_snapshot: Option<MapMarkers>,
     marker_summary: Option<MarkerRegionSummary>,
     content_header: Vec<u8>,
     content_patches: Vec<u8>,
@@ -416,6 +421,7 @@ fn parse_save_tail(remaining: &mut &[u8], out: &mut ParsedWorldTail) -> io::Resu
     // the whole tail opaque so legacy/bootstrap payloads continue to round-trip
     // unchanged.
     if let Some((markers, custom_chunks)) = split_marker_region_and_custom_chunks(remaining) {
+        out.markers_snapshot = parse_marker_region_bytes(&markers).ok();
         out.marker_summary = summarize_marker_region_bytes(&markers).ok();
         out.markers = markers;
         out.custom_chunks = custom_chunks;
@@ -1445,6 +1451,13 @@ mod tests {
         let decoded = read_world_data(&write_world_data(&data).unwrap()).unwrap();
         assert_eq!(decoded.markers, markers);
         assert_eq!(decoded.custom_chunks, custom_chunks);
+        let marker_snapshot = decoded
+            .markers_snapshot
+            .as_ref()
+            .expect("marker snapshot should be parsed");
+        assert_eq!(marker_snapshot.size(), 1);
+        assert_eq!(marker_snapshot.ids().collect::<Vec<_>>(), vec![1]);
+        assert_eq!(marker_snapshot.get(1).unwrap().type_name(), "Point");
         let summary = decoded
             .marker_summary
             .as_ref()
@@ -1521,6 +1534,7 @@ mod tests {
         assert!(decoded.tail_parse_error.is_none());
         assert_eq!(decoded.player_bytes, player);
         assert_eq!(decoded.markers, invalid_markers);
+        assert!(decoded.markers_snapshot.is_none());
         assert!(decoded.marker_summary.is_none());
     }
 }
