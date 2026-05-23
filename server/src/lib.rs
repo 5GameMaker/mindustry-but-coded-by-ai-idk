@@ -17,8 +17,13 @@ pub struct ServerLauncher {
 
 impl ServerLauncher {
     pub fn new(args: Vec<String>) -> Self {
+        let mut context = AppContext::server("config");
+        if let Some(port) = parse_port_arg(&args) {
+            context.port = port;
+        }
+
         Self {
-            context: AppContext::server("config"),
+            context,
             control: ServerControl::new(args.clone()),
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
@@ -67,6 +72,23 @@ pub fn banner() -> String {
     format!("mindustry server bootstrap ({UPSTREAM_BASELINE})")
 }
 
+fn parse_port_arg(args: &[String]) -> Option<u16> {
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--port" || arg == "-p" {
+            if let Some(next) = args.get(index + 1) {
+                if let Ok(port) = next.parse() {
+                    return Some(port);
+                }
+            }
+        } else if let Some(value) = arg.strip_prefix("--port=") {
+            if let Ok(port) = value.parse() {
+                return Some(port);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::ServerLauncher;
@@ -83,6 +105,24 @@ mod tests {
             }
         }
         panic!("could not reserve a local TCP/UDP port pair");
+    }
+
+    #[test]
+    fn server_launcher_reads_port_arg_before_opening_network() {
+        let port = free_local_port();
+        let mut launcher = ServerLauncher::new(vec![
+            "mindustry-server".into(),
+            "--port".into(),
+            port.to_string(),
+        ]);
+
+        assert_eq!(launcher.context.port, port);
+
+        launcher.init();
+
+        assert!(launcher.net_server.is_active());
+        assert_eq!(launcher.network_error, None);
+        launcher.close_network();
     }
 
     #[test]
