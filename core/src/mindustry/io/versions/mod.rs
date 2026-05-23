@@ -9,6 +9,7 @@ use crate::mindustry::io::{
     save::{read_chunk, read_legacy_short_chunk},
     type_io::{read_i16, read_i32, read_java_utf, read_object, read_u16, read_u8, TypeValue},
 };
+use crate::mindustry::world::{Tile, Tiles};
 
 pub mod save1;
 pub mod save10;
@@ -423,6 +424,63 @@ impl LegacyShortChunkMap {
     pub fn tile_count(&self) -> usize {
         self.width as usize * self.height as usize
     }
+
+    /// Expands the Java save-map run records into the lightweight Rust tile
+    /// container. Building payload bytes are intentionally left as raw data on
+    /// `LegacyMapBlockRecord` until generated building codecs are complete.
+    pub fn to_tiles(&self) -> Tiles {
+        let mut tiles = Tiles::new(self.width as usize, self.height as usize);
+        self.apply_to_tiles(&mut tiles);
+        tiles
+    }
+
+    pub fn apply_to_tiles(&self, tiles: &mut Tiles) {
+        let width = self.width as usize;
+        let height = self.height as usize;
+        if tiles.width != width || tiles.height != height {
+            *tiles = Tiles::new(width, height);
+        } else {
+            tiles.fill();
+        }
+
+        for record in &self.floors {
+            for index in record.index..record.index + record.len() {
+                if let Some(tile) = tile_mut_by_index(tiles, index) {
+                    tile.floor = record.floor_id;
+                    tile.overlay = record.ore_id;
+                }
+            }
+        }
+
+        for record in &self.blocks {
+            for index in record.index..record.index + record.len() {
+                if let Some(tile) = tile_mut_by_index(tiles, index) {
+                    tile.block = record.block_id;
+                }
+            }
+
+            if let Some(tile) = tile_mut_by_index(tiles, record.index) {
+                if let Some(data) = &record.new_data {
+                    tile.data = data.data;
+                    tile.floor_data = data.floor_data;
+                    tile.overlay_data = data.overlay_data;
+                    tile.extra_data = data.extra_data;
+                } else if let Some(data) = record.old_data {
+                    tile.data = data;
+                }
+            }
+        }
+    }
+}
+
+fn tile_mut_by_index(tiles: &mut Tiles, index: usize) -> Option<&mut Tile> {
+    let width = tiles.width;
+    if width == 0 {
+        return None;
+    }
+    let x = index % width;
+    let y = index / width;
+    tiles.get_mut(x as i32, y as i32)
 }
 
 pub fn read_legacy_short_chunk_map<R: Read>(read: &mut R) -> io::Result<LegacyShortChunkMap> {
@@ -626,4 +684,89 @@ pub fn read_chunk_map<R: Read>(read: &mut R) -> io::Result<LegacyShortChunkMap> 
         floors,
         blocks,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_chunk_map_expands_floor_and_block_runs_into_tiles() {
+        let map = LegacyShortChunkMap {
+            width: 2,
+            height: 1,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 2,
+                ore_id: 3,
+                consecutives: 1,
+            }],
+            blocks: vec![LegacyMapBlockRecord {
+                index: 0,
+                block_id: 5,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: None,
+                building: None,
+                consecutives: 1,
+            }],
+        };
+
+        let tiles = map.to_tiles();
+
+        assert_eq!(tiles.width, 2);
+        assert_eq!(tiles.height, 1);
+        for x in 0..2 {
+            let tile = tiles.get(x, 0).unwrap();
+            assert_eq!(tile.floor, 2);
+            assert_eq!(tile.overlay, 3);
+            assert_eq!(tile.block, 5);
+        }
+    }
+
+    #[test]
+    fn legacy_chunk_map_applies_new_tile_data_to_record_start() {
+        let map = LegacyShortChunkMap {
+            width: 1,
+            height: 1,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 7,
+                ore_id: 8,
+                consecutives: 0,
+            }],
+            blocks: vec![LegacyMapBlockRecord {
+                index: 0,
+                block_id: 9,
+                packed_flags: 4,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: true,
+                is_center: true,
+                new_data: Some(LegacyMapTileData {
+                    data: 1,
+                    floor_data: 2,
+                    overlay_data: 3,
+                    extra_data: 4,
+                }),
+                old_data: None,
+                building: None,
+                consecutives: 0,
+            }],
+        };
+
+        let tile = map.to_tiles().get(0, 0).cloned().unwrap();
+
+        assert_eq!(tile.floor, 7);
+        assert_eq!(tile.overlay, 8);
+        assert_eq!(tile.block, 9);
+        assert_eq!(tile.data, 1);
+        assert_eq!(tile.floor_data, 2);
+        assert_eq!(tile.overlay_data, 3);
+        assert_eq!(tile.extra_data, 4);
+    }
 }
