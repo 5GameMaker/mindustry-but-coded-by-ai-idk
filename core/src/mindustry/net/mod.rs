@@ -1,6 +1,7 @@
 pub mod administration;
 pub mod arc_net_provider;
 pub mod be_control;
+pub mod crash_handler;
 pub mod host;
 pub mod net;
 pub mod net_connection;
@@ -25,6 +26,11 @@ pub use be_control::{
     BeReleaseAsset, BeReleaseError, BeReleaseInfo, BeReleaseParseError, BeRuntimeFlags,
     BeUpdateAvailable, BeUpdateCheckPlan, BeUpdateDialogPlan, BE_DESKTOP_ASSET_PREFIX,
     BE_RELEASES_LATEST_URL, BE_SERVER_ASSET_PREFIX, BE_UPDATE_INTERVAL_SECONDS,
+};
+pub use crash_handler::{
+    crash_report_path, create_report, detect_mod_cause, handle_plan, match_dotted_prefix_score,
+    CrashHandleRuntime, CrashHandler, CrashHandlerAction, CrashHandlerPlan, CrashLoadedMod,
+    CrashReportContext, CrashStackFrame, CrashSystemInfo,
 };
 pub use host::Host;
 pub use net::{
