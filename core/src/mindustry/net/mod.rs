@@ -1,5 +1,6 @@
 pub mod administration;
 pub mod arc_net_provider;
+pub mod be_control;
 pub mod host;
 pub mod net;
 pub mod net_connection;
@@ -18,6 +19,12 @@ pub use administration::{
 };
 pub use arc_net_provider::{
     ArcNetProvider, ArcTransport, FrameworkMessage, PacketEnvelope, PacketSerializer,
+};
+pub use be_control::{
+    BeControl, BeDesktopUpdatePlan, BeHeadlessUpdatePlan, BeInitPlan, BeReleaseApplyError,
+    BeReleaseAsset, BeReleaseError, BeReleaseInfo, BeReleaseParseError, BeRuntimeFlags,
+    BeUpdateAvailable, BeUpdateCheckPlan, BeUpdateDialogPlan, BE_DESKTOP_ASSET_PREFIX,
+    BE_RELEASES_LATEST_URL, BE_SERVER_ASSET_PREFIX, BE_UPDATE_INTERVAL_SECONDS,
 };
 pub use host::Host;
 pub use net::{
