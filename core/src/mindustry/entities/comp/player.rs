@@ -110,6 +110,7 @@ pub struct PlayerAfterSyncPlan {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerComp {
+    pub id: i32,
     pub x: f32,
     pub y: f32,
     pub unit: Option<PlayerUnitState>,
@@ -151,6 +152,7 @@ pub struct PlayerComp {
 impl PlayerComp {
     pub fn new(team: TeamId) -> Self {
         Self {
+            id: -1,
             x: 0.0,
             y: 0.0,
             unit: None,
@@ -574,6 +576,7 @@ mod tests {
     #[test]
     fn apply_network_player_data_syncs_basic_fields_and_unit_reference() {
         let mut player = PlayerComp::default();
+        player.id = 77;
         player.name = "old-name".into();
         player.selected_block = Some(Block::new(1, "duo"));
 
@@ -598,6 +601,7 @@ mod tests {
 
         player.apply_network_player_data(&data);
 
+        assert_eq!(player.id, 77);
         assert!(player.admin);
         assert!(player.boosting);
         assert_eq!(player.color, 0x11_22_33_44);
