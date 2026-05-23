@@ -70,12 +70,18 @@ impl DesktopLauncher {
             }
         };
 
-        if loaded_world_data.as_ref() == self.last_applied_world_data.as_ref() {
-            return;
-        }
-
-        if let Some(world_data) = loaded_world_data.as_ref() {
-            self.game_state.apply_network_world_data(world_data);
+        match loaded_world_data.as_ref() {
+            Some(world_data) => {
+                if loaded_world_data.as_ref() == self.last_applied_world_data.as_ref() {
+                    return;
+                }
+                self.game_state.apply_network_world_data(world_data);
+            }
+            None => {
+                if self.last_applied_world_data.is_some() {
+                    self.game_state = GameState::new();
+                }
+            }
         }
         self.last_applied_world_data = loaded_world_data;
     }
@@ -234,6 +240,72 @@ mod tests {
                 WorldLoadEventKind::Loaded,
             ]
         );
+    }
+
+    #[test]
+    fn desktop_launcher_resets_game_state_when_world_data_clears() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+
+        let mut map_tags = BTreeMap::new();
+        map_tags.insert("name".into(), "Network Map".into());
+        map_tags.insert("build".into(), "157".into());
+        map_tags.insert("version".into(), "11".into());
+
+        let world_data = NetworkWorldData {
+            map_locales_json: r#"{"en":{"name":"Network Map"}}"#.into(),
+            map_tags,
+            wave: 12,
+            wave_time: 30.5,
+            tick: 99.25,
+            map_snapshot: Some(LegacyShortChunkMap {
+                width: 3,
+                height: 2,
+                floors: vec![LegacyMapFloorRecord {
+                    index: 0,
+                    floor_id: 1,
+                    ore_id: 0,
+                    consecutives: 5,
+                }],
+                blocks: vec![LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: 0,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 5,
+                }],
+            }),
+            ..NetworkWorldData::default()
+        };
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+        assert_eq!(launcher.game_state.world.width(), 3);
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = None;
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.game_state.map.name(), "empty");
+        assert_eq!(launcher.game_state.world.width(), 0);
+        assert_eq!(launcher.game_state.world.height(), 0);
+        assert!(launcher.game_state.world.load_events().is_empty());
     }
 
     #[test]
