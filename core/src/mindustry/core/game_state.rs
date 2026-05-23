@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     game::{GameStats, MapMarkers, Rules, Teams},
     maps::MapDescriptor,
-    net::StateSnapshotCallPacket,
+    net::{NetworkWorldData, StateSnapshotCallPacket},
     r#type::{MapLocales, Sector},
     world::blocks::Attributes,
 };
@@ -66,6 +66,16 @@ impl StateSnapshotApplyResult {
             state_change,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkWorldApplyResult {
+    pub map_width: i32,
+    pub map_height: i32,
+    pub map_locales_loaded: bool,
+    pub map_locales_error: Option<String>,
+    pub content_patches_loaded: usize,
+    pub tail_parse_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -286,6 +296,75 @@ impl GameState {
 
         StateSnapshotApplyResult::new(wave_changed, state_change)
     }
+
+    /// Applies the game-state front matter from Java `NetworkIO.loadWorld`.
+    ///
+    /// Full rules JSON and marker/entity materialization are still migrated in
+    /// their dedicated modules; this stage wires the stable fields that already
+    /// have Rust mirrors so a parsed world stream can drive map/wave/locales
+    /// state instead of only being logged by `NetClient`.
+    pub fn apply_network_world_data(
+        &mut self,
+        world_data: &NetworkWorldData,
+    ) -> NetworkWorldApplyResult {
+        self.wave = world_data.wave;
+        self.wavetime = world_data.wave_time;
+        self.tick = world_data.tick;
+
+        let map_width = world_data
+            .map_snapshot
+            .as_ref()
+            .map(|map| map.width as i32)
+            .or_else(|| parse_tag_i32(&world_data.map_tags, "width"))
+            .unwrap_or_default();
+        let map_height = world_data
+            .map_snapshot
+            .as_ref()
+            .map(|map| map.height as i32)
+            .or_else(|| parse_tag_i32(&world_data.map_tags, "height"))
+            .unwrap_or_default();
+        let map_version = parse_tag_i32(&world_data.map_tags, "version").unwrap_or_default();
+        let map_build = parse_tag_i32(&world_data.map_tags, "build").unwrap_or_default();
+        self.map = MapDescriptor::new(
+            "network.msav",
+            map_width,
+            map_height,
+            world_data.map_tags.clone(),
+            true,
+            map_version,
+            map_build,
+        );
+
+        let map_locales_error = match MapLocales::from_json_str(&world_data.map_locales_json) {
+            Ok(locales) => {
+                self.map_locales = locales;
+                None
+            }
+            Err(error) => Some(error),
+        };
+
+        self.patcher.patches = world_data
+            .content_patches_snapshot
+            .as_ref()
+            .map(|patches| {
+                patches
+                    .patches
+                    .iter()
+                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.patcher.warnings.clear();
+
+        NetworkWorldApplyResult {
+            map_width,
+            map_height,
+            map_locales_loaded: map_locales_error.is_none(),
+            map_locales_error,
+            content_patches_loaded: self.patcher.patches.len(),
+            tail_parse_error: world_data.tail_parse_error.clone(),
+        }
+    }
 }
 
 pub fn empty_map_descriptor() -> MapDescriptor {
@@ -294,12 +373,17 @@ pub fn empty_map_descriptor() -> MapDescriptor {
     MapDescriptor::new("empty.msav", 0, 0, tags, false, 0, 0)
 }
 
+fn parse_tag_i32(tags: &BTreeMap<String, String>, key: &str) -> Option<i32> {
+    tags.get(key).and_then(|value| value.parse().ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mindustry::{
         game::{CoreInfo, SpawnGroup, TEAM_CRUX},
-        net::StateSnapshotCallPacket,
+        io::{ContentPatchSet, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap},
+        net::{NetworkWorldData, StateSnapshotCallPacket},
         r#type::SectorPreset,
     };
 
@@ -329,6 +413,75 @@ mod tests {
         assert_eq!(state.enemies, 0);
         assert!(state.playtesting_map.is_none());
         assert!(state.sector.is_none());
+    }
+
+    #[test]
+    fn apply_network_world_data_updates_java_loadworld_front_matter() {
+        let mut state = GameState::new();
+        let mut map_tags = BTreeMap::new();
+        map_tags.insert("name".into(), "Network Map".into());
+        map_tags.insert("build".into(), "157".into());
+        map_tags.insert("version".into(), "11".into());
+
+        let world = NetworkWorldData {
+            rules_json: "{}".into(),
+            map_locales_json: r#"{"en":{"name":"Network Map"}}"#.into(),
+            map_tags,
+            wave: 12,
+            wave_time: 30.5,
+            tick: 99.25,
+            content_patches_snapshot: Some(ContentPatchSet {
+                patches: vec![b"one".to_vec(), b"two".to_vec()],
+            }),
+            map_snapshot: Some(LegacyShortChunkMap {
+                width: 3,
+                height: 2,
+                floors: vec![LegacyMapFloorRecord {
+                    index: 0,
+                    floor_id: 1,
+                    ore_id: 0,
+                    consecutives: 5,
+                }],
+                blocks: vec![LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: 0,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 5,
+                }],
+            }),
+            ..NetworkWorldData::default()
+        };
+
+        let result = state.apply_network_world_data(&world);
+
+        assert_eq!(state.wave, 12);
+        assert_eq!(state.wavetime, 30.5);
+        assert_eq!(state.tick, 99.25);
+        assert_eq!(state.map.name(), "Network Map");
+        assert_eq!(state.map.width, 3);
+        assert_eq!(state.map.height, 2);
+        assert_eq!(state.map.version, 11);
+        assert_eq!(state.map.build, 157);
+        assert_eq!(state.map_locales.locales["en"]["name"], "Network Map");
+        assert_eq!(state.patcher.patches, vec!["one", "two"]);
+        assert_eq!(
+            result,
+            NetworkWorldApplyResult {
+                map_width: 3,
+                map_height: 2,
+                map_locales_loaded: true,
+                map_locales_error: None,
+                content_patches_loaded: 2,
+                tail_parse_error: None,
+            }
+        );
     }
 
     #[test]
