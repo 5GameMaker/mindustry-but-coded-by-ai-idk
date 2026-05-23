@@ -22,7 +22,8 @@ use crate::mindustry::net::{
     RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
     SetCameraPositionCallPacket, SetFloorCallPacket, SetItemCallPacket, SetItemsCallPacket,
     SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket,
-    SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTileCallPacket,
+    SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTileBlocksCallPacket,
+    SetTileCallPacket, SetTileFloorsCallPacket, SetTileOverlaysCallPacket,
     SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
     StateSnapshotCallPacket, StreamBuilder, Streamable, TakeItemsCallPacket,
     TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
@@ -1354,6 +1355,13 @@ impl NetClient {
         camera.y = packet.y;
     }
 
+    fn tile_mut_by_packed_pos(tiles: &mut Tiles, pos: i32) -> Option<&mut Tile> {
+        tiles.get_mut(
+            crate::mindustry::world::point2_x(pos) as i32,
+            crate::mindustry::world::point2_y(pos) as i32,
+        )
+    }
+
     pub fn apply_remove_tile_packet(
         tiles: &mut Tiles,
         packet: &RemoveTileCallPacket,
@@ -1361,11 +1369,7 @@ impl NetClient {
         let pos = packet
             .tile
             .ok_or_else(|| "removeTile missing tile".to_string())?;
-        let tile = tiles
-            .get_mut(
-                crate::mindustry::world::point2_x(pos) as i32,
-                crate::mindustry::world::point2_y(pos) as i32,
-            )
+        let tile = Self::tile_mut_by_packed_pos(tiles, pos)
             .ok_or_else(|| format!("removeTile tile out of bounds: {pos}"))?;
         tile.block = Tile::AIR;
         tile.build = None;
@@ -1384,11 +1388,7 @@ impl NetClient {
         let pos = packet
             .tile
             .ok_or_else(|| "setTile missing tile".to_string())?;
-        let tile = tiles
-            .get_mut(
-                crate::mindustry::world::point2_x(pos) as i32,
-                crate::mindustry::world::point2_y(pos) as i32,
-            )
+        let tile = Self::tile_mut_by_packed_pos(tiles, pos)
             .ok_or_else(|| format!("setTile tile out of bounds: {pos}"))?;
 
         match packet.block.as_deref() {
@@ -1412,6 +1412,38 @@ impl NetClient {
         Ok(())
     }
 
+    pub fn apply_set_tile_blocks_packet<F>(
+        tiles: &mut Tiles,
+        packet: &SetTileBlocksCallPacket,
+        mut block_id_by_name: F,
+    ) -> Result<usize, String>
+    where
+        F: FnMut(&str) -> Option<BlockId>,
+    {
+        let Some(block_name) = packet.block.as_deref() else {
+            return Ok(0);
+        };
+        let block_id =
+            block_id_by_name(block_name).ok_or_else(|| format!("unknown block: {block_name}"))?;
+        let mut applied = 0;
+
+        for &pos in &packet.positions {
+            if let Some(tile) = Self::tile_mut_by_packed_pos(tiles, pos) {
+                tile.block = block_id;
+                tile.build = Some(WorldBuildingRef {
+                    tile_pos: pos,
+                    block: block_id,
+                    team: i32::from(packet.team.0),
+                    rotation: 0,
+                });
+                tile.changing = false;
+                applied += 1;
+            }
+        }
+
+        Ok(applied)
+    }
+
     pub fn apply_set_floor_packet<F>(
         tiles: &mut Tiles,
         packet: &SetFloorCallPacket,
@@ -1423,11 +1455,7 @@ impl NetClient {
         let pos = packet
             .tile
             .ok_or_else(|| "setFloor missing tile".to_string())?;
-        let tile = tiles
-            .get_mut(
-                crate::mindustry::world::point2_x(pos) as i32,
-                crate::mindustry::world::point2_y(pos) as i32,
-            )
+        let tile = Self::tile_mut_by_packed_pos(tiles, pos)
             .ok_or_else(|| format!("setFloor tile out of bounds: {pos}"))?;
 
         if let Some(floor_name) = packet.floor.as_deref() {
@@ -1442,6 +1470,31 @@ impl NetClient {
         Ok(())
     }
 
+    pub fn apply_set_tile_floors_packet<F>(
+        tiles: &mut Tiles,
+        packet: &SetTileFloorsCallPacket,
+        mut block_id_by_name: F,
+    ) -> Result<usize, String>
+    where
+        F: FnMut(&str) -> Option<BlockId>,
+    {
+        let Some(floor_name) = packet.block.as_deref() else {
+            return Ok(0);
+        };
+        let floor_id =
+            block_id_by_name(floor_name).ok_or_else(|| format!("unknown floor: {floor_name}"))?;
+        let mut applied = 0;
+
+        for &pos in &packet.positions {
+            if let Some(tile) = Self::tile_mut_by_packed_pos(tiles, pos) {
+                tile.floor = floor_id;
+                applied += 1;
+            }
+        }
+
+        Ok(applied)
+    }
+
     pub fn apply_set_overlay_packet<F>(
         tiles: &mut Tiles,
         packet: &SetOverlayCallPacket,
@@ -1453,11 +1506,7 @@ impl NetClient {
         let pos = packet
             .tile
             .ok_or_else(|| "setOverlay missing tile".to_string())?;
-        let tile = tiles
-            .get_mut(
-                crate::mindustry::world::point2_x(pos) as i32,
-                crate::mindustry::world::point2_y(pos) as i32,
-            )
+        let tile = Self::tile_mut_by_packed_pos(tiles, pos)
             .ok_or_else(|| format!("setOverlay tile out of bounds: {pos}"))?;
         tile.overlay = match packet.overlay.as_deref() {
             Some(overlay_name) => block_id_by_name(overlay_name)
@@ -1465,6 +1514,31 @@ impl NetClient {
             None => Tile::AIR,
         };
         Ok(())
+    }
+
+    pub fn apply_set_tile_overlays_packet<F>(
+        tiles: &mut Tiles,
+        packet: &SetTileOverlaysCallPacket,
+        mut block_id_by_name: F,
+    ) -> Result<usize, String>
+    where
+        F: FnMut(&str) -> Option<BlockId>,
+    {
+        let Some(overlay_name) = packet.block.as_deref() else {
+            return Ok(0);
+        };
+        let overlay_id = block_id_by_name(overlay_name)
+            .ok_or_else(|| format!("unknown overlay: {overlay_name}"))?;
+        let mut applied = 0;
+
+        for &pos in &packet.positions {
+            if let Some(tile) = Self::tile_mut_by_packed_pos(tiles, pos) {
+                tile.overlay = overlay_id;
+                applied += 1;
+            }
+        }
+
+        Ok(applied)
     }
 
     pub fn apply_received_preview_plans_to_player(
@@ -2371,7 +2445,8 @@ mod tests {
         SendMessageCallPacket, SendMessageCallPacket2, SetCameraPositionCallPacket,
         SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket, SetItemsCallPacket,
         SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket,
-        SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTileCallPacket,
+        SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTileBlocksCallPacket,
+        SetTileCallPacket, SetTileFloorsCallPacket, SetTileOverlaysCallPacket,
         SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
         StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
         TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
@@ -3021,6 +3096,101 @@ mod tests {
         )
         .unwrap_err()
         .contains("missing tile"));
+    }
+
+    #[test]
+    fn apply_batch_tile_topology_packets_mirrors_java_remote_helpers() {
+        let mut tiles = Tiles::new(4, 4);
+        let resolve = |name: &str| match name {
+            "router" => Some(10),
+            "stone" => Some(20),
+            "ore-copper" => Some(30),
+            _ => None,
+        };
+        let a = point2_pack(0, 0);
+        let b = point2_pack(3, 2);
+        let out_of_bounds = point2_pack(9, 9);
+
+        assert_eq!(
+            NetClient::apply_set_tile_blocks_packet(
+                &mut tiles,
+                &SetTileBlocksCallPacket {
+                    block: Some("router".into()),
+                    team: TeamId(4),
+                    positions: vec![a, out_of_bounds, b],
+                },
+                resolve,
+            )
+            .unwrap(),
+            2
+        );
+        for (x, y, pos) in [(0, 0, a), (3, 2, b)] {
+            let tile = tiles.get(x, y).unwrap();
+            assert_eq!(tile.block, 10);
+            let build = tile.build.as_ref().unwrap();
+            assert_eq!(build.tile_pos, pos);
+            assert_eq!(build.block, 10);
+            assert_eq!(build.team, 4);
+            assert_eq!(build.rotation, 0);
+        }
+
+        assert_eq!(
+            NetClient::apply_set_tile_floors_packet(
+                &mut tiles,
+                &SetTileFloorsCallPacket {
+                    block: Some("stone".into()),
+                    positions: vec![a, b],
+                },
+                resolve,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(tiles.get(0, 0).unwrap().floor, 20);
+        assert_eq!(tiles.get(3, 2).unwrap().floor, 20);
+        assert_eq!(tiles.get(0, 0).unwrap().overlay, Tile::AIR);
+
+        assert_eq!(
+            NetClient::apply_set_tile_overlays_packet(
+                &mut tiles,
+                &SetTileOverlaysCallPacket {
+                    block: Some("ore-copper".into()),
+                    positions: vec![a, b],
+                },
+                resolve,
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(tiles.get(0, 0).unwrap().overlay, 30);
+        assert_eq!(tiles.get(3, 2).unwrap().overlay, 30);
+
+        assert_eq!(
+            NetClient::apply_set_tile_blocks_packet(
+                &mut tiles,
+                &SetTileBlocksCallPacket {
+                    block: None,
+                    team: TeamId(1),
+                    positions: vec![a],
+                },
+                resolve,
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(tiles.get(0, 0).unwrap().block, 10);
+
+        assert!(NetClient::apply_set_tile_floors_packet(
+            &mut tiles,
+            &SetTileFloorsCallPacket {
+                block: Some("missing".into()),
+                positions: vec![a],
+            },
+            resolve,
+        )
+        .unwrap_err()
+        .contains("unknown floor"));
+        assert_eq!(tiles.get(0, 0).unwrap().floor, 20);
     }
 
     #[test]
