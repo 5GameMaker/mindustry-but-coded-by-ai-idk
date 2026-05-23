@@ -341,6 +341,7 @@ pub struct NetClientState {
     pub last_clear_liquids: Option<ClearLiquidsCallPacket>,
     pub last_clear_liquids_at: Option<Instant>,
     pub clear_liquids_packets_seen: u64,
+    pub building_storage_mirrors: BTreeMap<i32, ClientTileStorageMirror>,
     pub last_take_items: Option<TakeItemsCallPacket>,
     pub last_take_items_at: Option<Instant>,
     pub take_items_packets_seen: u64,
@@ -596,6 +597,7 @@ impl fmt::Debug for NetClientState {
                 "clear_liquids_packets_seen",
                 &self.clear_liquids_packets_seen,
             )
+            .field("building_storage_mirrors", &self.building_storage_mirrors)
             .field("take_items_packets_seen", &self.take_items_packets_seen)
             .field(
                 "transfer_item_effect_packets_seen",
@@ -2328,6 +2330,7 @@ impl NetClient {
                     PacketKind::SetItemCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_item_packets_seen += 1;
+                        Self::apply_set_item_packet(&mut state.building_storage_mirrors, packet);
                         state.last_set_item = Some(packet.clone());
                         state.last_set_item_at = Some(now);
                         (false, false)
@@ -2335,6 +2338,7 @@ impl NetClient {
                     PacketKind::SetItemsCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_items_packets_seen += 1;
+                        Self::apply_set_items_packet(&mut state.building_storage_mirrors, packet);
                         state.last_set_items = Some(packet.clone());
                         state.last_set_items_at = Some(now);
                         (false, false)
@@ -2342,6 +2346,7 @@ impl NetClient {
                     PacketKind::ClearItemsCallPacket(packet) => {
                         let now = Instant::now();
                         state.clear_items_packets_seen += 1;
+                        Self::apply_clear_items_packet(&mut state.building_storage_mirrors, packet);
                         state.last_clear_items = Some(*packet);
                         state.last_clear_items_at = Some(now);
                         (false, false)
@@ -2349,6 +2354,7 @@ impl NetClient {
                     PacketKind::SetLiquidCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_liquid_packets_seen += 1;
+                        Self::apply_set_liquid_packet(&mut state.building_storage_mirrors, packet);
                         state.last_set_liquid = Some(packet.clone());
                         state.last_set_liquid_at = Some(now);
                         (false, false)
@@ -2356,6 +2362,7 @@ impl NetClient {
                     PacketKind::SetLiquidsCallPacket(packet) => {
                         let now = Instant::now();
                         state.set_liquids_packets_seen += 1;
+                        Self::apply_set_liquids_packet(&mut state.building_storage_mirrors, packet);
                         state.last_set_liquids = Some(packet.clone());
                         state.last_set_liquids_at = Some(now);
                         (false, false)
@@ -2363,6 +2370,10 @@ impl NetClient {
                     PacketKind::ClearLiquidsCallPacket(packet) => {
                         let now = Instant::now();
                         state.clear_liquids_packets_seen += 1;
+                        Self::apply_clear_liquids_packet(
+                            &mut state.building_storage_mirrors,
+                            packet,
+                        );
                         state.last_clear_liquids = Some(*packet);
                         state.last_clear_liquids_at = Some(now);
                         (false, false)
@@ -4955,6 +4966,18 @@ mod tests {
         assert_eq!(state.clear_liquids_packets_seen, 1);
         assert_eq!(state.last_clear_liquids.as_ref(), Some(&clear_liquids));
         assert!(state.last_clear_liquids_at.is_some());
+        let primary_storage = state
+            .building_storage_mirrors
+            .get(&primary_build.tile_pos.unwrap())
+            .unwrap();
+        assert_eq!(primary_storage.items.get("copper"), Some(&42));
+        assert_eq!(primary_storage.liquids.get("water"), Some(&6.5));
+        let secondary_storage = state
+            .building_storage_mirrors
+            .get(&secondary_build.tile_pos.unwrap())
+            .unwrap();
+        assert!(secondary_storage.items.is_empty());
+        assert!(secondary_storage.liquids.is_empty());
         assert_eq!(state.take_items_packets_seen, 1);
         assert_eq!(state.last_take_items.as_ref(), Some(&take_items));
         assert!(state.last_take_items_at.is_some());
