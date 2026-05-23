@@ -1707,6 +1707,17 @@ impl NetClient {
         true
     }
 
+    pub fn apply_set_team_mirror_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetTeamCallPacket,
+    ) -> bool {
+        let Some(build_pos) = packet.build.tile_pos else {
+            return false;
+        };
+        storage.entry(build_pos).or_default().team = Some(i32::from(packet.team.0));
+        true
+    }
+
     pub fn apply_set_teams_packet(
         tiles: &mut Tiles,
         storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
@@ -1745,6 +1756,20 @@ impl NetClient {
             };
             let health = f32::from_bits(pair[1] as u32);
             storage.entry(build_pos).or_default().health = Some(health);
+            applied += 1;
+        }
+        applied
+    }
+
+    pub fn apply_build_health_update_mirror_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &BuildHealthUpdateCallPacket,
+    ) -> usize {
+        let mut applied = 0;
+        for pair in packet.buildings.chunks_exact(2) {
+            let pos = pair[0];
+            let health = f32::from_bits(pair[1] as u32);
+            storage.entry(pos).or_default().health = Some(health);
             applied += 1;
         }
         applied
@@ -2243,6 +2268,21 @@ impl NetClient {
                     | PacketKind::LandingPadLandedCallPacket(_)
                     | PacketKind::PlayerSpawnCallPacket(_)
                     | PacketKind::SyncVariableCallPacket(_) => {
+                        match &packet {
+                            PacketKind::SetTeamCallPacket(packet) => {
+                                Self::apply_set_team_mirror_packet(
+                                    &mut state.building_storage_mirrors,
+                                    packet,
+                                );
+                            }
+                            PacketKind::BuildHealthUpdateCallPacket(packet) => {
+                                Self::apply_build_health_update_mirror_packet(
+                                    &mut state.building_storage_mirrors,
+                                    packet,
+                                );
+                            }
+                            _ => {}
+                        }
                         state.record_world_update_packet(&packet);
                         (false, false)
                     }
@@ -3064,8 +3104,13 @@ mod tests {
             team: TeamId(1),
             rotation: 2,
         };
+        let health = 34.5f32;
         let build_health = BuildHealthUpdateCallPacket {
-            buildings: vec![12, 34],
+            buildings: vec![12, health.to_bits() as i32],
+        };
+        let set_team = SetTeamCallPacket {
+            build: BuildingRef::new(12),
+            team: TeamId(3),
         };
         let remove_tile = RemoveTileCallPacket { tile: Some(12) };
         let unit_death = UnitDeathCallPacket { uid: 77 };
@@ -3081,6 +3126,7 @@ mod tests {
             net.set_client_loaded(true);
             net.handle_client_received(PacketKind::SetTileCallPacket(set_tile));
             net.handle_client_received(PacketKind::BuildHealthUpdateCallPacket(build_health));
+            net.handle_client_received(PacketKind::SetTeamCallPacket(set_team));
             net.handle_client_received(PacketKind::RemoveTileCallPacket(remove_tile));
             net.handle_client_received(PacketKind::UnitDeathCallPacket(unit_death));
             net.handle_client_received(PacketKind::CreateMarkerCallPacket(create_marker));
@@ -3092,12 +3138,15 @@ mod tests {
 
         let state = client.state();
         let state = state.lock().unwrap();
-        assert_eq!(state.world_update_packets_seen, 3);
+        assert_eq!(state.world_update_packets_seen, 4);
         assert!(matches!(
             state.last_world_update_packet.as_ref(),
             Some(PacketKind::RemoveTileCallPacket(_))
         ));
         assert!(state.last_world_update_packet_at.is_some());
+        let mirror = state.building_storage_mirrors.get(&12).unwrap();
+        assert_eq!(mirror.health, Some(health));
+        assert_eq!(mirror.team, Some(3));
         assert_eq!(state.unit_lifecycle_packets_seen, 1);
         assert!(matches!(
             state.last_unit_lifecycle_packet.as_ref(),
