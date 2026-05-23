@@ -706,6 +706,19 @@ impl ObjectiveMarker {
         }
     }
 
+    pub fn default_for_java_name(name: &str) -> Option<Self> {
+        match marker_type_by_java_name(name)? {
+            "shapeText" => Some(ObjectiveMarker::ShapeText(ShapeTextMarker::default())),
+            "point" => Some(ObjectiveMarker::Point(PointMarker::default())),
+            "shape" => Some(ObjectiveMarker::Shape(ShapeMarker::default())),
+            "text" => Some(ObjectiveMarker::Text(TextMarker::default())),
+            "line" => Some(ObjectiveMarker::Line(LineMarker::default())),
+            "texture" => Some(ObjectiveMarker::Texture(TextureMarker::default())),
+            "quad" => Some(ObjectiveMarker::Quad(QuadMarker::default())),
+            _ => None,
+        }
+    }
+
     pub fn common(&self) -> &MarkerCommon {
         match self {
             ObjectiveMarker::ShapeText(value) => &value.common,
@@ -1400,6 +1413,26 @@ mod tests {
         assert_eq!(marker_type_by_java_name("Minimap"), Some("point"));
         assert_eq!(marker_type_by_java_name("shapeText"), Some("shapeText"));
         assert_eq!(marker_type_by_java_name("missing"), None);
+
+        assert_eq!(
+            ObjectiveMarker::default_for_java_name("ShapeText")
+                .unwrap()
+                .type_name(),
+            "ShapeText"
+        );
+        assert_eq!(
+            ObjectiveMarker::default_for_java_name("Minimap")
+                .unwrap()
+                .type_name(),
+            "Point"
+        );
+        assert_eq!(
+            ObjectiveMarker::default_for_java_name("texture")
+                .unwrap()
+                .type_name(),
+            "Texture"
+        );
+        assert!(ObjectiveMarker::default_for_java_name("missing").is_none());
     }
 
     #[test]
