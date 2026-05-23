@@ -4,7 +4,7 @@
 //! writes the enum ordinal as a single byte and `readMarkerControl` indexes
 //! `LMarkerControl.all` with an unsigned byte.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LMarkerControl {
     Remove,
     World,

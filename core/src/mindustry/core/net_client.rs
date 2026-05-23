@@ -6,33 +6,35 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
-use crate::mindustry::io::{BuildPlanWire, EntityRef};
+use crate::mindustry::io::{BuildPlanWire, EntityRef, TypeValue};
+use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{
     BlockSnapshotCallPacket, BuildDestroyedCallPacket, BuildHealthUpdateCallPacket,
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
     CommandBuildingCallPacket, CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect,
     ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
-    DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    CreateMarkerCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
     DeconstructFinishCallPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket,
     EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, MenuChooseCallPacket, Net,
     PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
     PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket,
-    PlayerDisconnectCallPacket, ProviderEvent, RemoveQueueBlockCallPacket, RemoveTileCallPacket,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, RotateBlockCallPacket, SetCameraPositionCallPacket,
-    SetFloorCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
-    SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket, SetPositionCallPacket,
-    SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket, SetTeamsCallPacket,
-    SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket, SetTileItemsCallPacket,
-    SetTileLiquidsCallPacket, SetTileOverlaysCallPacket, SetUnitCommandCallPacket,
-    SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
-    StreamBuilder, Streamable, TakeItemsCallPacket, TextInputResultCallPacket,
-    TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
-    TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
-    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    PlayerDisconnectCallPacket, ProviderEvent, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
+    RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    RotateBlockCallPacket, SetCameraPositionCallPacket, SetFloorCallPacket, SetItemCallPacket,
+    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket,
+    SetOverlayCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+    SetTeamCallPacket, SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket,
+    SetTileFloorsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
+    SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+    SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
+    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 use crate::mindustry::world::{BlockId, BuildingRef as WorldBuildingRef, Tile, Tiles};
@@ -88,6 +90,20 @@ pub struct ClientTileStorageMirror {
     pub liquids: BTreeMap<String, f32>,
     pub team: Option<i32>,
     pub health: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ClientMarkerTextMirror {
+    pub fetch: bool,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ClientMarkerMirror {
+    pub marker_json: Option<String>,
+    pub controls: BTreeMap<LMarkerControl, (f64, f64, f64)>,
+    pub text_controls: BTreeMap<LMarkerControl, ClientMarkerTextMirror>,
+    pub texture: Option<TypeValue>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -225,6 +241,9 @@ pub struct NetClientState {
     pub last_marker_packet: Option<PacketKind>,
     pub last_marker_packet_at: Option<Instant>,
     pub marker_packets_seen: u64,
+    pub marker_mirrors: BTreeMap<i32, ClientMarkerMirror>,
+    pub removed_marker_ids: BTreeSet<i32>,
+    pub removed_world_label_ids: BTreeSet<i32>,
     pub last_campaign_event_packet: Option<PacketKind>,
     pub last_campaign_event_packet_at: Option<Instant>,
     pub campaign_event_packets_seen: u64,
@@ -487,6 +506,9 @@ impl fmt::Debug for NetClientState {
                 &self.unit_lifecycle_packets_seen,
             )
             .field("marker_packets_seen", &self.marker_packets_seen)
+            .field("marker_mirrors", &self.marker_mirrors)
+            .field("removed_marker_ids", &self.removed_marker_ids)
+            .field("removed_world_label_ids", &self.removed_world_label_ids)
             .field(
                 "campaign_event_packets_seen",
                 &self.campaign_event_packets_seen,
@@ -1775,6 +1797,66 @@ impl NetClient {
         applied
     }
 
+    pub fn apply_create_marker_packet(state: &mut NetClientState, packet: &CreateMarkerCallPacket) {
+        state.removed_marker_ids.remove(&packet.id);
+        state
+            .marker_mirrors
+            .entry(packet.id)
+            .or_default()
+            .marker_json = Some(packet.marker_json.clone());
+    }
+
+    pub fn apply_update_marker_packet(state: &mut NetClientState, packet: &UpdateMarkerCallPacket) {
+        if packet.control == LMarkerControl::Remove {
+            state.marker_mirrors.remove(&packet.id);
+            state.removed_marker_ids.insert(packet.id);
+            return;
+        }
+        state
+            .marker_mirrors
+            .entry(packet.id)
+            .or_default()
+            .controls
+            .insert(packet.control, (packet.p1, packet.p2, packet.p3));
+    }
+
+    pub fn apply_update_marker_text_packet(
+        state: &mut NetClientState,
+        packet: &UpdateMarkerTextCallPacket,
+    ) {
+        state
+            .marker_mirrors
+            .entry(packet.id)
+            .or_default()
+            .text_controls
+            .insert(
+                packet.r#type,
+                ClientMarkerTextMirror {
+                    fetch: packet.fetch,
+                    text: packet.text.clone(),
+                },
+            );
+    }
+
+    pub fn apply_update_marker_texture_packet(
+        state: &mut NetClientState,
+        packet: &UpdateMarkerTextureCallPacket,
+    ) {
+        state.marker_mirrors.entry(packet.id).or_default().texture = Some(packet.texture.clone());
+    }
+
+    pub fn apply_remove_marker_packet(state: &mut NetClientState, packet: &RemoveMarkerCallPacket) {
+        state.marker_mirrors.remove(&packet.id);
+        state.removed_marker_ids.insert(packet.id);
+    }
+
+    pub fn apply_remove_world_label_packet(
+        state: &mut NetClientState,
+        packet: &RemoveWorldLabelCallPacket,
+    ) {
+        state.removed_world_label_ids.insert(packet.id);
+    }
+
     pub fn apply_set_floor_packet<F>(
         tiles: &mut Tiles,
         packet: &SetFloorCallPacket,
@@ -2306,6 +2388,27 @@ impl NetClient {
                     | PacketKind::UpdateMarkerTextureCallPacket(_)
                     | PacketKind::RemoveMarkerCallPacket(_)
                     | PacketKind::RemoveWorldLabelCallPacket(_) => {
+                        match &packet {
+                            PacketKind::CreateMarkerCallPacket(packet) => {
+                                Self::apply_create_marker_packet(&mut state, packet);
+                            }
+                            PacketKind::UpdateMarkerCallPacket(packet) => {
+                                Self::apply_update_marker_packet(&mut state, packet);
+                            }
+                            PacketKind::UpdateMarkerTextCallPacket(packet) => {
+                                Self::apply_update_marker_text_packet(&mut state, packet);
+                            }
+                            PacketKind::UpdateMarkerTextureCallPacket(packet) => {
+                                Self::apply_update_marker_texture_packet(&mut state, packet);
+                            }
+                            PacketKind::RemoveMarkerCallPacket(packet) => {
+                                Self::apply_remove_marker_packet(&mut state, packet);
+                            }
+                            PacketKind::RemoveWorldLabelCallPacket(packet) => {
+                                Self::apply_remove_world_label_packet(&mut state, packet);
+                            }
+                            _ => {}
+                        }
                         state.record_marker_packet(&packet);
                         (false, false)
                     }
@@ -2781,6 +2884,7 @@ mod tests {
     use crate::mindustry::io::type_io::RgbaColor;
     use crate::mindustry::io::UnitRef;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
+    use crate::mindustry::logic::LMarkerControl;
     use crate::mindustry::net::{
         AnnounceCallPacket, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
         BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
@@ -2797,29 +2901,31 @@ mod tests {
         PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
         PickedUnitPayloadCallPacket, PingLocationCallPacket, PingResponseCallPacket,
         PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
-        RemoveTileCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
-        SendMessageCallPacket, SendMessageCallPacket2, SetCameraPositionCallPacket,
-        SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket, SetItemsCallPacket,
-        SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket,
-        SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket,
-        SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket,
-        SetTileItemsCallPacket, SetTileLiquidsCallPacket, SetTileOverlaysCallPacket,
-        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
-        TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
-        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
-        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, UnitDeathCallPacket, UnitEnteredPayloadCallPacket,
-        WarningToastCallPacket, WorldDataBeginCallPacket,
+        RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket,
+        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+        RotateBlockCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
+        SetCameraPositionCallPacket, SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket,
+        SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket,
+        SetOverlayCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
+        SetTeamCallPacket, SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket,
+        SetTileFloorsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
+        SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+        SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk,
+        Streamable, TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket,
+        TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
+        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, UpdateMarkerCallPacket,
+        UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket, WarningToastCallPacket,
+        WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
     use crate::mindustry::world::{point2_pack, Tile, Tiles};
 
     use super::{
-        ClientCameraView, ClientConnectConfig, ClientInputSnapshot, ClientTileBlockKind,
-        ClientTileStorageMirror, NetClient, CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
+        ClientCameraView, ClientConnectConfig, ClientInputSnapshot, ClientMarkerTextMirror,
+        ClientTileBlockKind, ClientTileStorageMirror, NetClient, CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -3093,6 +3199,80 @@ mod tests {
         assert_eq!(state.text_input_result_packets_seen, 1);
         assert_eq!(state.last_text_input_result.as_ref(), Some(&text_result));
         assert!(state.last_text_input_result_at.is_some());
+    }
+
+    #[test]
+    fn update_records_marker_packets_and_updates_marker_mirrors() {
+        let client = NetClient::default();
+        let create = CreateMarkerCallPacket {
+            id: 10,
+            marker_json: r#"{"type":"shape"}"#.into(),
+        };
+        let update = UpdateMarkerCallPacket {
+            id: 10,
+            control: LMarkerControl::Pos,
+            p1: 1.0,
+            p2: 2.0,
+            p3: 3.0,
+        };
+        let text = UpdateMarkerTextCallPacket {
+            id: 10,
+            r#type: LMarkerControl::FlushText,
+            fetch: true,
+            text: "目标".into(),
+        };
+        let texture = UpdateMarkerTextureCallPacket {
+            id: 10,
+            texture: TypeValue::String("router".into()),
+        };
+        let transient = CreateMarkerCallPacket {
+            id: 11,
+            marker_json: "{}".into(),
+        };
+        let remove = RemoveMarkerCallPacket { id: 11 };
+        let remove_label = RemoveWorldLabelCallPacket { id: 12 };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::CreateMarkerCallPacket(create.clone()));
+            net.handle_client_received(PacketKind::UpdateMarkerCallPacket(update.clone()));
+            net.handle_client_received(PacketKind::UpdateMarkerTextCallPacket(text.clone()));
+            net.handle_client_received(PacketKind::UpdateMarkerTextureCallPacket(texture.clone()));
+            net.handle_client_received(PacketKind::CreateMarkerCallPacket(transient));
+            net.handle_client_received(PacketKind::RemoveMarkerCallPacket(remove));
+            net.handle_client_received(PacketKind::RemoveWorldLabelCallPacket(remove_label));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.marker_packets_seen, 7);
+        assert!(matches!(
+            state.last_marker_packet.as_ref(),
+            Some(PacketKind::RemoveWorldLabelCallPacket(_))
+        ));
+        let marker = state.marker_mirrors.get(&10).unwrap();
+        assert_eq!(
+            marker.marker_json.as_deref(),
+            Some(create.marker_json.as_str())
+        );
+        assert_eq!(
+            marker.controls.get(&LMarkerControl::Pos),
+            Some(&(update.p1, update.p2, update.p3))
+        );
+        assert_eq!(
+            marker.text_controls.get(&LMarkerControl::FlushText),
+            Some(&ClientMarkerTextMirror {
+                fetch: text.fetch,
+                text: text.text.clone(),
+            })
+        );
+        assert_eq!(marker.texture.as_ref(), Some(&texture.texture));
+        assert!(!state.marker_mirrors.contains_key(&11));
+        assert!(state.removed_marker_ids.contains(&11));
+        assert!(state.removed_world_label_ids.contains(&12));
     }
 
     #[test]
