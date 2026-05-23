@@ -7,6 +7,7 @@
 //! migrated separately.
 
 use crate::mindustry::{
+    io::LegacyShortChunkMap,
     vars::TILE_SIZE,
     world::{point2_x, point2_y, BlockId, BuildingRef, Tile, Tiles},
 };
@@ -253,6 +254,14 @@ impl World {
         self.end_map_load();
     }
 
+    /// Loads a network/save snapshot into the world using the same lifecycle
+    /// as generator-driven map creation.
+    pub fn load_network_map(&mut self, map: &LegacyShortChunkMap) {
+        self.begin_map_load();
+        map.apply_to_tiles(self.resize(map.width as usize, map.height as usize));
+        self.end_map_load();
+    }
+
     pub fn set_generating(&mut self, generating: bool) {
         self.generating = generating;
     }
@@ -281,6 +290,9 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::io::{
+        LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData, LegacyShortChunkMap,
+    };
     use crate::mindustry::world::point2_pack;
 
     #[test]
@@ -383,6 +395,68 @@ mod tests {
         assert_eq!(world.width(), 2);
         assert_eq!(world.height(), 2);
         assert_eq!(world.tile(1, 1).unwrap().block, 5);
+        assert_eq!(world.tile_changes, -1);
+        assert_eq!(world.floor_changes, -1);
+        assert_eq!(
+            world.load_events(),
+            &[
+                WorldLoadEventKind::Begin,
+                WorldLoadEventKind::End,
+                WorldLoadEventKind::Loaded
+            ]
+        );
+    }
+
+    #[test]
+    fn load_network_map_brackets_lifecycle_and_populates_tiles() {
+        let mut world = World::new();
+        world.resize(1, 1);
+        world.tile_mut(0, 0).unwrap().block = 99;
+        world.note_tile_change();
+        world.note_floor_change();
+
+        let map = LegacyShortChunkMap {
+            width: 2,
+            height: 2,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 3,
+                ore_id: 4,
+                consecutives: 3,
+            }],
+            blocks: vec![LegacyMapBlockRecord {
+                index: 0,
+                block_id: 7,
+                packed_flags: 4,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: true,
+                is_center: true,
+                new_data: Some(LegacyMapTileData {
+                    data: 11,
+                    floor_data: 12,
+                    overlay_data: 13,
+                    extra_data: 14,
+                }),
+                old_data: None,
+                building: None,
+                consecutives: 3,
+            }],
+        };
+
+        world.load_network_map(&map);
+
+        assert!(!world.is_generating());
+        assert_eq!(world.width(), 2);
+        assert_eq!(world.height(), 2);
+        assert_eq!(world.tile(0, 0).unwrap().floor, 3);
+        assert_eq!(world.tile(0, 0).unwrap().overlay, 4);
+        assert_eq!(world.tile(0, 0).unwrap().block, 7);
+        assert_eq!(world.tile(0, 0).unwrap().data, 11);
+        assert_eq!(world.tile(0, 0).unwrap().floor_data, 12);
+        assert_eq!(world.tile(0, 0).unwrap().overlay_data, 13);
+        assert_eq!(world.tile(0, 0).unwrap().extra_data, 14);
+        assert_eq!(world.tile(1, 1).unwrap().block, 7);
         assert_eq!(world.tile_changes, -1);
         assert_eq!(world.floor_changes, -1);
         assert_eq!(
