@@ -7,6 +7,7 @@ pub mod network_io;
 pub mod packet;
 pub mod packets;
 pub mod server_group;
+pub mod steam_admin;
 pub mod streamable;
 pub mod validate_exception;
 pub mod world_reloader;
@@ -86,6 +87,11 @@ pub use packets::{
     WarningToastCallPacket, WorldDataBeginCallPacket,
 };
 pub use server_group::ServerGroup;
+pub use steam_admin::{
+    cache_busted_primary_url, latest_commit_url, SteamAdmin, SteamAdminApplyResult,
+    SteamAdminFetchPlan, SteamAdminPlayer, STEAM_ADMIN_CHECK_INTERVAL_SECONDS,
+    STEAM_ADMIN_DATA_PATH,
+};
 pub use streamable::{StreamBuilder, Streamable};
 pub use validate_exception::ValidateException;
 pub use world_reloader::{
