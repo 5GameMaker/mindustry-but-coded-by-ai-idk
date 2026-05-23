@@ -65,6 +65,7 @@ pub struct TeamData {
     pub core_enemies: Vec<u8>,
     pub plans: Vec<BlockPlan>,
     pub cores: Vec<CoreInfo>,
+    pub core_items: BTreeMap<i16, i32>,
     pub last_core: Option<CoreInfo>,
     pub unit_cap: i32,
     pub unit_count: i32,
@@ -83,6 +84,7 @@ impl TeamData {
             core_enemies: Vec::new(),
             plans: Vec::new(),
             cores: Vec::new(),
+            core_items: BTreeMap::new(),
             last_core: None,
             unit_cap: 0,
             unit_count: 0,
@@ -243,6 +245,10 @@ impl Teams {
         for (team, plans) in plans_by_team {
             self.get(team).plans = plans;
         }
+    }
+
+    pub fn replace_core_items(&mut self, team: u8, items: BTreeMap<i16, i32>) {
+        self.get(team).core_items = items;
     }
 
     pub fn update_active(&mut self, team: u8) {
@@ -518,6 +524,40 @@ mod tests {
                 .unwrap()
                 .plans,
             vec![BlockPlan::new(5, 6, 2, "wall", Some("9".into()))]
+        );
+    }
+
+    #[test]
+    fn replace_core_items_keeps_snapshot_counts_by_item_id() {
+        let mut teams = Teams::default();
+        teams.replace_core_items(
+            crate::mindustry::game::TEAM_SHARDED,
+            BTreeMap::from([(0, 75), (3, 12)]),
+        );
+        teams.replace_core_items(crate::mindustry::game::TEAM_CRUX, BTreeMap::from([(1, 5)]));
+
+        assert_eq!(
+            teams
+                .get_or_null(crate::mindustry::game::TEAM_SHARDED)
+                .unwrap()
+                .core_items,
+            BTreeMap::from([(0, 75), (3, 12)])
+        );
+        assert_eq!(
+            teams
+                .get_or_null(crate::mindustry::game::TEAM_CRUX)
+                .unwrap()
+                .core_items,
+            BTreeMap::from([(1, 5)])
+        );
+
+        teams.replace_core_items(crate::mindustry::game::TEAM_SHARDED, BTreeMap::new());
+        assert!(
+            teams
+                .get_or_null(crate::mindustry::game::TEAM_SHARDED)
+                .unwrap()
+                .core_items
+                .is_empty()
         );
     }
 }
