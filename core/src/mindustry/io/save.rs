@@ -5,9 +5,10 @@ use std::{
 };
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use ubjson::Container as UbjsonContainer;
 
 use crate::mindustry::{
-    game::Rules,
+    game::{marker_type_by_java_name, Rules},
     io::type_io::{
         read_i32, read_i64, read_java_utf, read_u16, read_u8, write_i32, write_i64, write_java_utf,
         write_u16,
@@ -816,6 +817,12 @@ pub struct MarkerRegionBytes {
     pub bytes: Vec<u8>,
 }
 
+impl MarkerRegionBytes {
+    pub fn ubjson_summary(&self) -> io::Result<MarkerRegionSummary> {
+        summarize_marker_region_bytes(&self.bytes)
+    }
+}
+
 pub fn write_marker_region_bytes<W: Write>(
     write: &mut W,
     markers: &MarkerRegionBytes,
@@ -827,6 +834,89 @@ pub fn read_marker_region_bytes<R: Read>(read: &mut R) -> io::Result<MarkerRegio
     let mut bytes = Vec::new();
     read.read_to_end(&mut bytes)?;
     Ok(MarkerRegionBytes { bytes })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MarkerRegionSummary {
+    pub total: usize,
+    pub recognized_by_type: BTreeMap<String, usize>,
+    pub unrecognized_type_count: usize,
+    pub missing_class_count: usize,
+}
+
+impl MarkerRegionSummary {
+    pub fn marker_count(&self) -> usize {
+        self.total
+    }
+
+    pub fn marker_type_counts(&self) -> &BTreeMap<String, usize> {
+        &self.recognized_by_type
+    }
+
+    pub fn unrecognized_or_missing_class_tag_count(&self) -> usize {
+        self.unrecognized_type_count + self.missing_class_count
+    }
+}
+
+pub fn summarize_marker_region_bytes(bytes: &[u8]) -> io::Result<MarkerRegionSummary> {
+    let (remaining, markers) = ubjson::parse_one(bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("failed to parse MapMarkers UBJSON: {error}"),
+        )
+    })?;
+    if !remaining.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing bytes after MapMarkers UBJSON",
+        ));
+    }
+
+    let UbjsonContainer::Object(entries) = markers else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "MapMarkers UBJSON must be an object map",
+        ));
+    };
+
+    let mut summary = MarkerRegionSummary {
+        total: entries.len(),
+        ..MarkerRegionSummary::default()
+    };
+
+    for marker in entries.values() {
+        let Some(class_tag) = marker_class_tag(marker) else {
+            summary.missing_class_count += 1;
+            continue;
+        };
+        if let Some(canonical) = marker_type_by_java_name(class_tag) {
+            *summary
+                .recognized_by_type
+                .entry(canonical.to_string())
+                .or_insert(0) += 1;
+        } else {
+            summary.unrecognized_type_count += 1;
+        }
+    }
+
+    Ok(summary)
+}
+
+fn marker_class_tag<'a>(marker: &'a UbjsonContainer<'a>) -> Option<&'a str> {
+    let UbjsonContainer::Object(fields) = marker else {
+        return None;
+    };
+    fields
+        .iter()
+        .find(|(key, _)| key.as_ref() == "class")
+        .and_then(|(_, value)| ubjson_string(value))
+}
+
+fn ubjson_string<'a>(value: &'a UbjsonContainer<'a>) -> Option<&'a str> {
+    match value {
+        UbjsonContainer::String(value) => Some(value.as_ref()),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1420,6 +1510,66 @@ mod tests {
             read_marker_region_bytes(&mut bytes.as_slice()).unwrap(),
             markers
         );
+    }
+
+    #[test]
+    fn marker_region_ubjson_summary_counts_types_and_missing_or_unknown_class_tags() {
+        let markers = MarkerRegionBytes {
+            bytes: ubjson_object(vec![
+                ("1", ubjson_marker_object(Some("Minimap"))),
+                ("2", ubjson_marker_object(None)),
+                ("3", ubjson_marker_object(Some("Bogus"))),
+            ]),
+        };
+
+        let summary = markers.ubjson_summary().unwrap();
+        assert_eq!(summary.total, 3);
+        assert_eq!(summary.recognized_by_type.get("point"), Some(&1));
+        assert_eq!(summary.missing_class_count, 1);
+        assert_eq!(summary.unrecognized_type_count, 1);
+    }
+
+    #[test]
+    fn marker_region_ubjson_summary_rejects_invalid_or_non_object_blobs() {
+        assert!(summarize_marker_region_bytes(b"not ubjson").is_err());
+        assert!(summarize_marker_region_bytes(b"[Z]").is_err());
+    }
+
+    fn ubjson_object(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(b'{');
+        for (key, value) in entries {
+            write_ubjson_string_map_entry(&mut bytes, key, &value);
+        }
+        bytes.push(b'}');
+        bytes
+    }
+
+    fn ubjson_marker_object(class: Option<&str>) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(b'{');
+        if let Some(class) = class {
+            write_ubjson_string_field(&mut bytes, "class", class);
+        }
+        bytes.push(b'}');
+        bytes
+    }
+
+    fn write_ubjson_string_map_entry(write: &mut Vec<u8>, key: &str, value: &[u8]) {
+        write.push(b'U');
+        write.push(key.len() as u8);
+        write.extend_from_slice(key.as_bytes());
+        write.extend_from_slice(value);
+    }
+
+    fn write_ubjson_string_field(write: &mut Vec<u8>, key: &str, value: &str) {
+        write.push(b'U');
+        write.push(key.len() as u8);
+        write.extend_from_slice(key.as_bytes());
+        write.push(b'S');
+        write.push(b'U');
+        write.push(value.len() as u8);
+        write.extend_from_slice(value.as_bytes());
     }
 
     #[test]
