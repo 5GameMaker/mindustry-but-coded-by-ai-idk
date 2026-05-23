@@ -386,6 +386,7 @@ impl GameState {
             self.world.load_network_map(map_snapshot);
         }
 
+        self.markers = world_data.markers_snapshot.clone().unwrap_or_default();
         self.marker_summary = world_data.marker_summary.clone();
         self.custom_chunks = CustomChunkSet::default();
         self.custom_chunks_error = None;
@@ -472,7 +473,7 @@ fn parse_tag_i32(tags: &BTreeMap<String, String>, key: &str) -> Option<i32> {
 mod tests {
     use super::*;
     use crate::mindustry::{
-        game::{CoreInfo, SpawnGroup, TEAM_CRUX, TEAM_SHARDED},
+        game::{CoreInfo, MapMarkers, ObjectiveMarker, SpawnGroup, TEAM_CRUX, TEAM_SHARDED},
         io::{ContentPatchSet, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap},
         net::{NetworkWorldData, StateSnapshotCallPacket},
         r#type::SectorPreset,
@@ -529,6 +530,12 @@ mod tests {
             unrecognized_type_count: 1,
             missing_class_count: 0,
         };
+        let mut markers_snapshot = MapMarkers::new();
+        markers_snapshot.add(
+            7,
+            ObjectiveMarker::default_for_java_name("Minimap")
+                .expect("Minimap should map to point marker"),
+        );
         let mut custom_chunk_set = CustomChunkSet::default();
         custom_chunk_set.insert_or_replace("static-fog", vec![1, 2, 3]);
         let mut custom_chunks = Vec::new();
@@ -569,6 +576,7 @@ mod tests {
                     consecutives: 5,
                 }],
             }),
+            markers_snapshot: Some(markers_snapshot.clone()),
             marker_summary: Some(marker_summary.clone()),
             custom_chunks,
             ..NetworkWorldData::default()
@@ -588,6 +596,7 @@ mod tests {
         assert_eq!(state.map.build, 157);
         assert_eq!(state.world.width(), 3);
         assert_eq!(state.world.height(), 2);
+        assert_eq!(state.markers, markers_snapshot);
         assert_eq!(state.marker_summary, Some(marker_summary));
         assert_eq!(
             state.custom_chunks.get("static-fog"),
