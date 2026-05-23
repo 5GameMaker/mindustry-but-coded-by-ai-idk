@@ -3,7 +3,8 @@ use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameState, NetClient,
 };
 use mindustry_core::mindustry::entities::PlayerComp;
-use mindustry_core::mindustry::io::TeamId;
+use mindustry_core::mindustry::game::BlockPlan;
+use mindustry_core::mindustry::io::{LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue};
 use mindustry_core::mindustry::net::{ArcNetProvider, Net, NetworkPlayerData};
 use mindustry_core::mindustry::vars::AppContext;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -85,6 +86,7 @@ impl DesktopLauncher {
                 }
                 self.game_state.apply_network_world_data(world_data);
                 self.apply_network_player_data(world_data.player.as_ref());
+                self.apply_network_team_blocks(world_data.team_blocks_snapshot.as_ref());
             }
             None => {
                 if self.last_applied_world_data.is_some() {
@@ -117,6 +119,75 @@ impl DesktopLauncher {
             .and_then(|command_id| self.content_loader.unit_command(command_id).cloned());
         self.player.selected_block = selected_block;
         self.player.last_command = last_command;
+    }
+
+    fn apply_network_team_blocks(&mut self, team_blocks: Option<&LegacyTeamBlocks>) {
+        let Some(team_blocks) = team_blocks else {
+            self.game_state.teams.replace_plans(Vec::new());
+            return;
+        };
+
+        let plans_by_team = team_blocks
+            .groups
+            .iter()
+            .filter_map(|group| {
+                let team = u8::try_from(group.team_id).ok()?;
+                let plans = group
+                    .plans
+                    .iter()
+                    .filter_map(|plan| self.legacy_team_block_plan(plan))
+                    .collect::<Vec<_>>();
+                Some((team, plans))
+            })
+            .collect::<Vec<_>>();
+
+        self.game_state.teams.replace_plans(plans_by_team);
+    }
+
+    fn legacy_team_block_plan(&self, plan: &LegacyTeamBlockPlan) -> Option<BlockPlan> {
+        let block = self.content_loader.block(plan.block_id)?.base().name.clone();
+        Some(BlockPlan {
+            x: plan.x,
+            y: plan.y,
+            rotation: plan.rotation,
+            block,
+            config: self.legacy_team_block_config(&plan.config),
+            removed: false,
+        })
+    }
+
+    fn legacy_team_block_config(&self, config: &TypeValue) -> Option<String> {
+        match config {
+            TypeValue::Null => None,
+            TypeValue::Int(value) => Some(value.to_string()),
+            TypeValue::Long(value) => Some(value.to_string()),
+            TypeValue::Float(value) => Some(value.to_string()),
+            TypeValue::String(value) => Some(value.clone()),
+            TypeValue::Content(value) | TypeValue::TechNode(value) => self
+                .content_loader
+                .get_by_id(value.content_type, value.id)
+                .and_then(|content| content.name().map(str::to_string))
+                .or_else(|| Some(format!("{value:?}"))),
+            TypeValue::Bool(value) => Some(value.to_string()),
+            TypeValue::Double(value) => Some(value.to_string()),
+            TypeValue::Building(value) => Some(value.to_string()),
+            TypeValue::LogicAccess(value) => Some(format!("{value:?}")),
+            TypeValue::Unit(value) => Some(value.to_string()),
+            TypeValue::Point2(value) => Some(format!("{},{}", value.x, value.y)),
+            TypeValue::Vec2(value) => Some(format!("{},{}", value.x, value.y)),
+            TypeValue::Team(value) => Some(value.to_string()),
+            TypeValue::UnitCommand(value) => self
+                .content_loader
+                .unit_command(*value)
+                .map(|command| command.name().to_string())
+                .or_else(|| Some(value.to_string())),
+            TypeValue::IntSeq(values) | TypeValue::IntArray(values) => Some(format!("{values:?}")),
+            TypeValue::ByteArray(values) => Some(format!("{values:?}")),
+            TypeValue::Point2Array(values) => Some(format!("{values:?}")),
+            TypeValue::BoolArray(values) => Some(format!("{values:?}")),
+            TypeValue::Vec2Array(values) => Some(format!("{values:?}")),
+            TypeValue::ObjectArray(values) => Some(format!("{values:?}")),
+        }
     }
 }
 
@@ -172,7 +243,11 @@ mod tests {
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::{
         entities::PlayerComp,
-        io::{TeamId, UnitRef},
+        game::BlockPlan,
+        io::{
+            LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue,
+            UnitRef,
+        },
     };
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
@@ -249,6 +324,30 @@ mod tests {
                 }],
             }),
             ..NetworkWorldData::default()
+        }
+    }
+
+    fn sample_team_blocks(block_id: ContentId) -> LegacyTeamBlocks {
+        LegacyTeamBlocks {
+            groups: vec![LegacyTeamBlockGroup {
+                team_id: 7,
+                plans: vec![
+                    LegacyTeamBlockPlan {
+                        x: 5,
+                        y: 6,
+                        rotation: 1,
+                        block_id,
+                        config: TypeValue::String("cfg".into()),
+                    },
+                    LegacyTeamBlockPlan {
+                        x: 7,
+                        y: 8,
+                        rotation: 2,
+                        block_id,
+                        config: TypeValue::Int(9),
+                    },
+                ],
+            }],
         }
     }
 
@@ -344,6 +443,83 @@ mod tests {
         assert_eq!(
             launcher.player.last_command,
             launcher.content_loader.unit_command(last_command_id).cloned()
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_applies_team_block_snapshot_to_runtime_teams() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let router_block_id = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router")
+            .base()
+            .id;
+
+        let mut world_data = sample_network_world_data(None);
+        world_data.team_blocks_snapshot = Some(sample_team_blocks(router_block_id));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+
+        assert_eq!(
+            launcher.game_state.teams.get_or_null(7).unwrap().plans,
+            vec![
+                BlockPlan::new(5, 6, 1, "router", Some("cfg".into())),
+                BlockPlan::new(7, 8, 2, "router", Some("9".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_clears_runtime_team_plans_when_snapshot_has_no_team_blocks() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let router_block_id = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router")
+            .base()
+            .id;
+
+        let mut first = sample_network_world_data(None);
+        first.team_blocks_snapshot = Some(sample_team_blocks(router_block_id));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(first);
+        }
+
+        launcher.update();
+        assert_eq!(launcher.game_state.teams.get_or_null(7).unwrap().plans.len(), 2);
+
+        let mut second = sample_network_world_data(None);
+        second.tick = 100.25;
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(second);
+        }
+
+        launcher.update();
+
+        assert!(
+            launcher
+                .game_state
+                .teams
+                .get_or_null(7)
+                .unwrap()
+                .plans
+                .is_empty()
         );
     }
 
