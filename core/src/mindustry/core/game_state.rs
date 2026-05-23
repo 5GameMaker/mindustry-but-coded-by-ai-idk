@@ -5,16 +5,19 @@
 //! helpers while representing event dispatch as a returned `StateChangeEvent`
 //! until the full Arc event bus is migrated.
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    io::{self, Cursor},
+};
 
 use crate::mindustry::{
     core::World,
     game::{GameStats, MapMarkers, Rules, Teams},
-    io::{read_custom_chunks, CustomChunkSet, MarkerRegionSummary},
+    io::{read_custom_chunks, type_io::read_u8, CustomChunkSet, MarkerRegionSummary},
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
     r#type::{MapLocales, Sector},
-    world::blocks::Attributes,
+    world::{blocks::Attributes, modules::ItemModule},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -307,6 +310,7 @@ impl GameState {
         self.server_tps = snapshot.tps as i32;
         self.rand_seed0 = snapshot.rand0;
         self.rand_seed1 = snapshot.rand1;
+        self.apply_state_snapshot_core_data(&snapshot.core_data);
 
         let state_change = if self.is_menu() {
             None
@@ -319,6 +323,14 @@ impl GameState {
         };
 
         StateSnapshotApplyResult::new(wave_changed, state_change)
+    }
+
+    fn apply_state_snapshot_core_data(&mut self, core_data: &[u8]) {
+        if let Ok(items_by_team) = decode_state_snapshot_core_items(core_data) {
+            for (team, items) in items_by_team {
+                self.teams.replace_core_items(team, items);
+            }
+        }
     }
 
     /// Applies the game-state front matter from Java `NetworkIO.loadWorld`.
@@ -429,6 +441,25 @@ pub fn empty_map_descriptor() -> MapDescriptor {
     MapDescriptor::new("empty.msav", 0, 0, tags, false, 0, 0)
 }
 
+fn decode_state_snapshot_core_items(core_data: &[u8]) -> io::Result<Vec<(u8, BTreeMap<i16, i32>)>> {
+    if core_data.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut cursor = Cursor::new(core_data);
+    let teams = read_u8(&mut cursor)? as usize;
+    let mut items_by_team = Vec::with_capacity(teams);
+
+    for _ in 0..teams {
+        let team = read_u8(&mut cursor)?;
+        let mut items = ItemModule::default();
+        items.read(&mut cursor, false)?;
+        items_by_team.push((team, items.each().collect()));
+    }
+
+    Ok(items_by_team)
+}
+
 fn parse_tag_i32(tags: &BTreeMap<String, String>, key: &str) -> Option<i32> {
     tags.get(key).and_then(|value| value.parse().ok())
 }
@@ -437,7 +468,7 @@ fn parse_tag_i32(tags: &BTreeMap<String, String>, key: &str) -> Option<i32> {
 mod tests {
     use super::*;
     use crate::mindustry::{
-        game::{CoreInfo, SpawnGroup, TEAM_CRUX},
+        game::{CoreInfo, SpawnGroup, TEAM_CRUX, TEAM_SHARDED},
         io::{ContentPatchSet, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap},
         net::{NetworkWorldData, StateSnapshotCallPacket},
         r#type::SectorPreset,
@@ -497,8 +528,7 @@ mod tests {
         let mut custom_chunk_set = CustomChunkSet::default();
         custom_chunk_set.insert_or_replace("static-fog", vec![1, 2, 3]);
         let mut custom_chunks = Vec::new();
-        crate::mindustry::io::write_custom_chunks(&mut custom_chunks, &custom_chunk_set)
-            .unwrap();
+        crate::mindustry::io::write_custom_chunks(&mut custom_chunks, &custom_chunk_set).unwrap();
 
         let world = NetworkWorldData {
             rules_json: "{}".into(),
@@ -805,6 +835,49 @@ mod tests {
         assert_eq!(state.rand_seed0, 33);
         assert_eq!(state.rand_seed1, 44);
         assert!(state.is_playing());
+    }
+
+    #[test]
+    fn apply_state_snapshot_updates_core_items_from_java_core_data() {
+        let mut state = GameState::new();
+        state.set(GameStateState::Playing);
+
+        let mut core_data = Vec::new();
+        core_data.push(2);
+        core_data.push(TEAM_SHARDED);
+        core_data.extend_from_slice(&2i16.to_be_bytes());
+        core_data.extend_from_slice(&0i16.to_be_bytes());
+        core_data.extend_from_slice(&75i32.to_be_bytes());
+        core_data.extend_from_slice(&3i16.to_be_bytes());
+        core_data.extend_from_slice(&12i32.to_be_bytes());
+        core_data.push(TEAM_CRUX);
+        core_data.extend_from_slice(&1i16.to_be_bytes());
+        core_data.extend_from_slice(&1i16.to_be_bytes());
+        core_data.extend_from_slice(&5i32.to_be_bytes());
+
+        let snapshot = StateSnapshotCallPacket {
+            wave_time: 12.5,
+            wave: 9,
+            enemies: 17,
+            paused: false,
+            game_over: false,
+            time_data: 456,
+            tps: 60,
+            rand0: 11,
+            rand1: 22,
+            core_data,
+        };
+
+        state.apply_state_snapshot(&snapshot);
+
+        assert_eq!(
+            state.teams.get_or_null(TEAM_SHARDED).unwrap().core_items,
+            BTreeMap::from([(0, 75), (3, 12)])
+        );
+        assert_eq!(
+            state.teams.get_or_null(TEAM_CRUX).unwrap().core_items,
+            BTreeMap::from([(1, 5)])
+        );
     }
 
     #[test]
