@@ -1,4 +1,5 @@
 pub mod save;
+pub mod save_preview_loader;
 pub mod type_io;
 pub mod versions;
 
@@ -22,6 +23,10 @@ pub use save::{
     LATEST_SAVE_VERSION, SAVE_EXTENSION, SAVE_HEADER, SAVE_REGION_CONTENT, SAVE_REGION_CUSTOM,
     SAVE_REGION_ENTITIES, SAVE_REGION_MANIFEST, SAVE_REGION_MAP, SAVE_REGION_MARKERS,
     SAVE_REGION_META, SAVE_REGION_PATCHES, SAVE_SLOT_SETTING_PREFIX,
+};
+pub use save_preview_loader::{
+    resolve_sibling_without_last_extension, SavePreviewFailurePlan, SavePreviewLoadTarget,
+    SavePreviewLoader,
 };
 pub use type_io::{
     read_abilities, read_ability_data, read_action, read_building_ref, read_bytes, read_effect_id,
