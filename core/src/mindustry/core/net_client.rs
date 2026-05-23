@@ -1591,6 +1591,87 @@ impl NetClient {
         applied
     }
 
+    pub fn apply_set_item_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetItemCallPacket,
+    ) -> bool {
+        let (Some(build_pos), Some(item)) = (packet.build.tile_pos, packet.item.as_deref()) else {
+            return false;
+        };
+        storage
+            .entry(build_pos)
+            .or_default()
+            .items
+            .insert(item.to_string(), packet.amount);
+        true
+    }
+
+    pub fn apply_set_items_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetItemsCallPacket,
+    ) -> usize {
+        let Some(build_pos) = packet.build.tile_pos else {
+            return 0;
+        };
+        let mirror = storage.entry(build_pos).or_default();
+        for stack in &packet.items {
+            mirror.items.insert(stack.item.clone(), stack.amount);
+        }
+        packet.items.len()
+    }
+
+    pub fn apply_clear_items_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &ClearItemsCallPacket,
+    ) -> bool {
+        let Some(build_pos) = packet.build.tile_pos else {
+            return false;
+        };
+        storage.entry(build_pos).or_default().items.clear();
+        true
+    }
+
+    pub fn apply_set_liquid_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetLiquidCallPacket,
+    ) -> bool {
+        let (Some(build_pos), Some(liquid)) = (packet.build.tile_pos, packet.liquid.as_deref())
+        else {
+            return false;
+        };
+        storage
+            .entry(build_pos)
+            .or_default()
+            .liquids
+            .insert(liquid.to_string(), packet.amount);
+        true
+    }
+
+    pub fn apply_set_liquids_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetLiquidsCallPacket,
+    ) -> usize {
+        let Some(build_pos) = packet.build.tile_pos else {
+            return 0;
+        };
+        let mirror = storage.entry(build_pos).or_default();
+        for stack in &packet.liquids {
+            mirror.liquids.insert(stack.liquid.clone(), stack.amount);
+        }
+        packet.liquids.len()
+    }
+
+    pub fn apply_clear_liquids_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &ClearLiquidsCallPacket,
+    ) -> bool {
+        let Some(build_pos) = packet.build.tile_pos else {
+            return false;
+        };
+        storage.entry(build_pos).or_default().liquids.clear();
+        true
+    }
+
     pub fn apply_set_floor_packet<F>(
         tiles: &mut Tiles,
         packet: &SetFloorCallPacket,
@@ -3559,6 +3640,102 @@ mod tests {
             storage.get(&center).unwrap().liquids.get("water"),
             Some(&6.5)
         );
+    }
+
+    #[test]
+    fn apply_building_item_and_liquid_packets_updates_storage_mirror() {
+        let build = BuildingRef::new(point2_pack(1, 1));
+        let mut storage = BTreeMap::<i32, ClientTileStorageMirror>::new();
+
+        assert!(NetClient::apply_set_item_packet(
+            &mut storage,
+            &SetItemCallPacket {
+                build,
+                item: Some("copper".into()),
+                amount: 7,
+            },
+        ));
+        assert_eq!(
+            storage
+                .get(&build.tile_pos.unwrap())
+                .unwrap()
+                .items
+                .get("copper"),
+            Some(&7)
+        );
+
+        assert_eq!(
+            NetClient::apply_set_items_packet(
+                &mut storage,
+                &SetItemsCallPacket {
+                    build,
+                    items: vec![ItemStack::new("lead", 3), ItemStack::new("scrap", 4)],
+                },
+            ),
+            2
+        );
+        let mirror = storage.get(&build.tile_pos.unwrap()).unwrap();
+        assert_eq!(mirror.items.get("copper"), Some(&7));
+        assert_eq!(mirror.items.get("lead"), Some(&3));
+        assert_eq!(mirror.items.get("scrap"), Some(&4));
+
+        assert!(NetClient::apply_set_liquid_packet(
+            &mut storage,
+            &SetLiquidCallPacket {
+                build,
+                liquid: Some("water".into()),
+                amount: 2.5,
+            },
+        ));
+        assert_eq!(
+            NetClient::apply_set_liquids_packet(
+                &mut storage,
+                &SetLiquidsCallPacket {
+                    build,
+                    liquids: vec![LiquidStack::new("slag", 5.0)],
+                },
+            ),
+            1
+        );
+        let mirror = storage.get(&build.tile_pos.unwrap()).unwrap();
+        assert_eq!(mirror.liquids.get("water"), Some(&2.5));
+        assert_eq!(mirror.liquids.get("slag"), Some(&5.0));
+
+        assert!(NetClient::apply_clear_items_packet(
+            &mut storage,
+            &ClearItemsCallPacket { build },
+        ));
+        assert!(storage
+            .get(&build.tile_pos.unwrap())
+            .unwrap()
+            .items
+            .is_empty());
+        assert!(NetClient::apply_clear_liquids_packet(
+            &mut storage,
+            &ClearLiquidsCallPacket { build },
+        ));
+        assert!(storage
+            .get(&build.tile_pos.unwrap())
+            .unwrap()
+            .liquids
+            .is_empty());
+
+        assert!(!NetClient::apply_set_item_packet(
+            &mut storage,
+            &SetItemCallPacket {
+                build: BuildingRef::null(),
+                item: Some("copper".into()),
+                amount: 1,
+            },
+        ));
+        assert!(!NetClient::apply_set_liquid_packet(
+            &mut storage,
+            &SetLiquidCallPacket {
+                build,
+                liquid: None,
+                amount: 1.0,
+            },
+        ));
     }
 
     #[test]
