@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     core::World,
     game::{GameStats, MapMarkers, Rules, Teams},
+    io::{read_custom_chunks, CustomChunkSet, MarkerRegionSummary},
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
     r#type::{MapLocales, Sector},
@@ -130,8 +131,14 @@ pub struct GameState {
     pub stats: GameStats,
     /// Markers not linked to objectives. Controlled by world processors.
     pub markers: MapMarkers,
+    /// Summary of marker region bytes loaded through `NetworkIO.loadWorld`.
+    pub marker_summary: Option<MarkerRegionSummary>,
     /// Locale-specific string bundles of current map.
     pub map_locales: MapLocales,
+    /// Custom save chunks loaded after marker data.
+    pub custom_chunks: CustomChunkSet,
+    /// Last custom chunk decode error, if the network tail could not be materialized.
+    pub custom_chunks_error: Option<String>,
     /// Global attributes of the environment, calculated by weather.
     pub env_attrs: Attributes,
     /// Team data. Gets reset every new game.
@@ -179,7 +186,10 @@ impl GameState {
             rules,
             stats: GameStats::default(),
             markers: MapMarkers::default(),
+            marker_summary: None,
             map_locales: MapLocales::default(),
+            custom_chunks: CustomChunkSet::default(),
+            custom_chunks_error: None,
             env_attrs: Attributes::new(0),
             teams,
             patcher: DataPatcherState::default(),
@@ -358,6 +368,25 @@ impl GameState {
             self.world.load_network_map(map_snapshot);
         }
 
+        self.marker_summary = world_data.marker_summary.clone();
+        self.custom_chunks = CustomChunkSet::default();
+        self.custom_chunks_error = None;
+        if !world_data.custom_chunks.is_empty() {
+            let mut custom_chunks = world_data.custom_chunks.as_slice();
+            match read_custom_chunks(&mut custom_chunks) {
+                Ok(chunks) => {
+                    self.custom_chunks = chunks;
+                    if !custom_chunks.is_empty() {
+                        self.custom_chunks_error =
+                            Some("trailing bytes after custom chunks".into());
+                    }
+                }
+                Err(error) => {
+                    self.custom_chunks_error = Some(error.to_string());
+                }
+            }
+        }
+
         let map_locales_error = match MapLocales::from_json_str(&world_data.map_locales_json) {
             Ok(locales) => {
                 self.map_locales = locales;
@@ -437,7 +466,10 @@ mod tests {
         assert_eq!(state.get_planet_name(), Some("serpulo"));
         assert!(state.stats.placed_block_count.is_empty());
         assert!(state.markers.is_empty());
+        assert_eq!(state.marker_summary, None);
         assert!(state.map_locales.locales.is_empty());
+        assert!(state.custom_chunks.chunks.is_empty());
+        assert_eq!(state.custom_chunks_error, None);
         assert!(state.env_attrs.values().is_empty());
         assert!(state.patcher.patches.is_empty());
         assert_eq!(state.enemies, 0);
@@ -452,6 +484,19 @@ mod tests {
         map_tags.insert("name".into(), "Network Map".into());
         map_tags.insert("build".into(), "157".into());
         map_tags.insert("version".into(), "11".into());
+        let mut marker_counts = BTreeMap::new();
+        marker_counts.insert("Minimap".into(), 2);
+        let marker_summary = MarkerRegionSummary {
+            total: 3,
+            recognized_by_type: marker_counts,
+            unrecognized_type_count: 1,
+            missing_class_count: 0,
+        };
+        let mut custom_chunk_set = CustomChunkSet::default();
+        custom_chunk_set.insert_or_replace("static-fog", vec![1, 2, 3]);
+        let mut custom_chunks = Vec::new();
+        crate::mindustry::io::write_custom_chunks(&mut custom_chunks, &custom_chunk_set)
+            .unwrap();
 
         let world = NetworkWorldData {
             rules_json: "{}".into(),
@@ -488,6 +533,8 @@ mod tests {
                     consecutives: 5,
                 }],
             }),
+            marker_summary: Some(marker_summary.clone()),
+            custom_chunks,
             ..NetworkWorldData::default()
         };
 
@@ -505,6 +552,12 @@ mod tests {
         assert_eq!(state.map.build, 157);
         assert_eq!(state.world.width(), 3);
         assert_eq!(state.world.height(), 2);
+        assert_eq!(state.marker_summary, Some(marker_summary));
+        assert_eq!(
+            state.custom_chunks.get("static-fog"),
+            Some([1, 2, 3].as_slice())
+        );
+        assert_eq!(state.custom_chunks_error, None);
         assert_eq!(
             state.world.load_events(),
             &[
