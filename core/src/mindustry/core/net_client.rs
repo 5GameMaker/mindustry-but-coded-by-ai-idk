@@ -4,9 +4,10 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
-use crate::mindustry::io::{BuildPlanWire, EntityRef, TypeValue};
+use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{
     BlockSnapshotCallPacket, BuildDestroyedCallPacket, BuildHealthUpdateCallPacket,
@@ -14,22 +15,25 @@ use crate::mindustry::net::{
     ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
     CommandBuildingCallPacket, CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect,
     ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
-    CreateMarkerCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    CreateBulletCallPacket, CreateMarkerCallPacket, CreateWeatherCallPacket,
+    DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
     DeconstructFinishCallPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket,
     EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
-    HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, MenuChooseCallPacket, Net,
-    PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, PingCallPacket, PingLocationCallPacket,
-    PlayerDisconnectCallPacket, ProviderEvent, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
-    RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket,
-    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    RotateBlockCallPacket, SetCameraPositionCallPacket, SetFloorCallPacket, SetItemCallPacket,
-    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket,
-    SetOverlayCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
-    SetTeamCallPacket, SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket,
-    SetTileFloorsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
-    SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
-    SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, LandingPadLandedCallPacket,
+    LogicExplosionCallPacket, MenuChooseCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
+    PingLocationCallPacket, PlayerDisconnectCallPacket, PlayerSpawnCallPacket, ProviderEvent,
+    RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, RemoveTileCallPacket,
+    RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+    SetCameraPositionCallPacket, SetFlagCallPacket, SetFloorCallPacket, SetItemCallPacket,
+    SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetMapAreaCallPacket,
+    SetObjectivesCallPacket, SetOverlayCallPacket, SetPlayerTeamEditorCallPacket,
+    SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket,
+    SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket,
+    SetTileItemsCallPacket, SetTileLiquidsCallPacket, SetTileOverlaysCallPacket,
+    SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
+    StateSnapshotCallPacket, StreamBuilder, Streamable, SyncVariableCallPacket,
     TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
     TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
     TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
@@ -104,6 +108,132 @@ pub struct ClientMarkerMirror {
     pub controls: BTreeMap<LMarkerControl, (f64, f64, f64)>,
     pub text_controls: BTreeMap<LMarkerControl, ClientMarkerTextMirror>,
     pub texture: Option<TypeValue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientMapAreaMirror {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl From<&SetMapAreaCallPacket> for ClientMapAreaMirror {
+    fn from(packet: &SetMapAreaCallPacket) -> Self {
+        Self {
+            x: packet.x,
+            y: packet.y,
+            width: packet.width,
+            height: packet.height,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientPlayerTeamEditorMirror {
+    pub player: EntityRef,
+    pub team: TeamId,
+}
+
+impl From<&SetPlayerTeamEditorCallPacket> for ClientPlayerTeamEditorMirror {
+    fn from(packet: &SetPlayerTeamEditorCallPacket) -> Self {
+        Self {
+            player: packet.player,
+            team: packet.team,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientWeatherMirror {
+    pub weather_id: Option<ContentId>,
+    pub intensity: f32,
+    pub duration: f32,
+    pub wind_x: f32,
+    pub wind_y: f32,
+}
+
+impl From<&CreateWeatherCallPacket> for ClientWeatherMirror {
+    fn from(packet: &CreateWeatherCallPacket) -> Self {
+        Self {
+            weather_id: packet.weather_id,
+            intensity: packet.intensity,
+            duration: packet.duration,
+            wind_x: packet.wind_x,
+            wind_y: packet.wind_y,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientLogicExplosionMirror {
+    pub team: TeamId,
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub damage: f32,
+    pub air: bool,
+    pub ground: bool,
+    pub pierce: bool,
+    pub effect: bool,
+}
+
+impl From<&LogicExplosionCallPacket> for ClientLogicExplosionMirror {
+    fn from(packet: &LogicExplosionCallPacket) -> Self {
+        Self {
+            team: packet.team,
+            x: packet.x,
+            y: packet.y,
+            radius: packet.radius,
+            damage: packet.damage,
+            air: packet.air,
+            ground: packet.ground,
+            pierce: packet.pierce,
+            effect: packet.effect,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientBulletMirror {
+    pub bullet_type_id: ContentId,
+    pub team: TeamId,
+    pub x: f32,
+    pub y: f32,
+    pub angle: f32,
+    pub damage: f32,
+    pub velocity_scl: f32,
+    pub lifetime_scl: f32,
+}
+
+impl From<&CreateBulletCallPacket> for ClientBulletMirror {
+    fn from(packet: &CreateBulletCallPacket) -> Self {
+        Self {
+            bullet_type_id: packet.bullet_type_id,
+            team: packet.team,
+            x: packet.x,
+            y: packet.y,
+            angle: packet.angle,
+            damage: packet.damage,
+            velocity_scl: packet.velocity_scl,
+            lifetime_scl: packet.lifetime_scl,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientPlayerSpawnMirror {
+    pub tile: Option<i32>,
+    pub player: EntityRef,
+}
+
+impl From<&PlayerSpawnCallPacket> for ClientPlayerSpawnMirror {
+    fn from(packet: &PlayerSpawnCallPacket) -> Self {
+        Self {
+            tile: packet.tile,
+            player: packet.player,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -235,6 +365,15 @@ pub struct NetClientState {
     pub last_world_update_packet: Option<PacketKind>,
     pub last_world_update_packet_at: Option<Instant>,
     pub world_update_packets_seen: u64,
+    pub logic_flags: BTreeSet<String>,
+    pub map_area_mirror: Option<ClientMapAreaMirror>,
+    pub player_team_editor_mirrors: BTreeMap<Option<i32>, ClientPlayerTeamEditorMirror>,
+    pub weather_mirrors: Vec<ClientWeatherMirror>,
+    pub logic_explosion_mirrors: Vec<ClientLogicExplosionMirror>,
+    pub bullet_mirrors: Vec<ClientBulletMirror>,
+    pub landed_pad_tiles: Vec<Option<i32>>,
+    pub player_spawn_mirrors: Vec<ClientPlayerSpawnMirror>,
+    pub logic_variable_mirrors: BTreeMap<(Option<i32>, i32), TypeValue>,
     pub last_unit_lifecycle_packet: Option<PacketKind>,
     pub last_unit_lifecycle_packet_at: Option<Instant>,
     pub unit_lifecycle_packets_seen: u64,
@@ -501,6 +640,21 @@ impl fmt::Debug for NetClientState {
                 &self.text_input_result_packets_seen,
             )
             .field("world_update_packets_seen", &self.world_update_packets_seen)
+            .field("logic_flags", &self.logic_flags)
+            .field("map_area_mirror", &self.map_area_mirror)
+            .field(
+                "player_team_editor_mirrors",
+                &self.player_team_editor_mirrors,
+            )
+            .field("weather_mirrors_len", &self.weather_mirrors.len())
+            .field(
+                "logic_explosion_mirrors_len",
+                &self.logic_explosion_mirrors.len(),
+            )
+            .field("bullet_mirrors_len", &self.bullet_mirrors.len())
+            .field("landed_pad_tiles_len", &self.landed_pad_tiles.len())
+            .field("player_spawn_mirrors_len", &self.player_spawn_mirrors.len())
+            .field("logic_variable_mirrors", &self.logic_variable_mirrors)
             .field(
                 "unit_lifecycle_packets_seen",
                 &self.unit_lifecycle_packets_seen,
@@ -1857,6 +2011,70 @@ impl NetClient {
         state.removed_world_label_ids.insert(packet.id);
     }
 
+    pub fn apply_set_flag_packet(state: &mut NetClientState, packet: &SetFlagCallPacket) {
+        if packet.add {
+            state.logic_flags.insert(packet.flag.clone());
+        } else {
+            state.logic_flags.remove(&packet.flag);
+        }
+    }
+
+    pub fn apply_set_map_area_packet(state: &mut NetClientState, packet: &SetMapAreaCallPacket) {
+        state.map_area_mirror = Some(ClientMapAreaMirror::from(packet));
+    }
+
+    pub fn apply_set_player_team_editor_packet(
+        state: &mut NetClientState,
+        packet: &SetPlayerTeamEditorCallPacket,
+    ) {
+        let mirror = ClientPlayerTeamEditorMirror::from(packet);
+        state
+            .player_team_editor_mirrors
+            .insert(packet.player.id, mirror);
+    }
+
+    pub fn apply_create_weather_packet(
+        state: &mut NetClientState,
+        packet: &CreateWeatherCallPacket,
+    ) {
+        state
+            .weather_mirrors
+            .push(ClientWeatherMirror::from(packet));
+    }
+
+    pub fn apply_logic_explosion_packet(
+        state: &mut NetClientState,
+        packet: &LogicExplosionCallPacket,
+    ) {
+        state
+            .logic_explosion_mirrors
+            .push(ClientLogicExplosionMirror::from(packet));
+    }
+
+    pub fn apply_create_bullet_packet(state: &mut NetClientState, packet: &CreateBulletCallPacket) {
+        state.bullet_mirrors.push(ClientBulletMirror::from(packet));
+    }
+
+    pub fn apply_landing_pad_landed_packet(
+        state: &mut NetClientState,
+        packet: &LandingPadLandedCallPacket,
+    ) {
+        state.landed_pad_tiles.push(packet.tile);
+    }
+
+    pub fn apply_player_spawn_packet(state: &mut NetClientState, packet: &PlayerSpawnCallPacket) {
+        state
+            .player_spawn_mirrors
+            .push(ClientPlayerSpawnMirror::from(packet));
+    }
+
+    pub fn apply_sync_variable_packet(state: &mut NetClientState, packet: &SyncVariableCallPacket) {
+        state.logic_variable_mirrors.insert(
+            (packet.building.tile_pos, packet.variable),
+            packet.value.clone(),
+        );
+    }
+
     pub fn apply_set_floor_packet<F>(
         tiles: &mut Tiles,
         packet: &SetFloorCallPacket,
@@ -2351,6 +2569,15 @@ impl NetClient {
                     | PacketKind::PlayerSpawnCallPacket(_)
                     | PacketKind::SyncVariableCallPacket(_) => {
                         match &packet {
+                            PacketKind::SetFlagCallPacket(packet) => {
+                                Self::apply_set_flag_packet(&mut state, packet);
+                            }
+                            PacketKind::SetMapAreaCallPacket(packet) => {
+                                Self::apply_set_map_area_packet(&mut state, packet);
+                            }
+                            PacketKind::SetPlayerTeamEditorCallPacket(packet) => {
+                                Self::apply_set_player_team_editor_packet(&mut state, packet);
+                            }
                             PacketKind::SetTeamCallPacket(packet) => {
                                 Self::apply_set_team_mirror_packet(
                                     &mut state.building_storage_mirrors,
@@ -2362,6 +2589,24 @@ impl NetClient {
                                     &mut state.building_storage_mirrors,
                                     packet,
                                 );
+                            }
+                            PacketKind::LogicExplosionCallPacket(packet) => {
+                                Self::apply_logic_explosion_packet(&mut state, packet);
+                            }
+                            PacketKind::CreateBulletCallPacket(packet) => {
+                                Self::apply_create_bullet_packet(&mut state, packet);
+                            }
+                            PacketKind::CreateWeatherCallPacket(packet) => {
+                                Self::apply_create_weather_packet(&mut state, packet);
+                            }
+                            PacketKind::LandingPadLandedCallPacket(packet) => {
+                                Self::apply_landing_pad_landed_packet(&mut state, packet);
+                            }
+                            PacketKind::PlayerSpawnCallPacket(packet) => {
+                                Self::apply_player_spawn_packet(&mut state, packet);
+                            }
+                            PacketKind::SyncVariableCallPacket(packet) => {
+                                Self::apply_sync_variable_packet(&mut state, packet);
                             }
                             _ => {}
                         }
@@ -2891,29 +3136,32 @@ mod tests {
         ClearLiquidsCallPacket, ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
         ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
         CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
-        ConstructFinishCallPacket, CopyToClipboardCallPacket, CreateMarkerCallPacket,
-        DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
-        DeconstructFinishCallPacket, DeletePlansCallPacket, Disconnect, DoneCallback,
-        EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
-        GameOverCallPacket, HiddenSnapshotCallPacket, HideHudTextCallPacket, Host, HostCallback,
-        InfoMessageCallPacket, InfoToastCallPacket, KickCallPacket, KickCallPacket2, KickReason,
-        MenuCallPacket, MenuChooseCallPacket, Net, NetConnection, NetProvider, OpenUriCallPacket,
-        PacketKind, PayloadDroppedCallPacket, PickedBuildPayloadCallPacket,
-        PickedUnitPayloadCallPacket, PingLocationCallPacket, PingResponseCallPacket,
-        PlayerDisconnectCallPacket, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket,
-        RemoveTileCallPacket, RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket,
-        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-        RotateBlockCallPacket, SendMessageCallPacket, SendMessageCallPacket2,
-        SetCameraPositionCallPacket, SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket,
-        SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket,
-        SetOverlayCallPacket, SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket,
-        SetTeamCallPacket, SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket,
-        SetTileFloorsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
-        SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
-        SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket, StreamBegin, StreamChunk,
-        Streamable, TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket,
-        TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
-        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
+        ConstructFinishCallPacket, CopyToClipboardCallPacket, CreateBulletCallPacket,
+        CreateMarkerCallPacket, CreateWeatherCallPacket, DebugStatusClientCallPacket,
+        DebugStatusClientUnreliableCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
+        Disconnect, DoneCallback, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
+        EntitySnapshotCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
+        HideHudTextCallPacket, Host, HostCallback, InfoMessageCallPacket, InfoToastCallPacket,
+        KickCallPacket, KickCallPacket2, KickReason, LandingPadLandedCallPacket,
+        LogicExplosionCallPacket, MenuCallPacket, MenuChooseCallPacket, Net, NetConnection,
+        NetProvider, OpenUriCallPacket, PacketKind, PayloadDroppedCallPacket,
+        PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingLocationCallPacket,
+        PingResponseCallPacket, PlayerDisconnectCallPacket, PlayerSpawnCallPacket,
+        RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, RemoveTileCallPacket,
+        RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+        RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
+        SendMessageCallPacket, SendMessageCallPacket2, SetCameraPositionCallPacket,
+        SetFlagCallPacket, SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket,
+        SetItemsCallPacket, SetLiquidCallPacket, SetLiquidsCallPacket, SetMapAreaCallPacket,
+        SetObjectivesCallPacket, SetOverlayCallPacket, SetPlayerTeamEditorCallPacket,
+        SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTeamCallPacket,
+        SetTeamsCallPacket, SetTileBlocksCallPacket, SetTileCallPacket, SetTileFloorsCallPacket,
+        SetTileItemsCallPacket, SetTileLiquidsCallPacket, SetTileOverlaysCallPacket,
+        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
+        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, SyncVariableCallPacket,
+        TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
+        TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+        TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
         UnitDeathCallPacket, UnitEnteredPayloadCallPacket, UpdateMarkerCallPacket,
         UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket, WarningToastCallPacket,
@@ -2924,8 +3172,10 @@ mod tests {
     use crate::mindustry::world::{point2_pack, Tile, Tiles};
 
     use super::{
-        ClientCameraView, ClientConnectConfig, ClientInputSnapshot, ClientMarkerTextMirror,
-        ClientTileBlockKind, ClientTileStorageMirror, NetClient, CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
+        ClientBulletMirror, ClientCameraView, ClientConnectConfig, ClientInputSnapshot,
+        ClientLogicExplosionMirror, ClientMapAreaMirror, ClientMarkerTextMirror,
+        ClientPlayerSpawnMirror, ClientPlayerTeamEditorMirror, ClientTileBlockKind,
+        ClientTileStorageMirror, ClientWeatherMirror, NetClient, CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -3273,6 +3523,131 @@ mod tests {
         assert!(!state.marker_mirrors.contains_key(&11));
         assert!(state.removed_marker_ids.contains(&11));
         assert!(state.removed_world_label_ids.contains(&12));
+    }
+
+    #[test]
+    fn update_records_logic_and_world_event_packets_for_later_application() {
+        let client = NetClient::default();
+        let add_flag = SetFlagCallPacket {
+            flag: "open".into(),
+            add: true,
+        };
+        let remove_flag = SetFlagCallPacket {
+            flag: "legacy".into(),
+            add: false,
+        };
+        let map_area = SetMapAreaCallPacket {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        let team_editor = SetPlayerTeamEditorCallPacket {
+            player: EntityRef::new(42),
+            team: TeamId(6),
+        };
+        let weather = CreateWeatherCallPacket {
+            weather_id: Some(3),
+            intensity: 0.5,
+            duration: 20.0,
+            wind_x: 1.25,
+            wind_y: -2.5,
+        };
+        let logic = LogicExplosionCallPacket {
+            team: TeamId(2),
+            x: 8.0,
+            y: 9.0,
+            radius: 10.0,
+            damage: 11.0,
+            air: true,
+            ground: false,
+            pierce: true,
+            effect: false,
+        };
+        let bullet = CreateBulletCallPacket {
+            bullet_type_id: 12,
+            team: TeamId(4),
+            x: 13.0,
+            y: 14.0,
+            angle: 15.0,
+            damage: 16.0,
+            velocity_scl: 1.5,
+            lifetime_scl: 0.75,
+        };
+        let landing = LandingPadLandedCallPacket { tile: Some(77) };
+        let spawn = PlayerSpawnCallPacket {
+            tile: Some(88),
+            player: EntityRef::new(99),
+        };
+        let sync = SyncVariableCallPacket {
+            building: BuildingRef::new(1234),
+            variable: 5,
+            value: TypeValue::String("hello".into()),
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::SetFlagCallPacket(add_flag.clone()));
+            net.handle_client_received(PacketKind::SetFlagCallPacket(remove_flag.clone()));
+            net.handle_client_received(PacketKind::SetMapAreaCallPacket(map_area));
+            net.handle_client_received(PacketKind::SetPlayerTeamEditorCallPacket(team_editor));
+            net.handle_client_received(PacketKind::CreateWeatherCallPacket(weather));
+            net.handle_client_received(PacketKind::LogicExplosionCallPacket(logic));
+            net.handle_client_received(PacketKind::CreateBulletCallPacket(bullet));
+            net.handle_client_received(PacketKind::LandingPadLandedCallPacket(landing));
+            net.handle_client_received(PacketKind::PlayerSpawnCallPacket(spawn));
+            net.handle_client_received(PacketKind::SyncVariableCallPacket(sync.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.world_update_packets_seen, 10);
+        assert!(state.logic_flags.contains("open"));
+        assert!(!state.logic_flags.contains("legacy"));
+        assert_eq!(
+            state.map_area_mirror,
+            Some(ClientMapAreaMirror {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            })
+        );
+        assert_eq!(
+            state.player_team_editor_mirrors.get(&Some(42)),
+            Some(&ClientPlayerTeamEditorMirror {
+                player: team_editor.player,
+                team: team_editor.team,
+            })
+        );
+        assert_eq!(
+            state.weather_mirrors.last().copied(),
+            Some(ClientWeatherMirror::from(&weather))
+        );
+        assert_eq!(
+            state.logic_explosion_mirrors.last().copied(),
+            Some(ClientLogicExplosionMirror::from(&logic))
+        );
+        assert_eq!(
+            state.bullet_mirrors.last().copied(),
+            Some(ClientBulletMirror::from(&bullet))
+        );
+        assert_eq!(state.landed_pad_tiles.last().copied(), Some(Some(77)));
+        assert_eq!(
+            state.player_spawn_mirrors.last().copied(),
+            Some(ClientPlayerSpawnMirror::from(&spawn))
+        );
+        assert_eq!(
+            state.logic_variable_mirrors.get(&(Some(1234), 5)),
+            Some(&sync.value)
+        );
+        assert!(matches!(
+            state.last_world_update_packet.as_ref(),
+            Some(PacketKind::SyncVariableCallPacket(_))
+        ));
     }
 
     #[test]
