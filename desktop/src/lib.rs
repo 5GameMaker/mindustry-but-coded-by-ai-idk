@@ -1,6 +1,6 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, ClientConnectConfig, GameState, NetClient,
+    content_loader::ContentLoader, ClientConnectConfig, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::PlayerComp;
@@ -56,6 +56,7 @@ impl DesktopLauncher {
         self.client.update();
         self.net_client.update();
         self.sync_loaded_world_data();
+        self.sync_client_loaded_state();
         self.sync_state_snapshot();
     }
 
@@ -132,6 +133,22 @@ impl DesktopLauncher {
 
         self.game_state.apply_state_snapshot(&snapshot);
         self.last_applied_state_snapshot = Some(snapshot);
+    }
+
+    fn sync_client_loaded_state(&mut self) {
+        if self.last_applied_world_data.is_none() || !self.game_state.is_menu() {
+            return;
+        }
+
+        let connect_confirm_sent = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.connect_confirm_sent
+        };
+
+        if connect_confirm_sent {
+            self.game_state.set(GameStateState::Playing);
+        }
     }
 
     fn apply_network_content_header(&mut self, snapshot: Option<&ContentHeaderSnapshot>) {
@@ -584,6 +601,7 @@ mod tests {
             let mut state = state.lock().unwrap();
             state.last_world_data_error = None;
             state.last_loaded_world_data = Some(world_data);
+            state.connect_confirm_sent = true;
             state.last_state_snapshot = Some(snapshot.clone());
         }
 
@@ -597,7 +615,7 @@ mod tests {
         assert_eq!(launcher.game_state.rand_seed0, snapshot.rand0);
         assert_eq!(launcher.game_state.rand_seed1, snapshot.rand1);
         assert_eq!(launcher.game_state.universe.seconds(true), snapshot.time_data);
-        assert!(launcher.game_state.is_menu());
+        assert!(launcher.game_state.is_paused());
         assert_eq!(
             launcher.game_state
                 .teams
