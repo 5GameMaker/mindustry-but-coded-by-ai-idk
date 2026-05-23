@@ -7,8 +7,9 @@ use crate::mindustry::io::type_io::{
     read_unit_ref, TeamId, UnitRef,
 };
 use crate::mindustry::io::{
-    read_chunk_map, read_content_header_snapshot, read_content_patches, read_legacy_team_blocks,
-    ContentHeaderSnapshot, ContentPatchSet, LegacyShortChunkMap, LegacyTeamBlocks,
+    read_chunk_map, read_content_header_snapshot, read_content_patches, read_custom_chunks,
+    read_legacy_team_blocks, ContentHeaderSnapshot, ContentPatchSet, LegacyShortChunkMap,
+    LegacyTeamBlocks,
 };
 use crate::mindustry::vars::DEFAULT_PORT;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
@@ -407,10 +408,16 @@ fn parse_save_tail(remaining: &mut &[u8], out: &mut ParsedWorldTail) -> io::Resu
     out.team_blocks_snapshot = Some(team_blocks);
 
     // Java follows with `MapMarkers` UBJSON bytes and then custom chunks.
-    // The marker codec is not migrated yet, so preserve the remaining tail in
-    // one explicit slot instead of losing it or guessing the custom chunk
-    // boundary.
-    out.markers = remaining.to_vec();
+    // Prefer an exact split when the UBJSON payload is valid; otherwise keep
+    // the whole tail opaque so legacy/bootstrap payloads continue to round-trip
+    // unchanged.
+    if let Some((markers, custom_chunks)) = split_marker_region_and_custom_chunks(remaining) {
+        out.markers = markers;
+        out.custom_chunks = custom_chunks;
+    } else {
+        out.markers = remaining.to_vec();
+        out.custom_chunks.clear();
+    }
     *remaining = &[];
 
     Ok(())
@@ -424,6 +431,317 @@ where
     let value = reader(remaining)?;
     let consumed = start.len() - remaining.len();
     Ok((start[..consumed].to_vec(), value))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UbjsonCursor<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> UbjsonCursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.pos)
+    }
+
+    fn take(&mut self, len: usize) -> io::Result<&'a [u8]> {
+        if self.remaining() < len {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unexpected end of UBJSON payload",
+            ));
+        }
+        let start = self.pos;
+        self.pos += len;
+        Ok(&self.bytes[start..self.pos])
+    }
+
+    fn read_u8(&mut self) -> io::Result<u8> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn read_u16(&mut self) -> io::Result<u16> {
+        let bytes = self.take(2)?;
+        Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn read_i16(&mut self) -> io::Result<i16> {
+        let bytes = self.take(2)?;
+        Ok(i16::from_be_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn read_i32(&mut self) -> io::Result<i32> {
+        let bytes = self.take(4)?;
+        Ok(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn read_i64(&mut self) -> io::Result<i64> {
+        let bytes = self.take(8)?;
+        Ok(i64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+}
+
+fn parse_ubjson_value(cursor: &mut UbjsonCursor<'_>) -> io::Result<()> {
+    let type_marker = cursor.read_u8()?;
+    parse_ubjson_typed_value(cursor, type_marker)
+}
+
+fn parse_ubjson_typed_value(cursor: &mut UbjsonCursor<'_>, type_marker: u8) -> io::Result<()> {
+    match type_marker {
+        b'[' => parse_ubjson_array(cursor),
+        b'{' => parse_ubjson_object(cursor),
+        b'Z' | b'T' | b'F' => Ok(()),
+        b'B' | b'U' | b'i' => {
+            cursor.take(1)?;
+            Ok(())
+        }
+        b'I' => {
+            cursor.take(2)?;
+            Ok(())
+        }
+        b'l' | b'd' => {
+            cursor.take(4)?;
+            Ok(())
+        }
+        b'L' | b'D' => {
+            cursor.take(8)?;
+            Ok(())
+        }
+        b'C' => {
+            cursor.take(2)?;
+            Ok(())
+        }
+        b's' | b'S' => {
+            let len = parse_ubjson_string_length(cursor, type_marker, false)?;
+            cursor.take(len)?;
+            Ok(())
+        }
+        b'a' | b'A' => parse_ubjson_data(cursor, type_marker),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unrecognized UBJSON type marker: {type_marker:?}"),
+        )),
+    }
+}
+
+fn parse_ubjson_array(cursor: &mut UbjsonCursor<'_>) -> io::Result<()> {
+    let mut type_marker = cursor.read_u8()?;
+    let mut value_type = 0u8;
+
+    if type_marker == b'$' {
+        value_type = cursor.read_u8()?;
+        type_marker = cursor.read_u8()?;
+    }
+
+    let mut size = None;
+    if type_marker == b'#' {
+        size = Some(parse_ubjson_size(cursor, false)?);
+        if size == Some(0) {
+            return Ok(());
+        }
+        type_marker = if value_type == 0 {
+            cursor.read_u8()?
+        } else {
+            value_type
+        };
+    }
+
+    let mut count = 0usize;
+    while cursor.remaining() > 0 && type_marker != b']' {
+        parse_ubjson_typed_value(cursor, type_marker)?;
+        count += 1;
+        if matches!(size, Some(limit) if count >= limit) {
+            if cursor.remaining() > 0 && cursor.bytes[cursor.pos] == b']' {
+                cursor.pos += 1;
+            }
+            return Ok(());
+        }
+        type_marker = if value_type == 0 {
+            cursor.read_u8()?
+        } else {
+            value_type
+        };
+    }
+
+    Ok(())
+}
+
+fn parse_ubjson_object(cursor: &mut UbjsonCursor<'_>) -> io::Result<()> {
+    let mut type_marker = cursor.read_u8()?;
+    let mut value_type = 0u8;
+
+    if type_marker == b'$' {
+        value_type = cursor.read_u8()?;
+        type_marker = cursor.read_u8()?;
+    }
+
+    let mut size = None;
+    if type_marker == b'#' {
+        size = Some(parse_ubjson_size(cursor, false)?);
+        if size == Some(0) {
+            return Ok(());
+        }
+        type_marker = cursor.read_u8()?;
+    }
+
+    let mut count = 0usize;
+    while cursor.remaining() > 0 && type_marker != b'}' {
+        parse_ubjson_string(cursor, type_marker, true)?;
+        let value_marker = if value_type == 0 {
+            cursor.read_u8()?
+        } else {
+            value_type
+        };
+        parse_ubjson_typed_value(cursor, value_marker)?;
+        count += 1;
+        if matches!(size, Some(limit) if count >= limit) {
+            if cursor.remaining() > 0 && cursor.bytes[cursor.pos] == b'}' {
+                cursor.pos += 1;
+            }
+            return Ok(());
+        }
+        type_marker = cursor.read_u8()?;
+    }
+
+    Ok(())
+}
+
+fn parse_ubjson_data(cursor: &mut UbjsonCursor<'_>, block_type: u8) -> io::Result<()> {
+    let data_type = cursor.read_u8()?;
+    let size = if block_type == b'A' {
+        parse_ubjson_size(cursor, false)?
+    } else {
+        cursor.read_u8()? as usize
+    };
+
+    for _ in 0..size {
+        parse_ubjson_typed_value(cursor, data_type)?;
+    }
+
+    Ok(())
+}
+
+fn parse_ubjson_string(
+    cursor: &mut UbjsonCursor<'_>,
+    type_marker: u8,
+    s_optional: bool,
+) -> io::Result<()> {
+    let len = parse_ubjson_string_length(cursor, type_marker, s_optional)?;
+    cursor.take(len)?;
+    Ok(())
+}
+
+fn parse_ubjson_string_length(
+    cursor: &mut UbjsonCursor<'_>,
+    type_marker: u8,
+    s_optional: bool,
+) -> io::Result<usize> {
+    let size = match type_marker {
+        b'S' => parse_ubjson_size(cursor, true)? as i64,
+        b's' | b'i' => cursor.read_u8()? as i64,
+        b'I' => cursor.read_u16()? as i64,
+        b'l' => cursor.read_i32()? as i64,
+        b'L' => cursor.read_i64()?,
+        _ if s_optional => parse_ubjson_size_with_first_byte(cursor, type_marker, false)?,
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("string expected, found UBJSON marker {type_marker:?}"),
+            ))
+        }
+    };
+
+    if size < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "negative UBJSON string length",
+        ));
+    }
+
+    usize::try_from(size).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "UBJSON string length exceeds usize",
+        )
+    })
+}
+
+fn parse_ubjson_size(cursor: &mut UbjsonCursor<'_>, use_int_on_error: bool) -> io::Result<usize> {
+    let first_byte = cursor.read_u8()?;
+    let size = parse_ubjson_size_with_first_byte(cursor, first_byte, use_int_on_error)?;
+    usize::try_from(size).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "UBJSON container size exceeds usize",
+        )
+    })
+}
+
+fn parse_ubjson_size_with_first_byte(
+    cursor: &mut UbjsonCursor<'_>,
+    first_byte: u8,
+    use_int_on_error: bool,
+) -> io::Result<i64> {
+    let size = match first_byte {
+        b'i' => cursor.read_u8()? as i64,
+        b'I' => cursor.read_i16()? as i64,
+        b'l' => cursor.read_i32()? as i64,
+        b'L' => cursor.read_i64()?,
+        _ if use_int_on_error => {
+            let second = cursor.read_u8()? as i64;
+            let third = cursor.read_u8()? as i64;
+            let fourth = cursor.read_u8()? as i64;
+            ((first_byte as i64) << 24) | (second << 16) | (third << 8) | fourth
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected UBJSON size marker {first_byte:?}"),
+            ))
+        }
+    };
+
+    if size < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "negative UBJSON container size",
+        ));
+    }
+
+    Ok(size)
+}
+
+fn split_marker_region_and_custom_chunks(bytes: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    if bytes.is_empty() {
+        return Some((Vec::new(), Vec::new()));
+    }
+
+    let mut cursor = UbjsonCursor::new(bytes);
+    if parse_ubjson_value(&mut cursor).is_err() {
+        return None;
+    }
+
+    let markers_len = cursor.pos;
+    let mut remaining_after_markers = &bytes[markers_len..];
+    let Ok((custom_chunks, _custom_snapshot)) =
+        read_section(&mut remaining_after_markers, |input| {
+            read_custom_chunks(input)
+        })
+    else {
+        return None;
+    };
+
+    if !remaining_after_markers.is_empty() {
+        return None;
+    }
+
+    Some((bytes[..markers_len].to_vec(), custom_chunks))
 }
 
 fn read_network_player<R: Read>(read: &mut R) -> io::Result<NetworkPlayerData> {
@@ -948,5 +1266,80 @@ mod tests {
             0
         );
         assert_eq!(decoded.markers, marker_and_custom_tail);
+    }
+
+    #[test]
+    fn world_data_reader_splits_valid_markers_and_custom_chunks() {
+        let mut player = Vec::new();
+        write_io_i16(&mut player, 2).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_io_i32(&mut player, 0x11223344).unwrap();
+        write_command_id(&mut player, Some(7)).unwrap();
+        write_io_f32(&mut player, 12.0).unwrap();
+        write_io_f32(&mut player, 13.0).unwrap();
+        write_io_string(&mut player, Some("frog")).unwrap();
+        write_io_i16(&mut player, 99).unwrap();
+        write_io_i32(&mut player, 3).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_team(&mut player, Some(TeamId(6))).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_unit_ref(&mut player, UnitRef::Unit { id: 123 }).unwrap();
+        write_io_f32(&mut player, 40.0).unwrap();
+        write_io_f32(&mut player, 41.0).unwrap();
+
+        let content_header_snapshot = ContentHeaderSnapshot {
+            entries: vec![ContentHeaderEntry {
+                content_type: 1,
+                names: vec!["copper".into()],
+            }],
+        };
+        let mut content_header = Vec::new();
+        write_content_header_snapshot(&mut content_header, &content_header_snapshot).unwrap();
+
+        let content_patches_snapshot = ContentPatchSet {
+            patches: vec![b"patch".to_vec()],
+        };
+        let mut content_patches = Vec::new();
+        write_content_patches(&mut content_patches, &content_patches_snapshot).unwrap();
+
+        let mut map_bytes = Vec::new();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_i16(&mut map_bytes, 2).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+
+        let mut team_blocks = Vec::new();
+        write_io_i32(&mut team_blocks, 0).unwrap();
+
+        let markers = b"{}".to_vec();
+        let mut custom_chunk_set = crate::mindustry::io::CustomChunkSet::default();
+        custom_chunk_set.insert_or_replace("mod-a", vec![1, 2, 3]);
+        custom_chunk_set
+            .insert_or_replace(crate::mindustry::io::CUSTOM_CHUNK_STATIC_FOG_DATA, vec![4]);
+        let mut custom_chunks = Vec::new();
+        crate::mindustry::io::write_custom_chunks(&mut custom_chunks, &custom_chunk_set).unwrap();
+
+        let data = NetworkWorldData {
+            player_id: 42,
+            player_bytes: player.clone(),
+            content_header: content_header.clone(),
+            content_patches: content_patches.clone(),
+            map_bytes: map_bytes.clone(),
+            team_blocks: team_blocks.clone(),
+            markers: markers.clone(),
+            custom_chunks: custom_chunks.clone(),
+            ..NetworkWorldData::default()
+        };
+
+        let decoded = read_world_data(&write_world_data(&data).unwrap()).unwrap();
+
+        assert!(decoded.tail_parse_error.is_none());
+        assert_eq!(decoded.markers, markers);
+        assert_eq!(decoded.custom_chunks, custom_chunks);
     }
 }
