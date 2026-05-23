@@ -1034,13 +1034,14 @@ impl NetServer {
     }
 
     pub fn update(&self) {
-        self.flush_pending_connect_kicks();
-        self.flush_pending_debug_status();
-
         let connections = {
-            let net = self.net.lock().expect("Net mutex poisoned");
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.drain_provider_events();
             net.get_connections()
         };
+
+        self.flush_pending_connect_kicks();
+        self.flush_pending_debug_status();
 
         let mut state = self.state.lock().expect("NetServerState mutex poisoned");
         Self::sync_provider_connections(&mut state, connections);
@@ -3308,6 +3309,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct CaptureProvider {
         sent: Arc<Mutex<Vec<(i32, PacketKind, bool)>>>,
+        events: Arc<Mutex<Vec<ProviderEvent>>>,
         fail_server_to: bool,
         connect_filter: Option<ConnectFilter>,
     }
@@ -3367,6 +3369,10 @@ mod tests {
                 .unwrap()
                 .push((connection_id, object.clone(), reliable));
             Ok(())
+        }
+
+        fn drain_events(&mut self) -> Vec<ProviderEvent> {
+            self.events.lock().unwrap().drain(..).collect()
         }
 
         fn set_connect_filter(&mut self, connect_filter: Option<ConnectFilter>) {
@@ -3750,6 +3756,82 @@ mod tests {
         assert_eq!(state.connect_packets_rejected, 0);
         assert_eq!(state.pending_world_data_connections, vec![12]);
         assert_eq!(state.events.len(), 4);
+    }
+
+    #[test]
+    fn update_drains_provider_server_events_into_typed_handlers() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(vec![
+            ProviderEvent::ServerConnected {
+                connection_id: 42,
+                address: "10.0.0.42:6567".into(),
+            },
+            ProviderEvent::ServerPacket {
+                connection_id: 42,
+                packet: PacketKind::PingCallPacket(PingCallPacket { time: 99 }),
+            },
+        ]));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            events: Arc::clone(&events),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        let seen_handler = Arc::clone(&seen);
+        server.add_packet_handler(move |packet| {
+            let label = match packet {
+                PacketKind::Connect(_) => "connect",
+                PacketKind::PingCallPacket(_) => "ping",
+                _ => return,
+            };
+            seen_handler.lock().unwrap().push(label.to_string());
+        });
+
+        server.update();
+
+        assert!(events.lock().unwrap().is_empty());
+        assert_eq!(*seen.lock().unwrap(), vec!["connect", "ping"]);
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, 42);
+        assert!(sent[0].2);
+        assert!(matches!(
+            sent[0].1,
+            PacketKind::PingResponseCallPacket(PingResponseCallPacket { time: 99 })
+        ));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert!(state.active);
+        assert!(state.server);
+        assert_eq!(state.last_connection_id, Some(42));
+        assert_eq!(
+            state.last_connect.as_ref().unwrap().address_tcp,
+            "10.0.0.42:6567"
+        );
+        assert_eq!(state.last_ping_connection_id, Some(42));
+        assert_eq!(state.last_ping_time, Some(99));
+        assert_eq!(state.ping_requests_seen, 1);
+        assert_eq!(state.ping_responses_sent, 1);
+        assert_eq!(state.events.len(), 2);
+        assert!(matches!(
+            state.events[0],
+            ProviderEvent::ServerConnected {
+                connection_id: 42,
+                ..
+            }
+        ));
+        assert!(matches!(
+            state.events[1],
+            ProviderEvent::ServerPacket {
+                connection_id: 42,
+                packet: PacketKind::PingCallPacket(_)
+            }
+        ));
     }
 
     #[test]
