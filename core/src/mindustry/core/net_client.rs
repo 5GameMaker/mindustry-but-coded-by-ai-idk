@@ -10,20 +10,20 @@ use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{
-    BlockSnapshotCallPacket, BuildDestroyedCallPacket, BuildHealthUpdateCallPacket,
-    BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
-    ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket,
-    CommandBuildingCallPacket, CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect,
-    ConnectCallPacket, ConnectConfirmCallPacket, ConnectPacket, ConstructFinishCallPacket,
-    CreateBulletCallPacket, CreateMarkerCallPacket, CreateWeatherCallPacket,
-    DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
+    read_world_data, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
+    BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
+    ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+    ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
+    CompleteObjectiveCallPacket, Connect, ConnectCallPacket, ConnectConfirmCallPacket,
+    ConnectPacket, ConstructFinishCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
+    CreateWeatherCallPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket,
     DeconstructFinishCallPacket, DeletePlansCallPacket, Disconnect, EffectCallPacket,
     EffectCallPacket2, EffectReliableCallPacket, EntitySnapshotCallPacket,
     HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, LandingPadLandedCallPacket,
-    LogicExplosionCallPacket, MenuChooseCallPacket, Net, PacketKind, PayloadDroppedCallPacket,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, PingCallPacket,
-    PingLocationCallPacket, PlayerDisconnectCallPacket, PlayerSpawnCallPacket, ProviderEvent,
-    RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, RemoveTileCallPacket,
+    LogicExplosionCallPacket, MenuChooseCallPacket, Net, NetworkWorldData, PacketKind,
+    PayloadDroppedCallPacket, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    PingCallPacket, PingLocationCallPacket, PlayerDisconnectCallPacket, PlayerSpawnCallPacket,
+    ProviderEvent, RemoveMarkerCallPacket, RemoveQueueBlockCallPacket, RemoveTileCallPacket,
     RemoveWorldLabelCallPacket, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
     RequestItemCallPacket, RequestUnitPayloadCallPacket, RotateBlockCallPacket,
     SetCameraPositionCallPacket, SetFlagCallPacket, SetFloorCallPacket, SetItemCallPacket,
@@ -336,6 +336,8 @@ pub struct NetClientState {
     pub last_connect: Option<Connect>,
     pub last_disconnect: Option<Disconnect>,
     pub last_world_stream: Option<Streamable>,
+    pub last_loaded_world_data: Option<NetworkWorldData>,
+    pub last_world_data_error: Option<String>,
     pub last_packet: Option<PacketKind>,
     pub last_message: Option<String>,
     pub last_message_unformatted: Option<String>,
@@ -620,6 +622,8 @@ impl fmt::Debug for NetClientState {
             .field("last_connect", &self.last_connect)
             .field("last_disconnect", &self.last_disconnect)
             .field("last_world_stream", &self.last_world_stream)
+            .field("last_loaded_world_data", &self.last_loaded_world_data)
+            .field("last_world_data_error", &self.last_world_data_error)
             .field("last_packet", &self.last_packet)
             .field("last_message", &self.last_message)
             .field("message_packets_seen", &self.message_packets_seen)
@@ -951,6 +955,8 @@ impl NetClientState {
         self.connect_packet_sent = false;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.last_loaded_world_data = None;
+        self.last_world_data_error = None;
         self.removed_entity_ids.clear();
         self.reset_ping_state();
         self.reset_client_gameplay_sync_state();
@@ -967,6 +973,8 @@ impl NetClientState {
         self.connect_packet_sent = false;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.last_loaded_world_data = None;
+        self.last_world_data_error = None;
         self.removed_entity_ids.clear();
         self.reset_ping_state();
         self.reset_client_gameplay_sync_state();
@@ -983,6 +991,8 @@ impl NetClientState {
         self.last_world_data_begin_at = Some(Instant::now());
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.last_loaded_world_data = None;
+        self.last_world_data_error = None;
         self.removed_entity_ids.clear();
         self.reset_client_gameplay_sync_state();
         self.clear_loading_stream_tracking();
@@ -1028,6 +1038,8 @@ impl NetClientState {
         self.last_connect_packet_error = None;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.last_loaded_world_data = None;
+        self.last_world_data_error = None;
         self.removed_entity_ids.clear();
         self.reset_ping_state();
         self.reset_client_gameplay_sync_state();
@@ -1044,6 +1056,8 @@ impl NetClientState {
         self.connect_packet_sent = false;
         self.connect_confirm_sent = false;
         self.last_connect_confirm_error = None;
+        self.last_loaded_world_data = None;
+        self.last_world_data_error = None;
         self.removed_entity_ids.clear();
         self.reset_ping_state();
         self.reset_client_gameplay_sync_state();
@@ -1053,11 +1067,25 @@ impl NetClientState {
 
     fn record_world_stream(&mut self, stream: &Streamable) {
         self.connecting = false;
-        self.connected = true;
-        self.world_data_loading = false;
+        self.connected = false;
+        self.world_data_loading = true;
         self.world_stream_events += 1;
         self.last_world_stream = Some(stream.clone());
         self.last_binary_stream = Some(stream.stream.clone());
+        match read_world_data(&stream.stream) {
+            Ok(world_data) => {
+                self.connected = true;
+                self.world_data_loading = false;
+                self.last_loaded_world_data = Some(world_data);
+                self.last_world_data_error = None;
+            }
+            Err(error) => {
+                self.connected = false;
+                self.world_data_loading = true;
+                self.last_world_data_error = Some(error.to_string());
+                self.last_loaded_world_data = None;
+            }
+        }
         self.last_packet = Some(PacketKind::Streamable(stream.clone()));
         self.next_ping_at = Some(Instant::now() + PING_INTERVAL);
         self.reset_client_gameplay_sync_state();
@@ -2290,11 +2318,16 @@ impl NetClient {
                 state.last_packet = Some(packet.clone());
                 match &packet {
                     PacketKind::Streamable(stream) => {
+                        let world_data_ready = state.last_loaded_world_data.is_some()
+                            && state.last_world_data_error.is_none();
                         state.connecting = false;
-                        state.connected = true;
-                        state.world_data_loading = false;
+                        state.connected = world_data_ready;
+                        state.world_data_loading = !world_data_ready;
                         state.last_binary_stream = Some(stream.stream.clone());
-                        if state.auto_confirm_world_stream && !state.connect_confirm_sent {
+                        if state.auto_confirm_world_stream
+                            && !state.connect_confirm_sent
+                            && world_data_ready
+                        {
                             state.connect_confirm_sent = true;
                             state.last_connect_confirm_error = None;
                             (true, false)
@@ -3131,13 +3164,14 @@ mod tests {
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::logic::LMarkerControl;
     use crate::mindustry::net::{
-        AnnounceCallPacket, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
-        BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
-        ClearLiquidsCallPacket, ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
-        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
-        CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
-        ConstructFinishCallPacket, CopyToClipboardCallPacket, CreateBulletCallPacket,
-        CreateMarkerCallPacket, CreateWeatherCallPacket, DebugStatusClientCallPacket,
+        write_minimal_world_data, AnnounceCallPacket, BlockSnapshotCallPacket,
+        BuildDestroyedCallPacket, BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket,
+        ClearItemsCallPacket, ClearLiquidsCallPacket, ClearObjectivesCallPacket,
+        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+        ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
+        CompleteObjectiveCallPacket, Connect, ConnectCallPacket, ConstructFinishCallPacket,
+        CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
+        CreateWeatherCallPacket, DebugStatusClientCallPacket,
         DebugStatusClientUnreliableCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
         Disconnect, DoneCallback, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
         EntitySnapshotCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
@@ -5779,13 +5813,12 @@ mod tests {
         let client = NetClient::with_net(Net::new(Box::new(provider)));
         client.begin_connecting();
 
+        let payload = write_minimal_world_data(17).unwrap();
         {
             let mut net = client.net_mut();
-            net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![1, 2, 3])));
-            net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![4, 5, 6])));
+            net.handle_client_received(PacketKind::Streamable(Streamable::new(payload)));
         }
 
-        client.update();
         client.update();
 
         let sent = sent.lock().unwrap();
@@ -5800,6 +5833,32 @@ mod tests {
         assert!(!state.world_data_loading);
         assert!(state.connect_confirm_sent);
         assert!(state.last_connect_confirm_error.is_none());
+    }
+
+    #[test]
+    fn invalid_world_stream_does_not_confirm_or_finish_loading() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+        client.begin_connecting();
+
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![1, 2, 3])));
+        }
+
+        client.update();
+
+        assert!(sent.lock().unwrap().is_empty());
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert!(!state.connect_confirm_sent);
+        assert!(!state.connected);
+        assert!(state.world_data_loading);
+        assert!(state.last_loaded_world_data.is_none());
+        assert!(state.last_world_data_error.is_some());
     }
 
     #[test]
@@ -5844,9 +5903,10 @@ mod tests {
             assert!(state.timeout_deadline.is_some());
         }
 
+        let payload = write_minimal_world_data(23).unwrap();
         {
             let mut net = client.net_mut();
-            net.handle_client_received(PacketKind::Streamable(Streamable::new(vec![9, 8, 7])));
+            net.handle_client_received(PacketKind::Streamable(Streamable::new(payload)));
         }
 
         client.update();
@@ -5864,6 +5924,44 @@ mod tests {
         assert!(state.connect_confirm_sent);
         assert_eq!(state.world_data_begin_packets_seen, 1);
         assert!(state.timeout_deadline.is_none());
+    }
+
+    #[test]
+    fn world_stream_with_java_like_payload_is_parsed_and_confirmed() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let client = NetClient::with_net(Net::new(Box::new(provider)));
+        client.begin_connecting();
+
+        let payload = write_minimal_world_data(91).unwrap();
+        {
+            let mut net = client.net_mut();
+            net.handle_client_received(PacketKind::Streamable(Streamable::new(payload)));
+        }
+
+        client.update();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].1);
+        assert!(matches!(sent[0].0, PacketKind::ConnectConfirmCallPacket(_)));
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert!(state.connect_confirm_sent);
+        assert_eq!(state.world_stream_events, 1);
+        assert!(state.last_world_data_error.is_none());
+        let world = state
+            .last_loaded_world_data
+            .as_ref()
+            .expect("world data should be recorded");
+        assert_eq!(world.player_id, 91);
+        assert_eq!(world.rules_json, "{}");
+        assert_eq!(world.map_locales_json, "{}");
+        assert!(world.map_tags.contains_key("name"));
+        assert!(world.player_bytes.is_empty());
     }
 
     #[test]

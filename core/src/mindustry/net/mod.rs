@@ -24,8 +24,9 @@ pub use net::{
 };
 pub use net_connection::{NetConnection, Ratekeeper, SentPacket};
 pub use network_io::{
-    read_server_data, write_minimal_world_data, write_server_data, write_world_data,
-    write_world_data_raw, NetworkWorldData, ServerData,
+    read_server_data, read_world_data, read_world_data_raw, write_minimal_world_data,
+    write_server_data, write_world_data, write_world_data_raw, NetworkPlayerData, NetworkWorldData,
+    ServerData,
 };
 pub use packet::{PacketPriority, PacketRuntime};
 pub use packets::{
