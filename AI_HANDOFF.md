@@ -99,19 +99,21 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 最近已推送到 `main` 的提交包括：
 
-1. `5d70acc 接入客户端服务启动闭环`
-2. `ea5b4bd 接入服务端网络事件轮询`
-3. `ef67476 接入服务端真实网络启动器`
-4. `355376b 保持服务端网络循环运行`
-5. `643bef9 接入桌面客户端真实网络层`
-6. `571d58d 支持桌面客户端参数连接`
+1. `e154545 接入世界流前置信息到游戏状态`
+2. `eaaec1e 展开存档地图到轻量瓦片`
+3. `c76842c 解析世界流玩家与存档头`
+4. `c11610e 接入服务端最小世界数据流`
+5. `aaa62c7 补充迁移交接文档`
+6. `9c23edd 支持服务端端口参数`
 7. `2d19084 保持桌面客户端网络循环运行`
-8. `9c23edd 支持服务端端口参数`
+8. `571d58d 支持桌面客户端参数连接`
+9. `643bef9 接入桌面客户端真实网络层`
+10. `355376b 保持服务端网络循环运行`
 
 最后确认时：
 
 - 当前分支：`main`
-- 最新提交：`9c23edd 支持服务端端口参数`
+- 最新提交：`e154545 接入世界流前置信息到游戏状态`
 - `git status --short` 未显示已有未提交代码改动（创建本文档除外）。
 
 ---
@@ -120,34 +122,54 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 文件：
 
-- `server/src/lib.rs`
+- `core/src/mindustry/net/network_io.rs`
+- `core/src/mindustry/core/net_client.rs`
+- `core/src/mindustry/net/mod.rs`
+- `core/src/mindustry/io/versions/mod.rs`
+- `core/src/mindustry/core/game_state.rs`
 
 完成内容：
 
-1. `ServerLauncher::new()` 会读取端口参数并写入 `AppContext.port`。
-2. 支持以下参数形式：
-   - `--port 1234`
-   - `--port=1234`
-   - `-p 1234`
-3. 新增/补齐：
-   - `parse_port_arg(args: &[String]) -> Option<u16>`
-   - 测试：`server_launcher_reads_port_arg_before_opening_network`
+1. `NetworkIO.writeWorld/loadWorld` 对应的 world stream 前半段已经进一步迁移：
+   - 能 zlib inflate/deflate world stream；
+   - 能读写 Java `DataOutput.writeUTF` 的 modified UTF-8；
+   - 能解析 `rules_json`、`map_locales_json`、`map_tags`、`wave`、`wavetime`、`tick`、随机种子和 `player_id`；
+   - 能解析生成类 `mindustry.gen.Player.write(...)` 的 revision 0/1/2 玩家 wire body；
+   - 能继续解析 `SaveIO` 尾部前缀：content header、content patches、map、team blocks；
+   - marker/custom chunks 仍以 raw tail 保留，后续要补 UBJSON marker codec 后才能精确拆分。
+2. `NetClient` 收到 world stream 后：
+   - 解析成功才自动发送 `ConnectConfirmCallPacket`；
+   - 解析失败不确认、不结束加载态，并记录错误；
+   - 记录 `last_loaded_world_data` 供后续 world 生命周期接入。
+3. `SaveVersion` map wire 记录已经能展开成 Rust 轻量 `Tiles`，用于下一步真正应用地图。
+4. `GameState::apply_network_world_data(...)` 已接入 world stream 前置信息：
+   - 更新 wave / wavetime / tick；
+   - 用 map tags + map snapshot 更新 `MapDescriptor`；
+   - 解析并写入 `MapLocales`；
+   - 将 content patches 记录到 `DataPatcherState`。
 
 已验证：
 
 ```powershell
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' fmt
-& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-server -- --test-threads=1
+& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::net::network_io -- --test-threads=1
+& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::core::net_client -- --test-threads=1
+& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::io::versions -- --test-threads=1
+& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::core::game_state -- --test-threads=1
+& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test --workspace -- --skip mindustry::net::arc_net_provider::tests::* --test-threads=1
 ```
 
 验证结果：
 
-- `mindustry-server` 8 个测试全部通过。
+- workspace 测试通过；当前 `mindustry-core` 约 1472 个测试通过。
+- 仅有既存 warning（例如 `ItemUnlockExt` 未使用等），未发现本轮新增失败。
 
 已提交并推送：
 
 ```text
-9c23edd 支持服务端端口参数
+c76842c 解析世界流玩家与存档头
+eaaec1e 展开存档地图到轻量瓦片
+e154545 接入世界流前置信息到游戏状态
 ```
 
 ---
@@ -160,7 +182,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 粗略完成度建议口径：
 
-- 若以“完整可游玩、联机互通、内容/世界/实体/UI/渲染完整”为 100%，当前约为 **5%～8%**。
+- 若以“完整可游玩、联机互通、内容/世界/实体/UI/渲染完整”为 100%，当前约为 **6%～9%**。
 - 若只以“项目结构与早期网络启动骨架”为目标，当前进度会更高，但这不是最终目标。
 
 主要已具备：
@@ -170,15 +192,18 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 3. 桌面客户端有真实网络层与参数连接入口。
 4. 服务端支持端口参数读取。
 5. 部分 `NetClient` / `NetServer` / packet / service 生命周期已有骨架。
+6. 服务端能自动下发最小 world stream，Rust 客户端能解析并确认。
+7. Rust 客户端已经能解析 world stream 前置信息、生成类玩家 body，以及 SaveIO 尾部的 content/map/team-blocks 前缀。
+8. `GameState` 可以接收 world stream 前置信息并更新轻量地图/波次/locales/patcher 状态。
 
 主要缺口：
 
-1. 服务端尚未完整下发 world/map/save 数据。
-2. 客户端尚未完整接收 world stream 并进入可渲染世界。
-3. 内容系统、世界系统、Universe、GameState 生命周期未完整装配。
+1. 服务端尚未完整生成 Java 兼容 `NetworkIO.writeWorld` payload（玩家、content、map、markers、custom chunks 仍需真实 runtime 数据）。
+2. 客户端尚未把 parsed world stream 完整应用到 `World` / `Groups` / player / entity 生命周期。
+3. marker/custom chunks 的 UBJSON/JsonIO 字节解析尚未迁移。
 4. 实体 update/collision、单位、方块、队伍、规则、存档、地图加载仍大量缺失。
 5. 桌面客户端仍缺少真正窗口、渲染、输入、UI 与游戏主循环体验。
-6. 与 Java 原版服务端/客户端的协议级互通只完成了很早期的基础工作。
+6. 与 Java 原版服务端/客户端的协议级互通已推进到 world stream 前缀解析阶段，但仍不是可游玩的互通客户端。
 
 ---
 
@@ -186,24 +211,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 下一步推荐继续推进：
 
-### 7.1 服务端最小 world/map 数据下发闭环
+### 7.1 补完整 Java `NetworkIO.loadWorld` 后半段
 
 目标：
 
-1. 对照 Java 参考实现，定位客户端连接后服务端发送 world/map/save/world stream 的流程。
-2. 在 Rust 侧实现最小可测试闭环：
-   - 服务端在连接建立或握手完成后准备 world data。
-   - 服务端发送 `StreamBegin` / `StreamChunk` 或当前 Rust 已定义的等价 packet。
-   - 客户端能接收并记录 world data 状态。
-   - 测试能验证发送顺序、payload 长度、客户端状态变化。
-3. 先实现“测试可证明的数据流”，再逐步替换为真实 Java 兼容 payload。
+1. 对照 Java `NetworkIO.loadWorld(InputStream)` 和 `SaveVersion`：
+   - `readContentHeader`
+   - `readContentPatches`
+   - `readMap`
+   - `readTeamBlocks`
+   - `readMarkers`
+   - `readCustomChunks`
+2. 下一步最有价值的是补 `MapMarkers` 的 `JsonIO.writeBytes/readBytes` UBJSON 兼容读取，让 markers 与 custom chunks 能从 world stream tail 精确拆分。
+3. 把 `NetworkWorldData.map_snapshot.to_tiles()` 的结果真正接入 `World::begin_map_load` / `resize` / `end_map_load` 生命周期。
+4. 继续迁移 Player/Groups 应用逻辑：`Groups.clear()`、`player.reset()`、`player.read(...)`、`player.id = id`、`player.add()`。
 
 优先查看 Rust 文件：
 
 - `core/src/mindustry/core/net_server.rs`
 - `core/src/mindustry/core/net_client.rs`
 - `core/src/mindustry/core/world.rs`
+- `core/src/mindustry/core/game_state.rs`
 - `core/src/mindustry/core/content_loader.rs`
+- `core/src/mindustry/io/save.rs`
+- `core/src/mindustry/io/versions/mod.rs`
 - `core/src/mindustry/net/*`
 - `server/src/lib.rs`
 - `desktop/src/*`
@@ -339,9 +370,9 @@ git -C 'D:/MDT/rust-mindustry' push origin main
    git -C 'D:/MDT/rust-mindustry' push origin main
    ```
 
-4. 派发两个 `explorer` 做 world stream / world data 只读扫描。
-5. 主线程同时查看 Rust 当前 `net_server` / `net_client` packet 定义。
-6. 用测试驱动实现最小 world data 发送/接收闭环。
+4. 派发 `explorer` 对 Java `JsonIO.writeBytes/readBytes`、`UBJsonWriter/UBJsonReader` 和 `MapMarkers.read/write` 做只读扫描。
+5. 主线程同时查看 Rust 当前 `io/save.rs`、`io/versions/mod.rs`、`game/map_markers.rs`、`core/world.rs`。
+6. 用测试驱动实现 marker UBJSON 跳读/解析，先能精确定位 custom chunks 边界，再逐步还原 `MapMarkers`。
 7. `fmt` + 相关 crate 测试。
 8. 中文提交并推送到 `main`。
 9. 继续下一个 Java 文件/模块迁移。
