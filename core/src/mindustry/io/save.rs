@@ -8,7 +8,7 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use ubjson::Container as UbjsonContainer;
 
 use crate::mindustry::{
-    game::{marker_type_by_java_name, Rules},
+    game::{marker_type_by_java_name, MapMarkers, ObjectiveMarker, Rules},
     io::type_io::{
         read_i32, read_i64, read_java_utf, read_u16, read_u8, write_i32, write_i64, write_java_utf,
         write_u16,
@@ -902,6 +902,65 @@ pub fn summarize_marker_region_bytes(bytes: &[u8]) -> io::Result<MarkerRegionSum
     Ok(summary)
 }
 
+pub fn parse_marker_region_bytes(bytes: &[u8]) -> io::Result<MapMarkers> {
+    let (remaining, markers) = ubjson::parse_one(bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("failed to parse MapMarkers UBJSON: {error}"),
+        )
+    })?;
+    if !remaining.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing bytes after MapMarkers UBJSON",
+        ));
+    }
+
+    let UbjsonContainer::Object(entries) = markers else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "MapMarkers UBJSON must be an object map",
+        ));
+    };
+
+    let mut decoded = entries
+        .iter()
+        .filter_map(|(id, marker)| {
+            let id = id.parse::<i32>().ok()?;
+            let marker = parse_marker_entry(marker)?;
+            Some((id, marker))
+        })
+        .collect::<Vec<_>>();
+    decoded.sort_by_key(|(id, _)| *id);
+
+    Ok(MapMarkers::rebuild_from_entries(decoded))
+}
+
+fn parse_marker_entry(marker: &UbjsonContainer<'_>) -> Option<ObjectiveMarker> {
+    let fields = match marker {
+        UbjsonContainer::Object(fields) => fields,
+        _ => return None,
+    };
+
+    let mut marker = ObjectiveMarker::default_for_java_name(marker_class_tag(marker)?)?;
+    let common = marker.common_mut();
+
+    if let Some(world) = fields.get("world").and_then(ubjson_bool) {
+        common.world = world;
+    }
+    if let Some(minimap) = fields.get("minimap").and_then(ubjson_bool) {
+        common.minimap = minimap;
+    }
+    if let Some(autoscale) = fields.get("autoscale").and_then(ubjson_bool) {
+        common.autoscale = autoscale;
+    }
+    if let Some(draw_layer) = fields.get("drawLayer").and_then(ubjson_f32) {
+        common.draw_layer = draw_layer;
+    }
+
+    Some(marker)
+}
+
 fn marker_class_tag<'a>(marker: &'a UbjsonContainer<'a>) -> Option<&'a str> {
     let UbjsonContainer::Object(fields) = marker else {
         return None;
@@ -915,6 +974,26 @@ fn marker_class_tag<'a>(marker: &'a UbjsonContainer<'a>) -> Option<&'a str> {
 fn ubjson_string<'a>(value: &'a UbjsonContainer<'a>) -> Option<&'a str> {
     match value {
         UbjsonContainer::String(value) => Some(value.as_ref()),
+        _ => None,
+    }
+}
+
+fn ubjson_bool(value: &UbjsonContainer<'_>) -> Option<bool> {
+    match value {
+        UbjsonContainer::Boolean(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn ubjson_f32(value: &UbjsonContainer<'_>) -> Option<f32> {
+    match value {
+        UbjsonContainer::Float32(value) => Some(*value),
+        UbjsonContainer::Float64(value) => Some(*value as f32),
+        UbjsonContainer::Int8(value) => Some(*value as f32),
+        UbjsonContainer::Uint8(value) => Some(*value as f32),
+        UbjsonContainer::Int16(value) => Some(*value as f32),
+        UbjsonContainer::Int32(value) => Some(*value as f32),
+        UbjsonContainer::Int64(value) => Some(*value as f32),
         _ => None,
     }
 }
@@ -1535,6 +1614,67 @@ mod tests {
         assert!(summarize_marker_region_bytes(b"[Z]").is_err());
     }
 
+    #[test]
+    fn marker_region_ubjson_parse_materializes_point_markers_and_common_fields() {
+        let markers = MarkerRegionBytes {
+            bytes: ubjson_object(vec![(
+                "7",
+                ubjson_marker_object_with_fields(
+                    Some("Minimap"),
+                    Some(false),
+                    Some(true),
+                    Some(true),
+                    Some(33.5),
+                ),
+            )]),
+        };
+
+        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
+        assert_eq!(decoded.size(), 1);
+        assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![7]);
+        let marker = decoded.get(7).unwrap();
+        assert_eq!(marker.type_name(), "Point");
+        assert_eq!(marker.common().array_index, 0);
+        assert!(!marker.common().world);
+        assert!(marker.common().minimap);
+        assert!(marker.common().autoscale);
+        assert!((marker.common().draw_layer - 33.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn marker_region_ubjson_parse_rebuilds_ids_in_stable_numeric_order() {
+        let markers = MarkerRegionBytes {
+            bytes: ubjson_object(vec![
+                ("9", ubjson_marker_object(Some("Text"))),
+                ("2", ubjson_marker_object(Some("Shape"))),
+                ("7", ubjson_marker_object(Some("Minimap"))),
+            ]),
+        };
+
+        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
+        assert_eq!(decoded.size(), 3);
+        assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![2, 7, 9]);
+        assert_eq!(decoded.get(2).unwrap().common().array_index, 0);
+        assert_eq!(decoded.get(7).unwrap().common().array_index, 1);
+        assert_eq!(decoded.get(9).unwrap().common().array_index, 2);
+    }
+
+    #[test]
+    fn marker_region_ubjson_parse_skips_unknown_and_missing_class_entries() {
+        let markers = MarkerRegionBytes {
+            bytes: ubjson_object(vec![
+                ("1", ubjson_marker_object(Some("Bogus"))),
+                ("2", ubjson_marker_object(None)),
+                ("3", ubjson_marker_object(Some("Shape"))),
+            ]),
+        };
+
+        let decoded = parse_marker_region_bytes(&markers.bytes).unwrap();
+        assert_eq!(decoded.size(), 1);
+        assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![3]);
+        assert_eq!(decoded.get(3).unwrap().type_name(), "Shape");
+    }
+
     fn ubjson_object(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(b'{');
@@ -1555,6 +1695,34 @@ mod tests {
         bytes
     }
 
+    fn ubjson_marker_object_with_fields(
+        class: Option<&str>,
+        world: Option<bool>,
+        minimap: Option<bool>,
+        autoscale: Option<bool>,
+        draw_layer: Option<f32>,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(b'{');
+        if let Some(class) = class {
+            write_ubjson_string_field(&mut bytes, "class", class);
+        }
+        if let Some(world) = world {
+            write_ubjson_bool_field(&mut bytes, "world", world);
+        }
+        if let Some(minimap) = minimap {
+            write_ubjson_bool_field(&mut bytes, "minimap", minimap);
+        }
+        if let Some(autoscale) = autoscale {
+            write_ubjson_bool_field(&mut bytes, "autoscale", autoscale);
+        }
+        if let Some(draw_layer) = draw_layer {
+            write_ubjson_f32_field(&mut bytes, "drawLayer", draw_layer);
+        }
+        bytes.push(b'}');
+        bytes
+    }
+
     fn write_ubjson_string_map_entry(write: &mut Vec<u8>, key: &str, value: &[u8]) {
         write.push(b'U');
         write.push(key.len() as u8);
@@ -1570,6 +1738,21 @@ mod tests {
         write.push(b'U');
         write.push(value.len() as u8);
         write.extend_from_slice(value.as_bytes());
+    }
+
+    fn write_ubjson_bool_field(write: &mut Vec<u8>, key: &str, value: bool) {
+        write.push(b'U');
+        write.push(key.len() as u8);
+        write.extend_from_slice(key.as_bytes());
+        write.push(if value { b'T' } else { b'F' });
+    }
+
+    fn write_ubjson_f32_field(write: &mut Vec<u8>, key: &str, value: f32) {
+        write.push(b'U');
+        write.push(key.len() as u8);
+        write.extend_from_slice(key.as_bytes());
+        write.push(b'd');
+        write.extend_from_slice(&value.to_be_bytes());
     }
 
     #[test]
