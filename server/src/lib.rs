@@ -1,10 +1,11 @@
 pub mod server_control;
 
 use mindustry_core::mindustry::core::NetServer;
-use mindustry_core::mindustry::net::{ArcNetProvider, Net};
+use mindustry_core::mindustry::net::{write_minimal_world_data, ArcNetProvider, Net};
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
+use std::io;
 
 #[derive(Debug, Clone)]
 pub struct ServerLauncher {
@@ -59,6 +60,14 @@ impl ServerLauncher {
 
     pub fn update(&self) {
         self.net_server.update();
+        let _ = self.flush_pending_world_data();
+    }
+
+    pub fn flush_pending_world_data(&self) -> io::Result<usize> {
+        self.net_server.send_pending_world_data(|connection_id| {
+            write_minimal_world_data(connection_id)
+                .expect("bootstrap world data payload should be encodable")
+        })
     }
 }
 
@@ -92,9 +101,16 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::ServerLauncher;
-    use mindustry_core::mindustry::net::{packet_ids, ConnectPacket, PacketKind, PacketSerializer};
-    use mindustry_core::mindustry::vars::RuntimeMode;
+    use mindustry_core::mindustry::core::NetServer;
+    use mindustry_core::mindustry::net::{
+        packet_ids, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host, HostCallback, Net,
+        NetConnection, NetProvider, PacketKind, PacketSerializer, ProviderEvent,
+    };
+    use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
+    use std::io;
     use std::net::{TcpListener, UdpSocket};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     fn free_local_port() -> u16 {
         for _ in 0..32 {
@@ -178,5 +194,135 @@ mod tests {
             }
             other => panic!("unexpected packet: {other:?}"),
         }
+    }
+
+    #[derive(Default)]
+    struct CaptureProvider {
+        sent: Arc<Mutex<Vec<(i32, PacketKind, bool)>>>,
+    }
+
+    impl NetProvider for CaptureProvider {
+        fn connect_client(
+            &mut self,
+            _ip: &str,
+            _port: u16,
+            _success: Box<dyn Fn() + Send + 'static>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_client(&mut self, _object: &PacketKind, _reliable: bool) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn disconnect_client(&mut self) {}
+
+        fn discover_servers(&self, _callback: HostCallback, done: DoneCallback) {
+            done();
+        }
+
+        fn ping_host(&self, _address: &str, _port: u16, _timeout: Duration) -> io::Result<Host> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "capture provider does not ping hosts",
+            ))
+        }
+
+        fn host_server(&mut self, _port: u16) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn get_connections(&self) -> Vec<NetConnection> {
+            Vec::new()
+        }
+
+        fn close_server(&mut self) {}
+
+        fn send_server_to(
+            &mut self,
+            connection_id: i32,
+            object: &PacketKind,
+            reliable: bool,
+        ) -> io::Result<()> {
+            self.sent
+                .lock()
+                .unwrap()
+                .push((connection_id, object.clone(), reliable));
+            Ok(())
+        }
+
+        fn drain_events(&mut self) -> Vec<ProviderEvent> {
+            Vec::new()
+        }
+
+        fn set_connect_filter(&mut self, _connect_filter: Option<ConnectFilter>) {}
+    }
+
+    fn connect_packet(name: &str) -> ConnectPacket {
+        ConnectPacket {
+            version: 157,
+            version_type: "official".into(),
+            mods: Vec::new(),
+            name: name.into(),
+            locale: "en_US".into(),
+            uuid: "uuid".into(),
+            usid: "usid".into(),
+            mobile: false,
+            color: 0,
+            uuid_crc32: None,
+        }
+    }
+
+    #[test]
+    fn server_update_flushes_pending_world_data_after_connect_packet() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let launcher = ServerLauncher {
+            context: AppContext::server("config"),
+            args: Vec::new(),
+            control: super::ServerControl::new(Vec::new()),
+            net_server: NetServer::new(Net::new(Box::new(provider))),
+            network_error: None,
+        };
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(71),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "127.0.0.1:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(71),
+                false,
+                PacketKind::ConnectPacket(connect_packet("rust-player")),
+            );
+        }
+
+        launcher.update();
+
+        {
+            let state = launcher.net_server.state();
+            let state = state.lock().unwrap();
+            assert!(state.pending_world_data_connections.is_empty());
+            assert_eq!(state.last_world_data_connection_id, Some(71));
+            assert_eq!(state.world_streams_sent, 1);
+            assert!(state.last_world_data_bytes.is_some_and(|bytes| bytes > 0));
+        }
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0].0, 71);
+        assert_eq!(sent[1].0, 71);
+        assert!(sent.iter().all(|(_, _, reliable)| *reliable));
+        assert!(matches!(sent[0].1, PacketKind::StreamBegin(_)));
+        assert!(matches!(sent[1].1, PacketKind::StreamChunk(_)));
+        assert!(!sent
+            .iter()
+            .any(|(_, packet, _)| matches!(packet, PacketKind::WorldDataBeginCallPacket(_))));
     }
 }
