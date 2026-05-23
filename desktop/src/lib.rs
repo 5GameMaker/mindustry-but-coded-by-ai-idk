@@ -90,7 +90,7 @@ impl DesktopLauncher {
                 }
                 self.apply_network_content_header(world_data.content_header_snapshot.as_ref());
                 self.game_state.apply_network_world_data(world_data);
-                self.apply_network_player_data(world_data.player.as_ref());
+                self.apply_network_player_data(world_data.player_id, world_data.player.as_ref());
                 self.apply_network_team_blocks(world_data.team_blocks_snapshot.as_ref());
             }
             None => {
@@ -120,7 +120,11 @@ impl DesktopLauncher {
         }
     }
 
-    fn apply_network_player_data(&mut self, player_data: Option<&NetworkPlayerData>) {
+    fn apply_network_player_data(
+        &mut self,
+        player_id: i32,
+        player_data: Option<&NetworkPlayerData>,
+    ) {
         let Some(player_data) = player_data else {
             self.player = PlayerComp::default();
             return;
@@ -129,6 +133,7 @@ impl DesktopLauncher {
         self.player
             .reset(TeamId(self.game_state.rules.default_team as u8));
         self.player.apply_network_player_data(player_data);
+        self.player.id = player_id;
         let selected_block = player_data.selected_block_id.and_then(|block_id| {
             self.mapped_block_name(block_id).and_then(|name| {
                 self.content_loader
@@ -337,6 +342,9 @@ mod tests {
             wave: 12,
             wave_time: 30.5,
             tick: 99.25,
+            rand_seed0: 123,
+            rand_seed1: 456,
+            player_id: 91,
             player,
             map_snapshot: Some(LegacyShortChunkMap {
                 width: 3,
@@ -468,6 +476,8 @@ mod tests {
         launcher.update();
 
         assert_eq!(launcher.game_state.map.name(), "Network Map");
+        assert_eq!(launcher.game_state.rand_seed0, 123);
+        assert_eq!(launcher.game_state.rand_seed1, 456);
         assert_eq!(launcher.game_state.world.width(), 3);
         assert_eq!(launcher.game_state.world.height(), 2);
         assert_eq!(
@@ -479,6 +489,7 @@ mod tests {
             ]
         );
         assert!(launcher.player.admin);
+        assert_eq!(launcher.player.id, 91);
         assert!(launcher.player.boosting);
         assert_eq!(launcher.player.color, 0x11_22_33_44);
         assert_eq!(launcher.player.mouse_x, 12.5);
