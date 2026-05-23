@@ -12,7 +12,7 @@ use std::{
 
 use crate::mindustry::{
     core::World,
-    game::{GameStats, MapMarkers, Rules, Teams},
+    game::{GameStats, MapMarkers, Rules, Teams, Universe},
     io::{read_custom_chunks, type_io::read_u8, CustomChunkSet, MarkerRegionSummary},
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
@@ -146,6 +146,8 @@ pub struct GameState {
     pub env_attrs: Attributes,
     /// Team data. Gets reset every new game.
     pub teams: Teams,
+    /// Campaign/universe time mirror; multiplayer snapshots update `netSeconds`.
+    pub universe: Universe,
     /// Lightweight stand-in for upstream `DataPatcher` until the mod patcher is migrated.
     pub patcher: DataPatcherState,
     /// Number of enemies in the game; only used clientside in servers.
@@ -195,6 +197,7 @@ impl GameState {
             custom_chunks_error: None,
             env_attrs: Attributes::new(0),
             teams,
+            universe: Universe::new(Vec::<String>::new()),
             patcher: DataPatcherState::default(),
             enemies: 0,
             playtesting_map: None,
@@ -310,6 +313,7 @@ impl GameState {
         self.server_tps = snapshot.tps as i32;
         self.rand_seed0 = snapshot.rand0;
         self.rand_seed1 = snapshot.rand1;
+        self.universe.update_net_seconds(snapshot.time_data);
         self.apply_state_snapshot_core_data(&snapshot.core_data);
 
         let state_change = if self.is_menu() {
@@ -801,6 +805,7 @@ mod tests {
         assert_eq!(state.server_tps, 255);
         assert_eq!(state.rand_seed0, 11);
         assert_eq!(state.rand_seed1, 22);
+        assert_eq!(state.universe.seconds(true), 456);
         assert!(state.is_paused());
 
         let next = StateSnapshotCallPacket {
@@ -834,6 +839,7 @@ mod tests {
         assert_eq!(state.server_tps, 60);
         assert_eq!(state.rand_seed0, 33);
         assert_eq!(state.rand_seed1, 44);
+        assert_eq!(state.universe.seconds(true), 789);
         assert!(state.is_playing());
     }
 
@@ -908,5 +914,6 @@ mod tests {
         assert_eq!(state.server_tps, 30);
         assert_eq!(state.rand_seed0, 0);
         assert_eq!(state.rand_seed1, 0);
+        assert_eq!(state.universe.seconds(true), 123);
     }
 }
