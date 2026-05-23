@@ -11,6 +11,7 @@ use crate::mindustry::io::{
 };
 use crate::mindustry::world::{Tile, Tiles};
 
+pub mod legacy_io;
 pub mod save1;
 pub mod save10;
 pub mod save11;
@@ -23,6 +24,10 @@ pub mod save7;
 pub mod save8;
 pub mod save9;
 
+pub use legacy_io::{
+    legacy_unit_name, read_legacy_servers, read_legacy_servers_from, read_legacy_servers_result,
+    LegacyServer, LEGACY_SERVER_LIST_SETTING, LEGACY_UNIT_MAP,
+};
 pub use save1::Save1;
 pub use save10::Save10;
 pub use save11::Save11;
