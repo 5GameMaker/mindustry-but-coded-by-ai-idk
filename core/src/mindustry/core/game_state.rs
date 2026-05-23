@@ -71,6 +71,8 @@ impl StateSnapshotApplyResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkWorldApplyResult {
+    pub rules_loaded: bool,
+    pub rules_error: Option<String>,
     pub map_width: i32,
     pub map_height: i32,
     pub map_locales_loaded: bool,
@@ -311,6 +313,11 @@ impl GameState {
         &mut self,
         world_data: &NetworkWorldData,
     ) -> NetworkWorldApplyResult {
+        let rules_error = self.rules.apply_json_str(&world_data.rules_json).err();
+        if rules_error.is_none() {
+            self.sync_teams_with_rules();
+        }
+
         self.wave = world_data.wave;
         self.wavetime = world_data.wave_time;
         self.tick = world_data.tick;
@@ -365,6 +372,8 @@ impl GameState {
         self.patcher.warnings.clear();
 
         NetworkWorldApplyResult {
+            rules_loaded: rules_error.is_none(),
+            rules_error,
             map_width,
             map_height,
             map_locales_loaded: map_locales_error.is_none(),
@@ -495,6 +504,8 @@ mod tests {
         assert_eq!(
             result,
             NetworkWorldApplyResult {
+                rules_loaded: true,
+                rules_error: None,
                 map_width: 3,
                 map_height: 2,
                 map_locales_loaded: true,
@@ -503,6 +514,58 @@ mod tests {
                 tail_parse_error: None,
             }
         );
+    }
+
+    #[test]
+    fn apply_network_world_data_applies_supported_rules_json_and_resyncs_teams() {
+        let mut state = GameState::new();
+        let world = NetworkWorldData {
+            rules_json: r#"{
+                "waves": true,
+                "waveTimer": false,
+                "attackMode": true,
+                "pvp": true,
+                "defaultTeam": 6,
+                "waveTeam": 9,
+                "modeName": "PvP",
+                "planet": "erekir",
+                "env": 11
+            }"#
+            .into(),
+            ..NetworkWorldData::default()
+        };
+
+        let result = state.apply_network_world_data(&world);
+
+        assert!(result.rules_loaded);
+        assert_eq!(result.rules_error, None);
+        assert!(state.rules.waves);
+        assert!(!state.rules.wave_timer);
+        assert!(state.rules.attack_mode);
+        assert!(state.rules.pvp);
+        assert_eq!(state.rules.default_team, 6);
+        assert_eq!(state.rules.wave_team, 9);
+        assert_eq!(state.rules.mode_name.as_deref(), Some("PvP"));
+        assert_eq!(state.rules.planet, "erekir");
+        assert_eq!(state.rules.env, 11);
+        assert!(state.teams.get_active().contains(&9));
+    }
+
+    #[test]
+    fn apply_network_world_data_reports_invalid_rules_json_without_mutating_rules() {
+        let mut state = GameState::new();
+        state.rules.waves = true;
+        state.rules.default_team = 3;
+
+        let result = state.apply_network_world_data(&NetworkWorldData {
+            rules_json: r#"{"waves": tru}"#.into(),
+            ..NetworkWorldData::default()
+        });
+
+        assert!(!result.rules_loaded);
+        assert!(result.rules_error.is_some());
+        assert!(state.rules.waves);
+        assert_eq!(state.rules.default_team, 3);
     }
 
     #[test]
