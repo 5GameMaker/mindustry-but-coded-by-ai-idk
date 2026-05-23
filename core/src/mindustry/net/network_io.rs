@@ -8,8 +8,8 @@ use crate::mindustry::io::type_io::{
 };
 use crate::mindustry::io::{
     read_chunk_map, read_content_header_snapshot, read_content_patches, read_custom_chunks,
-    read_legacy_team_blocks, ContentHeaderSnapshot, ContentPatchSet, LegacyShortChunkMap,
-    LegacyTeamBlocks,
+    read_legacy_team_blocks, summarize_marker_region_bytes, ContentHeaderSnapshot, ContentPatchSet,
+    LegacyShortChunkMap, LegacyTeamBlocks, MarkerRegionSummary,
 };
 use crate::mindustry::vars::DEFAULT_PORT;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
@@ -83,6 +83,7 @@ pub struct NetworkWorldData {
     pub content_patches_snapshot: Option<ContentPatchSet>,
     pub map_snapshot: Option<LegacyShortChunkMap>,
     pub team_blocks_snapshot: Option<LegacyTeamBlocks>,
+    pub marker_summary: Option<MarkerRegionSummary>,
     pub content_header: Vec<u8>,
     pub content_patches: Vec<u8>,
     pub map_bytes: Vec<u8>,
@@ -110,6 +111,7 @@ impl Default for NetworkWorldData {
             content_patches_snapshot: None,
             map_snapshot: None,
             team_blocks_snapshot: None,
+            marker_summary: None,
             content_header: Vec::new(),
             content_patches: Vec::new(),
             map_bytes: Vec::new(),
@@ -286,6 +288,7 @@ pub fn read_world_data_raw(bytes: &[u8]) -> Result<NetworkWorldData, NetworkIoEr
         content_patches_snapshot: tail.content_patches_snapshot,
         map_snapshot: tail.map_snapshot,
         team_blocks_snapshot: tail.team_blocks_snapshot,
+        marker_summary: tail.marker_summary,
         content_header: tail.content_header,
         content_patches: tail.content_patches,
         map_bytes: tail.map_bytes,
@@ -323,6 +326,7 @@ struct ParsedWorldTail {
     content_patches_snapshot: Option<ContentPatchSet>,
     map_snapshot: Option<LegacyShortChunkMap>,
     team_blocks_snapshot: Option<LegacyTeamBlocks>,
+    marker_summary: Option<MarkerRegionSummary>,
     content_header: Vec<u8>,
     content_patches: Vec<u8>,
     map_bytes: Vec<u8>,
@@ -412,6 +416,7 @@ fn parse_save_tail(remaining: &mut &[u8], out: &mut ParsedWorldTail) -> io::Resu
     // the whole tail opaque so legacy/bootstrap payloads continue to round-trip
     // unchanged.
     if let Some((markers, custom_chunks)) = split_marker_region_and_custom_chunks(remaining) {
+        out.marker_summary = summarize_marker_region_bytes(&markers).ok();
         out.markers = markers;
         out.custom_chunks = custom_chunks;
     } else {
@@ -690,6 +695,7 @@ fn parse_ubjson_size_with_first_byte(
 ) -> io::Result<i64> {
     let size = match first_byte {
         b'i' => cursor.read_u8()? as i64,
+        b'U' => cursor.read_u8()? as i64,
         b'I' => cursor.read_i16()? as i64,
         b'l' => cursor.read_i32()? as i64,
         b'L' => cursor.read_i64()?,
@@ -1023,6 +1029,31 @@ mod tests {
     use flate2::read::ZlibDecoder;
     use std::io::Read;
 
+    fn ubjson_marker_region_with_classes(classes: &[&str]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(b'{');
+        for (index, class) in classes.iter().enumerate() {
+            write_ubjson_key(&mut bytes, &(index + 1).to_string());
+            bytes.push(b'{');
+            write_ubjson_key(&mut bytes, "class");
+            write_ubjson_string_value(&mut bytes, class);
+            bytes.push(b'}');
+        }
+        bytes.push(b'}');
+        bytes
+    }
+
+    fn write_ubjson_key(write: &mut Vec<u8>, key: &str) {
+        write.push(b'U');
+        write.push(key.len() as u8);
+        write.extend_from_slice(key.as_bytes());
+    }
+
+    fn write_ubjson_string_value(write: &mut Vec<u8>, value: &str) {
+        write.push(b'S');
+        write_ubjson_key(write, value);
+    }
+
     #[test]
     fn server_data_roundtrips_java_order() {
         let data = ServerData {
@@ -1316,7 +1347,7 @@ mod tests {
         let mut team_blocks = Vec::new();
         write_io_i32(&mut team_blocks, 0).unwrap();
 
-        let markers = b"{}".to_vec();
+        let markers = ubjson_marker_region_with_classes(&["Minimap"]);
         let mut custom_chunk_set = crate::mindustry::io::CustomChunkSet::default();
         custom_chunk_set.insert_or_replace("mod-a", vec![1, 2, 3]);
         custom_chunk_set
@@ -1341,5 +1372,155 @@ mod tests {
         assert!(decoded.tail_parse_error.is_none());
         assert_eq!(decoded.markers, markers);
         assert_eq!(decoded.custom_chunks, custom_chunks);
+    }
+
+    #[test]
+    fn world_data_reader_populates_marker_summary_from_valid_markers() {
+        let mut player = Vec::new();
+        write_io_i16(&mut player, 2).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_io_i32(&mut player, 0x11223344).unwrap();
+        write_command_id(&mut player, Some(7)).unwrap();
+        write_io_f32(&mut player, 12.0).unwrap();
+        write_io_f32(&mut player, 13.0).unwrap();
+        write_io_string(&mut player, Some("frog")).unwrap();
+        write_io_i16(&mut player, 99).unwrap();
+        write_io_i32(&mut player, 3).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_team(&mut player, Some(TeamId(6))).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_unit_ref(&mut player, UnitRef::Unit { id: 123 }).unwrap();
+        write_io_f32(&mut player, 40.0).unwrap();
+        write_io_f32(&mut player, 41.0).unwrap();
+
+        let content_header_snapshot = ContentHeaderSnapshot {
+            entries: vec![ContentHeaderEntry {
+                content_type: 1,
+                names: vec!["copper".into()],
+            }],
+        };
+        let mut content_header = Vec::new();
+        write_content_header_snapshot(&mut content_header, &content_header_snapshot).unwrap();
+
+        let content_patches_snapshot = ContentPatchSet {
+            patches: vec![b"patch".to_vec()],
+        };
+        let mut content_patches = Vec::new();
+        write_content_patches(&mut content_patches, &content_patches_snapshot).unwrap();
+
+        let mut map_bytes = Vec::new();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_i16(&mut map_bytes, 2).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+
+        let mut team_blocks = Vec::new();
+        write_io_i32(&mut team_blocks, 0).unwrap();
+
+        let markers = ubjson_marker_region_with_classes(&["Minimap"]);
+        let mut custom_chunk_set = crate::mindustry::io::CustomChunkSet::default();
+        custom_chunk_set.insert_or_replace("mod-a", vec![1, 2, 3]);
+        custom_chunk_set
+            .insert_or_replace(crate::mindustry::io::CUSTOM_CHUNK_STATIC_FOG_DATA, vec![4]);
+        let mut custom_chunks = Vec::new();
+        crate::mindustry::io::write_custom_chunks(&mut custom_chunks, &custom_chunk_set).unwrap();
+
+        let data = NetworkWorldData {
+            player_id: 42,
+            player_bytes: player.clone(),
+            content_header: content_header.clone(),
+            content_patches: content_patches.clone(),
+            map_bytes: map_bytes.clone(),
+            team_blocks: team_blocks.clone(),
+            markers: markers.clone(),
+            custom_chunks: custom_chunks.clone(),
+            ..NetworkWorldData::default()
+        };
+
+        let decoded = read_world_data(&write_world_data(&data).unwrap()).unwrap();
+        assert_eq!(decoded.markers, markers);
+        assert_eq!(decoded.custom_chunks, custom_chunks);
+        let summary = decoded
+            .marker_summary
+            .as_ref()
+            .expect("marker summary should be parsed");
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.marker_count(), 1);
+        assert_eq!(summary.marker_type_counts().get("point"), Some(&1));
+        assert_eq!(summary.missing_class_count, 0);
+        assert_eq!(summary.unrecognized_type_count, 0);
+    }
+
+    #[test]
+    fn world_data_reader_leaves_marker_summary_empty_for_invalid_markers() {
+        let mut player = Vec::new();
+        write_io_i16(&mut player, 2).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_io_i32(&mut player, 0x11223344).unwrap();
+        write_command_id(&mut player, Some(7)).unwrap();
+        write_io_f32(&mut player, 12.0).unwrap();
+        write_io_f32(&mut player, 13.0).unwrap();
+        write_io_string(&mut player, Some("frog")).unwrap();
+        write_io_i16(&mut player, 99).unwrap();
+        write_io_i32(&mut player, 3).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_team(&mut player, Some(TeamId(6))).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_unit_ref(&mut player, UnitRef::Unit { id: 123 }).unwrap();
+        write_io_f32(&mut player, 40.0).unwrap();
+        write_io_f32(&mut player, 41.0).unwrap();
+
+        let content_header_snapshot = ContentHeaderSnapshot {
+            entries: vec![ContentHeaderEntry {
+                content_type: 1,
+                names: vec!["copper".into()],
+            }],
+        };
+        let mut content_header = Vec::new();
+        write_content_header_snapshot(&mut content_header, &content_header_snapshot).unwrap();
+
+        let content_patches_snapshot = ContentPatchSet {
+            patches: vec![b"patch".to_vec()],
+        };
+        let mut content_patches = Vec::new();
+        write_content_patches(&mut content_patches, &content_patches_snapshot).unwrap();
+
+        let mut map_bytes = Vec::new();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_i16(&mut map_bytes, 2).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+
+        let mut team_blocks = Vec::new();
+        write_io_i32(&mut team_blocks, 0).unwrap();
+
+        let invalid_markers = b"not ubjson".to_vec();
+        let data = NetworkWorldData {
+            player_id: 42,
+            player_bytes: player.clone(),
+            content_header: content_header.clone(),
+            content_patches: content_patches.clone(),
+            map_bytes: map_bytes.clone(),
+            team_blocks: team_blocks.clone(),
+            markers: invalid_markers.clone(),
+            ..NetworkWorldData::default()
+        };
+
+        let decoded = read_world_data(&write_world_data(&data).unwrap()).unwrap();
+
+        assert!(decoded.tail_parse_error.is_none());
+        assert_eq!(decoded.player_bytes, player);
+        assert_eq!(decoded.markers, invalid_markers);
+        assert!(decoded.marker_summary.is_none());
     }
 }
