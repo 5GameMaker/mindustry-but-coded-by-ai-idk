@@ -210,6 +210,456 @@ impl Rules {
     pub fn set_objective_flag(&mut self, flag: impl Into<String>) {
         self.objective_flags.insert(flag.into());
     }
+
+    /// Applies the currently supported top-level fields from Java `Rules` JSON.
+    ///
+    /// This intentionally ignores unknown fields so network world loading can
+    /// progressively adopt more of the upstream payload without rejecting
+    /// otherwise valid saves/streams.
+    pub fn apply_json_str(&mut self, json: &str) -> Result<(), String> {
+        RulesJsonPatch::parse(json)?.apply(self);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+struct RulesJsonPatch {
+    waves: Option<bool>,
+    wave_timer: Option<bool>,
+    wave_sending: Option<bool>,
+    attack_mode: Option<bool>,
+    pvp: Option<bool>,
+    editor: Option<bool>,
+    infinite_resources: Option<bool>,
+    wave_spacing: Option<f32>,
+    default_team: Option<i32>,
+    wave_team: Option<i32>,
+    mode_name: Option<Option<String>>,
+    planet: Option<String>,
+    env: Option<u32>,
+}
+
+impl RulesJsonPatch {
+    fn parse(json: &str) -> Result<Self, String> {
+        RulesJsonParser::new(json).parse_patch()
+    }
+
+    fn apply(self, rules: &mut Rules) {
+        if let Some(value) = self.waves {
+            rules.waves = value;
+        }
+        if let Some(value) = self.wave_timer {
+            rules.wave_timer = value;
+        }
+        if let Some(value) = self.wave_sending {
+            rules.wave_sending = value;
+        }
+        if let Some(value) = self.attack_mode {
+            rules.attack_mode = value;
+        }
+        if let Some(value) = self.pvp {
+            rules.pvp = value;
+        }
+        if let Some(value) = self.editor {
+            rules.editor = value;
+        }
+        if let Some(value) = self.infinite_resources {
+            rules.infinite_resources = value;
+        }
+        if let Some(value) = self.wave_spacing {
+            rules.wave_spacing = value;
+        }
+        if let Some(value) = self.default_team {
+            rules.default_team = value;
+        }
+        if let Some(value) = self.wave_team {
+            rules.wave_team = value;
+        }
+        if let Some(value) = self.mode_name {
+            rules.mode_name = value;
+        }
+        if let Some(value) = self.planet {
+            rules.planet = value;
+        }
+        if let Some(value) = self.env {
+            rules.env = value;
+        }
+    }
+}
+
+struct RulesJsonParser<'a> {
+    chars: Vec<char>,
+    index: usize,
+    _source: &'a str,
+}
+
+impl<'a> RulesJsonParser<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            chars: source.chars().collect(),
+            index: 0,
+            _source: source,
+        }
+    }
+
+    fn parse_patch(&mut self) -> Result<RulesJsonPatch, String> {
+        self.skip_ws();
+        self.expect('{')?;
+        let mut patch = RulesJsonPatch::default();
+        self.skip_ws();
+        if self.peek() == Some('}') {
+            self.index += 1;
+            self.skip_ws();
+            return self.finish(patch);
+        }
+
+        loop {
+            let key = self.parse_string()?;
+            self.expect(':')?;
+            match key.as_str() {
+                "waves" => patch.waves = self.parse_optional_bool()?,
+                "waveTimer" => patch.wave_timer = self.parse_optional_bool()?,
+                "waveSending" => patch.wave_sending = self.parse_optional_bool()?,
+                "attackMode" => patch.attack_mode = self.parse_optional_bool()?,
+                "pvp" => patch.pvp = self.parse_optional_bool()?,
+                "editor" => patch.editor = self.parse_optional_bool()?,
+                "infiniteResources" => {
+                    patch.infinite_resources = self.parse_optional_bool()?;
+                }
+                "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
+                "defaultTeam" => patch.default_team = self.parse_optional_i32()?,
+                "waveTeam" => patch.wave_team = self.parse_optional_i32()?,
+                "modeName" => patch.mode_name = self.parse_optional_nullable_string()?,
+                "planet" => patch.planet = self.parse_optional_string_value()?,
+                "env" => patch.env = self.parse_optional_u32()?,
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some('}') => break,
+                Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                None => return Err("unterminated rules json object".into()),
+            }
+        }
+
+        self.skip_ws();
+        self.finish(patch)
+    }
+
+    fn finish(&self, patch: RulesJsonPatch) -> Result<RulesJsonPatch, String> {
+        if self.index == self.chars.len() {
+            Ok(patch)
+        } else {
+            Err("trailing data in rules json".into())
+        }
+    }
+
+    fn parse_optional_bool(&mut self) -> Result<Option<bool>, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('t') | Some('f') => self.parse_bool().map(Some),
+            _ => {
+                self.skip_value()?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn parse_optional_f32(&mut self) -> Result<Option<f32>, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('-' | '0'..='9') => self.parse_number_string().and_then(|value| {
+                value
+                    .parse::<f32>()
+                    .map(Some)
+                    .map_err(|_| format!("invalid json number '{value}'"))
+            }),
+            _ => {
+                self.skip_value()?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn parse_optional_i32(&mut self) -> Result<Option<i32>, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('-' | '0'..='9') => {
+                let value = self.parse_number_string()?;
+                let parsed = value
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid json number '{value}'"))?;
+                if !parsed.is_finite() || parsed.fract() != 0.0 {
+                    return Ok(None);
+                }
+                if parsed < i32::MIN as f64 || parsed > i32::MAX as f64 {
+                    return Ok(None);
+                }
+                Ok(Some(parsed as i32))
+            }
+            _ => {
+                self.skip_value()?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn parse_optional_u32(&mut self) -> Result<Option<u32>, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('-' | '0'..='9') => {
+                let value = self.parse_number_string()?;
+                let parsed = value
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid json number '{value}'"))?;
+                if !parsed.is_finite() || parsed.fract() != 0.0 {
+                    return Ok(None);
+                }
+                if parsed < 0.0 || parsed > u32::MAX as f64 {
+                    return Ok(None);
+                }
+                Ok(Some(parsed as u32))
+            }
+            _ => {
+                self.skip_value()?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn parse_optional_string_value(&mut self) -> Result<Option<String>, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('"') => self.parse_string().map(Some),
+            _ => {
+                self.skip_value()?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn parse_optional_nullable_string(&mut self) -> Result<Option<Option<String>>, String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('"') => self.parse_string().map(|value| Some(Some(value))),
+            Some('n') => {
+                self.parse_null()?;
+                Ok(Some(None))
+            }
+            _ => {
+                self.skip_value()?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn skip_value(&mut self) -> Result<(), String> {
+        self.skip_ws();
+        match self.peek() {
+            Some('{') => self.skip_object(),
+            Some('[') => self.skip_array(),
+            Some('"') => self.parse_string().map(|_| ()),
+            Some('t') | Some('f') => self.parse_bool().map(|_| ()),
+            Some('n') => self.parse_null(),
+            Some('-' | '0'..='9') => self.parse_number_string().map(|_| ()),
+            Some(ch) => Err(format!("unexpected json value start '{ch}'")),
+            None => Err("unexpected end of input while parsing json value".into()),
+        }
+    }
+
+    fn skip_object(&mut self) -> Result<(), String> {
+        self.expect('{')?;
+        self.skip_ws();
+        if self.peek() == Some('}') {
+            self.index += 1;
+            return Ok(());
+        }
+
+        loop {
+            self.parse_string()?;
+            self.expect(':')?;
+            self.skip_value()?;
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some('}') => return Ok(()),
+                Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                None => return Err("unterminated json object".into()),
+            }
+        }
+    }
+
+    fn skip_array(&mut self) -> Result<(), String> {
+        self.expect('[')?;
+        self.skip_ws();
+        if self.peek() == Some(']') {
+            self.index += 1;
+            return Ok(());
+        }
+
+        loop {
+            self.skip_value()?;
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some(']') => return Ok(()),
+                Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
+                None => return Err("unterminated json array".into()),
+            }
+        }
+    }
+
+    fn parse_bool(&mut self) -> Result<bool, String> {
+        if self.consume_literal("true") {
+            Ok(true)
+        } else if self.consume_literal("false") {
+            Ok(false)
+        } else {
+            Err("expected json boolean".into())
+        }
+    }
+
+    fn parse_null(&mut self) -> Result<(), String> {
+        if self.consume_literal("null") {
+            Ok(())
+        } else {
+            Err("expected json null".into())
+        }
+    }
+
+    fn parse_number_string(&mut self) -> Result<String, String> {
+        self.skip_ws();
+        let start = self.index;
+        if self.peek() == Some('-') {
+            self.index += 1;
+        }
+
+        match self.peek() {
+            Some('0') => {
+                self.index += 1;
+            }
+            Some('1'..='9') => {
+                self.index += 1;
+                while matches!(self.peek(), Some('0'..='9')) {
+                    self.index += 1;
+                }
+            }
+            _ => return Err("expected json number".into()),
+        }
+
+        if self.peek() == Some('.') {
+            self.index += 1;
+            let mut saw_digit = false;
+            while matches!(self.peek(), Some('0'..='9')) {
+                saw_digit = true;
+                self.index += 1;
+            }
+            if !saw_digit {
+                return Err("expected digits after decimal point".into());
+            }
+        }
+
+        if matches!(self.peek(), Some('e' | 'E')) {
+            self.index += 1;
+            if matches!(self.peek(), Some('+' | '-')) {
+                self.index += 1;
+            }
+            let mut saw_digit = false;
+            while matches!(self.peek(), Some('0'..='9')) {
+                saw_digit = true;
+                self.index += 1;
+            }
+            if !saw_digit {
+                return Err("expected exponent digits".into());
+            }
+        }
+
+        Ok(self.chars[start..self.index].iter().collect())
+    }
+
+    fn parse_string(&mut self) -> Result<String, String> {
+        self.skip_ws();
+        if self.next() != Some('"') {
+            return Err("expected json string".into());
+        }
+
+        let mut out = String::new();
+        loop {
+            match self.next() {
+                Some('"') => return Ok(out),
+                Some('\\') => out.push(self.parse_escape()?),
+                Some(ch) => out.push(ch),
+                None => return Err("unterminated json string".into()),
+            }
+        }
+    }
+
+    fn parse_escape(&mut self) -> Result<char, String> {
+        match self.next() {
+            Some('"') => Ok('"'),
+            Some('\\') => Ok('\\'),
+            Some('/') => Ok('/'),
+            Some('b') => Ok('\u{08}'),
+            Some('f') => Ok('\u{0c}'),
+            Some('n') => Ok('\n'),
+            Some('r') => Ok('\r'),
+            Some('t') => Ok('\t'),
+            Some('u') => {
+                let mut value = 0u32;
+                for _ in 0..4 {
+                    let ch = self
+                        .next()
+                        .ok_or_else(|| "incomplete unicode escape".to_string())?;
+                    value = value * 16
+                        + ch.to_digit(16)
+                            .ok_or_else(|| "invalid unicode escape".to_string())?;
+                }
+                char::from_u32(value).ok_or_else(|| "invalid unicode scalar".into())
+            }
+            Some(ch) => Err(format!("invalid json escape '\\{ch}'")),
+            None => Err("incomplete json escape".into()),
+        }
+    }
+
+    fn consume_literal(&mut self, literal: &str) -> bool {
+        self.skip_ws();
+        let end = self.index + literal.chars().count();
+        if end > self.chars.len() {
+            return false;
+        }
+        if self.chars[self.index..end].iter().copied().eq(literal.chars()) {
+            self.index = end;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expect(&mut self, expected: char) -> Result<(), String> {
+        self.skip_ws();
+        match self.next() {
+            Some(ch) if ch == expected => Ok(()),
+            Some(ch) => Err(format!("expected '{expected}', found '{ch}'")),
+            None => Err(format!("expected '{expected}', found end of input")),
+        }
+    }
+
+    fn skip_ws(&mut self) {
+        while self.peek().is_some_and(char::is_whitespace) {
+            self.index += 1;
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.index).copied()
+    }
+
+    fn next(&mut self) -> Option<char> {
+        let ch = self.peek()?;
+        self.index += 1;
+        Some(ch)
+    }
 }
 
 impl Default for Rules {
@@ -554,6 +1004,92 @@ mod tests {
             crate::mindustry::game::TEAM_SHARDED as i32
         );
         assert_eq!(rules.wave_team, crate::mindustry::game::TEAM_CRUX as i32);
+    }
+
+    #[test]
+    fn rules_apply_json_str_updates_supported_top_level_fields() {
+        let mut rules = Rules::default();
+        rules.mode_name = Some("old".into());
+
+        rules
+            .apply_json_str(
+                r#"{
+                    "waves": true,
+                    "waveTimer": false,
+                    "waveSending": false,
+                    "attackMode": true,
+                    "pvp": true,
+                    "editor": true,
+                    "infiniteResources": true,
+                    "waveSpacing": 7200.5,
+                    "defaultTeam": 6,
+                    "waveTeam": 7,
+                    "modeName": "duel",
+                    "planet": "erekir",
+                    "env": 42,
+                    "teams": {"1": {"infiniteResources": true}},
+                    "spawns": [{"type": "dagger"}]
+                }"#,
+            )
+            .unwrap();
+
+        assert!(rules.waves);
+        assert!(!rules.wave_timer);
+        assert!(!rules.wave_sending);
+        assert!(rules.attack_mode);
+        assert!(rules.pvp);
+        assert!(rules.editor);
+        assert!(rules.infinite_resources);
+        assert_eq!(rules.wave_spacing, 7200.5);
+        assert_eq!(rules.default_team, 6);
+        assert_eq!(rules.wave_team, 7);
+        assert_eq!(rules.mode_name.as_deref(), Some("duel"));
+        assert_eq!(rules.planet, "erekir");
+        assert_eq!(rules.env, 42);
+    }
+
+    #[test]
+    fn rules_apply_json_str_ignores_unknown_and_unsupported_value_shapes() {
+        let mut rules = Rules::default();
+        rules.waves = true;
+        rules.default_team = 3;
+        rules.wave_team = 4;
+        rules.mode_name = Some("keep".into());
+        rules.planet = "serpulo".into();
+        rules.env = 7;
+
+        rules
+            .apply_json_str(
+                r#"{
+                    "waves": {},
+                    "defaultTeam": "blue",
+                    "waveTeam": [],
+                    "modeName": [1, 2, 3],
+                    "planet": null,
+                    "env": {"value": 9},
+                    "unknown": {"nested": [{"deep": true}]}
+                }"#,
+            )
+            .unwrap();
+
+        assert!(rules.waves);
+        assert_eq!(rules.default_team, 3);
+        assert_eq!(rules.wave_team, 4);
+        assert_eq!(rules.mode_name.as_deref(), Some("keep"));
+        assert_eq!(rules.planet, "serpulo");
+        assert_eq!(rules.env, 7);
+    }
+
+    #[test]
+    fn rules_apply_json_str_accepts_null_mode_name_and_rejects_invalid_json() {
+        let mut rules = Rules::default();
+        rules.mode_name = Some("custom".into());
+
+        rules.apply_json_str(r#"{"modeName": null}"#).unwrap();
+        assert_eq!(rules.mode_name, None);
+
+        assert!(rules.apply_json_str("{").is_err());
+        assert!(rules.apply_json_str(r#"{"waves": tru}"#).is_err());
     }
 
     #[test]
