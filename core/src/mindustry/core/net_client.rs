@@ -25,13 +25,13 @@ use crate::mindustry::net::{
     SetFloorCallPacket, SetItemCallPacket, SetItemsCallPacket, SetLiquidCallPacket,
     SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket, SetPositionCallPacket,
     SetRuleCallPacket, SetRulesCallPacket, SetTileBlocksCallPacket, SetTileCallPacket,
-    SetTileFloorsCallPacket, SetTileOverlaysCallPacket, SetUnitCommandCallPacket,
-    SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
-    StreamBuilder, Streamable, TakeItemsCallPacket, TextInputResultCallPacket,
-    TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
-    TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
-    UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-    UnitEnteredPayloadCallPacket,
+    SetTileFloorsCallPacket, SetTileItemsCallPacket, SetTileLiquidsCallPacket,
+    SetTileOverlaysCallPacket, SetUnitCommandCallPacket, SetUnitStanceCallPacket,
+    SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket, StreamBuilder, Streamable,
+    TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
+    TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
+    TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
+    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 use crate::mindustry::world::{BlockId, BuildingRef as WorldBuildingRef, Tile, Tiles};
@@ -79,6 +79,12 @@ pub enum ClientTileBlockKind {
     Block,
     Floor,
     Overlay,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ClientTileStorageMirror {
+    pub items: BTreeMap<String, i32>,
+    pub liquids: BTreeMap<String, f32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1371,6 +1377,15 @@ impl NetClient {
         )
     }
 
+    fn build_pos_by_packed_pos(tiles: &Tiles, pos: i32) -> Option<i32> {
+        tiles
+            .get(
+                crate::mindustry::world::point2_x(pos) as i32,
+                crate::mindustry::world::point2_y(pos) as i32,
+            )
+            .and_then(|tile| tile.build.map(|build| build.tile_pos))
+    }
+
     fn clear_tile_block(tile: &mut Tile) {
         tile.block = Tile::AIR;
         tile.build = None;
@@ -1526,6 +1541,54 @@ impl NetClient {
         };
         Self::clear_tile_block(tile);
         true
+    }
+
+    pub fn apply_set_tile_items_packet(
+        tiles: &Tiles,
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetTileItemsCallPacket,
+    ) -> usize {
+        let Some(item) = packet.item.as_deref() else {
+            return 0;
+        };
+        let mut applied = 0;
+
+        for &pos in &packet.positions {
+            if let Some(build_pos) = Self::build_pos_by_packed_pos(tiles, pos) {
+                storage
+                    .entry(build_pos)
+                    .or_default()
+                    .items
+                    .insert(item.to_string(), packet.amount);
+                applied += 1;
+            }
+        }
+
+        applied
+    }
+
+    pub fn apply_set_tile_liquids_packet(
+        tiles: &Tiles,
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &SetTileLiquidsCallPacket,
+    ) -> usize {
+        let Some(liquid) = packet.liquid.as_deref() else {
+            return 0;
+        };
+        let mut applied = 0;
+
+        for &pos in &packet.positions {
+            if let Some(build_pos) = Self::build_pos_by_packed_pos(tiles, pos) {
+                storage
+                    .entry(build_pos)
+                    .or_default()
+                    .liquids
+                    .insert(liquid.to_string(), packet.amount);
+                applied += 1;
+            }
+        }
+
+        applied
     }
 
     pub fn apply_set_floor_packet<F>(
@@ -2500,6 +2563,7 @@ impl NetClient {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::io;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
@@ -2531,22 +2595,23 @@ mod tests {
         SetFloorCallPacket, SetHudTextCallPacket, SetItemCallPacket, SetItemsCallPacket,
         SetLiquidCallPacket, SetLiquidsCallPacket, SetObjectivesCallPacket, SetOverlayCallPacket,
         SetPositionCallPacket, SetRuleCallPacket, SetRulesCallPacket, SetTileBlocksCallPacket,
-        SetTileCallPacket, SetTileFloorsCallPacket, SetTileOverlaysCallPacket,
-        SetUnitCommandCallPacket, SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket,
-        StateSnapshotCallPacket, StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket,
-        TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket,
-        TransferInventoryCallPacket, TransferItemEffectCallPacket, TransferItemToCallPacket,
-        TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket, UnitClearCallPacket,
-        UnitControlCallPacket, UnitDeathCallPacket, UnitEnteredPayloadCallPacket,
-        WarningToastCallPacket, WorldDataBeginCallPacket,
+        SetTileCallPacket, SetTileFloorsCallPacket, SetTileItemsCallPacket,
+        SetTileLiquidsCallPacket, SetTileOverlaysCallPacket, SetUnitCommandCallPacket,
+        SetUnitStanceCallPacket, SoundAtCallPacket, SoundCallPacket, StateSnapshotCallPacket,
+        StreamBegin, StreamChunk, Streamable, TakeItemsCallPacket, TextInputResultCallPacket,
+        TileConfigCallPacket, TileTapCallPacket, TraceInfoCallPacket, TransferInventoryCallPacket,
+        TransferItemEffectCallPacket, TransferItemToCallPacket, TransferItemToUnitCallPacket,
+        UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
+        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, WarningToastCallPacket,
+        WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
     use crate::mindustry::world::{point2_pack, Tile, Tiles};
 
     use super::{
-        ClientCameraView, ClientConnectConfig, ClientInputSnapshot, ClientTileBlockKind, NetClient,
-        CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
+        ClientCameraView, ClientConnectConfig, ClientInputSnapshot, ClientTileBlockKind,
+        ClientTileStorageMirror, NetClient, CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -3406,6 +3471,94 @@ mod tests {
         )
         .unwrap_err()
         .contains("unknown block"));
+    }
+
+    #[test]
+    fn apply_set_tile_items_and_liquids_packets_updates_storage_mirror() {
+        let mut tiles = Tiles::new(4, 4);
+        let center = point2_pack(1, 1);
+        let proxy = point2_pack(2, 1);
+        let empty = point2_pack(0, 0);
+        let out_of_bounds = point2_pack(9, 9);
+
+        NetClient::apply_set_tile_packet(
+            &mut tiles,
+            &SetTileCallPacket {
+                tile: Some(center),
+                block: Some("router".into()),
+                team: TeamId(2),
+                rotation: 0,
+            },
+            |name| match name {
+                "router" => Some(10),
+                _ => None,
+            },
+        )
+        .unwrap();
+        let build = tiles.get(1, 1).unwrap().build.unwrap();
+        tiles.get_mut(2, 1).unwrap().build = Some(build);
+
+        let mut storage = BTreeMap::<i32, ClientTileStorageMirror>::new();
+        assert_eq!(
+            NetClient::apply_set_tile_items_packet(
+                &tiles,
+                &mut storage,
+                &SetTileItemsCallPacket {
+                    item: Some("copper".into()),
+                    amount: 12,
+                    positions: vec![center, proxy, empty, out_of_bounds],
+                },
+            ),
+            2
+        );
+        assert_eq!(storage.get(&center).unwrap().items.get("copper"), Some(&12));
+
+        assert_eq!(
+            NetClient::apply_set_tile_liquids_packet(
+                &tiles,
+                &mut storage,
+                &SetTileLiquidsCallPacket {
+                    liquid: Some("water".into()),
+                    amount: 6.5,
+                    positions: vec![proxy, empty],
+                },
+            ),
+            1
+        );
+        assert_eq!(
+            storage.get(&center).unwrap().liquids.get("water"),
+            Some(&6.5)
+        );
+
+        assert_eq!(
+            NetClient::apply_set_tile_items_packet(
+                &tiles,
+                &mut storage,
+                &SetTileItemsCallPacket {
+                    item: None,
+                    amount: 99,
+                    positions: vec![center],
+                },
+            ),
+            0
+        );
+        assert_eq!(storage.get(&center).unwrap().items.get("copper"), Some(&12));
+        assert_eq!(
+            NetClient::apply_set_tile_liquids_packet(
+                &tiles,
+                &mut storage,
+                &SetTileLiquidsCallPacket {
+                    liquid: None,
+                    amount: 99.0,
+                    positions: vec![center],
+                },
+            ),
+            0
+        );
+        assert_eq!(
+            storage.get(&center).unwrap().liquids.get("water"),
+            Some(&6.5)
+        );
     }
 
     #[test]
