@@ -8,7 +8,9 @@ use mindustry_core::mindustry::game::BlockPlan;
 use mindustry_core::mindustry::io::{
     ContentHeaderSnapshot, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue,
 };
-use mindustry_core::mindustry::net::{ArcNetProvider, Net, NetworkPlayerData};
+use mindustry_core::mindustry::net::{
+    ArcNetProvider, Net, NetworkPlayerData, StateSnapshotCallPacket,
+};
 use mindustry_core::mindustry::vars::AppContext;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
@@ -30,6 +32,7 @@ pub struct DesktopLauncher {
     pub args: Vec<String>,
     content_loader: ContentLoader,
     last_applied_world_data: Option<mindustry_core::mindustry::net::NetworkWorldData>,
+    last_applied_state_snapshot: Option<StateSnapshotCallPacket>,
 }
 
 impl DesktopLauncher {
@@ -45,6 +48,7 @@ impl DesktopLauncher {
             args,
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_applied_world_data: None,
+            last_applied_state_snapshot: None,
         }
     }
 
@@ -52,6 +56,7 @@ impl DesktopLauncher {
         self.client.update();
         self.net_client.update();
         self.sync_loaded_world_data();
+        self.sync_state_snapshot();
     }
 
     pub fn connect_from_args(&mut self) {
@@ -92,16 +97,41 @@ impl DesktopLauncher {
                 self.game_state.apply_network_world_data(world_data);
                 self.apply_network_player_data(world_data.player_id, world_data.player.as_ref());
                 self.apply_network_team_blocks(world_data.team_blocks_snapshot.as_ref());
+                self.last_applied_state_snapshot = None;
             }
             None => {
                 if self.last_applied_world_data.is_some() {
                     self.game_state = GameState::new();
                     self.player = PlayerComp::default();
                     self.content_loader.clear_temporary_mapper();
+                    self.last_applied_state_snapshot = None;
                 }
             }
         }
         self.last_applied_world_data = loaded_world_data;
+    }
+
+    fn sync_state_snapshot(&mut self) {
+        if self.last_applied_world_data.is_none() {
+            return;
+        }
+
+        let state_snapshot = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.last_state_snapshot.clone()
+        };
+
+        let Some(snapshot) = state_snapshot else {
+            return;
+        };
+
+        if self.last_applied_state_snapshot.as_ref() == Some(&snapshot) {
+            return;
+        }
+
+        self.game_state.apply_state_snapshot(&snapshot);
+        self.last_applied_state_snapshot = Some(snapshot);
     }
 
     fn apply_network_content_header(&mut self, snapshot: Option<&ContentHeaderSnapshot>) {
@@ -279,14 +309,16 @@ mod tests {
         LegacyShortChunkMap,
     };
     use mindustry_core::mindustry::ctype::ContentId;
-    use mindustry_core::mindustry::net::{NetworkPlayerData, NetworkWorldData};
+    use mindustry_core::mindustry::net::{
+        NetworkPlayerData, NetworkWorldData, StateSnapshotCallPacket,
+    };
     use mindustry_core::mindustry::net::{
         packet_ids, ConnectPacket, PacketEnvelope, PacketKind, PacketSerializer,
     };
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::{
         entities::PlayerComp,
-        game::BlockPlan,
+        game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::{
             LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue,
             UnitRef,
@@ -370,6 +402,34 @@ mod tests {
                 }],
             }),
             ..NetworkWorldData::default()
+        }
+    }
+
+    fn sample_state_snapshot() -> StateSnapshotCallPacket {
+        let mut core_data = Vec::new();
+        core_data.push(2);
+        core_data.push(TEAM_SHARDED);
+        core_data.extend_from_slice(&2i16.to_be_bytes());
+        core_data.extend_from_slice(&0i16.to_be_bytes());
+        core_data.extend_from_slice(&75i32.to_be_bytes());
+        core_data.extend_from_slice(&3i16.to_be_bytes());
+        core_data.extend_from_slice(&12i32.to_be_bytes());
+        core_data.push(TEAM_CRUX);
+        core_data.extend_from_slice(&1i16.to_be_bytes());
+        core_data.extend_from_slice(&1i16.to_be_bytes());
+        core_data.extend_from_slice(&5i32.to_be_bytes());
+
+        StateSnapshotCallPacket {
+            wave_time: 12.5,
+            wave: 9,
+            enemies: 17,
+            paused: true,
+            game_over: true,
+            time_data: 456,
+            tps: 255,
+            rand0: 11,
+            rand1: 22,
+            core_data,
         }
     }
 
@@ -510,6 +570,45 @@ mod tests {
         assert_eq!(
             launcher.player.last_command,
             launcher.content_loader.unit_command(last_command_id).cloned()
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_applies_state_snapshot_to_runtime_game_state() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        let snapshot = sample_state_snapshot();
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+            state.last_state_snapshot = Some(snapshot.clone());
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.game_state.wavetime, snapshot.wave_time);
+        assert_eq!(launcher.game_state.wave, snapshot.wave);
+        assert_eq!(launcher.game_state.enemies, snapshot.enemies);
+        assert_eq!(launcher.game_state.game_over, snapshot.game_over);
+        assert_eq!(launcher.game_state.server_tps, snapshot.tps as i32);
+        assert_eq!(launcher.game_state.rand_seed0, snapshot.rand0);
+        assert_eq!(launcher.game_state.rand_seed1, snapshot.rand1);
+        assert_eq!(launcher.game_state.universe.seconds(true), snapshot.time_data);
+        assert!(launcher.game_state.is_menu());
+        assert_eq!(
+            launcher.game_state
+                .teams
+                .get_or_null(TEAM_SHARDED)
+                .unwrap()
+                .core_items,
+            BTreeMap::from([(0, 75), (3, 12)])
+        );
+        assert_eq!(
+            launcher.game_state.teams.get_or_null(TEAM_CRUX).unwrap().core_items,
+            BTreeMap::from([(1, 5)])
         );
     }
 
