@@ -1,6 +1,10 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
-use mindustry_core::mindustry::core::{ClientConnectConfig, GameState, NetClient};
-use mindustry_core::mindustry::net::{ArcNetProvider, Net};
+use mindustry_core::mindustry::core::{
+    content_loader::ContentLoader, ClientConnectConfig, GameState, NetClient,
+};
+use mindustry_core::mindustry::entities::PlayerComp;
+use mindustry_core::mindustry::io::TeamId;
+use mindustry_core::mindustry::net::{ArcNetProvider, Net, NetworkPlayerData};
 use mindustry_core::mindustry::vars::AppContext;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 
@@ -15,9 +19,11 @@ pub struct DesktopLauncher {
     pub client: ClientLauncher,
     pub net_client: NetClient,
     pub game_state: GameState,
+    pub player: PlayerComp,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
+    content_loader: ContentLoader,
     last_applied_world_data: Option<mindustry_core::mindustry::net::NetworkWorldData>,
 }
 
@@ -28,9 +34,11 @@ impl DesktopLauncher {
             client: ClientLauncher::new(AppContext::new("data")),
             net_client: NetClient::with_net(Net::new(Box::new(ArcNetProvider::new()))),
             game_state: GameState::new(),
+            player: PlayerComp::default(),
             connect_target,
             connect_error: None,
             args,
+            content_loader: ContentLoader::create_base_content_or_panic(),
             last_applied_world_data: None,
         }
     }
@@ -76,14 +84,39 @@ impl DesktopLauncher {
                     return;
                 }
                 self.game_state.apply_network_world_data(world_data);
+                self.apply_network_player_data(world_data.player.as_ref());
             }
             None => {
                 if self.last_applied_world_data.is_some() {
                     self.game_state = GameState::new();
+                    self.player = PlayerComp::default();
                 }
             }
         }
         self.last_applied_world_data = loaded_world_data;
+    }
+
+    fn apply_network_player_data(&mut self, player_data: Option<&NetworkPlayerData>) {
+        let Some(player_data) = player_data else {
+            self.player = PlayerComp::default();
+            return;
+        };
+
+        self.player
+            .reset(TeamId(self.game_state.rules.default_team as u8));
+        self.player.apply_network_player_data(player_data);
+        let selected_block = player_data
+            .selected_block_id
+            .and_then(|block_id| {
+                self.content_loader
+                    .block(block_id)
+                    .map(|block| block.base().clone())
+            });
+        let last_command = player_data
+            .last_command_id
+            .and_then(|command_id| self.content_loader.unit_command(command_id).cloned());
+        self.player.selected_block = selected_block;
+        self.player.last_command = last_command;
     }
 }
 
@@ -131,11 +164,16 @@ mod tests {
     use mindustry_core::mindustry::io::{
         LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap,
     };
-    use mindustry_core::mindustry::net::NetworkWorldData;
+    use mindustry_core::mindustry::ctype::ContentId;
+    use mindustry_core::mindustry::net::{NetworkPlayerData, NetworkWorldData};
     use mindustry_core::mindustry::net::{
         packet_ids, ConnectPacket, PacketEnvelope, PacketKind, PacketSerializer,
     };
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
+    use mindustry_core::mindustry::{
+        entities::PlayerComp,
+        io::{TeamId, UnitRef},
+    };
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
 
@@ -148,6 +186,70 @@ mod tests {
             }
         }
         panic!("could not reserve a local TCP/UDP port pair");
+    }
+
+    fn sample_network_player_data(
+        selected_block_id: Option<ContentId>,
+        last_command_id: Option<ContentId>,
+    ) -> NetworkPlayerData {
+        NetworkPlayerData {
+            revision: 2,
+            admin: true,
+            boosting: true,
+            color: 0x11_22_33_44,
+            last_command_id,
+            mouse_x: 12.5,
+            mouse_y: -6.25,
+            name: Some("pilot".into()),
+            selected_block_id,
+            selected_rotation: 3,
+            shooting: true,
+            team: TeamId(6),
+            typing: true,
+            unit: UnitRef::Block { tile_pos: 42 },
+            x: 100.0,
+            y: 200.0,
+        }
+    }
+
+    fn sample_network_world_data(player: Option<NetworkPlayerData>) -> NetworkWorldData {
+        let mut map_tags = BTreeMap::new();
+        map_tags.insert("name".into(), "Network Map".into());
+        map_tags.insert("build".into(), "157".into());
+        map_tags.insert("version".into(), "11".into());
+
+        NetworkWorldData {
+            map_locales_json: r#"{"en":{"name":"Network Map"}}"#.into(),
+            map_tags,
+            wave: 12,
+            wave_time: 30.5,
+            tick: 99.25,
+            player,
+            map_snapshot: Some(LegacyShortChunkMap {
+                width: 3,
+                height: 2,
+                floors: vec![LegacyMapFloorRecord {
+                    index: 0,
+                    floor_id: 1,
+                    ore_id: 0,
+                    consecutives: 5,
+                }],
+                blocks: vec![LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: 0,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 5,
+                }],
+            }),
+            ..NetworkWorldData::default()
+        }
     }
 
     #[test]
@@ -180,45 +282,26 @@ mod tests {
     }
 
     #[test]
-    fn desktop_launcher_applies_loaded_world_data_to_game_state_world() {
+    fn desktop_launcher_applies_loaded_world_data_to_game_state_world_and_player() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        let selected_block_id = launcher
+            .content_loader
+            .block(0)
+            .expect("base content should include block 0")
+            .base()
+            .id;
+        let last_command_id = launcher
+            .content_loader
+            .unit_command(0)
+            .expect("base content should include command 0")
+            .base
+            .base
+            .id;
 
-        let mut map_tags = BTreeMap::new();
-        map_tags.insert("name".into(), "Network Map".into());
-        map_tags.insert("build".into(), "157".into());
-        map_tags.insert("version".into(), "11".into());
-
-        let world_data = NetworkWorldData {
-            map_locales_json: r#"{"en":{"name":"Network Map"}}"#.into(),
-            map_tags,
-            wave: 12,
-            wave_time: 30.5,
-            tick: 99.25,
-            map_snapshot: Some(LegacyShortChunkMap {
-                width: 3,
-                height: 2,
-                floors: vec![LegacyMapFloorRecord {
-                    index: 0,
-                    floor_id: 1,
-                    ore_id: 0,
-                    consecutives: 5,
-                }],
-                blocks: vec![LegacyMapBlockRecord {
-                    index: 0,
-                    block_id: 0,
-                    packed_flags: 0,
-                    has_entity: false,
-                    has_old_data: false,
-                    has_new_data: false,
-                    is_center: true,
-                    new_data: None,
-                    old_data: None,
-                    building: None,
-                    consecutives: 5,
-                }],
-            }),
-            ..NetworkWorldData::default()
-        };
+        let world_data = sample_network_world_data(Some(sample_network_player_data(
+            Some(selected_block_id),
+            Some(last_command_id),
+        )));
 
         {
             let state = launcher.net_client.state();
@@ -240,48 +323,51 @@ mod tests {
                 WorldLoadEventKind::Loaded,
             ]
         );
+        assert!(launcher.player.admin);
+        assert!(launcher.player.boosting);
+        assert_eq!(launcher.player.color, 0x11_22_33_44);
+        assert_eq!(launcher.player.mouse_x, 12.5);
+        assert_eq!(launcher.player.mouse_y, -6.25);
+        assert_eq!(launcher.player.name, "pilot");
+        assert_eq!(launcher.player.selected_rotation, 3);
+        assert!(launcher.player.shooting);
+        assert_eq!(launcher.player.team, TeamId(6));
+        assert!(launcher.player.typing);
+        assert_eq!(launcher.player.unit_ref(), Some(UnitRef::Block { tile_pos: 42 }));
+        assert_eq!(
+            launcher.player.selected_block,
+            launcher
+                .content_loader
+                .block(selected_block_id)
+                .map(|block| block.base().clone())
+        );
+        assert_eq!(
+            launcher.player.last_command,
+            launcher.content_loader.unit_command(last_command_id).cloned()
+        );
     }
 
     #[test]
-    fn desktop_launcher_resets_game_state_when_world_data_clears() {
+    fn desktop_launcher_resets_game_state_and_player_when_world_data_clears() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        let selected_block_id = launcher
+            .content_loader
+            .block(0)
+            .expect("base content should include block 0")
+            .base()
+            .id;
+        let last_command_id = launcher
+            .content_loader
+            .unit_command(0)
+            .expect("base content should include command 0")
+            .base
+            .base
+            .id;
 
-        let mut map_tags = BTreeMap::new();
-        map_tags.insert("name".into(), "Network Map".into());
-        map_tags.insert("build".into(), "157".into());
-        map_tags.insert("version".into(), "11".into());
-
-        let world_data = NetworkWorldData {
-            map_locales_json: r#"{"en":{"name":"Network Map"}}"#.into(),
-            map_tags,
-            wave: 12,
-            wave_time: 30.5,
-            tick: 99.25,
-            map_snapshot: Some(LegacyShortChunkMap {
-                width: 3,
-                height: 2,
-                floors: vec![LegacyMapFloorRecord {
-                    index: 0,
-                    floor_id: 1,
-                    ore_id: 0,
-                    consecutives: 5,
-                }],
-                blocks: vec![LegacyMapBlockRecord {
-                    index: 0,
-                    block_id: 0,
-                    packed_flags: 0,
-                    has_entity: false,
-                    has_old_data: false,
-                    has_new_data: false,
-                    is_center: true,
-                    new_data: None,
-                    old_data: None,
-                    building: None,
-                    consecutives: 5,
-                }],
-            }),
-            ..NetworkWorldData::default()
-        };
+        let world_data = sample_network_world_data(Some(sample_network_player_data(
+            Some(selected_block_id),
+            Some(last_command_id),
+        )));
 
         {
             let state = launcher.net_client.state();
@@ -292,6 +378,17 @@ mod tests {
 
         launcher.update();
         assert_eq!(launcher.game_state.world.width(), 3);
+        assert_eq!(
+            launcher.player.selected_block,
+            launcher
+                .content_loader
+                .block(selected_block_id)
+                .map(|block| block.base().clone())
+        );
+        assert_eq!(
+            launcher.player.last_command,
+            launcher.content_loader.unit_command(last_command_id).cloned()
+        );
 
         {
             let state = launcher.net_client.state();
@@ -306,6 +403,35 @@ mod tests {
         assert_eq!(launcher.game_state.world.width(), 0);
         assert_eq!(launcher.game_state.world.height(), 0);
         assert!(launcher.game_state.world.load_events().is_empty());
+        assert_eq!(launcher.player, PlayerComp::default());
+    }
+
+    #[test]
+    fn desktop_launcher_resets_player_when_world_data_has_no_player_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.player.selected_block = Some(
+            launcher
+                .content_loader
+                .block(0)
+                .expect("base content should include block 0")
+                .base()
+                .clone(),
+        );
+        launcher.player.last_command = launcher.content_loader.unit_command(0).cloned();
+
+        let mut world_data = sample_network_world_data(None);
+        world_data.tick = 123.0;
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.player, PlayerComp::default());
     }
 
     #[test]
