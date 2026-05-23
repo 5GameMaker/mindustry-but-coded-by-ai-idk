@@ -9,7 +9,7 @@ use crate::mindustry::ai::unit_command::UnitCommand;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::{CoreInfo, TEAM_SHARDED};
 use crate::mindustry::io::{TeamId, UnitRef};
-use crate::mindustry::net::NetConnection;
+use crate::mindustry::net::{NetConnection, NetworkPlayerData};
 use crate::mindustry::world::block::Block;
 
 const PREVIEW_PLAN_COMMIT_DELAY_MS: i64 = 100;
@@ -191,6 +191,34 @@ impl PlayerComp {
 
     pub fn unit_ref(&self) -> Option<UnitRef> {
         self.unit.map(|unit| unit.reference)
+    }
+
+    pub fn apply_network_player_data(&mut self, data: &NetworkPlayerData) {
+        self.admin = data.admin;
+        self.boosting = data.boosting;
+        self.color = data.color as u32;
+        self.mouse_x = data.mouse_x;
+        self.mouse_y = data.mouse_y;
+
+        if let Some(name) = &data.name {
+            self.name = name.clone();
+        }
+
+        self.selected_rotation = data.selected_rotation;
+        self.shooting = data.shooting;
+        self.team = data.team;
+        self.typing = data.typing;
+        self.x = data.x;
+        self.y = data.y;
+
+        match data.unit {
+            UnitRef::Null => self.clear_unit(),
+            UnitRef::Block { tile_pos } => self.set_unit_state(PlayerUnitState::block(tile_pos)),
+            UnitRef::Unit { id } => self.set_unit_state(PlayerUnitState::unit(id)),
+        }
+
+        let _ = data.selected_block_id;
+        let _ = data.last_command_id;
     }
 
     pub fn set_unit_state(&mut self, unit: PlayerUnitState) {
@@ -541,6 +569,61 @@ mod tests {
         assert!(player.display_ammo(true));
         assert!(player.is_pinging());
         assert_eq!(player.unit_ref(), Some(UnitRef::Block { tile_pos: 42 }));
+    }
+
+    #[test]
+    fn apply_network_player_data_syncs_basic_fields_and_unit_reference() {
+        let mut player = PlayerComp::default();
+        player.name = "old-name".into();
+        player.selected_block = Some(Block::new(1, "duo"));
+
+        let data = NetworkPlayerData {
+            revision: 2,
+            admin: true,
+            boosting: true,
+            color: 0x11_22_33_44,
+            last_command_id: Some(7),
+            mouse_x: 12.5,
+            mouse_y: -6.25,
+            name: Some("pilot".into()),
+            selected_block_id: Some(99),
+            selected_rotation: 3,
+            shooting: true,
+            team: TeamId(6),
+            typing: true,
+            unit: UnitRef::Block { tile_pos: 42 },
+            x: 100.0,
+            y: 200.0,
+        };
+
+        player.apply_network_player_data(&data);
+
+        assert!(player.admin);
+        assert!(player.boosting);
+        assert_eq!(player.color, 0x11_22_33_44);
+        assert_eq!(player.mouse_x, 12.5);
+        assert_eq!(player.mouse_y, -6.25);
+        assert_eq!(player.name, "pilot");
+        assert_eq!(player.selected_rotation, 3);
+        assert!(player.shooting);
+        assert_eq!(player.team, TeamId(6));
+        assert!(player.typing);
+        assert_eq!((player.x, player.y), (100.0, 200.0));
+        assert_eq!(player.unit_ref(), Some(UnitRef::Block { tile_pos: 42 }));
+        assert!(player.selected_block.is_some());
+
+        let mut follow_up = data.clone();
+        follow_up.name = None;
+        follow_up.unit = UnitRef::Null;
+        follow_up.x = 120.0;
+        follow_up.y = 220.0;
+
+        player.apply_network_player_data(&follow_up);
+
+        assert_eq!(player.name, "pilot");
+        assert_eq!((player.x, player.y), (120.0, 220.0));
+        assert_eq!(player.unit_ref(), None);
+        assert!(player.selected_block.is_some());
     }
 
     #[test]
