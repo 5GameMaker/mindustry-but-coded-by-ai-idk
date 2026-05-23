@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use crate::mindustry::{
+    core::World,
     game::{GameStats, MapMarkers, Rules, Teams},
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
@@ -115,6 +116,8 @@ pub struct GameState {
     pub server_tps: i32,
     /// Map that is currently being played on.
     pub map: MapDescriptor,
+    /// Runtime world tiles/load lifecycle.
+    pub world: World,
     /// The current game rules.
     pub rules: Rules,
     /// Statistics for this save/game. Displayed after game over.
@@ -164,6 +167,7 @@ impl GameState {
             won: false,
             server_tps: -1,
             map: empty_map_descriptor(),
+            world: World::new(),
             rules,
             stats: GameStats::default(),
             markers: MapMarkers::default(),
@@ -335,6 +339,10 @@ impl GameState {
             map_build,
         );
 
+        if let Some(map_snapshot) = world_data.map_snapshot.as_ref() {
+            self.world.load_network_map(map_snapshot);
+        }
+
         let map_locales_error = match MapLocales::from_json_str(&world_data.map_locales_json) {
             Ok(locales) => {
                 self.map_locales = locales;
@@ -403,6 +411,9 @@ mod tests {
         assert!(state.is_menu());
         assert!(!state.is_game());
         assert_eq!(state.map.name(), "empty");
+        assert_eq!(state.world.width(), 0);
+        assert_eq!(state.world.height(), 0);
+        assert!(state.world.load_events().is_empty());
         assert_eq!(state.rules.planet, "serpulo");
         assert_eq!(state.get_planet_name(), Some("serpulo"));
         assert!(state.stats.placed_block_count.is_empty());
@@ -469,6 +480,16 @@ mod tests {
         assert_eq!(state.map.height, 2);
         assert_eq!(state.map.version, 11);
         assert_eq!(state.map.build, 157);
+        assert_eq!(state.world.width(), 3);
+        assert_eq!(state.world.height(), 2);
+        assert_eq!(
+            state.world.load_events(),
+            &[
+                crate::mindustry::core::WorldLoadEventKind::Begin,
+                crate::mindustry::core::WorldLoadEventKind::End,
+                crate::mindustry::core::WorldLoadEventKind::Loaded,
+            ]
+        );
         assert_eq!(state.map_locales.locales["en"]["name"], "Network Map");
         assert_eq!(state.patcher.patches, vec!["one", "two"]);
         assert_eq!(
