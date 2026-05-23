@@ -2,12 +2,16 @@ use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameState, NetClient,
 };
+use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::PlayerComp;
 use mindustry_core::mindustry::game::BlockPlan;
-use mindustry_core::mindustry::io::{LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue};
+use mindustry_core::mindustry::io::{
+    ContentHeaderSnapshot, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue,
+};
 use mindustry_core::mindustry::net::{ArcNetProvider, Net, NetworkPlayerData};
 use mindustry_core::mindustry::vars::AppContext;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopConnectTarget {
@@ -84,6 +88,7 @@ impl DesktopLauncher {
                 if loaded_world_data.as_ref() == self.last_applied_world_data.as_ref() {
                     return;
                 }
+                self.apply_network_content_header(world_data.content_header_snapshot.as_ref());
                 self.game_state.apply_network_world_data(world_data);
                 self.apply_network_player_data(world_data.player.as_ref());
                 self.apply_network_team_blocks(world_data.team_blocks_snapshot.as_ref());
@@ -92,10 +97,27 @@ impl DesktopLauncher {
                 if self.last_applied_world_data.is_some() {
                     self.game_state = GameState::new();
                     self.player = PlayerComp::default();
+                    self.content_loader.clear_temporary_mapper();
                 }
             }
         }
         self.last_applied_world_data = loaded_world_data;
+    }
+
+    fn apply_network_content_header(&mut self, snapshot: Option<&ContentHeaderSnapshot>) {
+        let Some(snapshot) = snapshot else {
+            self.content_loader.clear_temporary_mapper();
+            return;
+        };
+
+        let block_name_fallback = BTreeMap::new();
+        if self
+            .content_loader
+            .read_content_header(snapshot, &block_name_fallback)
+            .is_err()
+        {
+            self.content_loader.clear_temporary_mapper();
+        }
     }
 
     fn apply_network_player_data(&mut self, player_data: Option<&NetworkPlayerData>) {
@@ -107,16 +129,19 @@ impl DesktopLauncher {
         self.player
             .reset(TeamId(self.game_state.rules.default_team as u8));
         self.player.apply_network_player_data(player_data);
-        let selected_block = player_data
-            .selected_block_id
-            .and_then(|block_id| {
+        let selected_block = player_data.selected_block_id.and_then(|block_id| {
+            self.mapped_block_name(block_id).and_then(|name| {
                 self.content_loader
-                    .block(block_id)
+                    .block_by_name(name)
                     .map(|block| block.base().clone())
-            });
+            })
+        });
         let last_command = player_data
             .last_command_id
-            .and_then(|command_id| self.content_loader.unit_command(command_id).cloned());
+            .and_then(|command_id| {
+                self.mapped_unit_command_name(command_id)
+                    .and_then(|name| self.content_loader.unit_command_by_name(name).cloned())
+            });
         self.player.selected_block = selected_block;
         self.player.last_command = last_command;
     }
@@ -145,7 +170,7 @@ impl DesktopLauncher {
     }
 
     fn legacy_team_block_plan(&self, plan: &LegacyTeamBlockPlan) -> Option<BlockPlan> {
-        let block = self.content_loader.block(plan.block_id)?.base().name.clone();
+        let block = self.mapped_block_name(plan.block_id)?.to_string();
         Some(BlockPlan {
             x: plan.x,
             y: plan.y,
@@ -154,6 +179,18 @@ impl DesktopLauncher {
             config: self.legacy_team_block_config(&plan.config),
             removed: false,
         })
+    }
+
+    fn mapped_block_name(&self, block_id: ContentId) -> Option<&str> {
+        self.content_loader
+            .get_by_id(ContentType::Block, block_id)
+            .and_then(|content| content.name())
+    }
+
+    fn mapped_unit_command_name(&self, command_id: ContentId) -> Option<&str> {
+        self.content_loader
+            .get_by_id(ContentType::UnitCommand, command_id)
+            .and_then(|content| content.name())
     }
 
     fn legacy_team_block_config(&self, config: &TypeValue) -> Option<String> {
@@ -177,9 +214,8 @@ impl DesktopLauncher {
             TypeValue::Vec2(value) => Some(format!("{},{}", value.x, value.y)),
             TypeValue::Team(value) => Some(value.to_string()),
             TypeValue::UnitCommand(value) => self
-                .content_loader
-                .unit_command(*value)
-                .map(|command| command.name().to_string())
+                .mapped_unit_command_name(*value)
+                .map(str::to_string)
                 .or_else(|| Some(value.to_string())),
             TypeValue::IntSeq(values) | TypeValue::IntArray(values) => Some(format!("{values:?}")),
             TypeValue::ByteArray(values) => Some(format!("{values:?}")),
@@ -232,8 +268,10 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{run, DesktopLauncher};
     use mindustry_core::mindustry::core::WorldLoadEventKind;
+    use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::io::{
-        LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap,
+        ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
+        LegacyShortChunkMap,
     };
     use mindustry_core::mindustry::ctype::ContentId;
     use mindustry_core::mindustry::net::{NetworkPlayerData, NetworkWorldData};
@@ -348,6 +386,24 @@ mod tests {
                     },
                 ],
             }],
+        }
+    }
+
+    fn sample_content_header_snapshot(
+        block_name: &str,
+        unit_command_name: &str,
+    ) -> ContentHeaderSnapshot {
+        ContentHeaderSnapshot {
+            entries: vec![
+                ContentHeaderEntry {
+                    content_type: ContentType::Block.ordinal(),
+                    names: vec![block_name.into()],
+                },
+                ContentHeaderEntry {
+                    content_type: ContentType::UnitCommand.ordinal(),
+                    names: vec![unit_command_name.into()],
+                },
+            ],
         }
     }
 
@@ -478,6 +534,52 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_uses_content_header_snapshot_to_map_remote_ids() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let router_block = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router")
+            .base()
+            .clone();
+        let mapped_command = launcher
+            .content_loader
+            .unit_commands()
+            .iter()
+            .find(|command| command.base.base.id != 0)
+            .expect("base content should include a non-zero unit command")
+            .clone();
+
+        let mut world_data =
+            sample_network_world_data(Some(sample_network_player_data(Some(0), Some(0))));
+        world_data.content_header_snapshot = Some(sample_content_header_snapshot(
+            router_block.name.as_str(),
+            mapped_command.name(),
+        ));
+        world_data.team_blocks_snapshot = Some(sample_team_blocks(0));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.player.selected_block, Some(router_block));
+        assert_eq!(launcher.player.last_command, Some(mapped_command));
+        assert_eq!(
+            launcher.game_state.teams.get_or_null(7).unwrap().plans,
+            vec![
+                BlockPlan::new(5, 6, 1, "router", Some("cfg".into())),
+                BlockPlan::new(7, 8, 2, "router", Some("9".into())),
+            ]
+        );
+        assert!(launcher.content_loader.temporary_mapper().is_some());
+    }
+
+    #[test]
     fn desktop_launcher_clears_runtime_team_plans_when_snapshot_has_no_team_blocks() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let router_block_id = launcher
@@ -520,6 +622,64 @@ mod tests {
                 .unwrap()
                 .plans
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_clears_temporary_content_mapper_when_header_snapshot_disappears() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let router_block = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router")
+            .base()
+            .clone();
+        let mapped_command = launcher
+            .content_loader
+            .unit_commands()
+            .iter()
+            .find(|command| command.base.base.id != 0)
+            .expect("base content should include a non-zero unit command")
+            .clone();
+
+        let mut first =
+            sample_network_world_data(Some(sample_network_player_data(Some(0), Some(0))));
+        first.content_header_snapshot = Some(sample_content_header_snapshot(
+            router_block.name.as_str(),
+            mapped_command.name(),
+        ));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(first);
+        }
+
+        launcher.update();
+        assert!(launcher.content_loader.temporary_mapper().is_some());
+
+        let mut second =
+            sample_network_world_data(Some(sample_network_player_data(Some(0), Some(0))));
+        second.tick = 100.25;
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(second);
+        }
+
+        launcher.update();
+
+        assert!(launcher.content_loader.temporary_mapper().is_none());
+        assert_eq!(
+            launcher.player.selected_block,
+            launcher.content_loader.block(0).map(|block| block.base().clone())
+        );
+        assert_eq!(
+            launcher.player.last_command,
+            launcher.content_loader.unit_command(0).cloned()
         );
     }
 
