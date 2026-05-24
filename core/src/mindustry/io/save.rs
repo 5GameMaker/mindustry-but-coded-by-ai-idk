@@ -454,6 +454,31 @@ impl RawSaveEnvelope {
         entry.payload = payload;
         Ok(())
     }
+
+    pub fn set_markers_from_map_markers(&mut self, markers: &MapMarkers) -> io::Result<()> {
+        self.set(
+            SaveRegion::Markers,
+            marker_region_bytes_from_map_markers(markers)?,
+        )
+    }
+
+    pub fn markers_as_map_markers(&self) -> io::Result<Option<MapMarkers>> {
+        self.get(SaveRegion::Markers)
+            .map(parse_marker_region_bytes)
+            .transpose()
+    }
+
+    pub fn set_custom_chunks(&mut self, chunks: &CustomChunkSet) -> io::Result<()> {
+        let mut bytes = Vec::new();
+        write_custom_chunks(&mut bytes, chunks)?;
+        self.set(SaveRegion::Custom, bytes)
+    }
+
+    pub fn custom_chunks(&self) -> io::Result<Option<CustomChunkSet>> {
+        self.get(SaveRegion::Custom)
+            .map(|payload| read_custom_chunks(&mut payload.as_ref()))
+            .transpose()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1809,6 +1834,47 @@ mod tests {
                 SaveRegion::manifest_for_version(version)
             );
         }
+    }
+
+    #[test]
+    fn raw_save_envelope_roundtrips_marker_and_custom_region_semantics() {
+        use crate::mindustry::game::map_objectives::PointMarker;
+
+        let mut markers = MapMarkers::new();
+        let mut point = PointMarker::default();
+        point.pos = Vec2::new(12.0, 34.0);
+        point.radius = 5.5;
+        point.stroke = 1.25;
+        markers.add(42, ObjectiveMarker::Point(point));
+
+        let mut chunks = CustomChunkSet::default();
+        chunks.insert_or_replace(CUSTOM_CHUNK_STATIC_FOG_DATA, vec![1, 2, 3]);
+        chunks.insert_or_replace("modded", b"payload".to_vec());
+
+        let mut envelope = RawSaveEnvelope::new(11);
+        envelope.set_markers_from_map_markers(&markers).unwrap();
+        envelope.set_custom_chunks(&chunks).unwrap();
+
+        let mut deflated = Vec::new();
+        write_deflated_raw_save_envelope(&mut deflated, &envelope).unwrap();
+        let decoded = read_deflated_raw_save_envelope(deflated.as_slice()).unwrap();
+        let decoded_markers = decoded
+            .markers_as_map_markers()
+            .unwrap()
+            .expect("v11 envelope should contain markers region");
+        let decoded_chunks = decoded
+            .custom_chunks()
+            .unwrap()
+            .expect("v11 envelope should contain custom region");
+
+        assert_eq!(decoded_markers.size(), 1);
+        assert_eq!(decoded_markers.ids().collect::<Vec<_>>(), vec![42]);
+        assert_eq!(decoded_markers.get(42).unwrap().type_name(), "Point");
+        assert_eq!(
+            decoded_chunks.get(CUSTOM_CHUNK_STATIC_FOG_DATA),
+            Some(&[1, 2, 3][..])
+        );
+        assert_eq!(decoded_chunks.get("modded"), Some(&b"payload"[..]));
     }
 
     #[test]
