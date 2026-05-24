@@ -1236,6 +1236,13 @@ pub struct ForceProjectorBulletAbsorb {
     pub buildup_added: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceProjectorRemovedPlan {
+    pub call_super_removed: bool,
+    pub play_force_shrink: bool,
+    pub effect_radius: f32,
+}
+
 pub fn force_projector_absorb_bullet(
     state: &mut ForceProjectorState,
     enemy_team: bool,
@@ -1261,6 +1268,20 @@ pub fn force_projector_absorb_bullet(
             sound_effect: false,
             buildup_added: 0.0,
         }
+    }
+}
+
+pub fn force_projector_on_removed_plan(
+    state: &ForceProjectorState,
+    radius: f32,
+    phase_radius_boost: f32,
+) -> ForceProjectorRemovedPlan {
+    let effect_radius =
+        force_projector_real_radius(radius, state.phase_heat, phase_radius_boost, state.radscl);
+    ForceProjectorRemovedPlan {
+        call_super_removed: true,
+        play_force_shrink: !state.broken && effect_radius > 1.0,
+        effect_radius,
     }
 }
 
@@ -4374,6 +4395,29 @@ mod tests {
             100.0,
             80.0
         ));
+        assert_eq!(
+            force_projector_on_removed_plan(&ambient_force, 100.0, 80.0),
+            ForceProjectorRemovedPlan {
+                call_super_removed: true,
+                play_force_shrink: true,
+                effect_radius: 28.0,
+            }
+        );
+        assert_eq!(
+            force_projector_on_removed_plan(
+                &ForceProjectorState {
+                    broken: true,
+                    ..ambient_force
+                },
+                100.0,
+                80.0
+            ),
+            ForceProjectorRemovedPlan {
+                call_super_removed: true,
+                play_force_shrink: false,
+                effect_radius: 28.0,
+            }
+        );
 
         let bullet = force_projector_absorb_bullet(&mut force, true, true, false, true, 35.0);
         assert_eq!(

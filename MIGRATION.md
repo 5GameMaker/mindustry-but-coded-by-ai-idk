@@ -846,8 +846,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_absorb_bullet(...)`
 - `force_projector_absorb_explosion(...)`
 - `ForceProjectorBulletAbsorb`
+- `ForceProjectorRemovedPlan`
 - `ForceProjectorDrawCommand`
 - `ForceProjectorDrawPlan`
+- `force_projector_on_removed_plan(...)`
 - `force_projector_draw_plan(...)`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
@@ -871,6 +873,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `outputsItems=false`；
   - ambient sound 条件为 `!broken && realRadius() > 1f`；
   - 对任意 viewer 均 `inFogTo=false`。
+- 已对照 `ForceProjector.onRemoved()` 锁定：
+  - 先计算 `realRadius()`；
+  - `!broken && radius > 1f` 时播放 `Fx.forceShrink`；
+  - 始终继续调用 super removed。
 - 已对照 `ForceProjector.pickedUp()` 锁定：
   - pickup 后只清零 `radscl` 与 `warmup`；
   - `broken / buildup / phaseHeat` 保持原状态，序列化仍按 Java 5 字段读写；
@@ -896,7 +902,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `ForceProjector.deflectBullets()` 接入真实 `Groups.bullet.intersect(...)` 与正多边形检测 adapter；
 - `ForceProjector.draw()` 接入真实 renderer/Draw dispatcher；
 - `ForceProjector.setBars()/sense/setProp` 接入真实 building runtime；
-- `ForceProjector.onRemoved/overwrote` 生命周期辅助；
+- `ForceProjector.overwrote` 生命周期辅助；
 - `DirectionalForceProjector` 接入真实 Groups.bullet.intersect、absorb effect、shield break effect 与 renderer；
 - `MendProjector` 真实 range indexer / world heal / drawPlace / drawSelect 接入；
 - `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描、status/effect、draw/select 接入；
