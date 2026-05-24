@@ -3,6 +3,7 @@
 pub mod binding;
 pub mod input_handler;
 pub mod place_mode;
+pub mod placement;
 
 pub use binding::{Binding, KeyBindingInput, KeyBindingSpec, KeyCode};
 pub use input_handler::{
@@ -48,3 +49,9 @@ pub use input_handler::{
     UnitEnteredPayloadOutcome, UnitEnteredPayloadRejectReason,
 };
 pub use place_mode::PlaceMode;
+pub use placement::{
+    bresenham_line_no_diagonal, calculate_bridge_plans, calculate_nodes, distance_heuristic,
+    is_side_place, normalize_area, normalize_draw_area, normalize_line, normalize_rectangle,
+    pathfind_line, BridgePlacementConfig, NormalizeDrawResult, NormalizeResult, Placement,
+    PlacementBlockDraw, PlacementPlanState,
+};
