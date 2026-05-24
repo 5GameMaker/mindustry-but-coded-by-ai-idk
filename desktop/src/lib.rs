@@ -4,10 +4,7 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::PlayerComp;
-use mindustry_core::mindustry::game::BlockPlan;
-use mindustry_core::mindustry::io::{
-    ContentHeaderSnapshot, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue,
-};
+use mindustry_core::mindustry::io::{ContentHeaderSnapshot, LegacyTeamBlocks, TeamId};
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, StateSnapshotCallPacket,
 };
@@ -188,49 +185,29 @@ impl DesktopLauncher {
                     .map(|block| block.base().clone())
             })
         });
-        let last_command = player_data
-            .last_command_id
-            .and_then(|command_id| {
-                self.mapped_unit_command_name(command_id)
-                    .and_then(|name| self.content_loader.unit_command_by_name(name).cloned())
-            });
+        let last_command = player_data.last_command_id.and_then(|command_id| {
+            self.mapped_unit_command_name(command_id)
+                .and_then(|name| self.content_loader.unit_command_by_name(name).cloned())
+        });
         self.player.selected_block = selected_block;
         self.player.last_command = last_command;
     }
 
     fn apply_network_team_blocks(&mut self, team_blocks: Option<&LegacyTeamBlocks>) {
-        let Some(team_blocks) = team_blocks else {
-            self.game_state.teams.replace_plans(Vec::new());
-            return;
-        };
-
-        let plans_by_team = team_blocks
-            .groups
-            .iter()
-            .filter_map(|group| {
-                let team = u8::try_from(group.team_id).ok()?;
-                let plans = group
-                    .plans
-                    .iter()
-                    .filter_map(|plan| self.legacy_team_block_plan(plan))
-                    .collect::<Vec<_>>();
-                Some((team, plans))
-            })
-            .collect::<Vec<_>>();
-
-        self.game_state.teams.replace_plans(plans_by_team);
-    }
-
-    fn legacy_team_block_plan(&self, plan: &LegacyTeamBlockPlan) -> Option<BlockPlan> {
-        let block = self.mapped_block_name(plan.block_id)?.to_string();
-        Some(BlockPlan {
-            x: plan.x,
-            y: plan.y,
-            rotation: plan.rotation,
-            block,
-            config: self.legacy_team_block_config(&plan.config),
-            removed: false,
-        })
+        let content_loader = self.content_loader.clone();
+        self.game_state.apply_legacy_team_blocks(
+            team_blocks,
+            |block_id| {
+                content_loader
+                    .get_by_id(ContentType::Block, block_id)
+                    .and_then(|content| content.name().map(str::to_string))
+            },
+            |content_type, content_id| {
+                content_loader
+                    .get_by_id(content_type, content_id)
+                    .and_then(|content| content.name().map(str::to_string))
+            },
+        );
     }
 
     fn mapped_block_name(&self, block_id: ContentId) -> Option<&str> {
@@ -243,39 +220,6 @@ impl DesktopLauncher {
         self.content_loader
             .get_by_id(ContentType::UnitCommand, command_id)
             .and_then(|content| content.name())
-    }
-
-    fn legacy_team_block_config(&self, config: &TypeValue) -> Option<String> {
-        match config {
-            TypeValue::Null => None,
-            TypeValue::Int(value) => Some(value.to_string()),
-            TypeValue::Long(value) => Some(value.to_string()),
-            TypeValue::Float(value) => Some(value.to_string()),
-            TypeValue::String(value) => Some(value.clone()),
-            TypeValue::Content(value) | TypeValue::TechNode(value) => self
-                .content_loader
-                .get_by_id(value.content_type, value.id)
-                .and_then(|content| content.name().map(str::to_string))
-                .or_else(|| Some(format!("{value:?}"))),
-            TypeValue::Bool(value) => Some(value.to_string()),
-            TypeValue::Double(value) => Some(value.to_string()),
-            TypeValue::Building(value) => Some(value.to_string()),
-            TypeValue::LogicAccess(value) => Some(format!("{value:?}")),
-            TypeValue::Unit(value) => Some(value.to_string()),
-            TypeValue::Point2(value) => Some(format!("{},{}", value.x, value.y)),
-            TypeValue::Vec2(value) => Some(format!("{},{}", value.x, value.y)),
-            TypeValue::Team(value) => Some(value.to_string()),
-            TypeValue::UnitCommand(value) => self
-                .mapped_unit_command_name(*value)
-                .map(str::to_string)
-                .or_else(|| Some(value.to_string())),
-            TypeValue::IntSeq(values) | TypeValue::IntArray(values) => Some(format!("{values:?}")),
-            TypeValue::ByteArray(values) => Some(format!("{values:?}")),
-            TypeValue::Point2Array(values) => Some(format!("{values:?}")),
-            TypeValue::BoolArray(values) => Some(format!("{values:?}")),
-            TypeValue::Vec2Array(values) => Some(format!("{values:?}")),
-            TypeValue::ObjectArray(values) => Some(format!("{values:?}")),
-        }
     }
 }
 
@@ -320,25 +264,24 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{run, DesktopLauncher};
     use mindustry_core::mindustry::core::WorldLoadEventKind;
+    use mindustry_core::mindustry::ctype::ContentId;
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
         LegacyShortChunkMap,
     };
-    use mindustry_core::mindustry::ctype::ContentId;
-    use mindustry_core::mindustry::net::{
-        NetworkPlayerData, NetworkWorldData, StateSnapshotCallPacket,
-    };
     use mindustry_core::mindustry::net::{
         packet_ids, ConnectPacket, PacketEnvelope, PacketKind, PacketSerializer,
     };
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
+    use mindustry_core::mindustry::net::{
+        NetworkPlayerData, NetworkWorldData, StateSnapshotCallPacket,
+    };
     use mindustry_core::mindustry::{
         entities::PlayerComp,
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::{
-            LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue,
-            UnitRef,
+            LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue, UnitRef,
         },
     };
     use std::collections::BTreeMap;
@@ -576,7 +519,10 @@ mod tests {
         assert!(launcher.player.shooting);
         assert_eq!(launcher.player.team, TeamId(6));
         assert!(launcher.player.typing);
-        assert_eq!(launcher.player.unit_ref(), Some(UnitRef::Block { tile_pos: 42 }));
+        assert_eq!(
+            launcher.player.unit_ref(),
+            Some(UnitRef::Block { tile_pos: 42 })
+        );
         assert_eq!(
             launcher.player.selected_block,
             launcher
@@ -586,7 +532,10 @@ mod tests {
         );
         assert_eq!(
             launcher.player.last_command,
-            launcher.content_loader.unit_command(last_command_id).cloned()
+            launcher
+                .content_loader
+                .unit_command(last_command_id)
+                .cloned()
         );
     }
 
@@ -614,10 +563,14 @@ mod tests {
         assert_eq!(launcher.game_state.server_tps, snapshot.tps as i32);
         assert_eq!(launcher.game_state.rand_seed0, snapshot.rand0);
         assert_eq!(launcher.game_state.rand_seed1, snapshot.rand1);
-        assert_eq!(launcher.game_state.universe.seconds(true), snapshot.time_data);
+        assert_eq!(
+            launcher.game_state.universe.seconds(true),
+            snapshot.time_data
+        );
         assert!(launcher.game_state.is_paused());
         assert_eq!(
-            launcher.game_state
+            launcher
+                .game_state
                 .teams
                 .get_or_null(TEAM_SHARDED)
                 .unwrap()
@@ -625,7 +578,12 @@ mod tests {
             BTreeMap::from([(0, 75), (3, 12)])
         );
         assert_eq!(
-            launcher.game_state.teams.get_or_null(TEAM_CRUX).unwrap().core_items,
+            launcher
+                .game_state
+                .teams
+                .get_or_null(TEAM_CRUX)
+                .unwrap()
+                .core_items,
             BTreeMap::from([(1, 5)])
         );
     }
@@ -728,7 +686,16 @@ mod tests {
         }
 
         launcher.update();
-        assert_eq!(launcher.game_state.teams.get_or_null(7).unwrap().plans.len(), 2);
+        assert_eq!(
+            launcher
+                .game_state
+                .teams
+                .get_or_null(7)
+                .unwrap()
+                .plans
+                .len(),
+            2
+        );
 
         let mut second = sample_network_world_data(None);
         second.tick = 100.25;
@@ -742,15 +709,13 @@ mod tests {
 
         launcher.update();
 
-        assert!(
-            launcher
-                .game_state
-                .teams
-                .get_or_null(7)
-                .unwrap()
-                .plans
-                .is_empty()
-        );
+        assert!(launcher
+            .game_state
+            .teams
+            .get_or_null(7)
+            .unwrap()
+            .plans
+            .is_empty());
     }
 
     #[test]
@@ -803,7 +768,10 @@ mod tests {
         assert!(launcher.content_loader.temporary_mapper().is_none());
         assert_eq!(
             launcher.player.selected_block,
-            launcher.content_loader.block(0).map(|block| block.base().clone())
+            launcher
+                .content_loader
+                .block(0)
+                .map(|block| block.base().clone())
         );
         assert_eq!(
             launcher.player.last_command,
@@ -851,7 +819,10 @@ mod tests {
         );
         assert_eq!(
             launcher.player.last_command,
-            launcher.content_loader.unit_command(last_command_id).cloned()
+            launcher
+                .content_loader
+                .unit_command(last_command_id)
+                .cloned()
         );
 
         {

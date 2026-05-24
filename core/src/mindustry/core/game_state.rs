@@ -12,10 +12,11 @@ use std::{
 
 use crate::mindustry::{
     core::World,
-    game::{FogControl, GameStats, MapMarkers, Rules, Teams, Universe},
+    ctype::{ContentId, ContentType},
+    game::{BlockPlan, FogControl, GameStats, MapMarkers, Rules, Teams, Universe},
     io::{
-        read_custom_chunks, type_io::read_u8, CustomChunkSet, MarkerRegionSummary,
-        CUSTOM_CHUNK_STATIC_FOG_DATA,
+        read_custom_chunks, type_io::read_u8, CustomChunkSet, LegacyTeamBlocks,
+        MarkerRegionSummary, TypeValue, CUSTOM_CHUNK_STATIC_FOG_DATA,
     },
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
@@ -346,6 +347,44 @@ impl GameState {
         }
     }
 
+    /// Applies Java `SaveVersion.readTeamBlocks(...)` output to runtime team plans.
+    ///
+    /// The core layer owns the stable team/plan mutation; callers provide the
+    /// content-id mapping because network content headers can remap ids at the
+    /// client boundary.
+    pub fn apply_legacy_team_blocks<BlockName, ContentName>(
+        &mut self,
+        team_blocks: Option<&LegacyTeamBlocks>,
+        mut block_name: BlockName,
+        mut content_name: ContentName,
+    ) where
+        BlockName: FnMut(ContentId) -> Option<String>,
+        ContentName: FnMut(ContentType, ContentId) -> Option<String>,
+    {
+        let Some(team_blocks) = team_blocks else {
+            self.teams.replace_plans(Vec::new());
+            return;
+        };
+
+        let plans_by_team = team_blocks
+            .groups
+            .iter()
+            .filter_map(|group| {
+                let team = u8::try_from(group.team_id).ok()?;
+                let plans = group
+                    .plans
+                    .iter()
+                    .filter_map(|plan| {
+                        legacy_team_block_plan(plan, &mut block_name, &mut content_name)
+                    })
+                    .collect::<Vec<_>>();
+                Some((team, plans))
+            })
+            .collect::<Vec<_>>();
+
+        self.teams.replace_plans(plans_by_team);
+    }
+
     /// Applies the game-state front matter from Java `NetworkIO.loadWorld`.
     ///
     /// Full rules JSON and marker/entity materialization are still migrated in
@@ -490,6 +529,62 @@ fn decode_state_snapshot_core_items(core_data: &[u8]) -> io::Result<Vec<(u8, BTr
 
 fn parse_tag_i32(tags: &BTreeMap<String, String>, key: &str) -> Option<i32> {
     tags.get(key).and_then(|value| value.parse().ok())
+}
+
+fn legacy_team_block_plan<BlockName, ContentName>(
+    plan: &crate::mindustry::io::LegacyTeamBlockPlan,
+    block_name: &mut BlockName,
+    content_name: &mut ContentName,
+) -> Option<BlockPlan>
+where
+    BlockName: FnMut(ContentId) -> Option<String>,
+    ContentName: FnMut(ContentType, ContentId) -> Option<String>,
+{
+    let block = block_name(plan.block_id)?;
+    Some(BlockPlan {
+        x: plan.x,
+        y: plan.y,
+        rotation: plan.rotation,
+        block,
+        config: legacy_team_block_config(&plan.config, content_name),
+        removed: false,
+    })
+}
+
+fn legacy_team_block_config<ContentName>(
+    config: &TypeValue,
+    content_name: &mut ContentName,
+) -> Option<String>
+where
+    ContentName: FnMut(ContentType, ContentId) -> Option<String>,
+{
+    match config {
+        TypeValue::Null => None,
+        TypeValue::Int(value) => Some(value.to_string()),
+        TypeValue::Long(value) => Some(value.to_string()),
+        TypeValue::Float(value) => Some(value.to_string()),
+        TypeValue::String(value) => Some(value.clone()),
+        TypeValue::Content(value) | TypeValue::TechNode(value) => {
+            content_name(value.content_type, value.id).or_else(|| Some(format!("{value:?}")))
+        }
+        TypeValue::Bool(value) => Some(value.to_string()),
+        TypeValue::Double(value) => Some(value.to_string()),
+        TypeValue::Building(value) => Some(value.to_string()),
+        TypeValue::LogicAccess(value) => Some(format!("{value:?}")),
+        TypeValue::Unit(value) => Some(value.to_string()),
+        TypeValue::Point2(value) => Some(format!("{},{}", value.x, value.y)),
+        TypeValue::Vec2(value) => Some(format!("{},{}", value.x, value.y)),
+        TypeValue::Team(value) => Some(value.to_string()),
+        TypeValue::UnitCommand(value) => {
+            content_name(ContentType::UnitCommand, *value).or_else(|| Some(value.to_string()))
+        }
+        TypeValue::IntSeq(values) | TypeValue::IntArray(values) => Some(format!("{values:?}")),
+        TypeValue::ByteArray(values) => Some(format!("{values:?}")),
+        TypeValue::Point2Array(values) => Some(format!("{values:?}")),
+        TypeValue::BoolArray(values) => Some(format!("{values:?}")),
+        TypeValue::Vec2Array(values) => Some(format!("{values:?}")),
+        TypeValue::ObjectArray(values) => Some(format!("{values:?}")),
+    }
 }
 
 #[cfg(test)]
@@ -708,6 +803,58 @@ mod tests {
         assert!(!state
             .fog_control
             .is_discovered(true, true, Some(3), false, 2, 0));
+    }
+
+    #[test]
+    fn apply_legacy_team_blocks_materializes_runtime_team_plans() {
+        use crate::mindustry::io::{
+            ContentRef, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
+        };
+
+        let mut state = GameState::new();
+        state.apply_legacy_team_blocks(
+            Some(&LegacyTeamBlocks {
+                groups: vec![LegacyTeamBlockGroup {
+                    team_id: 7,
+                    plans: vec![
+                        LegacyTeamBlockPlan {
+                            x: 5,
+                            y: 6,
+                            rotation: 1,
+                            block_id: 2,
+                            config: TypeValue::String("cfg".into()),
+                        },
+                        LegacyTeamBlockPlan {
+                            x: 8,
+                            y: 9,
+                            rotation: 2,
+                            block_id: 3,
+                            config: TypeValue::Content(ContentRef::new(ContentType::Item, 4)),
+                        },
+                    ],
+                }],
+            }),
+            |block_id| match block_id {
+                2 => Some("router".into()),
+                3 => Some("junction".into()),
+                _ => None,
+            },
+            |content_type, content_id| match (content_type, content_id) {
+                (ContentType::Item, 4) => Some("copper".into()),
+                _ => None,
+            },
+        );
+
+        assert_eq!(
+            state.teams.get_or_null(7).unwrap().plans,
+            vec![
+                BlockPlan::new(5, 6, 1, "router", Some("cfg".into())),
+                BlockPlan::new(8, 9, 2, "junction", Some("copper".into())),
+            ]
+        );
+
+        state.apply_legacy_team_blocks(None, |_| None, |_, _| None);
+        assert!(state.teams.get_or_null(7).unwrap().plans.is_empty());
     }
 
     #[test]
