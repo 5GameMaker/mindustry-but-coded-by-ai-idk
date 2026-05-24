@@ -124,6 +124,14 @@ pub fn wall_reflect_x(pen_x: f32, pen_y: f32) -> bool {
     pen_x > pen_y
 }
 
+pub fn wall_collision_reflect_axis(pen_x: f32, pen_y: f32) -> WallReflectAxis {
+    if wall_reflect_x(pen_x, pen_y) {
+        WallReflectAxis::X
+    } else {
+        WallReflectAxis::Y
+    }
+}
+
 pub fn wall_draw_plan(
     flash_hit: bool,
     hit: f32,
@@ -166,11 +174,7 @@ pub fn wall_collision_plan(
         bullet_damage,
         deflect_random,
     );
-    let reflect_axis = deflected.then_some(if wall_reflect_x(pen_x, pen_y) {
-        WallReflectAxis::X
-    } else {
-        WallReflectAxis::Y
-    });
+    let reflect_axis = deflected.then_some(wall_collision_reflect_axis(pen_x, pen_y));
     WallCollisionPlan {
         hit: 1.0,
         create_lightning,
@@ -3714,6 +3718,9 @@ mod tests {
         assert!(wall_deflects_bullet(10.0, 1.0, true, 20.0, 0.4));
         assert!(!wall_deflects_bullet(10.0, 0.05, true, 20.0, 0.0));
         assert!(wall_reflect_x(6.0, 3.0));
+        assert_eq!(wall_collision_reflect_axis(6.0, 3.0), WallReflectAxis::X);
+        assert_eq!(wall_collision_reflect_axis(3.0, 6.0), WallReflectAxis::Y);
+        assert_eq!(wall_collision_reflect_axis(4.0, 4.0), WallReflectAxis::Y);
         assert_eq!(
             wall_draw_plan(true, 0.8, 8.0, 2, 5.0, false),
             WallDrawPlan {

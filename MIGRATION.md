@@ -442,16 +442,24 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `ThrusterDrawPlan`
 - `thruster_top_rotation(...)`
 - `thruster_draw_plan(...)`
+- `DefenseWallKind::Thruster`
+- `blocks.rs` 内容注册 `thruster`
 - 已对照 `Thruster.java` 锁定：
   - 构造器 `rotate = true`；
   - 构造器 `quickRotate = false`；
   - plan/build 绘制顺序为 base region 后 topRegion；
   - top rotation = `rotation * 90` / `rotdeg()`。
+- 已对照 `Blocks.java` 锁定内容注册：
+  - 位置跟随 `scrap-wall-gigantic` 后、`beryllium-wall` 前；
+  - `requirements(Category.defense, BuildVisibility.sandboxOnly, with(Items.scrap, 96))`；
+  - `health = 55 * 16 * wallHealthMultiplier`；
+  - `size = 4`；
+  - 内容层显式 `rotate = true`。
 
 仍需：
 
 - 接入真实 block rendering adapter；
-- 将 Thruster 类型配置接入内容块声明，而不是只在 helper 层测试。
+- 图标/贴图层接入真实 atlas：`icons()` 应返回 `[region, topRegion]`。
 
 ### 7.5 Door / AutoDoor
 

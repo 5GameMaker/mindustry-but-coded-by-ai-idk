@@ -1301,6 +1301,7 @@ pub enum DefenseWallKind {
     Wall,
     Door,
     AutoDoor,
+    Thruster,
     ShieldWall,
 }
 
@@ -9702,6 +9703,14 @@ fn register_defense_walls(registry: &mut BlockRegistry, items: &[Item]) {
         wall.base.health = 60 * 16 * WALL_HEALTH_MULTIPLIER;
         wall.base.size = 4;
         wall.build_cost_multiplier = 4.0;
+    });
+    registry.register_defense_wall("thruster", |wall| {
+        wall.kind = DefenseWallKind::Thruster;
+        set_requirements(&mut wall.requirements, items, &[("scrap", 96)]);
+        wall.base.build_visibility = BuildVisibility::SandboxOnly;
+        wall.base.health = 55 * 16 * WALL_HEALTH_MULTIPLIER;
+        wall.base.size = 4;
+        wall.base.rotate = true;
     });
 
     registry.register_defense_wall("beryllium-wall", |wall| {
@@ -18625,6 +18634,31 @@ mod tests {
                 }]
             );
         }
+    }
+
+    #[test]
+    fn thruster_defense_wall_keeps_upstream_subset() {
+        let (all_items, _, registry) = load_test_registry();
+        let scrap_id = find_item(&all_items, "scrap")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let thruster = registry.get_defense_wall_by_name("thruster").unwrap();
+
+        assert_eq!(thruster.kind, DefenseWallKind::Thruster);
+        assert_eq!(thruster.base.build_visibility, BuildVisibility::SandboxOnly);
+        assert!(thruster.base.rotate);
+        assert_eq!(thruster.base.health, 55 * 16 * 4);
+        assert_eq!(thruster.base.size, 4);
+        assert_eq!(
+            thruster.requirements,
+            vec![ItemAmount {
+                item: scrap_id,
+                amount: 96
+            }]
+        );
     }
 
     #[test]
