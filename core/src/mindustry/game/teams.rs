@@ -386,6 +386,24 @@ impl Teams {
         self.get(team).claim_first_usable_plan(usable)
     }
 
+    pub fn claim_rebuild_plan<FPlaced, FUsable>(
+        &mut self,
+        team: u8,
+        hold: bool,
+        already_placed: FPlaced,
+        usable: FUsable,
+    ) -> TeamPlanClaim
+    where
+        FPlaced: FnMut(&BlockPlan) -> bool,
+        FUsable: FnMut(&BlockPlan) -> bool,
+    {
+        if hold {
+            self.claim_first_usable_plan(team, usable)
+        } else {
+            self.claim_front_plan(team, already_placed, usable)
+        }
+    }
+
     pub fn update_active(&mut self, team: u8) {
         if self.is_active(team) && !self.active.contains(&team) {
             self.active.push(team);
@@ -734,6 +752,78 @@ mod tests {
         assert_eq!(
             teams.claim_first_usable_plan(TEAM_SHARDED, |plan| plan.block == "missing"),
             TeamPlanClaim::NoUsablePlan
+        );
+    }
+
+    #[test]
+    fn claim_rebuild_plan_selects_builder_ai_hold_or_non_hold_semantics() {
+        let mut teams = Teams::default();
+        teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![
+                BlockPlan::new(1, 1, 0, "duo", None),
+                BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+                BlockPlan::new(3, 3, 2, "wall", None),
+            ],
+        )]);
+
+        let non_hold_placed = teams.claim_rebuild_plan(
+            TEAM_SHARDED,
+            false,
+            |plan| plan.block == "duo",
+            |_| panic!("already placed non-hold plan should not check usable"),
+        );
+        assert_eq!(
+            non_hold_placed,
+            TeamPlanClaim::AlreadyPlaced(BlockPlan::new(1, 1, 0, "duo", None))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![
+                BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+                BlockPlan::new(3, 3, 2, "wall", None),
+            ]
+        );
+
+        let non_hold_claimed = teams.claim_rebuild_plan(
+            TEAM_SHARDED,
+            false,
+            |_| false,
+            |plan| plan.block == "router",
+        );
+        assert_eq!(
+            non_hold_claimed,
+            TeamPlanClaim::Claimed(BlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![
+                BlockPlan::new(3, 3, 2, "wall", None),
+                BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ]
+        );
+
+        teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![
+                BlockPlan::new(4, 4, 0, "duo", None),
+                BlockPlan::new(5, 5, 1, "router", Some("cfg".into())),
+                BlockPlan::new(6, 6, 2, "wall", None),
+            ],
+        )]);
+        let hold_claimed =
+            teams.claim_rebuild_plan(TEAM_SHARDED, true, |_| true, |plan| plan.block == "router");
+        assert_eq!(
+            hold_claimed,
+            TeamPlanClaim::Claimed(BlockPlan::new(5, 5, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![
+                BlockPlan::new(4, 4, 0, "duo", None),
+                BlockPlan::new(6, 6, 2, "wall", None),
+                BlockPlan::new(5, 5, 1, "router", Some("cfg".into())),
+            ]
         );
     }
 
