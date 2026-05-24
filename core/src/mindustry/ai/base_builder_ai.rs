@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use crate::mindustry::{
     ai::base_registry::{BasePart, BasePartTile, BasePartTileKind},
+    entities::units::BuildPlan,
     game::{BlockPlan as TeamBlockPlan, TeamData, TeamPlanClaim},
     vars::TILE_SIZE,
     world::{footprint_tiles, get_edges, point2_pack},
@@ -166,6 +167,22 @@ pub struct BlockPlan {
     pub config: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuilderAiPlanAction {
+    NoPlan,
+    Keep,
+    DropConflictingBreak,
+    DropHoldOutOfRange,
+    DropInvalid,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuilderAiPlanValidation {
+    pub action: BuilderAiPlanAction,
+    pub removed_plan: Option<BuildPlan>,
+    pub remove_team_plan_at: Option<(i32, i32)>,
+}
+
 pub fn should_spawn_core_unit(
     ai_core_spawn: bool,
     timer_ready: bool,
@@ -228,6 +245,76 @@ where
     team_data.claim_front_plan(already_placed, |plan| {
         valid_place(plan) && (!always_flee || !near_enemy(plan))
     })
+}
+
+pub fn validate_builder_ai_current_plan<FValidBreak, FValidPlace>(
+    unit_plans: &mut VecDeque<BuildPlan>,
+    last_plan: &mut Option<TeamBlockPlan>,
+    hold: bool,
+    infinite_resources: bool,
+    within_hold_range: bool,
+    conflicting_breaker: bool,
+    construct_current_matches: bool,
+    mut valid_break: FValidBreak,
+    mut valid_place: FValidPlace,
+) -> BuilderAiPlanValidation
+where
+    FValidBreak: FnMut(&BuildPlan) -> bool,
+    FValidPlace: FnMut(&BuildPlan) -> bool,
+{
+    let Some(request) = unit_plans.front().cloned() else {
+        return BuilderAiPlanValidation {
+            action: BuilderAiPlanAction::NoPlan,
+            removed_plan: None,
+            remove_team_plan_at: None,
+        };
+    };
+
+    if !request.breaking && conflicting_breaker {
+        let removed_plan = unit_plans.pop_front();
+        return BuilderAiPlanValidation {
+            action: BuilderAiPlanAction::DropConflictingBreak,
+            removed_plan,
+            remove_team_plan_at: Some((request.x, request.y)),
+        };
+    }
+
+    let last_plan_removed = last_plan
+        .as_ref()
+        .is_some_and(|last_plan| last_plan.removed);
+    let valid = !last_plan_removed
+        && (construct_current_matches
+            || if request.breaking {
+                valid_break(&request)
+            } else {
+                valid_place(&request)
+            });
+
+    if !valid {
+        let removed_plan = unit_plans.pop_front();
+        *last_plan = None;
+        return BuilderAiPlanValidation {
+            action: BuilderAiPlanAction::DropInvalid,
+            removed_plan,
+            remove_team_plan_at: None,
+        };
+    }
+
+    if hold && !within_hold_range && !infinite_resources {
+        let removed_plan = unit_plans.pop_front();
+        *last_plan = None;
+        return BuilderAiPlanValidation {
+            action: BuilderAiPlanAction::DropHoldOutOfRange,
+            removed_plan,
+            remove_team_plan_at: None,
+        };
+    }
+
+    BuilderAiPlanValidation {
+        action: BuilderAiPlanAction::Keep,
+        removed_plan: None,
+        remove_team_plan_at: None,
+    }
 }
 
 pub fn begin_path_refresh(state: &mut BaseBuilderPathState) {
@@ -576,6 +663,122 @@ mod tests {
             team_data.plans,
             vec![TeamBlockPlan::new(3, 3, 2, "wall", None)]
         );
+    }
+
+    #[test]
+    fn builder_ai_current_plan_drops_conflicting_break_and_invalid_front_only() {
+        let mut unit_plans = VecDeque::from([
+            BuildPlan::new_place(4, 4, 0, "router"),
+            BuildPlan::new_place(5, 5, 1, "duo"),
+        ]);
+        let mut last_plan = Some(TeamBlockPlan::new(4, 4, 0, "router", None));
+
+        let conflict = validate_builder_ai_current_plan(
+            &mut unit_plans,
+            &mut last_plan,
+            false,
+            false,
+            true,
+            true,
+            false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(conflict.action, BuilderAiPlanAction::DropConflictingBreak);
+        assert_eq!(
+            conflict.removed_plan,
+            Some(BuildPlan::new_place(4, 4, 0, "router"))
+        );
+        assert_eq!(conflict.remove_team_plan_at, Some((4, 4)));
+        assert_eq!(unit_plans.len(), 1);
+        assert_eq!(unit_plans.front().unwrap().x, 5);
+        assert!(last_plan.is_some());
+
+        let mut last_plan = Some(TeamBlockPlan {
+            removed: true,
+            ..TeamBlockPlan::new(5, 5, 1, "duo", None)
+        });
+        let invalid = validate_builder_ai_current_plan(
+            &mut unit_plans,
+            &mut last_plan,
+            false,
+            false,
+            true,
+            false,
+            true,
+            |_| true,
+            |_| true,
+        );
+
+        assert_eq!(invalid.action, BuilderAiPlanAction::DropInvalid);
+        assert_eq!(
+            invalid.removed_plan,
+            Some(BuildPlan::new_place(5, 5, 1, "duo"))
+        );
+        assert!(unit_plans.is_empty());
+        assert_eq!(last_plan, None);
+    }
+
+    #[test]
+    fn builder_ai_current_plan_keeps_valid_or_drops_hold_out_of_range() {
+        let mut unit_plans = VecDeque::from([BuildPlan::new_place(7, 8, 2, "scatter")]);
+        let mut last_plan = Some(TeamBlockPlan::new(7, 8, 2, "scatter", None));
+
+        let keep = validate_builder_ai_current_plan(
+            &mut unit_plans,
+            &mut last_plan,
+            false,
+            false,
+            false,
+            false,
+            false,
+            |_| false,
+            |plan| plan.block.as_deref() == Some("scatter"),
+        );
+
+        assert_eq!(keep.action, BuilderAiPlanAction::Keep);
+        assert_eq!(keep.removed_plan, None);
+        assert_eq!(unit_plans.len(), 1);
+        assert!(last_plan.is_some());
+
+        let hold_drop = validate_builder_ai_current_plan(
+            &mut unit_plans,
+            &mut last_plan,
+            true,
+            false,
+            false,
+            false,
+            false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(hold_drop.action, BuilderAiPlanAction::DropHoldOutOfRange);
+        assert_eq!(
+            hold_drop.removed_plan,
+            Some(BuildPlan::new_place(7, 8, 2, "scatter"))
+        );
+        assert!(unit_plans.is_empty());
+        assert_eq!(last_plan, None);
+
+        let mut infinite_plans = VecDeque::from([BuildPlan::new_place(9, 9, 0, "wall")]);
+        let mut last_plan = Some(TeamBlockPlan::new(9, 9, 0, "wall", None));
+        let keep_infinite = validate_builder_ai_current_plan(
+            &mut infinite_plans,
+            &mut last_plan,
+            true,
+            true,
+            false,
+            false,
+            false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(keep_infinite.action, BuilderAiPlanAction::Keep);
+        assert_eq!(infinite_plans.len(), 1);
+        assert!(last_plan.is_some());
     }
 
     #[test]
