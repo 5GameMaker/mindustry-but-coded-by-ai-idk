@@ -639,6 +639,21 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描、status/effect、draw/select 接入；
 - 上述 helper 继续接入真实 block runtime，避免停留在单测 helper。
 
+### 7.9 Defense 当前迁移进度小结
+
+当前防御类方块迁移已经形成一条可持续推进的主线，重点进度如下：
+
+- `ShieldWall`：已完成状态、受击、拾取/恢复与 draw plan，对照 Java `ShieldWall.java` 的核心护盾展示与半径计算逻辑已锁定；
+- `ForceProjector`：已完成状态机、护盾吸收、爆炸处理、sense / setProp / bar 相关语义，以及持久化读写字段；
+- `Teams`：已把 `SaveVersion.readTeamBlocks(...)` / `writeTeamBlocks(...)` 的核心语义接到 Rust runtime，`Teams.plans` 与导出路径已能承接 legacy team blocks；
+- `Save envelope`：`RawSaveEnvelope` 已覆盖结构化 region 桥、markers/custom、content header、content patches、entities 相关封装，保存/读取外壳已进入可持续扩展阶段。
+
+下一步防御类方块的重点会放在：
+
+- `MendProjector`：纯语义层已补齐 stats、progress sense、timer-ready 消耗门控、place/select/light/draw plan 与 heal pulse plan；下一步接入真实 range/indexer 扫描、world heal 应用和 renderer/runtime；
+- `OverdriveProjector`：纯语义层已补齐 stats、boost bar、place/select/light/draw plan 和 Java 线框公式；下一步接入范围扫描、加速状态应用、效果/音效与真实 block runtime；
+- 继续把当前已完成的 helper 逐步收拢为真实 building 生命周期调用，避免长期停留在只被测试直接调用的辅助层。
+
 已完成 Rust 结构：
 
 ```text

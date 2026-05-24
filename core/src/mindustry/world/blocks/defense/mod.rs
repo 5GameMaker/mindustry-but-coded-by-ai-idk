@@ -270,10 +270,186 @@ pub struct MendProjectorUpdate {
     pub should_consume_optional: bool,
 }
 
-pub fn mend_projector_update(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectorTargetFilter {
+    AnyBlock,
+    CanOverdrive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProjectorPlacementPlan {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub real_range: f32,
+    pub selected_alpha: f32,
+    pub target_filter: ProjectorTargetFilter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProjectorSelectPlan {
+    pub real_range: f32,
+    pub selected_alpha: f32,
+    pub target_filter: ProjectorTargetFilter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProjectorLightPlan {
+    pub radius: f32,
+    pub alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MendProjectorDrawCommand {
+    SetColor,
+    DrawTop,
+    ResetAlpha,
+    StrokeSquare,
+    Reset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MendProjectorDrawPlan {
+    pub commands: &'static [MendProjectorDrawCommand],
+    pub phase_lerp: f32,
+    pub top_alpha: f32,
+    pub cycle: f32,
+    pub stroke: f32,
+    pub square_radius: f32,
+}
+
+const MEND_PROJECTOR_DRAW_COMMANDS: &[MendProjectorDrawCommand] = &[
+    MendProjectorDrawCommand::SetColor,
+    MendProjectorDrawCommand::DrawTop,
+    MendProjectorDrawCommand::ResetAlpha,
+    MendProjectorDrawCommand::StrokeSquare,
+    MendProjectorDrawCommand::Reset,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MendProjectorPulsePlan {
+    pub scan_targets: bool,
+    pub play_sound: bool,
+}
+
+pub fn mend_projector_repair_time_seconds(reload: f32, heal_percent: f32) -> f32 {
+    100.0 / heal_percent * reload / 60.0
+}
+
+pub fn mend_projector_range_blocks(range: f32, tile_size: f32) -> f32 {
+    range / tile_size
+}
+
+pub fn mend_projector_booster_multiplier(heal_percent: f32, phase_boost: f32) -> f32 {
+    (phase_boost + heal_percent) / heal_percent
+}
+
+pub fn mend_projector_real_range(range: f32, phase_heat: f32, phase_range_boost: f32) -> f32 {
+    range + phase_heat * phase_range_boost
+}
+
+pub fn mend_projector_heal_fraction(
+    heal_percent: f32,
+    phase_heat: f32,
+    phase_boost: f32,
+    efficiency: f32,
+) -> f32 {
+    (heal_percent + phase_heat * phase_boost) / 100.0 * efficiency
+}
+
+pub fn mend_projector_progress(charge: f32, reload: f32) -> f32 {
+    (charge / reload).clamp(0.0, 1.0)
+}
+
+pub fn mend_projector_sense(
+    sensor: LAccess,
+    state: &MendProjectorState,
+    reload: f32,
+) -> Option<f64> {
+    match sensor {
+        LAccess::Progress => Some(mend_projector_progress(state.charge, reload) as f64),
+        _ => None,
+    }
+}
+
+pub fn mend_projector_should_consume_optional(
+    optional_efficiency: f32,
+    timer_ready: bool,
+    can_heal: bool,
+) -> bool {
+    optional_efficiency > 0.0 && timer_ready && can_heal
+}
+
+pub fn mend_projector_pulse_plan(fired: bool, healed_any: bool) -> MendProjectorPulsePlan {
+    MendProjectorPulsePlan {
+        scan_targets: fired,
+        play_sound: fired && healed_any,
+    }
+}
+
+pub fn mend_projector_place_plan(
+    tile_x: i32,
+    tile_y: i32,
+    tile_size: f32,
+    offset: f32,
+    range: f32,
+    time: f32,
+) -> ProjectorPlacementPlan {
+    ProjectorPlacementPlan {
+        center_x: tile_x as f32 * tile_size + offset,
+        center_y: tile_y as f32 * tile_size + offset,
+        real_range: range,
+        selected_alpha: absin_time(time, 4.0, 1.0),
+        target_filter: ProjectorTargetFilter::AnyBlock,
+    }
+}
+
+pub fn mend_projector_select_plan(
+    state: &MendProjectorState,
+    range: f32,
+    phase_range_boost: f32,
+    time: f32,
+) -> ProjectorSelectPlan {
+    ProjectorSelectPlan {
+        real_range: mend_projector_real_range(range, state.phase_heat, phase_range_boost),
+        selected_alpha: absin_time(time, 4.0, 1.0),
+        target_filter: ProjectorTargetFilter::AnyBlock,
+    }
+}
+
+pub fn mend_projector_light_plan(
+    state: &MendProjectorState,
+    light_radius: f32,
+) -> ProjectorLightPlan {
+    ProjectorLightPlan {
+        radius: light_radius * state.smooth_efficiency,
+        alpha: 0.7 * state.smooth_efficiency,
+    }
+}
+
+pub fn mend_projector_draw_plan(
+    state: &MendProjectorState,
+    time: f32,
+    size: i32,
+    tile_size: f32,
+) -> MendProjectorDrawPlan {
+    let cycle = projector_cycle(time);
+    let half_size = size as f32 * tile_size / 2.0;
+    MendProjectorDrawPlan {
+        commands: MEND_PROJECTOR_DRAW_COMMANDS,
+        phase_lerp: state.phase_heat,
+        top_alpha: state.heat * absin_time(time, 50.0 / (std::f32::consts::PI * 2.0), 1.0) * 0.5,
+        cycle,
+        stroke: (2.0 * cycle + 0.2) * state.heat,
+        square_radius: (1.0 + (1.0 - cycle) * half_size).min(half_size),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn mend_projector_update_with_timer(
     state: &mut MendProjectorState,
     efficiency: f32,
     optional_efficiency: f32,
+    timer_ready: bool,
     can_heal: bool,
     delta: f32,
     reload: f32,
@@ -294,8 +470,9 @@ pub fn mend_projector_update(
     );
     state.charge += state.heat * delta;
     state.phase_heat = lerp_delta(state.phase_heat, optional_efficiency, 0.1);
-    let real_range = range + state.phase_heat * phase_range_boost;
-    let heal_fraction = (heal_percent + state.phase_heat * phase_boost) / 100.0 * efficiency;
+    let real_range = mend_projector_real_range(range, state.phase_heat, phase_range_boost);
+    let heal_fraction =
+        mend_projector_heal_fraction(heal_percent, state.phase_heat, phase_boost, efficiency);
     let fired = state.charge >= reload && can_heal;
     if fired {
         state.charge = 0.0;
@@ -304,8 +481,40 @@ pub fn mend_projector_update(
         fired,
         real_range,
         heal_fraction,
-        should_consume_optional: optional_efficiency > 0.0 && can_heal,
+        should_consume_optional: mend_projector_should_consume_optional(
+            optional_efficiency,
+            timer_ready,
+            can_heal,
+        ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn mend_projector_update(
+    state: &mut MendProjectorState,
+    efficiency: f32,
+    optional_efficiency: f32,
+    can_heal: bool,
+    delta: f32,
+    reload: f32,
+    range: f32,
+    heal_percent: f32,
+    phase_boost: f32,
+    phase_range_boost: f32,
+) -> MendProjectorUpdate {
+    mend_projector_update_with_timer(
+        state,
+        efficiency,
+        optional_efficiency,
+        true,
+        can_heal,
+        delta,
+        reload,
+        range,
+        heal_percent,
+        phase_boost,
+        phase_range_boost,
+    )
 }
 
 pub fn write_mend_projector_state<W: Write>(
@@ -362,6 +571,133 @@ pub fn overdrive_real_boost(
     (speed_boost + phase_heat * speed_boost_phase) * efficiency
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverdriveProjectorDrawCommand {
+    SetColor,
+    DrawTop,
+    ResetAlpha,
+    StrokeLineLoop,
+    Reset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OverdriveProjectorDrawPlan {
+    pub commands: &'static [OverdriveProjectorDrawCommand],
+    pub phase_lerp: f32,
+    pub top_alpha: f32,
+    pub cycle: f32,
+    pub stroke: f32,
+    pub line_radius: f32,
+    pub line_width: f32,
+    pub mirrored_points: bool,
+}
+
+const OVERDRIVE_PROJECTOR_DRAW_COMMANDS: &[OverdriveProjectorDrawCommand] = &[
+    OverdriveProjectorDrawCommand::SetColor,
+    OverdriveProjectorDrawCommand::DrawTop,
+    OverdriveProjectorDrawCommand::ResetAlpha,
+    OverdriveProjectorDrawCommand::StrokeLineLoop,
+    OverdriveProjectorDrawCommand::Reset,
+];
+
+pub fn overdrive_speed_increase_percent(speed_boost: f32) -> f32 {
+    speed_boost * 100.0 - 100.0
+}
+
+pub fn overdrive_production_time_seconds(use_time: f32) -> f32 {
+    use_time / 60.0
+}
+
+pub fn overdrive_real_range(range: f32, phase_heat: f32, phase_range_boost: f32) -> f32 {
+    range + phase_heat * phase_range_boost
+}
+
+pub fn overdrive_boost_multiplier_limit(
+    has_boost: bool,
+    speed_boost: f32,
+    speed_boost_phase: f32,
+) -> f32 {
+    if has_boost {
+        speed_boost + speed_boost_phase
+    } else {
+        speed_boost
+    }
+}
+
+pub fn overdrive_projector_bar_fraction(
+    real_boost: f32,
+    has_boost: bool,
+    speed_boost: f32,
+    speed_boost_phase: f32,
+) -> f32 {
+    let limit = overdrive_boost_multiplier_limit(has_boost, speed_boost, speed_boost_phase);
+    if limit == 0.0 {
+        0.0
+    } else {
+        real_boost / limit
+    }
+}
+
+pub fn overdrive_projector_place_plan(
+    tile_x: i32,
+    tile_y: i32,
+    tile_size: f32,
+    offset: f32,
+    range: f32,
+    time: f32,
+) -> ProjectorPlacementPlan {
+    ProjectorPlacementPlan {
+        center_x: tile_x as f32 * tile_size + offset,
+        center_y: tile_y as f32 * tile_size + offset,
+        real_range: range,
+        selected_alpha: absin_time(time, 4.0, 1.0),
+        target_filter: ProjectorTargetFilter::CanOverdrive,
+    }
+}
+
+pub fn overdrive_projector_select_plan(
+    state: &OverdriveProjectorState,
+    range: f32,
+    phase_range_boost: f32,
+    time: f32,
+) -> ProjectorSelectPlan {
+    ProjectorSelectPlan {
+        real_range: overdrive_real_range(range, state.phase_heat, phase_range_boost),
+        selected_alpha: absin_time(time, 4.0, 1.0),
+        target_filter: ProjectorTargetFilter::CanOverdrive,
+    }
+}
+
+pub fn overdrive_projector_light_plan(
+    state: &OverdriveProjectorState,
+    light_radius: f32,
+) -> ProjectorLightPlan {
+    ProjectorLightPlan {
+        radius: light_radius * state.smooth_efficiency,
+        alpha: 0.7 * state.smooth_efficiency,
+    }
+}
+
+pub fn overdrive_projector_draw_plan(
+    state: &OverdriveProjectorState,
+    time: f32,
+    size: i32,
+    tile_size: f32,
+) -> OverdriveProjectorDrawPlan {
+    let cycle = projector_cycle(time);
+    let block_half = size as f32 * tile_size / 2.0;
+    OverdriveProjectorDrawPlan {
+        commands: OVERDRIVE_PROJECTOR_DRAW_COMMANDS,
+        phase_lerp: state.phase_heat,
+        top_alpha: state.heat * absin_time(time, 50.0 / (std::f32::consts::PI * 2.0), 1.0) * 0.5,
+        cycle,
+        stroke: (2.0 * cycle + 0.1) * state.heat,
+        line_radius: (clamp_unit(2.0 - cycle * 2.0) * block_half - cycle - 0.2).max(0.0),
+        line_width: clamp_unit(0.5 - cycle) * size as f32 * tile_size,
+        mirrored_points: cycle < 0.5,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn overdrive_projector_update(
     state: &mut OverdriveProjectorState,
@@ -396,7 +732,7 @@ pub fn overdrive_projector_update(
     OverdriveProjectorUpdate {
         applied_boost,
         consumed,
-        real_range: range + state.phase_heat * phase_range_boost,
+        real_range: overdrive_real_range(range, state.phase_heat, phase_range_boost),
         real_boost: overdrive_real_boost(
             speed_boost,
             state.phase_heat,
@@ -2200,6 +2536,22 @@ fn approach_delta(from: f32, to: f32, amount: f32) -> f32 {
     }
 }
 
+fn clamp_unit(value: f32) -> f32 {
+    value.clamp(0.0, 1.0)
+}
+
+fn projector_cycle(time: f32) -> f32 {
+    1.0 - (time / 100.0).rem_euclid(1.0)
+}
+
+fn sin_time(time: f32, scl: f32, mag: f32) -> f32 {
+    (time / scl).sin() * mag
+}
+
+fn absin_time(time: f32, scl: f32, mag: f32) -> f32 {
+    sin_time(time, scl, mag).abs()
+}
+
 fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
@@ -2451,6 +2803,164 @@ mod tests {
                 .heat,
             over.heat
         );
+    }
+
+    #[test]
+    fn mend_projector_draw_select_sense_and_timer_plans_follow_java() {
+        assert_eq!(mend_projector_repair_time_seconds(250.0, 12.0), 34.72222);
+        assert_eq!(mend_projector_range_blocks(60.0, 8.0), 7.5);
+        assert_eq!(mend_projector_booster_multiplier(12.0, 12.0), 2.0);
+        assert_eq!(mend_projector_real_range(60.0, 0.5, 50.0), 85.0);
+        assert_eq!(mend_projector_heal_fraction(12.0, 0.5, 12.0, 0.75), 0.135);
+
+        let mut mend = MendProjectorState {
+            heat: 0.75,
+            charge: 500.0,
+            phase_heat: 0.5,
+            smooth_efficiency: 0.8,
+        };
+        assert_eq!(
+            mend_projector_sense(LAccess::Progress, &mend, 250.0),
+            Some(1.0)
+        );
+        assert_eq!(mend_projector_sense(LAccess::Health, &mend, 250.0), None);
+        assert!(mend_projector_should_consume_optional(1.0, true, true));
+        assert!(!mend_projector_should_consume_optional(1.0, false, true));
+        assert!(!mend_projector_should_consume_optional(0.0, true, true));
+        assert!(!mend_projector_should_consume_optional(1.0, true, false));
+
+        let blocked = mend_projector_update_with_timer(
+            &mut mend, 1.0, 1.0, true, false, 1.0, 250.0, 60.0, 12.0, 12.0, 50.0,
+        );
+        assert!(!blocked.fired);
+        assert_eq!(mend.charge, 500.0 + mend.heat);
+        assert!(!blocked.should_consume_optional);
+
+        let place = mend_projector_place_plan(2, 3, 8.0, 4.0, 60.0, 0.0);
+        assert_eq!(
+            place,
+            ProjectorPlacementPlan {
+                center_x: 20.0,
+                center_y: 28.0,
+                real_range: 60.0,
+                selected_alpha: 0.0,
+                target_filter: ProjectorTargetFilter::AnyBlock,
+            }
+        );
+
+        let select = mend_projector_select_plan(&mend, 60.0, 50.0, 0.0);
+        assert_eq!(select.real_range, 87.5);
+        assert_eq!(select.target_filter, ProjectorTargetFilter::AnyBlock);
+
+        let light = mend_projector_light_plan(&mend, 50.0);
+        assert_eq!(light.radius, 40.8);
+        assert!((light.alpha - 0.5712).abs() < 0.00001);
+
+        let draw = mend_projector_draw_plan(&mend, 25.0, 2, 8.0);
+        assert_eq!(
+            draw.commands,
+            &[
+                MendProjectorDrawCommand::SetColor,
+                MendProjectorDrawCommand::DrawTop,
+                MendProjectorDrawCommand::ResetAlpha,
+                MendProjectorDrawCommand::StrokeSquare,
+                MendProjectorDrawCommand::Reset,
+            ]
+        );
+        assert_eq!(draw.phase_lerp, mend.phase_heat);
+        assert_eq!(draw.cycle, 0.75);
+        assert_eq!(draw.stroke, (2.0 * 0.75 + 0.2) * mend.heat);
+        assert_eq!(draw.square_radius, 3.0);
+        assert!(draw.top_alpha > 0.0);
+
+        assert_eq!(
+            mend_projector_pulse_plan(true, true),
+            MendProjectorPulsePlan {
+                scan_targets: true,
+                play_sound: true,
+            }
+        );
+        assert_eq!(
+            mend_projector_pulse_plan(true, false),
+            MendProjectorPulsePlan {
+                scan_targets: true,
+                play_sound: false,
+            }
+        );
+    }
+
+    #[test]
+    fn overdrive_projector_bar_draw_select_and_stats_follow_java() {
+        assert_eq!(overdrive_speed_increase_percent(1.5), 50.0);
+        assert_eq!(overdrive_production_time_seconds(400.0), 400.0 / 60.0);
+        assert_eq!(overdrive_real_range(80.0, 0.5, 20.0), 90.0);
+        assert_eq!(overdrive_boost_multiplier_limit(true, 1.5, 0.75), 2.25);
+        assert_eq!(overdrive_boost_multiplier_limit(false, 1.5, 0.75), 1.5);
+        assert_eq!(
+            overdrive_projector_bar_fraction(1.5375, true, 1.5, 0.75),
+            1.5375 / 2.25
+        );
+        assert_eq!(
+            overdrive_projector_bar_fraction(1.2, false, 1.5, 0.75),
+            1.2 / 1.5
+        );
+
+        let mut state = OverdriveProjectorState {
+            heat: 0.6,
+            charge: 0.0,
+            phase_heat: 0.5,
+            smooth_efficiency: 0.25,
+            use_progress: 0.0,
+        };
+        let no_phase = overdrive_projector_update(
+            &mut state, 1.0, 1.0, false, 1.0, 60.0, 80.0, 20.0, 1.5, 0.75, 400.0,
+        );
+        assert_eq!(state.phase_heat, 0.5);
+        assert_eq!(no_phase.real_range, 90.0);
+
+        let place = overdrive_projector_place_plan(4, 5, 8.0, 4.0, 80.0, 0.0);
+        assert_eq!(
+            place,
+            ProjectorPlacementPlan {
+                center_x: 36.0,
+                center_y: 44.0,
+                real_range: 80.0,
+                selected_alpha: 0.0,
+                target_filter: ProjectorTargetFilter::CanOverdrive,
+            }
+        );
+
+        let select = overdrive_projector_select_plan(&state, 80.0, 20.0, 0.0);
+        assert_eq!(select.real_range, 90.0);
+        assert_eq!(select.target_filter, ProjectorTargetFilter::CanOverdrive);
+
+        let light = overdrive_projector_light_plan(&state, 50.0);
+        assert_eq!(light.radius, 15.5);
+        assert_eq!(light.alpha, 0.217);
+
+        let draw = overdrive_projector_draw_plan(&state, 25.0, 2, 8.0);
+        assert_eq!(
+            draw.commands,
+            &[
+                OverdriveProjectorDrawCommand::SetColor,
+                OverdriveProjectorDrawCommand::DrawTop,
+                OverdriveProjectorDrawCommand::ResetAlpha,
+                OverdriveProjectorDrawCommand::StrokeLineLoop,
+                OverdriveProjectorDrawCommand::Reset,
+            ]
+        );
+        assert_eq!(draw.phase_lerp, state.phase_heat);
+        assert_eq!(draw.cycle, 0.75);
+        assert_eq!(draw.stroke, (2.0 * 0.75 + 0.1) * state.heat);
+        assert_eq!(draw.line_radius, 3.05);
+        assert_eq!(draw.line_width, 0.0);
+        assert!(!draw.mirrored_points);
+
+        let wide = overdrive_projector_draw_plan(&state, 75.0, 2, 8.0);
+        assert_eq!(wide.cycle, 0.25);
+        assert_eq!(wide.line_radius, 7.55);
+        assert_eq!(wide.line_width, 4.0);
+        assert!(wide.mirrored_points);
     }
 
     #[test]
