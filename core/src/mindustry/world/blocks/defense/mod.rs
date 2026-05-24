@@ -895,6 +895,30 @@ pub struct BuildTurretUnitBinding {
     pub team: TeamId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildTurretDrawCommand {
+    Base,
+    ResetColor,
+    SetTurretLayer,
+    Shadow,
+    Region,
+    Glow,
+    UnitBuilding,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildTurretDrawPlan {
+    pub commands: &'static [BuildTurretDrawCommand],
+    pub x: f32,
+    pub y: f32,
+    pub elevation: f32,
+    pub turret_rotation: f32,
+    pub shadow_x: f32,
+    pub shadow_y: f32,
+    pub glow_alpha: f32,
+    pub draw_unit_building: bool,
+}
+
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
     if configured < 0.0 {
         size as f32 / 2.0
@@ -961,6 +985,73 @@ pub fn apply_build_turret_unit_tick(
     unit.status.speed_multiplier = step.speed_multiplier;
     state.warmup = step.warmup;
     unit.refresh_component_views();
+}
+
+const BUILD_TURRET_DRAW_COMMANDS_WITH_GLOW_AND_UNIT: &[BuildTurretDrawCommand] = &[
+    BuildTurretDrawCommand::Base,
+    BuildTurretDrawCommand::ResetColor,
+    BuildTurretDrawCommand::SetTurretLayer,
+    BuildTurretDrawCommand::Shadow,
+    BuildTurretDrawCommand::Region,
+    BuildTurretDrawCommand::Glow,
+    BuildTurretDrawCommand::UnitBuilding,
+];
+
+const BUILD_TURRET_DRAW_COMMANDS_WITH_GLOW: &[BuildTurretDrawCommand] = &[
+    BuildTurretDrawCommand::Base,
+    BuildTurretDrawCommand::ResetColor,
+    BuildTurretDrawCommand::SetTurretLayer,
+    BuildTurretDrawCommand::Shadow,
+    BuildTurretDrawCommand::Region,
+    BuildTurretDrawCommand::Glow,
+];
+
+const BUILD_TURRET_DRAW_COMMANDS_WITH_UNIT: &[BuildTurretDrawCommand] = &[
+    BuildTurretDrawCommand::Base,
+    BuildTurretDrawCommand::ResetColor,
+    BuildTurretDrawCommand::SetTurretLayer,
+    BuildTurretDrawCommand::Shadow,
+    BuildTurretDrawCommand::Region,
+    BuildTurretDrawCommand::UnitBuilding,
+];
+
+const BUILD_TURRET_DRAW_COMMANDS_BASE: &[BuildTurretDrawCommand] = &[
+    BuildTurretDrawCommand::Base,
+    BuildTurretDrawCommand::ResetColor,
+    BuildTurretDrawCommand::SetTurretLayer,
+    BuildTurretDrawCommand::Shadow,
+    BuildTurretDrawCommand::Region,
+];
+
+pub fn build_turret_draw_plan(
+    x: f32,
+    y: f32,
+    rotation: f32,
+    elevation: f32,
+    warmup: f32,
+    glow_region_found: bool,
+    efficiency: f32,
+) -> BuildTurretDrawPlan {
+    let turret_rotation = rotation - 90.0;
+    let draw_unit_building = efficiency > 0.0;
+    let commands = match (glow_region_found, draw_unit_building) {
+        (true, true) => BUILD_TURRET_DRAW_COMMANDS_WITH_GLOW_AND_UNIT,
+        (true, false) => BUILD_TURRET_DRAW_COMMANDS_WITH_GLOW,
+        (false, true) => BUILD_TURRET_DRAW_COMMANDS_WITH_UNIT,
+        (false, false) => BUILD_TURRET_DRAW_COMMANDS_BASE,
+    };
+
+    BuildTurretDrawPlan {
+        commands,
+        x,
+        y,
+        elevation,
+        turret_rotation,
+        shadow_x: x - elevation,
+        shadow_y: y - elevation,
+        glow_alpha: if glow_region_found { warmup } else { 0.0 },
+        draw_unit_building,
+    }
 }
 
 pub const BUILD_TURRET_UNIT_TYPE_PREFIX: &str = "turret-unit-";
@@ -1890,6 +1981,58 @@ mod tests {
         assert_eq!(unit.status.speed_multiplier, 0.0);
         assert_eq!(unit.builder.build_speed_multiplier, 0.0);
         assert!((state.warmup - 0.054).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn build_turret_draw_plan_matches_java_draw_order_and_conditions() {
+        let glowing = build_turret_draw_plan(40.0, 48.0, 135.0, 3.0, 0.65, true, 0.5);
+        assert_eq!(
+            glowing.commands,
+            &[
+                BuildTurretDrawCommand::Base,
+                BuildTurretDrawCommand::ResetColor,
+                BuildTurretDrawCommand::SetTurretLayer,
+                BuildTurretDrawCommand::Shadow,
+                BuildTurretDrawCommand::Region,
+                BuildTurretDrawCommand::Glow,
+                BuildTurretDrawCommand::UnitBuilding,
+            ]
+        );
+        assert_eq!((glowing.x, glowing.y), (40.0, 48.0));
+        assert_eq!((glowing.shadow_x, glowing.shadow_y), (37.0, 45.0));
+        assert_eq!(glowing.turret_rotation, 45.0);
+        assert_eq!(glowing.glow_alpha, 0.65);
+        assert!(glowing.draw_unit_building);
+
+        let no_glow_idle = build_turret_draw_plan(8.0, 16.0, 90.0, 1.5, 0.9, false, 0.0);
+        assert_eq!(
+            no_glow_idle.commands,
+            &[
+                BuildTurretDrawCommand::Base,
+                BuildTurretDrawCommand::ResetColor,
+                BuildTurretDrawCommand::SetTurretLayer,
+                BuildTurretDrawCommand::Shadow,
+                BuildTurretDrawCommand::Region,
+            ]
+        );
+        assert_eq!((no_glow_idle.shadow_x, no_glow_idle.shadow_y), (6.5, 14.5));
+        assert_eq!(no_glow_idle.turret_rotation, 0.0);
+        assert_eq!(no_glow_idle.glow_alpha, 0.0);
+        assert!(!no_glow_idle.draw_unit_building);
+
+        let unit_only = build_turret_draw_plan(0.0, 0.0, 180.0, 2.0, 0.4, false, 0.01);
+        assert_eq!(
+            unit_only.commands,
+            &[
+                BuildTurretDrawCommand::Base,
+                BuildTurretDrawCommand::ResetColor,
+                BuildTurretDrawCommand::SetTurretLayer,
+                BuildTurretDrawCommand::Shadow,
+                BuildTurretDrawCommand::Region,
+                BuildTurretDrawCommand::UnitBuilding,
+            ]
+        );
+        assert!(unit_only.draw_unit_building);
     }
 
     #[test]
