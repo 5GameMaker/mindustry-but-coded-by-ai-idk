@@ -354,8 +354,10 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - `BuildTurretUnitTickInput`
 - `BuildTurretUnitTickStep`
 - `BuildTurretUnitBinding`
+- `BuildTurretStatsPlan`
 - `BuildTurretDrawCommand`
 - `BuildTurretDrawPlan`
+- `build_turret_stats_plan(...)`
 - `build_turret_update_tick(...)`
 - `build_turret_unit_tick(...)`
 - `apply_build_turret_unit_tick(...)`
@@ -385,10 +387,12 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - `BuildTurretBuild.write/read()` 已新增基于 `ContentLoader` 与 `TypeIO.writePlans/readPlans` 的 typed plans 读写路径；旧 raw 路径保留作兼容兜底。
 - `BuildTurretState.plans` 与 `UnitComp.builder.plans` 已有双向桥接，typed read/write 后可恢复到单位建造队列。
 - `BuildTurretBuild.sense/senseObject()` 对 `buildX/buildY/building/breaking` 的 unit build plan 转发语义已有轻量 helper。
+- `BuildTurret.setStats()` 已按 Java `stats.addPercent(Stat.buildSpeed, buildSpeed)` 收口到 `BuildTurretStatsPlan`。
 
 仍需：
 
 - 继续补完整 `BuildTurretBuild` 运行态；
+- `BuildTurret.icons()` 的 `[baseRegion, region]` 图标层语义；
 - 接入完整 world/building runtime。
 
 ## 8. 当前真实完成度口径

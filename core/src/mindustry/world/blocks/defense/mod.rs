@@ -2677,6 +2677,11 @@ impl Default for BuildTurretState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildTurretStatsPlan {
+    pub build_speed_percent: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildTurretPlanAction {
     NoPlan,
@@ -2796,6 +2801,12 @@ pub struct BuildTurretDrawPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuildTurretSenseObject {
     BuildingAt { x: i32, y: i32 },
+}
+
+pub fn build_turret_stats_plan(build_speed: f32) -> BuildTurretStatsPlan {
+    BuildTurretStatsPlan {
+        build_speed_percent: build_speed,
+    }
 }
 
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
@@ -4965,6 +4976,12 @@ mod tests {
         assert_eq!(draw.rotation, 360.0);
         assert!((draw.glow_alpha - 0.4).abs() < 0.00001);
 
+        assert_eq!(
+            build_turret_stats_plan(1.5),
+            BuildTurretStatsPlan {
+                build_speed_percent: 1.5,
+            }
+        );
         assert_eq!(build_turret_elevation(-1.0, 3), 1.5);
         assert_eq!(build_turret_warmup_update(0.0, true, 0.8), 0.080000006);
         assert!(build_turret_should_consume(1, false));
