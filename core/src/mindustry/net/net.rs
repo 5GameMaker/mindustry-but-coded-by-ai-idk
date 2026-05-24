@@ -1648,7 +1648,7 @@ mod tests {
             Some(9),
             false,
             PacketKind::ConnectPacket(ConnectPacket {
-                version: 157,
+                version: 158,
                 version_type: "official".into(),
                 mods: vec!["mod-a".into()],
                 name: "player".into(),

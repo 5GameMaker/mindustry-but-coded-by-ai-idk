@@ -199,7 +199,7 @@ impl Default for ConnectPacketValidationContext {
             recent_kick_active: false,
             player_limit_reached: false,
             whitelisted: true,
-            server_version: 157,
+            server_version: 158,
             server_version_type: "official".into(),
             allows_custom_clients: false,
             prevent_duplicates: false,
@@ -3386,7 +3386,7 @@ mod tests {
 
     fn connect_packet(name: &str) -> ConnectPacket {
         ConnectPacket {
-            version: 157,
+            version: 158,
             version_type: "official".into(),
             mods: Vec::new(),
             name: name.into(),
@@ -3658,15 +3658,15 @@ mod tests {
         assert!(plan.accepted());
         assert!(plan.mod_client);
 
-        packet.version = 158;
+        packet.version = 159;
         let plan = NetServer::validate_connect_packet(&packet, &Default::default());
         assert_eq!(plan.kick_reason(), Some(KickReason::ServerOutdated));
 
-        packet.version = 156;
+        packet.version = 157;
         let plan = NetServer::validate_connect_packet(&packet, &Default::default());
         assert_eq!(plan.kick_reason(), Some(KickReason::ClientOutdated));
 
-        packet.version = 157;
+        packet.version = 158;
         packet.name = "[\n\t".into();
         let plan = NetServer::validate_connect_packet(&packet, &Default::default());
         assert_eq!(plan.kick_reason(), Some(KickReason::NameEmpty));

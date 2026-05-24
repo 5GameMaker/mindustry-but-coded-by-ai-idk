@@ -48,7 +48,7 @@ const PING_INTERVAL: Duration = Duration::from_secs(1);
 pub const CLIENT_PLAYER_SYNC_INTERVAL_MS: i64 = 66;
 pub const CLIENT_PLAN_SYNC_INTERVAL_MS: i64 = 500;
 pub const CLIENT_PLAN_PREVIEW_CHUNK_SIZE: usize = 900 / 12;
-pub const DEFAULT_CLIENT_VERSION: i32 = 157;
+pub const DEFAULT_CLIENT_VERSION: i32 = 158;
 pub const DEFAULT_CLIENT_VERSION_TYPE: &str = "official";
 
 pub type PacketHandler = Arc<dyn Fn(PacketKind) + Send + Sync + 'static>;
@@ -4708,7 +4708,7 @@ mod tests {
         assert!(sent[0].1);
         match &sent[0].0 {
             PacketKind::ConnectPacket(packet) => {
-                assert_eq!(packet.version, 157);
+                assert_eq!(packet.version, 158);
                 assert_eq!(packet.version_type, "official");
                 assert_eq!(packet.name, "rust-player");
                 assert_eq!(packet.locale, "zh_CN");

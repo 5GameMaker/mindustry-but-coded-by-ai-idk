@@ -2770,7 +2770,7 @@ fn default_server_data(port: u16) -> ServerData {
         map: String::new(),
         players: 0,
         wave: 0,
-        version: 157,
+        version: 158,
         version_type: "release".to_string(),
         mode: Gamemode::Survival,
         player_limit: 0,
@@ -2833,7 +2833,7 @@ mod tests {
                 map: "Map".into(),
                 players: 5,
                 wave: 12,
-                version: 157,
+                version: 158,
                 version_type: "release".into(),
                 mode: Gamemode::Attack,
                 player_limit: 16,
@@ -2851,7 +2851,7 @@ mod tests {
         assert_eq!(host.mapname, "Map");
         assert_eq!(host.players, 5);
         assert_eq!(host.wave, 12);
-        assert_eq!(host.version, 157);
+        assert_eq!(host.version, 158);
         assert_eq!(host.version_type, "release");
         assert_eq!(host.mode, Gamemode::Attack);
         assert_eq!(host.player_limit, 16);
@@ -3017,7 +3017,7 @@ mod tests {
             map: "Rust Map".into(),
             players: 3,
             wave: 9,
-            version: 157,
+            version: 158,
             version_type: "release".into(),
             mode: Gamemode::Survival,
             player_limit: 12,
@@ -3034,7 +3034,7 @@ mod tests {
         assert_eq!(host.mapname, "Rust Map");
         assert_eq!(host.players, 3);
         assert_eq!(host.wave, 9);
-        assert_eq!(host.version, 157);
+        assert_eq!(host.version, 158);
         assert_eq!(host.description, "provider discovery");
         assert_eq!(host.port, i32::from(port));
     }
@@ -3253,7 +3253,7 @@ mod tests {
     #[test]
     fn packet_kind_connect_packet_uses_manifest_id_without_changing_codec() {
         let packet = ConnectPacket {
-            version: 157,
+            version: 158,
             version_type: "official".into(),
             mods: Vec::new(),
             name: "p".into(),
