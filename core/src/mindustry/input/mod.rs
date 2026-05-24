@@ -55,8 +55,13 @@ pub use input_handler::{
     UnitEnteredPayloadOutcome, UnitEnteredPayloadRejectReason,
 };
 pub use mobile_input::{
-    MobileInput, MobileInputAction, MobileInputFrame, MobileInputUpdate, MobilePanFrame,
-    MobilePanPlan, MobileVec2, MobileZoomPlan, DEFAULT_EDGE_PAN, MAX_PAN_SPEED,
+    check_mobile_overlap_placement, get_mobile_plan, has_mobile_plan, is_area_breaking,
+    is_line_placing, mobile_schematic_origin, plan_rect, remove_mobile_plan, synced_mobile_plans,
+    MobileActionPlan, MobileBlockFootprint, MobileGesturePlan, MobileInput, MobileInputAction,
+    MobileInputFrame, MobileInputUpdate, MobileLongPressFrame, MobilePanFrame, MobilePanPlan,
+    MobilePlacementButton, MobilePlanSnapshot, MobileRemovePlanResult, MobileTapFrame,
+    MobileTouchDownFrame, MobileTouchUpFrame, MobileVec2, MobileZoomPlan, DEFAULT_EDGE_PAN,
+    MAX_PAN_SPEED,
 };
 pub use place_mode::PlaceMode;
 pub use placement::{

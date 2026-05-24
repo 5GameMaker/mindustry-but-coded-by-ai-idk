@@ -50,7 +50,7 @@ impl MobileVec2 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MobileInputAction {
     ResetMenuState,
     ClearCommandSelections,
@@ -62,6 +62,109 @@ pub enum MobileInputAction {
         end_y: i32,
     },
     ClearLinePlans,
+    ToggleDiagonalPlacement,
+    ToggleBreakMode {
+        mode: PlaceMode,
+    },
+    RotateBlock {
+        rotation: i32,
+    },
+    ToggleSchematicMode {
+        enabled: bool,
+    },
+    ToggleRebuildMode {
+        enabled: bool,
+    },
+    ConfirmSelectedPlans,
+    CancelPlacement,
+    ClearBuilding,
+    BeginSchematicSelection {
+        rebuild: bool,
+        tile_x: i32,
+        tile_y: i32,
+    },
+    StartKeyboardShooting,
+    ConfirmLinePlacement,
+    ConfirmAreaBreak {
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+    },
+    CreateSchematicSelection {
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+    },
+    RebuildArea {
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+    },
+    TryDropItems {
+        tile_present: bool,
+        world_x: f32,
+        world_y: f32,
+    },
+    SelectUnitsRect,
+    BeginCommandRect {
+        world_x: f32,
+        world_y: f32,
+    },
+    SetPayloadTargetUnit,
+    SetPayloadTargetBuilding,
+    SetPayloadDropPosition {
+        world_x: f32,
+        world_y: f32,
+    },
+    BeginManualShooting,
+    PlaySelectEffect {
+        world_x: f32,
+        world_y: f32,
+    },
+    PlayTapBlockEffect {
+        world_x: f32,
+        world_y: f32,
+        size: f32,
+    },
+    TileTap {
+        tile_x: i32,
+        tile_y: i32,
+    },
+    CheckTargets {
+        world_x: f32,
+        world_y: f32,
+    },
+    RemovePlanAtCursor,
+    AddPlacePlan {
+        tile_x: i32,
+        tile_y: i32,
+        rotation: i32,
+        block: String,
+    },
+    AddBreakPlan {
+        tile_x: i32,
+        tile_y: i32,
+    },
+    CommandTap {
+        queue: bool,
+    },
+    TapCommandUnit,
+    PingLocation {
+        world_x: f32,
+        world_y: f32,
+    },
+    ResetPayloadTarget,
+    UnitControlTapped,
+    BuildingControlTapped,
+    FallbackDoubleTap,
+    StoreTapCandidates {
+        unit: bool,
+        building: bool,
+    },
+    TryBeginMine,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +286,208 @@ pub struct MobilePanPlan {
 pub struct MobileZoomPlan {
     pub accepted: bool,
     pub scale: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MobilePlacementButton {
+    BreakMode,
+    Diagonal,
+    RotateOrSchematic,
+    Confirm,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MobileGesturePlan {
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobileActionPlan {
+    pub accepted: bool,
+    pub actions: Vec<MobileInputAction>,
+}
+
+impl MobileActionPlan {
+    pub fn rejected() -> Self {
+        Self {
+            accepted: false,
+            actions: Vec::new(),
+        }
+    }
+
+    pub fn accepted(actions: Vec<MobileInputAction>) -> Self {
+        Self {
+            accepted: true,
+            actions,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MobileTouchDownFrame {
+    pub state_menu: bool,
+    pub locked: bool,
+    pub player_dead: bool,
+    pub cursor: Option<(i32, i32)>,
+    pub scene_has_mouse: bool,
+    pub pointer: i32,
+    pub keyboard: bool,
+    pub state_editor: bool,
+    pub try_tap_player: bool,
+    pub has_plan_at_cursor: bool,
+}
+
+impl Default for MobileTouchDownFrame {
+    fn default() -> Self {
+        Self {
+            state_menu: false,
+            locked: false,
+            player_dead: false,
+            cursor: Some((0, 0)),
+            scene_has_mouse: false,
+            pointer: 0,
+            keyboard: false,
+            state_editor: false,
+            try_tap_player: false,
+            has_plan_at_cursor: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MobileTouchUpFrame {
+    pub any_touched: bool,
+    pub renderer_scale: f32,
+    pub tile_x: i32,
+    pub tile_y: i32,
+    pub player_dead: bool,
+    pub tile_present: bool,
+    pub world_x: f32,
+    pub world_y: f32,
+}
+
+impl Default for MobileTouchUpFrame {
+    fn default() -> Self {
+        Self {
+            any_touched: false,
+            renderer_scale: 1.0,
+            tile_x: 0,
+            tile_y: 0,
+            player_dead: false,
+            tile_present: false,
+            world_x: 0.0,
+            world_y: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MobileLongPressFrame {
+    pub state_menu: bool,
+    pub locked: bool,
+    pub player_dead: bool,
+    pub scene_has_mouse: bool,
+    pub state_paused: bool,
+    pub cursor: Option<(i32, i32)>,
+    pub cursor_world_x: f32,
+    pub cursor_world_y: f32,
+    pub command_mode: bool,
+    pub payload_unit_available: bool,
+    pub payload_building_available: bool,
+    pub payload_has_payload: bool,
+    pub selected_block_size: f32,
+    pub selected_block_offset: f32,
+}
+
+impl Default for MobileLongPressFrame {
+    fn default() -> Self {
+        Self {
+            state_menu: false,
+            locked: false,
+            player_dead: false,
+            scene_has_mouse: false,
+            state_paused: false,
+            cursor: Some((0, 0)),
+            cursor_world_x: 0.0,
+            cursor_world_y: 0.0,
+            command_mode: false,
+            payload_unit_available: false,
+            payload_building_available: false,
+            payload_has_payload: false,
+            selected_block_size: 1.0,
+            selected_block_offset: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MobileTapFrame {
+    pub state_menu: bool,
+    pub locked: bool,
+    pub line_mode: bool,
+    pub cursor: Option<(i32, i32)>,
+    pub linked_cursor: (i32, i32),
+    pub scene_has_mouse: bool,
+    pub world_x: f32,
+    pub world_y: f32,
+    pub count: i32,
+    pub player_dead: bool,
+    pub plan_at_cursor: bool,
+    pub plan_at_linked: bool,
+    pub valid_place: bool,
+    pub overlap_place: bool,
+    pub valid_break: bool,
+    pub command_selection_available: bool,
+    pub command_building_available: bool,
+    pub net_active: bool,
+    pub possession_allowed: bool,
+    pub unit_tapped_controllable: bool,
+    pub building_tapped_present: bool,
+    pub selected_unit_present: bool,
+    pub selected_control_building_present: bool,
+    pub try_repair_derelict: bool,
+    pub try_stop_mine: bool,
+    pub can_tap_player: bool,
+    pub config_tap_handled: bool,
+    pub tile_tapped_handled: bool,
+    pub double_tap_mine: bool,
+}
+
+impl Default for MobileTapFrame {
+    fn default() -> Self {
+        Self {
+            state_menu: false,
+            locked: false,
+            line_mode: false,
+            cursor: Some((0, 0)),
+            linked_cursor: (0, 0),
+            scene_has_mouse: false,
+            world_x: 0.0,
+            world_y: 0.0,
+            count: 1,
+            player_dead: false,
+            plan_at_cursor: false,
+            plan_at_linked: false,
+            valid_place: false,
+            overlap_place: false,
+            valid_break: false,
+            command_selection_available: false,
+            command_building_available: false,
+            net_active: false,
+            possession_allowed: false,
+            unit_tapped_controllable: false,
+            building_tapped_present: false,
+            selected_unit_present: false,
+            selected_control_building_present: false,
+            try_repair_derelict: false,
+            try_stop_mine: false,
+            can_tap_player: false,
+            config_tap_handled: false,
+            tile_tapped_handled: false,
+            double_tap_mine: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -621,6 +926,338 @@ impl MobileInput {
             accepted: true,
             scale: distance / initial_distance * self.last_zoom,
         }
+    }
+
+    pub fn placement_button(
+        &mut self,
+        button: MobilePlacementButton,
+        rotation: i32,
+        selected_block_rotates: bool,
+        player_dead: bool,
+    ) -> MobileActionPlan {
+        let mut actions = Vec::new();
+
+        match button {
+            MobilePlacementButton::BreakMode => {
+                self.mode = if self.mode == PlaceMode::Breaking {
+                    if self.selected_block.is_none() {
+                        PlaceMode::None
+                    } else {
+                        PlaceMode::Placing
+                    }
+                } else {
+                    PlaceMode::Breaking
+                };
+                self.last_block = self.selected_block.clone();
+                actions.push(MobileInputAction::ToggleBreakMode { mode: self.mode });
+            }
+            MobilePlacementButton::Diagonal => {
+                actions.push(MobileInputAction::ToggleDiagonalPlacement);
+            }
+            MobilePlacementButton::RotateOrSchematic => {
+                if self.selected_block.is_some() && selected_block_rotates {
+                    actions.push(MobileInputAction::RotateBlock {
+                        rotation: (rotation + 1).rem_euclid(4),
+                    });
+                } else {
+                    self.schematic_mode = !self.schematic_mode;
+                    if self.schematic_mode {
+                        self.selected_block = None;
+                        self.mode = PlaceMode::None;
+                    } else {
+                        self.rebuild_mode = false;
+                    }
+                    actions.push(MobileInputAction::ToggleSchematicMode {
+                        enabled: self.schematic_mode,
+                    });
+                }
+            }
+            MobilePlacementButton::Confirm => {
+                if self.schematic_mode {
+                    self.rebuild_mode = !self.rebuild_mode;
+                    actions.push(MobileInputAction::ToggleRebuildMode {
+                        enabled: self.rebuild_mode,
+                    });
+                } else if !player_dead {
+                    self.selecting = false;
+                    self.select_plans_empty = true;
+                    actions.push(MobileInputAction::ConfirmSelectedPlans);
+                }
+            }
+            MobilePlacementButton::Cancel => {
+                if !player_dead {
+                    actions.push(MobileInputAction::ClearBuilding);
+                }
+                self.select_plans_empty = true;
+                self.mode = PlaceMode::None;
+                self.selected_block = None;
+                actions.push(MobileInputAction::CancelPlacement);
+            }
+        }
+
+        MobileActionPlan::accepted(actions)
+    }
+
+    pub fn touch_down(&mut self, frame: &MobileTouchDownFrame) -> MobileActionPlan {
+        if frame.state_menu || frame.locked {
+            return MobileActionPlan::rejected();
+        }
+
+        self.down = true;
+
+        if frame.player_dead || frame.cursor.is_none() || frame.scene_has_mouse {
+            return MobileActionPlan::accepted(Vec::new());
+        }
+
+        let (tile_x, tile_y) = frame.cursor.expect("cursor checked above");
+        self.selecting = frame.has_plan_at_cursor && !self.command_mode;
+
+        let mut actions = Vec::new();
+        if frame.pointer == 0 && !self.selecting {
+            if self.schematic_mode && self.selected_block.is_none() {
+                self.mode = if self.rebuild_mode {
+                    PlaceMode::RebuildSelect
+                } else {
+                    PlaceMode::SchematicSelect
+                };
+                self.line_start_x = tile_x;
+                self.line_start_y = tile_y;
+                self.last_line_x = tile_x;
+                self.last_line_y = tile_y;
+                actions.push(MobileInputAction::BeginSchematicSelection {
+                    rebuild: self.rebuild_mode,
+                    tile_x,
+                    tile_y,
+                });
+            } else if !frame.try_tap_player && frame.keyboard && !frame.state_editor {
+                actions.push(MobileInputAction::StartKeyboardShooting);
+            }
+        }
+
+        MobileActionPlan::accepted(actions)
+    }
+
+    pub fn touch_up(&mut self, frame: &MobileTouchUpFrame) -> MobileActionPlan {
+        self.last_zoom = frame.renderer_scale;
+        if !frame.any_touched {
+            self.down = false;
+        }
+        self.manual_shooting = false;
+        self.selecting = false;
+
+        let mut actions = Vec::new();
+        if self.line_mode {
+            if self.mode == PlaceMode::Placing && self.is_placing() {
+                actions.push(MobileInputAction::ConfirmLinePlacement);
+            } else if self.mode == PlaceMode::Breaking {
+                actions.push(MobileInputAction::ConfirmAreaBreak {
+                    start_x: self.line_start_x,
+                    start_y: self.line_start_y,
+                    end_x: frame.tile_x,
+                    end_y: frame.tile_y,
+                });
+            }
+            self.line_mode = false;
+        } else if self.mode == PlaceMode::SchematicSelect {
+            actions.push(MobileInputAction::CreateSchematicSelection {
+                start_x: self.line_start_x,
+                start_y: self.line_start_y,
+                end_x: self.last_line_x,
+                end_y: self.last_line_y,
+            });
+            self.last_schematic_present = true;
+            self.schematic_mode = false;
+            self.mode = PlaceMode::None;
+        } else if self.mode == PlaceMode::RebuildSelect {
+            actions.push(MobileInputAction::RebuildArea {
+                start_x: self.line_start_x,
+                start_y: self.line_start_y,
+                end_x: self.last_line_x,
+                end_y: self.last_line_y,
+            });
+            self.mode = PlaceMode::None;
+        } else if !frame.player_dead {
+            actions.push(MobileInputAction::TryDropItems {
+                tile_present: frame.tile_present,
+                world_x: frame.world_x,
+                world_y: frame.world_y,
+            });
+        }
+
+        actions.push(MobileInputAction::SelectUnitsRect);
+        MobileActionPlan::accepted(actions)
+    }
+
+    pub fn long_press(&mut self, frame: &MobileLongPressFrame) -> MobileActionPlan {
+        if frame.state_menu
+            || frame.player_dead
+            || frame.locked
+            || frame.scene_has_mouse
+            || self.schematic_mode
+        {
+            return MobileActionPlan::rejected();
+        }
+
+        let mut actions = Vec::new();
+        if self.mode == PlaceMode::None {
+            if frame.command_mode || self.command_mode {
+                actions.push(MobileInputAction::BeginCommandRect {
+                    world_x: frame.cursor_world_x,
+                    world_y: frame.cursor_world_y,
+                });
+            } else if frame.payload_unit_available {
+                self.payload_target_present = true;
+                actions.push(MobileInputAction::SetPayloadTargetUnit);
+            } else if frame.payload_building_available {
+                self.payload_target_present = true;
+                actions.push(MobileInputAction::SetPayloadTargetBuilding);
+            } else if frame.payload_has_payload {
+                self.payload_target_present = true;
+                actions.push(MobileInputAction::SetPayloadDropPosition {
+                    world_x: frame.cursor_world_x,
+                    world_y: frame.cursor_world_y,
+                });
+            } else {
+                self.manual_shooting = true;
+                self.target_present = false;
+                actions.push(MobileInputAction::BeginManualShooting);
+            }
+
+            if !frame.state_paused {
+                actions.push(MobileInputAction::PlaySelectEffect {
+                    world_x: frame.cursor_world_x,
+                    world_y: frame.cursor_world_y,
+                });
+            }
+        } else {
+            let Some((tile_x, tile_y)) = frame.cursor else {
+                return MobileActionPlan::rejected();
+            };
+
+            self.line_start_x = tile_x;
+            self.line_start_y = tile_y;
+            self.last_line_x = tile_x;
+            self.last_line_y = tile_y;
+            self.line_mode = true;
+
+            if self.mode == PlaceMode::Breaking {
+                if !frame.state_paused {
+                    actions.push(MobileInputAction::PlayTapBlockEffect {
+                        world_x: frame.cursor_world_x,
+                        world_y: frame.cursor_world_y,
+                        size: 1.0,
+                    });
+                }
+            } else if self.selected_block.is_some() {
+                actions.push(MobileInputAction::UpdateLine {
+                    start_x: tile_x,
+                    start_y: tile_y,
+                    end_x: tile_x,
+                    end_y: tile_y,
+                });
+                if !frame.state_paused {
+                    actions.push(MobileInputAction::PlayTapBlockEffect {
+                        world_x: frame.cursor_world_x + frame.selected_block_offset,
+                        world_y: frame.cursor_world_y + frame.selected_block_offset,
+                        size: frame.selected_block_size,
+                    });
+                }
+            }
+        }
+
+        MobileActionPlan::accepted(actions)
+    }
+
+    pub fn tap(&mut self, frame: &MobileTapFrame, rotation: i32) -> MobileActionPlan {
+        if frame.state_menu || frame.line_mode || self.line_mode || frame.locked {
+            return MobileActionPlan::rejected();
+        }
+
+        let Some((tile_x, tile_y)) = frame.cursor else {
+            return MobileActionPlan::rejected();
+        };
+
+        if frame.scene_has_mouse {
+            return MobileActionPlan::rejected();
+        }
+
+        let mut actions = vec![MobileInputAction::TileTap { tile_x, tile_y }];
+
+        if !frame.player_dead {
+            actions.push(MobileInputAction::CheckTargets {
+                world_x: frame.world_x,
+                world_y: frame.world_y,
+            });
+        }
+
+        if frame.plan_at_cursor && !self.command_mode {
+            actions.push(MobileInputAction::RemovePlanAtCursor);
+        } else if self.mode == PlaceMode::Placing
+            && self.is_placing()
+            && frame.valid_place
+            && !frame.overlap_place
+        {
+            let block = self.selected_block.clone().unwrap_or_default();
+            self.last_placed_present = true;
+            self.select_plans_empty = false;
+            actions.push(MobileInputAction::AddPlacePlan {
+                tile_x,
+                tile_y,
+                rotation,
+                block,
+            });
+        } else if self.mode == PlaceMode::Breaking && frame.valid_break && !frame.plan_at_linked {
+            let (linked_x, linked_y) = frame.linked_cursor;
+            self.select_plans_empty = false;
+            actions.push(MobileInputAction::AddBreakPlan {
+                tile_x: linked_x,
+                tile_y: linked_y,
+            });
+        } else if (self.command_mode && frame.command_selection_available)
+            || frame.command_building_available
+        {
+            actions.push(MobileInputAction::CommandTap {
+                queue: self.queue_command_mode,
+            });
+        } else if self.command_mode {
+            actions.push(MobileInputAction::TapCommandUnit);
+        } else if frame.count == 3 && frame.net_active {
+            actions.push(MobileInputAction::PingLocation {
+                world_x: frame.world_x,
+                world_y: frame.world_y,
+            });
+        } else if frame.count == 2 {
+            self.payload_target_present = false;
+            actions.push(MobileInputAction::ResetPayloadTarget);
+
+            if frame.possession_allowed && frame.unit_tapped_controllable {
+                actions.push(MobileInputAction::UnitControlTapped);
+            } else if frame.possession_allowed && frame.building_tapped_present {
+                actions.push(MobileInputAction::BuildingControlTapped);
+            } else if !frame.config_tap_handled {
+                actions.push(MobileInputAction::FallbackDoubleTap);
+            }
+        } else {
+            self.unit_tapped_present = frame.selected_unit_present;
+            self.building_tapped_present = frame.selected_control_building_present;
+            actions.push(MobileInputAction::StoreTapCandidates {
+                unit: frame.selected_unit_present,
+                building: frame.selected_control_building_present,
+            });
+
+            if !frame.try_repair_derelict
+                && !frame.try_stop_mine
+                && !frame.can_tap_player
+                && !frame.config_tap_handled
+                && !frame.tile_tapped_handled
+                && self.mode == PlaceMode::None
+                && !frame.double_tap_mine
+            {
+                actions.push(MobileInputAction::TryBeginMine);
+            }
+        }
+
+        MobileActionPlan::accepted(actions)
     }
 }
 
@@ -1223,5 +1860,294 @@ mod tests {
 
         assert_eq!(mobile_schematic_origin(&plans, 8.0), Some((1, 2)));
         assert_eq!(mobile_schematic_origin(&[], 8.0), None);
+    }
+
+    #[test]
+    fn placement_buttons_toggle_break_rotate_schematic_confirm_and_cancel() {
+        let mut input = MobileInput::new();
+        input.selected_block = Some("duo".into());
+
+        let break_plan = input.placement_button(MobilePlacementButton::BreakMode, 0, false, false);
+        assert_eq!(input.mode, PlaceMode::Breaking);
+        assert_eq!(input.last_block, Some("duo".into()));
+        assert_eq!(
+            break_plan.actions,
+            vec![MobileInputAction::ToggleBreakMode {
+                mode: PlaceMode::Breaking
+            }]
+        );
+
+        let rotate =
+            input.placement_button(MobilePlacementButton::RotateOrSchematic, 3, true, false);
+        assert_eq!(
+            rotate.actions,
+            vec![MobileInputAction::RotateBlock { rotation: 0 }]
+        );
+
+        input.selected_block = None;
+        let schematic =
+            input.placement_button(MobilePlacementButton::RotateOrSchematic, 0, false, false);
+        assert!(input.schematic_mode);
+        assert_eq!(input.mode, PlaceMode::None);
+        assert_eq!(
+            schematic.actions,
+            vec![MobileInputAction::ToggleSchematicMode { enabled: true }]
+        );
+
+        let confirm = input.placement_button(MobilePlacementButton::Confirm, 0, false, false);
+        assert!(input.rebuild_mode);
+        assert_eq!(
+            confirm.actions,
+            vec![MobileInputAction::ToggleRebuildMode { enabled: true }]
+        );
+
+        let cancel = input.placement_button(MobilePlacementButton::Cancel, 0, false, false);
+        assert_eq!(input.mode, PlaceMode::None);
+        assert!(input.select_plans_empty);
+        assert_eq!(
+            cancel.actions,
+            vec![
+                MobileInputAction::ClearBuilding,
+                MobileInputAction::CancelPlacement
+            ]
+        );
+    }
+
+    #[test]
+    fn touch_down_begins_schematic_selection_or_keyboard_shooting() {
+        let mut input = MobileInput::new();
+        input.schematic_mode = true;
+        input.rebuild_mode = true;
+
+        let plan = input.touch_down(&MobileTouchDownFrame {
+            cursor: Some((7, 9)),
+            ..MobileTouchDownFrame::default()
+        });
+
+        assert!(plan.accepted);
+        assert!(input.down);
+        assert_eq!(input.mode, PlaceMode::RebuildSelect);
+        assert_eq!((input.line_start_x, input.line_start_y), (7, 9));
+        assert_eq!(
+            plan.actions,
+            vec![MobileInputAction::BeginSchematicSelection {
+                rebuild: true,
+                tile_x: 7,
+                tile_y: 9,
+            }]
+        );
+
+        let mut keyboard = MobileInput::new();
+        let shoot = keyboard.touch_down(&MobileTouchDownFrame {
+            keyboard: true,
+            try_tap_player: false,
+            ..MobileTouchDownFrame::default()
+        });
+        assert_eq!(
+            shoot.actions,
+            vec![MobileInputAction::StartKeyboardShooting]
+        );
+    }
+
+    #[test]
+    fn touch_up_finishes_line_schematic_rebuild_or_drop_paths() {
+        let mut line = MobileInput::new();
+        line.line_mode = true;
+        line.mode = PlaceMode::Placing;
+        line.selected_block = Some("conveyor".into());
+
+        let line_plan = line.touch_up(&MobileTouchUpFrame {
+            renderer_scale: 2.0,
+            ..MobileTouchUpFrame::default()
+        });
+
+        assert_eq!(line.last_zoom, 2.0);
+        assert!(!line.down);
+        assert!(!line.line_mode);
+        assert!(line_plan
+            .actions
+            .contains(&MobileInputAction::ConfirmLinePlacement));
+        assert!(line_plan
+            .actions
+            .contains(&MobileInputAction::SelectUnitsRect));
+
+        let mut schematic = MobileInput::new();
+        schematic.mode = PlaceMode::SchematicSelect;
+        schematic.schematic_mode = true;
+        schematic.line_start_x = 1;
+        schematic.line_start_y = 2;
+        schematic.last_line_x = 3;
+        schematic.last_line_y = 4;
+        let schematic_plan = schematic.touch_up(&MobileTouchUpFrame::default());
+        assert_eq!(schematic.mode, PlaceMode::None);
+        assert!(!schematic.schematic_mode);
+        assert_eq!(
+            schematic_plan.actions[0],
+            MobileInputAction::CreateSchematicSelection {
+                start_x: 1,
+                start_y: 2,
+                end_x: 3,
+                end_y: 4,
+            }
+        );
+
+        let mut dropping = MobileInput::new();
+        let drop_plan = dropping.touch_up(&MobileTouchUpFrame {
+            tile_present: true,
+            world_x: 12.0,
+            world_y: 34.0,
+            ..MobileTouchUpFrame::default()
+        });
+        assert!(drop_plan
+            .actions
+            .contains(&MobileInputAction::TryDropItems {
+                tile_present: true,
+                world_x: 12.0,
+                world_y: 34.0,
+            }));
+    }
+
+    #[test]
+    fn long_press_starts_command_rect_payload_manual_or_line_mode() {
+        let mut command = MobileInput::new();
+        command.command_mode = true;
+        let command_plan = command.long_press(&MobileLongPressFrame {
+            cursor_world_x: 5.0,
+            cursor_world_y: 6.0,
+            ..MobileLongPressFrame::default()
+        });
+        assert!(command_plan
+            .actions
+            .contains(&MobileInputAction::BeginCommandRect {
+                world_x: 5.0,
+                world_y: 6.0,
+            }));
+
+        let mut manual = MobileInput::new();
+        manual.target_present = true;
+        let manual_plan = manual.long_press(&MobileLongPressFrame::default());
+        assert!(manual.manual_shooting);
+        assert!(!manual.target_present);
+        assert!(manual_plan
+            .actions
+            .contains(&MobileInputAction::BeginManualShooting));
+
+        let mut line = MobileInput::new();
+        line.mode = PlaceMode::Breaking;
+        let line_plan = line.long_press(&MobileLongPressFrame {
+            cursor: Some((4, 5)),
+            cursor_world_x: 32.0,
+            cursor_world_y: 40.0,
+            ..MobileLongPressFrame::default()
+        });
+        assert!(line.line_mode);
+        assert_eq!((line.line_start_x, line.line_start_y), (4, 5));
+        assert!(line_plan
+            .actions
+            .contains(&MobileInputAction::PlayTapBlockEffect {
+                world_x: 32.0,
+                world_y: 40.0,
+                size: 1.0,
+            }));
+    }
+
+    #[test]
+    fn tap_emits_place_break_command_ping_and_double_tap_intents() {
+        let mut place = MobileInput::new();
+        place.mode = PlaceMode::Placing;
+        place.selected_block = Some("router".into());
+        let place_plan = place.tap(
+            &MobileTapFrame {
+                cursor: Some((2, 3)),
+                valid_place: true,
+                ..MobileTapFrame::default()
+            },
+            1,
+        );
+        assert_eq!(
+            place_plan.actions,
+            vec![
+                MobileInputAction::TileTap {
+                    tile_x: 2,
+                    tile_y: 3
+                },
+                MobileInputAction::CheckTargets {
+                    world_x: 0.0,
+                    world_y: 0.0,
+                },
+                MobileInputAction::AddPlacePlan {
+                    tile_x: 2,
+                    tile_y: 3,
+                    rotation: 1,
+                    block: "router".into(),
+                },
+            ]
+        );
+
+        let mut breaking = MobileInput::new();
+        breaking.mode = PlaceMode::Breaking;
+        let break_plan = breaking.tap(
+            &MobileTapFrame {
+                cursor: Some((2, 3)),
+                linked_cursor: (9, 10),
+                valid_break: true,
+                ..MobileTapFrame::default()
+            },
+            0,
+        );
+        assert!(break_plan
+            .actions
+            .contains(&MobileInputAction::AddBreakPlan {
+                tile_x: 9,
+                tile_y: 10,
+            }));
+
+        let mut command = MobileInput::new();
+        command.command_mode = true;
+        command.queue_command_mode = true;
+        let command_plan = command.tap(
+            &MobileTapFrame {
+                command_selection_available: true,
+                ..MobileTapFrame::default()
+            },
+            0,
+        );
+        assert!(command_plan
+            .actions
+            .contains(&MobileInputAction::CommandTap { queue: true }));
+
+        let mut ping = MobileInput::new();
+        let ping_plan = ping.tap(
+            &MobileTapFrame {
+                count: 3,
+                net_active: true,
+                world_x: 11.0,
+                world_y: 22.0,
+                ..MobileTapFrame::default()
+            },
+            0,
+        );
+        assert!(ping_plan
+            .actions
+            .contains(&MobileInputAction::PingLocation {
+                world_x: 11.0,
+                world_y: 22.0,
+            }));
+
+        let mut double = MobileInput::new();
+        double.payload_target_present = true;
+        let double_plan = double.tap(
+            &MobileTapFrame {
+                count: 2,
+                possession_allowed: true,
+                unit_tapped_controllable: true,
+                ..MobileTapFrame::default()
+            },
+            0,
+        );
+        assert!(!double.payload_target_present);
+        assert!(double_plan
+            .actions
+            .contains(&MobileInputAction::UnitControlTapped));
     }
 }
