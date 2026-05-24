@@ -228,6 +228,53 @@ pub fn shock_mine_should_trigger(enabled: bool, same_team: bool, timer_ready: bo
     enabled && !same_team && timer_ready
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShockMineStatsPlan {
+    pub tendrils: i32,
+    pub damage_fixed_decimals: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockMineDrawPlan {
+    pub draw_base: bool,
+    pub draw_team_top: bool,
+    pub team_alpha: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShockMineTriggerPlan {
+    pub triggered: bool,
+    pub self_damage: f32,
+    pub lightning_angles: Vec<f32>,
+    pub lightning_damage: f32,
+    pub lightning_length: i32,
+    pub bullet_angles: Vec<f32>,
+}
+
+pub fn shock_mine_stats_plan(tendrils: i32) -> ShockMineStatsPlan {
+    ShockMineStatsPlan {
+        tendrils,
+        damage_fixed_decimals: 2,
+    }
+}
+
+pub fn shock_mine_draw_plan(team_alpha: f32) -> ShockMineDrawPlan {
+    ShockMineDrawPlan {
+        draw_base: true,
+        draw_team_top: true,
+        team_alpha,
+    }
+}
+
+pub fn shock_mine_lightning_angles(tendrils: i32, random_angles: &[f32]) -> Vec<f32> {
+    if tendrils <= 0 {
+        return Vec::new();
+    }
+    (0..tendrils)
+        .map(|index| random_angles.get(index as usize).copied().unwrap_or(0.0))
+        .collect()
+}
+
 pub fn shock_mine_bullet_angles(shots: i32, inaccuracy_offsets: &[f32]) -> Vec<f32> {
     if shots <= 0 {
         return Vec::new();
@@ -241,6 +288,39 @@ pub fn shock_mine_bullet_angles(shots: i32, inaccuracy_offsets: &[f32]) -> Vec<f
                     .unwrap_or(0.0)
         })
         .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn shock_mine_trigger_plan(
+    enabled: bool,
+    same_team: bool,
+    timer_ready: bool,
+    tile_damage: f32,
+    damage: f32,
+    length: i32,
+    tendrils: i32,
+    lightning_random_angles: &[f32],
+    has_bullet: bool,
+    shots: i32,
+    bullet_inaccuracy_offsets: &[f32],
+) -> ShockMineTriggerPlan {
+    let triggered = shock_mine_should_trigger(enabled, same_team, timer_ready);
+    ShockMineTriggerPlan {
+        triggered,
+        self_damage: if triggered { tile_damage } else { 0.0 },
+        lightning_angles: if triggered {
+            shock_mine_lightning_angles(tendrils, lightning_random_angles)
+        } else {
+            Vec::new()
+        },
+        lightning_damage: if triggered { damage } else { 0.0 },
+        lightning_length: if triggered { length } else { 0 },
+        bullet_angles: if triggered && has_bullet {
+            shock_mine_bullet_angles(shots, bullet_inaccuracy_offsets)
+        } else {
+            Vec::new()
+        },
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2901,9 +2981,66 @@ mod tests {
         );
 
         assert!(shock_mine_should_trigger(true, false, true));
+        assert!(!shock_mine_should_trigger(false, false, true));
+        assert!(!shock_mine_should_trigger(true, true, true));
+        assert!(!shock_mine_should_trigger(true, false, false));
+        assert_eq!(
+            shock_mine_stats_plan(6),
+            ShockMineStatsPlan {
+                tendrils: 6,
+                damage_fixed_decimals: 2,
+            }
+        );
+        assert_eq!(
+            shock_mine_draw_plan(0.3),
+            ShockMineDrawPlan {
+                draw_base: true,
+                draw_team_top: true,
+                team_alpha: 0.3,
+            }
+        );
+        assert_eq!(
+            shock_mine_lightning_angles(3, &[10.0, 20.0]),
+            vec![10.0, 20.0, 0.0]
+        );
         assert_eq!(
             shock_mine_bullet_angles(4, &[1.0, 2.0]),
             vec![1.0, 92.0, 180.0, 270.0]
+        );
+        assert!(shock_mine_bullet_angles(0, &[1.0]).is_empty());
+        assert_eq!(
+            shock_mine_trigger_plan(
+                true,
+                false,
+                true,
+                5.0,
+                13.0,
+                10,
+                3,
+                &[90.0, 180.0],
+                true,
+                4,
+                &[1.0, 2.0],
+            ),
+            ShockMineTriggerPlan {
+                triggered: true,
+                self_damage: 5.0,
+                lightning_angles: vec![90.0, 180.0, 0.0],
+                lightning_damage: 13.0,
+                lightning_length: 10,
+                bullet_angles: vec![1.0, 92.0, 180.0, 270.0],
+            }
+        );
+        assert_eq!(
+            shock_mine_trigger_plan(true, true, true, 5.0, 13.0, 10, 3, &[90.0], true, 4, &[1.0],),
+            ShockMineTriggerPlan {
+                triggered: false,
+                self_damage: 0.0,
+                lightning_angles: Vec::new(),
+                lightning_damage: 0.0,
+                lightning_length: 0,
+                bullet_angles: Vec::new(),
+            }
         );
     }
 

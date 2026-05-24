@@ -579,6 +579,33 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - shieldColor/teamColor 到真实渲染颜色的 adapter；
 - drawPlace/drawSelect dash circle helper。
 
+### 7.7a ShockMine
+
+已推进：
+
+- `ShockMineStatsPlan`
+- `ShockMineDrawPlan`
+- `ShockMineTriggerPlan`
+- `shock_mine_should_trigger(...)`
+- `shock_mine_stats_plan(...)`
+- `shock_mine_draw_plan(...)`
+- `shock_mine_lightning_angles(...)`
+- `shock_mine_bullet_angles(...)`
+- `shock_mine_trigger_plan(...)`
+- 已对照 `ShockMine.unitOn()/triggered()/draw()/setStats()` 锁定：
+  - 触发条件为 `enabled && unit.team != team && timer(timerDamage, cooldown)`；
+  - 触发后自身承受 `tileDamage`；
+  - lightning 创建次数为 `tendrils`，每条角度来自 `Mathf.random(360f)`，当前由上层注入随机角度数组以保持纯函数可测；
+  - bullet 非空时创建 `shots` 枚，角度为 `(360f / shots) * i + Mathf.random(inaccuracy)`，当前由上层注入 inaccuracy offsets；
+  - team top 绘制使用 `teamAlpha`；
+  - stats damage 文案保留 tendrils 与 damage 的 2 位格式需求。
+
+仍需：
+
+- 接入真实 `Lightning.create(...)`、`BulletType.create(...)` 与 `Building.damage(...)`；
+- 将 draw plan 连接到 renderer 的 base/teamRegion 绘制；
+- setStats 文案与 bundle/localization 的最终桥接。
+
 ### 7.8 ShieldWall / ForceProjector / MendProjector / OverdriveProjector
 
 已推进：
