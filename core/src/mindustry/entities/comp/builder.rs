@@ -8,15 +8,24 @@
 use std::collections::VecDeque;
 
 use crate::mindustry::ai::{
-    prebuild_ai_update_movement_tick, PrebuildAiBlockInfo, PrebuildAiPlanSnapshot,
-    PrebuildAiTickDecision,
+    builder_ai_idle_retreat, claim_builder_ai_hold_plan, claim_builder_ai_rebuild_plan,
+    prebuild_ai_look_action, prebuild_ai_should_boost, prebuild_ai_update_movement_tick,
+    sync_builder_ai_follow_plan, validate_builder_ai_current_plan, BuilderAiFollowAction,
+    BuilderAiFollowSync, BuilderAiPlanAction, BuilderAiPlanValidation, BuilderAiRetreatDecision,
+    PrebuildAiBlockInfo, PrebuildAiLookAction, PrebuildAiPlanSnapshot, PrebuildAiTickDecision,
+    BUILDER_AI_DEFAULT_REBUILD_PERIOD,
 };
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::TEAM_DERELICT;
-use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamPlanClaim};
+use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamData, TeamPlanClaim};
 use crate::mindustry::io::{TeamId, TypeValue};
 use crate::mindustry::r#type::UnitType;
+
+pub const BUILDER_AI_BUILD_RADIUS: f32 = 1500.0;
+pub const BUILDER_AI_RETREAT_DST: f32 = 110.0;
+pub const BUILDER_AI_RETREAT_DELAY: f32 = 60.0 * 2.0;
+pub const BUILDER_AI_ASSIST_EXTRA_RANGE: f32 = 60.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuilderRequirement {
@@ -190,6 +199,45 @@ pub struct BuilderComp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BuilderAiRuntimeState {
+    pub assist_following: Option<i32>,
+    pub following: Option<i32>,
+    pub enemy: Option<i32>,
+    pub last_plan: Option<TeamBlockPlan>,
+    pub retreat_timer: f32,
+    pub always_flee: bool,
+    pub only_assist: bool,
+    pub flee_range: f32,
+    pub rebuild_period: f32,
+}
+
+impl BuilderAiRuntimeState {
+    pub fn new(always_flee: bool, flee_range: f32) -> Self {
+        Self {
+            always_flee,
+            flee_range,
+            ..Self::default()
+        }
+    }
+}
+
+impl Default for BuilderAiRuntimeState {
+    fn default() -> Self {
+        Self {
+            assist_following: None,
+            following: None,
+            enemy: None,
+            last_plan: None,
+            retreat_timer: 0.0,
+            always_flee: false,
+            only_assist: false,
+            flee_range: 370.0,
+            rebuild_period: BUILDER_AI_DEFAULT_REBUILD_PERIOD,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrebuildAiRuntimeState {
     pub collecting_items: bool,
     pub mining: bool,
@@ -249,6 +297,122 @@ pub struct PrebuildAiRuntimeStep {
     pub added_build_plan: Option<BuildPlan>,
     pub update_building: bool,
     pub collecting_items: bool,
+    pub last_plan: Option<TeamBlockPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuilderAiRuntimeInput {
+    pub delta: f32,
+    pub unit_flying: bool,
+    pub has_target: bool,
+    pub should_shoot: bool,
+    pub boost_when_building: bool,
+    pub floor_is_duct: bool,
+    pub floor_damage_taken: f32,
+    pub floor_is_deep: bool,
+    pub hold_position: bool,
+    pub infinite_resources: bool,
+    pub has_core: bool,
+    pub within_retreat_distance: bool,
+    pub sensed_enemy: Option<i32>,
+    pub timer_enemy_ready: bool,
+    pub timer_follow_ready: bool,
+    pub timer_find_ready: bool,
+    pub within_current_plan_range: bool,
+    pub within_hold_range: bool,
+    pub construct_current_matches: bool,
+    pub conflicting_breaker: bool,
+    pub following_valid: bool,
+    pub following_actively_building: bool,
+    pub following_plan: Option<BuildPlan>,
+    pub assist_valid: bool,
+    pub assist_actively_building: bool,
+    pub assist_plan: Option<BuildPlan>,
+    pub assist_hit_size: f32,
+    pub within_assist_range: bool,
+    pub next_following: Option<i32>,
+    pub next_assist_following: Option<i32>,
+}
+
+impl Default for BuilderAiRuntimeInput {
+    fn default() -> Self {
+        Self {
+            delta: 1.0,
+            unit_flying: false,
+            has_target: false,
+            should_shoot: false,
+            boost_when_building: false,
+            floor_is_duct: false,
+            floor_damage_taken: 0.0,
+            floor_is_deep: false,
+            hold_position: false,
+            infinite_resources: false,
+            has_core: false,
+            within_retreat_distance: false,
+            sensed_enemy: None,
+            timer_enemy_ready: false,
+            timer_follow_ready: false,
+            timer_find_ready: false,
+            within_current_plan_range: true,
+            within_hold_range: true,
+            construct_current_matches: false,
+            conflicting_breaker: false,
+            following_valid: false,
+            following_actively_building: false,
+            following_plan: None,
+            assist_valid: false,
+            assist_actively_building: false,
+            assist_plan: None,
+            assist_hit_size: 0.0,
+            within_assist_range: true,
+            next_following: None,
+            next_assist_following: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuilderAiRuntimeBranch {
+    FollowingInvalid,
+    FollowingCurrentPlan,
+    Retreat,
+    CurrentPlan,
+    AssistMove,
+    FindNewPlan,
+    Idle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuilderAiMoveToPlan {
+    pub range: f32,
+    pub margin: f32,
+    pub moving: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuilderAiMoveToAssist {
+    pub range: f32,
+    pub moving: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuilderAiRuntimeStep {
+    pub look_action: PrebuildAiLookAction,
+    pub update_building: bool,
+    pub branch: BuilderAiRuntimeBranch,
+    pub follow_sync: Option<BuilderAiFollowSync>,
+    pub retreat: Option<BuilderAiRetreatDecision>,
+    pub current_plan_validation: Option<BuilderAiPlanValidation>,
+    pub move_to_plan: Option<BuilderAiMoveToPlan>,
+    pub move_to_assist: Option<BuilderAiMoveToAssist>,
+    pub claimed_team_plan: Option<TeamPlanClaim>,
+    pub added_build_plan: Option<BuildPlan>,
+    pub boosting: Option<bool>,
+    pub moving: bool,
+    pub following: Option<i32>,
+    pub assist_following: Option<i32>,
+    pub enemy: Option<i32>,
+    pub retreat_timer: f32,
     pub last_plan: Option<TeamBlockPlan>,
 }
 
@@ -441,6 +605,266 @@ impl BuilderComp {
         }
         self.build_counter = self.build_counter.min(10.0);
         self.build_counter
+    }
+
+    pub fn builder_ai_plan_move(&self, within_current_plan_range: bool) -> BuilderAiMoveToPlan {
+        let range = (self.type_info.build_range - self.type_info.hit_size * 2.0)
+            .min(BUILDER_AI_BUILD_RADIUS);
+        BuilderAiMoveToPlan {
+            range,
+            margin: 20.0,
+            moving: !within_current_plan_range,
+        }
+    }
+
+    pub fn builder_ai_assist_move(
+        &self,
+        assist_hit_size: f32,
+        within_assist_range: bool,
+    ) -> BuilderAiMoveToAssist {
+        let range = assist_hit_size + self.type_info.hit_size / 2.0 + BUILDER_AI_ASSIST_EXTRA_RANGE;
+        BuilderAiMoveToAssist {
+            range,
+            moving: !within_assist_range,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_builder_ai_tick<
+        FValidBreak,
+        FValidPlace,
+        FWithinTeamPlanRange,
+        FAlreadyPlaced,
+        FTeamValidPlace,
+        FNearEnemy,
+    >(
+        &mut self,
+        state: &mut BuilderAiRuntimeState,
+        team_data: &mut TeamData,
+        input: BuilderAiRuntimeInput,
+        valid_break: FValidBreak,
+        valid_place: FValidPlace,
+        within_team_plan_range: FWithinTeamPlanRange,
+        already_placed: FAlreadyPlaced,
+        team_valid_place: FTeamValidPlace,
+        near_enemy: FNearEnemy,
+    ) -> BuilderAiRuntimeStep
+    where
+        FValidBreak: FnMut(&BuildPlan) -> bool,
+        FValidPlace: FnMut(&BuildPlan) -> bool,
+        FWithinTeamPlanRange: FnMut(&TeamBlockPlan) -> bool,
+        FAlreadyPlaced: FnMut(&TeamBlockPlan) -> bool,
+        FTeamValidPlace: FnMut(&TeamBlockPlan) -> bool,
+        FNearEnemy: FnMut(&TeamBlockPlan) -> bool,
+    {
+        let look_action =
+            prebuild_ai_look_action(input.has_target, input.should_shoot, input.unit_flying);
+        self.update_building = true;
+
+        if state.assist_following.is_some() && !input.assist_valid {
+            state.assist_following = None;
+        }
+
+        if state.following.is_some() && !input.following_valid {
+            state.following = None;
+        }
+
+        if state.assist_following.is_some() && input.assist_actively_building {
+            state.following = state.assist_following;
+        }
+
+        let mut branch = BuilderAiRuntimeBranch::Idle;
+        let mut follow_sync = None;
+        let mut retreat = None;
+        let mut current_plan_validation = None;
+        let mut move_to_plan = None;
+        let mut move_to_assist = None;
+        let mut claimed_team_plan = None;
+        let mut added_build_plan = None;
+        let mut moving = false;
+
+        if state.following.is_some() {
+            let sync = sync_builder_ai_follow_plan(
+                &mut self.plans,
+                &mut state.last_plan,
+                true,
+                input.following_valid,
+                input.following_actively_building,
+                input.following_plan.clone(),
+            );
+            state.retreat_timer = 0.0;
+
+            if sync.action == BuilderAiFollowAction::ClearInvalidFollower {
+                state.following = None;
+                follow_sync = Some(sync);
+                branch = BuilderAiRuntimeBranch::FollowingInvalid;
+                let boosting = (!input.unit_flying).then_some(prebuild_ai_should_boost(
+                    input.boost_when_building,
+                    false,
+                    input.floor_is_duct,
+                    input.floor_damage_taken,
+                    input.floor_is_deep,
+                ));
+                return BuilderAiRuntimeStep {
+                    look_action,
+                    update_building: self.update_building,
+                    branch,
+                    follow_sync,
+                    retreat,
+                    current_plan_validation,
+                    move_to_plan,
+                    move_to_assist,
+                    claimed_team_plan,
+                    added_build_plan,
+                    boosting,
+                    moving,
+                    following: state.following,
+                    assist_following: state.assist_following,
+                    enemy: state.enemy,
+                    retreat_timer: state.retreat_timer,
+                    last_plan: state.last_plan.clone(),
+                };
+            }
+
+            follow_sync = Some(sync);
+            branch = BuilderAiRuntimeBranch::FollowingCurrentPlan;
+        } else if (self.build_plan().is_none() || state.always_flee) && !input.hold_position {
+            if input.timer_enemy_ready {
+                state.enemy = input.sensed_enemy;
+            }
+
+            let retreat_decision = builder_ai_idle_retreat(
+                state.retreat_timer,
+                input.delta,
+                BUILDER_AI_RETREAT_DELAY,
+                state.always_flee,
+                state.enemy.is_some(),
+                input.has_core,
+                input.within_retreat_distance,
+            );
+            state.retreat_timer = retreat_decision.retreat_timer;
+            if retreat_decision.clear_building {
+                self.clear_building();
+            }
+            moving = retreat_decision.moving;
+            retreat = Some(retreat_decision);
+            if retreat_decision.clear_building || retreat_decision.move_to_core {
+                branch = BuilderAiRuntimeBranch::Retreat;
+            }
+        }
+
+        if self.build_plan().is_some() {
+            if !state.always_flee {
+                state.retreat_timer = 0.0;
+            }
+
+            let validation = validate_builder_ai_current_plan(
+                &mut self.plans,
+                &mut state.last_plan,
+                input.hold_position,
+                input.infinite_resources,
+                input.within_hold_range,
+                input.conflicting_breaker,
+                input.construct_current_matches,
+                valid_break,
+                valid_place,
+            );
+
+            if let Some((x, y)) = validation.remove_team_plan_at {
+                team_data.remove_plan_at(x, y);
+            }
+
+            if validation.action == BuilderAiPlanAction::Keep && !input.hold_position {
+                let plan_move = self.builder_ai_plan_move(input.within_current_plan_range);
+                moving = plan_move.moving;
+                move_to_plan = Some(plan_move);
+            }
+
+            if branch == BuilderAiRuntimeBranch::Idle {
+                branch = BuilderAiRuntimeBranch::CurrentPlan;
+            }
+            current_plan_validation = Some(validation);
+        } else {
+            if state.assist_following.is_some() && !input.hold_position {
+                let assist_move =
+                    self.builder_ai_assist_move(input.assist_hit_size, input.within_assist_range);
+                moving = moving || assist_move.moving;
+                move_to_assist = Some(assist_move);
+                branch = BuilderAiRuntimeBranch::AssistMove;
+            }
+
+            if input.timer_follow_ready {
+                if let Some(following) = input.next_following {
+                    state.following = Some(following);
+                }
+
+                if state.only_assist {
+                    state.assist_following = input.next_assist_following;
+                }
+            }
+
+            if !state.only_assist
+                && !team_data.plans.is_empty()
+                && state.following.is_none()
+                && input.timer_find_ready
+            {
+                let claim = if input.hold_position {
+                    claim_builder_ai_hold_plan(
+                        team_data,
+                        input.infinite_resources,
+                        within_team_plan_range,
+                        team_valid_place,
+                    )
+                } else {
+                    claim_builder_ai_rebuild_plan(
+                        team_data,
+                        state.always_flee,
+                        already_placed,
+                        team_valid_place,
+                        near_enemy,
+                    )
+                };
+
+                if let Some(plan) = claim.clone().into_claimed_plan() {
+                    let build_plan = Self::build_plan_from_team_plan(&plan);
+                    if self.add_build(build_plan.clone()) {
+                        state.last_plan = Some(plan);
+                        added_build_plan = Some(build_plan);
+                    }
+                }
+
+                claimed_team_plan = Some(claim);
+                branch = BuilderAiRuntimeBranch::FindNewPlan;
+            }
+        }
+
+        let boosting = (!input.unit_flying).then_some(prebuild_ai_should_boost(
+            input.boost_when_building,
+            moving,
+            input.floor_is_duct,
+            input.floor_damage_taken,
+            input.floor_is_deep,
+        ));
+
+        BuilderAiRuntimeStep {
+            look_action,
+            update_building: self.update_building,
+            branch,
+            follow_sync,
+            retreat,
+            current_plan_validation,
+            move_to_plan,
+            move_to_assist,
+            claimed_team_plan,
+            added_build_plan,
+            boosting,
+            moving,
+            following: state.following,
+            assist_following: state.assist_following,
+            enemy: state.enemy,
+            retreat_timer: state.retreat_timer,
+            last_plan: state.last_plan.clone(),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -801,5 +1225,219 @@ mod tests {
         );
         assert!(!builder.update_building);
         assert_eq!(collecting.added_build_plan, None);
+    }
+
+    #[test]
+    fn builder_component_builder_ai_tick_copies_follower_plan_and_clears_invalid_follower() {
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        let mut state = BuilderAiRuntimeState {
+            following: Some(42),
+            last_plan: Some(TeamBlockPlan::new(1, 1, 0, "duo", None)),
+            retreat_timer: 8.0,
+            ..BuilderAiRuntimeState::default()
+        };
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+
+        let copied = builder.apply_builder_ai_tick(
+            &mut state,
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                following_valid: true,
+                following_actively_building: true,
+                following_plan: Some(BuildPlan::new_place(3, 4, 1, "router")),
+                ..BuilderAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| true,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| false,
+        );
+
+        assert_eq!(copied.branch, BuilderAiRuntimeBranch::FollowingCurrentPlan);
+        assert_eq!(
+            copied.follow_sync.as_ref().map(|sync| sync.action),
+            Some(BuilderAiFollowAction::CopyFollowerPlan)
+        );
+        assert_eq!(
+            builder.build_plan(),
+            Some(&BuildPlan::new_place(3, 4, 1, "router"))
+        );
+        assert_eq!(state.last_plan, None);
+        assert_eq!(state.retreat_timer, 0.0);
+
+        let cleared = builder.apply_builder_ai_tick(
+            &mut state,
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                following_valid: true,
+                following_actively_building: false,
+                ..BuilderAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| true,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| false,
+        );
+
+        assert_eq!(cleared.branch, BuilderAiRuntimeBranch::FollowingInvalid);
+        assert_eq!(state.following, None);
+        assert!(builder.plans.is_empty());
+    }
+
+    #[test]
+    fn builder_component_builder_ai_tick_retreats_when_idle_and_enemy_seen() {
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        builder.add_build(BuildPlan::new_place(1, 1, 0, "duo"));
+        let mut state = BuilderAiRuntimeState {
+            always_flee: true,
+            ..BuilderAiRuntimeState::default()
+        };
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+
+        let step = builder.apply_builder_ai_tick(
+            &mut state,
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                delta: 1.0,
+                has_core: true,
+                timer_enemy_ready: true,
+                sensed_enemy: Some(99),
+                within_retreat_distance: false,
+                floor_is_deep: true,
+                ..BuilderAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| true,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| false,
+        );
+
+        assert_eq!(step.branch, BuilderAiRuntimeBranch::Retreat);
+        assert_eq!(state.enemy, Some(99));
+        assert!(builder.plans.is_empty());
+        assert!(step.retreat.unwrap().move_to_core);
+        assert_eq!(step.boosting, Some(true));
+        assert!(step.moving);
+    }
+
+    #[test]
+    fn builder_component_builder_ai_tick_validates_current_plan_and_removes_team_conflict() {
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        builder.add_build(BuildPlan::new_place(4, 5, 0, "duo"));
+        let mut state = BuilderAiRuntimeState {
+            last_plan: Some(TeamBlockPlan::new(4, 5, 0, "duo", None)),
+            ..BuilderAiRuntimeState::default()
+        };
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![TeamBlockPlan::new(4, 5, 0, "duo", None)];
+
+        let conflict = builder.apply_builder_ai_tick(
+            &mut state,
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                conflicting_breaker: true,
+                within_current_plan_range: false,
+                ..BuilderAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| true,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| false,
+        );
+
+        assert_eq!(conflict.branch, BuilderAiRuntimeBranch::CurrentPlan);
+        assert_eq!(
+            conflict
+                .current_plan_validation
+                .as_ref()
+                .map(|validation| validation.action),
+            Some(BuilderAiPlanAction::DropConflictingBreak)
+        );
+        assert!(builder.plans.is_empty());
+        assert!(team_data.plans.is_empty());
+    }
+
+    #[test]
+    fn builder_component_builder_ai_tick_claims_hold_and_rebuild_team_plans() {
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        let mut state = BuilderAiRuntimeState::default();
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![
+            TeamBlockPlan::new(1, 1, 0, "duo", None),
+            TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+        ];
+
+        let hold = builder.apply_builder_ai_tick(
+            &mut state,
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                hold_position: true,
+                timer_find_ready: true,
+                ..BuilderAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| true,
+            |plan| plan.block == "router",
+            |_| false,
+            |plan| plan.block == "router",
+            |_| false,
+        );
+
+        assert_eq!(hold.branch, BuilderAiRuntimeBranch::FindNewPlan);
+        assert_eq!(
+            hold.claimed_team_plan,
+            Some(TeamPlanClaim::Claimed(TeamBlockPlan::new(
+                2,
+                2,
+                1,
+                "router",
+                Some("cfg".into())
+            )))
+        );
+        assert_eq!(
+            hold.added_build_plan,
+            Some(BuildPlan::new_string_config(2, 2, 1, "router", "cfg"))
+        );
+        assert_eq!(
+            state.last_plan,
+            Some(TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+
+        builder.clear_building();
+        state.last_plan = None;
+        let rebuild = builder.apply_builder_ai_tick(
+            &mut state,
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                timer_find_ready: true,
+                ..BuilderAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| true,
+            |_| false,
+            |_| false,
+            |plan| plan.block == "duo",
+            |_| false,
+        );
+
+        assert_eq!(rebuild.branch, BuilderAiRuntimeBranch::FindNewPlan);
+        assert_eq!(
+            rebuild.claimed_team_plan,
+            Some(TeamPlanClaim::Claimed(TeamBlockPlan::new(
+                1, 1, 0, "duo", None
+            )))
+        );
+        assert_eq!(
+            rebuild.added_build_plan,
+            Some(BuildPlan::new_place(1, 1, 0, "duo"))
+        );
     }
 }
