@@ -12,8 +12,11 @@ use std::{
 
 use crate::mindustry::{
     core::World,
-    game::{GameStats, MapMarkers, Rules, Teams, Universe},
-    io::{read_custom_chunks, type_io::read_u8, CustomChunkSet, MarkerRegionSummary},
+    game::{FogControl, GameStats, MapMarkers, Rules, Teams, Universe},
+    io::{
+        read_custom_chunks, type_io::read_u8, CustomChunkSet, MarkerRegionSummary,
+        CUSTOM_CHUNK_STATIC_FOG_DATA,
+    },
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
     r#type::{MapLocales, Sector},
@@ -142,6 +145,10 @@ pub struct GameState {
     pub custom_chunks: CustomChunkSet,
     /// Last custom chunk decode error, if the network tail could not be materialized.
     pub custom_chunks_error: Option<String>,
+    /// Runtime static/dynamic fog controller restored from Java `static-fog-data`.
+    pub fog_control: FogControl,
+    /// Last static fog custom chunk decode error, if any.
+    pub static_fog_error: Option<String>,
     /// Global attributes of the environment, calculated by weather.
     pub env_attrs: Attributes,
     /// Team data. Gets reset every new game.
@@ -195,6 +202,8 @@ impl GameState {
             map_locales: MapLocales::default(),
             custom_chunks: CustomChunkSet::default(),
             custom_chunks_error: None,
+            fog_control: FogControl::new(0, 0),
+            static_fog_error: None,
             env_attrs: Attributes::new(0),
             teams,
             universe: Universe::new(Vec::<String>::new()),
@@ -385,12 +394,17 @@ impl GameState {
         if let Some(map_snapshot) = world_data.map_snapshot.as_ref() {
             self.world.load_network_map(map_snapshot);
         }
+        self.fog_control
+            .reset_world(map_width.max(0) as usize, map_height.max(0) as usize);
 
         self.markers = world_data.markers_snapshot.clone().unwrap_or_default();
         self.marker_summary = world_data.marker_summary.clone();
         self.custom_chunks = CustomChunkSet::default();
         self.custom_chunks_error = None;
-        if !world_data.custom_chunks.is_empty() {
+        self.static_fog_error = None;
+        if let Some(custom_chunks) = world_data.custom_chunks_snapshot.as_ref() {
+            self.custom_chunks = custom_chunks.clone();
+        } else if !world_data.custom_chunks.is_empty() {
             let mut custom_chunks = world_data.custom_chunks.as_slice();
             match read_custom_chunks(&mut custom_chunks) {
                 Ok(chunks) => {
@@ -403,6 +417,15 @@ impl GameState {
                 Err(error) => {
                     self.custom_chunks_error = Some(error.to_string());
                 }
+            }
+        }
+        if let Some(static_fog_bytes) = self
+            .custom_chunks
+            .get(CUSTOM_CHUNK_STATIC_FOG_DATA)
+            .map(Vec::from)
+        {
+            if let Err(error) = self.fog_control.read_static_fog_bytes(&static_fog_bytes) {
+                self.static_fog_error = Some(error);
             }
         }
 
@@ -626,6 +649,65 @@ mod tests {
                 tail_parse_error: None,
             }
         );
+    }
+
+    #[test]
+    fn apply_network_world_data_prefers_custom_chunk_snapshot_over_raw_bytes() {
+        let mut state = GameState::new();
+        let mut raw_chunks = CustomChunkSet::default();
+        raw_chunks.insert_or_replace(CUSTOM_CHUNK_STATIC_FOG_DATA, vec![9]);
+        let mut raw_bytes = Vec::new();
+        crate::mindustry::io::write_custom_chunks(&mut raw_bytes, &raw_chunks).unwrap();
+
+        let mut snapshot_chunks = CustomChunkSet::default();
+        snapshot_chunks.insert_or_replace(CUSTOM_CHUNK_STATIC_FOG_DATA, vec![4, 5, 6]);
+
+        state.apply_network_world_data(&NetworkWorldData {
+            custom_chunks: raw_bytes,
+            custom_chunks_snapshot: Some(snapshot_chunks.clone()),
+            ..NetworkWorldData::default()
+        });
+
+        assert_eq!(state.custom_chunks, snapshot_chunks);
+        assert_eq!(
+            state.custom_chunks.get(CUSTOM_CHUNK_STATIC_FOG_DATA),
+            Some([4, 5, 6].as_slice())
+        );
+        assert_eq!(state.custom_chunks_error, None);
+    }
+
+    #[test]
+    fn apply_network_world_data_restores_static_fog_custom_chunk() {
+        let mut source_fog = FogControl::new(4, 1);
+        {
+            let data = source_fog.ensure_data(3);
+            data.static_data.set(0);
+            data.static_data.set(1);
+        }
+        let mut chunks = CustomChunkSet::default();
+        chunks.insert_or_replace(
+            CUSTOM_CHUNK_STATIC_FOG_DATA,
+            source_fog.write_static_fog_bytes(),
+        );
+
+        let mut state = GameState::new();
+        state.apply_network_world_data(&NetworkWorldData {
+            custom_chunks_snapshot: Some(chunks),
+            ..NetworkWorldData::default()
+        });
+
+        assert_eq!(state.static_fog_error, None);
+        assert_eq!(state.fog_control.width(), 4);
+        assert_eq!(state.fog_control.height(), 1);
+        assert!(state
+            .fog_control
+            .is_discovered(true, true, Some(3), false, 0, 0));
+        assert!(state
+            .fog_control
+            .is_discovered(true, true, Some(3), false, 1, 0));
+        assert!(!state
+            .fog_control
+            .is_discovered(true, true, Some(3), false, 2, 0));
     }
 
     #[test]
