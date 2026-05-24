@@ -1148,6 +1148,148 @@ pub struct RemoveSelectionPlan {
     pub network_delete_positions: Vec<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinePlacementBlock {
+    pub name: String,
+    pub footprint: BuildPlanBlockTransform,
+    pub allow_diagonal: bool,
+    pub allow_rectangle_placement: bool,
+    pub conveyor_placement: bool,
+    pub swap_diagonal_placement: bool,
+    pub ignore_line_rotation: bool,
+}
+
+impl LinePlacementBlock {
+    pub fn new(name: impl Into<String>, footprint: BuildPlanBlockTransform) -> Self {
+        Self {
+            name: name.into(),
+            footprint,
+            allow_diagonal: false,
+            allow_rectangle_placement: false,
+            conveyor_placement: false,
+            swap_diagonal_placement: false,
+            ignore_line_rotation: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChainedBuildEndpoint {
+    pub chained: bool,
+    pub rotation: i32,
+    pub candidate_can_replace: bool,
+}
+
+impl ChainedBuildEndpoint {
+    pub const fn absent() -> Self {
+        Self {
+            chained: false,
+            rotation: -1,
+            candidate_can_replace: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IterateLineFrame {
+    pub start_x: i32,
+    pub start_y: i32,
+    pub end_x: i32,
+    pub end_y: i32,
+    pub rotation: i32,
+    pub override_line_rotation: bool,
+    pub diagonal_pressed: bool,
+    pub swap_diagonal_setting: bool,
+    pub mobile: bool,
+    pub conveyor_pathfinding: bool,
+    pub block: Option<LinePlacementBlock>,
+    pub start_build: ChainedBuildEndpoint,
+    pub end_build: ChainedBuildEndpoint,
+    pub second_to_last_chained: bool,
+    pub astar_path: Option<Vec<Point2>>,
+    pub upgrade_path: Option<Vec<Point2>>,
+    /// Result of upstream `block.changePlacementPath(points, rotation, diagonal)`.
+    /// Callers can provide an already-mutated path while this planner keeps the
+    /// block-specific hook outside pure logic.
+    pub changed_points: Option<Vec<Point2>>,
+}
+
+impl Default for IterateLineFrame {
+    fn default() -> Self {
+        Self {
+            start_x: 0,
+            start_y: 0,
+            end_x: 0,
+            end_y: 0,
+            rotation: 0,
+            override_line_rotation: false,
+            diagonal_pressed: false,
+            swap_diagonal_setting: false,
+            mobile: false,
+            conveyor_pathfinding: false,
+            block: None,
+            start_build: ChainedBuildEndpoint::absent(),
+            end_build: ChainedBuildEndpoint::absent(),
+            second_to_last_chained: false,
+            astar_path: None,
+            upgrade_path: None,
+            changed_points: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaceLine {
+    pub x: i32,
+    pub y: i32,
+    pub rotation: i32,
+    pub last: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IterateLinePlan {
+    pub diagonal: bool,
+    pub base_rotation: i32,
+    pub end_rotation: Option<i32>,
+    pub points: Vec<Point2>,
+    pub lines: Vec<PlaceLine>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LineReplacement {
+    pub x: i32,
+    pub y: i32,
+    pub block: String,
+    pub unlocked: bool,
+}
+
+impl LineReplacement {
+    pub fn new(x: i32, y: i32, block: impl Into<String>, unlocked: bool) -> Self {
+        Self {
+            x,
+            y,
+            block: block.into(),
+            unlocked,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateLineFrame {
+    pub line: IterateLineFrame,
+    pub next_config: TypeValue,
+    pub block_replace: bool,
+    pub replacements: Vec<LineReplacement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateLinePlan {
+    pub line: IterateLinePlan,
+    pub line_plans: Vec<BuildPlan>,
+    pub final_rotation: i32,
+    pub handle_placement_line: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputHandlerLocalAction {
     UnitControlRemote,
@@ -4347,6 +4489,225 @@ pub fn remove_selection_plan(frame: RemoveSelectionFrame) -> RemoveSelectionPlan
     }
 }
 
+fn line_angle_degrees(start_x: i32, start_y: i32, end_x: i32, end_y: i32) -> f32 {
+    ((end_y - start_y) as f32)
+        .atan2((end_x - start_x) as f32)
+        .to_degrees()
+        .rem_euclid(360.0)
+}
+
+fn line_base_rotation(start_x: i32, start_y: i32, end_x: i32, end_y: i32, rotation: i32) -> i32 {
+    if start_x == end_x && start_y == end_y {
+        rotation
+    } else {
+        (((line_angle_degrees(start_x, start_y, end_x, end_y) + 45.0) / 90.0) as i32).rem_euclid(4)
+    }
+}
+
+pub fn iterate_line_plan(mut frame: IterateLineFrame) -> IterateLinePlan {
+    let block = frame.block.clone();
+    let mut diagonal = frame.diagonal_pressed;
+    if frame.swap_diagonal_setting && frame.mobile {
+        diagonal = !diagonal;
+    }
+    if block
+        .as_ref()
+        .is_some_and(|block| block.swap_diagonal_placement)
+    {
+        diagonal = !diagonal;
+    }
+
+    let diagonal_allowed = diagonal
+        && block
+            .as_ref()
+            .map(|block| block.allow_diagonal)
+            .unwrap_or(true);
+
+    let mut points = if diagonal_allowed {
+        if block.as_ref().is_some_and(|block| {
+            frame.start_build.chained
+                && frame.end_build.chained
+                && frame.start_build.candidate_can_replace
+                && frame.end_build.candidate_can_replace
+                && block.allow_diagonal
+        }) {
+            frame.upgrade_path.take().unwrap_or_else(|| {
+                super::placement::pathfind_line(
+                    true,
+                    frame.conveyor_pathfinding,
+                    frame.astar_path.clone(),
+                    frame.start_x,
+                    frame.start_y,
+                    frame.end_x,
+                    frame.end_y,
+                )
+            })
+        } else {
+            super::placement::pathfind_line(
+                block.as_ref().is_some_and(|block| block.conveyor_placement),
+                frame.conveyor_pathfinding,
+                frame.astar_path.clone(),
+                frame.start_x,
+                frame.start_y,
+                frame.end_x,
+                frame.end_y,
+            )
+        }
+    } else if block
+        .as_ref()
+        .is_some_and(|block| block.allow_rectangle_placement)
+    {
+        super::placement::normalize_rectangle(
+            frame.start_x,
+            frame.start_y,
+            frame.end_x,
+            frame.end_y,
+            block.as_ref().unwrap().footprint.size,
+        )
+    } else {
+        super::placement::normalize_line(frame.start_x, frame.start_y, frame.end_x, frame.end_y)
+    };
+
+    if let Some(changed) = frame.changed_points.take() {
+        points = changed;
+    }
+
+    let end_rotation =
+        if points.len() > 1 && frame.end_build.chained && !frame.second_to_last_chained {
+            Some(frame.end_build.rotation)
+        } else {
+            None
+        };
+
+    let mut base_rotation = frame.rotation;
+    if !frame.override_line_rotation || diagonal {
+        base_rotation = line_base_rotation(
+            frame.start_x,
+            frame.start_y,
+            frame.end_x,
+            frame.end_y,
+            frame.rotation,
+        );
+    }
+
+    let mut previous_bounds: Option<BuildBounds> = None;
+    let mut lines = Vec::new();
+    for (index, point) in points.iter().copied().enumerate() {
+        if let Some(block) = block.as_ref() {
+            let bounds = build_bounds_for_plan(point.x, point.y, block.footprint);
+            if previous_bounds.is_some_and(|prev| build_bounds_overlap(bounds, prev)) {
+                continue;
+            }
+        }
+
+        let next = points.get(index + 1).copied();
+        let mut line_rotation = if let Some(block) = block.as_ref() {
+            if (!frame.override_line_rotation || diagonal)
+                && !(block.ignore_line_rotation && !frame.mobile)
+            {
+                let mut result = base_rotation;
+                if let Some(next) = next {
+                    result = crate::mindustry::world::tile::relative_to(
+                        point.x, point.y, next.x, next.y,
+                    ) as i32;
+                } else if let Some(end_rotation) = end_rotation {
+                    result = end_rotation;
+                } else if block.conveyor_placement && index > 0 {
+                    let prev = points[index - 1];
+                    result = crate::mindustry::world::tile::relative_to(
+                        prev.x, prev.y, point.x, point.y,
+                    ) as i32;
+                }
+                if result == -1 {
+                    frame.rotation
+                } else {
+                    result
+                }
+            } else {
+                frame.rotation
+            }
+        } else {
+            base_rotation
+        };
+        if line_rotation == -1 {
+            line_rotation = frame.rotation;
+        }
+
+        lines.push(PlaceLine {
+            x: point.x,
+            y: point.y,
+            rotation: line_rotation,
+            last: next.is_none(),
+        });
+
+        if let Some(block) = block.as_ref() {
+            previous_bounds = Some(build_bounds_for_plan(point.x, point.y, block.footprint));
+        }
+    }
+
+    IterateLinePlan {
+        diagonal,
+        base_rotation,
+        end_rotation,
+        points,
+        lines,
+    }
+}
+
+pub fn update_line_plan(frame: UpdateLineFrame) -> UpdateLinePlan {
+    let Some(block) = frame.line.block.clone() else {
+        let line = iterate_line_plan(frame.line);
+        return UpdateLinePlan {
+            final_rotation: line.lines.last().map(|line| line.rotation).unwrap_or(0),
+            line,
+            line_plans: Vec::new(),
+            handle_placement_line: false,
+        };
+    };
+
+    let line = iterate_line_plan(frame.line);
+    let mut line_plans: Vec<BuildPlan> = line
+        .lines
+        .iter()
+        .map(|line| {
+            let mut plan = BuildPlan::new_config(
+                line.x,
+                line.y,
+                line.rotation,
+                block.name.clone(),
+                frame.next_config.clone(),
+            );
+            plan.anim_scale = 1.0;
+            plan
+        })
+        .collect();
+
+    if frame.block_replace {
+        for plan in &mut line_plans {
+            if let Some(replacement) = frame
+                .replacements
+                .iter()
+                .find(|replacement| replacement.x == plan.x && replacement.y == plan.y)
+            {
+                if replacement.unlocked {
+                    plan.block = Some(replacement.block.clone());
+                }
+            }
+        }
+    }
+
+    UpdateLinePlan {
+        final_rotation: line
+            .lines
+            .last()
+            .map(|line| line.rotation)
+            .unwrap_or(block.footprint.plan_rotation(0)),
+        line,
+        line_plans,
+        handle_placement_line: frame.block_replace,
+    }
+}
+
 pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
     if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
         return CheckUnitPlan {
@@ -6831,6 +7192,171 @@ mod tests {
         assert_eq!(plan.queued_break_plans, vec![BuildPlan::new_break(2, 2)]);
         assert_eq!(plan.remove_select_plan_indices, vec![1]);
         assert!(plan.network_delete_positions.is_empty());
+    }
+
+    #[test]
+    fn iterate_line_plan_normalizes_line_and_rotates_toward_next_point() {
+        let block = LinePlacementBlock::new("router", BuildPlanBlockTransform::java_block(1));
+        let plan = iterate_line_plan(IterateLineFrame {
+            start_x: 0,
+            start_y: 0,
+            end_x: 0,
+            end_y: 2,
+            rotation: 0,
+            override_line_rotation: false,
+            block: Some(block),
+            ..IterateLineFrame::default()
+        });
+
+        assert_eq!(
+            plan.points,
+            vec![Point2::new(0, 0), Point2::new(0, 1), Point2::new(0, 2)]
+        );
+        assert_eq!(
+            plan.lines,
+            vec![
+                PlaceLine {
+                    x: 0,
+                    y: 0,
+                    rotation: 1,
+                    last: false,
+                },
+                PlaceLine {
+                    x: 0,
+                    y: 1,
+                    rotation: 1,
+                    last: false,
+                },
+                PlaceLine {
+                    x: 0,
+                    y: 2,
+                    rotation: 1,
+                    last: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn iterate_line_plan_supports_rectangle_mode_and_multiblock_overlap_filter() {
+        let mut block = LinePlacementBlock::new("large", BuildPlanBlockTransform::java_block(2));
+        block.allow_rectangle_placement = true;
+
+        let plan = iterate_line_plan(IterateLineFrame {
+            start_x: 0,
+            start_y: 0,
+            end_x: 3,
+            end_y: 3,
+            rotation: 2,
+            override_line_rotation: true,
+            block: Some(block),
+            ..IterateLineFrame::default()
+        });
+
+        assert_eq!(
+            plan.points,
+            vec![
+                Point2::new(0, 0),
+                Point2::new(2, 0),
+                Point2::new(0, 2),
+                Point2::new(2, 2)
+            ]
+        );
+        assert_eq!(
+            plan.lines
+                .iter()
+                .map(|line| (line.x, line.y, line.rotation))
+                .collect::<Vec<_>>(),
+            vec![(0, 0, 2), (2, 0, 2), (0, 2, 2), (2, 2, 2)]
+        );
+    }
+
+    #[test]
+    fn iterate_line_plan_uses_diagonal_path_and_chain_end_rotation() {
+        let mut block = LinePlacementBlock::new("conveyor", BuildPlanBlockTransform::java_block(1));
+        block.allow_diagonal = true;
+        block.conveyor_placement = true;
+
+        let plan = iterate_line_plan(IterateLineFrame {
+            start_x: 0,
+            start_y: 0,
+            end_x: 2,
+            end_y: 2,
+            rotation: 0,
+            override_line_rotation: true,
+            diagonal_pressed: true,
+            block: Some(block),
+            end_build: ChainedBuildEndpoint {
+                chained: true,
+                rotation: 2,
+                candidate_can_replace: false,
+            },
+            second_to_last_chained: false,
+            astar_path: Some(vec![
+                Point2::new(0, 0),
+                Point2::new(1, 0),
+                Point2::new(2, 2),
+            ]),
+            conveyor_pathfinding: true,
+            ..IterateLineFrame::default()
+        });
+
+        assert!(plan.diagonal);
+        assert_eq!(plan.end_rotation, Some(2));
+        assert_eq!(
+            plan.lines
+                .iter()
+                .map(|line| (line.x, line.y, line.rotation, line.last))
+                .collect::<Vec<_>>(),
+            vec![(0, 0, 0, false), (1, 0, 0, false), (2, 2, 2, true)]
+        );
+    }
+
+    #[test]
+    fn update_line_plan_builds_line_plans_and_applies_unlocked_replacements() {
+        let block = LinePlacementBlock::new("router", BuildPlanBlockTransform::java_block(1));
+        let plan = update_line_plan(UpdateLineFrame {
+            line: IterateLineFrame {
+                start_x: 0,
+                start_y: 0,
+                end_x: 2,
+                end_y: 0,
+                rotation: 1,
+                override_line_rotation: false,
+                block: Some(block),
+                ..IterateLineFrame::default()
+            },
+            next_config: TypeValue::Int(7),
+            block_replace: true,
+            replacements: vec![
+                LineReplacement::new(1, 0, "junction", false),
+                LineReplacement::new(2, 0, "overflow-gate", true),
+            ],
+        });
+
+        assert!(plan.handle_placement_line);
+        assert_eq!(plan.final_rotation, 0);
+        assert_eq!(
+            plan.line_plans
+                .iter()
+                .map(|plan| (
+                    plan.x,
+                    plan.y,
+                    plan.rotation,
+                    plan.block.as_deref(),
+                    plan.anim_scale
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, 0, 0, Some("router"), 1.0),
+                (1, 0, 0, Some("router"), 1.0),
+                (2, 0, 0, Some("overflow-gate"), 1.0),
+            ]
+        );
+        assert!(plan
+            .line_plans
+            .iter()
+            .all(|plan| plan.config == TypeValue::Int(7)));
     }
 
     #[test]
