@@ -504,6 +504,37 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `lastUpdateFrame` 与真实 world.build(pos).heal/recentlyHealed 应用；
 - drawPlace/drawSelect 的范围和目标选中绘制规划。
 
+### 7.7 BaseShield
+
+已推进：
+
+- `BaseShieldState`
+- `base_shield_update(...)`
+- `base_shield_should_interact(...)`
+- `base_shield_unit_overlap(...)`
+- `base_shield_unit_action(...)`
+- `write_base_shield_state(...)`
+- `read_base_shield_state(...)`
+- `BaseShieldDrawCommand`
+- `BaseShieldDrawPlan`
+- `base_shield_draw_plan(...)`
+- 已对照 `BaseShield.updateTile()` 锁定：
+  - `smoothRadius = lerpDelta(smoothRadius, radius * efficiency, 0.05)`；
+  - radius > 1 时才需要 bullet/unit 交互；
+  - 敌方可吸收 bullet 在半径内被吸收；
+  - unit overlap 大于 0 时被 repel，大于 `hitSize * 1.5` 时 kill。
+- 已对照 `drawShield()` 锁定：
+  - broken 时不绘制盾体但仍 reset；
+  - animateShields 时 fill poly；
+  - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill+lines poly；
+  - hit 参与 color clamp。
+
+仍需：
+
+- 接入真实 Groups.bullet / Units.nearbyEnemies 运行态；
+- shieldColor/teamColor 到真实渲染颜色的 adapter；
+- drawPlace/drawSelect dash circle helper。
+
 已完成 Rust 结构：
 
 ```text
