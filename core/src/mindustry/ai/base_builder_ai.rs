@@ -259,6 +259,25 @@ pub struct PrebuildAiReturnToCoreAction {
     pub transfer_to_core: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrebuildAiBuildMove {
+    pub range: f32,
+    pub move_range: f32,
+    pub moving: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrebuildAiAcceptPlanAction {
+    pub accepted: bool,
+    pub collecting_items: bool,
+    pub collect_block: Option<PrebuildAiBlockInfo>,
+    pub last_target_item: Option<ContentId>,
+    pub ore: Option<i32>,
+    pub reset_target_timer: bool,
+    pub last_plan: Option<TeamBlockPlan>,
+    pub build_plan: Option<BuildPlan>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderAiPlanAction {
     NoPlan,
@@ -614,6 +633,101 @@ pub fn prebuild_ai_handle_return_to_core_with_items(
         clear_mine_tile: true,
         clear_item: at_core,
         transfer_to_core: at_core && core_accept_stack_amount > 0,
+    }
+}
+
+pub fn validate_prebuild_ai_current_plan<FValidBreak, FValidPlace>(
+    unit_plans: &mut VecDeque<BuildPlan>,
+    last_plan: &mut Option<TeamBlockPlan>,
+    construct_current_matches: bool,
+    mut valid_break: FValidBreak,
+    mut valid_place: FValidPlace,
+) -> BuilderAiPlanValidation
+where
+    FValidBreak: FnMut(&BuildPlan) -> bool,
+    FValidPlace: FnMut(&BuildPlan) -> bool,
+{
+    validate_builder_ai_current_plan(
+        unit_plans,
+        last_plan,
+        false,
+        true,
+        true,
+        false,
+        construct_current_matches,
+        &mut valid_break,
+        &mut valid_place,
+    )
+}
+
+pub fn prebuild_ai_build_move(build_range: f32, within_range: bool) -> PrebuildAiBuildMove {
+    let range = (build_range - 20.0).min(100.0);
+    PrebuildAiBuildMove {
+        range,
+        move_range: range - 10.0,
+        moving: !within_range,
+    }
+}
+
+pub fn prebuild_ai_update_building(collecting_items: bool) -> bool {
+    !collecting_items
+}
+
+pub fn prebuild_ai_accept_plan<FValidPlace, FCanBuild>(
+    plan: Option<PrebuildAiPlanSnapshot>,
+    mut valid_place: FValidPlace,
+    mut can_build: FCanBuild,
+) -> PrebuildAiAcceptPlanAction
+where
+    FValidPlace: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+    FCanBuild: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+{
+    let Some(plan) = plan else {
+        return PrebuildAiAcceptPlanAction {
+            accepted: false,
+            collecting_items: false,
+            collect_block: None,
+            last_target_item: None,
+            ore: None,
+            reset_target_timer: false,
+            last_plan: None,
+            build_plan: None,
+        };
+    };
+
+    if !valid_place(&plan) {
+        return PrebuildAiAcceptPlanAction {
+            accepted: false,
+            collecting_items: false,
+            collect_block: None,
+            last_target_item: None,
+            ore: None,
+            reset_target_timer: false,
+            last_plan: None,
+            build_plan: None,
+        };
+    }
+
+    let can_build_now = can_build(&plan);
+    let mut build_plan = BuildPlan::new_place(
+        plan.plan.x as i32,
+        plan.plan.y as i32,
+        plan.plan.rotation as i32,
+        plan.plan.block.clone(),
+    );
+    if let Some(config) = &plan.plan.config {
+        build_plan.config = crate::mindustry::io::TypeValue::String(config.clone());
+    }
+
+    PrebuildAiAcceptPlanAction {
+        accepted: true,
+        collecting_items: !can_build_now,
+        collect_block: (!can_build_now).then_some(plan.block),
+        last_target_item: None,
+        ore: None,
+        reset_target_timer: !can_build_now,
+        last_plan: Some(plan.plan),
+        build_plan: Some(build_plan),
     }
 }
 
@@ -1488,6 +1602,95 @@ mod tests {
                 transfer_to_core: false,
             }
         );
+    }
+
+    #[test]
+    fn prebuild_ai_current_plan_validation_and_move_range_match_java_update_movement() {
+        let mut unit_plans = VecDeque::from([BuildPlan::new_place(4, 5, 1, "router")]);
+        let mut last_plan = Some(TeamBlockPlan::new(4, 5, 1, "router", None));
+
+        let keep = validate_prebuild_ai_current_plan(
+            &mut unit_plans,
+            &mut last_plan,
+            false,
+            |_| false,
+            |plan| plan.block.as_deref() == Some("router"),
+        );
+        assert_eq!(keep.action, BuilderAiPlanAction::Keep);
+        assert_eq!(unit_plans.len(), 1);
+        assert!(last_plan.is_some());
+
+        let move_plan = prebuild_ai_build_move(160.0, false);
+        assert_eq!(
+            move_plan,
+            PrebuildAiBuildMove {
+                range: 100.0,
+                move_range: 90.0,
+                moving: true,
+            }
+        );
+        assert_eq!(prebuild_ai_build_move(70.0, true).range, 50.0);
+        assert!(!prebuild_ai_build_move(70.0, true).moving);
+
+        let mut removed_last = Some(TeamBlockPlan {
+            removed: true,
+            ..TeamBlockPlan::new(4, 5, 1, "router", None)
+        });
+        let invalid = validate_prebuild_ai_current_plan(
+            &mut unit_plans,
+            &mut removed_last,
+            true,
+            |_| true,
+            |_| true,
+        );
+        assert_eq!(invalid.action, BuilderAiPlanAction::DropInvalid);
+        assert_eq!(
+            invalid.removed_plan,
+            Some(BuildPlan::new_place(4, 5, 1, "router"))
+        );
+        assert!(unit_plans.is_empty());
+        assert_eq!(removed_last, None);
+    }
+
+    #[test]
+    fn prebuild_ai_accept_plan_sets_collecting_state_only_when_core_lacks_items() {
+        let plan = prebuild_plan(
+            6,
+            7,
+            "router",
+            Category::Distribution,
+            3.0,
+            vec![PrebuildAiRequirement::new(1, 1)],
+        );
+
+        assert!(!prebuild_ai_update_building(true));
+        assert!(prebuild_ai_update_building(false));
+
+        let ready = prebuild_ai_accept_plan(Some(plan.clone()), |_| true, |_| true);
+        assert!(ready.accepted);
+        assert!(!ready.collecting_items);
+        assert_eq!(ready.collect_block, None);
+        assert_eq!(ready.last_plan, Some(plan.plan.clone()));
+        assert_eq!(
+            ready.build_plan,
+            Some(BuildPlan::new_place(6, 7, 0, "router"))
+        );
+        assert!(!ready.reset_target_timer);
+
+        let collect = prebuild_ai_accept_plan(Some(plan.clone()), |_| true, |_| false);
+        assert!(collect.accepted);
+        assert!(collect.collecting_items);
+        assert_eq!(collect.collect_block, Some(plan.block.clone()));
+        assert_eq!(collect.last_target_item, None);
+        assert_eq!(collect.ore, None);
+        assert!(collect.reset_target_timer);
+
+        let invalid = prebuild_ai_accept_plan(Some(plan), |_| false, |_| false);
+        assert!(!invalid.accepted);
+        assert_eq!(invalid.build_plan, None);
+
+        let none = prebuild_ai_accept_plan(None, |_| true, |_| true);
+        assert!(!none.accepted);
     }
 
     #[test]
