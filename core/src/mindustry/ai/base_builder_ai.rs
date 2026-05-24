@@ -198,6 +198,14 @@ pub struct BuilderAiFollowSync {
     pub copied_plan: Option<BuildPlan>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuilderAiRetreatDecision {
+    pub retreat_timer: f32,
+    pub clear_building: bool,
+    pub move_to_core: bool,
+    pub moving: bool,
+}
+
 pub fn should_spawn_core_unit(
     ai_core_spawn: bool,
     timer_ready: bool,
@@ -267,6 +275,28 @@ pub fn builder_ai_should_promote_assist_following(
     assist_actively_building: bool,
 ) -> bool {
     assist_valid && assist_actively_building
+}
+
+pub fn builder_ai_idle_retreat(
+    retreat_timer: f32,
+    delta: f32,
+    retreat_delay: f32,
+    always_flee: bool,
+    has_enemy: bool,
+    has_core: bool,
+    within_retreat_distance: bool,
+) -> BuilderAiRetreatDecision {
+    let next_timer = retreat_timer + delta;
+    let should_retreat = next_timer >= retreat_delay || always_flee;
+    let clear_building = should_retreat && has_enemy;
+    let move_to_core = clear_building && has_core && !within_retreat_distance;
+
+    BuilderAiRetreatDecision {
+        retreat_timer: next_timer,
+        clear_building,
+        move_to_core,
+        moving: move_to_core,
+    }
 }
 
 pub fn sync_builder_ai_follow_plan(
@@ -900,6 +930,49 @@ mod tests {
         assert_eq!(unit_plans.len(), 1);
         assert_eq!(unit_plans.front(), Some(&follower_plan));
         assert_eq!(last_plan, None);
+    }
+
+    #[test]
+    fn builder_ai_idle_retreat_waits_for_delay_and_requires_enemy() {
+        let waiting = builder_ai_idle_retreat(30.0, 10.0, 120.0, false, true, true, false);
+        assert_eq!(
+            waiting,
+            BuilderAiRetreatDecision {
+                retreat_timer: 40.0,
+                clear_building: false,
+                move_to_core: false,
+                moving: false,
+            }
+        );
+
+        let no_enemy = builder_ai_idle_retreat(120.0, 1.0, 120.0, false, false, true, false);
+        assert_eq!(no_enemy.retreat_timer, 121.0);
+        assert!(!no_enemy.clear_building);
+        assert!(!no_enemy.move_to_core);
+    }
+
+    #[test]
+    fn builder_ai_idle_retreat_clears_building_and_moves_to_core_when_needed() {
+        let delayed = builder_ai_idle_retreat(119.0, 1.0, 120.0, false, true, true, false);
+        assert_eq!(
+            delayed,
+            BuilderAiRetreatDecision {
+                retreat_timer: 120.0,
+                clear_building: true,
+                move_to_core: true,
+                moving: true,
+            }
+        );
+
+        let already_near_core = builder_ai_idle_retreat(200.0, 1.0, 120.0, false, true, true, true);
+        assert!(already_near_core.clear_building);
+        assert!(!already_near_core.move_to_core);
+        assert!(!already_near_core.moving);
+
+        let always_flee = builder_ai_idle_retreat(0.0, 0.0, 120.0, true, true, false, false);
+        assert!(always_flee.clear_building);
+        assert!(!always_flee.move_to_core);
+        assert!(!always_flee.moving);
     }
 
     #[test]

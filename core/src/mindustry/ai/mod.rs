@@ -15,14 +15,14 @@ pub mod wave_spawner;
 
 pub use astar::{manhattan, pathfind_grid, pathfind_grid_manhattan, D4};
 pub use base_builder_ai::{
-    begin_path_refresh, builder_ai_should_promote_assist_following, choose_part_pool,
-    claim_builder_ai_rebuild_plan, place_interval, random_position_source, rotate_build_tile,
-    rotate_center, should_spawn_core_unit, step_core_path, sync_builder_ai_follow_plan,
-    try_place_part, validate_builder_ai_current_plan, BaseBuildPart, BaseBuildTile,
-    BaseBuilderPathState, BlockPlan, BuilderAiFollowAction, BuilderAiFollowSync,
-    BuilderAiPlanAction, BuilderAiPlanValidation, PartPoolChoice, PathCalculationOutcome,
-    SeedPositionSource, TilePoint, ATTEMPTS, CORE_UNIT_MULTIPLIER, EMPTY_CHANCE,
-    PATH_STEP as BASE_BUILDER_PATH_STEP, PLACE_INTERVAL_MAX, PLACE_INTERVAL_MIN,
+    begin_path_refresh, builder_ai_idle_retreat, builder_ai_should_promote_assist_following,
+    choose_part_pool, claim_builder_ai_rebuild_plan, place_interval, random_position_source,
+    rotate_build_tile, rotate_center, should_spawn_core_unit, step_core_path,
+    sync_builder_ai_follow_plan, try_place_part, validate_builder_ai_current_plan, BaseBuildPart,
+    BaseBuildTile, BaseBuilderPathState, BlockPlan, BuilderAiFollowAction, BuilderAiFollowSync,
+    BuilderAiPlanAction, BuilderAiPlanValidation, BuilderAiRetreatDecision, PartPoolChoice,
+    PathCalculationOutcome, SeedPositionSource, TilePoint, ATTEMPTS, CORE_UNIT_MULTIPLIER,
+    EMPTY_CHANCE, PATH_STEP as BASE_BUILDER_PATH_STEP, PLACE_INTERVAL_MAX, PLACE_INTERVAL_MIN,
     TIMER_REFRESH_PATH, TIMER_SPAWN, TIMER_STEP,
 };
 pub use base_registry::{BasePart, BasePartTile, BasePartTileKind, BaseRegistry};
