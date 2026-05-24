@@ -68,6 +68,18 @@ pub enum TeamPlanClaim {
     Rotated(BlockPlan),
 }
 
+impl TeamPlanClaim {
+    pub fn into_claimed_plan(self) -> Option<BlockPlan> {
+        match self {
+            TeamPlanClaim::Claimed(plan) => Some(plan),
+            TeamPlanClaim::NoPlans
+            | TeamPlanClaim::NoUsablePlan
+            | TeamPlanClaim::AlreadyPlaced(_)
+            | TeamPlanClaim::Rotated(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TeamData {
     pub team: u8,
@@ -758,6 +770,28 @@ mod tests {
         assert_eq!(
             teams.get_or_null(TEAM_SHARDED).unwrap().plans,
             vec![BlockPlan::new(2, 2, 3, "scatter", Some("cfg".into()))]
+        );
+    }
+
+    #[test]
+    fn team_plan_claim_can_feed_builder_plan_conversion_helpers() {
+        let claim = TeamPlanClaim::Claimed(BlockPlan::new(4, 5, 1, "router", Some("cfg".into())));
+        let plan = claim
+            .into_claimed_plan()
+            .expect("claimed plan should be extractable");
+
+        let build_plan =
+            crate::mindustry::entities::comp::builder::BuilderComp::build_plan_from_team_plan(
+                &plan,
+            );
+
+        assert_eq!(build_plan.x, 4);
+        assert_eq!(build_plan.y, 5);
+        assert_eq!(build_plan.rotation, 1);
+        assert_eq!(build_plan.block.as_deref(), Some("router"));
+        assert_eq!(
+            build_plan.config,
+            crate::mindustry::io::TypeValue::String("cfg".into())
         );
     }
 

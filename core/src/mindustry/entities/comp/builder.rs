@@ -9,7 +9,8 @@ use std::collections::VecDeque;
 
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::TEAM_DERELICT;
-use crate::mindustry::io::TeamId;
+use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamPlanClaim};
+use crate::mindustry::io::{TeamId, TypeValue};
 use crate::mindustry::r#type::UnitType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,6 +202,29 @@ impl BuilderComp {
         }
     }
 
+    pub fn build_plan_from_team_plan(plan: &TeamBlockPlan) -> BuildPlan {
+        let mut build_plan = BuildPlan::new_place(
+            plan.x as i32,
+            plan.y as i32,
+            plan.rotation as i32,
+            plan.block.clone(),
+        );
+        if let Some(config) = &plan.config {
+            build_plan.config = TypeValue::String(config.clone());
+        }
+        build_plan
+    }
+
+    pub fn add_team_plan(&mut self, place: &TeamBlockPlan) -> bool {
+        self.add_build(Self::build_plan_from_team_plan(place))
+    }
+
+    pub fn add_claimed_team_plan(&mut self, claim: TeamPlanClaim) -> Option<BuildPlan> {
+        let plan = claim.into_claimed_plan()?;
+        let build_plan = Self::build_plan_from_team_plan(&plan);
+        self.add_build(build_plan.clone()).then_some(build_plan)
+    }
+
     pub fn can_build(&self) -> bool {
         self.type_info.build_speed > 0.0 && self.build_speed_multiplier > 0.0
     }
@@ -388,6 +412,65 @@ mod tests {
         builder.clear_building();
         assert!(!builder.is_building());
         assert_eq!(builder.build_plan(), None);
+    }
+
+    #[test]
+    fn builder_component_can_convert_and_queue_team_plans() {
+        let team_plan = TeamBlockPlan::new(8, 9, 2, "router", Some("cfg".into()));
+        let build_plan = BuilderComp::build_plan_from_team_plan(&team_plan);
+
+        assert_eq!(build_plan.x, 8);
+        assert_eq!(build_plan.y, 9);
+        assert_eq!(build_plan.rotation, 2);
+        assert_eq!(build_plan.block.as_deref(), Some("router"));
+        assert_eq!(build_plan.config, TypeValue::String("cfg".into()));
+
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        assert!(builder.add_team_plan(&team_plan));
+        assert_eq!(builder.build_plan(), Some(&build_plan));
+    }
+
+    #[test]
+    fn builder_component_claims_team_queue_into_unit_plan_like_builder_ai() {
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        let mut teams = crate::mindustry::game::Teams::default();
+        teams.replace_plans([(
+            1,
+            vec![
+                TeamBlockPlan::new(1, 1, 0, "duo", None),
+                TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ],
+        )]);
+
+        let rotated = teams.claim_front_plan(1, |_| false, |plan| plan.block == "router");
+        assert_eq!(builder.add_claimed_team_plan(rotated), None);
+        assert!(builder.plans.is_empty());
+        assert_eq!(
+            teams.get_or_null(1).unwrap().plans,
+            vec![
+                TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+                TeamBlockPlan::new(1, 1, 0, "duo", None),
+            ]
+        );
+
+        let claimed = teams.claim_front_plan(1, |_| false, |plan| plan.block == "router");
+        let build_plan = builder
+            .add_claimed_team_plan(claimed)
+            .expect("usable team plan should become a unit build plan");
+
+        assert_eq!(build_plan.x, 2);
+        assert_eq!(build_plan.y, 2);
+        assert_eq!(build_plan.rotation, 1);
+        assert_eq!(build_plan.block.as_deref(), Some("router"));
+        assert_eq!(build_plan.config, TypeValue::String("cfg".into()));
+        assert_eq!(builder.build_plan(), Some(&build_plan));
+        assert_eq!(
+            teams.get_or_null(1).unwrap().plans,
+            vec![
+                TeamBlockPlan::new(1, 1, 0, "duo", None),
+                TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ]
+        );
     }
 
     #[test]
