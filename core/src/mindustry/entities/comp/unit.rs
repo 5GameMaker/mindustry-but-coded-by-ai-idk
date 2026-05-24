@@ -11,6 +11,7 @@ use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
+use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamData};
 use crate::mindustry::io::type_io::{
     BuildPlanWire, CommandWire, ControllerWire, MountWire, UnitSyncWire,
 };
@@ -23,7 +24,8 @@ use crate::mindustry::r#type::UnitType;
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 use super::builder::{
-    BuilderComp, PrebuildAiRuntimeInput, PrebuildAiRuntimeState, PrebuildAiRuntimeStep,
+    BuilderAiRuntimeInput, BuilderAiRuntimeState, BuilderAiRuntimeStep, BuilderComp,
+    PrebuildAiRuntimeInput, PrebuildAiRuntimeState, PrebuildAiRuntimeStep,
 };
 use super::entity::EntityComp;
 use super::health::HealthComp;
@@ -177,6 +179,7 @@ pub struct UnitComp {
     pub weapons: WeaponsComp,
     pub builder: BuilderComp,
     pub miner: MinerComp,
+    pub builder_ai: BuilderAiRuntimeState,
     pub prebuild_ai: PrebuildAiRuntimeState,
     pub payload: Option<PayloadComp>,
     pub type_info: UnitType,
@@ -239,6 +242,7 @@ impl UnitComp {
             weapons: WeaponsComp::new(unit_ammo_capacity(&type_info), type_info.aim_dst),
             builder: BuilderComp::new(type_info.clone(), team),
             miner: MinerComp::new(miner_type_from_unit_type(&type_info)),
+            builder_ai: BuilderAiRuntimeState::default(),
             prebuild_ai: PrebuildAiRuntimeState::default(),
             payload: None,
             type_info: type_info.clone(),
@@ -398,6 +402,49 @@ impl UnitComp {
             payload.payload_capacity = self.type_info.payload_capacity;
             payload.pickup_units = self.type_info.pickup_units;
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_builder_ai<
+        FValidBreak,
+        FValidPlace,
+        FWithinTeamPlanRange,
+        FAlreadyPlaced,
+        FTeamValidPlace,
+        FNearEnemy,
+    >(
+        &mut self,
+        team_data: &mut TeamData,
+        input: BuilderAiRuntimeInput,
+        valid_break: FValidBreak,
+        valid_place: FValidPlace,
+        within_team_plan_range: FWithinTeamPlanRange,
+        already_placed: FAlreadyPlaced,
+        team_valid_place: FTeamValidPlace,
+        near_enemy: FNearEnemy,
+    ) -> BuilderAiRuntimeStep
+    where
+        FValidBreak: FnMut(&BuildPlan) -> bool,
+        FValidPlace: FnMut(&BuildPlan) -> bool,
+        FWithinTeamPlanRange: FnMut(&TeamBlockPlan) -> bool,
+        FAlreadyPlaced: FnMut(&TeamBlockPlan) -> bool,
+        FTeamValidPlace: FnMut(&TeamBlockPlan) -> bool,
+        FNearEnemy: FnMut(&TeamBlockPlan) -> bool,
+    {
+        self.refresh_component_views();
+        let step = self.builder.apply_builder_ai_tick(
+            &mut self.builder_ai,
+            team_data,
+            input,
+            valid_break,
+            valid_place,
+            within_team_plan_range,
+            already_placed,
+            team_valid_place,
+            near_enemy,
+        );
+        self.refresh_component_views();
+        step
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1075,6 +1122,7 @@ fn lerp(from: f32, to: f32, t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::entities::comp::BuilderAiRuntimeBranch;
     use crate::mindustry::entities::units::BuildPlan;
     use crate::mindustry::entities::StatusEntry;
     use crate::mindustry::io::TypeValue;
@@ -1093,6 +1141,7 @@ mod tests {
         unit.mine_tier = 2;
         unit.mine_speed = 2.0;
         unit.mine_range = 64.0;
+        unit.build_range = 64.0;
         unit.max_range = 128.0;
         unit.clip_size = 30.0;
         unit.payload_capacity = TILE_PAYLOAD * 2.0;
@@ -1308,6 +1357,44 @@ mod tests {
                 .map(|tile| (tile.world_x, tile.world_y)),
             Some((16, 24))
         );
+    }
+
+    #[test]
+    fn unit_component_holds_builder_ai_state_and_applies_team_plan_claims() {
+        let mut unit = UnitComp::new(12, unit_type(), TeamId(1));
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![crate::mindustry::game::BlockPlan::new(
+            6, 7, 2, "router", None,
+        )];
+
+        let step = unit.tick_builder_ai(
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                timer_find_ready: true,
+                floor_is_duct: true,
+                ..BuilderAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| true,
+            |_| true,
+            |_| false,
+            |_| true,
+            |_| false,
+        );
+
+        assert_eq!(step.branch, BuilderAiRuntimeBranch::FindNewPlan);
+        assert_eq!(
+            unit.builder_ai.last_plan,
+            Some(crate::mindustry::game::BlockPlan::new(
+                6, 7, 2, "router", None
+            ))
+        );
+        assert_eq!(
+            unit.builder.build_plan(),
+            Some(&BuildPlan::new_place(6, 7, 2, "router"))
+        );
+        assert_eq!(unit.miner.actively_building, true);
+        assert_eq!(step.boosting, Some(true));
     }
 
     #[test]
