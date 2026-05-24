@@ -9,6 +9,7 @@ use crate::mindustry::entities::comp::UnitComp;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::BlockPlan;
 use crate::mindustry::io::{type_io, TeamId, TypeValue};
+use crate::mindustry::logic::LAccess;
 use crate::mindustry::r#type::UnitType;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -922,6 +923,11 @@ pub struct BuildTurretDrawPlan {
     pub draw_unit_building: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuildTurretSenseObject {
+    BuildingAt { x: i32, y: i32 },
+}
+
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
     if configured < 0.0 {
         size as f32 / 2.0
@@ -998,6 +1004,33 @@ pub fn build_turret_capture_unit_plans(state: &mut BuildTurretState, unit: &Unit
 pub fn build_turret_apply_unit_plans(state: &BuildTurretState, unit: &mut UnitComp) {
     unit.builder.plans = state.plans.iter().cloned().collect();
     unit.refresh_component_views();
+}
+
+pub fn build_turret_sense_from_plan(sensor: LAccess, plan: Option<&BuildPlan>) -> Option<f64> {
+    match sensor {
+        LAccess::BuildX => Some(plan.map(|plan| plan.x).unwrap_or(-1) as f64),
+        LAccess::BuildY => Some(plan.map(|plan| plan.y).unwrap_or(-1) as f64),
+        _ => None,
+    }
+}
+
+pub fn build_turret_sense_object_from_plan(
+    sensor: LAccess,
+    plan: Option<&BuildPlan>,
+) -> Option<BuildTurretSenseObject> {
+    let plan = plan?;
+    match sensor {
+        LAccess::Building if !plan.breaking => Some(BuildTurretSenseObject::BuildingAt {
+            x: plan.x,
+            y: plan.y,
+        }),
+        LAccess::Breaking if plan.breaking => Some(BuildTurretSenseObject::BuildingAt {
+            x: plan.x,
+            y: plan.y,
+        }),
+        LAccess::Building | LAccess::Breaking => None,
+        _ => None,
+    }
 }
 
 const BUILD_TURRET_DRAW_COMMANDS_WITH_GLOW_AND_UNIT: &[BuildTurretDrawCommand] = &[
@@ -1933,6 +1966,54 @@ mod tests {
             Some(&BuildPlan::new_string_config(3, 4, 1, "conveyor", "cfg"))
         );
         assert!(unit.is_building());
+    }
+
+    #[test]
+    fn build_turret_sense_helpers_forward_unit_build_plan_fields() {
+        let place = BuildPlan::new_place(7, 8, 1, "router");
+        let breaking = BuildPlan::new_break(9, 10);
+
+        assert_eq!(
+            build_turret_sense_from_plan(LAccess::BuildX, Some(&place)),
+            Some(7.0)
+        );
+        assert_eq!(
+            build_turret_sense_from_plan(LAccess::BuildY, Some(&place)),
+            Some(8.0)
+        );
+        assert_eq!(
+            build_turret_sense_from_plan(LAccess::BuildX, None),
+            Some(-1.0)
+        );
+        assert_eq!(
+            build_turret_sense_from_plan(LAccess::Health, Some(&place)),
+            None
+        );
+
+        assert_eq!(
+            build_turret_sense_object_from_plan(LAccess::Building, Some(&place)),
+            Some(BuildTurretSenseObject::BuildingAt { x: 7, y: 8 })
+        );
+        assert_eq!(
+            build_turret_sense_object_from_plan(LAccess::Breaking, Some(&place)),
+            None
+        );
+        assert_eq!(
+            build_turret_sense_object_from_plan(LAccess::Breaking, Some(&breaking)),
+            Some(BuildTurretSenseObject::BuildingAt { x: 9, y: 10 })
+        );
+        assert_eq!(
+            build_turret_sense_object_from_plan(LAccess::Building, Some(&breaking)),
+            None
+        );
+        assert_eq!(
+            build_turret_sense_object_from_plan(LAccess::Building, None),
+            None
+        );
+        assert_eq!(
+            build_turret_sense_object_from_plan(LAccess::Health, Some(&place)),
+            None
+        );
     }
 
     #[test]
