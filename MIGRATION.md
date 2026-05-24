@@ -342,6 +342,8 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - `build_turret_read_child_with_loader(...)`
 - `build_turret_capture_unit_plans(...)`
 - `build_turret_apply_unit_plans(...)`
+- `build_turret_sense_from_plan(...)`
+- `build_turret_sense_object_from_plan(...)`
 - following/队伍 plan/自建 plan 清理等部分 `BuildTurretBuild.updateTile()` 逻辑。
 - `BuildTurret.init()/afterPatch()` 的内部 `unitType` 配置与同步逻辑。
 - `BuildTurretBuild.updateTile()` 前半段单位刷新 planner，并已薄接入 `UnitComp`：
@@ -356,6 +358,7 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
   - `efficiency > 0` 时绘制 unit building beam。
 - `BuildTurretBuild.write/read()` 已新增基于 `ContentLoader` 与 `TypeIO.writePlans/readPlans` 的 typed plans 读写路径；旧 raw 路径保留作兼容兜底。
 - `BuildTurretState.plans` 与 `UnitComp.builder.plans` 已有双向桥接，typed read/write 后可恢复到单位建造队列。
+- `BuildTurretBuild.sense/senseObject()` 对 `buildX/buildY/building/breaking` 的 unit build plan 转发语义已有轻量 helper。
 
 仍需：
 
@@ -402,7 +405,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 
 - `BuildTurretBuild` 剩余运行态。
 - `BuildTurretBuild.unit()/canControl()/buildRotation()/warmup()` 与真实 block runtime trait 接口；
-- `BuildTurretBuild.sense/senseObject()` 对 `buildX/buildY/building/breaking` 转发给 unit 的语义。
+- 将当前 helper 汇总为真实 `BuildTurretBuild` runtime adapter，而不是只由测试直接调用。
 
 已完成 Rust 结构：
 
