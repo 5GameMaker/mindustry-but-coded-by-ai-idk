@@ -2683,6 +2683,12 @@ pub struct BuildTurretStatsPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildTurretIconRegion {
+    Base,
+    Main,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildTurretPlanAction {
     NoPlan,
     Keep,
@@ -2807,6 +2813,13 @@ pub fn build_turret_stats_plan(build_speed: f32) -> BuildTurretStatsPlan {
     BuildTurretStatsPlan {
         build_speed_percent: build_speed,
     }
+}
+
+const BUILD_TURRET_ICON_REGIONS: &[BuildTurretIconRegion] =
+    &[BuildTurretIconRegion::Base, BuildTurretIconRegion::Main];
+
+pub fn build_turret_icons() -> &'static [BuildTurretIconRegion] {
+    BUILD_TURRET_ICON_REGIONS
 }
 
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
@@ -4981,6 +4994,10 @@ mod tests {
             BuildTurretStatsPlan {
                 build_speed_percent: 1.5,
             }
+        );
+        assert_eq!(
+            build_turret_icons(),
+            &[BuildTurretIconRegion::Base, BuildTurretIconRegion::Main]
         );
         assert_eq!(build_turret_elevation(-1.0, 3), 1.5);
         assert_eq!(build_turret_warmup_update(0.0, true, 0.8), 0.080000006);

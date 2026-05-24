@@ -355,9 +355,11 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - `BuildTurretUnitTickStep`
 - `BuildTurretUnitBinding`
 - `BuildTurretStatsPlan`
+- `BuildTurretIconRegion`
 - `BuildTurretDrawCommand`
 - `BuildTurretDrawPlan`
 - `build_turret_stats_plan(...)`
+- `build_turret_icons(...)`
 - `build_turret_update_tick(...)`
 - `build_turret_unit_tick(...)`
 - `apply_build_turret_unit_tick(...)`
@@ -388,11 +390,11 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - `BuildTurretState.plans` 与 `UnitComp.builder.plans` 已有双向桥接，typed read/write 后可恢复到单位建造队列。
 - `BuildTurretBuild.sense/senseObject()` 对 `buildX/buildY/building/breaking` 的 unit build plan 转发语义已有轻量 helper。
 - `BuildTurret.setStats()` 已按 Java `stats.addPercent(Stat.buildSpeed, buildSpeed)` 收口到 `BuildTurretStatsPlan`。
+- `BuildTurret.icons()` 已按 Java `{baseRegion, region}` 顺序收口到 `[Base, Main]`。
 
 仍需：
 
 - 继续补完整 `BuildTurretBuild` 运行态；
-- `BuildTurret.icons()` 的 `[baseRegion, region]` 图标层语义；
 - 接入完整 world/building runtime。
 
 ## 8. 当前真实完成度口径
