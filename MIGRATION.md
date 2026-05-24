@@ -427,6 +427,35 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 接入真实 block rendering adapter；
 - 将 Thruster 类型配置接入内容块声明，而不是只在 helper 层测试。
 
+### 7.5 Door / AutoDoor
+
+已推进：
+
+- `DoorState`
+- `door_check_solid(...)`
+- `door_sense_enabled(...)`
+- `door_can_toggle(...)`
+- `door_tapped_should_configure(...)`
+- `write_door_state(...)`
+- `read_door_state(...)`
+- `auto_door_should_open(...)`
+- `auto_door_trigger_size(...)`
+- `AutoDoorUpdatePlan`
+- `AutoDoorSetOpenPlan`
+- `auto_door_update_plan(...)`
+- `auto_door_set_open_plan(...)`
+- 已对照 `AutoDoor.updateTile()` 锁定：
+  - timer 未到或 net client 时不扫描/不发送 toggle；
+  - 触发范围内存在 ground 且非 allowLegStep 单位时应打开；
+  - open 状态变化时才发送 toggle；
+  - `setOpen` 总是更新 pathfinder，只有 `wasVisible` 时播放 effect/sound。
+
+仍需：
+
+- `Door` 的 chained doors flood-fill 与批量 configure 规划；
+- `Door.getPlanRegion()` / `AutoDoor.draw()` / `Door.draw()` 的 open-region 选择 helper；
+- 接入真实 Units/tree/pathfinder/Call runtime。
+
 已完成 Rust 结构：
 
 ```text
