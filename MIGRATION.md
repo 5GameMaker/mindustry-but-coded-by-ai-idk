@@ -297,6 +297,12 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
   - `set_custom_chunks(...)`；
   - `custom_chunks(...)`；
   - 已用 deflated envelope roundtrip 验证 marker UBJSON 与 custom chunk bytes 可恢复。
+- `RawSaveEnvelope` 已接入结构化 region 桥：
+  - content header snapshot；
+  - content patches；
+  - modern chunk map；
+  - `SaveEntitiesRegion`（按 Java `writeEntities()` 顺序保留 `entityMapping bytes -> teamBlocks -> worldEntities bytes`）；
+  - markers/custom。
 - `GameState::apply_network_world_data(...)` 接入部分地图/波次/locales/patcher 状态。
 - `GameState::apply_legacy_team_blocks(...)` 已把 Java `SaveVersion.readTeamBlocks(...)` 输出落到 runtime `Teams.plans`；
 - `Teams::to_legacy_team_blocks(...)` / `GameState::export_legacy_team_blocks(...)` 已补 Java `SaveVersion.writeTeamBlocks(...)` 形态导出：
@@ -309,7 +315,7 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 
 - 完整 Java 兼容 `NetworkIO.writeWorld/loadWorld`；
 - markers/custom chunks 与完整 save dispatcher 的运行态接入；
-- 将 `RawSaveEnvelope` region 层与 `versions/mod.rs` 的 map/entities/teamBlocks/markers/custom 语义对象接成完整 save read/write dispatcher；
+- 将 `RawSaveEnvelope` region 层与 runtime world/entities 物化流程接成完整 save read/write dispatcher；
 - `teamBlocks` 导出补 typed config 保真与 content header 临时映射写出；
 - player/groups/world/entity 的完整应用；
 - 与 Java 原版服务端/客户端的持续互通测试。
