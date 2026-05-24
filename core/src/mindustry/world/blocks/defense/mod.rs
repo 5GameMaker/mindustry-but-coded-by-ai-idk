@@ -1,6 +1,10 @@
 pub mod turrets;
 
+use std::collections::VecDeque;
 use std::io::{self, Read, Write};
+
+use crate::mindustry::entities::units::BuildPlan;
+use crate::mindustry::game::BlockPlan;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WallState {
@@ -778,6 +782,7 @@ pub fn read_radar_state<R: Read>(read: &mut R) -> io::Result<RadarState> {
 pub struct BuildTurretState {
     pub rotation: f32,
     pub warmup: f32,
+    pub last_plan: Option<BlockPlan>,
     pub raw_plans: Vec<u8>,
 }
 
@@ -786,9 +791,25 @@ impl Default for BuildTurretState {
         Self {
             rotation: 90.0,
             warmup: 0.0,
+            last_plan: None,
             raw_plans: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildTurretPlanAction {
+    NoPlan,
+    Keep,
+    DropConflictingBreak,
+    DropInvalid,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildTurretPlanValidation {
+    pub action: BuildTurretPlanAction,
+    pub removed_plan: Option<BuildPlan>,
+    pub remove_team_plan_at: Option<(i32, i32)>,
 }
 
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
@@ -832,6 +853,64 @@ where
     Some(returned)
 }
 
+pub fn build_turret_validate_current_plan<FValidBreak, FValidPlace>(
+    state: &mut BuildTurretState,
+    unit_plans: &mut VecDeque<BuildPlan>,
+    conflicting_breaker: bool,
+    construct_current_matches: bool,
+    mut valid_break: FValidBreak,
+    mut valid_place: FValidPlace,
+) -> BuildTurretPlanValidation
+where
+    FValidBreak: FnMut(&BuildPlan) -> bool,
+    FValidPlace: FnMut(&BuildPlan) -> bool,
+{
+    let Some(request) = unit_plans.front().cloned() else {
+        return BuildTurretPlanValidation {
+            action: BuildTurretPlanAction::NoPlan,
+            removed_plan: None,
+            remove_team_plan_at: None,
+        };
+    };
+
+    if !request.breaking && conflicting_breaker {
+        let removed_plan = unit_plans.pop_front();
+        return BuildTurretPlanValidation {
+            action: BuildTurretPlanAction::DropConflictingBreak,
+            removed_plan,
+            remove_team_plan_at: Some((request.x, request.y)),
+        };
+    }
+
+    let last_plan_removed = state
+        .last_plan
+        .as_ref()
+        .is_some_and(|last_plan| last_plan.removed);
+    let valid = !last_plan_removed
+        && (construct_current_matches
+            || if request.breaking {
+                valid_break(&request)
+            } else {
+                valid_place(&request)
+            });
+
+    if valid {
+        BuildTurretPlanValidation {
+            action: BuildTurretPlanAction::Keep,
+            removed_plan: None,
+            remove_team_plan_at: None,
+        }
+    } else {
+        let removed_plan = unit_plans.pop_front();
+        state.last_plan = None;
+        BuildTurretPlanValidation {
+            action: BuildTurretPlanAction::DropInvalid,
+            removed_plan,
+            remove_team_plan_at: None,
+        }
+    }
+}
+
 pub fn build_turret_write_child<W: Write>(
     write: &mut W,
     state: &BuildTurretState,
@@ -847,6 +926,7 @@ pub fn build_turret_read_child<R: Read>(read: &mut R) -> io::Result<BuildTurretS
     Ok(BuildTurretState {
         rotation,
         raw_plans,
+        last_plan: None,
         warmup: 0.0,
     })
 }
@@ -1202,6 +1282,7 @@ mod tests {
         let build = BuildTurretState {
             rotation: 45.0,
             warmup: 0.6,
+            last_plan: None,
             raw_plans: vec![0, 2, 7, 9],
         };
         let mut bytes = Vec::new();
@@ -1272,6 +1353,80 @@ mod tests {
             None
         );
         assert_eq!(plans, original);
+    }
+
+    #[test]
+    fn build_turret_discards_invalid_current_plan_and_clears_last_plan() {
+        let last_plan = crate::mindustry::game::BlockPlan {
+            removed: true,
+            ..crate::mindustry::game::BlockPlan::new(2, 2, 0, "router", None)
+        };
+        let mut state = BuildTurretState {
+            last_plan: Some(last_plan),
+            ..BuildTurretState::default()
+        };
+        let mut unit_plans =
+            std::collections::VecDeque::from([BuildPlan::new_place(2, 2, 0, "router")]);
+
+        let validation = build_turret_validate_current_plan(
+            &mut state,
+            &mut unit_plans,
+            false,
+            true,
+            |_| true,
+            |_| true,
+        );
+
+        assert_eq!(validation.action, BuildTurretPlanAction::DropInvalid);
+        assert_eq!(
+            validation.removed_plan,
+            Some(BuildPlan::new_place(2, 2, 0, "router"))
+        );
+        assert_eq!(validation.remove_team_plan_at, None);
+        assert!(unit_plans.is_empty());
+        assert_eq!(state.last_plan, None);
+    }
+
+    #[test]
+    fn build_turret_keeps_valid_current_plan_and_removes_conflicting_breaks() {
+        let mut state = BuildTurretState {
+            last_plan: Some(crate::mindustry::game::BlockPlan::new(4, 4, 1, "duo", None)),
+            ..BuildTurretState::default()
+        };
+        let mut unit_plans =
+            std::collections::VecDeque::from([BuildPlan::new_place(4, 4, 1, "duo")]);
+
+        let keep = build_turret_validate_current_plan(
+            &mut state,
+            &mut unit_plans,
+            false,
+            false,
+            |_| false,
+            |plan| plan.block.as_deref() == Some("duo"),
+        );
+
+        assert_eq!(keep.action, BuildTurretPlanAction::Keep);
+        assert_eq!(keep.removed_plan, None);
+        assert_eq!(unit_plans.len(), 1);
+        assert!(state.last_plan.is_some());
+
+        let conflict = build_turret_validate_current_plan(
+            &mut state,
+            &mut unit_plans,
+            true,
+            false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(conflict.action, BuildTurretPlanAction::DropConflictingBreak);
+        assert_eq!(
+            conflict.removed_plan,
+            Some(BuildPlan::new_place(4, 4, 1, "duo"))
+        );
+        assert_eq!(conflict.remove_team_plan_at, Some((4, 4)));
+        assert!(unit_plans.is_empty());
+        assert!(state.last_plan.is_some());
     }
 
     #[test]
