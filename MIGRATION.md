@@ -442,6 +442,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `auto_door_trigger_size(...)`
 - `AutoDoorUpdatePlan`
 - `AutoDoorSetOpenPlan`
+- `DoorChainNode`
+- `DoorChainToggle`
+- `DoorChainTogglePlan`
+- `door_chain_toggle_plan(...)`
 - `auto_door_update_plan(...)`
 - `auto_door_set_open_plan(...)`
 - 已对照 `AutoDoor.updateTile()` 锁定：
@@ -449,11 +453,18 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 触发范围内存在 ground 且非 allowLegStep 单位时应打开；
   - open 状态变化时才发送 toggle；
   - `setOpen` 总是更新 pathfinder，只有 `wasVisible` 时播放 effect/sound。
+- 已对照 `Door` 构造器配置闭包锁定：
+  - 非生成中先播放 origin doorSound/effect；
+  - chained 为空时只处理 base；
+  - 关闭时跳过 tile 内有单位的门；
+  - 跳过已经是目标 open 状态的门；
+  - `chainEffect` 控制链上门是否额外播放 effect；
+  - 非生成中每个切换门更新 pathfinder。
 
 仍需：
 
-- `Door` 的 chained doors flood-fill 与批量 configure 规划；
 - `Door.getPlanRegion()` / `AutoDoor.draw()` / `Door.draw()` 的 open-region 选择 helper；
+- `Door.updateChained()` 的真实 proximity flood-fill adapter；
 - 接入真实 Units/tree/pathfinder/Call runtime。
 
 已完成 Rust 结构：
