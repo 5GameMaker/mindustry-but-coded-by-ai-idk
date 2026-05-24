@@ -1163,6 +1163,20 @@ pub fn force_projector_picked_up(state: &mut ForceProjectorState) {
     state.warmup = 0.0;
 }
 
+pub fn force_projector_overwrote(
+    state: &mut ForceProjectorState,
+    previous_same_force_block: bool,
+    previous_broken: bool,
+    previous_buildup: f32,
+) -> bool {
+    if !previous_same_force_block {
+        return false;
+    }
+    state.broken = previous_broken;
+    state.buildup = previous_buildup;
+    true
+}
+
 pub fn force_projector_bar_fraction(
     state: &ForceProjectorState,
     shield_health: f32,
@@ -4538,6 +4552,14 @@ mod tests {
         assert_eq!(picked.broken, false);
         assert_eq!(picked.buildup, 12.0);
         assert_eq!(picked.phase_heat, 0.5);
+        assert!(force_projector_overwrote(&mut picked, true, true, 44.0));
+        assert!(picked.broken);
+        assert_eq!(picked.buildup, 44.0);
+        picked.phase_heat = 0.8;
+        assert!(!force_projector_overwrote(&mut picked, false, false, 1.0));
+        assert!(picked.broken);
+        assert_eq!(picked.buildup, 44.0);
+        assert_eq!(picked.phase_heat, 0.8);
 
         let mut bytes = Vec::new();
         write_force_projector_state(&mut bytes, &picked).unwrap();
