@@ -1290,6 +1290,101 @@ pub struct UpdateLinePlan {
     pub handle_placement_line: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TapPlayerFrame {
+    pub within_select_range: bool,
+    pub player_dead: bool,
+    pub stack_amount: i32,
+    pub block_selected: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TapPlayerPlan {
+    pub accepted: bool,
+    pub dropping_item: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CanMineFrame {
+    pub scene_has_mouse: bool,
+    pub player_dead: bool,
+    pub unit_valid_mine: bool,
+    pub unit_accepts_mine_result: bool,
+    pub double_tap_mine: bool,
+    pub floor_player_unmineable: bool,
+    pub overlay_player_unmineable: bool,
+    pub overlay_has_item_drop: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BeginMineFrame {
+    pub player_dead: bool,
+    pub can_mine: bool,
+    pub tile_pos: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BeginMinePlan {
+    pub accepted: bool,
+    pub mine_tile: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StopMineFrame {
+    pub player_dead: bool,
+    pub current_mine_tile: Option<i32>,
+    pub requested_tile: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StopMinePlan {
+    pub accepted: bool,
+    pub clear_mine_tile: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepairDerelictFrame {
+    pub tile_present: bool,
+    pub build_present: bool,
+    pub player_dead: bool,
+    pub editor: bool,
+    pub player_team_derelict: bool,
+    pub build_team_derelict: bool,
+    pub block_unlocked_host: bool,
+    pub valid_place: bool,
+    pub build_x: i32,
+    pub build_y: i32,
+    pub build_rotation: i32,
+    pub block: Option<String>,
+    pub config: TypeValue,
+}
+
+impl Default for RepairDerelictFrame {
+    fn default() -> Self {
+        Self {
+            tile_present: false,
+            build_present: false,
+            player_dead: false,
+            editor: false,
+            player_team_derelict: false,
+            build_team_derelict: false,
+            block_unlocked_host: false,
+            valid_place: false,
+            build_x: 0,
+            build_y: 0,
+            build_rotation: 0,
+            block: None,
+            config: TypeValue::Null,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepairDerelictPlan {
+    pub accepted: bool,
+    pub build_plan: Option<BuildPlan>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputHandlerLocalAction {
     UnitControlRemote,
@@ -4708,6 +4803,87 @@ pub fn update_line_plan(frame: UpdateLineFrame) -> UpdateLinePlan {
     }
 }
 
+pub fn can_tap_player_plan(frame: TapPlayerFrame) -> bool {
+    frame.within_select_range
+        && !frame.player_dead
+        && frame.stack_amount > 0
+        && !frame.block_selected
+}
+
+pub fn try_tap_player_plan(frame: TapPlayerFrame) -> TapPlayerPlan {
+    let accepted = can_tap_player_plan(frame);
+    TapPlayerPlan {
+        accepted,
+        dropping_item: accepted,
+    }
+}
+
+pub fn can_mine_plan(frame: CanMineFrame) -> bool {
+    !frame.scene_has_mouse
+        && !frame.player_dead
+        && frame.unit_valid_mine
+        && frame.unit_accepts_mine_result
+        && !((!frame.double_tap_mine && frame.floor_player_unmineable)
+            && !frame.overlay_has_item_drop)
+        && !((!frame.double_tap_mine && frame.overlay_player_unmineable)
+            && frame.overlay_has_item_drop)
+}
+
+pub fn try_begin_mine_plan(frame: BeginMineFrame) -> BeginMinePlan {
+    let accepted = !frame.player_dead && frame.can_mine && frame.tile_pos.is_some();
+    BeginMinePlan {
+        accepted,
+        mine_tile: accepted.then_some(frame.tile_pos).flatten(),
+    }
+}
+
+pub fn try_stop_mine_plan(frame: StopMineFrame) -> StopMinePlan {
+    let accepted = if frame.player_dead {
+        false
+    } else if let Some(requested) = frame.requested_tile {
+        frame.current_mine_tile == Some(requested)
+    } else {
+        frame.current_mine_tile.is_some()
+    };
+
+    StopMinePlan {
+        accepted,
+        clear_mine_tile: accepted,
+    }
+}
+
+pub fn can_repair_derelict_plan(frame: &RepairDerelictFrame) -> bool {
+    frame.tile_present
+        && frame.build_present
+        && !frame.player_dead
+        && !frame.editor
+        && !frame.player_team_derelict
+        && frame.build_team_derelict
+        && frame.block_unlocked_host
+        && frame.valid_place
+        && frame.block.is_some()
+}
+
+pub fn try_repair_derelict_plan(frame: RepairDerelictFrame) -> RepairDerelictPlan {
+    if !can_repair_derelict_plan(&frame) {
+        return RepairDerelictPlan {
+            accepted: false,
+            build_plan: None,
+        };
+    }
+
+    RepairDerelictPlan {
+        accepted: true,
+        build_plan: Some(BuildPlan::new_config(
+            frame.build_x,
+            frame.build_y,
+            frame.build_rotation,
+            frame.block.unwrap_or_default(),
+            frame.config,
+        )),
+    }
+}
+
 pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
     if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
         return CheckUnitPlan {
@@ -7357,6 +7533,226 @@ mod tests {
             .line_plans
             .iter()
             .all(|plan| plan.config == TypeValue::Int(7)));
+    }
+
+    #[test]
+    fn tap_player_plan_requires_range_stack_alive_and_no_selected_block() {
+        let accepted = try_tap_player_plan(TapPlayerFrame {
+            within_select_range: true,
+            stack_amount: 1,
+            ..TapPlayerFrame::default()
+        });
+        assert!(accepted.accepted);
+        assert!(accepted.dropping_item);
+
+        for frame in [
+            TapPlayerFrame {
+                within_select_range: false,
+                stack_amount: 1,
+                ..TapPlayerFrame::default()
+            },
+            TapPlayerFrame {
+                within_select_range: true,
+                player_dead: true,
+                stack_amount: 1,
+                ..TapPlayerFrame::default()
+            },
+            TapPlayerFrame {
+                within_select_range: true,
+                stack_amount: 0,
+                ..TapPlayerFrame::default()
+            },
+            TapPlayerFrame {
+                within_select_range: true,
+                stack_amount: 1,
+                block_selected: true,
+                ..TapPlayerFrame::default()
+            },
+        ] {
+            assert!(!try_tap_player_plan(frame).accepted);
+        }
+    }
+
+    #[test]
+    fn mine_plans_follow_java_gates_and_tile_specific_stop() {
+        assert!(can_mine_plan(CanMineFrame {
+            unit_valid_mine: true,
+            unit_accepts_mine_result: true,
+            ..CanMineFrame::default()
+        }));
+
+        assert!(!can_mine_plan(CanMineFrame {
+            scene_has_mouse: true,
+            unit_valid_mine: true,
+            unit_accepts_mine_result: true,
+            ..CanMineFrame::default()
+        }));
+        assert!(!can_mine_plan(CanMineFrame {
+            unit_valid_mine: true,
+            unit_accepts_mine_result: true,
+            floor_player_unmineable: true,
+            overlay_has_item_drop: false,
+            ..CanMineFrame::default()
+        }));
+        assert!(can_mine_plan(CanMineFrame {
+            unit_valid_mine: true,
+            unit_accepts_mine_result: true,
+            floor_player_unmineable: true,
+            overlay_has_item_drop: false,
+            double_tap_mine: true,
+            ..CanMineFrame::default()
+        }));
+        assert!(!can_mine_plan(CanMineFrame {
+            unit_valid_mine: true,
+            unit_accepts_mine_result: true,
+            overlay_player_unmineable: true,
+            overlay_has_item_drop: true,
+            ..CanMineFrame::default()
+        }));
+
+        assert_eq!(
+            try_begin_mine_plan(BeginMineFrame {
+                can_mine: true,
+                tile_pos: Some(point2_pack(4, 5)),
+                ..BeginMineFrame::default()
+            }),
+            BeginMinePlan {
+                accepted: true,
+                mine_tile: Some(point2_pack(4, 5)),
+            }
+        );
+        assert!(
+            !try_begin_mine_plan(BeginMineFrame {
+                player_dead: true,
+                can_mine: true,
+                tile_pos: Some(point2_pack(4, 5)),
+            })
+            .accepted
+        );
+
+        assert_eq!(
+            try_stop_mine_plan(StopMineFrame {
+                current_mine_tile: Some(point2_pack(1, 2)),
+                requested_tile: None,
+                player_dead: false,
+            }),
+            StopMinePlan {
+                accepted: true,
+                clear_mine_tile: true,
+            }
+        );
+        assert!(
+            !try_stop_mine_plan(StopMineFrame {
+                current_mine_tile: Some(point2_pack(1, 2)),
+                requested_tile: Some(point2_pack(2, 1)),
+                player_dead: false,
+            })
+            .accepted
+        );
+        assert!(
+            try_stop_mine_plan(StopMineFrame {
+                current_mine_tile: Some(point2_pack(1, 2)),
+                requested_tile: Some(point2_pack(1, 2)),
+                player_dead: false,
+            })
+            .accepted
+        );
+    }
+
+    #[test]
+    fn repair_derelict_plan_requires_derelict_build_and_valid_place() {
+        let accepted = try_repair_derelict_plan(RepairDerelictFrame {
+            tile_present: true,
+            build_present: true,
+            build_team_derelict: true,
+            block_unlocked_host: true,
+            valid_place: true,
+            build_x: 7,
+            build_y: 8,
+            build_rotation: 2,
+            block: Some("duo".into()),
+            config: TypeValue::String("cfg".into()),
+            ..RepairDerelictFrame::default()
+        });
+
+        assert!(accepted.accepted);
+        let plan = accepted.build_plan.unwrap();
+        assert_eq!(plan.x, 7);
+        assert_eq!(plan.y, 8);
+        assert_eq!(plan.rotation, 2);
+        assert_eq!(plan.block.as_deref(), Some("duo"));
+        assert_eq!(plan.config, TypeValue::String("cfg".into()));
+
+        for frame in [
+            RepairDerelictFrame {
+                tile_present: false,
+                build_present: true,
+                build_team_derelict: true,
+                block_unlocked_host: true,
+                valid_place: true,
+                block: Some("duo".into()),
+                ..RepairDerelictFrame::default()
+            },
+            RepairDerelictFrame {
+                tile_present: true,
+                build_present: true,
+                player_dead: true,
+                build_team_derelict: true,
+                block_unlocked_host: true,
+                valid_place: true,
+                block: Some("duo".into()),
+                ..RepairDerelictFrame::default()
+            },
+            RepairDerelictFrame {
+                tile_present: true,
+                build_present: true,
+                editor: true,
+                build_team_derelict: true,
+                block_unlocked_host: true,
+                valid_place: true,
+                block: Some("duo".into()),
+                ..RepairDerelictFrame::default()
+            },
+            RepairDerelictFrame {
+                tile_present: true,
+                build_present: true,
+                player_team_derelict: true,
+                build_team_derelict: true,
+                block_unlocked_host: true,
+                valid_place: true,
+                block: Some("duo".into()),
+                ..RepairDerelictFrame::default()
+            },
+            RepairDerelictFrame {
+                tile_present: true,
+                build_present: true,
+                build_team_derelict: false,
+                block_unlocked_host: true,
+                valid_place: true,
+                block: Some("duo".into()),
+                ..RepairDerelictFrame::default()
+            },
+            RepairDerelictFrame {
+                tile_present: true,
+                build_present: true,
+                build_team_derelict: true,
+                block_unlocked_host: false,
+                valid_place: true,
+                block: Some("duo".into()),
+                ..RepairDerelictFrame::default()
+            },
+            RepairDerelictFrame {
+                tile_present: true,
+                build_present: true,
+                build_team_derelict: true,
+                block_unlocked_host: true,
+                valid_place: false,
+                block: Some("duo".into()),
+                ..RepairDerelictFrame::default()
+            },
+        ] {
+            assert!(!try_repair_derelict_plan(frame).accepted);
+        }
     }
 
     #[test]
