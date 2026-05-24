@@ -1140,6 +1140,24 @@ pub fn force_projector_set_shield(
     state.buildup = (shield_health + phase_shield_boost * state.phase_heat - value).max(0.0);
 }
 
+pub fn force_projector_outputs_items() -> bool {
+    false
+}
+
+pub fn force_projector_should_ambient_sound(
+    state: &ForceProjectorState,
+    radius: f32,
+    phase_radius_boost: f32,
+) -> bool {
+    !state.broken
+        && force_projector_real_radius(radius, state.phase_heat, phase_radius_boost, state.radscl)
+            > 1.0
+}
+
+pub fn force_projector_in_fog_to() -> bool {
+    false
+}
+
 pub fn force_projector_picked_up(state: &mut ForceProjectorState) {
     state.radscl = 0.0;
     state.warmup = 0.0;
@@ -4334,6 +4352,28 @@ mod tests {
         assert!(
             (force_projector_bar_fraction(&force, 700.0, 400.0) - (600.0 / 740.0)).abs() < 0.00001
         );
+        assert!(!force_projector_outputs_items());
+        assert!(!force_projector_in_fog_to());
+        assert!(!force_projector_should_ambient_sound(&force, 100.0, 80.0));
+        let ambient_force = ForceProjectorState {
+            broken: false,
+            radscl: 0.2,
+            phase_heat: 0.5,
+            ..force
+        };
+        assert!(force_projector_should_ambient_sound(
+            &ambient_force,
+            100.0,
+            80.0
+        ));
+        assert!(!force_projector_should_ambient_sound(
+            &ForceProjectorState {
+                broken: true,
+                ..ambient_force
+            },
+            100.0,
+            80.0
+        ));
 
         let bullet = force_projector_absorb_bullet(&mut force, true, true, false, true, 35.0);
         assert_eq!(
