@@ -1677,6 +1677,56 @@ mod tests {
     }
 
     #[test]
+    fn save_region_manifest_for_versions_matches_java_save_version_gates() {
+        assert_eq!(
+            SaveRegion::manifest_for_version(11),
+            &[
+                SaveRegion::Meta,
+                SaveRegion::Content,
+                SaveRegion::Patches,
+                SaveRegion::Map,
+                SaveRegion::Entities,
+                SaveRegion::Markers,
+                SaveRegion::Custom,
+            ]
+        );
+        assert_eq!(
+            SaveRegion::manifest_for_version(10),
+            &[
+                SaveRegion::Meta,
+                SaveRegion::Content,
+                SaveRegion::Map,
+                SaveRegion::Entities,
+                SaveRegion::Markers,
+                SaveRegion::Custom,
+            ]
+        );
+        assert_eq!(
+            SaveRegion::manifest_for_version(8),
+            SaveRegion::manifest_for_version(10)
+        );
+        assert_eq!(
+            SaveRegion::manifest_for_version(7),
+            &[
+                SaveRegion::Meta,
+                SaveRegion::Content,
+                SaveRegion::Map,
+                SaveRegion::Entities,
+                SaveRegion::Custom,
+            ]
+        );
+        assert_eq!(
+            SaveRegion::manifest_for_version(6),
+            &[
+                SaveRegion::Meta,
+                SaveRegion::Content,
+                SaveRegion::Map,
+                SaveRegion::Entities,
+            ]
+        );
+    }
+
+    #[test]
     fn raw_save_envelope_roundtrips_regions_in_version_order() {
         let mut envelope = RawSaveEnvelope::new(LATEST_SAVE_VERSION);
         envelope.set(SaveRegion::Meta, vec![1, 2, 3]).unwrap();
@@ -1700,6 +1750,65 @@ mod tests {
                 .collect::<Vec<_>>(),
             SaveRegion::manifest().to_vec()
         );
+    }
+
+    #[test]
+    fn deflated_raw_save_envelope_roundtrips_all_java_save_version_regions() {
+        let mut envelope = RawSaveEnvelope::new(11);
+        for (index, region) in SaveRegion::manifest_for_version(11).iter().enumerate() {
+            envelope
+                .set(*region, vec![index as u8, region.as_str().len() as u8])
+                .unwrap();
+        }
+
+        let mut deflated = Vec::new();
+        write_deflated_raw_save_envelope(&mut deflated, &envelope).unwrap();
+        let decoded = read_deflated_raw_save_envelope(deflated.as_slice()).unwrap();
+
+        assert_eq!(decoded, envelope);
+        assert_eq!(decoded.version, 11);
+        assert_eq!(
+            decoded
+                .regions
+                .iter()
+                .map(|entry| entry.region)
+                .collect::<Vec<_>>(),
+            SaveRegion::manifest_for_version(11)
+        );
+        assert_eq!(
+            decoded.get(SaveRegion::Markers),
+            envelope.get(SaveRegion::Markers)
+        );
+        assert_eq!(
+            decoded.get(SaveRegion::Custom),
+            envelope.get(SaveRegion::Custom)
+        );
+    }
+
+    #[test]
+    fn deflated_raw_save_envelope_roundtrips_version_gated_region_sets() {
+        for version in [10, 8, 7, 6] {
+            let mut envelope = RawSaveEnvelope::new(version);
+            for (index, region) in SaveRegion::manifest_for_version(version).iter().enumerate() {
+                envelope
+                    .set(*region, vec![version as u8, index as u8])
+                    .unwrap();
+            }
+
+            let mut deflated = Vec::new();
+            write_deflated_raw_save_envelope(&mut deflated, &envelope).unwrap();
+            let decoded = read_deflated_raw_save_envelope(deflated.as_slice()).unwrap();
+
+            assert_eq!(decoded, envelope);
+            assert_eq!(
+                decoded
+                    .regions
+                    .iter()
+                    .map(|entry| entry.region)
+                    .collect::<Vec<_>>(),
+                SaveRegion::manifest_for_version(version)
+            );
+        }
     }
 
     #[test]
