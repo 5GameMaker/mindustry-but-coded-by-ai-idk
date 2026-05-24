@@ -72,7 +72,10 @@ pub use items::{ItemStackSlot, ItemsComp};
 pub use launch_core::{LaunchCoreBlock, LaunchCoreComp, LaunchCoreDrawPlan, LaunchCoreSmoke};
 pub use legs::{LegsComp, LegsSolidPred, LegsType, LegsUpdateInput};
 pub use mech::{MechComp, MechStepPlan, MechType};
-pub use miner::{MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext, MinerUpdatePlan};
+pub use miner::{
+    apply_prebuild_mining_tick, MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext,
+    MinerUpdatePlan, PrebuildMiningRuntimeStep,
+};
 pub use owner::OwnerComp;
 pub use payload::{PayloadComp, PayloadKind, PayloadState};
 pub use physics::{PhysicRef, PhysicsComp};
