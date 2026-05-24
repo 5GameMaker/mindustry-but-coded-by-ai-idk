@@ -15,12 +15,12 @@ pub mod wave_spawner;
 
 pub use astar::{manhattan, pathfind_grid, pathfind_grid_manhattan, D4};
 pub use base_builder_ai::{
-    begin_path_refresh, choose_part_pool, place_interval, random_position_source,
-    rotate_build_tile, rotate_center, should_spawn_core_unit, step_core_path, try_place_part,
-    BaseBuildPart, BaseBuildTile, BaseBuilderPathState, BlockPlan, PartPoolChoice,
-    PathCalculationOutcome, SeedPositionSource, TilePoint, ATTEMPTS, CORE_UNIT_MULTIPLIER,
-    EMPTY_CHANCE, PATH_STEP as BASE_BUILDER_PATH_STEP, PLACE_INTERVAL_MAX, PLACE_INTERVAL_MIN,
-    TIMER_REFRESH_PATH, TIMER_SPAWN, TIMER_STEP,
+    begin_path_refresh, choose_part_pool, claim_builder_ai_rebuild_plan, place_interval,
+    random_position_source, rotate_build_tile, rotate_center, should_spawn_core_unit,
+    step_core_path, try_place_part, BaseBuildPart, BaseBuildTile, BaseBuilderPathState, BlockPlan,
+    PartPoolChoice, PathCalculationOutcome, SeedPositionSource, TilePoint, ATTEMPTS,
+    CORE_UNIT_MULTIPLIER, EMPTY_CHANCE, PATH_STEP as BASE_BUILDER_PATH_STEP, PLACE_INTERVAL_MAX,
+    PLACE_INTERVAL_MIN, TIMER_REFRESH_PATH, TIMER_SPAWN, TIMER_STEP,
 };
 pub use base_registry::{BasePart, BasePartTile, BasePartTileKind, BaseRegistry};
 pub use block_indexer::{

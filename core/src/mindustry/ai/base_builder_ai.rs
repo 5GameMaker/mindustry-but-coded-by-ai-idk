@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::mindustry::{
     ai::base_registry::{BasePart, BasePartTile, BasePartTileKind},
+    game::{BlockPlan as TeamBlockPlan, TeamData, TeamPlanClaim},
     vars::TILE_SIZE,
     world::{footprint_tiles, get_edges, point2_pack},
 };
@@ -210,6 +211,23 @@ pub fn choose_part_pool(
     } else {
         PartPoolChoice::None
     }
+}
+
+pub fn claim_builder_ai_rebuild_plan<FPlaced, FValid, FNearEnemy>(
+    team_data: &mut TeamData,
+    always_flee: bool,
+    already_placed: FPlaced,
+    mut valid_place: FValid,
+    mut near_enemy: FNearEnemy,
+) -> TeamPlanClaim
+where
+    FPlaced: FnMut(&TeamBlockPlan) -> bool,
+    FValid: FnMut(&TeamBlockPlan) -> bool,
+    FNearEnemy: FnMut(&TeamBlockPlan) -> bool,
+{
+    team_data.claim_front_plan(already_placed, |plan| {
+        valid_place(plan) && (!always_flee || !near_enemy(plan))
+    })
 }
 
 pub fn begin_path_refresh(state: &mut BaseBuilderPathState) {
@@ -493,6 +511,71 @@ mod tests {
         );
         assert_eq!(choose_part_pool(None, false, 0.0), PartPoolChoice::Generic);
         assert_eq!(choose_part_pool(None, false, 0.5), PartPoolChoice::None);
+    }
+
+    #[test]
+    fn builder_ai_rebuild_claim_removes_placed_or_rotates_invalid_front_plan() {
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![
+            TeamBlockPlan::new(1, 1, 0, "duo", None),
+            TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+        ];
+
+        let placed = claim_builder_ai_rebuild_plan(
+            &mut team_data,
+            false,
+            |plan| plan.block == "duo",
+            |_| panic!("placed blocks should be removed before validPlace"),
+            |_| false,
+        );
+        assert_eq!(
+            placed,
+            TeamPlanClaim::AlreadyPlaced(TeamBlockPlan::new(1, 1, 0, "duo", None))
+        );
+        assert_eq!(
+            team_data.plans,
+            vec![TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into()))]
+        );
+
+        let rotated =
+            claim_builder_ai_rebuild_plan(&mut team_data, false, |_| false, |_| false, |_| false);
+        assert_eq!(
+            rotated,
+            TeamPlanClaim::Rotated(TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            team_data.plans,
+            vec![TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into()))]
+        );
+    }
+
+    #[test]
+    fn builder_ai_rebuild_claim_accepts_valid_front_plan_and_respects_always_flee() {
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![TeamBlockPlan::new(3, 3, 2, "wall", None)];
+
+        let near_enemy = claim_builder_ai_rebuild_plan(
+            &mut team_data,
+            true,
+            |_| false,
+            |_| true,
+            |plan| plan.x == 3 && plan.y == 3,
+        );
+        assert_eq!(
+            near_enemy,
+            TeamPlanClaim::Rotated(TeamBlockPlan::new(3, 3, 2, "wall", None))
+        );
+
+        let claimed =
+            claim_builder_ai_rebuild_plan(&mut team_data, true, |_| false, |_| true, |_| false);
+        assert_eq!(
+            claimed,
+            TeamPlanClaim::Claimed(TeamBlockPlan::new(3, 3, 2, "wall", None))
+        );
+        assert_eq!(
+            team_data.plans,
+            vec![TeamBlockPlan::new(3, 3, 2, "wall", None)]
+        );
     }
 
     #[test]
