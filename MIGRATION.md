@@ -901,6 +901,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `mend_projector_update(...)`
 - `write_mend_projector_state(...)`
 - `read_mend_projector_state(...)`
+- `OverdriveProjectorStatsPlan`
+- `overdrive_projector_stats_plan(...)`
 - `OverdriveProjectorState`
 - `overdrive_projector_update(...)`
 - `write_overdrive_projector_state(...)`

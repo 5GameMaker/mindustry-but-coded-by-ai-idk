@@ -11,6 +11,7 @@ use crate::mindustry::game::BlockPlan;
 use crate::mindustry::io::{type_io, TeamId, TypeValue};
 use crate::mindustry::logic::LAccess;
 use crate::mindustry::r#type::UnitType;
+use crate::mindustry::vars::TILE_SIZE;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WallState {
@@ -868,6 +869,16 @@ pub struct OverdriveProjectorUpdate {
     pub real_boost: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OverdriveProjectorStatsPlan {
+    pub time_period: f32,
+    pub speed_increase_percent: i32,
+    pub range_blocks: f32,
+    pub production_time_seconds: f32,
+    pub booster_percent: Option<f32>,
+    pub booster_range_boost: Option<f32>,
+}
+
 pub fn overdrive_real_boost(
     speed_boost: f32,
     phase_heat: f32,
@@ -875,6 +886,24 @@ pub fn overdrive_real_boost(
     efficiency: f32,
 ) -> f32 {
     (speed_boost + phase_heat * speed_boost_phase) * efficiency
+}
+
+pub fn overdrive_projector_stats_plan(
+    speed_boost: f32,
+    range: f32,
+    use_time: f32,
+    has_boost: bool,
+    speed_boost_phase: f32,
+    phase_range_boost: f32,
+) -> OverdriveProjectorStatsPlan {
+    OverdriveProjectorStatsPlan {
+        time_period: use_time,
+        speed_increase_percent: overdrive_speed_increase_percent(speed_boost) as i32,
+        range_blocks: range / TILE_SIZE as f32,
+        production_time_seconds: overdrive_production_time_seconds(use_time),
+        booster_percent: has_boost.then_some(speed_boost_phase * 100.0),
+        booster_range_boost: has_boost.then_some(phase_range_boost),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4317,6 +4346,32 @@ mod tests {
         assert_eq!(
             overdrive_projector_bar_fraction(1.2, false, 1.5, 0.75),
             1.2 / 1.5
+        );
+
+        let boosted_stats = overdrive_projector_stats_plan(1.5, 80.0, 400.0, true, 0.75, 20.0);
+        assert_eq!(
+            boosted_stats,
+            OverdriveProjectorStatsPlan {
+                time_period: 400.0,
+                speed_increase_percent: 50,
+                range_blocks: 80.0 / TILE_SIZE as f32,
+                production_time_seconds: 400.0 / 60.0,
+                booster_percent: Some(75.0),
+                booster_range_boost: Some(20.0),
+            }
+        );
+
+        let plain_stats = overdrive_projector_stats_plan(1.5, 80.0, 400.0, false, 0.75, 20.0);
+        assert_eq!(
+            plain_stats,
+            OverdriveProjectorStatsPlan {
+                time_period: 400.0,
+                speed_increase_percent: 50,
+                range_blocks: 80.0 / TILE_SIZE as f32,
+                production_time_seconds: 400.0 / 60.0,
+                booster_percent: None,
+                booster_range_boost: None,
+            }
         );
 
         let mut state = OverdriveProjectorState {
