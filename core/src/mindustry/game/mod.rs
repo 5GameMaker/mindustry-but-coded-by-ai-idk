@@ -50,7 +50,7 @@ pub use team::{
     vanilla_teams, Team, TeamRegistry, BASE_TEAM_COUNT, TEAM_BLUE, TEAM_COUNT, TEAM_CRUX,
     TEAM_DERELICT, TEAM_GREEN, TEAM_MALIS, TEAM_NEOPLASTIC, TEAM_SHARDED,
 };
-pub use teams::{BlockPlan, CoreInfo, TeamData, Teams};
+pub use teams::{BlockPlan, CoreInfo, TeamData, TeamPlanClaim, Teams};
 pub use tech_tree::{TechContentRef, TechNode, TechNodeId, TechTree};
 pub use universe::{
     file_stem_like_java, last_loadout_key, Universe, UniverseSettings, UniverseTurn,

@@ -58,6 +58,15 @@ impl BlockPlan {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TeamPlanClaim {
+    NoPlans,
+    NoUsablePlan,
+    AlreadyPlaced(BlockPlan),
+    Claimed(BlockPlan),
+    Rotated(BlockPlan),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TeamData {
     pub team: u8,
@@ -143,6 +152,66 @@ impl TeamData {
 
     pub fn core(&self) -> Option<&CoreInfo> {
         self.cores.first()
+    }
+
+    pub fn add_plan_front(&mut self, plan: BlockPlan, check_previous: bool) -> Option<BlockPlan> {
+        let removed = check_previous
+            .then(|| self.remove_plan_at(plan.x as i32, plan.y as i32))
+            .flatten();
+        self.plans.insert(0, plan);
+        removed
+    }
+
+    pub fn remove_plan_at(&mut self, x: i32, y: i32) -> Option<BlockPlan> {
+        let index = self
+            .plans
+            .iter()
+            .position(|plan| plan.x as i32 == x && plan.y as i32 == y)?;
+        Some(self.plans.remove(index))
+    }
+
+    pub fn claim_front_plan<FPlaced, FUsable>(
+        &mut self,
+        mut already_placed: FPlaced,
+        mut usable: FUsable,
+    ) -> TeamPlanClaim
+    where
+        FPlaced: FnMut(&BlockPlan) -> bool,
+        FUsable: FnMut(&BlockPlan) -> bool,
+    {
+        let Some(front) = self.plans.first() else {
+            return TeamPlanClaim::NoPlans;
+        };
+
+        if already_placed(front) {
+            return TeamPlanClaim::AlreadyPlaced(self.plans.remove(0));
+        }
+
+        let plan = self.plans.remove(0);
+        let outcome = if usable(&plan) {
+            TeamPlanClaim::Claimed(plan.clone())
+        } else {
+            TeamPlanClaim::Rotated(plan.clone())
+        };
+        self.plans.push(plan);
+        outcome
+    }
+
+    pub fn claim_first_usable_plan<FUsable>(&mut self, mut usable: FUsable) -> TeamPlanClaim
+    where
+        FUsable: FnMut(&BlockPlan) -> bool,
+    {
+        if self.plans.is_empty() {
+            return TeamPlanClaim::NoPlans;
+        }
+
+        let Some(index) = self.plans.iter().position(|plan| usable(plan)) else {
+            return TeamPlanClaim::NoUsablePlan;
+        };
+
+        let plan = self.plans.remove(index);
+        self.plans.push(plan.clone());
+        TeamPlanClaim::Claimed(plan)
     }
 }
 
@@ -234,10 +303,7 @@ impl Teams {
         &self.active
     }
 
-    pub fn replace_plans(
-        &mut self,
-        plans_by_team: impl IntoIterator<Item = (u8, Vec<BlockPlan>)>,
-    ) {
+    pub fn replace_plans(&mut self, plans_by_team: impl IntoIterator<Item = (u8, Vec<BlockPlan>)>) {
         for data in self.map.iter_mut().flatten() {
             data.plans.clear();
         }
@@ -249,6 +315,39 @@ impl Teams {
 
     pub fn replace_core_items(&mut self, team: u8, items: BTreeMap<i16, i32>) {
         self.get(team).core_items = items;
+    }
+
+    pub fn add_plan_front(
+        &mut self,
+        team: u8,
+        plan: BlockPlan,
+        check_previous: bool,
+    ) -> Option<BlockPlan> {
+        self.get(team).add_plan_front(plan, check_previous)
+    }
+
+    pub fn remove_plan_at(&mut self, team: u8, x: i32, y: i32) -> Option<BlockPlan> {
+        self.get(team).remove_plan_at(x, y)
+    }
+
+    pub fn claim_front_plan<FPlaced, FUsable>(
+        &mut self,
+        team: u8,
+        already_placed: FPlaced,
+        usable: FUsable,
+    ) -> TeamPlanClaim
+    where
+        FPlaced: FnMut(&BlockPlan) -> bool,
+        FUsable: FnMut(&BlockPlan) -> bool,
+    {
+        self.get(team).claim_front_plan(already_placed, usable)
+    }
+
+    pub fn claim_first_usable_plan<FUsable>(&mut self, team: u8, usable: FUsable) -> TeamPlanClaim
+    where
+        FUsable: FnMut(&BlockPlan) -> bool,
+    {
+        self.get(team).claim_first_usable_plan(usable)
     }
 
     pub fn update_active(&mut self, team: u8) {
@@ -504,26 +603,137 @@ mod tests {
             (crate::mindustry::game::TEAM_SHARDED, Vec::new()),
         ]);
 
-        assert!(
-            teams
-                .get_or_null(crate::mindustry::game::TEAM_CRUX)
-                .unwrap()
-                .plans
-                .is_empty()
-        );
-        assert!(
-            teams
-                .get_or_null(crate::mindustry::game::TEAM_SHARDED)
-                .unwrap()
-                .plans
-                .is_empty()
-        );
+        assert!(teams
+            .get_or_null(crate::mindustry::game::TEAM_CRUX)
+            .unwrap()
+            .plans
+            .is_empty());
+        assert!(teams
+            .get_or_null(crate::mindustry::game::TEAM_SHARDED)
+            .unwrap()
+            .plans
+            .is_empty());
         assert_eq!(
             teams
                 .get_or_null(crate::mindustry::game::TEAM_MALIS)
                 .unwrap()
                 .plans,
             vec![BlockPlan::new(5, 6, 2, "wall", Some("9".into()))]
+        );
+    }
+
+    #[test]
+    fn team_plan_queue_claims_and_rotates_like_builder_ai() {
+        let mut teams = Teams::default();
+        teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![
+                BlockPlan::new(1, 1, 0, "duo", None),
+                BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ],
+        )]);
+
+        let placed = teams.claim_front_plan(
+            TEAM_SHARDED,
+            |plan| plan.block == "duo",
+            |_| panic!("already placed should skip validity check"),
+        );
+        assert_eq!(
+            placed,
+            TeamPlanClaim::AlreadyPlaced(BlockPlan::new(1, 1, 0, "duo", None))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![BlockPlan::new(2, 2, 1, "router", Some("cfg".into()))]
+        );
+
+        let rotated = teams.claim_front_plan(TEAM_SHARDED, |_| false, |_| false);
+        assert_eq!(
+            rotated,
+            TeamPlanClaim::Rotated(BlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![BlockPlan::new(2, 2, 1, "router", Some("cfg".into()))]
+        );
+
+        let claimed = teams.claim_front_plan(TEAM_SHARDED, |_| false, |_| true);
+        assert_eq!(
+            claimed,
+            TeamPlanClaim::Claimed(BlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![BlockPlan::new(2, 2, 1, "router", Some("cfg".into()))]
+        );
+    }
+
+    #[test]
+    fn team_plan_queue_claims_first_usable_like_hold_builder_or_build_turret() {
+        let mut teams = Teams::default();
+        teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![
+                BlockPlan::new(1, 1, 0, "duo", None),
+                BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+                BlockPlan::new(3, 3, 2, "wall", None),
+            ],
+        )]);
+
+        let claimed = teams.claim_first_usable_plan(TEAM_SHARDED, |plan| plan.block == "router");
+
+        assert_eq!(
+            claimed,
+            TeamPlanClaim::Claimed(BlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![
+                BlockPlan::new(1, 1, 0, "duo", None),
+                BlockPlan::new(3, 3, 2, "wall", None),
+                BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ]
+        );
+
+        assert_eq!(
+            teams.claim_first_usable_plan(TEAM_SHARDED, |plan| plan.block == "missing"),
+            TeamPlanClaim::NoUsablePlan
+        );
+    }
+
+    #[test]
+    fn team_plan_queue_add_front_deduplicates_and_remove_matches_building_comp() {
+        let mut teams = Teams::default();
+        teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![
+                BlockPlan::new(1, 1, 0, "duo", None),
+                BlockPlan::new(2, 2, 1, "router", None),
+            ],
+        )]);
+
+        let removed = teams.add_plan_front(
+            TEAM_SHARDED,
+            BlockPlan::new(2, 2, 3, "scatter", Some("cfg".into())),
+            true,
+        );
+
+        assert_eq!(removed, Some(BlockPlan::new(2, 2, 1, "router", None)));
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![
+                BlockPlan::new(2, 2, 3, "scatter", Some("cfg".into())),
+                BlockPlan::new(1, 1, 0, "duo", None),
+            ]
+        );
+
+        assert_eq!(
+            teams.remove_plan_at(TEAM_SHARDED, 1, 1),
+            Some(BlockPlan::new(1, 1, 0, "duo", None))
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![BlockPlan::new(2, 2, 3, "scatter", Some("cfg".into()))]
         );
     }
 
@@ -552,12 +762,10 @@ mod tests {
         );
 
         teams.replace_core_items(crate::mindustry::game::TEAM_SHARDED, BTreeMap::new());
-        assert!(
-            teams
-                .get_or_null(crate::mindustry::game::TEAM_SHARDED)
-                .unwrap()
-                .core_items
-                .is_empty()
-        );
+        assert!(teams
+            .get_or_null(crate::mindustry::game::TEAM_SHARDED)
+            .unwrap()
+            .core_items
+            .is_empty());
     }
 }
