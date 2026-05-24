@@ -183,6 +183,21 @@ pub struct BuilderAiPlanValidation {
     pub remove_team_plan_at: Option<(i32, i32)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuilderAiFollowAction {
+    NoFollower,
+    ClearInvalidFollower,
+    CopyFollowerPlan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuilderAiFollowSync {
+    pub action: BuilderAiFollowAction,
+    pub clear_following: bool,
+    pub reset_retreat_timer: bool,
+    pub copied_plan: Option<BuildPlan>,
+}
+
 pub fn should_spawn_core_unit(
     ai_core_spawn: bool,
     timer_ready: bool,
@@ -245,6 +260,54 @@ where
     team_data.claim_front_plan(already_placed, |plan| {
         valid_place(plan) && (!always_flee || !near_enemy(plan))
     })
+}
+
+pub fn builder_ai_should_promote_assist_following(
+    assist_valid: bool,
+    assist_actively_building: bool,
+) -> bool {
+    assist_valid && assist_actively_building
+}
+
+pub fn sync_builder_ai_follow_plan(
+    unit_plans: &mut VecDeque<BuildPlan>,
+    last_plan: &mut Option<TeamBlockPlan>,
+    following_present: bool,
+    following_valid: bool,
+    following_actively_building: bool,
+    following_plan: Option<BuildPlan>,
+) -> BuilderAiFollowSync {
+    if !following_present {
+        return BuilderAiFollowSync {
+            action: BuilderAiFollowAction::NoFollower,
+            clear_following: false,
+            reset_retreat_timer: false,
+            copied_plan: None,
+        };
+    }
+
+    if !following_valid || !following_actively_building {
+        unit_plans.clear();
+        return BuilderAiFollowSync {
+            action: BuilderAiFollowAction::ClearInvalidFollower,
+            clear_following: true,
+            reset_retreat_timer: true,
+            copied_plan: None,
+        };
+    }
+
+    unit_plans.clear();
+    if let Some(plan) = &following_plan {
+        unit_plans.push_front(plan.clone());
+    }
+    *last_plan = None;
+
+    BuilderAiFollowSync {
+        action: BuilderAiFollowAction::CopyFollowerPlan,
+        clear_following: false,
+        reset_retreat_timer: true,
+        copied_plan: following_plan,
+    }
 }
 
 pub fn validate_builder_ai_current_plan<FValidBreak, FValidPlace>(
@@ -779,6 +842,64 @@ mod tests {
         assert_eq!(keep_infinite.action, BuilderAiPlanAction::Keep);
         assert_eq!(infinite_plans.len(), 1);
         assert!(last_plan.is_some());
+    }
+
+    #[test]
+    fn builder_ai_follow_sync_clears_invalid_follower_and_promotes_assist() {
+        assert!(builder_ai_should_promote_assist_following(true, true));
+        assert!(!builder_ai_should_promote_assist_following(false, true));
+        assert!(!builder_ai_should_promote_assist_following(true, false));
+
+        let mut unit_plans = VecDeque::from([BuildPlan::new_place(1, 1, 0, "router")]);
+        let mut last_plan = Some(TeamBlockPlan::new(1, 1, 0, "router", None));
+
+        let no_follower =
+            sync_builder_ai_follow_plan(&mut unit_plans, &mut last_plan, false, false, false, None);
+        assert_eq!(no_follower.action, BuilderAiFollowAction::NoFollower);
+        assert_eq!(unit_plans.len(), 1);
+        assert!(last_plan.is_some());
+
+        let cleared = sync_builder_ai_follow_plan(
+            &mut unit_plans,
+            &mut last_plan,
+            true,
+            false,
+            true,
+            Some(BuildPlan::new_place(2, 2, 0, "duo")),
+        );
+        assert_eq!(cleared.action, BuilderAiFollowAction::ClearInvalidFollower);
+        assert!(cleared.clear_following);
+        assert!(cleared.reset_retreat_timer);
+        assert!(cleared.copied_plan.is_none());
+        assert!(unit_plans.is_empty());
+        assert!(last_plan.is_some());
+    }
+
+    #[test]
+    fn builder_ai_follow_sync_copies_follower_plan_and_clears_last_plan() {
+        let mut unit_plans = VecDeque::from([
+            BuildPlan::new_place(3, 3, 0, "router"),
+            BuildPlan::new_place(4, 4, 1, "duo"),
+        ]);
+        let mut last_plan = Some(TeamBlockPlan::new(3, 3, 0, "router", None));
+        let follower_plan = BuildPlan::new_place(9, 10, 2, "scatter");
+
+        let copied = sync_builder_ai_follow_plan(
+            &mut unit_plans,
+            &mut last_plan,
+            true,
+            true,
+            true,
+            Some(follower_plan.clone()),
+        );
+
+        assert_eq!(copied.action, BuilderAiFollowAction::CopyFollowerPlan);
+        assert!(!copied.clear_following);
+        assert!(copied.reset_retreat_timer);
+        assert_eq!(copied.copied_plan, Some(follower_plan.clone()));
+        assert_eq!(unit_plans.len(), 1);
+        assert_eq!(unit_plans.front(), Some(&follower_plan));
+        assert_eq!(last_plan, None);
     }
 
     #[test]
