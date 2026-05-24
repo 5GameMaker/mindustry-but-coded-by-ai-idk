@@ -17,6 +17,8 @@ pub const TIMER_REFRESH_PATH: usize = 2;
 pub const PLACE_INTERVAL_MIN: f32 = 12.0;
 pub const PLACE_INTERVAL_MAX: f32 = 2.0;
 pub const PATH_STEP: usize = 50;
+pub const BUILDER_AI_DEFAULT_REBUILD_PERIOD: f32 = 60.0 * 2.0;
+pub const BUILDER_AI_BUILD_AI_REBUILD_PERIOD: f32 = 10.0;
 
 const D4: [TilePoint; 4] = [
     TilePoint { x: 1, y: 0 },
@@ -206,6 +208,14 @@ pub struct BuilderAiRetreatDecision {
     pub moving: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuilderAiEnemySearchRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderAiFallbackController {
     Prebuild,
@@ -277,11 +287,72 @@ where
     })
 }
 
+pub fn claim_builder_ai_hold_plan<FWithin, FValid>(
+    team_data: &mut TeamData,
+    infinite_resources: bool,
+    mut within_build_range: FWithin,
+    mut valid_place: FValid,
+) -> TeamPlanClaim
+where
+    FWithin: FnMut(&TeamBlockPlan) -> bool,
+    FValid: FnMut(&TeamBlockPlan) -> bool,
+{
+    team_data.claim_first_usable_plan(|plan| {
+        (infinite_resources || within_build_range(plan)) && valid_place(plan)
+    })
+}
+
+pub fn builder_ai_init_rebuild_period(
+    rebuild_period: f32,
+    default_rebuild_period: f32,
+    team_build_ai: bool,
+) -> f32 {
+    if rebuild_period == default_rebuild_period && team_build_ai {
+        BUILDER_AI_BUILD_AI_REBUILD_PERIOD
+    } else {
+        rebuild_period
+    }
+}
+
 pub fn builder_ai_should_promote_assist_following(
     assist_valid: bool,
     assist_actively_building: bool,
 ) -> bool {
     assist_valid && assist_actively_building
+}
+
+pub fn builder_ai_should_fire(command_ai_should_fire: Option<bool>) -> bool {
+    command_ai_should_fire.unwrap_or(true)
+}
+
+pub fn builder_ai_should_shoot(unit_is_building: bool, unit_can_attack: bool) -> bool {
+    !unit_is_building && unit_can_attack
+}
+
+pub fn builder_ai_enemy_search_rect(
+    tile_x: i32,
+    tile_y: i32,
+    flee_range: f32,
+) -> BuilderAiEnemySearchRect {
+    let half = flee_range / 2.0;
+    BuilderAiEnemySearchRect {
+        x: tile_x as f32 * TILE_SIZE as f32 - half,
+        y: tile_y as f32 * TILE_SIZE as f32 - half,
+        width: flee_range,
+        height: flee_range,
+    }
+}
+
+pub fn builder_ai_near_enemy<FNearEnemy>(
+    tile_x: i32,
+    tile_y: i32,
+    flee_range: f32,
+    mut near_enemy: FNearEnemy,
+) -> bool
+where
+    FNearEnemy: FnMut(BuilderAiEnemySearchRect) -> bool,
+{
+    near_enemy(builder_ai_enemy_search_rect(tile_x, tile_y, flee_range))
 }
 
 pub fn builder_ai_fallback_controller(
@@ -791,6 +862,112 @@ mod tests {
             team_data.plans,
             vec![TeamBlockPlan::new(3, 3, 2, "wall", None)]
         );
+    }
+
+    #[test]
+    fn builder_ai_hold_claim_selects_first_reachable_valid_plan_and_rotates_to_tail() {
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![
+            TeamBlockPlan::new(1, 1, 0, "duo", None),
+            TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            TeamBlockPlan::new(3, 3, 2, "wall", None),
+        ];
+
+        let selected = claim_builder_ai_hold_plan(
+            &mut team_data,
+            false,
+            |plan| plan.x == 2 || plan.x == 3,
+            |plan| plan.block != "wall",
+        );
+
+        assert_eq!(
+            selected,
+            TeamPlanClaim::Claimed(TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            team_data.plans,
+            vec![
+                TeamBlockPlan::new(1, 1, 0, "duo", None),
+                TeamBlockPlan::new(3, 3, 2, "wall", None),
+                TeamBlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn builder_ai_hold_claim_allows_infinite_resources_and_keeps_queue_on_no_match() {
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![
+            TeamBlockPlan::new(4, 4, 0, "duo", None),
+            TeamBlockPlan::new(5, 5, 0, "router", None),
+        ];
+        let original = team_data.plans.clone();
+
+        assert_eq!(
+            claim_builder_ai_hold_plan(&mut team_data, false, |_| false, |_| true),
+            TeamPlanClaim::NoUsablePlan
+        );
+        assert_eq!(team_data.plans, original);
+
+        let selected =
+            claim_builder_ai_hold_plan(&mut team_data, true, |_| false, |plan| plan.block == "duo");
+        assert_eq!(
+            selected,
+            TeamPlanClaim::Claimed(TeamBlockPlan::new(4, 4, 0, "duo", None))
+        );
+        assert_eq!(
+            team_data.plans,
+            vec![
+                TeamBlockPlan::new(5, 5, 0, "router", None),
+                TeamBlockPlan::new(4, 4, 0, "duo", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn builder_ai_init_fire_shoot_and_enemy_rect_match_java_rules() {
+        assert_eq!(
+            builder_ai_init_rebuild_period(
+                BUILDER_AI_DEFAULT_REBUILD_PERIOD,
+                BUILDER_AI_DEFAULT_REBUILD_PERIOD,
+                true,
+            ),
+            BUILDER_AI_BUILD_AI_REBUILD_PERIOD
+        );
+        assert_eq!(
+            builder_ai_init_rebuild_period(
+                BUILDER_AI_DEFAULT_REBUILD_PERIOD,
+                BUILDER_AI_DEFAULT_REBUILD_PERIOD,
+                false,
+            ),
+            BUILDER_AI_DEFAULT_REBUILD_PERIOD
+        );
+        assert_eq!(
+            builder_ai_init_rebuild_period(30.0, BUILDER_AI_DEFAULT_REBUILD_PERIOD, true),
+            30.0
+        );
+
+        assert!(builder_ai_should_fire(None));
+        assert!(builder_ai_should_fire(Some(true)));
+        assert!(!builder_ai_should_fire(Some(false)));
+
+        assert!(builder_ai_should_shoot(false, true));
+        assert!(!builder_ai_should_shoot(true, true));
+        assert!(!builder_ai_should_shoot(false, false));
+
+        let rect = builder_ai_enemy_search_rect(10, 20, 370.0);
+        assert_eq!(
+            rect,
+            BuilderAiEnemySearchRect {
+                x: 10.0 * TILE_SIZE as f32 - 185.0,
+                y: 20.0 * TILE_SIZE as f32 - 185.0,
+                width: 370.0,
+                height: 370.0,
+            }
+        );
+        assert!(builder_ai_near_enemy(10, 20, 370.0, |rect| {
+            rect.x == 10.0 * TILE_SIZE as f32 - 185.0 && rect.width == 370.0
+        }));
     }
 
     #[test]
