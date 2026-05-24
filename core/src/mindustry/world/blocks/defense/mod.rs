@@ -1456,6 +1456,28 @@ pub struct BaseShieldState {
     pub smooth_radius: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BaseShieldRangePlan {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BaseShieldInteractionPlan {
+    pub active: bool,
+    pub bullet_min_x: f32,
+    pub bullet_min_y: f32,
+    pub bullet_size: f32,
+    pub unit_range: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BaseShieldTintPlan {
+    pub use_team_color: bool,
+    pub hit_alpha: u8,
+}
+
 impl Default for BaseShieldState {
     fn default() -> Self {
         Self {
@@ -1471,8 +1493,77 @@ pub fn base_shield_update(state: &mut BaseShieldState, radius: f32, efficiency: 
     state.smooth_radius
 }
 
+pub fn base_shield_clip_radius(radius: f32) -> f32 {
+    radius
+}
+
+pub fn base_shield_radius(state: &BaseShieldState) -> f32 {
+    state.smooth_radius
+}
+
+pub fn base_shield_in_fog_to() -> bool {
+    false
+}
+
 pub fn base_shield_should_interact(radius: f32) -> bool {
     radius > 1.0
+}
+
+pub fn base_shield_should_absorb_bullet(
+    enemy_team: bool,
+    absorbable: bool,
+    within_radius: bool,
+) -> bool {
+    enemy_team && absorbable && within_radius
+}
+
+pub fn base_shield_tint_plan(shield_color_present: bool, hit: f32) -> BaseShieldTintPlan {
+    BaseShieldTintPlan {
+        use_team_color: !shield_color_present,
+        hit_alpha: (hit.clamp(0.0, 1.0) * 255.0).round() as u8,
+    }
+}
+
+pub fn base_shield_place_plan(
+    tile_x: i32,
+    tile_y: i32,
+    tile_size: f32,
+    offset: f32,
+    radius: f32,
+) -> BaseShieldRangePlan {
+    BaseShieldRangePlan {
+        center_x: tile_x as f32 * tile_size + offset,
+        center_y: tile_y as f32 * tile_size + offset,
+        radius,
+    }
+}
+
+pub fn base_shield_select_plan(x: f32, y: f32, radius: f32) -> BaseShieldRangePlan {
+    BaseShieldRangePlan {
+        center_x: x,
+        center_y: y,
+        radius,
+    }
+}
+
+pub fn base_shield_interaction_plan(x: f32, y: f32, radius: f32) -> BaseShieldInteractionPlan {
+    if base_shield_should_interact(radius) {
+        BaseShieldInteractionPlan {
+            active: true,
+            bullet_min_x: x - radius,
+            bullet_min_y: y - radius,
+            bullet_size: radius * 2.0,
+            unit_range: radius + 10.0,
+        }
+    } else {
+        BaseShieldInteractionPlan {
+            active: false,
+            bullet_min_x: x,
+            bullet_min_y: y,
+            bullet_size: 0.0,
+            unit_range: 0.0,
+        }
+    }
 }
 
 pub fn base_shield_unit_overlap(unit_hit_size: f32, shield_radius: f32, distance: f32) -> f32 {
@@ -3818,7 +3909,64 @@ mod tests {
     fn base_and_shield_wall_helpers_follow_upstream_state_order() {
         let mut base = BaseShieldState::default();
         assert_eq!(base_shield_update(&mut base, 200.0, 0.5), 5.0);
+        assert_eq!(base_shield_radius(&base), 5.0);
+        assert_eq!(base_shield_clip_radius(200.0), 200.0);
+        assert!(!base_shield_in_fog_to());
         assert!(base_shield_should_interact(5.0));
+        assert_eq!(
+            base_shield_place_plan(2, 3, 8.0, 4.0, 200.0),
+            BaseShieldRangePlan {
+                center_x: 20.0,
+                center_y: 28.0,
+                radius: 200.0,
+            }
+        );
+        assert_eq!(
+            base_shield_select_plan(40.0, 48.0, 200.0),
+            BaseShieldRangePlan {
+                center_x: 40.0,
+                center_y: 48.0,
+                radius: 200.0,
+            }
+        );
+        assert_eq!(
+            base_shield_interaction_plan(40.0, 48.0, 5.0),
+            BaseShieldInteractionPlan {
+                active: true,
+                bullet_min_x: 35.0,
+                bullet_min_y: 43.0,
+                bullet_size: 10.0,
+                unit_range: 15.0,
+            }
+        );
+        assert_eq!(
+            base_shield_interaction_plan(40.0, 48.0, 1.0),
+            BaseShieldInteractionPlan {
+                active: false,
+                bullet_min_x: 40.0,
+                bullet_min_y: 48.0,
+                bullet_size: 0.0,
+                unit_range: 0.0,
+            }
+        );
+        assert!(base_shield_should_absorb_bullet(true, true, true));
+        assert!(!base_shield_should_absorb_bullet(false, true, true));
+        assert!(!base_shield_should_absorb_bullet(true, false, true));
+        assert!(!base_shield_should_absorb_bullet(true, true, false));
+        assert_eq!(
+            base_shield_tint_plan(false, 0.5),
+            BaseShieldTintPlan {
+                use_team_color: true,
+                hit_alpha: 128,
+            }
+        );
+        assert_eq!(
+            base_shield_tint_plan(true, 2.0),
+            BaseShieldTintPlan {
+                use_team_color: false,
+                hit_alpha: 255,
+            }
+        );
         assert_eq!(
             base_shield_unit_action(10.0, 20.0, 18.0),
             ShieldUnitAction::Repel { distance: 7.01 }

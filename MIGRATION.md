@@ -561,23 +561,43 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `read_base_shield_state(...)`
 - `BaseShieldDrawCommand`
 - `BaseShieldDrawPlan`
+- `BaseShieldRangePlan`
+- `BaseShieldInteractionPlan`
+- `BaseShieldTintPlan`
+- `base_shield_clip_radius(...)`
+- `base_shield_radius(...)`
+- `base_shield_in_fog_to(...)`
+- `base_shield_should_absorb_bullet(...)`
+- `base_shield_tint_plan(...)`
+- `base_shield_place_plan(...)`
+- `base_shield_select_plan(...)`
+- `base_shield_interaction_plan(...)`
 - `base_shield_draw_plan(...)`
 - 已对照 `BaseShield.updateTile()` 锁定：
   - `smoothRadius = lerpDelta(smoothRadius, radius * efficiency, 0.05)`；
   - radius > 1 时才需要 bullet/unit 交互；
-  - 敌方可吸收 bullet 在半径内被吸收；
+  - bullet 扫描矩形为 `(x - rad, y - rad, rad * 2, rad * 2)`；
+  - unit 扫描半径为 `rad + 10f`；
+  - 敌方、可吸收且在半径内的 bullet 被吸收；
   - unit overlap 大于 0 时被 repel，大于 `hitSize * 1.5` 时 kill。
+- 已对照 `init()/drawPlace()/drawSelect()/radius()/inFogTo()` 锁定：
+  - `init()` 使用 `updateClipRadius(radius)`；
+  - place 圆心为 `tile * tilesize + offset`，半径为 block radius；
+  - select 圆心为 building `x/y`，半径为 block radius；
+  - building `radius()` 返回 `smoothRadius`；
+  - shield building 对任意 viewer 均 `inFogTo=false`。
 - 已对照 `drawShield()` 锁定：
   - broken 时不绘制盾体但仍 reset；
   - animateShields 时 fill poly；
   - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill+lines poly；
-  - hit 参与 color clamp。
+  - `shieldColor == null` 时使用 team color，否则使用 shieldColor；
+  - hit 参与与 white 的 color clamp/blend。
 
 仍需：
 
 - 接入真实 Groups.bullet / Units.nearbyEnemies 运行态；
 - shieldColor/teamColor 到真实渲染颜色的 adapter；
-- drawPlace/drawSelect dash circle helper。
+- drawPlace/drawSelect dash circle helper 接入真实 renderer。
 
 ### 7.7a ShockMine
 
