@@ -385,6 +385,22 @@ impl GameState {
         self.teams.replace_plans(plans_by_team);
     }
 
+    /// Exports runtime team plans in the same logical shape consumed by Java
+    /// `SaveVersion.writeTeamBlocks(...)`.
+    ///
+    /// The caller supplies the block-name-to-id mapping so this remains usable
+    /// both for base content and for temporary network content mappers.
+    pub fn export_legacy_team_blocks<BlockId>(
+        &mut self,
+        block_id: BlockId,
+        include_sharded: bool,
+    ) -> LegacyTeamBlocks
+    where
+        BlockId: FnMut(&str) -> Option<ContentId>,
+    {
+        self.teams.to_legacy_team_blocks(block_id, include_sharded)
+    }
+
     /// Applies the game-state front matter from Java `NetworkIO.loadWorld`.
     ///
     /// Full rules JSON and marker/entity materialization are still migrated in
@@ -591,7 +607,9 @@ where
 mod tests {
     use super::*;
     use crate::mindustry::{
-        game::{CoreInfo, MapMarkers, ObjectiveMarker, SpawnGroup, TEAM_CRUX, TEAM_SHARDED},
+        game::{
+            CoreInfo, MapMarkers, ObjectiveMarker, SpawnGroup, TEAM_CRUX, TEAM_MALIS, TEAM_SHARDED,
+        },
         io::{ContentPatchSet, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap},
         net::{NetworkWorldData, StateSnapshotCallPacket},
         r#type::SectorPreset,
@@ -855,6 +873,48 @@ mod tests {
 
         state.apply_legacy_team_blocks(None, |_| None, |_, _| None);
         assert!(state.teams.get_or_null(7).unwrap().plans.is_empty());
+    }
+
+    #[test]
+    fn export_legacy_team_blocks_uses_runtime_teams_for_save_version_writer() {
+        let mut state = GameState::new();
+        state
+            .teams
+            .register_core(CoreInfo::new(1, TEAM_CRUX, 0.0, 0.0));
+        state
+            .teams
+            .register_core(CoreInfo::new(2, TEAM_MALIS, 10.0, 0.0));
+        state.teams.replace_plans([
+            (
+                TEAM_CRUX,
+                vec![
+                    BlockPlan::new(1, 2, 0, "duo", None),
+                    BlockPlan::new(3, 4, 1, "router", Some("cfg".into())),
+                ],
+            ),
+            (TEAM_MALIS, vec![BlockPlan::new(5, 6, 2, "wall", None)]),
+        ]);
+
+        let exported = state.export_legacy_team_blocks(
+            |name| match name {
+                "duo" => Some(10),
+                "router" => Some(11),
+                "wall" => Some(12),
+                _ => None,
+            },
+            true,
+        );
+
+        assert_eq!(exported.groups.len(), 3);
+        assert_eq!(exported.groups[0].team_id, TEAM_CRUX as i32);
+        assert_eq!(exported.groups[0].plans[0].block_id, 10);
+        assert_eq!(
+            exported.groups[0].plans[1].config,
+            TypeValue::String("cfg".into())
+        );
+        assert_eq!(exported.groups[1].team_id, TEAM_MALIS as i32);
+        assert_eq!(exported.groups[1].plans[0].block_id, 12);
+        assert_eq!(exported.groups[2].team_id, TEAM_SHARDED as i32);
     }
 
     #[test]
