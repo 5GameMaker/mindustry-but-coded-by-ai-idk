@@ -1864,6 +1864,112 @@ pub struct DirectionalForceProjectorState {
     pub shield_radius: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorStatsPlan {
+    pub shield_health: f32,
+    pub cooldown_time_seconds: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorPlacePlan {
+    pub origin: (f32, f32),
+    pub top_point: (f32, f32),
+    pub bottom_point: (f32, f32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorDeflectPlan {
+    pub active: bool,
+    pub segment: ((f32, f32), (f32, f32)),
+    pub bounds: DirectionalForceProjectorRect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectionalForceProjectorDrawCommand {
+    SuperDraw,
+    TopAdditive,
+    ResetTop,
+    SetShieldLayer,
+    SetShieldColor,
+    FillAnimatedRect,
+    DrawAnimatedEdges,
+    FillAnimatedCaps,
+    FillStaticRect,
+    StrokeStaticRect,
+    ResetShield,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorDrawPlan {
+    pub commands: &'static [DirectionalForceProjectorDrawCommand],
+    pub top_alpha: f32,
+    pub shield_rect: DirectionalForceProjectorRect,
+    pub segment: ((f32, f32), (f32, f32)),
+    pub hit_alpha: f32,
+    pub fill_alpha: f32,
+    pub stroke: f32,
+    pub edge_stroke: f32,
+}
+
+const DIRECTIONAL_FORCE_PROJECTOR_DRAW_TOP_ANIMATED: &[DirectionalForceProjectorDrawCommand] = &[
+    DirectionalForceProjectorDrawCommand::SuperDraw,
+    DirectionalForceProjectorDrawCommand::TopAdditive,
+    DirectionalForceProjectorDrawCommand::ResetTop,
+    DirectionalForceProjectorDrawCommand::SetShieldLayer,
+    DirectionalForceProjectorDrawCommand::SetShieldColor,
+    DirectionalForceProjectorDrawCommand::FillAnimatedRect,
+    DirectionalForceProjectorDrawCommand::DrawAnimatedEdges,
+    DirectionalForceProjectorDrawCommand::FillAnimatedCaps,
+    DirectionalForceProjectorDrawCommand::ResetShield,
+];
+
+const DIRECTIONAL_FORCE_PROJECTOR_DRAW_TOP_STATIC: &[DirectionalForceProjectorDrawCommand] = &[
+    DirectionalForceProjectorDrawCommand::SuperDraw,
+    DirectionalForceProjectorDrawCommand::TopAdditive,
+    DirectionalForceProjectorDrawCommand::ResetTop,
+    DirectionalForceProjectorDrawCommand::SetShieldLayer,
+    DirectionalForceProjectorDrawCommand::SetShieldColor,
+    DirectionalForceProjectorDrawCommand::FillStaticRect,
+    DirectionalForceProjectorDrawCommand::StrokeStaticRect,
+    DirectionalForceProjectorDrawCommand::ResetShield,
+];
+
+const DIRECTIONAL_FORCE_PROJECTOR_DRAW_ANIMATED: &[DirectionalForceProjectorDrawCommand] = &[
+    DirectionalForceProjectorDrawCommand::SuperDraw,
+    DirectionalForceProjectorDrawCommand::SetShieldLayer,
+    DirectionalForceProjectorDrawCommand::SetShieldColor,
+    DirectionalForceProjectorDrawCommand::FillAnimatedRect,
+    DirectionalForceProjectorDrawCommand::DrawAnimatedEdges,
+    DirectionalForceProjectorDrawCommand::FillAnimatedCaps,
+    DirectionalForceProjectorDrawCommand::ResetShield,
+];
+
+const DIRECTIONAL_FORCE_PROJECTOR_DRAW_STATIC: &[DirectionalForceProjectorDrawCommand] = &[
+    DirectionalForceProjectorDrawCommand::SuperDraw,
+    DirectionalForceProjectorDrawCommand::SetShieldLayer,
+    DirectionalForceProjectorDrawCommand::SetShieldColor,
+    DirectionalForceProjectorDrawCommand::FillStaticRect,
+    DirectionalForceProjectorDrawCommand::StrokeStaticRect,
+    DirectionalForceProjectorDrawCommand::ResetShield,
+];
+
+const DIRECTIONAL_FORCE_PROJECTOR_DRAW_TOP_ONLY: &[DirectionalForceProjectorDrawCommand] = &[
+    DirectionalForceProjectorDrawCommand::SuperDraw,
+    DirectionalForceProjectorDrawCommand::TopAdditive,
+    DirectionalForceProjectorDrawCommand::ResetTop,
+];
+
+const DIRECTIONAL_FORCE_PROJECTOR_DRAW_SUPER_ONLY: &[DirectionalForceProjectorDrawCommand] =
+    &[DirectionalForceProjectorDrawCommand::SuperDraw];
+
 impl Default for DirectionalForceProjectorState {
     fn default() -> Self {
         Self {
@@ -1873,6 +1979,70 @@ impl Default for DirectionalForceProjectorState {
             warmup: 0.0,
             shield_radius: 0.0,
         }
+    }
+}
+
+pub fn directional_force_projector_clip_radius(width: f32) -> f32 {
+    width + 3.0
+}
+
+pub fn directional_force_projector_effective_length(length: f32, size: i32, tile_size: f32) -> f32 {
+    if length < 0.0 {
+        size as f32 * tile_size / 2.0
+    } else {
+        length
+    }
+}
+
+pub fn directional_force_projector_stats_plan(
+    shield_health: f32,
+    cooldown_broken_base: f32,
+) -> DirectionalForceProjectorStatsPlan {
+    DirectionalForceProjectorStatsPlan {
+        shield_health,
+        cooldown_time_seconds: (shield_health / cooldown_broken_base / 60.0) as i32,
+    }
+}
+
+pub fn directional_force_projector_bar_fraction(
+    state: &DirectionalForceProjectorState,
+    shield_health: f32,
+) -> f32 {
+    if state.broken {
+        0.0
+    } else {
+        1.0 - state.buildup / shield_health
+    }
+}
+
+pub fn directional_force_projector_outputs_items() -> bool {
+    false
+}
+
+pub fn directional_force_projector_should_ambient_sound(
+    state: &DirectionalForceProjectorState,
+) -> bool {
+    !state.broken && state.shield_radius > 1.0
+}
+
+pub fn directional_force_projector_place_plan(
+    tile_x: i32,
+    tile_y: i32,
+    tile_size: f32,
+    length: f32,
+    width: f32,
+    size: i32,
+    rotation: i32,
+) -> DirectionalForceProjectorPlacePlan {
+    let origin_x = tile_x as f32 * tile_size;
+    let origin_y = tile_y as f32 * tile_size;
+    let rotation_degrees = rotation as f32 * 90.0;
+    let x = length - size as f32 / 2.0;
+    let y = width + size as f32 / 2.0;
+    DirectionalForceProjectorPlacePlan {
+        origin: (origin_x, origin_y),
+        top_point: rotate_add(x, y, rotation_degrees, origin_x, origin_y),
+        bottom_point: rotate_add(x, -y, rotation_degrees, origin_x, origin_y),
     }
 }
 
@@ -1923,6 +2093,126 @@ pub fn directional_force_projector_segment(
         rotate_add(length, shield_radius, rotation_degrees, origin_x, origin_y),
         rotate_add(length, -shield_radius, rotation_degrees, origin_x, origin_y),
     )
+}
+
+fn directional_force_projector_rect_from_segment(
+    segment: ((f32, f32), (f32, f32)),
+    grow: f32,
+) -> DirectionalForceProjectorRect {
+    let min_x = segment.0 .0.min(segment.1 .0);
+    let min_y = segment.0 .1.min(segment.1 .1);
+    let max_x = segment.0 .0.max(segment.1 .0);
+    let max_y = segment.0 .1.max(segment.1 .1);
+    DirectionalForceProjectorRect {
+        x: min_x - grow,
+        y: min_y - grow,
+        width: max_x - min_x + grow * 2.0,
+        height: max_y - min_y + grow * 2.0,
+    }
+}
+
+pub fn directional_force_projector_deflect_plan(
+    state: &DirectionalForceProjectorState,
+    origin_x: f32,
+    origin_y: f32,
+    length: f32,
+    rotation_degrees: f32,
+    pad_size: f32,
+) -> DirectionalForceProjectorDeflectPlan {
+    let active = state.shield_radius > 0.0 && !state.broken;
+    let segment = if active {
+        directional_force_projector_segment(
+            origin_x,
+            origin_y,
+            length,
+            state.shield_radius,
+            rotation_degrees,
+        )
+    } else {
+        ((origin_x, origin_y), (origin_x, origin_y))
+    };
+    DirectionalForceProjectorDeflectPlan {
+        active,
+        segment,
+        bounds: if active {
+            directional_force_projector_rect_from_segment(segment, pad_size)
+        } else {
+            DirectionalForceProjectorRect {
+                x: origin_x,
+                y: origin_y,
+                width: 0.0,
+                height: 0.0,
+            }
+        },
+    }
+}
+
+pub fn directional_force_projector_draw_plan(
+    state: &DirectionalForceProjectorState,
+    origin_x: f32,
+    origin_y: f32,
+    length: f32,
+    rotation_degrees: f32,
+    shield_health: f32,
+    animate_shields: bool,
+) -> DirectionalForceProjectorDrawPlan {
+    let has_top = state.buildup > 0.0;
+    let has_shield = !state.broken && state.shield_radius > 0.0;
+    let segment = if has_shield {
+        directional_force_projector_segment(
+            origin_x,
+            origin_y,
+            length,
+            state.shield_radius,
+            rotation_degrees,
+        )
+    } else {
+        ((origin_x, origin_y), (origin_x, origin_y))
+    };
+    DirectionalForceProjectorDrawPlan {
+        commands: match (has_top, has_shield, animate_shields) {
+            (true, true, true) => DIRECTIONAL_FORCE_PROJECTOR_DRAW_TOP_ANIMATED,
+            (true, true, false) => DIRECTIONAL_FORCE_PROJECTOR_DRAW_TOP_STATIC,
+            (false, true, true) => DIRECTIONAL_FORCE_PROJECTOR_DRAW_ANIMATED,
+            (false, true, false) => DIRECTIONAL_FORCE_PROJECTOR_DRAW_STATIC,
+            (true, false, _) => DIRECTIONAL_FORCE_PROJECTOR_DRAW_TOP_ONLY,
+            (false, false, _) => DIRECTIONAL_FORCE_PROJECTOR_DRAW_SUPER_ONLY,
+        },
+        top_alpha: if has_top && shield_health != 0.0 {
+            state.buildup / shield_health * 0.75
+        } else {
+            0.0
+        },
+        shield_rect: if has_shield {
+            directional_force_projector_rect_from_segment(segment, 4.0)
+        } else {
+            DirectionalForceProjectorRect {
+                x: origin_x,
+                y: origin_y,
+                width: 0.0,
+                height: 0.0,
+            }
+        },
+        segment,
+        hit_alpha: state.hit.clamp(0.0, 1.0),
+        fill_alpha: if has_shield && !animate_shields {
+            0.09 + (0.08 * state.hit).clamp(0.0, 1.0)
+        } else if has_shield {
+            1.0
+        } else {
+            0.0
+        },
+        stroke: if has_shield && !animate_shields {
+            1.5
+        } else {
+            0.0
+        },
+        edge_stroke: if has_shield && animate_shields {
+            3.0
+        } else {
+            0.0
+        },
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4100,8 +4390,96 @@ mod tests {
             3000.0
         ));
         assert!((directional.warmup - 0.95).abs() < 0.00001);
+        assert_eq!(directional_force_projector_clip_radius(30.0), 33.0);
+        assert_eq!(
+            directional_force_projector_effective_length(-1.0, 2, 8.0),
+            8.0
+        );
+        assert_eq!(
+            directional_force_projector_stats_plan(3000.0, 0.35),
+            DirectionalForceProjectorStatsPlan {
+                shield_health: 3000.0,
+                cooldown_time_seconds: 142,
+            }
+        );
+        assert_eq!(
+            directional_force_projector_bar_fraction(&directional, 3000.0),
+            1.0
+        );
+        assert!(!directional_force_projector_outputs_items());
+        assert!(directional_force_projector_should_ambient_sound(
+            &directional
+        ));
+        let place = directional_force_projector_place_plan(2, 3, 8.0, 40.0, 30.0, 2, 0);
+        assert_eq!(
+            place,
+            DirectionalForceProjectorPlacePlan {
+                origin: (16.0, 24.0),
+                top_point: (55.0, 55.0),
+                bottom_point: (55.0, -7.0),
+            }
+        );
         let segment = directional_force_projector_segment(0.0, 0.0, 40.0, 10.0, 0.0);
         assert_eq!(segment, ((40.0, 10.0), (40.0, -10.0)));
+        let deflect_plan =
+            directional_force_projector_deflect_plan(&directional, 0.0, 0.0, 40.0, 0.0, 40.0);
+        assert!(deflect_plan.active);
+        assert_eq!(deflect_plan.segment, ((40.0, 11.0), (40.0, -11.0)));
+        assert_eq!(
+            deflect_plan.bounds,
+            DirectionalForceProjectorRect {
+                x: 0.0,
+                y: -51.0,
+                width: 80.0,
+                height: 102.0,
+            }
+        );
+        let animated_draw =
+            directional_force_projector_draw_plan(&directional, 0.0, 0.0, 40.0, 0.0, 3000.0, true);
+        assert_eq!(
+            animated_draw.commands,
+            &[
+                DirectionalForceProjectorDrawCommand::SuperDraw,
+                DirectionalForceProjectorDrawCommand::SetShieldLayer,
+                DirectionalForceProjectorDrawCommand::SetShieldColor,
+                DirectionalForceProjectorDrawCommand::FillAnimatedRect,
+                DirectionalForceProjectorDrawCommand::DrawAnimatedEdges,
+                DirectionalForceProjectorDrawCommand::FillAnimatedCaps,
+                DirectionalForceProjectorDrawCommand::ResetShield,
+            ]
+        );
+        assert_eq!(animated_draw.fill_alpha, 1.0);
+        assert_eq!(animated_draw.edge_stroke, 3.0);
+        let static_draw = directional_force_projector_draw_plan(
+            &DirectionalForceProjectorState {
+                buildup: 300.0,
+                hit: 2.0,
+                ..directional
+            },
+            0.0,
+            0.0,
+            40.0,
+            0.0,
+            3000.0,
+            false,
+        );
+        assert_eq!(
+            static_draw.commands,
+            &[
+                DirectionalForceProjectorDrawCommand::SuperDraw,
+                DirectionalForceProjectorDrawCommand::TopAdditive,
+                DirectionalForceProjectorDrawCommand::ResetTop,
+                DirectionalForceProjectorDrawCommand::SetShieldLayer,
+                DirectionalForceProjectorDrawCommand::SetShieldColor,
+                DirectionalForceProjectorDrawCommand::FillStaticRect,
+                DirectionalForceProjectorDrawCommand::StrokeStaticRect,
+                DirectionalForceProjectorDrawCommand::ResetShield,
+            ]
+        );
+        assert_eq!(static_draw.top_alpha, 0.075);
+        assert_eq!(static_draw.hit_alpha, 1.0);
+        assert_eq!(static_draw.fill_alpha, 0.25);
+        assert_eq!(static_draw.stroke, 1.5);
         assert!(directional_force_projector_absorb_bullet(
             &mut directional,
             true,
@@ -4121,6 +4499,7 @@ mod tests {
         assert!(directional.buildup >= 50.0);
         directional_force_projector_picked_up(&mut directional);
         assert_eq!(directional.shield_radius, 0.0);
+        assert_eq!(directional.warmup, 0.0);
 
         let mut radar = RadarState::default();
         assert!(!radar_update(&mut radar, 1.0, 60.0, 10.0, 600.0));

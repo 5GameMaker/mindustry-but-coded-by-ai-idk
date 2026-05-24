@@ -722,6 +722,25 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `shield_wall_draw_plan(...)`
 - `write_shield_wall_state(...)`
 - `read_shield_wall_state(...)`
+- `DirectionalForceProjectorState`
+- `DirectionalForceProjectorStatsPlan`
+- `DirectionalForceProjectorPlacePlan`
+- `DirectionalForceProjectorDeflectPlan`
+- `DirectionalForceProjectorDrawCommand`
+- `DirectionalForceProjectorDrawPlan`
+- `directional_force_projector_clip_radius(...)`
+- `directional_force_projector_effective_length(...)`
+- `directional_force_projector_stats_plan(...)`
+- `directional_force_projector_bar_fraction(...)`
+- `directional_force_projector_outputs_items(...)`
+- `directional_force_projector_should_ambient_sound(...)`
+- `directional_force_projector_place_plan(...)`
+- `directional_force_projector_update(...)`
+- `directional_force_projector_picked_up(...)`
+- `directional_force_projector_segment(...)`
+- `directional_force_projector_deflect_plan(...)`
+- `directional_force_projector_draw_plan(...)`
+- `directional_force_projector_absorb_bullet(...)`
 - 已对照 `ShieldWall.draw()` 锁定：
   - 总是先绘制 base region；
   - `shieldRadius <= 0` 时只输出 region；
@@ -729,6 +748,17 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - animateShields 时走 fill square；
   - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill square + outline square；
   - additive glow alpha = `(1 - glowMag + absin(glowScl, glowMag)) * shieldRadius`。
+- 已对照 `DirectionalForceProjector.init()/setBars()/setStats()/drawPlace()/updateTile()/deflectBullets()/draw()/drawShield()` 锁定：
+  - clip radius = `width + 3f`；
+  - `length < 0` 时转为 `size * tilesize / 2f`；
+  - shield bar fraction broken 时为 0，否则 `1 - buildup / shieldHealth`；
+  - stats cooldownTime = `(int)(shieldHealth / cooldownBrokenBase / 60f)`；
+  - place 使用 tile world 坐标，不加 block offset，并按 `rotation * 90` 旋转两条端点线；
+  - `shouldAmbientSound = !broken && shieldRadius > 1f`，`outputsItems=false`；
+  - `shieldRadius = lerpDelta(shieldRadius, broken ? 0 : warmup * width, 0.05)`；
+  - deflect segment 为 `(length, ±shieldRadius)` 旋转平移，扫描 bounds 在 segment bbox 基础上 grow `padSize`；
+  - animated shield 走 rect、edge lines 与 caps，静态 shield 走 fill/stroke rect；
+  - top additive alpha = `buildup / shieldHealth * 0.75`。
 - `ForceProjectorState`
 - `force_projector_real_radius(...)`
 - `force_projector_shield(...)`
@@ -782,6 +812,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `ForceProjector.draw()` 接入真实 renderer/Draw dispatcher；
 - `ForceProjector.setBars()/sense/setProp` 接入真实 building runtime；
 - `ForceProjector.onRemoved/pickedUp/inFogTo/shouldAmbientSound/overwrote` 生命周期辅助；
+- `DirectionalForceProjector` 接入真实 Groups.bullet.intersect、absorb effect、shield break effect 与 renderer；
 - `MendProjector` 真实 range indexer / world heal / drawPlace / drawSelect 接入；
 - `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描、status/effect、draw/select 接入；
 - 上述 helper 继续接入真实 block runtime，避免停留在单测 helper。
