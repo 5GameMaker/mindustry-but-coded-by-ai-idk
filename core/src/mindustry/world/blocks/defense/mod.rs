@@ -133,6 +133,40 @@ pub fn door_chain_toggle_plan(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoorRegion {
+    Closed,
+    Open,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoorDrawCommand {
+    Region(DoorRegion),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoorDrawPlan {
+    pub command: DoorDrawCommand,
+}
+
+pub fn door_region_for_open(open: bool) -> DoorRegion {
+    if open {
+        DoorRegion::Open
+    } else {
+        DoorRegion::Closed
+    }
+}
+
+pub fn door_plan_region(config_open: Option<bool>) -> DoorRegion {
+    door_region_for_open(config_open.unwrap_or(false))
+}
+
+pub fn door_draw_plan(open: bool) -> DoorDrawPlan {
+    DoorDrawPlan {
+        command: DoorDrawCommand::Region(door_region_for_open(open)),
+    }
+}
+
 pub fn write_door_state<W: Write>(write: &mut W, state: DoorState) -> io::Result<()> {
     write.write_all(&[state.open as u8])
 }
@@ -1826,6 +1860,23 @@ mod tests {
                     play_chain_effect: false,
                     update_pathfinder: false,
                 }],
+            }
+        );
+        assert_eq!(door_region_for_open(false), DoorRegion::Closed);
+        assert_eq!(door_region_for_open(true), DoorRegion::Open);
+        assert_eq!(door_plan_region(Some(true)), DoorRegion::Open);
+        assert_eq!(door_plan_region(Some(false)), DoorRegion::Closed);
+        assert_eq!(door_plan_region(None), DoorRegion::Closed);
+        assert_eq!(
+            door_draw_plan(true),
+            DoorDrawPlan {
+                command: DoorDrawCommand::Region(DoorRegion::Open),
+            }
+        );
+        assert_eq!(
+            door_draw_plan(false),
+            DoorDrawPlan {
+                command: DoorDrawCommand::Region(DoorRegion::Closed),
             }
         );
 
