@@ -3,9 +3,11 @@ pub mod turrets;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
+use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::BlockPlan;
 use crate::mindustry::io::TypeValue;
+use crate::mindustry::r#type::UnitType;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WallState {
@@ -882,6 +884,113 @@ pub fn build_turret_should_consume(plan_count: usize, heal_suppressed: bool) -> 
     plan_count > 0 && !heal_suppressed
 }
 
+pub const BUILD_TURRET_UNIT_TYPE_PREFIX: &str = "turret-unit-";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildTurretUnitConstructor {
+    BlockUnitUnit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildTurretUnitTypeConfig {
+    pub unit_type: UnitType,
+    pub constructor: BuildTurretUnitConstructor,
+}
+
+pub fn build_turret_unit_type(
+    unit_type_id: ContentId,
+    block_name: impl AsRef<str>,
+    rotate_speed: f32,
+    build_beam_offset: f32,
+    range: f32,
+    build_speed: f32,
+) -> UnitType {
+    let mut unit_type = UnitType::new(
+        unit_type_id,
+        format!("{}{}", BUILD_TURRET_UNIT_TYPE_PREFIX, block_name.as_ref()),
+    );
+    apply_build_turret_unit_type_defaults(
+        &mut unit_type,
+        rotate_speed,
+        build_beam_offset,
+        range,
+        build_speed,
+    );
+    unit_type
+}
+
+pub fn build_turret_unit_type_config(
+    unit_type_id: ContentId,
+    block_name: impl AsRef<str>,
+    rotate_speed: f32,
+    build_beam_offset: f32,
+    range: f32,
+    build_speed: f32,
+) -> BuildTurretUnitTypeConfig {
+    BuildTurretUnitTypeConfig {
+        unit_type: build_turret_unit_type(
+            unit_type_id,
+            block_name,
+            rotate_speed,
+            build_beam_offset,
+            range,
+            build_speed,
+        ),
+        constructor: BuildTurretUnitConstructor::BlockUnitUnit,
+    }
+}
+
+pub fn apply_build_turret_unit_type_defaults(
+    unit_type: &mut UnitType,
+    rotate_speed: f32,
+    build_beam_offset: f32,
+    range: f32,
+    build_speed: f32,
+) {
+    unit_type.hidden = true;
+    unit_type.internal = true;
+    unit_type.speed = 0.0;
+    unit_type.hit_size = 0.0;
+    unit_type.health = 1.0;
+    unit_type.item_capacity = 0;
+    build_turret_after_patch_unit_type(
+        unit_type,
+        rotate_speed,
+        build_beam_offset,
+        range,
+        build_speed,
+    );
+}
+
+pub fn build_turret_after_patch_unit_type(
+    unit_type: &mut UnitType,
+    rotate_speed: f32,
+    build_beam_offset: f32,
+    range: f32,
+    build_speed: f32,
+) {
+    unit_type.rotate_speed = rotate_speed;
+    unit_type.build_beam_offset = build_beam_offset;
+    unit_type.build_range = range;
+    unit_type.build_speed = build_speed;
+}
+
+pub fn build_turret_after_patch_unit_type_config(
+    config: &mut BuildTurretUnitTypeConfig,
+    rotate_speed: f32,
+    build_beam_offset: f32,
+    range: f32,
+    build_speed: f32,
+) {
+    build_turret_after_patch_unit_type(
+        &mut config.unit_type,
+        rotate_speed,
+        build_beam_offset,
+        range,
+        build_speed,
+    );
+}
+
 pub fn build_turret_build_plan_from_team_plan(plan: &BlockPlan) -> BuildPlan {
     let mut build_plan = BuildPlan::new_place(
         plan.x as i32,
@@ -1479,6 +1588,37 @@ mod tests {
         assert_eq!(build_turret_elevation(-1.0, 3), 1.5);
         assert_eq!(build_turret_warmup_update(0.0, true, 0.8), 0.080000006);
         assert!(build_turret_should_consume(1, false));
+        let mut unit_config =
+            build_turret_unit_type_config(-1, "build-tower", 10.0, 5.0, 80.0, 1.5);
+        assert_eq!(
+            unit_config.unit_type.base.mappable.name,
+            "turret-unit-build-tower"
+        );
+        assert_eq!(
+            unit_config.constructor,
+            BuildTurretUnitConstructor::BlockUnitUnit
+        );
+        assert!(unit_config.unit_type.hidden);
+        assert!(unit_config.unit_type.internal);
+        assert_eq!(unit_config.unit_type.speed, 0.0);
+        assert_eq!(unit_config.unit_type.hit_size, 0.0);
+        assert_eq!(unit_config.unit_type.health, 1.0);
+        assert_eq!(unit_config.unit_type.item_capacity, 0);
+        assert_eq!(unit_config.unit_type.rotate_speed, 10.0);
+        assert_eq!(unit_config.unit_type.build_beam_offset, 5.0);
+        assert_eq!(unit_config.unit_type.build_range, 80.0);
+        assert_eq!(unit_config.unit_type.build_speed, 1.5);
+        build_turret_after_patch_unit_type_config(&mut unit_config, 12.0, 7.5, 96.0, 2.25);
+        assert_eq!(unit_config.unit_type.rotate_speed, 12.0);
+        assert_eq!(unit_config.unit_type.build_beam_offset, 7.5);
+        assert_eq!(unit_config.unit_type.build_range, 96.0);
+        assert_eq!(unit_config.unit_type.build_speed, 2.25);
+        assert!(unit_config.unit_type.hidden);
+        assert!(unit_config.unit_type.internal);
+        assert_eq!(unit_config.unit_type.speed, 0.0);
+        assert_eq!(unit_config.unit_type.hit_size, 0.0);
+        assert_eq!(unit_config.unit_type.health, 1.0);
+        assert_eq!(unit_config.unit_type.item_capacity, 0);
         let build = BuildTurretState {
             rotation: 45.0,
             warmup: 0.6,
