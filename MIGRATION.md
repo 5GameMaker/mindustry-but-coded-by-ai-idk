@@ -482,6 +482,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `regen_projector_heal_amount(...)`
 - `RegenProjectorState`
 - `RegenProjectorUpdatePlan`
+- `RegenProjectorMendMap`
 - `regen_projector_update(...)`
 - 已对照 `RegenProjector.updateTile()` 锁定：
   - `warmup` 按上一帧 `didRegen` 通过 `approachDelta(..., 1/70)` 更新；
@@ -492,11 +493,15 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `optionalTimer += edelta * optionalEfficiency`，超过 `optionalUseTime` 后 consume 并归零；
   - heal percent = `lerp(1, optionalMultiplier, optionalEfficiency) * healPercent`；
   - 有可修复目标时标记 `didRegen`。
+- 已对照 `mendMap` 行为锁定：
+  - 同一建筑同一帧只保留最大修复量，防止叠加；
+  - 修复量受 missing health 上限约束；
+  - drain 后清空，供统一应用 `heal/recentlyHealed`。
 
 仍需：
 
 - `updateTargets()` 的真实 indexer 范围扫描接入；
-- `mendMap` 的跨实例同帧聚合与 `lastUpdateFrame` 统一 heal 应用；
+- `lastUpdateFrame` 与真实 world.build(pos).heal/recentlyHealed 应用；
 - drawPlace/drawSelect 的范围和目标选中绘制规划。
 
 已完成 Rust 结构：
