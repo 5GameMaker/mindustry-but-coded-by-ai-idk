@@ -3,6 +3,7 @@
 pub mod binding;
 pub mod desktop_input;
 pub mod input_handler;
+pub mod mobile_input;
 pub mod place_mode;
 pub mod placement;
 
@@ -52,6 +53,10 @@ pub use input_handler::{
     UnitBuildingControlSelectRejectReason, UnitClearContext, UnitClearOutcome,
     UnitClearRejectReason, UnitControlContext, UnitControlOutcome, UnitControlRejectReason,
     UnitEnteredPayloadOutcome, UnitEnteredPayloadRejectReason,
+};
+pub use mobile_input::{
+    MobileInput, MobileInputAction, MobileInputFrame, MobileInputUpdate, MobilePanFrame,
+    MobilePanPlan, MobileVec2, MobileZoomPlan, DEFAULT_EDGE_PAN, MAX_PAN_SPEED,
 };
 pub use place_mode::PlaceMode;
 pub use placement::{
