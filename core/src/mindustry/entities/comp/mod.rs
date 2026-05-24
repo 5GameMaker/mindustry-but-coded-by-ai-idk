@@ -55,7 +55,7 @@ pub use builder::{
     BuilderAiMoveToAssist, BuilderAiMoveToPlan, BuilderAiRuntimeBranch, BuilderAiRuntimeInput,
     BuilderAiRuntimeState, BuilderAiRuntimeStep, BuilderBlockInfo, BuilderComp, BuilderRequirement,
     BuilderSkipContext, BuilderTileSnapshot, PrebuildAiRuntimeInput, PrebuildAiRuntimeState,
-    PrebuildAiRuntimeStep,
+    PrebuildAiRuntimeStep, BUILDER_AI_ASSIST_WITHIN_EXTRA_RANGE,
 };
 pub use building::BuildingComp;
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};
