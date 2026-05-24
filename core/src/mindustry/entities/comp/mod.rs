@@ -51,6 +51,7 @@ pub mod world_label;
 
 pub use block_unit::{BlockUnitBuilding, BlockUnitComp};
 pub use builder::{
+    BuilderAiAssistCandidate, BuilderAiFollowCandidate, BuilderAiFollowSearch,
     BuilderAiMoveToAssist, BuilderAiMoveToPlan, BuilderAiRuntimeBranch, BuilderAiRuntimeInput,
     BuilderAiRuntimeState, BuilderAiRuntimeStep, BuilderBlockInfo, BuilderComp, BuilderRequirement,
     BuilderSkipContext, BuilderTileSnapshot, PrebuildAiRuntimeInput, PrebuildAiRuntimeState,
