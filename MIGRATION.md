@@ -323,12 +323,18 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - `BuildTurretPlanValidation`
 - `BuildTurretUpdateAction`
 - `BuildTurretUpdateStep`
+- `BuildTurretUnitConstructor`
+- `BuildTurretUnitTypeConfig`
 - `build_turret_update_tick(...)`
+- `build_turret_unit_type(...)`
+- `apply_build_turret_unit_type_defaults(...)`
+- `build_turret_after_patch_unit_type(...)`
+- `build_turret_after_patch_unit_type_config(...)`
 - following/队伍 plan/自建 plan 清理等部分 `BuildTurretBuild.updateTile()` 逻辑。
+- `BuildTurret.init()/afterPatch()` 的内部 `unitType` 配置与同步逻辑。
 
 仍需：
 
-- `BuildTurret.init()/afterPatch()` 的 unit type 配置；
 - 继续补完整 `BuildTurretBuild` 运行态；
 - 接入实际 world/building/unit runtime。
 
@@ -370,18 +376,22 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 
 优先补：
 
-- `init()`
-- `afterPatch()`
-- 内部 `unitType` 配置；
 - `BuildTurretBuild` 剩余运行态。
+- `BuildTurretBuild.updateTile()` 前半段：
+  - `unit.tile(this)` / `unit.team(team)`；
+  - `rotation = unit.rotation()`；
+  - `activelyBuilding()` 时 `lookAt(angleTo(unit.buildPlan()))`；
+  - `checkSuppression()` 后清零 `efficiency/potentialEfficiency`；
+  - `buildSpeedMultiplier/speedMultiplier = potentialEfficiency * timeScale`；
+  - `warmup = Mathf.lerpDelta(warmup, activelyBuilding ? efficiency : 0f, 0.1f)`。
 
-建议 Rust 结构：
+已完成 Rust 结构：
 
 ```text
 BuildTurretUnitTypeConfig
 ```
 
-测试锁定：
+已测试锁定：
 
 - name = `turret-unit-{block_name}`；
 - hidden/internal = true；
@@ -463,4 +473,3 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 不使用 `D:/MDT/mindustry-rust`；
 - 乱码先按 UTF-8 处理；
 - 每个迁移闭环中文提交并推送 `origin main`。
-
