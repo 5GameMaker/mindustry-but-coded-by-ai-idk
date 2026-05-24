@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{self, Read, Write},
+    io::{self, Cursor, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -11,8 +11,12 @@ use crate::mindustry::{
     game::map_objectives::{TextureHolder, OBJECTIVE_MARKER_DRAW_LAYER_OVERLAY_UI},
     game::{marker_type_by_java_name, MapMarkers, ObjectiveMarker, Rules, Vec2},
     io::type_io::{
-        read_i32, read_i64, read_java_utf, read_u16, read_u8, write_i32, write_i64, write_java_utf,
-        write_u16,
+        read_i16, read_i32, read_i64, read_java_utf, read_u16, read_u8, write_i16, write_i32,
+        write_i64, write_java_utf, write_u16,
+    },
+    io::versions::{
+        read_chunk_map, read_legacy_team_blocks, write_chunk_map, write_legacy_team_blocks,
+        LegacyShortChunkMap, LegacyTeamBlocks,
     },
 };
 
@@ -455,6 +459,55 @@ impl RawSaveEnvelope {
         Ok(())
     }
 
+    pub fn set_content_header_snapshot(
+        &mut self,
+        snapshot: &ContentHeaderSnapshot,
+    ) -> io::Result<()> {
+        let mut bytes = Vec::new();
+        write_content_header_snapshot(&mut bytes, snapshot)?;
+        self.set(SaveRegion::Content, bytes)
+    }
+
+    pub fn content_header_snapshot(&self) -> io::Result<Option<ContentHeaderSnapshot>> {
+        self.get(SaveRegion::Content)
+            .map(|payload| read_content_header_snapshot(&mut payload.as_ref()))
+            .transpose()
+    }
+
+    pub fn set_content_patches(&mut self, patches: &ContentPatchSet) -> io::Result<()> {
+        let mut bytes = Vec::new();
+        write_content_patches(&mut bytes, patches)?;
+        self.set(SaveRegion::Patches, bytes)
+    }
+
+    pub fn content_patches(&self) -> io::Result<Option<ContentPatchSet>> {
+        self.get(SaveRegion::Patches)
+            .map(|payload| read_content_patches(&mut payload.as_ref()))
+            .transpose()
+    }
+
+    pub fn set_chunk_map(&mut self, map: &LegacyShortChunkMap) -> io::Result<()> {
+        let mut bytes = Vec::new();
+        write_chunk_map(&mut bytes, map)?;
+        self.set(SaveRegion::Map, bytes)
+    }
+
+    pub fn chunk_map(&self) -> io::Result<Option<LegacyShortChunkMap>> {
+        self.get(SaveRegion::Map)
+            .map(|payload| read_chunk_map(&mut payload.as_ref()))
+            .transpose()
+    }
+
+    pub fn set_entities_region(&mut self, region: &SaveEntitiesRegion) -> io::Result<()> {
+        self.set(SaveRegion::Entities, region.to_bytes()?)
+    }
+
+    pub fn entities_region(&self) -> io::Result<Option<SaveEntitiesRegion>> {
+        self.get(SaveRegion::Entities)
+            .map(SaveEntitiesRegion::from_bytes)
+            .transpose()
+    }
+
     pub fn set_markers_from_map_markers(&mut self, markers: &MapMarkers) -> io::Result<()> {
         self.set(
             SaveRegion::Markers,
@@ -527,6 +580,68 @@ impl SaveMeta {
     pub fn has_sector(&self) -> bool {
         json_field_is_non_null(&self.rules_json, "sector")
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SaveEntitiesRegion {
+    pub entity_mapping: Vec<u8>,
+    pub team_blocks: LegacyTeamBlocks,
+    pub world_entities: Vec<u8>,
+}
+
+impl SaveEntitiesRegion {
+    pub fn new(
+        entity_mapping: Vec<u8>,
+        team_blocks: LegacyTeamBlocks,
+        world_entities: Vec<u8>,
+    ) -> Self {
+        Self {
+            entity_mapping,
+            team_blocks,
+            world_entities,
+        }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
+        let mut cursor = Cursor::new(bytes);
+        let entity_mapping = read_entity_mapping_bytes(&mut cursor)?;
+        let team_blocks = read_legacy_team_blocks(&mut cursor)?;
+        let mut world_entities = Vec::new();
+        cursor.read_to_end(&mut world_entities)?;
+        Ok(Self {
+            entity_mapping,
+            team_blocks,
+            world_entities,
+        })
+    }
+
+    pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.entity_mapping);
+        write_legacy_team_blocks(&mut bytes, &self.team_blocks)?;
+        bytes.extend_from_slice(&self.world_entities);
+        Ok(bytes)
+    }
+}
+
+pub fn read_entity_mapping_bytes<R: Read>(read: &mut R) -> io::Result<Vec<u8>> {
+    let count = read_i16(read)?;
+    if count < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "negative entity mapping count",
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    write_i16(&mut bytes, count)?;
+    for _ in 0..count {
+        let id = read_i16(read)?;
+        let name = read_java_utf(read)?;
+        write_i16(&mut bytes, id)?;
+        write_java_utf(&mut bytes, &name)?;
+    }
+    Ok(bytes)
 }
 
 pub fn write_header<W: Write>(write: &mut W, version: i32) -> io::Result<()> {
@@ -1834,6 +1949,87 @@ mod tests {
                 SaveRegion::manifest_for_version(version)
             );
         }
+    }
+
+    #[test]
+    fn raw_save_envelope_roundtrips_structured_save_version_regions() {
+        use crate::mindustry::io::{
+            LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyTeamBlockGroup, LegacyTeamBlockPlan,
+            TypeValue,
+        };
+
+        let content = ContentHeaderSnapshot {
+            entries: vec![ContentHeaderEntry {
+                content_type: 1,
+                names: vec!["router".into(), "duo".into()],
+            }],
+        };
+        let patches = ContentPatchSet {
+            patches: vec![b"patch".to_vec()],
+        };
+        let map = LegacyShortChunkMap {
+            width: 1,
+            height: 1,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 2,
+                ore_id: 0,
+                consecutives: 0,
+            }],
+            blocks: vec![LegacyMapBlockRecord {
+                index: 0,
+                block_id: 3,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: None,
+                building: None,
+                consecutives: 0,
+            }],
+        };
+        let team_blocks = LegacyTeamBlocks {
+            groups: vec![LegacyTeamBlockGroup {
+                team_id: 1,
+                plans: vec![LegacyTeamBlockPlan {
+                    x: 4,
+                    y: 5,
+                    rotation: 2,
+                    block_id: 3,
+                    config: TypeValue::String("cfg".into()),
+                }],
+            }],
+        };
+        let mut entity_mapping = Vec::new();
+        write_i16(&mut entity_mapping, 1).unwrap();
+        write_i16(&mut entity_mapping, 7).unwrap();
+        write_java_utf(&mut entity_mapping, "mindustry.gen.Player").unwrap();
+        let entities =
+            SaveEntitiesRegion::new(entity_mapping.clone(), team_blocks.clone(), vec![9, 8, 7]);
+
+        let mut envelope = RawSaveEnvelope::new(11);
+        envelope.set_content_header_snapshot(&content).unwrap();
+        envelope.set_content_patches(&patches).unwrap();
+        envelope.set_chunk_map(&map).unwrap();
+        envelope.set_entities_region(&entities).unwrap();
+
+        let mut deflated = Vec::new();
+        write_deflated_raw_save_envelope(&mut deflated, &envelope).unwrap();
+        let decoded = read_deflated_raw_save_envelope(deflated.as_slice()).unwrap();
+
+        assert_eq!(decoded.content_header_snapshot().unwrap(), Some(content));
+        assert_eq!(decoded.content_patches().unwrap(), Some(patches));
+        assert_eq!(decoded.chunk_map().unwrap(), Some(map));
+        assert_eq!(
+            decoded.entities_region().unwrap(),
+            Some(SaveEntitiesRegion {
+                entity_mapping,
+                team_blocks,
+                world_entities: vec![9, 8, 7],
+            })
+        );
     }
 
     #[test]
