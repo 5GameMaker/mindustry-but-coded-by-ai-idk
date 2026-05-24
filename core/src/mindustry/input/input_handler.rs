@@ -13,6 +13,7 @@ use crate::mindustry::entities::comp::{
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::type_io::CommandWire;
+use crate::mindustry::io::Point2;
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
@@ -723,6 +724,53 @@ pub struct UnitBuildingControlSelectOutcome {
     pub accepted: bool,
     pub rejection: Option<UnitBuildingControlSelectRejectReason>,
     pub packet: Option<UnitBuildingControlSelectCallPacket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildPlanBlockTransform {
+    pub size: i32,
+    pub offset: f32,
+    pub rotate: bool,
+    pub lock_rotation: bool,
+    pub invert_flip: bool,
+}
+
+impl BuildPlanBlockTransform {
+    pub const fn new(
+        size: i32,
+        offset: f32,
+        rotate: bool,
+        lock_rotation: bool,
+        invert_flip: bool,
+    ) -> Self {
+        Self {
+            size,
+            offset,
+            rotate,
+            lock_rotation,
+            invert_flip,
+        }
+    }
+
+    pub fn single() -> Self {
+        Self::new(1, TILE_SIZE as f32 / 2.0, true, false, false)
+    }
+
+    pub fn plan_rotation(self, rotation: i32) -> i32 {
+        if !self.rotate && self.lock_rotation {
+            0
+        } else {
+            rotation.rem_euclid(4)
+        }
+    }
+
+    pub fn flip_rotation(self, rotation: i32, flip_x: bool) -> i32 {
+        if (flip_x == (rotation.rem_euclid(4) % 2 == 0)) != self.invert_flip {
+            self.plan_rotation(rotation + 2)
+        } else {
+            self.plan_rotation(rotation)
+        }
+    }
 }
 
 impl RotateBlockOutcome {
@@ -3298,6 +3346,90 @@ pub fn remove_queue_block_packet(x: i32, y: i32, breaking: bool) -> RemoveQueueB
     RemoveQueueBlockCallPacket { x, y, breaking }
 }
 
+pub fn rotate_build_plans<F>(
+    plans: &[BuildPlan],
+    origin_x: i32,
+    origin_y: i32,
+    direction: i32,
+    mut block_info: F,
+) -> Vec<BuildPlan>
+where
+    F: FnMut(&BuildPlan) -> Option<BuildPlanBlockTransform>,
+{
+    plans
+        .iter()
+        .map(|plan| {
+            let Some(info) = block_info(plan) else {
+                return plan.clone();
+            };
+            if plan.breaking || plan.block.is_none() {
+                return plan.clone();
+            }
+
+            let mut rotated = plan.clone();
+            rotated.config = transform_point_config(&rotated.config, |point| {
+                rotate_config_point(point, direction, info.size)
+            });
+
+            let mut world_x = (plan.x - origin_x) as f32 * TILE_SIZE as f32 + info.offset;
+            let mut world_y = (plan.y - origin_y) as f32 * TILE_SIZE as f32 + info.offset;
+            let old_x = world_x;
+            if direction >= 0 {
+                world_x = -world_y;
+                world_y = old_x;
+            } else {
+                world_x = world_y;
+                world_y = -old_x;
+            }
+
+            rotated.x = world_to_tile_runtime(world_x - info.offset) + origin_x;
+            rotated.y = world_to_tile_runtime(world_y - info.offset) + origin_y;
+            rotated.rotation = info.plan_rotation(plan.rotation + direction);
+            rotated
+        })
+        .collect()
+}
+
+pub fn flip_build_plans<F>(
+    plans: &[BuildPlan],
+    origin_x: i32,
+    origin_y: i32,
+    flip_x: bool,
+    mut block_info: F,
+) -> Vec<BuildPlan>
+where
+    F: FnMut(&BuildPlan) -> Option<BuildPlanBlockTransform>,
+{
+    let origin = if flip_x { origin_x } else { origin_y } * TILE_SIZE;
+    plans
+        .iter()
+        .map(|plan| {
+            let Some(info) = block_info(plan) else {
+                return plan.clone();
+            };
+            if plan.breaking || plan.block.is_none() {
+                return plan.clone();
+            }
+
+            let mut flipped = plan.clone();
+            let coord = if flip_x { plan.x } else { plan.y };
+            let value = -((coord * TILE_SIZE) as f32 - origin as f32 + info.offset) + origin as f32;
+
+            if flip_x {
+                flipped.x = ((value - info.offset) / TILE_SIZE as f32) as i32;
+            } else {
+                flipped.y = ((value - info.offset) / TILE_SIZE as f32) as i32;
+            }
+
+            flipped.config = transform_point_config(&flipped.config, |point| {
+                flip_config_point(point, flip_x, info.size)
+            });
+            flipped.rotation = info.flip_rotation(plan.rotation, flip_x);
+            flipped
+        })
+        .collect()
+}
+
 pub fn unit_building_control_select<C>(
     unit: Option<&UnitComp>,
     build: Option<&BuildingComp>,
@@ -3344,6 +3476,53 @@ where
             build: BuildingRef::new(build.tile_pos),
         }),
     }
+}
+
+fn transform_point_config<F>(config: &TypeValue, mut transform: F) -> TypeValue
+where
+    F: FnMut(Point2) -> Point2,
+{
+    match config {
+        TypeValue::Point2(point) => TypeValue::Point2(transform(*point)),
+        TypeValue::Point2Array(points) => {
+            TypeValue::Point2Array(points.iter().copied().map(transform).collect())
+        }
+        _ => config.clone(),
+    }
+}
+
+fn rotate_config_point(point: Point2, direction: i32, block_size: i32) -> Point2 {
+    let offset = if block_size % 2 == 0 { -0.5 } else { 0.0 };
+    let mut cx = point.x as f32 + offset;
+    let mut cy = point.y as f32 + offset;
+    let old_x = cx;
+    if direction >= 0 {
+        cx = -cy;
+        cy = old_x;
+    } else {
+        cx = cy;
+        cy = -old_x;
+    }
+    Point2::new((cx - offset).floor() as i32, (cy - offset).floor() as i32)
+}
+
+fn flip_config_point(mut point: Point2, flip_x: bool, block_size: i32) -> Point2 {
+    if flip_x {
+        if block_size % 2 == 0 {
+            point.x -= 1;
+        }
+        point.x = -point.x;
+    } else {
+        if block_size % 2 == 0 {
+            point.y -= 1;
+        }
+        point.y = -point.y;
+    }
+    point
+}
+
+fn world_to_tile_runtime(coord: f32) -> i32 {
+    (coord / TILE_SIZE as f32 + 0.5).floor() as i32
 }
 
 pub fn unit_building_control_select_packet(
@@ -5210,6 +5389,76 @@ mod tests {
                 y: 10,
                 breaking: true
             }
+        );
+    }
+
+    #[test]
+    fn rotate_build_plans_rotates_coordinates_rotation_and_point_configs() {
+        let info = BuildPlanBlockTransform::new(2, 8.0, true, false, false);
+        let plan = BuildPlan::new_config(
+            3,
+            1,
+            1,
+            "junction",
+            TypeValue::Point2Array(vec![Point2::new(1, 0), Point2::new(0, 2)]),
+        );
+        let breaking = BuildPlan::new_break(9, 9);
+
+        let rotated =
+            rotate_build_plans(&[plan.clone(), breaking.clone()], 1, 1, 1, |_| Some(info));
+
+        assert_eq!(rotated[0].x, -1);
+        assert_eq!(rotated[0].y, 3);
+        assert_eq!(rotated[0].rotation, 2);
+        assert_eq!(
+            rotated[0].config,
+            TypeValue::Point2Array(vec![Point2::new(1, 1), Point2::new(-1, 0)])
+        );
+        assert_eq!(rotated[1], breaking);
+    }
+
+    #[test]
+    fn rotate_build_plans_respects_locked_non_rotating_blocks() {
+        let locked = BuildPlanBlockTransform::new(1, 4.0, false, true, false);
+        let plan = BuildPlan::new_place(2, 1, 3, "core");
+
+        let rotated = rotate_build_plans(&[plan], 1, 1, -1, |_| Some(locked));
+
+        assert_eq!(rotated[0].rotation, 0);
+    }
+
+    #[test]
+    fn flip_build_plans_flips_coordinates_config_and_rotation() {
+        let info = BuildPlanBlockTransform::new(2, 8.0, true, false, false);
+        let plan = BuildPlan::new_config(3, 2, 0, "bridge", TypeValue::Point2(Point2::new(2, 1)));
+
+        let flipped = flip_build_plans(&[plan], 1, 1, true, |_| Some(info));
+
+        assert_eq!(flipped[0].x, -3);
+        assert_eq!(flipped[0].y, 2);
+        assert_eq!(flipped[0].rotation, 2);
+        assert_eq!(flipped[0].config, TypeValue::Point2(Point2::new(-1, 1)));
+    }
+
+    #[test]
+    fn flip_build_plans_supports_y_axis_and_inverted_flip_rule() {
+        let inverted = BuildPlanBlockTransform::new(1, 4.0, true, false, true);
+        let plan = BuildPlan::new_config(
+            2,
+            4,
+            1,
+            "sorter",
+            TypeValue::Point2Array(vec![Point2::new(1, 2)]),
+        );
+
+        let flipped = flip_build_plans(&[plan], 1, 1, false, |_| Some(inverted));
+
+        assert_eq!(flipped[0].x, 2);
+        assert_eq!(flipped[0].y, -3);
+        assert_eq!(flipped[0].rotation, 1);
+        assert_eq!(
+            flipped[0].config,
+            TypeValue::Point2Array(vec![Point2::new(1, -2)])
         );
     }
 
