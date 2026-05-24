@@ -7,6 +7,10 @@
 //! re-implementing the same branch logic in platform code.
 
 use super::PlaceMode;
+use crate::mindustry::{
+    entities::{units::BuildPlan, Rect},
+    vars::TILE_SIZE,
+};
 
 pub const MAX_PAN_SPEED: f32 = 1.3;
 pub const DEFAULT_EDGE_PAN: f32 = 60.0;
@@ -179,6 +183,66 @@ pub struct MobilePanPlan {
 pub struct MobileZoomPlan {
     pub accepted: bool,
     pub scale: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MobileBlockFootprint {
+    pub size: i32,
+    pub offset: f32,
+}
+
+impl MobileBlockFootprint {
+    pub const fn new(size: i32, offset: f32) -> Self {
+        Self { size, offset }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobilePlanSnapshot {
+    pub plan: BuildPlan,
+    pub block: Option<MobileBlockFootprint>,
+    pub tile_block: Option<MobileBlockFootprint>,
+    pub tile_world_x: f32,
+    pub tile_world_y: f32,
+    pub tile_present: bool,
+}
+
+impl MobilePlanSnapshot {
+    pub fn from_plan(plan: BuildPlan, block: Option<MobileBlockFootprint>) -> Self {
+        Self {
+            tile_world_x: plan.x as f32 * TILE_SIZE as f32,
+            tile_world_y: plan.y as f32 * TILE_SIZE as f32,
+            tile_present: true,
+            tile_block: block,
+            block,
+            plan,
+        }
+    }
+
+    pub fn missing_tile(plan: BuildPlan, block: Option<MobileBlockFootprint>) -> Self {
+        Self {
+            tile_present: false,
+            ..Self::from_plan(plan, block)
+        }
+    }
+
+    pub fn with_tile_block(mut self, tile_block: MobileBlockFootprint) -> Self {
+        self.tile_block = Some(tile_block);
+        self
+    }
+
+    pub fn with_world(mut self, tile_world_x: f32, tile_world_y: f32) -> Self {
+        self.tile_world_x = tile_world_x;
+        self.tile_world_y = tile_world_y;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobileRemovePlanResult {
+    pub removed: Option<BuildPlan>,
+    pub remaining: Vec<BuildPlan>,
+    pub removals: Vec<BuildPlan>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -560,9 +624,202 @@ impl MobileInput {
     }
 }
 
+pub fn is_line_placing(
+    mode: PlaceMode,
+    line_mode: bool,
+    line_start_x: i32,
+    line_start_y: i32,
+    mouse_world_x: f32,
+    mouse_world_y: f32,
+    tile_size: f32,
+) -> bool {
+    mode == PlaceMode::Placing
+        && line_mode
+        && distance(
+            line_start_x as f32 * tile_size,
+            line_start_y as f32 * tile_size,
+            mouse_world_x,
+            mouse_world_y,
+        ) >= 3.0 * tile_size
+}
+
+pub fn is_area_breaking(
+    mode: PlaceMode,
+    line_mode: bool,
+    line_start_x: i32,
+    line_start_y: i32,
+    mouse_world_x: f32,
+    mouse_world_y: f32,
+    tile_size: f32,
+) -> bool {
+    mode == PlaceMode::Breaking
+        && line_mode
+        && distance(
+            line_start_x as f32 * tile_size,
+            line_start_y as f32 * tile_size,
+            mouse_world_x,
+            mouse_world_y,
+        ) >= 2.0 * tile_size
+}
+
+pub fn synced_mobile_plans(plans: &[BuildPlan]) -> Vec<BuildPlan> {
+    plans
+        .iter()
+        .filter(|plan| !plan.breaking)
+        .cloned()
+        .collect()
+}
+
+pub fn remove_mobile_plan(plans: &[BuildPlan], target: &BuildPlan) -> MobileRemovePlanResult {
+    let mut removed = None;
+    let mut remaining = Vec::with_capacity(plans.len());
+    let mut removals = Vec::new();
+
+    for plan in plans {
+        if removed.is_none() && plan == target {
+            removed = Some(plan.clone());
+            if !plan.breaking {
+                removals.push(plan.clone());
+            }
+        } else {
+            remaining.push(plan.clone());
+        }
+    }
+
+    MobileRemovePlanResult {
+        removed,
+        remaining,
+        removals,
+    }
+}
+
+pub fn plan_rect(
+    x: i32,
+    y: i32,
+    block: MobileBlockFootprint,
+    tile_size: f32,
+    tile_world_x: Option<f32>,
+    tile_world_y: Option<f32>,
+) -> Rect {
+    let size = block.size as f32 * tile_size;
+    rect_centered(
+        tile_world_x.unwrap_or(x as f32 * tile_size) + block.offset,
+        tile_world_y.unwrap_or(y as f32 * tile_size) + block.offset,
+        size,
+        size,
+    )
+}
+
+pub fn get_mobile_plan<'a>(
+    plans: &'a [MobilePlanSnapshot],
+    tile_world_x: f32,
+    tile_world_y: f32,
+    tile_size: f32,
+) -> Option<&'a BuildPlan> {
+    let tile_rect = rect_centered(tile_world_x, tile_world_y, tile_size, tile_size);
+
+    plans.iter().find_map(|snapshot| {
+        if !snapshot.tile_present {
+            return None;
+        }
+
+        let footprint = if snapshot.plan.breaking {
+            snapshot.tile_block
+        } else {
+            snapshot.block
+        }?;
+
+        let plan_rect = plan_rect(
+            snapshot.plan.x,
+            snapshot.plan.y,
+            footprint,
+            tile_size,
+            Some(snapshot.tile_world_x),
+            Some(snapshot.tile_world_y),
+        );
+
+        tile_rect.overlaps(plan_rect).then_some(&snapshot.plan)
+    })
+}
+
+pub fn has_mobile_plan(
+    plans: &[MobilePlanSnapshot],
+    tile_world_x: f32,
+    tile_world_y: f32,
+    tile_size: f32,
+) -> bool {
+    get_mobile_plan(plans, tile_world_x, tile_world_y, tile_size).is_some()
+}
+
+pub fn check_mobile_overlap_placement(
+    x: i32,
+    y: i32,
+    block: MobileBlockFootprint,
+    selected_plans: &[MobilePlanSnapshot],
+    unit_plans: &[MobilePlanSnapshot],
+    player_dead: bool,
+    tile_size: f32,
+) -> bool {
+    let candidate = plan_rect(x, y, block, tile_size, None, None);
+    selected_plans
+        .iter()
+        .filter(|snapshot| snapshot.tile_present && !snapshot.plan.breaking)
+        .chain(
+            unit_plans.iter().filter(|snapshot| {
+                !player_dead && snapshot.tile_present && !snapshot.plan.breaking
+            }),
+        )
+        .any(|snapshot| {
+            snapshot.block.is_some_and(|footprint| {
+                candidate.overlaps(plan_rect(
+                    snapshot.plan.x,
+                    snapshot.plan.y,
+                    footprint,
+                    tile_size,
+                    Some(snapshot.tile_world_x),
+                    Some(snapshot.tile_world_y),
+                ))
+            })
+        })
+}
+
+pub fn mobile_schematic_origin(plans: &[MobilePlanSnapshot], tile_size: f32) -> Option<(i32, i32)> {
+    if plans.is_empty() {
+        return None;
+    }
+
+    let (sum_x, sum_y) = plans.iter().fold((0.0, 0.0), |(sum_x, sum_y), snapshot| {
+        (sum_x + snapshot.tile_world_x, sum_y + snapshot.tile_world_y)
+    });
+    let inv = 1.0 / plans.len() as f32;
+    Some((
+        world_to_tile(sum_x * inv, tile_size),
+        world_to_tile(sum_y * inv, tile_size),
+    ))
+}
+
 fn lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
     let t = (alpha * delta.max(0.0)).clamp(0.0, 1.0);
     from + (to - from) * t
+}
+
+fn distance(x: f32, y: f32, x2: f32, y2: f32) -> f32 {
+    let dx = x2 - x;
+    let dy = y2 - y;
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn rect_centered(center_x: f32, center_y: f32, width: f32, height: f32) -> Rect {
+    Rect::new(
+        center_x - width / 2.0,
+        center_y - height / 2.0,
+        width,
+        height,
+    )
+}
+
+fn world_to_tile(value: f32, tile_size: f32) -> i32 {
+    (value / tile_size).floor() as i32
 }
 
 #[cfg(test)]
@@ -822,5 +1079,149 @@ mod tests {
                 scale: 4.0,
             }
         );
+    }
+
+    #[test]
+    fn line_and_area_thresholds_match_mobile_tile_distances() {
+        assert!(!is_line_placing(
+            PlaceMode::Placing,
+            true,
+            0,
+            0,
+            23.9,
+            0.0,
+            8.0
+        ));
+        assert!(is_line_placing(
+            PlaceMode::Placing,
+            true,
+            0,
+            0,
+            24.0,
+            0.0,
+            8.0
+        ));
+        assert!(is_area_breaking(
+            PlaceMode::Breaking,
+            true,
+            1,
+            1,
+            8.0,
+            24.0,
+            8.0
+        ));
+        assert!(!is_area_breaking(
+            PlaceMode::Placing,
+            true,
+            1,
+            1,
+            8.0,
+            24.0,
+            8.0
+        ));
+    }
+
+    #[test]
+    fn synced_mobile_plans_filter_breaking_entries() {
+        let place = BuildPlan::new_place(1, 2, 0, "router");
+        let breaking = BuildPlan::new_break(3, 4);
+
+        assert_eq!(synced_mobile_plans(&[place.clone(), breaking]), vec![place]);
+    }
+
+    #[test]
+    fn remove_mobile_plan_moves_only_non_breaking_to_removals() {
+        let place = BuildPlan::new_place(1, 2, 0, "router");
+        let breaking = BuildPlan::new_break(3, 4);
+        let keep = BuildPlan::new_place(5, 6, 0, "duo");
+
+        let result = remove_mobile_plan(&[place.clone(), breaking.clone(), keep.clone()], &place);
+        assert_eq!(result.removed, Some(place.clone()));
+        assert_eq!(result.remaining, vec![breaking.clone(), keep.clone()]);
+        assert_eq!(result.removals, vec![place]);
+
+        let break_result = remove_mobile_plan(&[breaking.clone(), keep.clone()], &breaking);
+        assert_eq!(break_result.removed, Some(breaking));
+        assert_eq!(break_result.remaining, vec![keep]);
+        assert!(break_result.removals.is_empty());
+    }
+
+    #[test]
+    fn get_mobile_plan_uses_plan_or_tile_block_footprint() {
+        let duo = MobileBlockFootprint::new(1, 4.0);
+        let large = MobileBlockFootprint::new(2, 8.0);
+        let plan = MobilePlanSnapshot::from_plan(BuildPlan::new_place(2, 2, 0, "duo"), Some(duo));
+        let breaking = MobilePlanSnapshot::from_plan(BuildPlan::new_break(10, 10), None)
+            .with_tile_block(large);
+
+        assert_eq!(
+            get_mobile_plan(&[plan.clone()], 16.0, 16.0, 8.0),
+            Some(&plan.plan)
+        );
+        assert!(has_mobile_plan(&[breaking.clone()], 80.0, 80.0, 8.0));
+        assert_eq!(
+            get_mobile_plan(
+                &[MobilePlanSnapshot::missing_tile(
+                    plan.plan.clone(),
+                    Some(duo)
+                )],
+                16.0,
+                16.0,
+                8.0,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn check_mobile_overlap_placement_compares_selected_and_unit_plans() {
+        let small = MobileBlockFootprint::new(1, 4.0);
+        let large = MobileBlockFootprint::new(2, 8.0);
+        let selected =
+            MobilePlanSnapshot::from_plan(BuildPlan::new_place(3, 3, 0, "duo"), Some(small));
+        let unit =
+            MobilePlanSnapshot::from_plan(BuildPlan::new_place(8, 8, 0, "large"), Some(large));
+
+        assert!(check_mobile_overlap_placement(
+            3,
+            3,
+            small,
+            &[selected.clone()],
+            &[],
+            false,
+            8.0
+        ));
+        assert!(check_mobile_overlap_placement(
+            9,
+            8,
+            small,
+            &[],
+            &[unit.clone()],
+            false,
+            8.0
+        ));
+        assert!(!check_mobile_overlap_placement(
+            9,
+            8,
+            small,
+            &[],
+            &[unit],
+            true,
+            8.0
+        ));
+    }
+
+    #[test]
+    fn mobile_schematic_origin_averages_plan_draw_positions_as_tiles() {
+        let small = MobileBlockFootprint::new(1, 4.0);
+        let plans = vec![
+            MobilePlanSnapshot::from_plan(BuildPlan::new_place(0, 0, 0, "router"), Some(small))
+                .with_world(0.0, 8.0),
+            MobilePlanSnapshot::from_plan(BuildPlan::new_place(2, 4, 0, "router"), Some(small))
+                .with_world(16.0, 24.0),
+        ];
+
+        assert_eq!(mobile_schematic_origin(&plans, 8.0), Some((1, 2)));
+        assert_eq!(mobile_schematic_origin(&[], 8.0), None);
     }
 }
