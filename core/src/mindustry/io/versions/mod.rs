@@ -2,12 +2,15 @@
 
 use std::{
     collections::HashSet,
-    io::{self, Read},
+    io::{self, Read, Write},
 };
 
 use crate::mindustry::io::{
-    save::{read_chunk, read_legacy_short_chunk},
-    type_io::{read_i16, read_i32, read_java_utf, read_object, read_u16, read_u8, TypeValue},
+    save::{read_chunk, read_legacy_short_chunk, write_chunk},
+    type_io::{
+        read_i16, read_i32, read_java_utf, read_object, read_u16, read_u8, write_i16, write_i32,
+        write_object, write_u16, write_u8, TypeValue,
+    },
 };
 use crate::mindustry::world::{Tile, Tiles};
 
@@ -177,6 +180,34 @@ pub fn read_legacy_team_blocks<R: Read>(read: &mut R) -> io::Result<LegacyTeamBl
     }
 
     Ok(LegacyTeamBlocks { groups })
+}
+
+pub fn write_legacy_team_blocks<W: Write>(
+    write: &mut W,
+    blocks: &LegacyTeamBlocks,
+) -> io::Result<()> {
+    if blocks.groups.len() > i32::MAX as usize {
+        return Err(invalid_input("legacy team block group count too large"));
+    }
+
+    write_i32(write, blocks.groups.len() as i32)?;
+    for group in &blocks.groups {
+        if group.plans.len() > i32::MAX as usize {
+            return Err(invalid_input("legacy team block plan count too large"));
+        }
+
+        write_i32(write, group.team_id)?;
+        write_i32(write, group.plans.len() as i32)?;
+        for plan in &group.plans {
+            write_i16(write, plan.x)?;
+            write_i16(write, plan.y)?;
+            write_i16(write, plan.rotation)?;
+            write_i16(write, plan.block_id)?;
+            write_object(write, &plan.config)?;
+        }
+    }
+
+    Ok(())
 }
 
 pub fn read_legacy_int_config_team_blocks<R: Read>(read: &mut R) -> io::Result<LegacyTeamBlocks> {
@@ -693,6 +724,117 @@ pub fn read_chunk_map<R: Read>(read: &mut R) -> io::Result<LegacyShortChunkMap> 
     })
 }
 
+pub fn write_chunk_map<W: Write>(write: &mut W, map: &LegacyShortChunkMap) -> io::Result<()> {
+    validate_run_cover(
+        map.tile_count(),
+        map.floors.iter().map(|record| (record.index, record.len())),
+        "floor",
+    )?;
+    validate_run_cover(
+        map.tile_count(),
+        map.blocks.iter().map(|record| (record.index, record.len())),
+        "block",
+    )?;
+
+    write_u16(write, map.width)?;
+    write_u16(write, map.height)?;
+
+    for record in &map.floors {
+        write_i16(write, record.floor_id)?;
+        write_i16(write, record.ore_id)?;
+        write_u8(write, record.consecutives)?;
+    }
+
+    for record in &map.blocks {
+        let has_entity = record.has_entity || record.building.is_some();
+        let has_old_data = record.has_old_data || record.old_data.is_some();
+        let has_new_data = record.has_new_data || record.new_data.is_some();
+
+        if has_old_data {
+            return Err(invalid_input(
+                "legacy old tile data cannot be written as modern chunk map",
+            ));
+        }
+        if has_new_data != record.new_data.is_some() {
+            return Err(invalid_input("chunk map new data flag mismatch"));
+        }
+        if has_entity && record.is_center && record.building.is_none() {
+            return Err(invalid_input("center entity record missing building chunk"));
+        }
+        if !has_entity && record.building.is_some() {
+            return Err(invalid_input("building chunk without entity flag"));
+        }
+        if (has_entity || has_new_data) && record.consecutives != 0 {
+            return Err(invalid_input(
+                "entity or data block record cannot encode consecutives",
+            ));
+        }
+
+        let packed_flags = (record.packed_flags & !0x07)
+            | if has_entity { 1 } else { 0 }
+            | if has_new_data { 4 } else { 0 };
+
+        write_i16(write, record.block_id)?;
+        write_u8(write, packed_flags)?;
+
+        if let Some(data) = &record.new_data {
+            write_u8(write, data.data)?;
+            write_u8(write, data.floor_data)?;
+            write_u8(write, data.overlay_data)?;
+            write_i32(write, data.extra_data)?;
+        }
+
+        if has_entity {
+            write_u8(write, record.is_center as u8)?;
+            if record.is_center {
+                let building = record
+                    .building
+                    .as_ref()
+                    .ok_or_else(|| invalid_input("center entity record missing building chunk"))?;
+                write_chunk(write, |payload| {
+                    payload.write_all(building)?;
+                    Ok(())
+                })?;
+            }
+        } else if !has_new_data {
+            write_u8(write, record.consecutives)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_run_cover<I>(tile_count: usize, runs: I, label: &'static str) -> io::Result<()>
+where
+    I: IntoIterator<Item = (usize, usize)>,
+{
+    let mut expected = 0usize;
+    for (index, len) in runs {
+        if len == 0 {
+            return Err(invalid_input(label));
+        }
+        if index != expected {
+            return Err(invalid_input(label));
+        }
+        expected = expected
+            .checked_add(len)
+            .ok_or_else(|| invalid_input(label))?;
+        if expected > tile_count {
+            return Err(invalid_input(label));
+        }
+    }
+
+    if expected != tile_count {
+        return Err(invalid_input(label));
+    }
+
+    Ok(())
+}
+
+fn invalid_input(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -775,5 +917,139 @@ mod tests {
         assert_eq!(tile.floor_data, 2);
         assert_eq!(tile.overlay_data, 3);
         assert_eq!(tile.extra_data, 4);
+    }
+
+    #[test]
+    fn chunk_map_writer_roundtrips_modern_runs_data_and_buildings() {
+        let map = LegacyShortChunkMap {
+            width: 3,
+            height: 1,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 2,
+                ore_id: 0,
+                consecutives: 2,
+            }],
+            blocks: vec![
+                LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: 5,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 0,
+                },
+                LegacyMapBlockRecord {
+                    index: 1,
+                    block_id: 6,
+                    packed_flags: 4,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: true,
+                    is_center: true,
+                    new_data: Some(LegacyMapTileData {
+                        data: 1,
+                        floor_data: 2,
+                        overlay_data: 3,
+                        extra_data: 4,
+                    }),
+                    old_data: None,
+                    building: None,
+                    consecutives: 0,
+                },
+                LegacyMapBlockRecord {
+                    index: 2,
+                    block_id: 7,
+                    packed_flags: 1,
+                    has_entity: true,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: Some(vec![9, 8]),
+                    consecutives: 0,
+                },
+            ],
+        };
+
+        let mut bytes = Vec::new();
+        write_chunk_map(&mut bytes, &map).unwrap();
+
+        assert_eq!(read_chunk_map(&mut bytes.as_slice()).unwrap(), map);
+    }
+
+    #[test]
+    fn chunk_map_writer_rejects_legacy_old_tile_data() {
+        let map = LegacyShortChunkMap {
+            width: 1,
+            height: 1,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 2,
+                ore_id: 0,
+                consecutives: 0,
+            }],
+            blocks: vec![LegacyMapBlockRecord {
+                index: 0,
+                block_id: 5,
+                packed_flags: 2,
+                has_entity: false,
+                has_old_data: true,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: Some(7),
+                building: None,
+                consecutives: 0,
+            }],
+        };
+
+        assert_eq!(
+            write_chunk_map(&mut Vec::new(), &map).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn legacy_team_blocks_writer_preserves_plan_count_before_reader_dedupes() {
+        let blocks = LegacyTeamBlocks {
+            groups: vec![LegacyTeamBlockGroup {
+                team_id: 1,
+                plans: vec![
+                    LegacyTeamBlockPlan {
+                        x: 2,
+                        y: 3,
+                        rotation: 1,
+                        block_id: 4,
+                        config: TypeValue::Null,
+                    },
+                    LegacyTeamBlockPlan {
+                        x: 2,
+                        y: 3,
+                        rotation: 2,
+                        block_id: 5,
+                        config: TypeValue::Int(7),
+                    },
+                ],
+            }],
+        };
+
+        let mut bytes = Vec::new();
+        write_legacy_team_blocks(&mut bytes, &blocks).unwrap();
+
+        let mut cursor = bytes.as_slice();
+        assert_eq!(read_i32(&mut cursor).unwrap(), 1);
+        assert_eq!(read_i32(&mut cursor).unwrap(), 1);
+        assert_eq!(read_i32(&mut cursor).unwrap(), 2);
+
+        let decoded = read_legacy_team_blocks(&mut bytes.as_slice()).unwrap();
+        assert_eq!(decoded.total_plans(), 1);
+        assert_eq!(decoded.groups[0].plans[0], blocks.groups[0].plans[0]);
     }
 }

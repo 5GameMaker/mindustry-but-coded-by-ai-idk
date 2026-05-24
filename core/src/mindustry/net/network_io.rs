@@ -9,9 +9,10 @@ use crate::mindustry::io::type_io::{
 };
 use crate::mindustry::io::{
     read_chunk_map, read_content_header_snapshot, read_content_patches, read_custom_chunks,
-    read_legacy_team_blocks, summarize_marker_region_bytes, write_content_header_snapshot,
-    write_content_patches, write_custom_chunks, ContentHeaderSnapshot, ContentPatchSet,
-    CustomChunkSet, LegacyShortChunkMap, LegacyTeamBlocks, MarkerRegionSummary,
+    read_legacy_team_blocks, summarize_marker_region_bytes, write_chunk_map,
+    write_content_header_snapshot, write_content_patches, write_custom_chunks,
+    write_legacy_team_blocks, ContentHeaderSnapshot, ContentPatchSet, CustomChunkSet,
+    LegacyShortChunkMap, LegacyTeamBlocks, MarkerRegionSummary,
 };
 use crate::mindustry::vars::DEFAULT_PORT;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
@@ -167,6 +168,24 @@ impl NetworkWorldData {
             None => self.content_patches.clone(),
         };
 
+        let map_bytes = match &self.map_snapshot {
+            Some(snapshot) => {
+                let mut bytes = Vec::new();
+                write_chunk_map(&mut bytes, snapshot)?;
+                bytes
+            }
+            None => self.map_bytes.clone(),
+        };
+
+        let team_blocks = match &self.team_blocks_snapshot {
+            Some(snapshot) => {
+                let mut bytes = Vec::new();
+                write_legacy_team_blocks(&mut bytes, snapshot)?;
+                bytes
+            }
+            None => self.team_blocks.clone(),
+        };
+
         let custom_chunks = match &self.custom_chunks_snapshot {
             Some(snapshot) => {
                 let mut bytes = Vec::new();
@@ -185,8 +204,8 @@ impl NetworkWorldData {
         Ok(NetworkWorldTailSections {
             content_header,
             content_patches,
-            map_bytes: self.map_bytes.clone(),
-            team_blocks: self.team_blocks.clone(),
+            map_bytes,
+            team_blocks,
             markers: self.markers.clone(),
             custom_chunks,
         })
@@ -1092,10 +1111,11 @@ mod tests {
     use crate::mindustry::io::type_io::{
         write_bool as write_io_bool, write_command_id, write_f32 as write_io_f32,
         write_i16 as write_io_i16, write_i32 as write_io_i32, write_string as write_io_string,
-        write_team, write_u16 as write_io_u16, write_u8 as write_io_u8, write_unit_ref,
+        write_team, write_u16 as write_io_u16, write_u8 as write_io_u8, write_unit_ref, TypeValue,
     };
     use crate::mindustry::io::{
-        write_content_header_snapshot, write_content_patches, ContentHeaderEntry,
+        write_chunk_map, write_content_header_snapshot, write_content_patches,
+        write_legacy_team_blocks, ContentHeaderEntry,
     };
     use flate2::read::ZlibDecoder;
     use std::io::Read;
@@ -1209,6 +1229,41 @@ mod tests {
 
     #[test]
     fn world_data_raw_materializes_content_snapshots_and_empty_custom_chunks() {
+        let map_snapshot = LegacyShortChunkMap {
+            width: 1,
+            height: 1,
+            floors: vec![crate::mindustry::io::LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 2,
+                ore_id: 0,
+                consecutives: 0,
+            }],
+            blocks: vec![crate::mindustry::io::LegacyMapBlockRecord {
+                index: 0,
+                block_id: 0,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: None,
+                building: None,
+                consecutives: 0,
+            }],
+        };
+        let team_blocks_snapshot = LegacyTeamBlocks {
+            groups: vec![crate::mindustry::io::LegacyTeamBlockGroup {
+                team_id: 1,
+                plans: vec![crate::mindustry::io::LegacyTeamBlockPlan {
+                    x: 2,
+                    y: 3,
+                    rotation: 1,
+                    block_id: 4,
+                    config: TypeValue::String("core".into()),
+                }],
+            }],
+        };
         let data = NetworkWorldData {
             player_id: 42,
             content_header_snapshot: Some(ContentHeaderSnapshot {
@@ -1222,6 +1277,8 @@ mod tests {
             }),
             map_bytes: vec![0x03],
             team_blocks: vec![0x04],
+            map_snapshot: Some(map_snapshot),
+            team_blocks_snapshot: Some(team_blocks_snapshot),
             markers: vec![0x7b, 0x7d],
             custom_chunks_snapshot: Some(CustomChunkSet {
                 chunks: vec![crate::mindustry::io::CustomChunk {
@@ -1251,11 +1308,19 @@ mod tests {
             data.custom_chunks_snapshot.as_ref().unwrap(),
         )
         .unwrap();
+        let mut expected_map = Vec::new();
+        write_chunk_map(&mut expected_map, data.map_snapshot.as_ref().unwrap()).unwrap();
+        let mut expected_team_blocks = Vec::new();
+        write_legacy_team_blocks(
+            &mut expected_team_blocks,
+            data.team_blocks_snapshot.as_ref().unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(tail.content_header, expected_header);
         assert_eq!(tail.content_patches, expected_patches);
-        assert_eq!(tail.map_bytes, vec![0x03]);
-        assert_eq!(tail.team_blocks, vec![0x04]);
+        assert_eq!(tail.map_bytes, expected_map);
+        assert_eq!(tail.team_blocks, expected_team_blocks);
         assert_eq!(tail.markers, vec![0x7b, 0x7d]);
         assert_eq!(tail.custom_chunks, expected_custom);
 
@@ -1267,6 +1332,73 @@ mod tests {
         assert!(raw
             .windows(expected_patches.len())
             .any(|window| window == expected_patches.as_slice()));
+        assert!(raw
+            .windows(expected_map.len())
+            .any(|window| window == expected_map.as_slice()));
+        assert!(raw
+            .windows(expected_team_blocks.len())
+            .any(|window| window == expected_team_blocks.as_slice()));
+    }
+
+    #[test]
+    fn world_data_tail_uses_map_and_team_snapshots_over_raw_bytes() {
+        let map_snapshot = LegacyShortChunkMap {
+            width: 1,
+            height: 1,
+            floors: vec![crate::mindustry::io::LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 2,
+                ore_id: 0,
+                consecutives: 0,
+            }],
+            blocks: vec![crate::mindustry::io::LegacyMapBlockRecord {
+                index: 0,
+                block_id: 0,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: None,
+                building: None,
+                consecutives: 0,
+            }],
+        };
+        let team_blocks_snapshot = LegacyTeamBlocks {
+            groups: vec![crate::mindustry::io::LegacyTeamBlockGroup {
+                team_id: 6,
+                plans: vec![crate::mindustry::io::LegacyTeamBlockPlan {
+                    x: 1,
+                    y: 2,
+                    rotation: 3,
+                    block_id: 4,
+                    config: TypeValue::Int(9),
+                }],
+            }],
+        };
+        let data = NetworkWorldData {
+            map_bytes: b"raw-map-ignored".to_vec(),
+            team_blocks: b"raw-team-ignored".to_vec(),
+            map_snapshot: Some(map_snapshot),
+            team_blocks_snapshot: Some(team_blocks_snapshot),
+            ..NetworkWorldData::default()
+        };
+
+        let tail = data.materialized_tail_sections().unwrap();
+        let mut expected_map = Vec::new();
+        write_chunk_map(&mut expected_map, data.map_snapshot.as_ref().unwrap()).unwrap();
+        let mut expected_team_blocks = Vec::new();
+        write_legacy_team_blocks(
+            &mut expected_team_blocks,
+            data.team_blocks_snapshot.as_ref().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(tail.map_bytes, expected_map);
+        assert_eq!(tail.team_blocks, expected_team_blocks);
+        assert_ne!(tail.map_bytes.as_slice(), b"raw-map-ignored");
+        assert_ne!(tail.team_blocks.as_slice(), b"raw-team-ignored");
     }
 
     #[test]
@@ -1374,7 +1506,9 @@ mod tests {
         let expected =
             write_world_data_raw(&NetworkWorldData::bootstrap_for_connection(17)).unwrap();
         assert_eq!(raw, expected);
-        assert!(raw.ends_with(&17i32.to_be_bytes()));
+        let mut empty_custom_chunks = Vec::new();
+        write_custom_chunks(&mut empty_custom_chunks, &CustomChunkSet::default()).unwrap();
+        assert!(raw.ends_with(&empty_custom_chunks));
     }
 
     #[test]
@@ -1408,7 +1542,9 @@ mod tests {
         assert_eq!(decoded.rand_seed0, 123);
         assert_eq!(decoded.rand_seed1, 456);
         assert_eq!(decoded.player_id, 77);
-        assert_eq!(decoded.player_bytes, vec![0x10, 0x20, 0x30]);
+        let mut expected_player_bytes = vec![0x10, 0x20, 0x30];
+        write_custom_chunks(&mut expected_player_bytes, &CustomChunkSet::default()).unwrap();
+        assert_eq!(decoded.player_bytes, expected_player_bytes);
     }
 
     #[test]
@@ -1510,7 +1646,9 @@ mod tests {
                 .total_plans(),
             0
         );
-        assert_eq!(decoded.markers, marker_and_custom_tail);
+        let mut expected_markers = marker_and_custom_tail;
+        write_custom_chunks(&mut expected_markers, &CustomChunkSet::default()).unwrap();
+        assert_eq!(decoded.markers, expected_markers);
     }
 
     #[test]
@@ -1741,7 +1879,9 @@ mod tests {
 
         assert!(decoded.tail_parse_error.is_none());
         assert_eq!(decoded.player_bytes, player);
-        assert_eq!(decoded.markers, invalid_markers);
+        let mut expected_markers = invalid_markers;
+        write_custom_chunks(&mut expected_markers, &CustomChunkSet::default()).unwrap();
+        assert_eq!(decoded.markers, expected_markers);
         assert!(decoded.markers_snapshot.is_none());
         assert!(decoded.marker_summary.is_none());
     }
