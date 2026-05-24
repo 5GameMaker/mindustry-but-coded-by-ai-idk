@@ -470,6 +470,50 @@ pub fn force_projector_shield(
     }
 }
 
+pub fn force_projector_sense(
+    sensor: LAccess,
+    state: &ForceProjectorState,
+    shield_health: f32,
+    phase_shield_boost: f32,
+) -> Option<f64> {
+    match sensor {
+        LAccess::Heat => Some(state.buildup as f64),
+        LAccess::Shield => Some(force_projector_shield(
+            state.broken,
+            shield_health,
+            phase_shield_boost,
+            state.phase_heat,
+            state.buildup,
+        ) as f64),
+        _ => None,
+    }
+}
+
+pub fn force_projector_set_shield(
+    state: &mut ForceProjectorState,
+    value: f32,
+    shield_health: f32,
+    phase_shield_boost: f32,
+) {
+    state.buildup = (shield_health + phase_shield_boost * state.phase_heat - value).max(0.0);
+}
+
+pub fn force_projector_bar_fraction(
+    state: &ForceProjectorState,
+    shield_health: f32,
+    phase_shield_boost: f32,
+) -> f32 {
+    if state.broken {
+        return 0.0;
+    }
+    let capacity = shield_health + phase_shield_boost * state.phase_heat;
+    if capacity == 0.0 {
+        0.0
+    } else {
+        1.0 - state.buildup / capacity
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn force_projector_update(
     state: &mut ForceProjectorState,
@@ -519,6 +563,42 @@ pub fn force_projector_update(
     broke_now
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceProjectorBulletAbsorb {
+    pub absorbed: bool,
+    pub hit_effect: bool,
+    pub sound_effect: bool,
+    pub buildup_added: f32,
+}
+
+pub fn force_projector_absorb_bullet(
+    state: &mut ForceProjectorState,
+    enemy_team: bool,
+    absorbable: bool,
+    already_absorbed: bool,
+    inside_polygon: bool,
+    bullet_shield_damage: f32,
+) -> ForceProjectorBulletAbsorb {
+    let absorbed = !state.broken && enemy_team && absorbable && !already_absorbed && inside_polygon;
+    if absorbed {
+        state.hit = 1.0;
+        state.buildup += bullet_shield_damage;
+        ForceProjectorBulletAbsorb {
+            absorbed: true,
+            hit_effect: true,
+            sound_effect: true,
+            buildup_added: bullet_shield_damage,
+        }
+    } else {
+        ForceProjectorBulletAbsorb {
+            absorbed: false,
+            hit_effect: false,
+            sound_effect: false,
+            buildup_added: 0.0,
+        }
+    }
+}
+
 pub fn force_projector_absorb_explosion(
     state: &mut ForceProjectorState,
     inside_polygon: bool,
@@ -531,6 +611,127 @@ pub fn force_projector_absorb_explosion(
         state.buildup += damage * crash_damage_multiplier;
     }
     absorb
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForceProjectorDrawCommand {
+    TopAdditive,
+    ResetTopAdditive,
+    SetShieldColor,
+    SetAnimatedShieldLayer,
+    FillAnimatedPoly,
+    SetStaticShieldLayer,
+    StrokeStaticPoly,
+    ResetStaticShield,
+    ResetFinal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceProjectorDrawPlan {
+    pub commands: &'static [ForceProjectorDrawCommand],
+    pub radius: f32,
+    pub sides: i32,
+    pub shield_rotation: f32,
+    pub hit_alpha: f32,
+    pub shield_layer_offset: f32,
+    pub top_alpha: f32,
+    pub fill_alpha: f32,
+    pub stroke: f32,
+}
+
+const FORCE_PROJECTOR_DRAW_TOP_ANIMATED: &[ForceProjectorDrawCommand] = &[
+    ForceProjectorDrawCommand::TopAdditive,
+    ForceProjectorDrawCommand::ResetTopAdditive,
+    ForceProjectorDrawCommand::SetShieldColor,
+    ForceProjectorDrawCommand::SetAnimatedShieldLayer,
+    ForceProjectorDrawCommand::FillAnimatedPoly,
+    ForceProjectorDrawCommand::ResetFinal,
+];
+
+const FORCE_PROJECTOR_DRAW_ANIMATED: &[ForceProjectorDrawCommand] = &[
+    ForceProjectorDrawCommand::SetShieldColor,
+    ForceProjectorDrawCommand::SetAnimatedShieldLayer,
+    ForceProjectorDrawCommand::FillAnimatedPoly,
+    ForceProjectorDrawCommand::ResetFinal,
+];
+
+const FORCE_PROJECTOR_DRAW_TOP_STATIC: &[ForceProjectorDrawCommand] = &[
+    ForceProjectorDrawCommand::TopAdditive,
+    ForceProjectorDrawCommand::ResetTopAdditive,
+    ForceProjectorDrawCommand::SetShieldColor,
+    ForceProjectorDrawCommand::SetStaticShieldLayer,
+    ForceProjectorDrawCommand::StrokeStaticPoly,
+    ForceProjectorDrawCommand::ResetStaticShield,
+    ForceProjectorDrawCommand::ResetFinal,
+];
+
+const FORCE_PROJECTOR_DRAW_STATIC: &[ForceProjectorDrawCommand] = &[
+    ForceProjectorDrawCommand::SetShieldColor,
+    ForceProjectorDrawCommand::SetStaticShieldLayer,
+    ForceProjectorDrawCommand::StrokeStaticPoly,
+    ForceProjectorDrawCommand::ResetStaticShield,
+    ForceProjectorDrawCommand::ResetFinal,
+];
+
+const FORCE_PROJECTOR_DRAW_TOP_ONLY: &[ForceProjectorDrawCommand] = &[
+    ForceProjectorDrawCommand::TopAdditive,
+    ForceProjectorDrawCommand::ResetTopAdditive,
+    ForceProjectorDrawCommand::ResetFinal,
+];
+
+const FORCE_PROJECTOR_DRAW_RESET_ONLY: &[ForceProjectorDrawCommand] =
+    &[ForceProjectorDrawCommand::ResetFinal];
+
+pub fn force_projector_draw_plan(
+    state: &ForceProjectorState,
+    radius: f32,
+    phase_radius_boost: f32,
+    shield_health: f32,
+    sides: i32,
+    shield_rotation: f32,
+    animate_shields: bool,
+) -> ForceProjectorDrawPlan {
+    let real_radius =
+        force_projector_real_radius(radius, state.phase_heat, phase_radius_boost, state.radscl);
+    let has_top = state.buildup > 0.0;
+    let has_shield = !state.broken && real_radius > 0.001;
+    let top_alpha = if has_top && shield_health != 0.0 {
+        state.buildup / shield_health * 0.75
+    } else {
+        0.0
+    };
+    ForceProjectorDrawPlan {
+        commands: match (has_top, has_shield, animate_shields) {
+            (true, true, true) => FORCE_PROJECTOR_DRAW_TOP_ANIMATED,
+            (false, true, true) => FORCE_PROJECTOR_DRAW_ANIMATED,
+            (true, true, false) => FORCE_PROJECTOR_DRAW_TOP_STATIC,
+            (false, true, false) => FORCE_PROJECTOR_DRAW_STATIC,
+            (true, false, _) => FORCE_PROJECTOR_DRAW_TOP_ONLY,
+            (false, false, _) => FORCE_PROJECTOR_DRAW_RESET_ONLY,
+        },
+        radius: real_radius,
+        sides,
+        shield_rotation,
+        hit_alpha: state.hit.clamp(0.0, 1.0),
+        shield_layer_offset: if has_shield && animate_shields {
+            0.001 * state.hit
+        } else {
+            0.0
+        },
+        top_alpha,
+        fill_alpha: if has_shield && !animate_shields {
+            0.09 + (0.08 * state.hit).clamp(0.0, 1.0)
+        } else if has_shield {
+            1.0
+        } else {
+            0.0
+        },
+        stroke: if has_shield && !animate_shields {
+            1.5
+        } else {
+            0.0
+        },
+    }
 }
 
 pub fn write_force_projector_state<W: Write>(
@@ -2270,6 +2471,121 @@ mod tests {
             force_projector_shield(false, 700.0, 400.0, 0.5, 100.0),
             800.0
         );
+        assert_eq!(
+            force_projector_sense(LAccess::Heat, &force, 700.0, 400.0),
+            Some(force.buildup as f64)
+        );
+        assert_eq!(
+            force_projector_sense(LAccess::Shield, &force, 700.0, 400.0),
+            Some(
+                force_projector_shield(force.broken, 700.0, 400.0, force.phase_heat, force.buildup)
+                    as f64
+            )
+        );
+        assert_eq!(
+            force_projector_sense(LAccess::Health, &force, 700.0, 400.0),
+            None
+        );
+        force_projector_set_shield(&mut force, 600.0, 700.0, 400.0);
+        assert!((force.buildup - 140.0).abs() < 0.00001);
+        assert!(
+            (force_projector_bar_fraction(&force, 700.0, 400.0) - (600.0 / 740.0)).abs() < 0.00001
+        );
+
+        let bullet = force_projector_absorb_bullet(&mut force, true, true, false, true, 35.0);
+        assert_eq!(
+            bullet,
+            ForceProjectorBulletAbsorb {
+                absorbed: true,
+                hit_effect: true,
+                sound_effect: true,
+                buildup_added: 35.0,
+            }
+        );
+        assert_eq!(force.hit, 1.0);
+        assert!((force.buildup - 175.0).abs() < 0.00001);
+        let unchanged = force;
+        assert_eq!(
+            force_projector_absorb_bullet(&mut force, false, true, false, true, 10.0),
+            ForceProjectorBulletAbsorb {
+                absorbed: false,
+                hit_effect: false,
+                sound_effect: false,
+                buildup_added: 0.0,
+            }
+        );
+        assert_eq!(force, unchanged);
+
+        let top_only_draw = force_projector_draw_plan(&force, 101.7, 80.0, 700.0, 6, 0.0, true);
+        assert_eq!(
+            top_only_draw.commands,
+            &[
+                ForceProjectorDrawCommand::TopAdditive,
+                ForceProjectorDrawCommand::ResetTopAdditive,
+                ForceProjectorDrawCommand::ResetFinal,
+            ]
+        );
+
+        let draw_force = ForceProjectorState {
+            radscl: 1.0,
+            ..force
+        };
+        let animated_draw =
+            force_projector_draw_plan(&draw_force, 101.7, 80.0, 700.0, 6, 0.0, true);
+        assert_eq!(
+            animated_draw.commands,
+            &[
+                ForceProjectorDrawCommand::TopAdditive,
+                ForceProjectorDrawCommand::ResetTopAdditive,
+                ForceProjectorDrawCommand::SetShieldColor,
+                ForceProjectorDrawCommand::SetAnimatedShieldLayer,
+                ForceProjectorDrawCommand::FillAnimatedPoly,
+                ForceProjectorDrawCommand::ResetFinal,
+            ]
+        );
+        assert_eq!(animated_draw.sides, 6);
+        assert_eq!(animated_draw.shield_rotation, 0.0);
+        assert_eq!(animated_draw.hit_alpha, 1.0);
+        assert_eq!(animated_draw.shield_layer_offset, 0.001);
+        assert!(animated_draw.top_alpha > 0.0);
+        assert_eq!(animated_draw.fill_alpha, 1.0);
+
+        let static_draw =
+            force_projector_draw_plan(&draw_force, 101.7, 80.0, 700.0, 6, 45.0, false);
+        assert_eq!(
+            static_draw.commands,
+            &[
+                ForceProjectorDrawCommand::TopAdditive,
+                ForceProjectorDrawCommand::ResetTopAdditive,
+                ForceProjectorDrawCommand::SetShieldColor,
+                ForceProjectorDrawCommand::SetStaticShieldLayer,
+                ForceProjectorDrawCommand::StrokeStaticPoly,
+                ForceProjectorDrawCommand::ResetStaticShield,
+                ForceProjectorDrawCommand::ResetFinal,
+            ]
+        );
+        assert_eq!(static_draw.shield_rotation, 45.0);
+        assert_eq!(static_draw.stroke, 1.5);
+        assert!((static_draw.fill_alpha - (0.09 + 0.08)).abs() < 0.00001);
+
+        let broken_draw = force_projector_draw_plan(
+            &ForceProjectorState {
+                broken: true,
+                buildup: 0.0,
+                ..force
+            },
+            101.7,
+            80.0,
+            700.0,
+            6,
+            0.0,
+            true,
+        );
+        assert_eq!(
+            broken_draw.commands,
+            &[ForceProjectorDrawCommand::ResetFinal]
+        );
+
         assert!(force_projector_absorb_explosion(
             &mut force, true, 10.0, 2.0
         ));
