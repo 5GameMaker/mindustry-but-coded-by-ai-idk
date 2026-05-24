@@ -446,6 +446,12 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `DoorChainToggle`
 - `DoorChainTogglePlan`
 - `door_chain_toggle_plan(...)`
+- `DoorRegion`
+- `DoorDrawCommand`
+- `DoorDrawPlan`
+- `door_region_for_open(...)`
+- `door_plan_region(...)`
+- `door_draw_plan(...)`
 - `auto_door_update_plan(...)`
 - `auto_door_set_open_plan(...)`
 - 已对照 `AutoDoor.updateTile()` 锁定：
@@ -460,10 +466,12 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 跳过已经是目标 open 状态的门；
   - `chainEffect` 控制链上门是否额外播放 effect；
   - 非生成中每个切换门更新 pathfinder。
+- 已对照 `Door.getPlanRegion()`、`Door.draw()`、`AutoDoor.draw()` 锁定：
+  - `config == Boolean.TRUE` 或 `open == true` 时选择 openRegion；
+  - 否则选择默认 region。
 
 仍需：
 
-- `Door.getPlanRegion()` / `AutoDoor.draw()` / `Door.draw()` 的 open-region 选择 helper；
 - `Door.updateChained()` 的真实 proximity flood-fill adapter；
 - 接入真实 Units/tree/pathfinder/Call runtime。
 
