@@ -328,13 +328,18 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - `BuildTurretUnitTickInput`
 - `BuildTurretUnitTickStep`
 - `BuildTurretUnitBinding`
+- `BuildTurretDrawCommand`
+- `BuildTurretDrawPlan`
 - `build_turret_update_tick(...)`
 - `build_turret_unit_tick(...)`
 - `apply_build_turret_unit_tick(...)`
+- `build_turret_draw_plan(...)`
 - `build_turret_unit_type(...)`
 - `apply_build_turret_unit_type_defaults(...)`
 - `build_turret_after_patch_unit_type(...)`
 - `build_turret_after_patch_unit_type_config(...)`
+- `build_turret_write_child_with_loader(...)`
+- `build_turret_read_child_with_loader(...)`
 - following/队伍 plan/自建 plan 清理等部分 `BuildTurretBuild.updateTile()` 逻辑。
 - `BuildTurret.init()/afterPatch()` 的内部 `unitType` 配置与同步逻辑。
 - `BuildTurretBuild.updateTile()` 前半段单位刷新 planner，并已薄接入 `UnitComp`：
@@ -342,6 +347,12 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
   - rotation/warmup 写回 `BuildTurretState`；
   - `lookAt` 写回 unit rotation；
   - `buildSpeedMultiplier/speedMultiplier` 写回 unit status 与 builder view。
+- `BuildTurretBuild.draw()` 的纯 draw plan：
+  - base；
+  - turret shadow/body 使用 `rotation - 90`；
+  - glowRegion 存在时用 `warmup`；
+  - `efficiency > 0` 时绘制 unit building beam。
+- `BuildTurretBuild.write/read()` 已新增基于 `ContentLoader` 与 `TypeIO.writePlans/readPlans` 的 typed plans 读写路径；旧 raw 路径保留作兼容兜底。
 
 仍需：
 
@@ -387,12 +398,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 优先补：
 
 - `BuildTurretBuild` 剩余运行态。
-- `BuildTurretBuild.draw()` 的纯 draw plan：
-  - base；
-  - turret shadow/body 使用 `rotation - 90`；
-  - glowRegion 存在时用 `warmup`；
-  - `efficiency > 0` 时绘制 unit building beam。
-- `BuildTurretBuild.write/read()` 的 TypeIO plans 完整编码，而不是只保留 raw bytes。
+- `BuildTurretBuild.unit()/canControl()/buildRotation()/warmup()` 与真实 block runtime trait 接口；
+- `BuildTurretBuild.sense/senseObject()` 对 `buildX/buildY/building/breaking` 转发给 unit 的语义；
+- 把 `BuildTurretState.plans` 和实际 `UnitComp.builder.plans` 的读写桥接到真实建筑实例。
 
 已完成 Rust 结构：
 
