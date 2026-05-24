@@ -455,6 +455,44 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 
 ### 7.5 Door / AutoDoor
 
+### 7.5a Wall
+
+已推进：
+
+- `WallState`
+- `WallStatsPlan`
+- `WallIconRegion`
+- `WallDestroySound`
+- `WallDrawPlan`
+- `WallReflectAxis`
+- `WallCollisionPlan`
+- `wall_stats_plan(...)`
+- `wall_init_destroy_sound(...)`
+- `wall_icon_region(...)`
+- `wall_collision_hit(...)`
+- `wall_draw_hit_decay(...)`
+- `wall_should_lightning(...)`
+- `wall_deflects_bullet(...)`
+- `wall_reflect_x(...)`
+- `wall_draw_plan(...)`
+- `wall_collision_plan(...)`
+- 已对照 `Wall.setStats()/init()/icons()/draw()/collision()` 锁定：
+  - `chanceDeflect > 0` 时展示 base deflect chance；
+  - `lightningChance > 0` 时展示 lightningChance 百分比与 lightningDamage；
+  - size=2 且 destroySound unset 时改为 `blockExplodeWall`；
+  - icon 优先 atlas 中 `name`，否则 `name + "1"`；
+  - collision 总是先将 hit 置 1；
+  - flashHit 时绘制 additive 白色方形，alpha=`hit*0.5`，未暂停时按 `delta/10` 衰减；
+  - lightning 触发条件为 `lightningChance > 0 && chance(lightningChance)`，角度为 `bullet.rotation()+180`；
+  - deflect 需要 `chanceDeflect > 0`、速度大于 `0.1`、reflectable、且随机命中 `chanceDeflect / bullet.damage()`；
+  - deflect 命中后按 `penX > penY` 反转 x/y 速度，owner/team 转为 wall，bullet time 加 1，并返回 false 禁用本次 collision。
+
+仍需：
+
+- 接入真实 `Lightning.create(...)`、sound pitch 随机、bullet translate/owner/team/time 写回；
+- flash overlay 接入 renderer；
+- atlas icon 查询桥接真实 content/atlas。
+
 已推进：
 
 - `DoorState`

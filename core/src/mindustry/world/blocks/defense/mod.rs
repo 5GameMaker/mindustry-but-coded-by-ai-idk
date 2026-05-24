@@ -17,6 +17,79 @@ pub struct WallState {
     pub hit: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WallStatsPlan {
+    pub base_deflect_chance: Option<f32>,
+    pub lightning_chance_percent: Option<f32>,
+    pub lightning_damage: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WallIconRegion {
+    Main,
+    Variant1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WallDestroySound {
+    Keep,
+    BlockExplodeWall,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WallDrawPlan {
+    pub draw_flash: bool,
+    pub flash_alpha: f32,
+    pub flash_size: f32,
+    pub next_hit: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WallReflectAxis {
+    X,
+    Y,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WallCollisionPlan {
+    pub hit: f32,
+    pub create_lightning: bool,
+    pub lightning_rotation: f32,
+    pub deflected: bool,
+    pub reflect_axis: Option<WallReflectAxis>,
+    pub bullet_time_add: f32,
+    pub transfer_owner_and_team: bool,
+    pub continue_collision: bool,
+}
+
+pub fn wall_stats_plan(
+    chance_deflect: f32,
+    lightning_chance: f32,
+    lightning_damage: f32,
+) -> WallStatsPlan {
+    WallStatsPlan {
+        base_deflect_chance: (chance_deflect > 0.0).then_some(chance_deflect),
+        lightning_chance_percent: (lightning_chance > 0.0).then_some(lightning_chance * 100.0),
+        lightning_damage: (lightning_chance > 0.0).then_some(lightning_damage),
+    }
+}
+
+pub fn wall_init_destroy_sound(size: i32, destroy_sound_unset: bool) -> WallDestroySound {
+    if size == 2 && destroy_sound_unset {
+        WallDestroySound::BlockExplodeWall
+    } else {
+        WallDestroySound::Keep
+    }
+}
+
+pub fn wall_icon_region(has_main_region: bool) -> WallIconRegion {
+    if has_main_region {
+        WallIconRegion::Main
+    } else {
+        WallIconRegion::Variant1
+    }
+}
+
 pub fn wall_collision_hit(_previous_hit: f32) -> f32 {
     1.0
 }
@@ -49,6 +122,65 @@ pub fn wall_deflects_bullet(
 
 pub fn wall_reflect_x(pen_x: f32, pen_y: f32) -> bool {
     pen_x > pen_y
+}
+
+pub fn wall_draw_plan(
+    flash_hit: bool,
+    hit: f32,
+    tile_size: f32,
+    size: i32,
+    delta: f32,
+    paused: bool,
+) -> WallDrawPlan {
+    let draw_flash = flash_hit && hit >= 0.0001;
+    WallDrawPlan {
+        draw_flash,
+        flash_alpha: if draw_flash { hit * 0.5 } else { 0.0 },
+        flash_size: tile_size * size as f32,
+        next_hit: if draw_flash {
+            wall_draw_hit_decay(hit, delta, paused)
+        } else {
+            hit
+        },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn wall_collision_plan(
+    lightning_chance: f32,
+    lightning_random: f32,
+    bullet_rotation: f32,
+    chance_deflect: f32,
+    bullet_speed: f32,
+    reflectable: bool,
+    bullet_damage: f32,
+    deflect_random: f32,
+    pen_x: f32,
+    pen_y: f32,
+) -> WallCollisionPlan {
+    let create_lightning = wall_should_lightning(lightning_chance, lightning_random);
+    let deflected = wall_deflects_bullet(
+        chance_deflect,
+        bullet_speed,
+        reflectable,
+        bullet_damage,
+        deflect_random,
+    );
+    let reflect_axis = deflected.then_some(if wall_reflect_x(pen_x, pen_y) {
+        WallReflectAxis::X
+    } else {
+        WallReflectAxis::Y
+    });
+    WallCollisionPlan {
+        hit: 1.0,
+        create_lightning,
+        lightning_rotation: bullet_rotation + 180.0,
+        deflected,
+        reflect_axis,
+        bullet_time_add: if deflected { 1.0 } else { 0.0 },
+        transfer_owner_and_team: deflected,
+        continue_collision: !deflected,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3471,10 +3603,78 @@ mod tests {
     fn wall_door_auto_door_and_mine_helpers_follow_upstream() {
         assert_eq!(wall_collision_hit(0.0), 1.0);
         assert_eq!(wall_draw_hit_decay(1.0, 5.0, false), 0.5);
+        assert_eq!(wall_draw_hit_decay(1.0, 5.0, true), 1.0);
+        assert_eq!(
+            wall_stats_plan(0.25, 0.5, 20.0),
+            WallStatsPlan {
+                base_deflect_chance: Some(0.25),
+                lightning_chance_percent: Some(50.0),
+                lightning_damage: Some(20.0),
+            }
+        );
+        assert_eq!(
+            wall_stats_plan(-1.0, -1.0, 20.0),
+            WallStatsPlan {
+                base_deflect_chance: None,
+                lightning_chance_percent: None,
+                lightning_damage: None,
+            }
+        );
+        assert_eq!(
+            wall_init_destroy_sound(2, true),
+            WallDestroySound::BlockExplodeWall
+        );
+        assert_eq!(wall_init_destroy_sound(1, true), WallDestroySound::Keep);
+        assert_eq!(wall_icon_region(true), WallIconRegion::Main);
+        assert_eq!(wall_icon_region(false), WallIconRegion::Variant1);
         assert!(wall_should_lightning(0.25, 0.2));
         assert!(wall_deflects_bullet(10.0, 1.0, true, 20.0, 0.4));
         assert!(!wall_deflects_bullet(10.0, 0.05, true, 20.0, 0.0));
         assert!(wall_reflect_x(6.0, 3.0));
+        assert_eq!(
+            wall_draw_plan(true, 0.8, 8.0, 2, 5.0, false),
+            WallDrawPlan {
+                draw_flash: true,
+                flash_alpha: 0.4,
+                flash_size: 16.0,
+                next_hit: 0.3,
+            }
+        );
+        assert_eq!(
+            wall_draw_plan(true, 0.00001, 8.0, 2, 5.0, false),
+            WallDrawPlan {
+                draw_flash: false,
+                flash_alpha: 0.0,
+                flash_size: 16.0,
+                next_hit: 0.00001,
+            }
+        );
+        assert_eq!(
+            wall_collision_plan(0.5, 0.25, 30.0, 10.0, 1.0, true, 20.0, 0.4, 6.0, 3.0),
+            WallCollisionPlan {
+                hit: 1.0,
+                create_lightning: true,
+                lightning_rotation: 210.0,
+                deflected: true,
+                reflect_axis: Some(WallReflectAxis::X),
+                bullet_time_add: 1.0,
+                transfer_owner_and_team: true,
+                continue_collision: false,
+            }
+        );
+        assert_eq!(
+            wall_collision_plan(0.0, 0.0, 30.0, 10.0, 0.05, true, 20.0, 0.0, 1.0, 3.0),
+            WallCollisionPlan {
+                hit: 1.0,
+                create_lightning: false,
+                lightning_rotation: 210.0,
+                deflected: false,
+                reflect_axis: None,
+                bullet_time_add: 0.0,
+                transfer_owner_and_team: false,
+                continue_collision: true,
+            }
+        );
 
         assert!(door_check_solid(false));
         assert_eq!(door_sense_enabled(true), 1.0);
