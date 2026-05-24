@@ -36,6 +36,10 @@ impl MobileVec2 {
         Self::new(self.x * scale, self.y * scale)
     }
 
+    pub fn subtracted(self, other: Self) -> Self {
+        Self::new(self.x - other.x, self.y - other.y)
+    }
+
     pub fn limited(self, max: f32) -> Self {
         let len = self.len();
         if len > max && len > 0.0 {
@@ -47,6 +51,24 @@ impl MobileVec2 {
 
     pub fn is_zero(self) -> bool {
         self.x == 0.0 && self.y == 0.0
+    }
+
+    pub fn distance_to(self, other: Self) -> f32 {
+        self.subtracted(other).len()
+    }
+
+    pub fn angle_deg(self) -> f32 {
+        self.y.atan2(self.x).to_degrees()
+    }
+
+    pub fn with_angle_deg(self, angle: f32) -> Self {
+        let len = self.len();
+        if len == 0.0 {
+            self
+        } else {
+            let radians = angle.to_radians();
+            Self::new(radians.cos() * len, radians.sin() * len)
+        }
     }
 }
 
@@ -165,6 +187,21 @@ pub enum MobileInputAction {
         building: bool,
     },
     TryBeginMine,
+    ClearMineTile,
+    SetCombatTargetUnit,
+    SetCombatTargetBuilding,
+    ClearCombatTarget,
+    ClearPayloadTarget,
+    RequestDropPayload,
+    RequestBuildPayload,
+    RequestUnitPayload,
+    SlowVelocityAtTarget,
+    RequestAutoTarget,
+    RequestHealTarget,
+    AimAt {
+        world_x: f32,
+        world_y: f32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -486,6 +523,162 @@ impl Default for MobileTapFrame {
             config_tap_handled: false,
             tile_tapped_handled: false,
             double_tap_mine: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MobilePayloadTargetKind {
+    DropPosition,
+    Building,
+    Unit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MobileCombatTargetKind {
+    Unit,
+    Building,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MobileTargetCheckFrame {
+    pub player_dead: bool,
+    pub enemy_unit_available: bool,
+    pub player_unit_can_attack: bool,
+    pub building_available: bool,
+    pub building_enemy: bool,
+    pub building_derelict: bool,
+    pub core_capture: bool,
+    pub building_same_team: bool,
+    pub building_damaged: bool,
+    pub player_unit_can_heal: bool,
+}
+
+impl Default for MobileTargetCheckFrame {
+    fn default() -> Self {
+        Self {
+            player_dead: false,
+            enemy_unit_available: false,
+            player_unit_can_attack: true,
+            building_available: false,
+            building_enemy: false,
+            building_derelict: false,
+            core_capture: false,
+            building_same_team: false,
+            building_damaged: false,
+            player_unit_can_heal: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MobileMovementFrame {
+    pub unit_type_present: bool,
+    pub omni_movement: bool,
+    pub can_attack: bool,
+    pub can_heal: bool,
+    pub type_has_weapons: bool,
+    pub face_target: bool,
+    pub boosted: bool,
+    pub player_shooting: bool,
+    pub mouse_angle: f32,
+    pub preferred_rotation: f32,
+    pub state_editor: bool,
+    pub target_invalid: bool,
+    pub valid_heal_target: bool,
+    pub camera_pos: MobileVec2,
+    pub player_pos: MobileVec2,
+    pub unit_speed: f32,
+    pub unit_velocity_angle: f32,
+    pub payload_target: Option<MobilePayloadTargetKind>,
+    pub payload_target_valid: bool,
+    pub payload_target_pos: MobileVec2,
+    pub unit_is_payload: bool,
+    pub unit_within_payload_target: bool,
+    pub payload_has_payload: bool,
+    pub payload_building_same_team: bool,
+    pub payload_unit_pickup_allowed: bool,
+    pub solid_collision: bool,
+    pub unit_within_target_85: bool,
+    pub actively_building: bool,
+    pub mining: bool,
+    pub autotarget: bool,
+    pub block_unit_disables_auto_target: bool,
+    pub auto_attack_target_available: bool,
+    pub auto_heal_target_available: bool,
+    pub mouse_world: MobileVec2,
+    pub target_aim_pos: MobileVec2,
+    pub intercept_aim_pos: MobileVec2,
+    pub predict_target: bool,
+}
+
+impl Default for MobileMovementFrame {
+    fn default() -> Self {
+        Self {
+            unit_type_present: true,
+            omni_movement: true,
+            can_attack: true,
+            can_heal: false,
+            type_has_weapons: true,
+            face_target: true,
+            boosted: false,
+            player_shooting: false,
+            mouse_angle: 0.0,
+            preferred_rotation: 0.0,
+            state_editor: false,
+            target_invalid: false,
+            valid_heal_target: false,
+            camera_pos: MobileVec2::ZERO,
+            player_pos: MobileVec2::ZERO,
+            unit_speed: 0.0,
+            unit_velocity_angle: 0.0,
+            payload_target: None,
+            payload_target_valid: true,
+            payload_target_pos: MobileVec2::ZERO,
+            unit_is_payload: false,
+            unit_within_payload_target: false,
+            payload_has_payload: false,
+            payload_building_same_team: false,
+            payload_unit_pickup_allowed: false,
+            solid_collision: false,
+            unit_within_target_85: true,
+            actively_building: false,
+            mining: false,
+            autotarget: false,
+            block_unit_disables_auto_target: false,
+            auto_attack_target_available: false,
+            auto_heal_target_available: false,
+            mouse_world: MobileVec2::ZERO,
+            target_aim_pos: MobileVec2::ZERO,
+            intercept_aim_pos: MobileVec2::ZERO,
+            predict_target: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobileMovementPlan {
+    pub accepted: bool,
+    pub target_pos: MobileVec2,
+    pub movement: MobileVec2,
+    pub look_at_angle: f32,
+    pub boosting: bool,
+    pub shooting: bool,
+    pub weapon_control: bool,
+    pub actions: Vec<MobileInputAction>,
+}
+
+impl Default for MobileMovementPlan {
+    fn default() -> Self {
+        Self {
+            accepted: false,
+            target_pos: MobileVec2::ZERO,
+            movement: MobileVec2::ZERO,
+            look_at_angle: 0.0,
+            boosting: false,
+            shooting: false,
+            weapon_control: false,
+            actions: Vec::new(),
         }
     }
 }
@@ -1259,6 +1452,163 @@ impl MobileInput {
 
         MobileActionPlan::accepted(actions)
     }
+
+    pub fn check_targets(&mut self, frame: &MobileTargetCheckFrame) -> MobileActionPlan {
+        if frame.player_dead {
+            return MobileActionPlan::rejected();
+        }
+
+        let mut actions = Vec::new();
+        if frame.enemy_unit_available && frame.player_unit_can_attack {
+            self.target_present = true;
+            actions.push(MobileInputAction::ClearMineTile);
+            actions.push(MobileInputAction::SetCombatTargetUnit);
+        } else if frame.building_available {
+            let attack_building = frame.player_unit_can_attack
+                && frame.building_enemy
+                && (!frame.building_derelict || frame.core_capture);
+            let heal_building =
+                frame.player_unit_can_heal && frame.building_same_team && frame.building_damaged;
+
+            if attack_building || heal_building {
+                self.target_present = true;
+                actions.push(MobileInputAction::ClearMineTile);
+                actions.push(MobileInputAction::SetCombatTargetBuilding);
+            }
+        }
+
+        MobileActionPlan::accepted(actions)
+    }
+
+    pub fn update_movement(&mut self, frame: &MobileMovementFrame) -> MobileMovementPlan {
+        if !frame.unit_type_present {
+            return MobileMovementPlan::default();
+        }
+
+        let mut actions = Vec::new();
+        if (self.target_present && frame.target_invalid && !frame.valid_heal_target)
+            || frame.state_editor
+        {
+            self.target_present = false;
+            actions.push(MobileInputAction::ClearCombatTarget);
+        }
+
+        let aim_cursor = frame.omni_movement
+            && frame.player_shooting
+            && frame.type_has_weapons
+            && !frame.boosted
+            && frame.face_target;
+        let look_at_angle = if aim_cursor {
+            frame.mouse_angle
+        } else {
+            frame.preferred_rotation
+        };
+
+        if self.payload_target_present && !frame.payload_target_valid {
+            self.payload_target_present = false;
+            actions.push(MobileInputAction::ClearPayloadTarget);
+        }
+
+        let mut target_pos = frame.camera_pos;
+        let mut attract_dst = 15.0;
+        if self.payload_target_present
+            && frame.unit_is_payload
+            && frame.payload_target_valid
+            && frame.payload_target.is_some()
+        {
+            target_pos = frame.payload_target_pos;
+            attract_dst = 0.0;
+
+            if frame.unit_within_payload_target {
+                match frame.payload_target.expect("checked above") {
+                    MobilePayloadTargetKind::DropPosition if frame.payload_has_payload => {
+                        actions.push(MobileInputAction::RequestDropPayload);
+                        self.payload_target_present = false;
+                        actions.push(MobileInputAction::ClearPayloadTarget);
+                    }
+                    MobilePayloadTargetKind::Building if frame.payload_building_same_team => {
+                        actions.push(MobileInputAction::RequestBuildPayload);
+                        self.payload_target_present = false;
+                        actions.push(MobileInputAction::ClearPayloadTarget);
+                    }
+                    MobilePayloadTargetKind::Unit if frame.payload_unit_pickup_allowed => {
+                        actions.push(MobileInputAction::RequestUnitPayload);
+                        self.payload_target_present = false;
+                        actions.push(MobileInputAction::ClearPayloadTarget);
+                    }
+                    _ => {}
+                }
+            }
+        } else if self.payload_target_present {
+            self.payload_target_present = false;
+            actions.push(MobileInputAction::ClearPayloadTarget);
+        }
+
+        self.target_pos = target_pos;
+        self.movement = target_pos
+            .subtracted(frame.player_pos)
+            .limited(frame.unit_speed)
+            .with_angle_deg(slerp_degrees(
+                target_pos.subtracted(frame.player_pos).angle_deg(),
+                frame.unit_velocity_angle,
+                0.05,
+            ));
+
+        if frame.player_pos.distance_to(target_pos) <= attract_dst {
+            self.movement = MobileVec2::ZERO;
+            actions.push(MobileInputAction::SlowVelocityAtTarget);
+        }
+
+        let boosting = frame.solid_collision || !frame.unit_within_target_85;
+        let mut shooting = frame.player_shooting;
+
+        if !frame.actively_building && !frame.mining && !frame.state_editor {
+            if self.manual_shooting {
+                shooting = !frame.boosted;
+                actions.push(MobileInputAction::AimAt {
+                    world_x: frame.mouse_world.x,
+                    world_y: frame.mouse_world.y,
+                });
+            } else if !self.target_present {
+                shooting = false;
+                if frame.autotarget && !frame.block_unit_disables_auto_target {
+                    if frame.can_attack && frame.auto_attack_target_available {
+                        self.target_present = true;
+                        actions.push(MobileInputAction::RequestAutoTarget);
+                    } else if frame.can_heal && frame.auto_heal_target_available {
+                        self.target_present = true;
+                        actions.push(MobileInputAction::RequestHealTarget);
+                    }
+                }
+                actions.push(MobileInputAction::AimAt {
+                    world_x: frame.mouse_world.x,
+                    world_y: frame.mouse_world.y,
+                });
+            } else {
+                let aim = if frame.predict_target {
+                    frame.intercept_aim_pos
+                } else {
+                    frame.target_aim_pos
+                };
+                shooting = !frame.boosted;
+                actions.push(MobileInputAction::AimAt {
+                    world_x: aim.x,
+                    world_y: aim.y,
+                });
+            }
+        }
+
+        MobileMovementPlan {
+            accepted: true,
+            target_pos,
+            movement: self.movement,
+            look_at_angle,
+            boosting,
+            shooting,
+            weapon_control: shooting && !frame.boosted,
+            actions,
+        }
+    }
 }
 
 pub fn is_line_placing(
@@ -1457,6 +1807,14 @@ fn rect_centered(center_x: f32, center_y: f32, width: f32, height: f32) -> Rect 
 
 fn world_to_tile(value: f32, tile_size: f32) -> i32 {
     (value / tile_size).floor() as i32
+}
+
+fn slerp_degrees(from: f32, to: f32, alpha: f32) -> f32 {
+    let mut delta = (to - from).rem_euclid(360.0);
+    if delta > 180.0 {
+        delta -= 360.0;
+    }
+    from + delta * alpha
 }
 
 #[cfg(test)]
@@ -2149,5 +2507,181 @@ mod tests {
         assert!(double_plan
             .actions
             .contains(&MobileInputAction::UnitControlTapped));
+    }
+
+    #[test]
+    fn check_targets_prefers_enemy_units_then_valid_buildings() {
+        let mut input = MobileInput::new();
+
+        let enemy = input.check_targets(&MobileTargetCheckFrame {
+            enemy_unit_available: true,
+            building_available: true,
+            building_enemy: true,
+            ..MobileTargetCheckFrame::default()
+        });
+
+        assert!(input.target_present);
+        assert_eq!(
+            enemy.actions,
+            vec![
+                MobileInputAction::ClearMineTile,
+                MobileInputAction::SetCombatTargetUnit,
+            ]
+        );
+
+        let mut building = MobileInput::new();
+        let building_plan = building.check_targets(&MobileTargetCheckFrame {
+            building_available: true,
+            building_enemy: true,
+            building_derelict: true,
+            core_capture: false,
+            ..MobileTargetCheckFrame::default()
+        });
+        assert!(building_plan.actions.is_empty());
+        assert!(!building.target_present);
+
+        let heal = building.check_targets(&MobileTargetCheckFrame {
+            building_available: true,
+            building_same_team: true,
+            building_damaged: true,
+            player_unit_can_heal: true,
+            player_unit_can_attack: false,
+            ..MobileTargetCheckFrame::default()
+        });
+        assert!(building.target_present);
+        assert_eq!(
+            heal.actions,
+            vec![
+                MobileInputAction::ClearMineTile,
+                MobileInputAction::SetCombatTargetBuilding,
+            ]
+        );
+    }
+
+    #[test]
+    fn update_movement_clears_invalid_targets_and_plans_mouse_aim() {
+        let mut input = MobileInput::new();
+        input.target_present = true;
+
+        let plan = input.update_movement(&MobileMovementFrame {
+            target_invalid: true,
+            mouse_world: MobileVec2::new(6.0, 7.0),
+            ..MobileMovementFrame::default()
+        });
+
+        assert!(plan.accepted);
+        assert!(!input.target_present);
+        assert!(plan.actions.contains(&MobileInputAction::ClearCombatTarget));
+        assert!(plan.actions.contains(&MobileInputAction::AimAt {
+            world_x: 6.0,
+            world_y: 7.0,
+        }));
+        assert!(!plan.shooting);
+        assert!(!plan.weapon_control);
+    }
+
+    #[test]
+    fn update_movement_resolves_payload_target_requests() {
+        let mut drop = MobileInput::new();
+        drop.payload_target_present = true;
+        let drop_plan = drop.update_movement(&MobileMovementFrame {
+            payload_target: Some(MobilePayloadTargetKind::DropPosition),
+            payload_target_valid: true,
+            payload_target_pos: MobileVec2::new(10.0, 0.0),
+            unit_is_payload: true,
+            unit_within_payload_target: true,
+            payload_has_payload: true,
+            unit_speed: 5.0,
+            ..MobileMovementFrame::default()
+        });
+        assert!(!drop.payload_target_present);
+        assert_eq!(drop_plan.target_pos, MobileVec2::new(10.0, 0.0));
+        assert!(drop_plan
+            .actions
+            .contains(&MobileInputAction::RequestDropPayload));
+        assert!(drop_plan
+            .actions
+            .contains(&MobileInputAction::ClearPayloadTarget));
+
+        let mut build = MobileInput::new();
+        build.payload_target_present = true;
+        let build_plan = build.update_movement(&MobileMovementFrame {
+            payload_target: Some(MobilePayloadTargetKind::Building),
+            payload_target_valid: true,
+            unit_is_payload: true,
+            unit_within_payload_target: true,
+            payload_building_same_team: true,
+            ..MobileMovementFrame::default()
+        });
+        assert!(build_plan
+            .actions
+            .contains(&MobileInputAction::RequestBuildPayload));
+
+        let mut unit = MobileInput::new();
+        unit.payload_target_present = true;
+        let unit_plan = unit.update_movement(&MobileMovementFrame {
+            payload_target: Some(MobilePayloadTargetKind::Unit),
+            payload_target_valid: true,
+            unit_is_payload: true,
+            unit_within_payload_target: true,
+            payload_unit_pickup_allowed: true,
+            ..MobileMovementFrame::default()
+        });
+        assert!(unit_plan
+            .actions
+            .contains(&MobileInputAction::RequestUnitPayload));
+    }
+
+    #[test]
+    fn update_movement_limits_motion_boosts_and_handles_shooting_modes() {
+        let mut manual = MobileInput::new();
+        manual.manual_shooting = true;
+        let manual_plan = manual.update_movement(&MobileMovementFrame {
+            camera_pos: MobileVec2::new(30.0, 0.0),
+            player_pos: MobileVec2::ZERO,
+            unit_speed: 4.0,
+            unit_velocity_angle: 0.0,
+            mouse_world: MobileVec2::new(3.0, 4.0),
+            solid_collision: true,
+            unit_within_target_85: true,
+            ..MobileMovementFrame::default()
+        });
+
+        assert_eq!(manual_plan.movement, MobileVec2::new(4.0, 0.0));
+        assert!(manual_plan.boosting);
+        assert!(manual_plan.shooting);
+        assert!(manual_plan.weapon_control);
+        assert!(manual_plan.actions.contains(&MobileInputAction::AimAt {
+            world_x: 3.0,
+            world_y: 4.0,
+        }));
+
+        let mut auto = MobileInput::new();
+        let auto_plan = auto.update_movement(&MobileMovementFrame {
+            autotarget: true,
+            can_attack: true,
+            auto_attack_target_available: true,
+            mouse_world: MobileVec2::new(1.0, 2.0),
+            ..MobileMovementFrame::default()
+        });
+        assert!(auto.target_present);
+        assert!(auto_plan
+            .actions
+            .contains(&MobileInputAction::RequestAutoTarget));
+        assert!(!auto_plan.shooting);
+
+        let mut targeted = MobileInput::new();
+        targeted.target_present = true;
+        let target_plan = targeted.update_movement(&MobileMovementFrame {
+            target_aim_pos: MobileVec2::new(8.0, 9.0),
+            intercept_aim_pos: MobileVec2::new(12.0, 13.0),
+            predict_target: true,
+            ..MobileMovementFrame::default()
+        });
+        assert!(target_plan.shooting);
+        assert!(target_plan.actions.contains(&MobileInputAction::AimAt {
+            world_x: 12.0,
+            world_y: 13.0,
+        }));
     }
 }
