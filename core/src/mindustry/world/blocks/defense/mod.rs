@@ -3,11 +3,12 @@ pub mod turrets;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
+use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::comp::UnitComp;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::BlockPlan;
-use crate::mindustry::io::{TeamId, TypeValue};
+use crate::mindustry::io::{type_io, TeamId, TypeValue};
 use crate::mindustry::r#type::UnitType;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -788,6 +789,7 @@ pub struct BuildTurretState {
     pub warmup: f32,
     pub following: Option<i32>,
     pub last_plan: Option<BlockPlan>,
+    pub plans: Vec<BuildPlan>,
     pub raw_plans: Vec<u8>,
 }
 
@@ -798,6 +800,7 @@ impl Default for BuildTurretState {
             warmup: 0.0,
             following: None,
             last_plan: None,
+            plans: Vec::new(),
             raw_plans: Vec::new(),
         }
     }
@@ -1404,6 +1407,36 @@ pub fn build_turret_read_child<R: Read>(read: &mut R) -> io::Result<BuildTurretS
     Ok(BuildTurretState {
         rotation,
         raw_plans,
+        plans: Vec::new(),
+        following: None,
+        last_plan: None,
+        warmup: 0.0,
+    })
+}
+
+pub fn build_turret_write_child_with_loader<W: Write>(
+    write: &mut W,
+    loader: &ContentLoader,
+    state: &BuildTurretState,
+) -> io::Result<()> {
+    write_f32(write, state.rotation)?;
+    if state.plans.is_empty() && !state.raw_plans.is_empty() {
+        write.write_all(&state.raw_plans)
+    } else {
+        type_io::write_build_plans(write, loader, Some(&state.plans))
+    }
+}
+
+pub fn build_turret_read_child_with_loader<R: Read>(
+    read: &mut R,
+    loader: &ContentLoader,
+) -> io::Result<BuildTurretState> {
+    let rotation = read_f32(read)?;
+    let plans = type_io::read_build_plans(read, loader)?.unwrap_or_default();
+    Ok(BuildTurretState {
+        rotation,
+        plans,
+        raw_plans: Vec::new(),
         following: None,
         last_plan: None,
         warmup: 0.0,
@@ -1794,6 +1827,7 @@ mod tests {
             warmup: 0.6,
             following: None,
             last_plan: None,
+            plans: Vec::new(),
             raw_plans: vec![0, 2, 7, 9],
         };
         let mut bytes = Vec::new();
@@ -1803,6 +1837,50 @@ mod tests {
         assert_eq!(restored.raw_plans, vec![0, 2, 7, 9]);
 
         assert_eq!(thruster_top_rotation(3), 270.0);
+    }
+
+    #[test]
+    fn build_turret_child_read_write_with_loader_round_trips_java_typeio_plans() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let state = BuildTurretState {
+            rotation: 135.0,
+            warmup: 0.4,
+            following: Some(99),
+            last_plan: Some(BlockPlan::new(1, 1, 0, "router", None)),
+            plans: vec![
+                BuildPlan::new_string_config(2, 3, 1, "router", "cfg"),
+                BuildPlan::new_break(4, 5),
+            ],
+            raw_plans: Vec::new(),
+        };
+
+        let mut bytes = Vec::new();
+        build_turret_write_child_with_loader(&mut bytes, &loader, &state).unwrap();
+        assert_eq!(&bytes[0..4], &135.0f32.to_be_bytes());
+        assert_eq!(&bytes[4..6], &[0, 2]);
+
+        let restored = build_turret_read_child_with_loader(&mut bytes.as_slice(), &loader).unwrap();
+        assert_eq!(restored.rotation, 135.0);
+        assert_eq!(restored.plans, state.plans);
+        assert!(restored.raw_plans.is_empty());
+        assert_eq!(restored.warmup, 0.0);
+        assert_eq!(restored.following, None);
+        assert_eq!(restored.last_plan, None);
+
+        let empty = BuildTurretState {
+            rotation: 90.0,
+            ..BuildTurretState::default()
+        };
+        bytes.clear();
+        build_turret_write_child_with_loader(&mut bytes, &loader, &empty).unwrap();
+        assert_eq!(&bytes[0..4], &90.0f32.to_be_bytes());
+        assert_eq!(&bytes[4..6], &[0, 0]);
+        assert_eq!(
+            build_turret_read_child_with_loader(&mut bytes.as_slice(), &loader)
+                .unwrap()
+                .plans,
+            Vec::<BuildPlan>::new()
+        );
     }
 
     #[test]
