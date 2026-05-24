@@ -206,6 +206,13 @@ pub struct BuilderAiRetreatDecision {
     pub moving: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuilderAiFallbackController {
+    Prebuild,
+    Flying,
+    Ground,
+}
+
 pub fn should_spawn_core_unit(
     ai_core_spawn: bool,
     timer_ready: bool,
@@ -275,6 +282,34 @@ pub fn builder_ai_should_promote_assist_following(
     assist_actively_building: bool,
 ) -> bool {
     assist_valid && assist_actively_building
+}
+
+pub fn builder_ai_fallback_controller(
+    team_is_ai: bool,
+    team_prebuild_ai: bool,
+    unit_flying: bool,
+) -> BuilderAiFallbackController {
+    if team_is_ai && team_prebuild_ai {
+        BuilderAiFallbackController::Prebuild
+    } else if unit_flying {
+        BuilderAiFallbackController::Flying
+    } else {
+        BuilderAiFallbackController::Ground
+    }
+}
+
+pub fn builder_ai_use_fallback(
+    team_is_ai: bool,
+    team_prebuild_ai: bool,
+    state_waves: bool,
+    unit_is_wave_team: bool,
+    team_rts_ai: bool,
+) -> bool {
+    if team_is_ai && team_prebuild_ai {
+        true
+    } else {
+        state_waves && unit_is_wave_team && !team_rts_ai
+    }
 }
 
 pub fn builder_ai_idle_retreat(
@@ -973,6 +1008,31 @@ mod tests {
         assert!(always_flee.clear_building);
         assert!(!always_flee.move_to_core);
         assert!(!always_flee.moving);
+    }
+
+    #[test]
+    fn builder_ai_fallback_controller_prefers_prebuild_then_unit_mobility() {
+        assert_eq!(
+            builder_ai_fallback_controller(true, true, false),
+            BuilderAiFallbackController::Prebuild
+        );
+        assert_eq!(
+            builder_ai_fallback_controller(false, true, true),
+            BuilderAiFallbackController::Flying
+        );
+        assert_eq!(
+            builder_ai_fallback_controller(false, false, false),
+            BuilderAiFallbackController::Ground
+        );
+    }
+
+    #[test]
+    fn builder_ai_use_fallback_matches_prebuild_and_wave_team_rules() {
+        assert!(builder_ai_use_fallback(true, true, false, false, true));
+        assert!(builder_ai_use_fallback(false, false, true, true, false));
+        assert!(!builder_ai_use_fallback(false, false, true, true, true));
+        assert!(!builder_ai_use_fallback(false, false, false, true, false));
+        assert!(!builder_ai_use_fallback(false, false, true, false, false));
     }
 
     #[test]
