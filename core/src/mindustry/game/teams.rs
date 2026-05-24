@@ -5,7 +5,10 @@
 //! are represented as data hooks so the networking/game-state layer can share
 //! Java-compatible team IDs and active/enemy semantics now.
 
-use crate::mindustry::game::{TEAM_COUNT, TEAM_CRUX, TEAM_NEOPLASTIC};
+use crate::mindustry::game::{TEAM_COUNT, TEAM_CRUX, TEAM_NEOPLASTIC, TEAM_SHARDED};
+use crate::mindustry::io::{
+    LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TypeValue,
+};
 use crate::mindustry::world::{point2_x, point2_y};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -245,6 +248,36 @@ impl TeamData {
         self.plans.push(plan.clone());
         TeamPlanClaim::Claimed(plan)
     }
+
+    pub fn to_legacy_team_block_group<BlockId>(&self, mut block_id: BlockId) -> LegacyTeamBlockGroup
+    where
+        BlockId: FnMut(&str) -> Option<i16>,
+    {
+        LegacyTeamBlockGroup {
+            team_id: self.team as i32,
+            plans: self
+                .plans
+                .iter()
+                .filter_map(|plan| {
+                    let block_id = block_id(&plan.block)?;
+                    Some(LegacyTeamBlockPlan {
+                        x: plan.x,
+                        y: plan.y,
+                        rotation: plan.rotation,
+                        block_id,
+                        config: block_plan_config_to_legacy(&plan.config),
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
+pub fn block_plan_config_to_legacy(config: &Option<String>) -> TypeValue {
+    config
+        .as_ref()
+        .map(|value| TypeValue::String(value.clone()))
+        .unwrap_or(TypeValue::Null)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -402,6 +435,37 @@ impl Teams {
         } else {
             self.claim_front_plan(team, already_placed, usable)
         }
+    }
+
+    pub fn to_legacy_team_blocks<BlockId>(
+        &mut self,
+        mut block_id: BlockId,
+        include_sharded: bool,
+    ) -> LegacyTeamBlocks
+    where
+        BlockId: FnMut(&str) -> Option<i16>,
+    {
+        let active = self.get_active().to_vec();
+        let mut groups = active
+            .into_iter()
+            .filter_map(|team| {
+                self.get_or_null(team)
+                    .map(|data| data.to_legacy_team_block_group(&mut block_id))
+            })
+            .collect::<Vec<_>>();
+
+        if include_sharded
+            && !groups
+                .iter()
+                .any(|group| group.team_id == TEAM_SHARDED as i32)
+        {
+            groups.push(
+                self.get(TEAM_SHARDED)
+                    .to_legacy_team_block_group(&mut block_id),
+            );
+        }
+
+        LegacyTeamBlocks { groups }
     }
 
     pub fn update_active(&mut self, team: u8) {
@@ -720,6 +784,60 @@ mod tests {
             teams.get_or_null(TEAM_SHARDED).unwrap().plans,
             vec![BlockPlan::new(2, 2, 1, "router", Some("cfg".into()))]
         );
+    }
+
+    #[test]
+    fn team_plans_export_to_legacy_team_blocks_like_save_version_writer() {
+        let mut teams = Teams::new(TEAM_CRUX, false, TEAM_CRUX, TEAM_SHARDED);
+        teams.register_core(CoreInfo::new(10, TEAM_CRUX, 0.0, 0.0));
+        teams.register_core(CoreInfo::new(20, TEAM_MALIS, 8.0, 0.0));
+        teams.replace_plans([
+            (
+                TEAM_CRUX,
+                vec![
+                    BlockPlan::new(1, 2, 0, "duo", None),
+                    BlockPlan::new(3, 4, 1, "router", Some("cfg".into())),
+                    BlockPlan::new(9, 9, 0, "unknown", Some("drop".into())),
+                ],
+            ),
+            (TEAM_MALIS, vec![BlockPlan::new(5, 6, 2, "wall", None)]),
+        ]);
+
+        let blocks = teams.to_legacy_team_blocks(
+            |name| match name {
+                "duo" => Some(10),
+                "router" => Some(11),
+                "wall" => Some(12),
+                _ => None,
+            },
+            true,
+        );
+
+        assert_eq!(blocks.groups.len(), 3);
+        assert_eq!(blocks.groups[0].team_id, TEAM_CRUX as i32);
+        assert_eq!(
+            blocks.groups[0].plans,
+            vec![
+                LegacyTeamBlockPlan {
+                    x: 1,
+                    y: 2,
+                    rotation: 0,
+                    block_id: 10,
+                    config: TypeValue::Null,
+                },
+                LegacyTeamBlockPlan {
+                    x: 3,
+                    y: 4,
+                    rotation: 1,
+                    block_id: 11,
+                    config: TypeValue::String("cfg".into()),
+                },
+            ]
+        );
+        assert_eq!(blocks.groups[1].team_id, TEAM_MALIS as i32);
+        assert_eq!(blocks.groups[1].plans[0].block_id, 12);
+        assert_eq!(blocks.groups[2].team_id, TEAM_SHARDED as i32);
+        assert!(blocks.groups[2].plans.is_empty());
     }
 
     #[test]
