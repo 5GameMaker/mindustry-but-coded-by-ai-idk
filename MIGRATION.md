@@ -496,14 +496,25 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 已推进：
 
 - `DoorState`
+- `DoorEffectKind`
+- `DoorControlPlan`
+- `DoorTappedPlan`
+- `AutoDoorTriggerRect`
 - `door_check_solid(...)`
 - `door_sense_enabled(...)`
 - `door_can_toggle(...)`
 - `door_tapped_should_configure(...)`
+- `door_effect_for_current_open(...)`
+- `door_origin_id(...)`
+- `door_control_enabled_plan(...)`
+- `door_tapped_plan(...)`
 - `write_door_state(...)`
 - `read_door_state(...)`
 - `auto_door_should_open(...)`
+- `auto_door_ground_check(...)`
 - `auto_door_trigger_size(...)`
+- `auto_door_trigger_rect(...)`
+- `auto_door_remote_toggle_valid(...)`
 - `AutoDoorUpdatePlan`
 - `AutoDoorSetOpenPlan`
 - `DoorChainNode`
@@ -520,9 +531,17 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `auto_door_set_open_plan(...)`
 - 已对照 `AutoDoor.updateTile()` 锁定：
   - timer 未到或 net client 时不扫描/不发送 toggle；
-  - 触发范围内存在 ground 且非 allowLegStep 单位时应打开；
+  - 触发范围尺寸为 `size * tilesize + triggerMargin * 2`，中心为 building `x/y`；
+  - 触发范围内存在 `isGrounded && !allowLegStep` 单位时应打开；
   - open 状态变化时才发送 toggle；
+  - remote toggle 仅 tile 存在且 build 是 AutoDoorBuild 时有效；
   - `setOpen` 总是更新 pathfinder，只有 `wasVisible` 时播放 effect/sound。
+- 已对照 `Door.control()/tapped()/origin()/effect()` 锁定：
+  - `control enabled` 在 net client、目标状态不变、关门且 tile 内有单位、origin timer 未到时均不 configure；
+  - `p1` 非零视为 shouldOpen；
+  - tapped 在 `open && unitsInTile` 或 origin timer 未到时不 configure，否则切换 `!open`；
+  - chained 为空时 origin 为 self，否则为 chained first；
+  - 当前 open=false 时 effect 为 openfx，open=true 时 effect 为 closefx。
 - 已对照 `Door` 构造器配置闭包锁定：
   - 非生成中先播放 origin doorSound/effect；
   - chained 为空时只处理 base；

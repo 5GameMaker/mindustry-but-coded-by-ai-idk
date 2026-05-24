@@ -188,6 +188,29 @@ pub struct DoorState {
     pub open: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoorEffectKind {
+    Open,
+    Close,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoorControlPlan {
+    pub configure: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoorTappedPlan {
+    pub configure: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutoDoorTriggerRect {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub size: f32,
+}
+
 pub fn door_check_solid(open: bool) -> bool {
     !open
 }
@@ -215,6 +238,44 @@ pub fn door_tapped_should_configure(
     origin_timer_ready: bool,
 ) -> bool {
     !(units_in_tile && open) && origin_timer_ready
+}
+
+pub fn door_effect_for_current_open(open: bool) -> DoorEffectKind {
+    if open {
+        DoorEffectKind::Close
+    } else {
+        DoorEffectKind::Open
+    }
+}
+
+pub fn door_origin_id(self_id: i32, chained_first: Option<i32>) -> i32 {
+    chained_first.unwrap_or(self_id)
+}
+
+pub fn door_control_enabled_plan(
+    open: bool,
+    p1: f64,
+    net_client: bool,
+    units_in_tile: bool,
+    origin_timer_ready: bool,
+) -> DoorControlPlan {
+    let should_open = p1.abs() > f64::EPSILON;
+    let blocked =
+        net_client || open == should_open || (units_in_tile && !should_open) || !origin_timer_ready;
+    DoorControlPlan {
+        configure: (!blocked).then_some(should_open),
+    }
+}
+
+pub fn door_tapped_plan(
+    open: bool,
+    units_in_tile: bool,
+    origin_timer_ready: bool,
+) -> DoorTappedPlan {
+    DoorTappedPlan {
+        configure: door_tapped_should_configure(open, units_in_tile, origin_timer_ready)
+            .then_some(!open),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -313,8 +374,30 @@ pub fn auto_door_should_open(ground_units_in_trigger: bool) -> bool {
     ground_units_in_trigger
 }
 
+pub fn auto_door_ground_check(is_grounded: bool, allow_leg_step: bool) -> bool {
+    is_grounded && !allow_leg_step
+}
+
 pub fn auto_door_trigger_size(block_size: i32, tile_size: f32, trigger_margin: f32) -> f32 {
     block_size as f32 * tile_size + trigger_margin * 2.0
+}
+
+pub fn auto_door_trigger_rect(
+    center_x: f32,
+    center_y: f32,
+    block_size: i32,
+    tile_size: f32,
+    trigger_margin: f32,
+) -> AutoDoorTriggerRect {
+    AutoDoorTriggerRect {
+        center_x,
+        center_y,
+        size: auto_door_trigger_size(block_size, tile_size, trigger_margin),
+    }
+}
+
+pub fn auto_door_remote_toggle_valid(tile_exists: bool, is_auto_door_build: bool) -> bool {
+    tile_exists && is_auto_door_build
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3682,6 +3765,44 @@ mod tests {
         assert!(!door_can_toggle(false, false, false, true));
         assert!(door_tapped_should_configure(false, true, true));
         assert!(!door_tapped_should_configure(true, true, true));
+        assert_eq!(door_effect_for_current_open(false), DoorEffectKind::Open);
+        assert_eq!(door_effect_for_current_open(true), DoorEffectKind::Close);
+        assert_eq!(door_origin_id(10, None), 10);
+        assert_eq!(door_origin_id(10, Some(7)), 7);
+        assert_eq!(
+            door_control_enabled_plan(false, 1.0, false, false, true),
+            DoorControlPlan {
+                configure: Some(true),
+            }
+        );
+        assert_eq!(
+            door_control_enabled_plan(true, 0.0, false, false, true),
+            DoorControlPlan {
+                configure: Some(false),
+            }
+        );
+        assert_eq!(
+            door_control_enabled_plan(true, 0.0, true, false, true),
+            DoorControlPlan { configure: None }
+        );
+        assert_eq!(
+            door_control_enabled_plan(true, 0.0, false, true, true),
+            DoorControlPlan { configure: None }
+        );
+        assert_eq!(
+            door_control_enabled_plan(false, 0.0, false, false, true),
+            DoorControlPlan { configure: None }
+        );
+        assert_eq!(
+            door_tapped_plan(false, true, true),
+            DoorTappedPlan {
+                configure: Some(true),
+            }
+        );
+        assert_eq!(
+            door_tapped_plan(true, true, true),
+            DoorTappedPlan { configure: None }
+        );
         assert_eq!(
             door_chain_toggle_plan(
                 [
@@ -3784,7 +3905,21 @@ mod tests {
         );
 
         assert!(auto_door_should_open(true));
+        assert!(auto_door_ground_check(true, false));
+        assert!(!auto_door_ground_check(false, false));
+        assert!(!auto_door_ground_check(true, true));
         assert_eq!(auto_door_trigger_size(2, 8.0, 12.0), 40.0);
+        assert_eq!(
+            auto_door_trigger_rect(20.0, 28.0, 2, 8.0, 12.0),
+            AutoDoorTriggerRect {
+                center_x: 20.0,
+                center_y: 28.0,
+                size: 40.0,
+            }
+        );
+        assert!(auto_door_remote_toggle_valid(true, true));
+        assert!(!auto_door_remote_toggle_valid(false, true));
+        assert!(!auto_door_remote_toggle_valid(true, false));
         assert_eq!(
             auto_door_update_plan(false, true, false, true),
             AutoDoorUpdatePlan {
