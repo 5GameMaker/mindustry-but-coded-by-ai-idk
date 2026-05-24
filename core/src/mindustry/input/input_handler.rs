@@ -773,6 +773,138 @@ impl BuildPlanBlockTransform {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InputHandlerLocalAction {
+    UnitControlRemote,
+    UnitControlLocal,
+    RequestUnitPayload,
+    RequestBuildPayload,
+    RequestDropPayload { x: f32, y: f32 },
+    TransferInventory { new_item_deposit_cooldown: f32 },
+    DropItem { angle: f32 },
+    ClearDroppingItem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CheckUnitFrame {
+    pub controlled_type_present: bool,
+    pub controlled_type_player_controllable: bool,
+    pub closest_unit_present: bool,
+    pub block_control_unit_present: bool,
+    pub net_client: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckUnitPlan {
+    pub accepted: bool,
+    pub action: Option<InputHandlerLocalAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PayloadPickupFrame {
+    pub unit_is_payload: bool,
+    pub pickup_unit_available: bool,
+    pub build_present: bool,
+    pub teams_can_interact: bool,
+    pub stored_payload_pickable: bool,
+    pub build_visibility_hidden: bool,
+    pub build_can_pickup: bool,
+    pub payload_can_pickup_build: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadPickupPlan {
+    pub accepted: bool,
+    pub action: Option<InputHandlerLocalAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PayloadDropFrame {
+    pub unit_is_payload: bool,
+    pub can_drop_payload: bool,
+    pub player_x: f32,
+    pub player_y: f32,
+}
+
+impl Default for PayloadDropFrame {
+    fn default() -> Self {
+        Self {
+            unit_is_payload: false,
+            can_drop_payload: false,
+            player_x: 0.0,
+            player_y: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadDropPlan {
+    pub accepted: bool,
+    pub action: Option<InputHandlerLocalAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CanShootFrame {
+    pub block_selected: bool,
+    pub on_configurable: bool,
+    pub dropping_item: bool,
+    pub actively_building: bool,
+    pub mech_flying: bool,
+    pub mining: bool,
+    pub command_mode: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DepositItemFrame {
+    pub item_deposit_cooldown: f32,
+    pub rules_item_deposit_cooldown: f32,
+    pub block_deposit_cooldown: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TryDropItemsFrame {
+    pub player_dead: bool,
+    pub dropping_item: bool,
+    pub stack_amount: i32,
+    pub can_tap_player: bool,
+    pub state_paused: bool,
+    pub build_present: bool,
+    pub build_accepts_stack: i32,
+    pub build_interactable: bool,
+    pub build_has_items: bool,
+    pub build_allow_deposit: bool,
+    pub can_deposit_item: bool,
+    pub rules_item_deposit_cooldown: f32,
+    pub drop_angle: f32,
+}
+
+impl Default for TryDropItemsFrame {
+    fn default() -> Self {
+        Self {
+            player_dead: false,
+            dropping_item: false,
+            stack_amount: 0,
+            can_tap_player: false,
+            state_paused: false,
+            build_present: false,
+            build_accepts_stack: 0,
+            build_interactable: false,
+            build_has_items: false,
+            build_allow_deposit: false,
+            can_deposit_item: false,
+            rules_item_deposit_cooldown: 0.0,
+            drop_angle: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TryDropItemsPlan {
+    pub player_dead_ignored: bool,
+    pub dropping_item: bool,
+    pub action: Option<InputHandlerLocalAction>,
+}
+
 impl RotateBlockOutcome {
     fn rejected(context: RotateBlockContext, reason: RotateBlockRejectReason) -> Self {
         Self {
@@ -3430,6 +3562,134 @@ where
         .collect()
 }
 
+pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
+    if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
+        return CheckUnitPlan {
+            accepted: false,
+            action: None,
+        };
+    }
+
+    let target_present = frame.closest_unit_present || frame.block_control_unit_present;
+    CheckUnitPlan {
+        accepted: target_present,
+        action: target_present.then_some(if frame.net_client {
+            InputHandlerLocalAction::UnitControlRemote
+        } else {
+            InputHandlerLocalAction::UnitControlLocal
+        }),
+    }
+}
+
+pub fn try_pickup_payload_plan(frame: PayloadPickupFrame) -> PayloadPickupPlan {
+    if !frame.unit_is_payload {
+        return PayloadPickupPlan {
+            accepted: false,
+            action: None,
+        };
+    }
+
+    if frame.pickup_unit_available {
+        return PayloadPickupPlan {
+            accepted: true,
+            action: Some(InputHandlerLocalAction::RequestUnitPayload),
+        };
+    }
+
+    if !frame.build_present {
+        return PayloadPickupPlan {
+            accepted: false,
+            action: None,
+        };
+    }
+
+    let can_pick_build = frame.teams_can_interact
+        && (frame.stored_payload_pickable
+            || (!frame.build_visibility_hidden
+                && frame.build_can_pickup
+                && frame.payload_can_pickup_build));
+
+    PayloadPickupPlan {
+        accepted: can_pick_build,
+        action: can_pick_build.then_some(InputHandlerLocalAction::RequestBuildPayload),
+    }
+}
+
+pub fn try_drop_payload_plan(frame: PayloadDropFrame) -> PayloadDropPlan {
+    let accepted = frame.unit_is_payload && frame.can_drop_payload;
+    PayloadDropPlan {
+        accepted,
+        action: accepted.then_some(InputHandlerLocalAction::RequestDropPayload {
+            x: frame.player_x,
+            y: frame.player_y,
+        }),
+    }
+}
+
+pub fn can_shoot_plan(frame: CanShootFrame) -> bool {
+    !frame.block_selected
+        && !frame.on_configurable
+        && !frame.dropping_item
+        && !frame.actively_building
+        && !frame.mech_flying
+        && !frame.mining
+        && !frame.command_mode
+}
+
+pub fn can_drop_item_plan(dropping_item: bool, can_tap_player: bool) -> bool {
+    dropping_item && !can_tap_player
+}
+
+pub fn can_deposit_item_plan(frame: DepositItemFrame) -> bool {
+    if frame.block_deposit_cooldown >= 0.0 {
+        frame.item_deposit_cooldown - frame.rules_item_deposit_cooldown
+            <= -frame.block_deposit_cooldown
+    } else {
+        frame.item_deposit_cooldown <= 0.0
+    }
+}
+
+pub fn try_drop_items_plan(frame: TryDropItemsFrame) -> TryDropItemsPlan {
+    if frame.player_dead {
+        return TryDropItemsPlan {
+            player_dead_ignored: true,
+            dropping_item: frame.dropping_item,
+            action: None,
+        };
+    }
+
+    if !frame.dropping_item || frame.stack_amount <= 0 || frame.can_tap_player || frame.state_paused
+    {
+        return TryDropItemsPlan {
+            player_dead_ignored: false,
+            dropping_item: false,
+            action: Some(InputHandlerLocalAction::ClearDroppingItem),
+        };
+    }
+
+    let can_transfer = frame.build_present
+        && frame.build_accepts_stack > 0
+        && frame.build_interactable
+        && frame.build_has_items
+        && frame.stack_amount > 0
+        && frame.build_allow_deposit
+        && frame.can_deposit_item;
+
+    TryDropItemsPlan {
+        player_dead_ignored: false,
+        dropping_item: false,
+        action: Some(if can_transfer {
+            InputHandlerLocalAction::TransferInventory {
+                new_item_deposit_cooldown: frame.rules_item_deposit_cooldown,
+            }
+        } else {
+            InputHandlerLocalAction::DropItem {
+                angle: frame.drop_angle,
+            }
+        }),
+    }
+}
+
 pub fn unit_building_control_select<C>(
     unit: Option<&UnitComp>,
     build: Option<&BuildingComp>,
@@ -5534,5 +5794,212 @@ mod tests {
 
         assert_eq!(packet.unit, UnitRef::Unit { id: 95 });
         assert_eq!(packet.build, BuildingRef::new(point2_pack(26, 28)));
+    }
+
+    #[test]
+    fn check_unit_plan_selects_remote_or_local_control_target() {
+        let missing = check_unit_plan(CheckUnitFrame::default());
+        assert!(!missing.accepted);
+        assert_eq!(missing.action, None);
+
+        let remote = check_unit_plan(CheckUnitFrame {
+            controlled_type_present: true,
+            controlled_type_player_controllable: true,
+            closest_unit_present: true,
+            net_client: true,
+            ..CheckUnitFrame::default()
+        });
+        assert!(remote.accepted);
+        assert_eq!(
+            remote.action,
+            Some(InputHandlerLocalAction::UnitControlRemote)
+        );
+
+        let local_block_unit = check_unit_plan(CheckUnitFrame {
+            controlled_type_present: true,
+            controlled_type_player_controllable: true,
+            block_control_unit_present: true,
+            net_client: false,
+            ..CheckUnitFrame::default()
+        });
+        assert_eq!(
+            local_block_unit.action,
+            Some(InputHandlerLocalAction::UnitControlLocal)
+        );
+    }
+
+    #[test]
+    fn payload_pickup_plan_prefers_unit_then_building_paths() {
+        let unit = try_pickup_payload_plan(PayloadPickupFrame {
+            unit_is_payload: true,
+            pickup_unit_available: true,
+            build_present: true,
+            ..PayloadPickupFrame::default()
+        });
+        assert_eq!(
+            unit.action,
+            Some(InputHandlerLocalAction::RequestUnitPayload)
+        );
+
+        let stored = try_pickup_payload_plan(PayloadPickupFrame {
+            unit_is_payload: true,
+            build_present: true,
+            teams_can_interact: true,
+            stored_payload_pickable: true,
+            ..PayloadPickupFrame::default()
+        });
+        assert_eq!(
+            stored.action,
+            Some(InputHandlerLocalAction::RequestBuildPayload)
+        );
+
+        let whole_build = try_pickup_payload_plan(PayloadPickupFrame {
+            unit_is_payload: true,
+            build_present: true,
+            teams_can_interact: true,
+            build_visibility_hidden: false,
+            build_can_pickup: true,
+            payload_can_pickup_build: true,
+            ..PayloadPickupFrame::default()
+        });
+        assert!(whole_build.accepted);
+
+        let rejected = try_pickup_payload_plan(PayloadPickupFrame {
+            unit_is_payload: true,
+            build_present: true,
+            teams_can_interact: true,
+            build_visibility_hidden: true,
+            build_can_pickup: true,
+            payload_can_pickup_build: true,
+            ..PayloadPickupFrame::default()
+        });
+        assert!(!rejected.accepted);
+    }
+
+    #[test]
+    fn payload_drop_plan_requires_payload_unit_and_drop_capability() {
+        let rejected = try_drop_payload_plan(PayloadDropFrame {
+            unit_is_payload: true,
+            can_drop_payload: false,
+            player_x: 1.0,
+            player_y: 2.0,
+        });
+        assert!(!rejected.accepted);
+
+        let accepted = try_drop_payload_plan(PayloadDropFrame {
+            unit_is_payload: true,
+            can_drop_payload: true,
+            player_x: 3.0,
+            player_y: 4.0,
+        });
+        assert_eq!(
+            accepted.action,
+            Some(InputHandlerLocalAction::RequestDropPayload { x: 3.0, y: 4.0 })
+        );
+    }
+
+    #[test]
+    fn can_shoot_plan_matches_java_gate_conditions() {
+        assert!(can_shoot_plan(CanShootFrame::default()));
+
+        for frame in [
+            CanShootFrame {
+                block_selected: true,
+                ..CanShootFrame::default()
+            },
+            CanShootFrame {
+                on_configurable: true,
+                ..CanShootFrame::default()
+            },
+            CanShootFrame {
+                dropping_item: true,
+                ..CanShootFrame::default()
+            },
+            CanShootFrame {
+                actively_building: true,
+                ..CanShootFrame::default()
+            },
+            CanShootFrame {
+                mech_flying: true,
+                ..CanShootFrame::default()
+            },
+            CanShootFrame {
+                mining: true,
+                ..CanShootFrame::default()
+            },
+            CanShootFrame {
+                command_mode: true,
+                ..CanShootFrame::default()
+            },
+        ] {
+            assert!(!can_shoot_plan(frame));
+        }
+    }
+
+    #[test]
+    fn drop_item_and_deposit_plans_follow_cooldown_and_target_rules() {
+        assert!(can_drop_item_plan(true, false));
+        assert!(!can_drop_item_plan(true, true));
+
+        assert!(can_deposit_item_plan(DepositItemFrame {
+            item_deposit_cooldown: 3.0,
+            rules_item_deposit_cooldown: 10.0,
+            block_deposit_cooldown: 5.0,
+        }));
+        assert!(!can_deposit_item_plan(DepositItemFrame {
+            item_deposit_cooldown: 6.0,
+            rules_item_deposit_cooldown: 10.0,
+            block_deposit_cooldown: 5.0,
+        }));
+        assert!(can_deposit_item_plan(DepositItemFrame {
+            item_deposit_cooldown: 0.0,
+            rules_item_deposit_cooldown: 10.0,
+            block_deposit_cooldown: -1.0,
+        }));
+
+        let cleared = try_drop_items_plan(TryDropItemsFrame {
+            dropping_item: true,
+            stack_amount: 3,
+            can_tap_player: true,
+            ..TryDropItemsFrame::default()
+        });
+        assert_eq!(
+            cleared.action,
+            Some(InputHandlerLocalAction::ClearDroppingItem)
+        );
+        assert!(!cleared.dropping_item);
+
+        let transfer = try_drop_items_plan(TryDropItemsFrame {
+            dropping_item: true,
+            stack_amount: 3,
+            build_present: true,
+            build_accepts_stack: 3,
+            build_interactable: true,
+            build_has_items: true,
+            build_allow_deposit: true,
+            can_deposit_item: true,
+            rules_item_deposit_cooldown: 12.0,
+            drop_angle: 45.0,
+            ..TryDropItemsFrame::default()
+        });
+        assert_eq!(
+            transfer.action,
+            Some(InputHandlerLocalAction::TransferInventory {
+                new_item_deposit_cooldown: 12.0
+            })
+        );
+
+        let drop = try_drop_items_plan(TryDropItemsFrame {
+            dropping_item: true,
+            stack_amount: 3,
+            build_present: true,
+            build_accepts_stack: 0,
+            drop_angle: 90.0,
+            ..TryDropItemsFrame::default()
+        });
+        assert_eq!(
+            drop.action,
+            Some(InputHandlerLocalAction::DropItem { angle: 90.0 })
+        );
     }
 }
