@@ -30,7 +30,7 @@ use crate::mindustry::net::{
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
-use crate::mindustry::world::{meta::BuildVisibility, point2_pack};
+use crate::mindustry::world::{meta::BuildVisibility, placement_bounds, point2_pack, BuildBounds};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileConfigRejectReason {
@@ -771,6 +771,212 @@ impl BuildPlanBlockTransform {
             self.plan_rotation(rotation)
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueuedBuildPlanSnapshot {
+    pub plan: BuildPlan,
+    pub footprint: BuildPlanBlockTransform,
+    /// Mirrors Java's identity `plan != ignore` check. The caller marks the
+    /// exact queued plan that should be ignored for this placement probe.
+    pub ignored: bool,
+    /// Precomputed `candidate.canReplace(plan.block)` result for the queued
+    /// plan. Keeping it explicit avoids pulling the whole block registry into
+    /// this pure input planner.
+    pub candidate_can_replace: bool,
+}
+
+impl QueuedBuildPlanSnapshot {
+    pub fn new(plan: BuildPlan, footprint: BuildPlanBlockTransform) -> Self {
+        Self {
+            plan,
+            footprint,
+            ignored: false,
+            candidate_can_replace: false,
+        }
+    }
+
+    pub fn ignored(mut self) -> Self {
+        self.ignored = true;
+        self
+    }
+
+    pub fn replaceable_by_candidate(mut self) -> Self {
+        self.candidate_can_replace = true;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidPlaceFrame {
+    /// Result of upstream `Build.validPlace(...)` or
+    /// `Build.validPlaceIgnoreUnits(...)`.
+    pub base_valid: bool,
+    pub player_is_builder: bool,
+    pub x: i32,
+    pub y: i32,
+    pub block: BuildPlanBlockTransform,
+    pub queued_plans: Vec<QueuedBuildPlanSnapshot>,
+}
+
+impl Default for ValidPlaceFrame {
+    fn default() -> Self {
+        Self {
+            base_valid: false,
+            player_is_builder: false,
+            x: 0,
+            y: 0,
+            block: BuildPlanBlockTransform::single(),
+            queued_plans: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreakBlockTileSnapshot {
+    pub x: i32,
+    pub y: i32,
+    /// Java redirects a clicked multiblock tile through `tile.build.tile`.
+    pub build_origin: Option<(i32, i32)>,
+}
+
+impl BreakBlockTileSnapshot {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self {
+            x,
+            y,
+            build_origin: None,
+        }
+    }
+
+    pub const fn with_build_origin(mut self, x: i32, y: i32) -> Self {
+        self.build_origin = Some((x, y));
+        self
+    }
+
+    pub const fn target(self) -> (i32, i32) {
+        match self.build_origin {
+            Some(origin) => origin,
+            None => (self.x, self.y),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BreakBlockFrame {
+    pub player_is_builder: bool,
+    pub tile: Option<BreakBlockTileSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TryBreakBlockFrame {
+    pub valid_break: bool,
+    pub break_frame: BreakBlockFrame,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RebuildBlockPlanSnapshot {
+    pub x: i32,
+    pub y: i32,
+    pub rotation: i32,
+    pub block: String,
+    pub config: TypeValue,
+    pub footprint: BuildPlanBlockTransform,
+}
+
+impl RebuildBlockPlanSnapshot {
+    pub fn new(
+        x: i32,
+        y: i32,
+        rotation: i32,
+        block: impl Into<String>,
+        config: TypeValue,
+        footprint: BuildPlanBlockTransform,
+    ) -> Self {
+        Self {
+            x,
+            y,
+            rotation,
+            block: block.into(),
+            config,
+            footprint,
+        }
+    }
+
+    pub fn to_build_plan(&self) -> BuildPlan {
+        BuildPlan::new_config(
+            self.x,
+            self.y,
+            self.rotation,
+            self.block.clone(),
+            self.config.clone(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RebuildRepairCandidate {
+    pub scan_x: i32,
+    pub scan_y: i32,
+    pub tile_pos: i32,
+    pub can_repair: bool,
+    pub plan: BuildPlan,
+}
+
+impl RebuildRepairCandidate {
+    pub fn new(scan_x: i32, scan_y: i32, tile_pos: i32, can_repair: bool, plan: BuildPlan) -> Self {
+        Self {
+            scan_x,
+            scan_y,
+            tile_pos,
+            can_repair,
+            plan,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebuildAreaSelection {
+    pub x: i32,
+    pub y: i32,
+    pub x2: i32,
+    pub y2: i32,
+    pub rotation: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RebuildAreaFrame {
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
+    pub rotation: i32,
+    pub max_length: i32,
+    pub broken_plans: Vec<RebuildBlockPlanSnapshot>,
+    pub repair_candidates: Vec<RebuildRepairCandidate>,
+}
+
+impl Default for RebuildAreaFrame {
+    fn default() -> Self {
+        Self {
+            x1: 0,
+            y1: 0,
+            x2: 0,
+            y2: 0,
+            rotation: 0,
+            max_length: 999_999_999,
+            broken_plans: Vec::new(),
+            repair_candidates: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RebuildAreaPlan {
+    pub selection: RebuildAreaSelection,
+    pub rebuild_plans: Vec<BuildPlan>,
+    pub repair_plans: Vec<BuildPlan>,
+    pub repair_tile_positions: Vec<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3562,6 +3768,122 @@ where
         .collect()
 }
 
+pub fn build_bounds_for_plan(x: i32, y: i32, footprint: BuildPlanBlockTransform) -> BuildBounds {
+    placement_bounds(x, y, footprint.size, footprint.offset)
+}
+
+pub fn build_bounds_overlap(left: BuildBounds, right: BuildBounds) -> bool {
+    left.x < right.x + right.width
+        && left.x + left.width > right.x
+        && left.y < right.y + right.height
+        && left.y + left.height > right.y
+}
+
+pub fn valid_place_plan(frame: ValidPlaceFrame) -> bool {
+    if !frame.base_valid {
+        return false;
+    }
+
+    if !frame.player_is_builder || frame.queued_plans.is_empty() {
+        return true;
+    }
+
+    let candidate = build_bounds_for_plan(frame.x, frame.y, frame.block);
+    frame.queued_plans.iter().all(|snapshot| {
+        if snapshot.ignored || snapshot.plan.breaking {
+            return true;
+        }
+
+        if snapshot.candidate_can_replace
+            && snapshot.plan.x == frame.x
+            && snapshot.plan.y == frame.y
+        {
+            return true;
+        }
+
+        let queued = build_bounds_for_plan(snapshot.plan.x, snapshot.plan.y, snapshot.footprint);
+        !build_bounds_overlap(candidate, queued)
+    })
+}
+
+pub fn valid_break_plan(base_valid_break: bool) -> bool {
+    base_valid_break
+}
+
+pub fn break_block_plan(frame: BreakBlockFrame) -> Option<BuildPlan> {
+    if !frame.player_is_builder {
+        return None;
+    }
+    let tile = frame.tile?;
+    let (x, y) = tile.target();
+    Some(BuildPlan::new_break(x, y))
+}
+
+pub fn try_break_block_plan(frame: TryBreakBlockFrame) -> Option<BuildPlan> {
+    valid_break_plan(frame.valid_break).then(|| break_block_plan(frame.break_frame))?
+}
+
+pub fn rebuild_area_plan(frame: RebuildAreaFrame) -> RebuildAreaPlan {
+    let result = super::placement::normalize_area(
+        frame.x1,
+        frame.y1,
+        frame.x2,
+        frame.y2,
+        frame.rotation,
+        false,
+        frame.max_length,
+    );
+    let selection = RebuildAreaSelection {
+        x: result.x,
+        y: result.y,
+        x2: result.x2,
+        y2: result.y2,
+        rotation: result.rotation,
+    };
+    let selection_bounds = BuildBounds {
+        x: result.x as f32 * TILE_SIZE as f32,
+        y: result.y as f32 * TILE_SIZE as f32,
+        width: (result.x2 - result.x) as f32 * TILE_SIZE as f32,
+        height: (result.y2 - result.y) as f32 * TILE_SIZE as f32,
+    };
+
+    let rebuild_plans = frame
+        .broken_plans
+        .iter()
+        .filter(|plan| {
+            build_bounds_overlap(
+                build_bounds_for_plan(plan.x, plan.y, plan.footprint),
+                selection_bounds,
+            )
+        })
+        .map(RebuildBlockPlanSnapshot::to_build_plan)
+        .collect();
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut repair_plans = Vec::new();
+    let mut repair_tile_positions = Vec::new();
+    for candidate in frame.repair_candidates {
+        if candidate.scan_x < result.x
+            || candidate.scan_x > result.x2
+            || candidate.scan_y < result.y
+            || candidate.scan_y > result.y2
+            || !candidate.can_repair
+            || !seen.insert(candidate.tile_pos)
+        {
+            continue;
+        }
+        repair_tile_positions.push(candidate.tile_pos);
+        repair_plans.push(candidate.plan);
+    }
+
+    RebuildAreaPlan {
+        selection,
+        rebuild_plans,
+        repair_plans,
+        repair_tile_positions,
+    }
+}
+
 pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
     if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
         return CheckUnitPlan {
@@ -5720,6 +6042,198 @@ mod tests {
             flipped[0].config,
             TypeValue::Point2Array(vec![Point2::new(1, -2)])
         );
+    }
+
+    #[test]
+    fn valid_place_plan_combines_base_validity_and_queued_plan_conflicts() {
+        let candidate = BuildPlanBlockTransform::new(2, 8.0, true, false, false);
+        let queued = QueuedBuildPlanSnapshot::new(
+            BuildPlan::new_place(4, 4, 0, "duo"),
+            BuildPlanBlockTransform::single(),
+        );
+
+        assert!(!valid_place_plan(ValidPlaceFrame {
+            base_valid: false,
+            player_is_builder: true,
+            x: 4,
+            y: 4,
+            block: candidate,
+            queued_plans: vec![queued.clone()],
+        }));
+
+        assert!(valid_place_plan(ValidPlaceFrame {
+            base_valid: true,
+            player_is_builder: false,
+            x: 4,
+            y: 4,
+            block: candidate,
+            queued_plans: vec![queued.clone()],
+        }));
+
+        assert!(!valid_place_plan(ValidPlaceFrame {
+            base_valid: true,
+            player_is_builder: true,
+            x: 4,
+            y: 4,
+            block: candidate,
+            queued_plans: vec![queued],
+        }));
+
+        assert!(valid_place_plan(ValidPlaceFrame {
+            base_valid: true,
+            player_is_builder: true,
+            x: 4,
+            y: 4,
+            block: candidate,
+            queued_plans: vec![QueuedBuildPlanSnapshot::new(
+                BuildPlan::new_place(10, 10, 0, "duo"),
+                BuildPlanBlockTransform::single(),
+            )],
+        }));
+    }
+
+    #[test]
+    fn valid_place_plan_respects_ignore_breaking_and_replace_exceptions() {
+        let candidate = BuildPlanBlockTransform::new(2, 8.0, true, false, false);
+        let ignored = QueuedBuildPlanSnapshot::new(
+            BuildPlan::new_place(2, 2, 0, "router"),
+            BuildPlanBlockTransform::single(),
+        )
+        .ignored();
+        let breaking = QueuedBuildPlanSnapshot::new(
+            BuildPlan::new_break(2, 2),
+            BuildPlanBlockTransform::single(),
+        );
+        let replaceable = QueuedBuildPlanSnapshot::new(
+            BuildPlan::new_place(2, 2, 0, "router"),
+            BuildPlanBlockTransform::single(),
+        )
+        .replaceable_by_candidate();
+
+        assert!(valid_place_plan(ValidPlaceFrame {
+            base_valid: true,
+            player_is_builder: true,
+            x: 2,
+            y: 2,
+            block: candidate,
+            queued_plans: vec![ignored, breaking, replaceable],
+        }));
+
+        assert!(!valid_place_plan(ValidPlaceFrame {
+            base_valid: true,
+            player_is_builder: true,
+            x: 2,
+            y: 2,
+            block: candidate,
+            queued_plans: vec![QueuedBuildPlanSnapshot::new(
+                BuildPlan::new_place(2, 3, 0, "wall"),
+                BuildPlanBlockTransform::single(),
+            )
+            .replaceable_by_candidate()],
+        }));
+    }
+
+    #[test]
+    fn break_block_plan_targets_build_origin_and_obeys_valid_break_gate() {
+        assert_eq!(
+            break_block_plan(BreakBlockFrame {
+                player_is_builder: true,
+                tile: Some(BreakBlockTileSnapshot::new(7, 8).with_build_origin(6, 6)),
+            }),
+            Some(BuildPlan::new_break(6, 6))
+        );
+
+        assert_eq!(
+            break_block_plan(BreakBlockFrame {
+                player_is_builder: false,
+                tile: Some(BreakBlockTileSnapshot::new(7, 8)),
+            }),
+            None
+        );
+
+        assert_eq!(
+            try_break_block_plan(TryBreakBlockFrame {
+                valid_break: false,
+                break_frame: BreakBlockFrame {
+                    player_is_builder: true,
+                    tile: Some(BreakBlockTileSnapshot::new(7, 8)),
+                },
+            }),
+            None
+        );
+
+        assert_eq!(
+            try_break_block_plan(TryBreakBlockFrame {
+                valid_break: true,
+                break_frame: BreakBlockFrame {
+                    player_is_builder: true,
+                    tile: Some(BreakBlockTileSnapshot::new(7, 8)),
+                },
+            }),
+            Some(BuildPlan::new_break(7, 8))
+        );
+    }
+
+    #[test]
+    fn rebuild_area_plan_requeues_overlapping_broken_plans_and_dedupes_repairs() {
+        let footprint = BuildPlanBlockTransform::single();
+        let router = RebuildBlockPlanSnapshot::new(
+            2,
+            2,
+            1,
+            "router",
+            TypeValue::String("cfg".into()),
+            footprint,
+        );
+        let outside = RebuildBlockPlanSnapshot::new(20, 20, 0, "duo", TypeValue::Null, footprint);
+        let repair = BuildPlan::new_config(3, 3, 2, "duo", TypeValue::Int(9));
+
+        let plan = rebuild_area_plan(RebuildAreaFrame {
+            x1: 1,
+            y1: 1,
+            x2: 4,
+            y2: 4,
+            rotation: 0,
+            broken_plans: vec![router, outside],
+            repair_candidates: vec![
+                RebuildRepairCandidate::new(3, 3, point2_pack(3, 3), true, repair.clone()),
+                RebuildRepairCandidate::new(3, 4, point2_pack(3, 3), true, repair.clone()),
+                RebuildRepairCandidate::new(
+                    4,
+                    4,
+                    point2_pack(4, 4),
+                    false,
+                    BuildPlan::new_place(4, 4, 0, "duo"),
+                ),
+                RebuildRepairCandidate::new(
+                    8,
+                    8,
+                    point2_pack(8, 8),
+                    true,
+                    BuildPlan::new_place(8, 8, 0, "duo"),
+                ),
+            ],
+            ..RebuildAreaFrame::default()
+        });
+
+        assert_eq!(
+            plan.selection,
+            RebuildAreaSelection {
+                x: 1,
+                y: 1,
+                x2: 4,
+                y2: 4,
+                rotation: 0
+            }
+        );
+        assert_eq!(plan.rebuild_plans.len(), 1);
+        assert_eq!(plan.rebuild_plans[0].block.as_deref(), Some("router"));
+        assert_eq!(
+            plan.rebuild_plans[0].config,
+            TypeValue::String("cfg".into())
+        );
+        assert_eq!(plan.repair_plans, vec![repair]);
+        assert_eq!(plan.repair_tile_positions, vec![point2_pack(3, 3)]);
     }
 
     #[test]
