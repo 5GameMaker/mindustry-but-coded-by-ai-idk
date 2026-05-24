@@ -392,6 +392,14 @@ pub struct BuilderAiFollowSearch {
     pub found: bool,
 }
 
+impl BuilderAiRuntimeInput {
+    pub fn with_follow_search(mut self, search: BuilderAiFollowSearch) -> Self {
+        self.next_following = search.following;
+        self.next_assist_following = search.assist_following;
+        self
+    }
+}
+
 impl Default for BuilderAiRuntimeInput {
     fn default() -> Self {
         Self {
@@ -1645,5 +1653,55 @@ mod tests {
         let no_assist =
             builder.search_builder_ai_follow_targets([follow].iter(), candidates.iter(), false);
         assert_eq!(no_assist.assist_following, None);
+    }
+
+    #[test]
+    fn builder_ai_runtime_consumes_follow_search_results_and_only_assist_blocks_rebuild() {
+        let builder = BuilderComp::new(builder_unit(), TeamId(1));
+        let search = builder.search_builder_ai_follow_targets(
+            [BuilderAiFollowCandidate::new(
+                31,
+                BuildPlan::new_place(1, 1, 0, "router"),
+                32.0,
+                3.0,
+            )]
+            .iter(),
+            [BuilderAiAssistCandidate::new(41, 16.0)].iter(),
+            true,
+        );
+
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        let mut state = BuilderAiRuntimeState {
+            only_assist: true,
+            ..BuilderAiRuntimeState::default()
+        };
+        let mut team_data = crate::mindustry::game::TeamData::new(1);
+        team_data.plans = vec![TeamBlockPlan::new(9, 9, 0, "duo", None)];
+
+        let step = builder.apply_builder_ai_tick(
+            &mut state,
+            &mut team_data,
+            BuilderAiRuntimeInput {
+                timer_follow_ready: true,
+                timer_find_ready: true,
+                ..BuilderAiRuntimeInput::default().with_follow_search(search)
+            },
+            |_| false,
+            |_| true,
+            |_| true,
+            |_| false,
+            |_| true,
+            |_| false,
+        );
+
+        assert_eq!(step.branch, BuilderAiRuntimeBranch::Idle);
+        assert_eq!(state.following, Some(31));
+        assert_eq!(state.assist_following, Some(41));
+        assert_eq!(step.claimed_team_plan, None);
+        assert!(builder.plans.is_empty());
+        assert_eq!(
+            team_data.plans,
+            vec![TeamBlockPlan::new(9, 9, 0, "duo", None)]
+        );
     }
 }
