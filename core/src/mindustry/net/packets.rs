@@ -3272,13 +3272,26 @@ impl PacketRuntime for StreamChunk {
 impl PacketCodec for StreamChunk {
     fn read_from<R: Read>(read: &mut R) -> std::io::Result<Self> {
         let id = read_i32(read)?;
-        let len = read_i16(read)? as usize;
+        let raw_len = read_i16(read)?;
+        if raw_len < 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "negative StreamChunk length",
+            ));
+        }
+        let len = raw_len as usize;
         let mut data = vec![0; len];
         read.read_exact(&mut data)?;
         Ok(Self { id, data })
     }
 
     fn write_to<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        if self.data.len() > i16::MAX as usize {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "StreamChunk payload exceeds Java short length",
+            ));
+        }
         write_i32(write, self.id)?;
         write_i16(write, self.data.len() as i16)?;
         write.write_all(&self.data)
@@ -7682,6 +7695,22 @@ mod tests {
         assert_eq!(bytes, vec![0, 0, 0, 3, 0, 3, 1, 2, 3]);
         let decoded = StreamChunk::read_from(&mut bytes.as_slice()).unwrap();
         assert_eq!(decoded, packet);
+    }
+
+    #[test]
+    fn stream_chunk_rejects_lengths_that_cannot_roundtrip_java_short() {
+        let oversized = StreamChunk {
+            id: 1,
+            data: vec![0; i16::MAX as usize + 1],
+        };
+        let err = oversized.write_to(&mut Vec::new()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+
+        let mut negative_len = Vec::new();
+        negative_len.extend_from_slice(&1i32.to_be_bytes());
+        negative_len.extend_from_slice(&(-1i16).to_be_bytes());
+        let err = StreamChunk::read_from(&mut negative_len.as_slice()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]
