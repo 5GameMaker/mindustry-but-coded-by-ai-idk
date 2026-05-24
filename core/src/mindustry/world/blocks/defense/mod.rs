@@ -990,6 +990,16 @@ pub fn apply_build_turret_unit_tick(
     unit.refresh_component_views();
 }
 
+pub fn build_turret_capture_unit_plans(state: &mut BuildTurretState, unit: &UnitComp) {
+    state.plans = unit.builder.plans.iter().cloned().collect();
+    state.raw_plans.clear();
+}
+
+pub fn build_turret_apply_unit_plans(state: &BuildTurretState, unit: &mut UnitComp) {
+    unit.builder.plans = state.plans.iter().cloned().collect();
+    unit.refresh_component_views();
+}
+
 const BUILD_TURRET_DRAW_COMMANDS_WITH_GLOW_AND_UNIT: &[BuildTurretDrawCommand] = &[
     BuildTurretDrawCommand::Base,
     BuildTurretDrawCommand::ResetColor,
@@ -1881,6 +1891,48 @@ mod tests {
                 .plans,
             Vec::<BuildPlan>::new()
         );
+    }
+
+    #[test]
+    fn build_turret_state_plans_bridge_unit_builder_queue() {
+        let mut unit = UnitComp::new(
+            12,
+            build_turret_unit_type(-1, "build-tower", 90.0, 5.0, 80.0, 1.0),
+            TeamId(1),
+        );
+        unit.builder
+            .plans
+            .push_back(BuildPlan::new_place(1, 2, 0, "router"));
+        unit.builder
+            .plans
+            .push_back(BuildPlan::new_string_config(3, 4, 1, "conveyor", "cfg"));
+        let mut state = BuildTurretState {
+            raw_plans: vec![1, 2, 3],
+            ..BuildTurretState::default()
+        };
+
+        build_turret_capture_unit_plans(&mut state, &unit);
+        assert_eq!(
+            state.plans,
+            vec![
+                BuildPlan::new_place(1, 2, 0, "router"),
+                BuildPlan::new_string_config(3, 4, 1, "conveyor", "cfg"),
+            ]
+        );
+        assert!(state.raw_plans.is_empty());
+
+        unit.builder.plans.clear();
+        build_turret_apply_unit_plans(&state, &mut unit);
+        assert_eq!(unit.builder.plans.len(), 2);
+        assert_eq!(
+            unit.builder.plans.front(),
+            Some(&BuildPlan::new_place(1, 2, 0, "router"))
+        );
+        assert_eq!(
+            unit.builder.plans.back(),
+            Some(&BuildPlan::new_string_config(3, 4, 1, "conveyor", "cfg"))
+        );
+        assert!(unit.is_building());
     }
 
     #[test]
