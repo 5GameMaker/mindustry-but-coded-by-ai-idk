@@ -9,8 +9,9 @@ use crate::mindustry::io::type_io::{
 };
 use crate::mindustry::io::{
     read_chunk_map, read_content_header_snapshot, read_content_patches, read_custom_chunks,
-    read_legacy_team_blocks, summarize_marker_region_bytes, ContentHeaderSnapshot, ContentPatchSet,
-    LegacyShortChunkMap, LegacyTeamBlocks, MarkerRegionSummary,
+    read_legacy_team_blocks, summarize_marker_region_bytes, write_content_header_snapshot,
+    write_content_patches, write_custom_chunks, ContentHeaderSnapshot, ContentPatchSet,
+    CustomChunkSet, LegacyShortChunkMap, LegacyTeamBlocks, MarkerRegionSummary,
 };
 use crate::mindustry::vars::DEFAULT_PORT;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
@@ -140,6 +141,58 @@ impl NetworkWorldData {
             ..Self::default()
         }
     }
+
+    /// Builds Java `NetworkIO.writeWorld(...)` SaveVersion tail bytes from
+    /// parsed snapshots when available, falling back to the preserved raw
+    /// section bytes. This keeps the write path deterministic while the full
+    /// map/team/marker SaveVersion writers are migrated incrementally.
+    pub fn materialized_tail_sections(&self) -> io::Result<NetworkWorldTailSections> {
+        let content_header = match &self.content_header_snapshot {
+            Some(snapshot) => {
+                let mut bytes = Vec::new();
+                write_content_header_snapshot(&mut bytes, snapshot)?;
+                bytes
+            }
+            None => self.content_header.clone(),
+        };
+
+        let content_patches = match &self.content_patches_snapshot {
+            Some(snapshot) => {
+                let mut bytes = Vec::new();
+                write_content_patches(&mut bytes, snapshot)?;
+                bytes
+            }
+            None => self.content_patches.clone(),
+        };
+
+        let custom_chunks = if !self.custom_chunks.is_empty() {
+            self.custom_chunks.clone()
+        } else {
+            let empty = CustomChunkSet::default();
+            let mut bytes = Vec::new();
+            write_custom_chunks(&mut bytes, &empty)?;
+            bytes
+        };
+
+        Ok(NetworkWorldTailSections {
+            content_header,
+            content_patches,
+            map_bytes: self.map_bytes.clone(),
+            team_blocks: self.team_blocks.clone(),
+            markers: self.markers.clone(),
+            custom_chunks,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NetworkWorldTailSections {
+    pub content_header: Vec<u8>,
+    pub content_patches: Vec<u8>,
+    pub map_bytes: Vec<u8>,
+    pub team_blocks: Vec<u8>,
+    pub markers: Vec<u8>,
+    pub custom_chunks: Vec<u8>,
 }
 
 impl ServerData {
@@ -238,15 +291,16 @@ pub fn write_world_data_raw(data: &NetworkWorldData) -> io::Result<Vec<u8>> {
     buffer.extend_from_slice(&data.player_id.to_be_bytes());
     buffer.extend_from_slice(&data.player_bytes);
 
-    // SaveVersion-backed tail. These are placeholders until the real map/save
-    // codecs are migrated; keeping them here preserves one explicit runtime
-    // insertion point instead of scattering ad-hoc bytes through NetServer.
-    buffer.extend_from_slice(&data.content_header);
-    buffer.extend_from_slice(&data.content_patches);
-    buffer.extend_from_slice(&data.map_bytes);
-    buffer.extend_from_slice(&data.team_blocks);
-    buffer.extend_from_slice(&data.markers);
-    buffer.extend_from_slice(&data.custom_chunks);
+    // SaveVersion-backed tail. Prefer parsed snapshots when callers have them,
+    // but retain raw section bytes for map/team/marker chunks until their write
+    // codecs are fully migrated.
+    let tail = data.materialized_tail_sections()?;
+    buffer.extend_from_slice(&tail.content_header);
+    buffer.extend_from_slice(&tail.content_patches);
+    buffer.extend_from_slice(&tail.map_bytes);
+    buffer.extend_from_slice(&tail.team_blocks);
+    buffer.extend_from_slice(&tail.markers);
+    buffer.extend_from_slice(&tail.custom_chunks);
 
     Ok(buffer)
 }
@@ -1140,6 +1194,58 @@ mod tests {
         expected.extend_from_slice(&[0xaa, 0xbb, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
 
         assert_eq!(raw, expected);
+    }
+
+    #[test]
+    fn world_data_raw_materializes_content_snapshots_and_empty_custom_chunks() {
+        let data = NetworkWorldData {
+            player_id: 42,
+            content_header_snapshot: Some(ContentHeaderSnapshot {
+                entries: vec![ContentHeaderEntry {
+                    content_type: 1,
+                    names: vec!["copper".into(), "lead".into()],
+                }],
+            }),
+            content_patches_snapshot: Some(ContentPatchSet {
+                patches: vec![b"patch-a".to_vec()],
+            }),
+            map_bytes: vec![0x03],
+            team_blocks: vec![0x04],
+            markers: vec![0x7b, 0x7d],
+            ..NetworkWorldData::default()
+        };
+
+        let tail = data.materialized_tail_sections().unwrap();
+        let mut expected_header = Vec::new();
+        write_content_header_snapshot(
+            &mut expected_header,
+            data.content_header_snapshot.as_ref().unwrap(),
+        )
+        .unwrap();
+        let mut expected_patches = Vec::new();
+        write_content_patches(
+            &mut expected_patches,
+            data.content_patches_snapshot.as_ref().unwrap(),
+        )
+        .unwrap();
+        let mut expected_custom = Vec::new();
+        write_custom_chunks(&mut expected_custom, &CustomChunkSet::default()).unwrap();
+
+        assert_eq!(tail.content_header, expected_header);
+        assert_eq!(tail.content_patches, expected_patches);
+        assert_eq!(tail.map_bytes, vec![0x03]);
+        assert_eq!(tail.team_blocks, vec![0x04]);
+        assert_eq!(tail.markers, vec![0x7b, 0x7d]);
+        assert_eq!(tail.custom_chunks, expected_custom);
+
+        let raw = write_world_data_raw(&data).unwrap();
+        assert!(raw.ends_with(&expected_custom));
+        assert!(raw
+            .windows(expected_header.len())
+            .any(|window| window == expected_header.as_slice()));
+        assert!(raw
+            .windows(expected_patches.len())
+            .any(|window| window == expected_patches.as_slice()));
     }
 
     #[test]
