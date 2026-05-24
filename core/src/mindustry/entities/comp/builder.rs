@@ -26,6 +26,7 @@ pub const BUILDER_AI_BUILD_RADIUS: f32 = 1500.0;
 pub const BUILDER_AI_RETREAT_DST: f32 = 110.0;
 pub const BUILDER_AI_RETREAT_DELAY: f32 = 60.0 * 2.0;
 pub const BUILDER_AI_ASSIST_EXTRA_RANGE: f32 = 60.0;
+pub const BUILDER_AI_ASSIST_WITHIN_EXTRA_RANGE: f32 = 65.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuilderRequirement {
@@ -458,6 +459,7 @@ pub struct BuilderAiMoveToPlan {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BuilderAiMoveToAssist {
     pub range: f32,
+    pub within_range: f32,
     pub moving: bool,
 }
 
@@ -689,8 +691,11 @@ impl BuilderComp {
         within_assist_range: bool,
     ) -> BuilderAiMoveToAssist {
         let range = assist_hit_size + self.type_info.hit_size / 2.0 + BUILDER_AI_ASSIST_EXTRA_RANGE;
+        let within_range =
+            assist_hit_size + self.type_info.hit_size / 2.0 + BUILDER_AI_ASSIST_WITHIN_EXTRA_RANGE;
         BuilderAiMoveToAssist {
             range,
+            within_range,
             moving: !within_assist_range,
         }
     }
@@ -1485,6 +1490,34 @@ mod tests {
         );
         assert!(builder.plans.is_empty());
         assert!(team_data.plans.is_empty());
+    }
+
+    #[test]
+    fn builder_ai_move_outputs_match_java_builder_ai_ranges() {
+        let mut unit = builder_unit();
+        unit.build_range = 90.0;
+        unit.hit_size = 10.0;
+        let builder = BuilderComp::new(unit, TeamId(1));
+
+        assert_eq!(
+            builder.builder_ai_plan_move(false),
+            BuilderAiMoveToPlan {
+                range: 70.0,
+                margin: 20.0,
+                moving: true,
+            }
+        );
+        assert!(!builder.builder_ai_plan_move(true).moving);
+
+        assert_eq!(
+            builder.builder_ai_assist_move(12.0, false),
+            BuilderAiMoveToAssist {
+                range: 12.0 + 10.0 / 2.0 + BUILDER_AI_ASSIST_EXTRA_RANGE,
+                within_range: 12.0 + 10.0 / 2.0 + BUILDER_AI_ASSIST_WITHIN_EXTRA_RANGE,
+                moving: true,
+            }
+        );
+        assert!(!builder.builder_ai_assist_move(12.0, true).moving);
     }
 
     #[test]
