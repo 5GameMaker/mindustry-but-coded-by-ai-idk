@@ -407,6 +407,26 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `BuildTurretBuild.unit()/canControl()/buildRotation()/warmup()` 与真实 block runtime trait 接口；
 - 将当前 helper 汇总为真实 `BuildTurretBuild` runtime adapter，而不是只由测试直接调用。
 
+### 7.4 Thruster
+
+已推进：
+
+- `ThrusterBlockConfig`
+- `ThrusterDrawCommand`
+- `ThrusterDrawPlan`
+- `thruster_top_rotation(...)`
+- `thruster_draw_plan(...)`
+- 已对照 `Thruster.java` 锁定：
+  - 构造器 `rotate = true`；
+  - 构造器 `quickRotate = false`；
+  - plan/build 绘制顺序为 base region 后 topRegion；
+  - top rotation = `rotation * 90` / `rotdeg()`。
+
+仍需：
+
+- 接入真实 block rendering adapter；
+- 将 Thruster 类型配置接入内容块声明，而不是只在 helper 层测试。
+
 已完成 Rust 结构：
 
 ```text
