@@ -535,6 +535,69 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - shieldColor/teamColor 到真实渲染颜色的 adapter；
 - drawPlace/drawSelect dash circle helper。
 
+### 7.8 ShieldWall / ForceProjector / MendProjector / OverdriveProjector
+
+已推进：
+
+- `ShieldWallState`
+- `shield_wall_broken(...)`
+- `shield_wall_update(...)`
+- `shield_wall_damage(...)`
+- `shield_wall_pickup(...)`
+- `ShieldWallDrawCommand`
+- `ShieldWallDrawPlan`
+- `shield_wall_draw_plan(...)`
+- `write_shield_wall_state(...)`
+- `read_shield_wall_state(...)`
+- 已对照 `ShieldWall.draw()` 锁定：
+  - 总是先绘制 base region；
+  - `shieldRadius <= 0` 时只输出 region；
+  - radius = `shieldRadius * tilesize * size / 2`；
+  - animateShields 时走 fill square；
+  - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill square + outline square；
+  - additive glow alpha = `(1 - glowMag + absin(glowScl, glowMag)) * shieldRadius`。
+- `ForceProjectorState`
+- `force_projector_real_radius(...)`
+- `force_projector_shield(...)`
+- `force_projector_update(...)`
+- `force_projector_absorb_explosion(...)`
+- `write_force_projector_state(...)`
+- `read_force_projector_state(...)`
+- 已对照 `ForceProjector.updateTile()` 推进：
+  - `broken / buildup / radscl / warmup / phaseHeat / hit` 的主状态机；
+  - 破盾阈值与冷却；
+  - 爆炸吸收；
+  - Java write/read 的 5 个持久化字段。
+- `MendProjectorState`
+- `mend_projector_update(...)`
+- `write_mend_projector_state(...)`
+- `read_mend_projector_state(...)`
+- `OverdriveProjectorState`
+- `overdrive_projector_update(...)`
+- `write_overdrive_projector_state(...)`
+- `read_overdrive_projector_state(...)`
+- `overdrive-dome` 变体当前按同类 overdrive 投射器状态机推进。
+
+仍需：
+
+- `ForceProjector.deflectBullets()` / bullet absorb：
+  - 非同队；
+  - bullet type absorbable；
+  - 未被吸收；
+  - 点在正多边形内；
+  - 命中后 `hit = 1`、`buildup += shieldDamage`，并返回 effect/sound plan。
+- `ForceProjector.setBars()` / shield bar fraction；
+- `ForceProjector.sense(LAccess.heat/shield)`；
+- `ForceProjector.draw()` 独立 draw plan：
+  - topRegion additive buildup 层；
+  - animate/static shield poly；
+  - shieldRotation / sides；
+  - `Draw.reset()` 顺序。
+- `ForceProjector.onRemoved/pickedUp/inFogTo/shouldAmbientSound/overwrote` 生命周期辅助；
+- `MendProjector` 真实 range indexer / world heal / drawPlace / drawSelect 接入；
+- `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描、status/effect、draw/select 接入；
+- 上述 helper 继续接入真实 block runtime，避免停留在单测 helper。
+
 已完成 Rust 结构：
 
 ```text
