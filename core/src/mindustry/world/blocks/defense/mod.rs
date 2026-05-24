@@ -1140,6 +1140,155 @@ pub struct RegenProjectorUpdatePlan {
     pub optional_timer: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegenProjectorStatsPlan {
+    pub time_period: f32,
+    pub repair_time_seconds: i32,
+    pub range_blocks: i32,
+    pub booster_multiplier: Option<f32>,
+    pub booster_range_boost: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegenProjectorDrawCommand {
+    DrawerDraw,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegenProjectorDrawPlan {
+    pub commands: &'static [RegenProjectorDrawCommand],
+    pub draw_region: bool,
+}
+
+const REGEN_PROJECTOR_DRAW_COMMANDS: &[RegenProjectorDrawCommand] =
+    &[RegenProjectorDrawCommand::DrawerDraw];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegenProjectorRangePlan {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub square_size: f32,
+    pub selected_alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegenProjectorApplyPlan {
+    pub apply_mend_map: bool,
+    pub clear_mend_map: bool,
+}
+
+pub fn regen_projector_repair_time_seconds(heal_percent_per_frame: f32) -> f32 {
+    1.0 / (heal_percent_per_frame / 100.0) / 60.0
+}
+
+pub fn regen_projector_repair_time_stat_seconds(heal_percent_per_frame: f32) -> i32 {
+    regen_projector_repair_time_seconds(heal_percent_per_frame) as i32
+}
+
+pub fn regen_projector_range_blocks(range: i32) -> i32 {
+    range
+}
+
+pub fn regen_projector_booster_multiplier(optional_multiplier: f32) -> f32 {
+    optional_multiplier
+}
+
+pub fn regen_projector_stats_plan(
+    optional_use_time: f32,
+    heal_percent_per_frame: f32,
+    range: i32,
+    optional_multiplier: f32,
+    has_item_booster: bool,
+) -> RegenProjectorStatsPlan {
+    RegenProjectorStatsPlan {
+        time_period: optional_use_time,
+        repair_time_seconds: regen_projector_repair_time_stat_seconds(heal_percent_per_frame),
+        range_blocks: regen_projector_range_blocks(range),
+        booster_multiplier: has_item_booster.then_some(optional_multiplier),
+        booster_range_boost: 0.0,
+    }
+}
+
+pub fn regen_projector_square_size(range: i32, tile_size: f32) -> f32 {
+    range as f32 * tile_size
+}
+
+pub fn regen_projector_should_consume(any_targets: bool) -> bool {
+    any_targets
+}
+
+pub fn regen_projector_effect_chance_delta(effect_chance: f32, block_size: i32, delta: f32) -> f32 {
+    (effect_chance * block_size as f32 * block_size as f32 * delta).clamp(0.0, 1.0)
+}
+
+pub fn regen_projector_effect_offset_limit(block_size: i32, tile_size: f32) -> f32 {
+    block_size as f32 * tile_size / 2.0 - 1.0
+}
+
+pub fn regen_projector_should_emit_effect(
+    previous_mend_value: f32,
+    effect_chance_delta: f32,
+    random: f32,
+) -> bool {
+    previous_mend_value <= 0.0 && random < effect_chance_delta
+}
+
+pub fn regen_projector_place_plan(
+    tile_x: i32,
+    tile_y: i32,
+    tile_size: f32,
+    offset: f32,
+    range: i32,
+    time: f32,
+) -> RegenProjectorRangePlan {
+    RegenProjectorRangePlan {
+        center_x: tile_x as f32 * tile_size + offset,
+        center_y: tile_y as f32 * tile_size + offset,
+        square_size: regen_projector_square_size(range, tile_size),
+        selected_alpha: absin_time(time, 4.0, 1.0),
+    }
+}
+
+pub fn regen_projector_select_plan(
+    x: f32,
+    y: f32,
+    range: i32,
+    tile_size: f32,
+    time: f32,
+) -> RegenProjectorRangePlan {
+    RegenProjectorRangePlan {
+        center_x: x,
+        center_y: y,
+        square_size: regen_projector_square_size(range, tile_size),
+        selected_alpha: absin_time(time, 4.0, 1.0),
+    }
+}
+
+pub fn regen_projector_light_plan(state: &RegenProjectorState) -> ProjectorLightPlan {
+    ProjectorLightPlan {
+        radius: 0.0,
+        alpha: 0.0 * state.warmup,
+    }
+}
+
+pub fn regen_projector_draw_plan() -> RegenProjectorDrawPlan {
+    RegenProjectorDrawPlan {
+        commands: REGEN_PROJECTOR_DRAW_COMMANDS,
+        draw_region: true,
+    }
+}
+
+pub fn regen_projector_apply_plan(
+    last_update_frame: i64,
+    current_update_id: i64,
+) -> RegenProjectorApplyPlan {
+    let apply_mend_map = last_update_frame != current_update_id;
+    RegenProjectorApplyPlan {
+        apply_mend_map,
+        clear_mend_map: apply_mend_map,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn regen_projector_update(
     state: &mut RegenProjectorState,
@@ -3166,6 +3315,99 @@ mod tests {
         assert_eq!(mend.entries.get(&11), Some(&2.5));
         assert_eq!(mend.drain(), vec![(10, 7.0), (11, 2.5)]);
         assert!(mend.is_empty());
+    }
+
+    #[test]
+    fn regen_projector_range_draw_light_stats_and_effect_plans_follow_java() {
+        assert_eq!(
+            regen_projector_repair_time_seconds(12.0 / 60.0),
+            1.0 / ((12.0 / 60.0) / 100.0) / 60.0
+        );
+        assert_eq!(regen_projector_repair_time_stat_seconds(12.0 / 60.0), 8);
+        assert_eq!(regen_projector_range_blocks(14), 14);
+        assert_eq!(regen_projector_booster_multiplier(2.0), 2.0);
+        assert_eq!(
+            regen_projector_stats_plan(480.0, 12.0 / 60.0, 14, 2.0, true),
+            RegenProjectorStatsPlan {
+                time_period: 480.0,
+                repair_time_seconds: 8,
+                range_blocks: 14,
+                booster_multiplier: Some(2.0),
+                booster_range_boost: 0.0,
+            }
+        );
+        assert_eq!(
+            regen_projector_stats_plan(480.0, 12.0 / 60.0, 14, 2.0, false).booster_multiplier,
+            None
+        );
+        assert_eq!(regen_projector_square_size(14, 8.0), 112.0);
+        assert!(regen_projector_should_consume(true));
+        assert!(!regen_projector_should_consume(false));
+
+        let place = regen_projector_place_plan(2, 3, 8.0, 4.0, 14, 0.0);
+        assert_eq!(
+            place,
+            RegenProjectorRangePlan {
+                center_x: 20.0,
+                center_y: 28.0,
+                square_size: 112.0,
+                selected_alpha: 0.0,
+            }
+        );
+
+        let select = regen_projector_select_plan(40.0, 48.0, 14, 8.0, 0.0);
+        assert_eq!(
+            select,
+            RegenProjectorRangePlan {
+                center_x: 40.0,
+                center_y: 48.0,
+                square_size: 112.0,
+                selected_alpha: 0.0,
+            }
+        );
+
+        let state = RegenProjectorState {
+            warmup: 0.6,
+            total_time: 10.0,
+            optional_timer: 0.0,
+            any_targets: true,
+            did_regen: true,
+        };
+        assert_eq!(
+            regen_projector_light_plan(&state),
+            ProjectorLightPlan {
+                radius: 0.0,
+                alpha: 0.0,
+            }
+        );
+        assert_eq!(
+            regen_projector_draw_plan(),
+            RegenProjectorDrawPlan {
+                commands: &[RegenProjectorDrawCommand::DrawerDraw],
+                draw_region: true,
+            }
+        );
+
+        assert!((regen_projector_effect_chance_delta(0.003, 3, 2.0) - 0.054).abs() < 0.00001);
+        assert_eq!(regen_projector_effect_offset_limit(3, 8.0), 11.0);
+        assert!(regen_projector_should_emit_effect(0.0, 0.5, 0.49));
+        assert!(!regen_projector_should_emit_effect(0.1, 0.5, 0.49));
+        assert!(!regen_projector_should_emit_effect(0.0, 0.5, 0.51));
+
+        assert_eq!(
+            regen_projector_apply_plan(-1, 10),
+            RegenProjectorApplyPlan {
+                apply_mend_map: true,
+                clear_mend_map: true,
+            }
+        );
+        assert_eq!(
+            regen_projector_apply_plan(10, 10),
+            RegenProjectorApplyPlan {
+                apply_mend_map: false,
+                clear_mend_map: false,
+            }
+        );
     }
 
     #[test]

@@ -506,9 +506,19 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 已推进：
 
 - `regen_projector_heal_amount(...)`
+- `RegenProjectorStatsPlan`
+- `RegenProjectorRangePlan`
+- `RegenProjectorDrawPlan`
+- `RegenProjectorApplyPlan`
 - `RegenProjectorState`
 - `RegenProjectorUpdatePlan`
 - `RegenProjectorMendMap`
+- `regen_projector_stats_plan(...)`
+- `regen_projector_place_plan(...)`
+- `regen_projector_select_plan(...)`
+- `regen_projector_draw_plan(...)`
+- `regen_projector_light_plan(...)`
+- `regen_projector_apply_plan(...)`
 - `regen_projector_update(...)`
 - 已对照 `RegenProjector.updateTile()` 锁定：
   - `warmup` 按上一帧 `didRegen` 通过 `approachDelta(..., 1/70)` 更新；
@@ -524,11 +534,19 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 修复量受 missing health 上限约束；
   - drain 后清空，供统一应用 `heal/recentlyHealed`。
 
+- 已对照 `RegenProjector.drawPlace()/drawSelect()/drawLight()/setStats()` 锁定：
+  - place/select 均使用 `range * tilesize` 的 dash square；
+  - place 坐标来自 `tile * tilesize + offset`，select 坐标来自建筑当前 `x/y`；
+  - selected alpha 由 `absin(4f, 1f)` 派生；
+  - `DrawDefault` 下 `drawer.drawLight(this)` 无额外光效，当前 light plan 显式记录为无额外绘制；
+  - repair time stat 按 Java `(int)(1f / (healPercent / 100f) / 60f)` 截断；
+  - booster 使用 `optionalMultiplier`，range boost 为 `0f`。
+
 仍需：
 
 - `updateTargets()` 的真实 indexer 范围扫描接入；
 - `lastUpdateFrame` 与真实 world.build(pos).heal/recentlyHealed 应用；
-- drawPlace/drawSelect 的范围和目标选中绘制规划。
+- drawPlace/drawSelect 的目标列表高亮接入真实 indexer / targets。
 
 ### 7.7 BaseShield
 
