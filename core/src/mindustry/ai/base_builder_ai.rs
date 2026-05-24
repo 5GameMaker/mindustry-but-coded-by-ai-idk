@@ -278,6 +278,32 @@ pub struct PrebuildAiAcceptPlanAction {
     pub build_plan: Option<BuildPlan>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PrebuildAiLookAction {
+    Target,
+    PrefRotation,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrebuildAiTickBranch {
+    Collecting,
+    CurrentPlan,
+    FindNewPlan,
+    Idle,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrebuildAiTickDecision {
+    pub look_action: PrebuildAiLookAction,
+    pub update_building: bool,
+    pub branch: PrebuildAiTickBranch,
+    pub current_plan_validation: Option<BuilderAiPlanValidation>,
+    pub build_move: Option<PrebuildAiBuildMove>,
+    pub accept_plan: Option<PrebuildAiAcceptPlanAction>,
+    pub boosting: Option<bool>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderAiPlanAction {
     NoPlan,
@@ -728,6 +754,145 @@ where
         reset_target_timer: !can_build_now,
         last_plan: Some(plan.plan),
         build_plan: Some(build_plan),
+    }
+}
+
+pub fn prebuild_ai_look_action(
+    has_target: bool,
+    should_shoot: bool,
+    unit_flying: bool,
+) -> PrebuildAiLookAction {
+    if has_target && should_shoot {
+        PrebuildAiLookAction::Target
+    } else if !unit_flying {
+        PrebuildAiLookAction::PrefRotation
+    } else {
+        PrebuildAiLookAction::None
+    }
+}
+
+pub fn prebuild_ai_should_boost(
+    boost_when_building: bool,
+    moving: bool,
+    floor_is_duct: bool,
+    floor_damage_taken: f32,
+    floor_is_deep: bool,
+) -> bool {
+    boost_when_building || moving || floor_is_duct || floor_damage_taken > 0.0 || floor_is_deep
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn prebuild_ai_update_movement_tick<FValidBreak, FValidPlace, FPlanValid, FPlanCanBuild>(
+    collecting_items: bool,
+    unit_has_current_plan: bool,
+    unit_flying: bool,
+    has_target: bool,
+    should_shoot: bool,
+    boost_when_building: bool,
+    floor_is_duct: bool,
+    floor_damage_taken: f32,
+    floor_is_deep: bool,
+    build_range: f32,
+    within_current_plan_range: bool,
+    unit_plans: &mut VecDeque<BuildPlan>,
+    last_plan: &mut Option<TeamBlockPlan>,
+    construct_current_matches: bool,
+    valid_break: FValidBreak,
+    valid_place: FValidPlace,
+    timer_find_ready: bool,
+    next_plan: Option<PrebuildAiPlanSnapshot>,
+    plan_valid_place: FPlanValid,
+    plan_can_build: FPlanCanBuild,
+) -> PrebuildAiTickDecision
+where
+    FValidBreak: FnMut(&BuildPlan) -> bool,
+    FValidPlace: FnMut(&BuildPlan) -> bool,
+    FPlanValid: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+    FPlanCanBuild: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+{
+    let look_action = prebuild_ai_look_action(has_target, should_shoot, unit_flying);
+    let update_building = prebuild_ai_update_building(collecting_items);
+
+    if collecting_items {
+        return PrebuildAiTickDecision {
+            look_action,
+            update_building,
+            branch: PrebuildAiTickBranch::Collecting,
+            current_plan_validation: None,
+            build_move: None,
+            accept_plan: None,
+            boosting: (!unit_flying).then_some(prebuild_ai_should_boost(
+                boost_when_building,
+                false,
+                floor_is_duct,
+                floor_damage_taken,
+                floor_is_deep,
+            )),
+        };
+    }
+
+    if unit_has_current_plan {
+        let validation = validate_prebuild_ai_current_plan(
+            unit_plans,
+            last_plan,
+            construct_current_matches,
+            valid_break,
+            valid_place,
+        );
+        let move_plan = (validation.action == BuilderAiPlanAction::Keep)
+            .then(|| prebuild_ai_build_move(build_range, within_current_plan_range));
+        let moving = move_plan.as_ref().is_some_and(|plan| plan.moving);
+
+        return PrebuildAiTickDecision {
+            look_action,
+            update_building,
+            branch: PrebuildAiTickBranch::CurrentPlan,
+            current_plan_validation: Some(validation),
+            build_move: move_plan,
+            accept_plan: None,
+            boosting: (!unit_flying).then_some(prebuild_ai_should_boost(
+                boost_when_building,
+                moving,
+                floor_is_duct,
+                floor_damage_taken,
+                floor_is_deep,
+            )),
+        };
+    }
+
+    if timer_find_ready {
+        let accepted = prebuild_ai_accept_plan(next_plan, plan_valid_place, plan_can_build);
+        return PrebuildAiTickDecision {
+            look_action,
+            update_building,
+            branch: PrebuildAiTickBranch::FindNewPlan,
+            current_plan_validation: None,
+            build_move: None,
+            accept_plan: Some(accepted),
+            boosting: (!unit_flying).then_some(prebuild_ai_should_boost(
+                boost_when_building,
+                false,
+                floor_is_duct,
+                floor_damage_taken,
+                floor_is_deep,
+            )),
+        };
+    }
+
+    PrebuildAiTickDecision {
+        look_action,
+        update_building,
+        branch: PrebuildAiTickBranch::Idle,
+        current_plan_validation: None,
+        build_move: None,
+        accept_plan: None,
+        boosting: (!unit_flying).then_some(prebuild_ai_should_boost(
+            boost_when_building,
+            false,
+            floor_is_duct,
+            floor_damage_taken,
+            floor_is_deep,
+        )),
     }
 }
 
@@ -1691,6 +1856,168 @@ mod tests {
 
         let none = prebuild_ai_accept_plan(None, |_| true, |_| true);
         assert!(!none.accepted);
+    }
+
+    #[test]
+    fn prebuild_ai_look_and_boost_decisions_match_java_branches() {
+        assert_eq!(
+            prebuild_ai_look_action(true, true, false),
+            PrebuildAiLookAction::Target
+        );
+        assert_eq!(
+            prebuild_ai_look_action(true, false, false),
+            PrebuildAiLookAction::PrefRotation
+        );
+        assert_eq!(
+            prebuild_ai_look_action(false, false, true),
+            PrebuildAiLookAction::None
+        );
+
+        assert!(prebuild_ai_should_boost(false, true, false, 0.0, false));
+        assert!(prebuild_ai_should_boost(false, false, true, 0.0, false));
+        assert!(prebuild_ai_should_boost(false, false, false, 0.1, false));
+        assert!(prebuild_ai_should_boost(false, false, false, 0.0, true));
+        assert!(!prebuild_ai_should_boost(false, false, false, 0.0, false));
+    }
+
+    #[test]
+    fn prebuild_ai_update_movement_tick_handles_current_plan_branch() {
+        let mut unit_plans = VecDeque::from([BuildPlan::new_place(2, 2, 0, "router")]);
+        let mut last_plan = Some(TeamBlockPlan::new(2, 2, 0, "router", None));
+
+        let decision = prebuild_ai_update_movement_tick(
+            false,
+            true,
+            false,
+            true,
+            true,
+            false,
+            false,
+            0.0,
+            false,
+            160.0,
+            false,
+            &mut unit_plans,
+            &mut last_plan,
+            false,
+            |_| false,
+            |plan| plan.block.as_deref() == Some("router"),
+            false,
+            None,
+            |_| false,
+            |_| false,
+        );
+
+        assert_eq!(decision.look_action, PrebuildAiLookAction::Target);
+        assert!(decision.update_building);
+        assert_eq!(decision.branch, PrebuildAiTickBranch::CurrentPlan);
+        assert_eq!(
+            decision
+                .current_plan_validation
+                .as_ref()
+                .map(|validation| validation.action),
+            Some(BuilderAiPlanAction::Keep)
+        );
+        assert_eq!(
+            decision.build_move,
+            Some(PrebuildAiBuildMove {
+                range: 100.0,
+                move_range: 90.0,
+                moving: true,
+            })
+        );
+        assert_eq!(decision.boosting, Some(true));
+    }
+
+    #[test]
+    fn prebuild_ai_update_movement_tick_accepts_new_plan_and_collects_when_needed() {
+        let mut unit_plans = VecDeque::new();
+        let mut last_plan = None;
+        let next = prebuild_plan(
+            3,
+            4,
+            "router",
+            Category::Distribution,
+            5.0,
+            vec![PrebuildAiRequirement::new(1, 1)],
+        );
+
+        let decision = prebuild_ai_update_movement_tick(
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            0.0,
+            false,
+            80.0,
+            false,
+            &mut unit_plans,
+            &mut last_plan,
+            false,
+            |_| false,
+            |_| false,
+            true,
+            Some(next.clone()),
+            |_| true,
+            |_| false,
+        );
+
+        assert_eq!(decision.look_action, PrebuildAiLookAction::PrefRotation);
+        assert!(decision.update_building);
+        assert_eq!(decision.branch, PrebuildAiTickBranch::FindNewPlan);
+        assert_eq!(decision.boosting, Some(false));
+        let accept = decision
+            .accept_plan
+            .expect("ready timer should evaluate plan");
+        assert!(accept.accepted);
+        assert!(accept.collecting_items);
+        assert_eq!(accept.collect_block, Some(next.block));
+        assert!(accept.reset_target_timer);
+        assert_eq!(accept.last_plan, Some(next.plan));
+        assert_eq!(
+            accept.build_plan,
+            Some(BuildPlan::new_place(3, 4, 0, "router"))
+        );
+    }
+
+    #[test]
+    fn prebuild_ai_update_movement_tick_collecting_skips_building_and_current_plan() {
+        let mut unit_plans = VecDeque::from([BuildPlan::new_place(5, 5, 0, "duo")]);
+        let mut last_plan = Some(TeamBlockPlan::new(5, 5, 0, "duo", None));
+
+        let decision = prebuild_ai_update_movement_tick(
+            true,
+            true,
+            false,
+            false,
+            false,
+            true,
+            false,
+            0.0,
+            false,
+            80.0,
+            false,
+            &mut unit_plans,
+            &mut last_plan,
+            false,
+            |_| panic!("collecting branch should not validate current plan"),
+            |_| panic!("collecting branch should not validate current plan"),
+            true,
+            None,
+            |_| panic!("collecting branch should not accept new plans"),
+            |_| panic!("collecting branch should not accept new plans"),
+        );
+
+        assert_eq!(decision.branch, PrebuildAiTickBranch::Collecting);
+        assert!(!decision.update_building);
+        assert_eq!(decision.current_plan_validation, None);
+        assert_eq!(decision.accept_plan, None);
+        assert_eq!(decision.boosting, Some(true));
+        assert_eq!(unit_plans.len(), 1);
+        assert!(last_plan.is_some());
     }
 
     #[test]
