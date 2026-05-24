@@ -232,6 +232,34 @@ pub struct PrebuildAiTreeQuery {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrebuildAiMiningTarget {
+    pub target_item: Option<ContentId>,
+    pub last_target_item: Option<ContentId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrebuildAiFullCoreAction {
+    pub handled: bool,
+    pub clear_item: bool,
+    pub clear_mine_tile: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrebuildAiOreTarget {
+    Existing(Option<i32>),
+    Refreshed(Option<i32>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrebuildAiReturnToCoreAction {
+    pub mining: bool,
+    pub collecting_items: bool,
+    pub clear_mine_tile: bool,
+    pub clear_item: bool,
+    pub transfer_to_core: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderAiPlanAction {
     NoPlan,
     Keep,
@@ -486,6 +514,107 @@ where
     best_index
         .map(|index| plans[index].clone())
         .or_else(|| plans.first().cloned())
+}
+
+pub fn prebuild_ai_pick_missing_collect_target_item<FCoreHas>(
+    requirements: &[PrebuildAiRequirement],
+    build_cost_multiplier: f32,
+    last_target_item: Option<ContentId>,
+    mut core_has_item: FCoreHas,
+) -> PrebuildAiMiningTarget
+where
+    FCoreHas: FnMut(ContentId, i32) -> bool,
+{
+    let target_item = requirements
+        .iter()
+        .find(|requirement| {
+            !core_has_item(
+                requirement.item,
+                scaled_requirement_amount(requirement.amount, build_cost_multiplier),
+            )
+        })
+        .map(|requirement| requirement.item);
+
+    PrebuildAiMiningTarget {
+        target_item: target_item.or(last_target_item),
+        last_target_item: target_item.or(last_target_item),
+    }
+}
+
+pub fn prebuild_ai_handle_full_core_for_target_item(
+    target_item: Option<ContentId>,
+    core_accept_stack_one: i32,
+) -> PrebuildAiFullCoreAction {
+    let handled = target_item.is_some() && core_accept_stack_one == 0;
+    PrebuildAiFullCoreAction {
+        handled,
+        clear_item: handled,
+        clear_mine_tile: handled,
+    }
+}
+
+pub fn prebuild_ai_should_stop_mining_for_carry_limit_or_acceptance(
+    target_item: Option<ContentId>,
+    stack_amount: i32,
+    item_capacity: i32,
+    accepts_target_item: bool,
+) -> bool {
+    target_item.is_none() || stack_amount >= item_capacity || !accepts_target_item
+}
+
+pub fn prebuild_ai_refresh_mining_ore_target<FFloor, FWall>(
+    current_ore: Option<i32>,
+    timer_ready: bool,
+    target_item: Option<ContentId>,
+    mine_floor: bool,
+    mine_walls: bool,
+    mut find_floor_ore: FFloor,
+    mut find_wall_ore: FWall,
+) -> PrebuildAiOreTarget
+where
+    FFloor: FnMut(ContentId) -> Option<i32>,
+    FWall: FnMut(ContentId) -> Option<i32>,
+{
+    let Some(target_item) = target_item else {
+        return PrebuildAiOreTarget::Existing(current_ore);
+    };
+    if !timer_ready {
+        return PrebuildAiOreTarget::Existing(current_ore);
+    }
+
+    let floor = mine_floor.then(|| find_floor_ore(target_item)).flatten();
+    let ore = floor.or_else(|| mine_walls.then(|| find_wall_ore(target_item)).flatten());
+    PrebuildAiOreTarget::Refreshed(ore)
+}
+
+pub fn prebuild_ai_handle_return_to_core_with_items(
+    stack_amount: i32,
+    within_core_range: bool,
+    core_accept_stack_amount: i32,
+    can_build_after_deposit: bool,
+) -> PrebuildAiReturnToCoreAction {
+    if stack_amount <= 0 {
+        return PrebuildAiReturnToCoreAction {
+            mining: true,
+            collecting_items: !can_build_after_deposit,
+            clear_mine_tile: true,
+            clear_item: false,
+            transfer_to_core: false,
+        };
+    }
+
+    let at_core = within_core_range;
+    PrebuildAiReturnToCoreAction {
+        mining: at_core,
+        collecting_items: if at_core {
+            !can_build_after_deposit
+        } else {
+            true
+        },
+        clear_mine_tile: true,
+        clear_item: at_core,
+        transfer_to_core: at_core && core_accept_stack_amount > 0,
+    }
 }
 
 pub fn builder_ai_init_rebuild_period(
@@ -1167,6 +1296,198 @@ mod tests {
         )
         .expect("Java falls back to plans.first() when no min candidate matches");
         assert_eq!(fallback, unreachable);
+    }
+
+    #[test]
+    fn prebuild_ai_pick_missing_collect_target_item_updates_last_target_only_on_new_gap() {
+        let requirements = [
+            PrebuildAiRequirement::new(1, 2),
+            PrebuildAiRequirement::new(2, 5),
+        ];
+
+        let missing = prebuild_ai_pick_missing_collect_target_item(
+            &requirements,
+            1.5,
+            Some(9),
+            |item, amount| item == 1 && amount == 3,
+        );
+        assert_eq!(
+            missing,
+            PrebuildAiMiningTarget {
+                target_item: Some(2),
+                last_target_item: Some(2),
+            }
+        );
+
+        let fallback =
+            prebuild_ai_pick_missing_collect_target_item(&requirements, 1.5, Some(9), |_, _| true);
+        assert_eq!(
+            fallback,
+            PrebuildAiMiningTarget {
+                target_item: Some(9),
+                last_target_item: Some(9),
+            }
+        );
+
+        let none =
+            prebuild_ai_pick_missing_collect_target_item(&requirements, 1.0, None, |_, _| true);
+        assert_eq!(
+            none,
+            PrebuildAiMiningTarget {
+                target_item: None,
+                last_target_item: None,
+            }
+        );
+    }
+
+    #[test]
+    fn prebuild_ai_mining_branch_handles_full_core_and_stop_conditions() {
+        assert_eq!(
+            prebuild_ai_handle_full_core_for_target_item(Some(1), 0),
+            PrebuildAiFullCoreAction {
+                handled: true,
+                clear_item: true,
+                clear_mine_tile: true,
+            }
+        );
+        assert_eq!(
+            prebuild_ai_handle_full_core_for_target_item(Some(1), 1),
+            PrebuildAiFullCoreAction {
+                handled: false,
+                clear_item: false,
+                clear_mine_tile: false,
+            }
+        );
+        assert!(!prebuild_ai_handle_full_core_for_target_item(None, 0).handled);
+
+        assert!(prebuild_ai_should_stop_mining_for_carry_limit_or_acceptance(None, 0, 10, true,));
+        assert!(
+            prebuild_ai_should_stop_mining_for_carry_limit_or_acceptance(Some(1), 10, 10, true,)
+        );
+        assert!(
+            prebuild_ai_should_stop_mining_for_carry_limit_or_acceptance(Some(1), 1, 10, false,)
+        );
+        assert!(
+            !prebuild_ai_should_stop_mining_for_carry_limit_or_acceptance(Some(1), 1, 10, true,)
+        );
+    }
+
+    #[test]
+    fn prebuild_ai_refresh_mining_ore_target_prefers_floor_then_wall() {
+        assert_eq!(
+            prebuild_ai_refresh_mining_ore_target(
+                Some(7),
+                false,
+                Some(1),
+                true,
+                true,
+                |_| Some(1),
+                |_| Some(2)
+            ),
+            PrebuildAiOreTarget::Existing(Some(7))
+        );
+        assert_eq!(
+            prebuild_ai_refresh_mining_ore_target(
+                None,
+                true,
+                None,
+                true,
+                true,
+                |_| Some(1),
+                |_| Some(2)
+            ),
+            PrebuildAiOreTarget::Existing(None)
+        );
+        assert_eq!(
+            prebuild_ai_refresh_mining_ore_target(
+                None,
+                true,
+                Some(1),
+                true,
+                true,
+                |_| Some(11),
+                |_| Some(22)
+            ),
+            PrebuildAiOreTarget::Refreshed(Some(11))
+        );
+        assert_eq!(
+            prebuild_ai_refresh_mining_ore_target(
+                None,
+                true,
+                Some(1),
+                true,
+                true,
+                |_| None,
+                |_| Some(22)
+            ),
+            PrebuildAiOreTarget::Refreshed(Some(22))
+        );
+        assert_eq!(
+            prebuild_ai_refresh_mining_ore_target(
+                None,
+                true,
+                Some(1),
+                false,
+                false,
+                |_| Some(11),
+                |_| Some(22)
+            ),
+            PrebuildAiOreTarget::Refreshed(None)
+        );
+    }
+
+    #[test]
+    fn prebuild_ai_return_to_core_state_matches_java_deposit_branch() {
+        assert_eq!(
+            prebuild_ai_handle_return_to_core_with_items(0, false, 0, false),
+            PrebuildAiReturnToCoreAction {
+                mining: true,
+                collecting_items: true,
+                clear_mine_tile: true,
+                clear_item: false,
+                transfer_to_core: false,
+            }
+        );
+        assert_eq!(
+            prebuild_ai_handle_return_to_core_with_items(0, false, 0, true),
+            PrebuildAiReturnToCoreAction {
+                mining: true,
+                collecting_items: false,
+                clear_mine_tile: true,
+                clear_item: false,
+                transfer_to_core: false,
+            }
+        );
+        assert_eq!(
+            prebuild_ai_handle_return_to_core_with_items(5, true, 5, true),
+            PrebuildAiReturnToCoreAction {
+                mining: true,
+                collecting_items: false,
+                clear_mine_tile: true,
+                clear_item: true,
+                transfer_to_core: true,
+            }
+        );
+        assert_eq!(
+            prebuild_ai_handle_return_to_core_with_items(5, true, 0, false),
+            PrebuildAiReturnToCoreAction {
+                mining: true,
+                collecting_items: true,
+                clear_mine_tile: true,
+                clear_item: true,
+                transfer_to_core: false,
+            }
+        );
+        assert_eq!(
+            prebuild_ai_handle_return_to_core_with_items(5, false, 5, true),
+            PrebuildAiReturnToCoreAction {
+                mining: false,
+                collecting_items: true,
+                clear_mine_tile: true,
+                clear_item: false,
+                transfer_to_core: false,
+            }
+        );
     }
 
     #[test]
