@@ -4,9 +4,10 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
 use crate::mindustry::ctype::ContentId;
+use crate::mindustry::entities::comp::UnitComp;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::BlockPlan;
-use crate::mindustry::io::TypeValue;
+use crate::mindustry::io::{TeamId, TypeValue};
 use crate::mindustry::r#type::UnitType;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -887,6 +888,13 @@ pub struct BuildTurretUnitTickStep {
     pub warmup: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildTurretUnitBinding {
+    pub x: f32,
+    pub y: f32,
+    pub team: TeamId,
+}
+
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
     if configured < 0.0 {
         size as f32 / 2.0
@@ -932,6 +940,27 @@ pub fn build_turret_unit_tick(input: BuildTurretUnitTickInput) -> BuildTurretUni
         speed_multiplier: multiplier,
         warmup: build_turret_warmup_update(input.warmup, input.actively_building, efficiency),
     }
+}
+
+pub fn apply_build_turret_unit_tick(
+    state: &mut BuildTurretState,
+    unit: &mut UnitComp,
+    binding: BuildTurretUnitBinding,
+    step: BuildTurretUnitTickStep,
+    delta: f32,
+) {
+    unit.team.team = binding.team;
+    unit.set_pos(binding.x, binding.y);
+    state.rotation = step.rotation;
+
+    if let Some(angle) = step.look_at {
+        unit.look_at_angle(angle, delta);
+    }
+
+    unit.status.build_speed_multiplier = step.build_speed_multiplier;
+    unit.status.speed_multiplier = step.speed_multiplier;
+    state.warmup = step.warmup;
+    unit.refresh_component_views();
 }
 
 pub const BUILD_TURRET_UNIT_TYPE_PREFIX: &str = "turret-unit-";
@@ -1782,6 +1811,85 @@ mod tests {
         assert_eq!(suppressed.build_speed_multiplier, 0.0);
         assert_eq!(suppressed.speed_multiplier, 0.0);
         assert_eq!(suppressed.warmup, 0.45);
+    }
+
+    #[test]
+    fn apply_build_turret_unit_tick_binds_unit_and_writes_runtime_state() {
+        let mut unit_type = build_turret_unit_type(-1, "build-tower", 90.0, 5.0, 80.0, 1.0);
+        unit_type.rotate_speed = 90.0;
+        let mut unit = UnitComp::new(7, unit_type, TeamId(1));
+        unit.set_rotation(0.0);
+        unit.status.speed_multiplier = 1.0;
+        unit.status.build_speed_multiplier = 1.0;
+        let mut state = BuildTurretState {
+            rotation: 270.0,
+            warmup: 0.0,
+            ..BuildTurretState::default()
+        };
+
+        let step = build_turret_unit_tick(BuildTurretUnitTickInput {
+            unit_rotation: unit.rotation(),
+            actively_building: true,
+            build_plan_angle: Some(90.0),
+            suppressed: false,
+            efficiency: 0.6,
+            potential_efficiency: 0.5,
+            time_scale: 2.0,
+            warmup: state.warmup,
+        });
+
+        apply_build_turret_unit_tick(
+            &mut state,
+            &mut unit,
+            BuildTurretUnitBinding {
+                x: 40.0,
+                y: 48.0,
+                team: TeamId(3),
+            },
+            step,
+            1.0,
+        );
+
+        assert_eq!((unit.x(), unit.y()), (40.0, 48.0));
+        assert_eq!(unit.team_id(), TeamId(3));
+        assert_eq!(state.rotation, 0.0);
+        assert_eq!(unit.rotation(), 90.0);
+        assert_eq!(unit.status.build_speed_multiplier, 1.0);
+        assert_eq!(unit.status.speed_multiplier, 1.0);
+        assert_eq!(unit.builder.build_speed_multiplier, 1.0);
+        assert_eq!(state.warmup, 0.060000002);
+
+        let idle = build_turret_unit_tick(BuildTurretUnitTickInput {
+            unit_rotation: unit.rotation(),
+            actively_building: false,
+            build_plan_angle: Some(180.0),
+            suppressed: true,
+            efficiency: 1.0,
+            potential_efficiency: 1.0,
+            time_scale: 3.0,
+            warmup: state.warmup,
+        });
+
+        apply_build_turret_unit_tick(
+            &mut state,
+            &mut unit,
+            BuildTurretUnitBinding {
+                x: 56.0,
+                y: 64.0,
+                team: TeamId(4),
+            },
+            idle,
+            1.0,
+        );
+
+        assert_eq!((unit.x(), unit.y()), (56.0, 64.0));
+        assert_eq!(unit.team_id(), TeamId(4));
+        assert_eq!(state.rotation, 90.0);
+        assert_eq!(unit.rotation(), 90.0);
+        assert_eq!(unit.status.build_speed_multiplier, 0.0);
+        assert_eq!(unit.status.speed_multiplier, 0.0);
+        assert_eq!(unit.builder.build_speed_multiplier, 0.0);
+        assert!((state.warmup - 0.054).abs() < f32::EPSILON);
     }
 
     #[test]
