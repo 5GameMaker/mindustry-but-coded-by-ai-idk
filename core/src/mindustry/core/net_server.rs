@@ -3332,6 +3332,7 @@ mod tests {
         sent: Arc<Mutex<Vec<(i32, PacketKind, bool)>>>,
         events: Arc<Mutex<Vec<ProviderEvent>>>,
         fail_server_to: bool,
+        fail_server_to_connection: Option<i32>,
         connect_filter: Option<ConnectFilter>,
     }
 
@@ -3378,7 +3379,7 @@ mod tests {
             object: &PacketKind,
             reliable: bool,
         ) -> io::Result<()> {
-            if self.fail_server_to {
+            if self.fail_server_to || self.fail_server_to_connection == Some(connection_id) {
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "forced send failure",
@@ -6138,6 +6139,83 @@ mod tests {
         let state = state.lock().unwrap();
         assert_eq!(state.next_world_stream_id, 2);
         assert_eq!(state.world_streams_sent, 2);
+    }
+
+    #[test]
+    fn resend_world_data_sends_begin_before_stream_like_java_sync_path() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        server.resend_world_data(12, vec![7; 3]).unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert!(matches!(sent[0].1, PacketKind::WorldDataBeginCallPacket(_)));
+        match &sent[1].1 {
+            PacketKind::StreamBegin(begin) => {
+                assert_eq!(begin.id, 0);
+                assert_eq!(begin.total, 3);
+                assert_eq!(begin.packet_type, packet_ids::WORLD_STREAM);
+            }
+            other => panic!("unexpected packet after worldDataBegin: {other:?}"),
+        }
+        match &sent[2].1 {
+            PacketKind::StreamChunk(chunk) => {
+                assert_eq!(chunk.id, 0);
+                assert_eq!(chunk.data, vec![7; 3]);
+            }
+            other => panic!("unexpected packet after stream begin: {other:?}"),
+        }
+        assert!(sent
+            .iter()
+            .all(|(connection_id, _, reliable)| *connection_id == 12 && *reliable));
+    }
+
+    #[test]
+    fn send_pending_world_data_restores_failed_and_unprocessed_connections_in_order() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            fail_server_to_connection: Some(22),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        {
+            let state = server.state();
+            let mut state = state.lock().unwrap();
+            state.pending_world_data_connections = vec![11, 22, 33];
+        }
+
+        let error = server
+            .send_pending_world_data(|connection_id| vec![connection_id as u8])
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(
+            sent.iter().map(|(id, _, _)| *id).collect::<Vec<_>>(),
+            vec![11, 11]
+        );
+        assert!(matches!(sent[0].1, PacketKind::StreamBegin(_)));
+        assert!(matches!(sent[1].1, PacketKind::StreamChunk(_)));
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.pending_world_data_connections, vec![22, 33]);
+        assert_eq!(state.last_world_data_connection_id, Some(22));
+        assert_eq!(state.last_world_data_bytes, Some(1));
+        assert_eq!(state.world_streams_sent, 1);
+        assert_eq!(state.next_world_stream_id, 2);
+        assert!(state
+            .last_world_data_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("forced send failure"));
     }
 
     #[test]
