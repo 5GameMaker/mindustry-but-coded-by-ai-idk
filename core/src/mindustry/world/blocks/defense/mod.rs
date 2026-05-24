@@ -1559,8 +1559,49 @@ pub fn shockwave_tower_should_consume(reload_counter: f32, reload: f32) -> bool 
     reload_counter < reload
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThrusterBlockConfig {
+    pub rotate: bool,
+    pub quick_rotate: bool,
+}
+
+impl Default for ThrusterBlockConfig {
+    fn default() -> Self {
+        Self {
+            rotate: true,
+            quick_rotate: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThrusterDrawCommand {
+    Region,
+    Top,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThrusterDrawPlan {
+    pub commands: &'static [ThrusterDrawCommand],
+    pub x: f32,
+    pub y: f32,
+    pub top_rotation: f32,
+}
+
+const THRUSTER_DRAW_COMMANDS: &[ThrusterDrawCommand] =
+    &[ThrusterDrawCommand::Region, ThrusterDrawCommand::Top];
+
 pub fn thruster_top_rotation(rotation: i32) -> f32 {
     rotation as f32 * 90.0
+}
+
+pub fn thruster_draw_plan(x: f32, y: f32, rotation: i32) -> ThrusterDrawPlan {
+    ThrusterDrawPlan {
+        commands: THRUSTER_DRAW_COMMANDS,
+        x,
+        y,
+        top_rotation: thruster_top_rotation(rotation),
+    }
 }
 
 fn lerp_delta(from: f32, to: f32, alpha: f32) -> f32 {
@@ -1880,6 +1921,16 @@ mod tests {
         assert_eq!(restored.raw_plans, vec![0, 2, 7, 9]);
 
         assert_eq!(thruster_top_rotation(3), 270.0);
+        let thruster = ThrusterBlockConfig::default();
+        assert!(thruster.rotate);
+        assert!(!thruster.quick_rotate);
+        let draw = thruster_draw_plan(16.0, 24.0, 2);
+        assert_eq!(
+            draw.commands,
+            &[ThrusterDrawCommand::Region, ThrusterDrawCommand::Top]
+        );
+        assert_eq!((draw.x, draw.y), (16.0, 24.0));
+        assert_eq!(draw.top_rotation, 180.0);
     }
 
     #[test]
