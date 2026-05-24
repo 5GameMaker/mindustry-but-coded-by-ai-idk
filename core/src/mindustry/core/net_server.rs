@@ -12,10 +12,10 @@ use crate::mindustry::net::{
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2,
     KickReason, Net, NetConnection, PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket,
     SendChatMessageCallPacket, SendMessageCallPacket2, SentPacket, ServerResponse,
-    StateSnapshotCallPacket, SteamAdminData, Streamable, TileConfigCallPacket, TileTapCallPacket,
-    WorldDataBeginCallPacket,
+    StateSnapshotCallPacket, SteamAdminData, StreamBegin, StreamChunk, TileConfigCallPacket,
+    TileTapCallPacket, WorldDataBeginCallPacket,
 };
-use crate::mindustry::vars::MAX_TEXT_LENGTH;
+use crate::mindustry::vars::{MAX_TCP_SIZE, MAX_TEXT_LENGTH};
 
 pub type PacketHandler = Arc<Mutex<Box<dyn FnMut(&PacketKind) + Send + 'static>>>;
 pub type BinaryPacketHandler = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send + 'static>>>;
@@ -266,6 +266,7 @@ pub struct NetServerState {
     pub last_world_data_bytes: Option<usize>,
     pub world_data_begin_sent: u64,
     pub world_streams_sent: u64,
+    pub next_world_stream_id: i32,
     pub last_world_data_error: Option<String>,
     pub last_kick_connection_id: Option<i32>,
     pub last_kick_reason: Option<KickReason>,
@@ -565,7 +566,13 @@ impl NetServer {
     pub fn send_world_data(&self, connection_id: i32, bytes: impl Into<Vec<u8>>) -> io::Result<()> {
         let bytes = bytes.into();
         let byte_len = bytes.len();
-        let send_plan = Self::world_stream_send_plan(bytes);
+        let stream_id = {
+            let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+            let stream_id = state.next_world_stream_id;
+            state.next_world_stream_id = state.next_world_stream_id.wrapping_add(1);
+            stream_id
+        };
+        let send_plan = Self::world_stream_send_plan(stream_id, bytes);
 
         let mut first_error = None;
         {
@@ -1189,21 +1196,35 @@ impl NetServer {
         }
     }
 
-    fn world_stream_send_plan(bytes: Vec<u8>) -> Vec<(PacketKind, SentPacket, bool)> {
-        let mut connection = NetConnection::new(String::new());
-        connection.send_stream(Streamable::new(bytes), packet_ids::WORLD_STREAM);
-        connection
-            .sent
-            .into_iter()
-            .filter_map(|(sent_packet, reliable)| {
-                let packet = match &sent_packet {
-                    SentPacket::StreamBegin(begin) => PacketKind::StreamBegin(begin.clone()),
-                    SentPacket::StreamChunk(chunk) => PacketKind::StreamChunk(chunk.clone()),
-                    _ => return None,
-                };
-                Some((packet, sent_packet, reliable))
-            })
-            .collect()
+    fn world_stream_send_plan(
+        stream_id: i32,
+        bytes: Vec<u8>,
+    ) -> Vec<(PacketKind, SentPacket, bool)> {
+        let mut plan = Vec::new();
+        let begin = StreamBegin {
+            id: stream_id,
+            total: bytes.len() as i32,
+            packet_type: packet_ids::WORLD_STREAM,
+        };
+        plan.push((
+            PacketKind::StreamBegin(begin),
+            SentPacket::StreamBegin(begin),
+            true,
+        ));
+
+        for chunk in bytes.chunks(MAX_TCP_SIZE) {
+            let chunk = StreamChunk {
+                id: stream_id,
+                data: chunk.to_vec(),
+            };
+            plan.push((
+                PacketKind::StreamChunk(chunk.clone()),
+                SentPacket::StreamChunk(chunk),
+                true,
+            ));
+        }
+
+        plan
     }
 
     fn connect_packet_validation_context(
@@ -6088,6 +6109,35 @@ mod tests {
         assert!(matches!(connection.sent[1].0, SentPacket::StreamBegin(_)));
         assert!(matches!(connection.sent[2].0, SentPacket::StreamChunk(_)));
         assert!(matches!(connection.sent[3].0, SentPacket::StreamChunk(_)));
+    }
+
+    #[test]
+    fn send_world_data_uses_java_like_global_stream_ids_across_connections() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+
+        server.send_world_data(12, vec![1, 2]).unwrap();
+        server.send_world_data(34, vec![3, 4]).unwrap();
+
+        let sent = sent.lock().unwrap();
+        let begins = sent
+            .iter()
+            .filter_map(|(connection_id, packet, _)| match packet {
+                PacketKind::StreamBegin(begin) => Some((*connection_id, begin.id, begin.total)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(begins, vec![(12, 0, 2), (34, 1, 2)]);
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.next_world_stream_id, 2);
+        assert_eq!(state.world_streams_sent, 2);
     }
 
     #[test]
