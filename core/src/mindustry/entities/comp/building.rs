@@ -9,6 +9,7 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::ctype::ContentType;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
+use crate::mindustry::game::{BlockPlan, Teams};
 use crate::mindustry::io::{
     type_io::{read_bool, read_f32, read_i32, read_i64, read_u8, write_f32, write_i32, write_i64},
     TeamId, TypeValue,
@@ -446,6 +447,34 @@ impl BuildingComp {
         self.config = None;
     }
 
+    pub fn rebuild_plan(&self) -> BlockPlan {
+        BlockPlan::new(
+            self.tile_x(),
+            self.tile_y(),
+            self.rotation as i16,
+            self.block.name.clone(),
+            config_string(&self.config_value()),
+        )
+    }
+
+    pub fn add_rebuild_plan(
+        &self,
+        teams: &mut Teams,
+        check_previous: bool,
+        ignore_conditions: bool,
+        rebuildable: bool,
+        visible: bool,
+        default_team: TeamId,
+        campaign: bool,
+    ) -> Option<BlockPlan> {
+        if !ignore_conditions
+            && (!rebuildable || (self.team == default_team && campaign && !visible))
+        {
+            return None;
+        }
+        teams.add_plan_front(self.team.0, self.rebuild_plan(), check_previous)
+    }
+
     pub fn configure_any(&mut self, value: TypeValue) -> BuildingConfigChange {
         self.configure_any_checked(value, |_| true)
     }
@@ -553,6 +582,32 @@ fn clamp01(value: f32) -> f32 {
         0.0
     } else {
         value.clamp(0.0, 1.0)
+    }
+}
+
+fn config_string(value: &TypeValue) -> Option<String> {
+    match value {
+        TypeValue::Null => None,
+        TypeValue::Int(value) => Some(value.to_string()),
+        TypeValue::Long(value) => Some(value.to_string()),
+        TypeValue::Float(value) => Some(value.to_string()),
+        TypeValue::String(value) => Some(value.clone()),
+        TypeValue::Content(value) | TypeValue::TechNode(value) => Some(format!("{value:?}")),
+        TypeValue::Bool(value) => Some(value.to_string()),
+        TypeValue::Double(value) => Some(value.to_string()),
+        TypeValue::Building(value) => Some(value.to_string()),
+        TypeValue::LogicAccess(value) => Some(format!("{value:?}")),
+        TypeValue::Unit(value) => Some(value.to_string()),
+        TypeValue::Point2(value) => Some(format!("{},{}", value.x, value.y)),
+        TypeValue::Vec2(value) => Some(format!("{},{}", value.x, value.y)),
+        TypeValue::Team(value) => Some(value.to_string()),
+        TypeValue::UnitCommand(value) => Some(value.to_string()),
+        TypeValue::IntSeq(values) | TypeValue::IntArray(values) => Some(format!("{values:?}")),
+        TypeValue::ByteArray(values) => Some(format!("{values:?}")),
+        TypeValue::Point2Array(values) => Some(format!("{values:?}")),
+        TypeValue::BoolArray(values) => Some(format!("{values:?}")),
+        TypeValue::Vec2Array(values) => Some(format!("{values:?}")),
+        TypeValue::ObjectArray(values) => Some(format!("{values:?}")),
     }
 }
 
@@ -681,6 +736,64 @@ mod tests {
         assert_eq!(change.rollback, None);
         assert_eq!(building.config_value(), change.current);
         assert_eq!(building.last_accessed, "[#ffaa00]frog");
+    }
+
+    #[test]
+    fn building_component_add_rebuild_plan_matches_plain_java_add_plan_branch() {
+        let mut building = BuildingComp::new(point2_pack(2, 3), block(), TeamId(1));
+        building.set_rotation(2);
+        building.set_config_value(TypeValue::String("cfg".into()));
+        let mut teams = Teams::default();
+        teams.replace_plans([(
+            1,
+            vec![
+                BlockPlan::new(2, 3, 0, "old", Some("old-cfg".into())),
+                BlockPlan::new(4, 5, 1, "duo", None),
+            ],
+        )]);
+
+        let removed =
+            building.add_rebuild_plan(&mut teams, true, false, true, true, TeamId(1), false);
+
+        assert_eq!(
+            removed,
+            Some(BlockPlan::new(2, 3, 0, "old", Some("old-cfg".into())))
+        );
+        assert_eq!(
+            teams.get_or_null(1).unwrap().plans,
+            vec![
+                BlockPlan::new(2, 3, 2, "router", Some("cfg".into())),
+                BlockPlan::new(4, 5, 1, "duo", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn building_component_add_rebuild_plan_respects_rebuild_visibility_gate() {
+        let building = BuildingComp::new(point2_pack(6, 7), block(), TeamId(1));
+        let mut teams = Teams::default();
+
+        assert_eq!(
+            building.add_rebuild_plan(&mut teams, false, false, false, true, TeamId(1), false),
+            None
+        );
+        assert!(teams
+            .get_or_null(1)
+            .is_none_or(|team| team.plans.is_empty()));
+
+        assert_eq!(
+            building.add_rebuild_plan(&mut teams, false, false, true, false, TeamId(1), true),
+            None
+        );
+        assert!(teams
+            .get_or_null(1)
+            .is_none_or(|team| team.plans.is_empty()));
+
+        building.add_rebuild_plan(&mut teams, false, true, false, false, TeamId(1), true);
+        assert_eq!(
+            teams.get_or_null(1).unwrap().plans,
+            vec![BlockPlan::new(6, 7, 0, "router", None)]
+        );
     }
 
     #[test]
