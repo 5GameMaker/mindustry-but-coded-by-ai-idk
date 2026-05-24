@@ -6,8 +6,9 @@
 //! migrates pure helper behavior first; global `Vars`/`World` side effects are
 //! left to explicit snapshots or future runtime adapters.
 
+use crate::mindustry::ai::{PrebuildAiPlanSnapshot, PrebuildAiRequirement};
 use crate::mindustry::core::world::World;
-use crate::mindustry::ctype::Content;
+use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
 use crate::mindustry::io::type_io::{
@@ -21,12 +22,14 @@ use crate::mindustry::r#type::ItemStack;
 use crate::mindustry::r#type::UnitType;
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
-use super::builder::BuilderComp;
+use super::builder::{
+    BuilderComp, PrebuildAiRuntimeInput, PrebuildAiRuntimeState, PrebuildAiRuntimeStep,
+};
 use super::entity::EntityComp;
 use super::health::HealthComp;
 use super::hitbox::HitboxComp;
 use super::items::ItemsComp;
-use super::miner::{MineTile, MinerComp, MinerType};
+use super::miner::{MineTile, MinerComp, MinerType, PrebuildMiningRuntimeStep};
 use super::payload::PayloadComp;
 use super::physics::PhysicsComp;
 use super::rot::RotComp;
@@ -174,6 +177,7 @@ pub struct UnitComp {
     pub weapons: WeaponsComp,
     pub builder: BuilderComp,
     pub miner: MinerComp,
+    pub prebuild_ai: PrebuildAiRuntimeState,
     pub payload: Option<PayloadComp>,
     pub type_info: UnitType,
     pub controller: UnitControllerState,
@@ -197,6 +201,27 @@ pub struct UnitComp {
     pub last_drown_floor: Option<UnitFloorSnapshot>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrebuildAiUnitInput {
+    pub runtime: PrebuildAiRuntimeInput,
+    pub core_accept_stack_amount: i32,
+    pub within_core_range: bool,
+    pub timer_ore_ready: bool,
+    pub build_cost_multiplier: f32,
+}
+
+impl Default for PrebuildAiUnitInput {
+    fn default() -> Self {
+        Self {
+            runtime: PrebuildAiRuntimeInput::default(),
+            core_accept_stack_amount: 0,
+            within_core_range: false,
+            timer_ore_ready: false,
+            build_cost_multiplier: 1.0,
+        }
+    }
+}
+
 impl UnitComp {
     pub fn new(id: i32, type_info: UnitType, team: TeamId) -> Self {
         let mut unit = Self {
@@ -214,6 +239,7 @@ impl UnitComp {
             weapons: WeaponsComp::new(unit_ammo_capacity(&type_info), type_info.aim_dst),
             builder: BuilderComp::new(type_info.clone(), team),
             miner: MinerComp::new(miner_type_from_unit_type(&type_info)),
+            prebuild_ai: PrebuildAiRuntimeState::default(),
             payload: None,
             type_info: type_info.clone(),
             controller: UnitControllerState::Ground,
@@ -372,6 +398,87 @@ impl UnitComp {
             payload.payload_capacity = self.type_info.payload_capacity;
             payload.pickup_units = self.type_info.pickup_units;
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_prebuild_ai_builder<FValidBreak, FValidPlace, FPlanValid, FPlanCanBuild>(
+        &mut self,
+        input: PrebuildAiRuntimeInput,
+        valid_break: FValidBreak,
+        valid_place: FValidPlace,
+        next_plan: Option<PrebuildAiPlanSnapshot>,
+        plan_valid_place: FPlanValid,
+        plan_can_build: FPlanCanBuild,
+    ) -> PrebuildAiRuntimeStep
+    where
+        FValidBreak: FnMut(&BuildPlan) -> bool,
+        FValidPlace: FnMut(&BuildPlan) -> bool,
+        FPlanValid: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+        FPlanCanBuild: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+    {
+        let step = self.builder.apply_prebuild_ai_tick(
+            &mut self.prebuild_ai,
+            input,
+            valid_break,
+            valid_place,
+            next_plan,
+            plan_valid_place,
+            plan_can_build,
+        );
+        self.refresh_component_views();
+        step
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_prebuild_ai_mining<
+        FCoreHas,
+        FCoreAcceptOne,
+        FAcceptsItem,
+        FFindFloorOre,
+        FFindWallOre,
+        FOreTile,
+        FCanBuild,
+    >(
+        &mut self,
+        requirements: &[PrebuildAiRequirement],
+        input: PrebuildAiUnitInput,
+        core_accept_stack_one: FCoreAcceptOne,
+        can_build_after_deposit: FCanBuild,
+        core_has_item: FCoreHas,
+        accepts_item: FAcceptsItem,
+        find_floor_ore: FFindFloorOre,
+        find_wall_ore: FFindWallOre,
+        ore_tile: FOreTile,
+    ) -> PrebuildMiningRuntimeStep
+    where
+        FCoreHas: FnMut(ContentId, i32) -> bool,
+        FCoreAcceptOne: FnMut(ContentId) -> i32,
+        FAcceptsItem: FnMut(ContentId) -> bool,
+        FFindFloorOre: FnMut(ContentId) -> Option<i32>,
+        FFindWallOre: FnMut(ContentId) -> Option<i32>,
+        FOreTile: FnMut(i32) -> Option<MineTile>,
+        FCanBuild: FnMut() -> bool,
+    {
+        self.refresh_component_views();
+        let step = self.miner.apply_prebuild_mining_tick(
+            &mut self.prebuild_ai,
+            requirements,
+            input.build_cost_multiplier,
+            input.timer_ore_ready,
+            core_accept_stack_one,
+            input.core_accept_stack_amount,
+            input.within_core_range,
+            can_build_after_deposit,
+            core_has_item,
+            accepts_item,
+            find_floor_ore,
+            find_wall_ore,
+            ore_tile,
+        );
+        self.items.stack.item = self.miner.stack_item.clone();
+        self.items.stack.amount = self.miner.stack_amount;
+        self.refresh_component_views();
+        step
     }
 
     pub fn after_sync(&mut self) {
@@ -1133,6 +1240,106 @@ mod tests {
         assert_eq!(unit.team_id(), TeamId(5));
         assert!(!unit.set_prop_basic(LAccess::Team, 6.0, true));
         assert_eq!(unit.team_id(), TeamId(5));
+    }
+
+    #[test]
+    fn unit_component_holds_prebuild_ai_state_across_builder_and_miner_ticks() {
+        let mut unit = UnitComp::new(10, unit_type(), TeamId(1));
+        let block = crate::mindustry::ai::PrebuildAiBlockInfo::new(
+            "router",
+            crate::mindustry::r#type::Category::Distribution,
+        );
+        let plan = crate::mindustry::ai::PrebuildAiPlanSnapshot::new(
+            crate::mindustry::game::BlockPlan::new(3, 4, 0, "router", None),
+            block,
+        );
+
+        let build_step = unit.tick_prebuild_ai_builder(
+            PrebuildAiRuntimeInput {
+                timer_find_ready: true,
+                ..PrebuildAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| false,
+            Some(plan),
+            |_| true,
+            |_| false,
+        );
+
+        assert!(build_step.collecting_items);
+        assert!(unit.prebuild_ai.collecting_items);
+        assert_eq!(
+            unit.builder.build_plan().unwrap().block.as_deref(),
+            Some("router")
+        );
+        assert_eq!(unit.miner.actively_building, true);
+
+        unit.prebuild_ai.mining = true;
+        let mine_step = unit.tick_prebuild_ai_mining(
+            &[PrebuildAiRequirement::new(2, 5)],
+            PrebuildAiUnitInput {
+                timer_ore_ready: true,
+                build_cost_multiplier: 1.0,
+                ..PrebuildAiUnitInput::default()
+            },
+            |_| 1,
+            || false,
+            |_, _| false,
+            |_| true,
+            |_| Some(77),
+            |_| None,
+            |pos| {
+                (pos == 77).then_some(MineTile {
+                    world_x: 16,
+                    world_y: 24,
+                    block_air: true,
+                    floor_drop: Some(crate::mindustry::entities::MineItem::new("lead", 1)),
+                    wall_drop: None,
+                })
+            },
+        );
+
+        assert_eq!(mine_step.target_item, Some(2));
+        assert_eq!(unit.prebuild_ai.ore, Some(77));
+        assert_eq!(
+            unit.miner
+                .mine_tile
+                .as_ref()
+                .map(|tile| (tile.world_x, tile.world_y)),
+            Some((16, 24))
+        );
+    }
+
+    #[test]
+    fn unit_component_prebuild_ai_mining_deposit_updates_unit_items() {
+        let mut unit = UnitComp::new(11, unit_type(), TeamId(1));
+        unit.items.stack.item = Some("lead".into());
+        unit.items.stack.amount = 4;
+        unit.prebuild_ai.collecting_items = true;
+        unit.prebuild_ai.mining = false;
+
+        let step = unit.tick_prebuild_ai_mining(
+            &[PrebuildAiRequirement::new(2, 5)],
+            PrebuildAiUnitInput {
+                core_accept_stack_amount: 4,
+                within_core_range: true,
+                build_cost_multiplier: 1.0,
+                ..PrebuildAiUnitInput::default()
+            },
+            |_| 1,
+            || true,
+            |_, _| true,
+            |_| true,
+            |_| None,
+            |_| None,
+            |_| None,
+        );
+
+        assert!(step.transfer_to_core);
+        assert_eq!(unit.items.stack.amount, 0);
+        assert!(unit.items.stack.item.is_none());
+        assert!(unit.prebuild_ai.mining);
+        assert!(!unit.prebuild_ai.collecting_items);
     }
 
     #[test]
