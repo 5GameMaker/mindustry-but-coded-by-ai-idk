@@ -903,6 +903,87 @@ pub fn shield_wall_pickup(state: &mut ShieldWallState) {
     state.shield_radius = 0.0;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShieldWallDrawCommand {
+    Region,
+    SetShieldLayer,
+    SetShieldColor,
+    FillAnimatedSquare,
+    StrokeStaticSquare,
+    ResetShield,
+    Glow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldWallDrawPlan {
+    pub commands: &'static [ShieldWallDrawCommand],
+    pub radius: f32,
+    pub hit_alpha: f32,
+    pub fill_alpha: f32,
+    pub stroke: f32,
+    pub glow_alpha: f32,
+}
+
+const SHIELD_WALL_DRAW_COMMANDS_ANIMATED: &[ShieldWallDrawCommand] = &[
+    ShieldWallDrawCommand::Region,
+    ShieldWallDrawCommand::SetShieldLayer,
+    ShieldWallDrawCommand::SetShieldColor,
+    ShieldWallDrawCommand::FillAnimatedSquare,
+    ShieldWallDrawCommand::ResetShield,
+    ShieldWallDrawCommand::Glow,
+];
+
+const SHIELD_WALL_DRAW_COMMANDS_STATIC: &[ShieldWallDrawCommand] = &[
+    ShieldWallDrawCommand::Region,
+    ShieldWallDrawCommand::SetShieldLayer,
+    ShieldWallDrawCommand::SetShieldColor,
+    ShieldWallDrawCommand::StrokeStaticSquare,
+    ShieldWallDrawCommand::ResetShield,
+    ShieldWallDrawCommand::Glow,
+];
+
+const SHIELD_WALL_DRAW_COMMANDS_REGION: &[ShieldWallDrawCommand] = &[ShieldWallDrawCommand::Region];
+
+pub fn shield_wall_draw_plan(
+    shield_radius: f32,
+    size: i32,
+    tile_size: f32,
+    hit: f32,
+    animate_shields: bool,
+    glow_mag: f32,
+    absin: f32,
+) -> ShieldWallDrawPlan {
+    let has_shield = shield_radius > 0.0;
+    ShieldWallDrawPlan {
+        commands: if !has_shield {
+            SHIELD_WALL_DRAW_COMMANDS_REGION
+        } else if animate_shields {
+            SHIELD_WALL_DRAW_COMMANDS_ANIMATED
+        } else {
+            SHIELD_WALL_DRAW_COMMANDS_STATIC
+        },
+        radius: shield_radius * tile_size * size as f32 / 2.0,
+        hit_alpha: hit.clamp(0.0, 1.0),
+        fill_alpha: if has_shield && !animate_shields {
+            0.09 + (0.08 * hit).clamp(0.0, 1.0)
+        } else if has_shield {
+            1.0
+        } else {
+            0.0
+        },
+        stroke: if has_shield && !animate_shields {
+            1.5
+        } else {
+            0.0
+        },
+        glow_alpha: if has_shield {
+            (1.0 - glow_mag + absin) * shield_radius
+        } else {
+            0.0
+        },
+    }
+}
+
 pub fn write_shield_wall_state<W: Write>(write: &mut W, state: &ShieldWallState) -> io::Result<()> {
     write_f32(write, state.shield)
 }
@@ -2325,6 +2406,46 @@ mod tests {
             break_timer: 0.0,
             hit: 0.8,
         };
+        let animated_wall =
+            shield_wall_draw_plan(wall.shield_radius, 2, 8.0, wall.hit, true, 0.6, 0.25);
+        assert_eq!(
+            animated_wall.commands,
+            &[
+                ShieldWallDrawCommand::Region,
+                ShieldWallDrawCommand::SetShieldLayer,
+                ShieldWallDrawCommand::SetShieldColor,
+                ShieldWallDrawCommand::FillAnimatedSquare,
+                ShieldWallDrawCommand::ResetShield,
+                ShieldWallDrawCommand::Glow,
+            ]
+        );
+        assert_eq!(animated_wall.radius, 8.0);
+        assert_eq!(animated_wall.hit_alpha, 0.8);
+        assert_eq!(animated_wall.fill_alpha, 1.0);
+        assert_eq!(animated_wall.stroke, 0.0);
+        assert_eq!(animated_wall.glow_alpha, 0.65);
+
+        let static_wall = shield_wall_draw_plan(wall.shield_radius, 2, 8.0, 1.5, false, 0.6, 0.25);
+        assert_eq!(
+            static_wall.commands,
+            &[
+                ShieldWallDrawCommand::Region,
+                ShieldWallDrawCommand::SetShieldLayer,
+                ShieldWallDrawCommand::SetShieldColor,
+                ShieldWallDrawCommand::StrokeStaticSquare,
+                ShieldWallDrawCommand::ResetShield,
+                ShieldWallDrawCommand::Glow,
+            ]
+        );
+        assert_eq!(static_wall.hit_alpha, 1.0);
+        assert!((static_wall.fill_alpha - (0.09 + 0.08 * 1.5)).abs() < 0.00001);
+        assert_eq!(static_wall.stroke, 1.5);
+
+        let region_only_wall = shield_wall_draw_plan(0.0, 2, 8.0, 0.8, true, 0.6, 0.25);
+        assert_eq!(region_only_wall.commands, &[ShieldWallDrawCommand::Region]);
+        assert_eq!(region_only_wall.radius, 0.0);
+        assert_eq!(region_only_wall.glow_alpha, 0.0);
+
         let damage = shield_wall_damage(&mut wall, true, 20.0, 600.0);
         assert_eq!(damage.shield_taken, 15.0);
         assert_eq!(damage.passthrough_damage, 5.0);
