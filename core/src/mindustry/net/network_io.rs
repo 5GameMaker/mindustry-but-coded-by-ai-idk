@@ -8,11 +8,11 @@ use crate::mindustry::io::type_io::{
     read_unit_ref, TeamId, UnitRef,
 };
 use crate::mindustry::io::{
-    read_chunk_map, read_content_header_snapshot, read_content_patches, read_custom_chunks,
-    read_legacy_team_blocks, summarize_marker_region_bytes, write_chunk_map,
-    write_content_header_snapshot, write_content_patches, write_custom_chunks,
-    write_legacy_team_blocks, ContentHeaderSnapshot, ContentPatchSet, CustomChunkSet,
-    LegacyShortChunkMap, LegacyTeamBlocks, MarkerRegionSummary,
+    marker_region_bytes_from_map_markers, read_chunk_map, read_content_header_snapshot,
+    read_content_patches, read_custom_chunks, read_legacy_team_blocks,
+    summarize_marker_region_bytes, write_chunk_map, write_content_header_snapshot,
+    write_content_patches, write_custom_chunks, write_legacy_team_blocks, ContentHeaderSnapshot,
+    ContentPatchSet, CustomChunkSet, LegacyShortChunkMap, LegacyTeamBlocks, MarkerRegionSummary,
 };
 use crate::mindustry::vars::DEFAULT_PORT;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
@@ -186,6 +186,11 @@ impl NetworkWorldData {
             None => self.team_blocks.clone(),
         };
 
+        let markers = match &self.markers_snapshot {
+            Some(snapshot) => marker_region_bytes_from_map_markers(snapshot)?,
+            None => self.markers.clone(),
+        };
+
         let custom_chunks = match &self.custom_chunks_snapshot {
             Some(snapshot) => {
                 let mut bytes = Vec::new();
@@ -206,7 +211,7 @@ impl NetworkWorldData {
             content_patches,
             map_bytes,
             team_blocks,
-            markers: self.markers.clone(),
+            markers,
             custom_chunks,
         })
     }
@@ -1108,6 +1113,8 @@ fn decode_java_modified_utf8(bytes: &[u8]) -> Result<String, NetworkIoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::game::map_objectives::PointMarker;
+    use crate::mindustry::game::ObjectiveMarker;
     use crate::mindustry::io::type_io::{
         write_bool as write_io_bool, write_command_id, write_f32 as write_io_f32,
         write_i16 as write_io_i16, write_i32 as write_io_i32, write_string as write_io_string,
@@ -1399,6 +1406,26 @@ mod tests {
         assert_eq!(tail.team_blocks, expected_team_blocks);
         assert_ne!(tail.map_bytes.as_slice(), b"raw-map-ignored");
         assert_ne!(tail.team_blocks.as_slice(), b"raw-team-ignored");
+    }
+
+    #[test]
+    fn world_data_tail_uses_marker_snapshot_over_raw_bytes() {
+        let mut markers_snapshot = MapMarkers::new();
+        let mut point = PointMarker::default();
+        point.pos = crate::mindustry::game::Vec2::new(8.0, 16.0);
+        markers_snapshot.add(9, ObjectiveMarker::Point(point));
+
+        let data = NetworkWorldData {
+            markers: b"raw-markers-ignored".to_vec(),
+            markers_snapshot: Some(markers_snapshot.clone()),
+            ..NetworkWorldData::default()
+        };
+
+        let tail = data.materialized_tail_sections().unwrap();
+        assert_ne!(tail.markers.as_slice(), b"raw-markers-ignored");
+
+        let decoded = parse_marker_region_bytes(&tail.markers).unwrap();
+        assert_eq!(decoded, markers_snapshot);
     }
 
     #[test]

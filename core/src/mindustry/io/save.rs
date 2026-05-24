@@ -8,7 +8,8 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use ubjson::Container as UbjsonContainer;
 
 use crate::mindustry::{
-    game::{marker_type_by_java_name, MapMarkers, ObjectiveMarker, Rules},
+    game::map_objectives::{TextureHolder, OBJECTIVE_MARKER_DRAW_LAYER_OVERLAY_UI},
+    game::{marker_type_by_java_name, MapMarkers, ObjectiveMarker, Rules, Vec2},
     io::type_io::{
         read_i32, read_i64, read_java_utf, read_u16, read_u8, write_i32, write_i64, write_java_utf,
         write_u16,
@@ -834,6 +835,27 @@ pub fn write_marker_region_bytes<W: Write>(
     write.write_all(&markers.bytes)
 }
 
+pub fn write_marker_region_from_map_markers<W: Write>(
+    write: &mut W,
+    markers: &MapMarkers,
+) -> io::Result<()> {
+    let bytes = marker_region_bytes_from_map_markers(markers)?;
+    write.write_all(&bytes)
+}
+
+pub fn marker_region_bytes_from_map_markers(markers: &MapMarkers) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    write_ubjson_object_start(&mut bytes);
+    let mut entries = markers.entries().collect::<Vec<_>>();
+    entries.sort_by_key(|(id, _)| *id);
+    for (id, marker) in entries {
+        write_ubjson_key(&mut bytes, &id.to_string())?;
+        write_objective_marker_ubjson(&mut bytes, marker)?;
+    }
+    write_ubjson_object_end(&mut bytes);
+    Ok(bytes)
+}
+
 pub fn read_marker_region_bytes<R: Read>(read: &mut R) -> io::Result<MarkerRegionBytes> {
     let mut bytes = Vec::new();
     read.read_to_end(&mut bytes)?;
@@ -1216,6 +1238,195 @@ fn parse_hex_rgba(value: &str) -> Option<u32> {
 fn pack_rgba(r: f32, g: f32, b: f32, a: f32) -> u32 {
     let pack = |value: f32| -> u32 { (value.clamp(0.0, 1.0) * 255.0).round() as u32 };
     (pack(r) << 24) | (pack(g) << 16) | (pack(b) << 8) | pack(a)
+}
+
+fn write_objective_marker_ubjson(write: &mut Vec<u8>, marker: &ObjectiveMarker) -> io::Result<()> {
+    write_ubjson_object_start(write);
+    write_marker_common_ubjson(write, marker)?;
+
+    match marker {
+        ObjectiveMarker::ShapeText(value) => {
+            write_ubjson_vec2_field(write, "pos", value.pos)?;
+            write_ubjson_string_field(write, "text", &value.text)?;
+            write_ubjson_f32_field(write, "fontSize", value.font_size)?;
+            write_ubjson_f32_field(write, "textHeight", value.text_height)?;
+            write_ubjson_u8_field(write, "flags", value.flags)?;
+            write_ubjson_i32_field(write, "textAlign", value.text_align)?;
+            write_ubjson_i32_field(write, "lineAlign", value.line_align)?;
+            write_ubjson_f32_field(write, "radius", value.radius)?;
+            write_ubjson_f32_field(write, "rotation", value.rotation)?;
+            write_ubjson_i32_field(write, "sides", value.sides)?;
+            write_ubjson_color_field(write, "color", value.color)?;
+        }
+        ObjectiveMarker::Point(value) => {
+            write_ubjson_vec2_field(write, "pos", value.pos)?;
+            write_ubjson_f32_field(write, "radius", value.radius)?;
+            write_ubjson_f32_field(write, "stroke", value.stroke)?;
+            write_ubjson_color_field(write, "color", value.color)?;
+        }
+        ObjectiveMarker::Shape(value) => {
+            write_ubjson_vec2_field(write, "pos", value.pos)?;
+            write_ubjson_f32_field(write, "radius", value.radius)?;
+            write_ubjson_f32_field(write, "rotation", value.rotation)?;
+            write_ubjson_f32_field(write, "stroke", value.stroke)?;
+            write_ubjson_f32_field(write, "startAngle", value.start_angle)?;
+            write_ubjson_f32_field(write, "endAngle", value.end_angle)?;
+            write_ubjson_bool_field(write, "fill", value.fill)?;
+            write_ubjson_bool_field(write, "outline", value.outline)?;
+            write_ubjson_i32_field(write, "sides", value.sides)?;
+            write_ubjson_color_field(write, "color", value.color)?;
+        }
+        ObjectiveMarker::Text(value) => {
+            write_ubjson_vec2_field(write, "pos", value.pos)?;
+            write_ubjson_string_field(write, "text", &value.text)?;
+            write_ubjson_f32_field(write, "fontSize", value.font_size)?;
+            write_ubjson_u8_field(write, "flags", value.flags)?;
+            write_ubjson_i32_field(write, "textAlign", value.text_align)?;
+            write_ubjson_i32_field(write, "lineAlign", value.line_align)?;
+        }
+        ObjectiveMarker::Line(value) => {
+            write_ubjson_vec2_field(write, "pos", value.pos)?;
+            write_ubjson_vec2_field(write, "endPos", value.end_pos)?;
+            write_ubjson_f32_field(write, "stroke", value.stroke)?;
+            write_ubjson_bool_field(write, "outline", value.outline)?;
+            write_ubjson_color_field(write, "color1", value.color1)?;
+            write_ubjson_color_field(write, "color2", value.color2)?;
+        }
+        ObjectiveMarker::Texture(value) => {
+            write_ubjson_vec2_field(write, "pos", value.pos)?;
+            write_ubjson_f32_field(write, "rotation", value.rotation)?;
+            write_ubjson_f32_field(write, "width", value.width)?;
+            write_ubjson_f32_field(write, "height", value.height)?;
+            write_ubjson_texture_holder_field(write, "texture", &value.texture)?;
+            write_ubjson_color_field(write, "color", value.color)?;
+        }
+        ObjectiveMarker::Quad(value) => {
+            write_ubjson_texture_holder_field(write, "texture", &value.texture)?;
+            write_ubjson_f32_array_field(write, "vertices", &value.vertices)?;
+            write_ubjson_bool_field(write, "mapRegion", value.map_region)?;
+        }
+    }
+
+    write_ubjson_object_end(write);
+    Ok(())
+}
+
+fn write_marker_common_ubjson(write: &mut Vec<u8>, marker: &ObjectiveMarker) -> io::Result<()> {
+    write_ubjson_string_field(write, "class", marker.type_name())?;
+    let common = marker.common();
+    write_ubjson_bool_field(write, "world", common.world)?;
+    write_ubjson_bool_field(write, "minimap", common.minimap)?;
+    write_ubjson_bool_field(write, "autoscale", common.autoscale)?;
+    if common.draw_layer != OBJECTIVE_MARKER_DRAW_LAYER_OVERLAY_UI {
+        write_ubjson_f32_field(write, "drawLayer", common.draw_layer)?;
+    }
+    Ok(())
+}
+
+fn write_ubjson_object_start(write: &mut Vec<u8>) {
+    write.push(b'{');
+}
+
+fn write_ubjson_object_end(write: &mut Vec<u8>) {
+    write.push(b'}');
+}
+
+fn write_ubjson_key(write: &mut Vec<u8>, key: &str) -> io::Result<()> {
+    write_ubjson_raw_string(write, key)
+}
+
+fn write_ubjson_string_field(write: &mut Vec<u8>, key: &str, value: &str) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write.push(b'S');
+    write_ubjson_raw_string(write, value)
+}
+
+fn write_ubjson_bool_field(write: &mut Vec<u8>, key: &str, value: bool) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write.push(if value { b'T' } else { b'F' });
+    Ok(())
+}
+
+fn write_ubjson_i32_field(write: &mut Vec<u8>, key: &str, value: i32) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write.push(b'l');
+    write.extend_from_slice(&value.to_be_bytes());
+    Ok(())
+}
+
+fn write_ubjson_u8_field(write: &mut Vec<u8>, key: &str, value: u8) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write.push(b'U');
+    write.push(value);
+    Ok(())
+}
+
+fn write_ubjson_f32_field(write: &mut Vec<u8>, key: &str, value: f32) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write.push(b'd');
+    write.extend_from_slice(&value.to_be_bytes());
+    Ok(())
+}
+
+fn write_ubjson_vec2_field(write: &mut Vec<u8>, key: &str, value: Vec2) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write_ubjson_object_start(write);
+    write_ubjson_f32_field(write, "x", value.x)?;
+    write_ubjson_f32_field(write, "y", value.y)?;
+    write_ubjson_object_end(write);
+    Ok(())
+}
+
+fn write_ubjson_color_field(write: &mut Vec<u8>, key: &str, value: u32) -> io::Result<()> {
+    write_ubjson_string_field(write, key, &format!("{value:08x}"))
+}
+
+fn write_ubjson_texture_holder_field(
+    write: &mut Vec<u8>,
+    key: &str,
+    value: &TextureHolder,
+) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write_ubjson_object_start(write);
+    match value {
+        TextureHolder::String(value) => write_ubjson_string_field(write, "string", value)?,
+        TextureHolder::Content(value) => write_ubjson_string_field(write, "content", value)?,
+        TextureHolder::Building(value) => write_ubjson_i32_field(write, "building", *value)?,
+    }
+    write_ubjson_object_end(write);
+    Ok(())
+}
+
+fn write_ubjson_f32_array_field(write: &mut Vec<u8>, key: &str, values: &[f32]) -> io::Result<()> {
+    write_ubjson_key(write, key)?;
+    write.push(b'[');
+    for value in values {
+        write.push(b'd');
+        write.extend_from_slice(&value.to_be_bytes());
+    }
+    write.push(b']');
+    Ok(())
+}
+
+fn write_ubjson_raw_string(write: &mut Vec<u8>, value: &str) -> io::Result<()> {
+    let bytes = value.as_bytes();
+    if bytes.len() <= u8::MAX as usize {
+        write.push(b'U');
+        write.push(bytes.len() as u8);
+    } else if bytes.len() <= i16::MAX as usize {
+        write.push(b'I');
+        write.extend_from_slice(&(bytes.len() as i16).to_be_bytes());
+    } else if bytes.len() <= i32::MAX as usize {
+        write.push(b'l');
+        write.extend_from_slice(&(bytes.len() as i32).to_be_bytes());
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "UBJSON string too large",
+        ));
+    }
+    write.extend_from_slice(bytes);
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2184,6 +2395,99 @@ mod tests {
             }
             other => panic!("expected Quad marker, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn marker_region_writer_roundtrips_all_marker_variants() {
+        use crate::mindustry::game::map_objectives::{
+            LineMarker, PointMarker, QuadMarker, ShapeMarker, ShapeTextMarker, TextMarker,
+            TextureMarker,
+        };
+
+        let mut markers = MapMarkers::new();
+
+        let mut shape_text = ShapeTextMarker::default();
+        shape_text.common.world = false;
+        shape_text.common.minimap = true;
+        shape_text.common.autoscale = true;
+        shape_text.common.draw_layer = 99.5;
+        shape_text.pos = Vec2::new(1.0, 2.0);
+        shape_text.text = "alpha".into();
+        shape_text.font_size = 2.0;
+        shape_text.text_height = 8.0;
+        shape_text.flags = 1;
+        shape_text.text_align = 2;
+        shape_text.line_align = 3;
+        shape_text.radius = 4.0;
+        shape_text.rotation = 5.0;
+        shape_text.sides = 6;
+        shape_text.color = 0x11223344;
+        markers.add(7, ObjectiveMarker::ShapeText(shape_text));
+
+        let mut point = PointMarker::default();
+        point.pos = Vec2::new(3.0, 4.0);
+        point.radius = 5.5;
+        point.stroke = 6.5;
+        point.color = 0x55667788;
+        markers.add(1, ObjectiveMarker::Point(point));
+
+        let mut shape = ShapeMarker::default();
+        shape.pos = Vec2::new(5.0, 6.0);
+        shape.radius = 7.0;
+        shape.rotation = 8.0;
+        shape.stroke = 9.0;
+        shape.start_angle = 10.0;
+        shape.end_angle = 11.0;
+        shape.fill = true;
+        shape.outline = false;
+        shape.sides = 12;
+        shape.color = 0x99aabbcc;
+        markers.add(3, ObjectiveMarker::Shape(shape));
+
+        let mut text = TextMarker::default();
+        text.pos = Vec2::new(7.0, 8.0);
+        text.text = "beta".into();
+        text.font_size = 3.0;
+        text.flags = 2;
+        text.text_align = 4;
+        text.line_align = 5;
+        markers.add(4, ObjectiveMarker::Text(text));
+
+        let mut line = LineMarker::default();
+        line.pos = Vec2::new(9.0, 10.0);
+        line.end_pos = Vec2::new(11.0, 12.0);
+        line.stroke = 13.0;
+        line.outline = false;
+        line.color1 = 0x01020304;
+        line.color2 = 0x05060708;
+        markers.add(5, ObjectiveMarker::Line(line));
+
+        let mut texture = TextureMarker::default();
+        texture.pos = Vec2::new(13.0, 14.0);
+        texture.rotation = 15.0;
+        texture.width = 16.0;
+        texture.height = 17.0;
+        texture.texture = TextureHolder::Content("router".into());
+        texture.color = 0xaabbccdd;
+        markers.add(6, ObjectiveMarker::Texture(texture));
+
+        let mut quad = QuadMarker::default();
+        quad.texture = TextureHolder::Building(42);
+        quad.vertices = (0..24).map(|index| index as f32 + 0.25).collect();
+        quad.map_region = false;
+        markers.add(2, ObjectiveMarker::Quad(quad));
+
+        let bytes = marker_region_bytes_from_map_markers(&markers).unwrap();
+        let decoded = parse_marker_region_bytes(&bytes).unwrap();
+        let mut expected_entries = markers
+            .entries()
+            .map(|(id, marker)| (id, marker.clone()))
+            .collect::<Vec<_>>();
+        expected_entries.sort_by_key(|(id, _)| *id);
+        let expected = MapMarkers::rebuild_from_entries(expected_entries);
+
+        assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(decoded, expected);
     }
 
     fn ubjson_object(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
