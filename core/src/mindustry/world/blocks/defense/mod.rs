@@ -811,6 +811,27 @@ pub fn build_turret_should_consume(plan_count: usize, heal_suppressed: bool) -> 
     plan_count > 0 && !heal_suppressed
 }
 
+pub fn build_turret_first_fit_plan<T, FWithin, FValid, FHasResources>(
+    plans: &mut Vec<T>,
+    within_range: FWithin,
+    valid_place: FValid,
+    has_resources: FHasResources,
+) -> Option<T>
+where
+    T: Clone,
+    FWithin: Fn(&T) -> bool,
+    FValid: Fn(&T) -> bool,
+    FHasResources: Fn(&T) -> bool,
+{
+    let index = plans
+        .iter()
+        .position(|plan| within_range(plan) && valid_place(plan) && has_resources(plan))?;
+    let selected = plans.remove(index);
+    let returned = selected.clone();
+    plans.push(selected);
+    Some(returned)
+}
+
 pub fn build_turret_write_child<W: Write>(
     write: &mut W,
     state: &BuildTurretState,
@@ -1190,6 +1211,67 @@ mod tests {
         assert_eq!(restored.raw_plans, vec![0, 2, 7, 9]);
 
         assert_eq!(thruster_top_rotation(3), 270.0);
+    }
+
+    #[test]
+    fn build_turret_consumes_team_plan_queue_and_moves_consumed_plan_to_tail() {
+        let mut plans = vec![
+            crate::mindustry::game::BlockPlan::new(1, 1, 0, "duo", None),
+            crate::mindustry::game::BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            crate::mindustry::game::BlockPlan::new(3, 3, 2, "wall", None),
+        ];
+
+        let selected = build_turret_first_fit_plan(
+            &mut plans,
+            |plan| plan.x == 2 || plan.x == 3,
+            |plan| plan.block != "wall",
+            |_| true,
+        )
+        .expect("first in-range valid plan should be selected");
+
+        assert_eq!(
+            selected,
+            crate::mindustry::game::BlockPlan::new(2, 2, 1, "router", Some("cfg".into()))
+        );
+        assert_eq!(
+            plans,
+            vec![
+                crate::mindustry::game::BlockPlan::new(1, 1, 0, "duo", None),
+                crate::mindustry::game::BlockPlan::new(3, 3, 2, "wall", None),
+                crate::mindustry::game::BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ]
+        );
+
+        let build_plan =
+            crate::mindustry::entities::comp::BuilderComp::build_plan_from_team_plan(&selected);
+        assert_eq!(build_plan.x, 2);
+        assert_eq!(build_plan.y, 2);
+        assert_eq!(build_plan.rotation, 1);
+        assert_eq!(build_plan.block.as_deref(), Some("router"));
+        assert_eq!(
+            build_plan.config,
+            crate::mindustry::io::TypeValue::String("cfg".into())
+        );
+    }
+
+    #[test]
+    fn build_turret_keeps_team_plan_queue_when_no_candidate_matches() {
+        let mut plans = vec![
+            crate::mindustry::game::BlockPlan::new(4, 4, 0, "duo", None),
+            crate::mindustry::game::BlockPlan::new(5, 5, 0, "router", None),
+        ];
+        let original = plans.clone();
+
+        assert_eq!(
+            build_turret_first_fit_plan(
+                &mut plans,
+                |_| true,
+                |_| true,
+                |plan| plan.block == "missing",
+            ),
+            None
+        );
+        assert_eq!(plans, original);
     }
 
     #[test]
