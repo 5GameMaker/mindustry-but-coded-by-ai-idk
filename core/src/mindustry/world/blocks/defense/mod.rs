@@ -572,6 +572,97 @@ pub fn regen_projector_heal_amount(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegenProjectorState {
+    pub warmup: f32,
+    pub total_time: f32,
+    pub optional_timer: f32,
+    pub any_targets: bool,
+    pub did_regen: bool,
+}
+
+impl Default for RegenProjectorState {
+    fn default() -> Self {
+        Self {
+            warmup: 0.0,
+            total_time: 0.0,
+            optional_timer: 0.0,
+            any_targets: false,
+            did_regen: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegenProjectorUpdatePlan {
+    pub suppressed: bool,
+    pub any_targets: bool,
+    pub consume_optional: bool,
+    pub heal_amount_percent: f32,
+    pub warmup: f32,
+    pub total_time: f32,
+    pub optional_timer: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn regen_projector_update(
+    state: &mut RegenProjectorState,
+    suppressed: bool,
+    damaged_targets: bool,
+    efficiency: f32,
+    edelta: f32,
+    delta: f32,
+    optional_efficiency: f32,
+    optional_use_time: f32,
+    optional_multiplier: f32,
+    heal_percent: f32,
+) -> RegenProjectorUpdatePlan {
+    state.warmup = approach_delta(
+        state.warmup,
+        if state.did_regen { 1.0 } else { 0.0 },
+        1.0 / 70.0,
+    );
+    state.total_time += state.warmup * delta;
+    state.did_regen = false;
+    state.any_targets = false;
+
+    if suppressed {
+        return RegenProjectorUpdatePlan {
+            suppressed: true,
+            any_targets: false,
+            consume_optional: false,
+            heal_amount_percent: 0.0,
+            warmup: state.warmup,
+            total_time: state.total_time,
+            optional_timer: state.optional_timer,
+        };
+    }
+
+    state.any_targets = damaged_targets;
+    let mut consume_optional = false;
+    let mut heal_amount_percent = 0.0;
+
+    if efficiency > 0.0 {
+        state.optional_timer += edelta * optional_efficiency;
+        if state.optional_timer >= optional_use_time {
+            consume_optional = true;
+            state.optional_timer = 0.0;
+        }
+        heal_amount_percent = lerp(1.0, optional_multiplier, optional_efficiency) * heal_percent;
+        state.did_regen = damaged_targets;
+    }
+
+    RegenProjectorUpdatePlan {
+        suppressed: false,
+        any_targets: state.any_targets,
+        consume_optional,
+        heal_amount_percent,
+        warmup: state.warmup,
+        total_time: state.total_time,
+        optional_timer: state.optional_timer,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BaseShieldState {
     pub broken: bool,
     pub hit: f32,
@@ -1733,6 +1824,14 @@ fn lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * progress
 }
 
+fn approach_delta(from: f32, to: f32, amount: f32) -> f32 {
+    if from < to {
+        (from + amount).min(to)
+    } else {
+        (from - amount).max(to)
+    }
+}
+
 fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
@@ -2023,6 +2122,47 @@ mod tests {
             regen_projector_heal_amount(1.0, 2.0, 12.0, 1.0, 1000.0, 20.0),
             20.0
         );
+        let mut regen = RegenProjectorState {
+            did_regen: true,
+            optional_timer: 470.0,
+            ..RegenProjectorState::default()
+        };
+        let plan = regen_projector_update(
+            &mut regen,
+            false,
+            true,
+            1.0,
+            20.0,
+            2.0,
+            1.0,
+            480.0,
+            2.0,
+            12.0 / 60.0,
+        );
+        assert_eq!(plan.warmup, 1.0 / 70.0);
+        assert_eq!(plan.total_time, (1.0 / 70.0) * 2.0);
+        assert!(plan.any_targets);
+        assert!(plan.consume_optional);
+        assert_eq!(plan.optional_timer, 0.0);
+        assert_eq!(plan.heal_amount_percent, 0.4);
+        assert!(regen.did_regen);
+
+        let suppressed = regen_projector_update(
+            &mut regen,
+            true,
+            true,
+            1.0,
+            20.0,
+            1.0,
+            1.0,
+            480.0,
+            2.0,
+            12.0 / 60.0,
+        );
+        assert!(suppressed.suppressed);
+        assert!(!suppressed.any_targets);
+        assert_eq!(suppressed.heal_amount_percent, 0.0);
+        assert!(!regen.did_regen);
     }
 
     #[test]
