@@ -1386,6 +1386,112 @@ pub struct RepairDerelictPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectUnitCandidate {
+    pub id: i32,
+    pub x: f32,
+    pub y: f32,
+    pub hit_size: f32,
+    pub is_ai: bool,
+    pub player_controllable: bool,
+    pub commandable: bool,
+    pub in_fog_to_player: bool,
+}
+
+impl SelectUnitCandidate {
+    pub const fn new(id: i32, x: f32, y: f32) -> Self {
+        Self {
+            id,
+            x,
+            y,
+            hit_size: 8.0,
+            is_ai: true,
+            player_controllable: true,
+            commandable: true,
+            in_fog_to_player: false,
+        }
+    }
+
+    pub fn dst_edge(self, x: f32, y: f32) -> f32 {
+        let dx = self.x - x;
+        let dy = self.y - y;
+        (dx * dx + dy * dy).sqrt() - self.hit_size / 2.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectBuildingCandidate {
+    pub id: i32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub same_team: bool,
+    pub commandable: bool,
+    pub control_block: bool,
+    pub can_control: bool,
+    pub controlled_unit_id: Option<i32>,
+    pub controlled_unit_is_player: bool,
+    pub controlled_unit_is_ai: bool,
+    pub can_control_select: bool,
+}
+
+impl SelectBuildingCandidate {
+    pub const fn new(id: i32, x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            id,
+            x,
+            y,
+            width,
+            height,
+            same_team: true,
+            commandable: false,
+            control_block: false,
+            can_control: false,
+            controlled_unit_id: None,
+            controlled_unit_is_player: false,
+            controlled_unit_is_ai: false,
+            can_control_select: false,
+        }
+    }
+
+    pub fn contains(self, x: f32, y: f32) -> bool {
+        x >= self.x && x <= self.x + self.width && y >= self.y && y <= self.y + self.height
+    }
+
+    pub fn intersects(self, x: f32, y: f32, w: f32, h: f32) -> bool {
+        let left = self.x.min(self.x + self.width);
+        let right = self.x.max(self.x + self.width);
+        let bottom = self.y.min(self.y + self.height);
+        let top = self.y.max(self.y + self.height);
+        let q_left = x.min(x + w);
+        let q_right = x.max(x + w);
+        let q_bottom = y.min(y + h);
+        let q_top = y.max(y + h);
+        left < q_right && right > q_left && bottom < q_top && top > q_bottom
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectedUnitSource {
+    NearbyUnit,
+    ControlBlock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectedUnitPlan {
+    pub unit_id: i32,
+    pub source: SelectedUnitSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectionRectFrame {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputHandlerLocalAction {
     UnitControlRemote,
     UnitControlLocal,
@@ -4884,6 +4990,126 @@ pub fn try_repair_derelict_plan(frame: RepairDerelictFrame) -> RepairDerelictPla
     }
 }
 
+pub fn selected_unit_plan(
+    mouse_x: f32,
+    mouse_y: f32,
+    player_unit_id: Option<i32>,
+    nearby_units: &[SelectUnitCandidate],
+    world_build: Option<SelectBuildingCandidate>,
+) -> Option<SelectedUnitPlan> {
+    if let Some(unit) = nearby_units
+        .iter()
+        .copied()
+        .filter(|unit| unit.is_ai && unit.player_controllable)
+        .filter(|unit| unit.dst_edge(mouse_x, mouse_y) <= 40.0)
+        .filter(|unit| {
+            let grown = unit.hit_size / 2.0 + 6.0;
+            (unit.x - mouse_x).abs() <= grown && (unit.y - mouse_y).abs() <= grown
+        })
+        .min_by(|a, b| {
+            a.dst_edge(mouse_x, mouse_y)
+                .total_cmp(&b.dst_edge(mouse_x, mouse_y))
+        })
+    {
+        return Some(SelectedUnitPlan {
+            unit_id: unit.id,
+            source: SelectedUnitSource::NearbyUnit,
+        });
+    }
+
+    let build = world_build?;
+    if build.control_block
+        && build.can_control
+        && build.same_team
+        && build.controlled_unit_id != player_unit_id
+        && build.controlled_unit_is_ai
+    {
+        build.controlled_unit_id.map(|unit_id| SelectedUnitPlan {
+            unit_id,
+            source: SelectedUnitSource::ControlBlock,
+        })
+    } else {
+        None
+    }
+}
+
+pub fn selected_control_build_plan(
+    player_dead: bool,
+    build: Option<SelectBuildingCandidate>,
+) -> Option<i32> {
+    let build = build?;
+    (!player_dead && build.can_control_select && build.same_team).then_some(build.id)
+}
+
+pub fn selected_command_unit_plan(x: f32, y: f32, units: &[SelectUnitCandidate]) -> Option<i32> {
+    units
+        .iter()
+        .copied()
+        .filter(|unit| unit.commandable)
+        .filter(|unit| (unit.x - x).abs() <= 2.0 && (unit.y - y).abs() <= 2.0)
+        .min_by(|a, b| a.dst_edge(x, y).total_cmp(&b.dst_edge(x, y)))
+        .map(|unit| unit.id)
+}
+
+pub fn selected_enemy_unit_plan(x: f32, y: f32, units: &[SelectUnitCandidate]) -> Option<i32> {
+    units
+        .iter()
+        .copied()
+        .filter(|unit| !unit.in_fog_to_player)
+        .filter(|unit| (unit.x - x).abs() <= 2.0 && (unit.y - y).abs() <= 2.0)
+        .min_by(|a, b| a.dst_edge(x, y).total_cmp(&b.dst_edge(x, y)))
+        .map(|unit| unit.id)
+}
+
+pub fn selected_command_buildings_plan(
+    rect: SelectionRectFrame,
+    buildings: &[SelectBuildingCandidate],
+) -> Vec<i32> {
+    let rad = 4.0;
+    buildings
+        .iter()
+        .copied()
+        .filter(|build| build.commandable)
+        .filter(|build| {
+            build.intersects(
+                rect.x - rad / 2.0,
+                rect.y - rad / 2.0,
+                rad * 2.0 + rect.w,
+                rad * 2.0 + rect.h,
+            )
+        })
+        .map(|build| build.id)
+        .collect()
+}
+
+pub fn selected_command_units_plan<F>(
+    rect: SelectionRectFrame,
+    units: &[SelectUnitCandidate],
+    mut predicate: F,
+) -> Vec<i32>
+where
+    F: FnMut(&SelectUnitCandidate) -> bool,
+{
+    let rad = 4.0;
+    let qx = rect.x - rad / 2.0;
+    let qy = rect.y - rad / 2.0;
+    let qw = rad * 2.0 + rect.w;
+    let qh = rad * 2.0 + rect.h;
+    units
+        .iter()
+        .filter(|unit| unit.commandable && predicate(unit))
+        .filter(|unit| {
+            let half = unit.hit_size / 2.0;
+            let left = unit.x - half;
+            let right = unit.x + half;
+            let bottom = unit.y - half;
+            let top = unit.y + half;
+            left < qx + qw && right > qx && bottom < qy + qh && top > qy
+        })
+        .map(|unit| unit.id)
+        .collect()
+}
+
 pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
     if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
         return CheckUnitPlan {
@@ -7753,6 +7979,174 @@ mod tests {
         ] {
             assert!(!try_repair_derelict_plan(frame).accepted);
         }
+    }
+
+    #[test]
+    fn selected_unit_plan_prefers_nearby_ai_unit_then_control_block_unit() {
+        let far = SelectUnitCandidate {
+            id: 1,
+            x: 100.0,
+            y: 100.0,
+            ..SelectUnitCandidate::new(1, 100.0, 100.0)
+        };
+        let nearby = SelectUnitCandidate {
+            id: 2,
+            x: 10.0,
+            y: 10.0,
+            hit_size: 8.0,
+            ..SelectUnitCandidate::new(2, 10.0, 10.0)
+        };
+        let control = SelectBuildingCandidate {
+            control_block: true,
+            can_control: true,
+            same_team: true,
+            controlled_unit_id: Some(9),
+            controlled_unit_is_ai: true,
+            ..SelectBuildingCandidate::new(4, 0.0, 0.0, 8.0, 8.0)
+        };
+
+        assert_eq!(
+            selected_unit_plan(10.0, 10.0, Some(99), &[far, nearby], Some(control)),
+            Some(SelectedUnitPlan {
+                unit_id: 2,
+                source: SelectedUnitSource::NearbyUnit
+            })
+        );
+
+        assert_eq!(
+            selected_unit_plan(0.0, 0.0, Some(99), &[], Some(control)),
+            Some(SelectedUnitPlan {
+                unit_id: 9,
+                source: SelectedUnitSource::ControlBlock
+            })
+        );
+
+        assert_eq!(
+            selected_unit_plan(0.0, 0.0, Some(9), &[], Some(control)),
+            None
+        );
+    }
+
+    #[test]
+    fn selected_control_build_plan_requires_alive_same_team_selectable() {
+        let build = SelectBuildingCandidate {
+            same_team: true,
+            can_control_select: true,
+            ..SelectBuildingCandidate::new(7, 0.0, 0.0, 8.0, 8.0)
+        };
+
+        assert_eq!(selected_control_build_plan(false, Some(build)), Some(7));
+        assert_eq!(selected_control_build_plan(true, Some(build)), None);
+        assert_eq!(
+            selected_control_build_plan(
+                false,
+                Some(SelectBuildingCandidate {
+                    same_team: false,
+                    ..build
+                })
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn selected_command_and_enemy_units_pick_visible_closest_edge() {
+        let close = SelectUnitCandidate {
+            id: 1,
+            x: 10.0,
+            y: 10.0,
+            hit_size: 4.0,
+            ..SelectUnitCandidate::new(1, 10.0, 10.0)
+        };
+        let closer_edge = SelectUnitCandidate {
+            id: 2,
+            x: 11.0,
+            y: 10.0,
+            hit_size: 12.0,
+            ..SelectUnitCandidate::new(2, 11.0, 10.0)
+        };
+        let not_commandable = SelectUnitCandidate {
+            id: 3,
+            commandable: false,
+            ..SelectUnitCandidate::new(3, 10.0, 10.0)
+        };
+
+        assert_eq!(
+            selected_command_unit_plan(10.0, 10.0, &[close, closer_edge, not_commandable]),
+            Some(2)
+        );
+
+        assert_eq!(
+            selected_enemy_unit_plan(
+                10.0,
+                10.0,
+                &[
+                    SelectUnitCandidate {
+                        id: 4,
+                        in_fog_to_player: true,
+                        ..SelectUnitCandidate::new(4, 10.0, 10.0)
+                    },
+                    close,
+                ],
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn selected_command_rects_filter_commandable_buildings_and_units() {
+        let rect = SelectionRectFrame {
+            x: 0.0,
+            y: 0.0,
+            w: 16.0,
+            h: 16.0,
+        };
+        let buildings = vec![
+            SelectBuildingCandidate {
+                id: 1,
+                commandable: true,
+                ..SelectBuildingCandidate::new(1, 4.0, 4.0, 8.0, 8.0)
+            },
+            SelectBuildingCandidate {
+                id: 2,
+                commandable: false,
+                ..SelectBuildingCandidate::new(2, 4.0, 4.0, 8.0, 8.0)
+            },
+            SelectBuildingCandidate {
+                id: 3,
+                commandable: true,
+                ..SelectBuildingCandidate::new(3, 100.0, 100.0, 8.0, 8.0)
+            },
+        ];
+        assert_eq!(selected_command_buildings_plan(rect, &buildings), vec![1]);
+
+        let units = vec![
+            SelectUnitCandidate {
+                id: 4,
+                x: 4.0,
+                y: 4.0,
+                commandable: true,
+                ..SelectUnitCandidate::new(4, 4.0, 4.0)
+            },
+            SelectUnitCandidate {
+                id: 5,
+                x: 5.0,
+                y: 5.0,
+                commandable: true,
+                ..SelectUnitCandidate::new(5, 5.0, 5.0)
+            },
+            SelectUnitCandidate {
+                id: 6,
+                x: 100.0,
+                y: 100.0,
+                commandable: true,
+                ..SelectUnitCandidate::new(6, 100.0, 100.0)
+            },
+        ];
+        assert_eq!(
+            selected_command_units_plan(rect, &units, |unit| unit.id != 5),
+            vec![4]
+        );
     }
 
     #[test]
