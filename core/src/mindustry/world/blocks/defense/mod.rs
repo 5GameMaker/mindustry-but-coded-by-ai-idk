@@ -2766,6 +2766,158 @@ pub struct ShockwaveTowerFire {
     pub removed_targets: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockwaveTowerStatsPlan {
+    pub damage: f32,
+    pub range_blocks: f32,
+    pub reload_per_second: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockwaveTowerRangePlan {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShockwaveTowerDrawCommand {
+    SuperDraw,
+    HeatAdditive,
+    SetEffectLayer,
+    FillShape,
+    ResetColor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockwaveTowerDrawPlan {
+    pub commands: &'static [ShockwaveTowerDrawCommand],
+    pub heat_alpha: f32,
+    pub color_lerp: f32,
+    pub shape_sides: i32,
+    pub shape_radius: f32,
+    pub shape_rotation: f32,
+}
+
+const SHOCKWAVE_TOWER_DRAW_COMMANDS: &[ShockwaveTowerDrawCommand] = &[
+    ShockwaveTowerDrawCommand::SuperDraw,
+    ShockwaveTowerDrawCommand::HeatAdditive,
+    ShockwaveTowerDrawCommand::SetEffectLayer,
+    ShockwaveTowerDrawCommand::FillShape,
+    ShockwaveTowerDrawCommand::ResetColor,
+];
+
+pub fn shockwave_tower_stats_plan(
+    bullet_damage: f32,
+    range: f32,
+    tile_size: f32,
+    reload: f32,
+) -> ShockwaveTowerStatsPlan {
+    ShockwaveTowerStatsPlan {
+        damage: bullet_damage,
+        range_blocks: range / tile_size,
+        reload_per_second: 60.0 / reload,
+    }
+}
+
+pub fn shockwave_tower_place_plan(
+    tile_x: i32,
+    tile_y: i32,
+    tile_size: f32,
+    offset: f32,
+    range: f32,
+) -> ShockwaveTowerRangePlan {
+    ShockwaveTowerRangePlan {
+        center_x: tile_x as f32 * tile_size + offset,
+        center_y: tile_y as f32 * tile_size + offset,
+        radius: range,
+    }
+}
+
+pub fn shockwave_tower_select_plan(x: f32, y: f32, range: f32) -> ShockwaveTowerRangePlan {
+    ShockwaveTowerRangePlan {
+        center_x: x,
+        center_y: y,
+        radius: range,
+    }
+}
+
+pub fn shockwave_tower_wave_damage(
+    bullet_damage: f32,
+    falloff_count: f32,
+    target_count: usize,
+) -> f32 {
+    if target_count == 0 {
+        0.0
+    } else {
+        bullet_damage.min(bullet_damage * falloff_count / target_count as f32)
+    }
+}
+
+pub fn shockwave_tower_can_target(enemy_team: bool, hittable: bool) -> bool {
+    enemy_team && hittable
+}
+
+pub fn shockwave_tower_can_fire(
+    potential_efficiency: f32,
+    reload_counter: f32,
+    reload: f32,
+    timer_ready: bool,
+    target_count: usize,
+) -> bool {
+    potential_efficiency > 0.0 && reload_counter >= reload && timer_ready && target_count > 0
+}
+
+pub fn shockwave_tower_apply_damage(current_damage: f32, wave_damage: f32) -> (f32, bool) {
+    if current_damage > wave_damage {
+        (current_damage - wave_damage, false)
+    } else {
+        (0.0, true)
+    }
+}
+
+pub fn shockwave_tower_heat_after_cooldown(
+    heat: f32,
+    delta: f32,
+    reload: f32,
+    cooldown_multiplier: f32,
+) -> f32 {
+    (heat - delta / reload * cooldown_multiplier).clamp(0.0, 1.0)
+}
+
+pub fn shockwave_tower_sense(
+    sensor: LAccess,
+    state: &ShockwaveTowerState,
+    reload: f32,
+) -> Option<f64> {
+    match sensor {
+        LAccess::Progress => Some(shockwave_tower_progress(state.reload_counter, reload) as f64),
+        _ => None,
+    }
+}
+
+pub fn shockwave_tower_warmup(state: &ShockwaveTowerState) -> f32 {
+    state.heat
+}
+
+pub fn shockwave_tower_draw_plan(
+    state: &ShockwaveTowerState,
+    time: f32,
+    potential_efficiency: f32,
+    shape_sides: i32,
+    shape_radius: f32,
+    shape_rotate_speed: f32,
+) -> ShockwaveTowerDrawPlan {
+    ShockwaveTowerDrawPlan {
+        commands: SHOCKWAVE_TOWER_DRAW_COMMANDS,
+        heat_alpha: state.heat,
+        color_lerp: state.heat.powi(2),
+        shape_sides,
+        shape_radius: shape_radius * potential_efficiency,
+        shape_rotation: time * shape_rotate_speed,
+    }
+}
+
 pub fn shockwave_tower_update(
     state: &mut ShockwaveTowerState,
     potential_efficiency: f32,
@@ -2786,26 +2938,28 @@ pub fn shockwave_tower_update(
     if potential_efficiency > 0.0 {
         state.reload_counter += edelta;
     }
-    if potential_efficiency > 0.0
-        && state.reload_counter >= reload
-        && timer_ready
-        && !target_damages.is_empty()
-    {
+    if shockwave_tower_can_fire(
+        potential_efficiency,
+        state.reload_counter,
+        reload,
+        timer_ready,
+        target_damages.len(),
+    ) {
         state.heat = 1.0;
         state.reload_counter = 0.0;
         fire.fired = true;
         fire.wave_damage =
-            bullet_damage.min(bullet_damage * falloff_count / target_damages.len() as f32);
+            shockwave_tower_wave_damage(bullet_damage, falloff_count, target_damages.len());
         for damage in target_damages {
-            if *damage > fire.wave_damage {
-                *damage -= fire.wave_damage;
-            } else {
-                *damage = 0.0;
+            let (remaining, removed) = shockwave_tower_apply_damage(*damage, fire.wave_damage);
+            *damage = remaining;
+            if removed {
                 fire.removed_targets += 1;
             }
         }
     }
-    state.heat = (state.heat - delta / reload * cooldown_multiplier).clamp(0.0, 1.0);
+    state.heat =
+        shockwave_tower_heat_after_cooldown(state.heat, delta, reload, cooldown_multiplier);
     fire
 }
 
@@ -4634,7 +4788,105 @@ mod tests {
         assert_eq!(targets, [0.0, 340.0, 0.0, 40.0]);
         assert_eq!(tower.reload_counter, 0.0);
         assert!(tower.heat < 1.0);
+        assert_eq!(
+            shockwave_tower_stats_plan(160.0, 110.0, 8.0, 90.0),
+            ShockwaveTowerStatsPlan {
+                damage: 160.0,
+                range_blocks: 13.75,
+                reload_per_second: 60.0 / 90.0,
+            }
+        );
+        assert_eq!(
+            shockwave_tower_place_plan(2, 3, 8.0, 4.0, 110.0),
+            ShockwaveTowerRangePlan {
+                center_x: 20.0,
+                center_y: 28.0,
+                radius: 110.0,
+            }
+        );
+        assert_eq!(
+            shockwave_tower_select_plan(40.0, 48.0, 110.0),
+            ShockwaveTowerRangePlan {
+                center_x: 40.0,
+                center_y: 48.0,
+                radius: 110.0,
+            }
+        );
+        assert_eq!(shockwave_tower_wave_damage(160.0, 20.0, 4), 160.0);
+        assert_eq!(shockwave_tower_wave_damage(160.0, 20.0, 20), 160.0);
+        assert_eq!(shockwave_tower_wave_damage(160.0, 20.0, 40), 80.0);
+        assert_eq!(shockwave_tower_wave_damage(160.0, 20.0, 0), 0.0);
+        assert!(shockwave_tower_can_target(true, true));
+        assert!(!shockwave_tower_can_target(false, true));
+        assert!(!shockwave_tower_can_target(true, false));
+        assert!(shockwave_tower_can_fire(1.0, 90.0, 90.0, true, 1));
+        assert!(!shockwave_tower_can_fire(0.0, 90.0, 90.0, true, 1));
+        assert!(!shockwave_tower_can_fire(1.0, 89.0, 90.0, true, 1));
+        assert!(!shockwave_tower_can_fire(1.0, 90.0, 90.0, false, 1));
+        assert!(!shockwave_tower_can_fire(1.0, 90.0, 90.0, true, 0));
+        assert_eq!(shockwave_tower_apply_damage(200.0, 160.0), (40.0, false));
+        assert_eq!(shockwave_tower_apply_damage(160.0, 160.0), (0.0, true));
+        assert_eq!(shockwave_tower_apply_damage(10.0, 160.0), (0.0, true));
+        assert_eq!(
+            shockwave_tower_heat_after_cooldown(0.1, 45.0, 90.0, 1.0),
+            0.0
+        );
+        assert_eq!(
+            shockwave_tower_sense(LAccess::Progress, &tower, 90.0),
+            Some(0.0)
+        );
+        assert_eq!(shockwave_tower_sense(LAccess::Health, &tower, 90.0), None);
+        assert_eq!(shockwave_tower_warmup(&tower), tower.heat);
+        let draw = shockwave_tower_draw_plan(&tower, 30.0, 0.5, 4, 6.0, 1.0);
+        assert_eq!(
+            draw.commands,
+            &[
+                ShockwaveTowerDrawCommand::SuperDraw,
+                ShockwaveTowerDrawCommand::HeatAdditive,
+                ShockwaveTowerDrawCommand::SetEffectLayer,
+                ShockwaveTowerDrawCommand::FillShape,
+                ShockwaveTowerDrawCommand::ResetColor,
+            ]
+        );
+        assert_eq!(draw.heat_alpha, tower.heat);
+        assert!((draw.color_lerp - tower.heat.powi(2)).abs() < 0.00001);
+        assert_eq!(draw.shape_sides, 4);
+        assert_eq!(draw.shape_radius, 3.0);
+        assert_eq!(draw.shape_rotation, 30.0);
         assert_eq!(shockwave_tower_progress(45.0, 90.0), 0.5);
         assert!(shockwave_tower_should_consume(45.0, 90.0));
+        assert!(!shockwave_tower_should_consume(90.0, 90.0));
+
+        let mut idle = ShockwaveTowerState {
+            reload_counter: 90.0,
+            heat: 0.5,
+        };
+        let mut empty = [];
+        let no_targets = shockwave_tower_update(
+            &mut idle, 1.0, 1.0, 1.0, 90.0, 160.0, 20.0, &mut empty, true, 1.0,
+        );
+        assert!(!no_targets.fired);
+        assert_eq!(idle.reload_counter, 91.0);
+        assert!(idle.heat < 0.5);
+
+        let mut no_efficiency = ShockwaveTowerState {
+            reload_counter: 10.0,
+            heat: 0.5,
+        };
+        let mut one_target = [100.0];
+        let blocked = shockwave_tower_update(
+            &mut no_efficiency,
+            0.0,
+            5.0,
+            1.0,
+            90.0,
+            160.0,
+            20.0,
+            &mut one_target,
+            true,
+            1.0,
+        );
+        assert!(!blocked.fired);
+        assert_eq!(no_efficiency.reload_counter, 10.0);
     }
 }

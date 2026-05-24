@@ -647,6 +647,47 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 将 dash circle / baseRegion / rotating region / additive glow 连接到 renderer；
 - content atlas 中 base/glow region 的加载与 outline icon 细节。
 
+### 7.7c ShockwaveTower
+
+已推进：
+
+- `ShockwaveTowerState`
+- `ShockwaveTowerFire`
+- `ShockwaveTowerStatsPlan`
+- `ShockwaveTowerRangePlan`
+- `ShockwaveTowerDrawCommand`
+- `ShockwaveTowerDrawPlan`
+- `shockwave_tower_stats_plan(...)`
+- `shockwave_tower_place_plan(...)`
+- `shockwave_tower_select_plan(...)`
+- `shockwave_tower_wave_damage(...)`
+- `shockwave_tower_can_target(...)`
+- `shockwave_tower_can_fire(...)`
+- `shockwave_tower_apply_damage(...)`
+- `shockwave_tower_heat_after_cooldown(...)`
+- `shockwave_tower_sense(...)`
+- `shockwave_tower_warmup(...)`
+- `shockwave_tower_draw_plan(...)`
+- `shockwave_tower_update(...)`
+- `shockwave_tower_progress(...)`
+- `shockwave_tower_should_consume(...)`
+- 已对照 `ShockwaveTower.updateTile()/setStats()/drawPlace()/drawSelect()/draw()/sense()/warmup()/shouldConsume()` 锁定：
+  - 仅 `potentialEfficiency > 0` 时累积 `reloadCounter += edelta()`；
+  - 开火条件为 `potentialEfficiency > 0 && reloadCounter >= reload && timerReady && targets.size > 0`；
+  - 目标过滤为异队且 `bullet.type.hittable`；
+  - wave damage = `min(bulletDamage, bulletDamage * falloffCount / targetCount)`；
+  - target damage 严格大于 waveDamage 时扣血，否则 remove；
+  - 开火后 `heat = 1`、`reloadCounter = 0`，同 tick 末尾按 `delta / reload * cooldownMultiplier` 衰减并 clamp；
+  - stats damage/range/reload per second 与 Java 公式一致；
+  - draw heat additive alpha = `heat`，shape color lerp = `heat^2`，shape radius = `shapeRadius * potentialEfficiency`，rotation = `Time.time * shapeRotateSpeed`；
+  - `sense(progress) = reloadCounter / reload`，`warmup() = heat`，`shouldConsume() = reloadCounter < reload`。
+
+仍需：
+
+- 接入真实 `Groups.bullet.intersect(...)`、hit/wave effect、sound、shake 与 Trigger 事件；
+- 将 heatRegion additive 和 effect-layer polygon 接入 renderer；
+- timerCheck/checkInterval 连接到真实 building timer。
+
 ### 7.8 ShieldWall / ForceProjector / MendProjector / OverdriveProjector
 
 已推进：
