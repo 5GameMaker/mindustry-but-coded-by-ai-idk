@@ -2,8 +2,10 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::mindustry::{
     ai::base_registry::{BasePart, BasePartTile, BasePartTileKind},
+    ctype::ContentId,
     entities::units::BuildPlan,
     game::{BlockPlan as TeamBlockPlan, TeamData, TeamPlanClaim},
+    r#type::Category,
     vars::TILE_SIZE,
     world::{footprint_tiles, get_edges, point2_pack},
 };
@@ -19,6 +21,11 @@ pub const PLACE_INTERVAL_MAX: f32 = 2.0;
 pub const PATH_STEP: usize = 50;
 pub const BUILDER_AI_DEFAULT_REBUILD_PERIOD: f32 = 60.0 * 2.0;
 pub const BUILDER_AI_BUILD_AI_REBUILD_PERIOD: f32 = 10.0;
+pub const PREBUILD_AI_PRODUCTION_PRIORITY: f32 = 11.0;
+pub const PREBUILD_AI_DISTRIBUTION_PRIORITY: f32 = 10.0;
+pub const PREBUILD_AI_LIQUID_PRIORITY: f32 = 9.0;
+pub const PREBUILD_AI_CRAFTING_PRIORITY: f32 = 8.0;
+pub const PREBUILD_AI_PRIORITY_DST_SCALE: f32 = 200.0;
 
 const D4: [TilePoint; 4] = [
     TilePoint { x: 1, y: 0 },
@@ -169,6 +176,61 @@ pub struct BlockPlan {
     pub config: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrebuildAiRequirement {
+    pub item: ContentId,
+    pub amount: i32,
+}
+
+impl PrebuildAiRequirement {
+    pub const fn new(item: ContentId, amount: i32) -> Self {
+        Self { item, amount }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrebuildAiBlockInfo {
+    pub name: String,
+    pub category: Category,
+    pub build_time: f32,
+    pub offset: f32,
+    pub size: i32,
+    pub requirements: Vec<PrebuildAiRequirement>,
+}
+
+impl PrebuildAiBlockInfo {
+    pub fn new(name: impl Into<String>, category: Category) -> Self {
+        Self {
+            name: name.into(),
+            category,
+            build_time: 0.0,
+            offset: 0.0,
+            size: 1,
+            requirements: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrebuildAiPlanSnapshot {
+    pub plan: TeamBlockPlan,
+    pub block: PrebuildAiBlockInfo,
+}
+
+impl PrebuildAiPlanSnapshot {
+    pub fn new(plan: TeamBlockPlan, block: PrebuildAiBlockInfo) -> Self {
+        Self { plan, block }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrebuildAiTreeQuery {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderAiPlanAction {
     NoPlan,
@@ -300,6 +362,130 @@ where
     team_data.claim_first_usable_plan(|plan| {
         (infinite_resources || within_build_range(plan)) && valid_place(plan)
     })
+}
+
+pub const fn prebuild_ai_category_priority(category: Category) -> f32 {
+    match category {
+        Category::Production => PREBUILD_AI_PRODUCTION_PRIORITY,
+        Category::Distribution => PREBUILD_AI_DISTRIBUTION_PRIORITY,
+        Category::Liquid => PREBUILD_AI_LIQUID_PRIORITY,
+        Category::Crafting => PREBUILD_AI_CRAFTING_PRIORITY,
+        _ => 0.0,
+    }
+}
+
+pub fn prebuild_ai_sort_plans(plans: &mut Vec<PrebuildAiPlanSnapshot>) {
+    plans.sort_by(|left, right| {
+        prebuild_ai_category_priority(left.block.category)
+            .total_cmp(&prebuild_ai_category_priority(right.block.category))
+            .then_with(|| left.block.build_time.total_cmp(&right.block.build_time))
+    });
+    plans.reverse();
+}
+
+pub fn prebuild_ai_can_build<FCoreItems>(
+    rules_infinite_resources: bool,
+    team_infinite_resources: bool,
+    requirements: &[PrebuildAiRequirement],
+    build_cost_multiplier: f32,
+    mut core_has_item: FCoreItems,
+) -> bool
+where
+    FCoreItems: FnMut(ContentId, i32) -> bool,
+{
+    rules_infinite_resources
+        || team_infinite_resources
+        || requirements.iter().all(|requirement| {
+            core_has_item(
+                requirement.item,
+                scaled_requirement_amount(requirement.amount, build_cost_multiplier),
+            )
+        })
+}
+
+pub fn prebuild_ai_all_requirements_have_ore<FHasOre>(
+    requirements: &[PrebuildAiRequirement],
+    mut has_ore: FHasOre,
+) -> bool
+where
+    FHasOre: FnMut(ContentId) -> bool,
+{
+    requirements
+        .iter()
+        .all(|requirement| has_ore(requirement.item))
+}
+
+pub fn prebuild_ai_tree_query(
+    plan: &TeamBlockPlan,
+    block: &PrebuildAiBlockInfo,
+) -> PrebuildAiTreeQuery {
+    let size = block.size as f32 * TILE_SIZE as f32 + 1.0;
+    let half = size / 2.0;
+    PrebuildAiTreeQuery {
+        x: plan.x as f32 * TILE_SIZE as f32 + block.offset - half,
+        y: plan.y as f32 * TILE_SIZE as f32 + block.offset - half,
+        width: size,
+        height: size,
+    }
+}
+
+pub fn prebuild_ai_plan_reachable_from_tree<FBuildingTree>(
+    plan: &TeamBlockPlan,
+    block: &PrebuildAiBlockInfo,
+    mut building_tree_any: FBuildingTree,
+) -> bool
+where
+    FBuildingTree: FnMut(PrebuildAiTreeQuery) -> bool,
+{
+    block.category == Category::Production || building_tree_any(prebuild_ai_tree_query(plan, block))
+}
+
+pub fn prebuild_ai_find_next_plan<FCanBuild, FHasOre, FBuildingTree>(
+    plans: &[PrebuildAiPlanSnapshot],
+    core_available: bool,
+    building_tree_available: bool,
+    unit_x: f32,
+    unit_y: f32,
+    mut can_build: FCanBuild,
+    mut has_ore: FHasOre,
+    mut building_tree_any: FBuildingTree,
+) -> Option<PrebuildAiPlanSnapshot>
+where
+    FCanBuild: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+    FHasOre: FnMut(ContentId) -> bool,
+    FBuildingTree: FnMut(PrebuildAiTreeQuery) -> bool,
+{
+    if !core_available || !building_tree_available || plans.is_empty() {
+        return None;
+    }
+
+    let mut best_index = None;
+    let mut best_score = 0.0;
+
+    for (index, plan) in plans.iter().enumerate() {
+        let can_supply = can_build(plan)
+            || prebuild_ai_all_requirements_have_ore(&plan.block.requirements, &mut has_ore);
+        if !can_supply
+            || !prebuild_ai_plan_reachable_from_tree(
+                &plan.plan,
+                &plan.block,
+                &mut building_tree_any,
+            )
+        {
+            continue;
+        }
+
+        let score = tile_world_dst(unit_x, unit_y, plan.plan.x as i32, plan.plan.y as i32)
+            - prebuild_ai_category_priority(plan.block.category) * PREBUILD_AI_PRIORITY_DST_SCALE;
+        if best_index.is_none() || score < best_score {
+            best_index = Some(index);
+            best_score = score;
+        }
+    }
+
+    best_index
+        .map(|index| plans[index].clone())
+        .or_else(|| plans.first().cloned())
 }
 
 pub fn builder_ai_init_rebuild_period(
@@ -759,6 +945,16 @@ fn world_index(x: i32, y: i32, world_width: i32, world_height: i32) -> Option<us
         .then_some((x + y * world_width) as usize)
 }
 
+fn scaled_requirement_amount(amount: i32, build_cost_multiplier: f32) -> i32 {
+    (amount as f32 * build_cost_multiplier).ceil() as i32
+}
+
+fn tile_world_dst(unit_x: f32, unit_y: f32, tile_x: i32, tile_y: i32) -> f32 {
+    let dx = unit_x - tile_x as f32 * TILE_SIZE as f32;
+    let dy = unit_y - tile_y as f32 * TILE_SIZE as f32;
+    (dx * dx + dy * dy).sqrt()
+}
+
 fn world_to_tile(coord: f32) -> i32 {
     (coord / TILE_SIZE as f32).round() as i32
 }
@@ -771,6 +967,20 @@ mod tests {
         let mut tile = BaseBuildTile::new(x, y, "mechanical-drill", BasePartTileKind::Drill);
         tile.solid = true;
         tile
+    }
+
+    fn prebuild_plan(
+        x: i32,
+        y: i32,
+        name: &str,
+        category: Category,
+        build_time: f32,
+        requirements: Vec<PrebuildAiRequirement>,
+    ) -> PrebuildAiPlanSnapshot {
+        let mut block = PrebuildAiBlockInfo::new(name, category);
+        block.build_time = build_time;
+        block.requirements = requirements;
+        PrebuildAiPlanSnapshot::new(TeamBlockPlan::new(x, y, 0, name, None), block)
     }
 
     #[test]
@@ -797,6 +1007,166 @@ mod tests {
         );
         assert_eq!(choose_part_pool(None, false, 0.0), PartPoolChoice::Generic);
         assert_eq!(choose_part_pool(None, false, 0.5), PartPoolChoice::None);
+    }
+
+    #[test]
+    fn prebuild_ai_sort_plans_reverses_java_sorted_copy_into_priority_queue() {
+        assert_eq!(
+            prebuild_ai_category_priority(Category::Production),
+            PREBUILD_AI_PRODUCTION_PRIORITY
+        );
+        assert_eq!(
+            prebuild_ai_category_priority(Category::Distribution),
+            PREBUILD_AI_DISTRIBUTION_PRIORITY
+        );
+        assert_eq!(
+            prebuild_ai_category_priority(Category::Liquid),
+            PREBUILD_AI_LIQUID_PRIORITY
+        );
+        assert_eq!(
+            prebuild_ai_category_priority(Category::Crafting),
+            PREBUILD_AI_CRAFTING_PRIORITY
+        );
+        assert_eq!(prebuild_ai_category_priority(Category::Turret), 0.0);
+
+        let mut plans = vec![
+            prebuild_plan(1, 1, "graphite-press", Category::Crafting, 20.0, vec![]),
+            prebuild_plan(2, 2, "router", Category::Distribution, 8.0, vec![]),
+            prebuild_plan(3, 3, "junction", Category::Distribution, 18.0, vec![]),
+            prebuild_plan(4, 4, "mechanical-drill", Category::Production, 12.0, vec![]),
+        ];
+
+        prebuild_ai_sort_plans(&mut plans);
+
+        assert_eq!(
+            plans
+                .iter()
+                .map(|plan| plan.plan.block.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mechanical-drill", "junction", "router", "graphite-press"]
+        );
+    }
+
+    #[test]
+    fn prebuild_ai_can_build_uses_infinite_flags_or_scaled_core_items() {
+        let requirements = [
+            PrebuildAiRequirement::new(1, 2),
+            PrebuildAiRequirement::new(2, 5),
+        ];
+
+        assert!(prebuild_ai_can_build(
+            true,
+            false,
+            &requirements,
+            10.0,
+            |_, _| false,
+        ));
+        assert!(prebuild_ai_can_build(
+            false,
+            true,
+            &requirements,
+            10.0,
+            |_, _| false,
+        ));
+        assert!(prebuild_ai_can_build(
+            false,
+            false,
+            &requirements,
+            1.5,
+            |item, amount| matches!((item, amount), (1, 3) | (2, 8)),
+        ));
+        assert!(!prebuild_ai_can_build(
+            false,
+            false,
+            &requirements,
+            1.5,
+            |item, amount| item == 1 && amount == 3,
+        ));
+    }
+
+    #[test]
+    fn prebuild_ai_tree_query_and_find_next_plan_match_java_filters() {
+        let mut bridge = prebuild_plan(
+            2,
+            3,
+            "bridge-conveyor",
+            Category::Distribution,
+            12.0,
+            vec![PrebuildAiRequirement::new(1, 1)],
+        );
+        bridge.block.offset = 4.0;
+        bridge.block.size = 2;
+
+        let query = prebuild_ai_tree_query(&bridge.plan, &bridge.block);
+        assert_eq!(
+            query,
+            PrebuildAiTreeQuery {
+                x: 2.0 * TILE_SIZE as f32 + 4.0 - (2.0 * TILE_SIZE as f32 + 1.0) / 2.0,
+                y: 3.0 * TILE_SIZE as f32 + 4.0 - (2.0 * TILE_SIZE as f32 + 1.0) / 2.0,
+                width: 2.0 * TILE_SIZE as f32 + 1.0,
+                height: 2.0 * TILE_SIZE as f32 + 1.0,
+            }
+        );
+
+        let far_production = prebuild_plan(
+            20,
+            0,
+            "mechanical-drill",
+            Category::Production,
+            10.0,
+            vec![PrebuildAiRequirement::new(2, 1)],
+        );
+        let near_crafting = prebuild_plan(
+            1,
+            0,
+            "graphite-press",
+            Category::Crafting,
+            8.0,
+            vec![PrebuildAiRequirement::new(3, 1)],
+        );
+        let unreachable = prebuild_plan(
+            0,
+            1,
+            "router",
+            Category::Distribution,
+            4.0,
+            vec![PrebuildAiRequirement::new(4, 1)],
+        );
+        let plans = vec![
+            unreachable.clone(),
+            near_crafting.clone(),
+            far_production.clone(),
+        ];
+
+        let selected = prebuild_ai_find_next_plan(
+            &plans,
+            true,
+            true,
+            0.0,
+            0.0,
+            |_| false,
+            |item| item == 2 || item == 3,
+            |query| query.y == 0.0,
+        )
+        .expect("production plan should win by Java priority score");
+        assert_eq!(selected.plan.block, "mechanical-drill");
+
+        let no_core =
+            prebuild_ai_find_next_plan(&plans, false, true, 0.0, 0.0, |_| true, |_| true, |_| true);
+        assert_eq!(no_core, None);
+
+        let fallback = prebuild_ai_find_next_plan(
+            &plans,
+            true,
+            true,
+            0.0,
+            0.0,
+            |_| false,
+            |_| false,
+            |_| false,
+        )
+        .expect("Java falls back to plans.first() when no min candidate matches");
+        assert_eq!(fallback, unreachable);
     }
 
     #[test]
