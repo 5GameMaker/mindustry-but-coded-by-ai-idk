@@ -1140,6 +1140,11 @@ pub fn force_projector_set_shield(
     state.buildup = (shield_health + phase_shield_boost * state.phase_heat - value).max(0.0);
 }
 
+pub fn force_projector_picked_up(state: &mut ForceProjectorState) {
+    state.radscl = 0.0;
+    state.warmup = 0.0;
+}
+
 pub fn force_projector_bar_fraction(
     state: &ForceProjectorState,
     shield_health: f32,
@@ -4410,6 +4415,28 @@ mod tests {
         let restored = read_force_projector_state(&mut bytes.as_slice()).unwrap();
         assert_eq!(restored.broken, force.broken);
         assert_eq!(restored.buildup, force.buildup);
+
+        let mut picked = ForceProjectorState {
+            broken: false,
+            buildup: 12.0,
+            radscl: 0.9,
+            hit: 0.4,
+            warmup: 0.7,
+            phase_heat: 0.5,
+        };
+        force_projector_picked_up(&mut picked);
+        assert_eq!(picked.radscl, 0.0);
+        assert_eq!(picked.warmup, 0.0);
+        assert_eq!(picked.broken, false);
+        assert_eq!(picked.buildup, 12.0);
+        assert_eq!(picked.phase_heat, 0.5);
+
+        let mut bytes = Vec::new();
+        write_force_projector_state(&mut bytes, &picked).unwrap();
+        let restored = read_force_projector_state(&mut bytes.as_slice()).unwrap();
+        assert_eq!(restored.radscl, 0.0);
+        assert_eq!(restored.warmup, 0.0);
+        assert_eq!(restored.hit, 0.0);
 
         assert_eq!(
             regen_projector_heal_amount(0.5, 2.0, 0.2, 1.0, 1000.0, 20.0),
