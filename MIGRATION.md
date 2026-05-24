@@ -848,9 +848,11 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_absorb_explosion(...)`
 - `ForceProjectorBulletAbsorb`
 - `ForceProjectorRemovedPlan`
+- `ForceProjectorDeflectPlan`
 - `ForceProjectorDrawCommand`
 - `ForceProjectorDrawPlan`
 - `force_projector_on_removed_plan(...)`
+- `force_projector_deflect_plan(...)`
 - `force_projector_draw_plan(...)`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
@@ -878,6 +880,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 先计算 `realRadius()`；
   - `!broken && radius > 1f` 时播放 `Fx.forceShrink`；
   - 始终继续调用 super removed。
+- 已对照 `ForceProjector.deflectBullets()` 的范围裁剪入口收口：
+  - `realRadius() > 0 && !broken` 时才扫描；
+  - 扫描 bounds 为 `x/y ± realRadius()` 的正方形；
+  - 真实 `Groups.bullet.intersect(...)` 仍待接入 runtime。
 - 已对照 `ForceProjector.pickedUp()` 锁定：
   - pickup 后只清零 `radscl` 与 `warmup`；
   - `broken / buildup / phaseHeat` 保持原状态，序列化仍按 Java 5 字段读写；
@@ -903,7 +909,6 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 
 仍需：
 
-- `ForceProjector.deflectBullets()` 接入真实 `Groups.bullet.intersect(...)` 与正多边形检测 adapter；
 - `ForceProjector.draw()` 接入真实 renderer/Draw dispatcher；
 - `ForceProjector.setBars()/sense/setProp` 接入真实 building runtime；
 - `DirectionalForceProjector` 接入真实 Groups.bullet.intersect、absorb effect、shield break effect 与 renderer；

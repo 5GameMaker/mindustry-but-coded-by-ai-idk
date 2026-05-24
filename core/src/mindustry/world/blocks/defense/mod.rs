@@ -1257,6 +1257,16 @@ pub struct ForceProjectorRemovedPlan {
     pub effect_radius: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceProjectorDeflectPlan {
+    pub active: bool,
+    pub real_radius: f32,
+    pub bounds_x: f32,
+    pub bounds_y: f32,
+    pub bounds_width: f32,
+    pub bounds_height: f32,
+}
+
 pub fn force_projector_absorb_bullet(
     state: &mut ForceProjectorState,
     enemy_team: bool,
@@ -1296,6 +1306,24 @@ pub fn force_projector_on_removed_plan(
         call_super_removed: true,
         play_force_shrink: !state.broken && effect_radius > 1.0,
         effect_radius,
+    }
+}
+
+pub fn force_projector_deflect_plan(
+    state: &ForceProjectorState,
+    radius: f32,
+    phase_radius_boost: f32,
+) -> ForceProjectorDeflectPlan {
+    let real_radius =
+        force_projector_real_radius(radius, state.phase_heat, phase_radius_boost, state.radscl);
+    let active = real_radius > 0.0 && !state.broken;
+    ForceProjectorDeflectPlan {
+        active,
+        real_radius,
+        bounds_x: if active { -real_radius } else { 0.0 },
+        bounds_y: if active { -real_radius } else { 0.0 },
+        bounds_width: if active { real_radius * 2.0 } else { 0.0 },
+        bounds_height: if active { real_radius * 2.0 } else { 0.0 },
     }
 }
 
@@ -4418,6 +4446,17 @@ mod tests {
             }
         );
         assert_eq!(
+            force_projector_deflect_plan(&ambient_force, 100.0, 80.0),
+            ForceProjectorDeflectPlan {
+                active: true,
+                real_radius: 28.0,
+                bounds_x: -28.0,
+                bounds_y: -28.0,
+                bounds_width: 56.0,
+                bounds_height: 56.0,
+            }
+        );
+        assert_eq!(
             force_projector_on_removed_plan(
                 &ForceProjectorState {
                     broken: true,
@@ -4430,6 +4469,24 @@ mod tests {
                 call_super_removed: true,
                 play_force_shrink: false,
                 effect_radius: 28.0,
+            }
+        );
+        assert_eq!(
+            force_projector_deflect_plan(
+                &ForceProjectorState {
+                    broken: true,
+                    ..ambient_force
+                },
+                100.0,
+                80.0
+            ),
+            ForceProjectorDeflectPlan {
+                active: false,
+                real_radius: 28.0,
+                bounds_x: 0.0,
+                bounds_y: 0.0,
+                bounds_width: 0.0,
+                bounds_height: 0.0,
             }
         );
 
