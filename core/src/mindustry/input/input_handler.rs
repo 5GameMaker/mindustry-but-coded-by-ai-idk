@@ -99,6 +99,49 @@ pub struct TileTapOutcome {
     pub packet: Option<TileTapCallPacket>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ConfigTapFrame {
+    pub config_shown: bool,
+    pub selected_on_configure_tapped: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TileTappedFrame {
+    pub build_present: bool,
+    pub command_mode: bool,
+    pub build_commandable: bool,
+    pub block_configurable: bool,
+    pub build_interactable: bool,
+    pub config_shown: bool,
+    pub should_show_configure: bool,
+    pub selected_accepts_configure_build_tap: bool,
+    pub config_has_mouse: bool,
+    pub block_consumes_tap: bool,
+    pub block_synthetic: bool,
+    pub block_allow_config_inventory: bool,
+    pub block_has_items: bool,
+    pub items_total: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TileTappedAction {
+    HidePlanConfig,
+    HideInventory,
+    HideConfig,
+    ClearCommandBuildings,
+    PlayConfigureSound,
+    ShowConfig,
+    CallTapped,
+    ShowInventory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TileTappedPlan {
+    pub consumed: bool,
+    pub showed_inventory: bool,
+    pub actions: Vec<TileTappedAction>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestItemRejectReason {
     MissingPlayer,
@@ -2252,6 +2295,78 @@ pub fn tile_tap(context: TileTapContext, tile: Option<i32>) -> TileTapOutcome {
 
 pub fn client_tile_tap_packet(tile: Option<i32>) -> Option<TileTapCallPacket> {
     tile.map(|tile| TileTapCallPacket::client(Some(tile)))
+}
+
+pub fn check_config_tap_plan(frame: ConfigTapFrame) -> bool {
+    frame.config_shown && frame.selected_on_configure_tapped
+}
+
+pub fn tile_tapped_plan(frame: TileTappedFrame) -> TileTappedPlan {
+    let mut actions = vec![TileTappedAction::HidePlanConfig];
+
+    if !frame.build_present {
+        actions.push(TileTappedAction::HideInventory);
+        actions.push(TileTappedAction::HideConfig);
+        actions.push(TileTappedAction::ClearCommandBuildings);
+        return TileTappedPlan {
+            consumed: false,
+            showed_inventory: false,
+            actions,
+        };
+    }
+
+    let mut consumed = false;
+    let mut showed_inventory = false;
+
+    if frame.build_commandable && frame.command_mode {
+        consumed = true;
+    } else if frame.block_configurable && frame.build_interactable {
+        consumed = true;
+        if (!frame.config_shown && frame.should_show_configure)
+            || (frame.config_shown
+                && frame.selected_accepts_configure_build_tap
+                && frame.should_show_configure)
+        {
+            actions.push(TileTappedAction::PlayConfigureSound);
+            actions.push(TileTappedAction::ShowConfig);
+        }
+    } else if !frame.config_has_mouse {
+        if frame.config_shown && frame.selected_accepts_configure_build_tap {
+            consumed = true;
+            actions.push(TileTappedAction::HideConfig);
+        }
+
+        if frame.config_shown {
+            consumed = true;
+        }
+    }
+
+    if !consumed && frame.build_interactable {
+        actions.push(TileTappedAction::CallTapped);
+    }
+
+    if frame.build_interactable && frame.block_consumes_tap {
+        consumed = true;
+    } else if frame.build_interactable
+        && frame.block_synthetic
+        && (!consumed || frame.block_allow_config_inventory)
+        && frame.block_has_items
+        && frame.items_total > 0
+    {
+        actions.push(TileTappedAction::ShowInventory);
+        consumed = true;
+        showed_inventory = true;
+    }
+
+    if !showed_inventory {
+        actions.push(TileTappedAction::HideInventory);
+    }
+
+    TileTappedPlan {
+        consumed,
+        showed_inventory,
+        actions,
+    }
 }
 
 pub fn request_item<I, C, A>(
@@ -5504,6 +5619,102 @@ mod tests {
         assert_eq!(packet.player, EntityRef::null());
         assert_eq!(packet.build, BuildingRef::new(point2_pack(8, 9)));
         assert_eq!(packet.value, TypeValue::String("cfg".into()));
+    }
+
+    #[test]
+    fn config_and_tile_tap_plans_cover_null_and_command_mode_paths() {
+        assert!(check_config_tap_plan(ConfigTapFrame {
+            config_shown: true,
+            selected_on_configure_tapped: true,
+        }));
+        assert!(!check_config_tap_plan(ConfigTapFrame {
+            config_shown: false,
+            selected_on_configure_tapped: true,
+        }));
+
+        let none = tile_tapped_plan(TileTappedFrame::default());
+        assert!(!none.consumed);
+        assert_eq!(
+            none.actions,
+            vec![
+                TileTappedAction::HidePlanConfig,
+                TileTappedAction::HideInventory,
+                TileTappedAction::HideConfig,
+                TileTappedAction::ClearCommandBuildings
+            ]
+        );
+
+        let command = tile_tapped_plan(TileTappedFrame {
+            build_present: true,
+            build_commandable: true,
+            command_mode: true,
+            build_interactable: true,
+            ..TileTappedFrame::default()
+        });
+        assert!(command.consumed);
+        assert!(!command.actions.contains(&TileTappedAction::CallTapped));
+        assert!(command.actions.contains(&TileTappedAction::HideInventory));
+    }
+
+    #[test]
+    fn tile_tap_plan_shows_config_or_hides_existing_config_like_java() {
+        let show = tile_tapped_plan(TileTappedFrame {
+            build_present: true,
+            block_configurable: true,
+            build_interactable: true,
+            should_show_configure: true,
+            ..TileTappedFrame::default()
+        });
+        assert!(show.consumed);
+        assert!(show.actions.contains(&TileTappedAction::PlayConfigureSound));
+        assert!(show.actions.contains(&TileTappedAction::ShowConfig));
+
+        let hide = tile_tapped_plan(TileTappedFrame {
+            build_present: true,
+            config_shown: true,
+            selected_accepts_configure_build_tap: true,
+            config_has_mouse: false,
+            build_interactable: true,
+            ..TileTappedFrame::default()
+        });
+        assert!(hide.consumed);
+        assert!(hide.actions.contains(&TileTappedAction::HideConfig));
+        assert!(!hide.actions.contains(&TileTappedAction::CallTapped));
+    }
+
+    #[test]
+    fn tile_tap_plan_calls_tapped_and_handles_synthetic_inventory() {
+        let tapped = tile_tapped_plan(TileTappedFrame {
+            build_present: true,
+            build_interactable: true,
+            ..TileTappedFrame::default()
+        });
+        assert!(!tapped.consumed);
+        assert!(tapped.actions.contains(&TileTappedAction::CallTapped));
+        assert!(tapped.actions.contains(&TileTappedAction::HideInventory));
+
+        let inventory = tile_tapped_plan(TileTappedFrame {
+            build_present: true,
+            build_interactable: true,
+            block_synthetic: true,
+            block_has_items: true,
+            items_total: 3,
+            ..TileTappedFrame::default()
+        });
+        assert!(inventory.consumed);
+        assert!(inventory.showed_inventory);
+        assert!(inventory.actions.contains(&TileTappedAction::ShowInventory));
+        assert!(!inventory.actions.contains(&TileTappedAction::HideInventory));
+
+        let consumes = tile_tapped_plan(TileTappedFrame {
+            build_present: true,
+            build_interactable: true,
+            block_consumes_tap: true,
+            ..TileTappedFrame::default()
+        });
+        assert!(consumes.consumed);
+        assert!(consumes.actions.contains(&TileTappedAction::CallTapped));
+        assert!(consumes.actions.contains(&TileTappedAction::HideInventory));
     }
 
     #[test]
