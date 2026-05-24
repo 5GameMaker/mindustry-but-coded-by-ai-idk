@@ -477,6 +477,13 @@ pub fn shock_mine_stats_plan(tendrils: i32) -> ShockMineStatsPlan {
     }
 }
 
+pub fn shock_mine_stats_text(tendrils: i32, damage: f32) -> String {
+    format!(
+        "[white]{tendrils}x[lightgray] lightning ~ [white]{}[lightgray] damage",
+        format_fixed_trimmed(damage, 2)
+    )
+}
+
 pub fn shock_mine_draw_plan(team_alpha: f32) -> ShockMineDrawPlan {
     ShockMineDrawPlan {
         draw_base: true,
@@ -3636,6 +3643,19 @@ fn clamp_unit(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
 
+fn format_fixed_trimmed(value: f32, decimals: usize) -> String {
+    let mut formatted = format!("{value:.decimals$}");
+    if let Some(dot_index) = formatted.find('.') {
+        while formatted.ends_with('0') {
+            formatted.pop();
+        }
+        if formatted.len() == dot_index + 1 {
+            formatted.pop();
+        }
+    }
+    formatted
+}
+
 fn projector_cycle(time: f32) -> f32 {
     1.0 - (time / 100.0).rem_euclid(1.0)
 }
@@ -3980,6 +4000,14 @@ mod tests {
                 tendrils: 6,
                 damage_fixed_decimals: 2,
             }
+        );
+        assert_eq!(
+            shock_mine_stats_text(6, 13.0),
+            "[white]6x[lightgray] lightning ~ [white]13[lightgray] damage"
+        );
+        assert_eq!(
+            shock_mine_stats_text(3, 12.25),
+            "[white]3x[lightgray] lightning ~ [white]12.25[lightgray] damage"
         );
         assert_eq!(
             shock_mine_draw_plan(0.3),

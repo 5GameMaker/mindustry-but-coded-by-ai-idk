@@ -673,6 +673,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `ShockMineTriggerPlan`
 - `shock_mine_should_trigger(...)`
 - `shock_mine_stats_plan(...)`
+- `shock_mine_stats_text(...)`
 - `shock_mine_draw_plan(...)`
 - `shock_mine_lightning_angles(...)`
 - `shock_mine_bullet_angles(...)`
@@ -684,6 +685,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - bullet 非空时创建 `shots` 枚，角度为 `(360f / shots) * i + Mathf.random(inaccuracy)`，当前由上层注入 inaccuracy offsets；
   - team top 绘制使用 `teamAlpha`；
   - stats damage 文案保留 tendrils 与 damage 的 2 位格式需求。
+  - stats 文案按上游 `Core.bundle.format("bullet.lightning", tendrils, Strings.autoFixed(damage, 2)).replace("[stat]", "[white]")` 的英文 bundle 形态收口。
 
 仍需：
 
