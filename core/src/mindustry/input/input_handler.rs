@@ -12,6 +12,7 @@ use crate::mindustry::entities::comp::{
     BuildingComp, PayloadState, PlayerComp, UnitComp, UnitControllerState,
 };
 use crate::mindustry::entities::units::BuildPlan;
+use crate::mindustry::game::{BlockPlan as TeamBlockPlan, Teams};
 use crate::mindustry::io::type_io::CommandWire;
 use crate::mindustry::io::Point2;
 use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
@@ -4225,6 +4226,51 @@ where
     }
 }
 
+pub fn delete_team_plans<A>(
+    context: DeletePlansContext,
+    player_present: bool,
+    teams: &mut Teams,
+    team: u8,
+    positions: &[i32],
+    admin_allows: A,
+) -> DeletePlansOutcome
+where
+    A: FnOnce(&[i32]) -> bool,
+{
+    if !admin_allows(positions) {
+        return DeletePlansOutcome::rejected(&context, DeletePlansRejectReason::AdminDenied, true);
+    }
+
+    if !player_present {
+        return DeletePlansOutcome::rejected(
+            &context,
+            DeletePlansRejectReason::MissingPlayer,
+            false,
+        );
+    }
+
+    let removed = teams.delete_plans_at_positions(team, positions).len();
+
+    DeletePlansOutcome {
+        accepted: true,
+        rejection: None,
+        removed,
+        packet: Some(DeletePlansCallPacket {
+            player_id: context.player_id,
+            positions: positions.to_vec(),
+        }),
+        should_raise_validate: false,
+    }
+}
+
+pub fn apply_removed_team_plan_positions(
+    teams: &mut Teams,
+    team: u8,
+    positions: &[i32],
+) -> Vec<TeamBlockPlan> {
+    teams.delete_plans_at_positions(team, positions)
+}
+
 pub fn client_delete_plans_packet(positions: Vec<i32>) -> DeletePlansCallPacket {
     DeletePlansCallPacket {
         player_id: None,
@@ -8229,6 +8275,47 @@ mod tests {
     }
 
     #[test]
+    fn delete_team_plans_removes_from_team_queue_and_records_packet() {
+        use crate::mindustry::game::{BlockPlan as TeamBlockPlan, Teams, TEAM_SHARDED};
+
+        let mut teams = Teams::default();
+        teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![
+                TeamBlockPlan::new(1, 2, 0, "duo", None),
+                TeamBlockPlan::new(3, 4, 1, "router", Some("cfg".into())),
+            ],
+        )]);
+        let positions = vec![point2_pack(3, 4)];
+
+        let outcome = delete_team_plans(
+            DeletePlansContext {
+                player_id: Some(17),
+                local_player: false,
+            },
+            true,
+            &mut teams,
+            TEAM_SHARDED,
+            &positions,
+            |_| true,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(outcome.removed, 1);
+        assert_eq!(
+            outcome.packet,
+            Some(DeletePlansCallPacket {
+                player_id: Some(17),
+                positions
+            })
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![TeamBlockPlan::new(1, 2, 0, "duo", None)]
+        );
+    }
+
+    #[test]
     fn command_units_accepts_targets_and_records_packet() {
         let building = BuildingComp::new(point2_pack(7, 8), item_block(), TeamId(1));
         let outcome = command_units(
@@ -8940,6 +9027,8 @@ mod tests {
 
     #[test]
     fn remove_selection_plan_immediate_breaks_and_cleans_team_rebuilds() {
+        use crate::mindustry::game::{BlockPlan as TeamBlockPlan, Teams, TEAM_SHARDED};
+
         let footprint = BuildPlanBlockTransform::single();
         let tile = RemoveSelectionTileCandidate {
             break_tile: BreakBlockTileSnapshot::new(2, 2).with_build_origin(1, 1),
@@ -8969,6 +9058,28 @@ mod tests {
         assert_eq!(plan.remove_team_plan_indices, vec![0]);
         assert_eq!(plan.removed_team_plan_positions, vec![point2_pack(2, 2)]);
         assert_eq!(plan.network_delete_positions, vec![point2_pack(2, 2)]);
+
+        let mut teams = Teams::default();
+        teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![
+                TeamBlockPlan::new(2, 2, 0, "router", None),
+                TeamBlockPlan::new(4, 4, 0, "duo", None),
+            ],
+        )]);
+
+        let removed = apply_removed_team_plan_positions(
+            &mut teams,
+            TEAM_SHARDED,
+            &plan.removed_team_plan_positions,
+        );
+
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].removed);
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![TeamBlockPlan::new(4, 4, 0, "duo", None)]
+        );
     }
 
     #[test]

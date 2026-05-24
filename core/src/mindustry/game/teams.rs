@@ -6,6 +6,7 @@
 //! Java-compatible team IDs and active/enemy semantics now.
 
 use crate::mindustry::game::{TEAM_COUNT, TEAM_CRUX, TEAM_NEOPLASTIC};
+use crate::mindustry::world::{point2_x, point2_y};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -170,6 +171,25 @@ impl TeamData {
         Some(self.plans.remove(index))
     }
 
+    pub fn delete_plans_at_positions(&mut self, positions: &[i32]) -> Vec<BlockPlan> {
+        let mut removed = Vec::new();
+        let mut index = 0usize;
+        while index < self.plans.len() {
+            let should_remove = positions.iter().any(|position| {
+                self.plans[index].x == point2_x(*position)
+                    && self.plans[index].y == point2_y(*position)
+            });
+            if should_remove {
+                let mut plan = self.plans.remove(index);
+                plan.removed = true;
+                removed.push(plan);
+            } else {
+                index += 1;
+            }
+        }
+        removed
+    }
+
     pub fn claim_front_plan<FPlaced, FUsable>(
         &mut self,
         mut already_placed: FPlaced,
@@ -328,6 +348,10 @@ impl Teams {
 
     pub fn remove_plan_at(&mut self, team: u8, x: i32, y: i32) -> Option<BlockPlan> {
         self.get(team).remove_plan_at(x, y)
+    }
+
+    pub fn delete_plans_at_positions(&mut self, team: u8, positions: &[i32]) -> Vec<BlockPlan> {
+        self.get(team).delete_plans_at_positions(positions)
     }
 
     pub fn claim_front_plan<FPlaced, FUsable>(
@@ -734,6 +758,47 @@ mod tests {
         assert_eq!(
             teams.get_or_null(TEAM_SHARDED).unwrap().plans,
             vec![BlockPlan::new(2, 2, 3, "scatter", Some("cfg".into()))]
+        );
+    }
+
+    #[test]
+    fn delete_plans_at_positions_marks_removed_and_matches_java_delete_plans() {
+        let mut teams = Teams::default();
+        teams.replace_plans([
+            (
+                TEAM_SHARDED,
+                vec![
+                    BlockPlan::new(1, 1, 0, "duo", None),
+                    BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+                ],
+            ),
+            (TEAM_MALIS, vec![BlockPlan::new(2, 2, 0, "wall", None)]),
+        ]);
+
+        let removed = teams.delete_plans_at_positions(
+            TEAM_SHARDED,
+            &[
+                crate::mindustry::world::point2_pack(2, 2),
+                crate::mindustry::world::point2_pack(9, 9),
+            ],
+        );
+
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].removed);
+        assert_eq!(
+            removed[0],
+            BlockPlan {
+                removed: true,
+                ..BlockPlan::new(2, 2, 1, "router", Some("cfg".into()))
+            }
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![BlockPlan::new(1, 1, 0, "duo", None)]
+        );
+        assert_eq!(
+            teams.get_or_null(TEAM_MALIS).unwrap().plans,
+            vec![BlockPlan::new(2, 2, 0, "wall", None)]
         );
     }
 
