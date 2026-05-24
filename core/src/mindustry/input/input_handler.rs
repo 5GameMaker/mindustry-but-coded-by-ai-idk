@@ -1655,6 +1655,214 @@ pub struct CommandTapPlan {
     pub fire_position_event: bool,
 }
 
+pub const COMMAND_UNIT_SELECT_RADIUS_SCALE: f32 = 1.0;
+pub const COMMAND_OVERLAY_LINE_LIMIT: f32 = 6.5;
+pub const COMMAND_OVERLAY_ALPHA: f32 = 0.5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandOverlayColor {
+    Accent,
+    Remove,
+    Malis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandOverlayController {
+    CommandAi,
+    LogicAi,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandOverlayTargetKind {
+    Position,
+    Entity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandOverlayTarget {
+    pub pos: Vec2,
+    pub kind: CommandOverlayTargetKind,
+}
+
+impl CommandOverlayTarget {
+    pub const fn position(pos: Vec2) -> Self {
+        Self {
+            pos,
+            kind: CommandOverlayTargetKind::Position,
+        }
+    }
+
+    pub const fn entity(pos: Vec2) -> Self {
+        Self {
+            pos,
+            kind: CommandOverlayTargetKind::Entity,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandOverlayUnit {
+    pub id: i32,
+    pub pos: Vec2,
+    pub hit_size: f32,
+    pub allow_command: bool,
+    pub is_flying: bool,
+    pub allow_leg_step: bool,
+    pub controller: CommandOverlayController,
+    pub command_draw_target: bool,
+    pub target_pos: Option<Vec2>,
+    pub attack_target: Option<CommandOverlayTarget>,
+    pub command_queue: Vec<CommandOverlayTarget>,
+    pub enter_payload_command: bool,
+    pub enter_payload_target_accepts: bool,
+    pub loop_payload_command: bool,
+    pub has_payload: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandOverlayBuilding {
+    pub id: i32,
+    pub pos: Vec2,
+    pub hit_size: f32,
+    pub command_position: Option<Vec2>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandOverlayFrame {
+    pub command_mode: bool,
+    pub flying_pass: bool,
+    pub selected_units: Vec<CommandOverlayUnit>,
+    pub command_buildings: Vec<CommandOverlayBuilding>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandMarkerSource {
+    Selection,
+    Commanded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandUnitMarkerPlan {
+    pub id: i32,
+    pub pos: Vec2,
+    pub sides: i32,
+    pub radius: f32,
+    pub pulse_radius: f32,
+    pub color: CommandOverlayColor,
+    pub source: CommandMarkerSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandBuildingMarkerPlan {
+    pub id: i32,
+    pub pos: Vec2,
+    pub sides: i32,
+    pub radius: f32,
+    pub pulse_radius: f32,
+    pub color: CommandOverlayColor,
+    pub source: CommandMarkerSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandOverlayLinePlan {
+    pub from: Vec2,
+    pub to: Vec2,
+    pub from_margin: f32,
+    pub to_margin: f32,
+    pub color: CommandOverlayColor,
+    pub alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandTargetMarkerKind {
+    MoveSquare,
+    AttackTarget,
+    EnterPayloadAccepted,
+    EnterPayloadRejected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandTargetMarkerPlan {
+    pub pos: Vec2,
+    pub kind: CommandTargetMarkerKind,
+    pub color: CommandOverlayColor,
+    pub alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandPayloadIconKind {
+    Upload,
+    Download,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandPayloadIconPlan {
+    pub pos: Vec2,
+    pub kind: CommandPayloadIconKind,
+    pub offset_y: f32,
+    pub size: f32,
+    pub color: CommandOverlayColor,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CommandOverlayPlan {
+    pub retained_selected_units: Vec<i32>,
+    pub removed_selected_units: Vec<i32>,
+    pub unit_markers: Vec<CommandUnitMarkerPlan>,
+    pub building_markers: Vec<CommandBuildingMarkerPlan>,
+    pub target_lines: Vec<CommandOverlayLinePlan>,
+    pub target_markers: Vec<CommandTargetMarkerPlan>,
+    pub queue_lines: Vec<CommandOverlayLinePlan>,
+    pub queue_markers: Vec<CommandTargetMarkerPlan>,
+    pub payload_icons: Vec<CommandPayloadIconPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandTargetsOverlayFrame {
+    pub command_mode: bool,
+    pub selected_units: Vec<CommandOverlayUnit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CommandTargetsOverlayPlan {
+    pub target_markers: Vec<CommandTargetMarkerPlan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandSelectableUnit {
+    pub id: i32,
+    pub pos: Vec2,
+    pub hit_size: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommandSelectableBuilding {
+    pub id: i32,
+    pub pos: Vec2,
+    pub hit_size: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandSelectionOverlayFrame {
+    pub command_mode: bool,
+    pub command_rect: bool,
+    pub rect: SelectionRectFrame,
+    pub selected_units: Vec<i32>,
+    pub command_buildings: Vec<i32>,
+    pub rect_units: Vec<CommandSelectableUnit>,
+    pub rect_buildings: Vec<CommandSelectableBuilding>,
+    pub hover_unit: Option<CommandSelectableUnit>,
+    pub multi_unit_select: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CommandSelectionOverlayPlan {
+    pub unit_markers: Vec<CommandUnitMarkerPlan>,
+    pub building_markers: Vec<CommandBuildingMarkerPlan>,
+    pub rect_fill: Option<SelectionRectFrame>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputHandlerLocalAction {
     UnitControlRemote,
@@ -5518,6 +5726,325 @@ pub fn command_tap_plan(frame: CommandTapFrame) -> CommandTapPlan {
     }
 }
 
+fn command_unit_marker_radius(hit_size: f32) -> f32 {
+    hit_size / COMMAND_UNIT_SELECT_RADIUS_SCALE
+}
+
+fn commanded_unit_marker_radius(hit_size: f32) -> f32 {
+    hit_size / COMMAND_UNIT_SELECT_RADIUS_SCALE + 1.0
+}
+
+fn command_building_marker_radius(hit_size: f32) -> f32 {
+    hit_size / 1.4 + 0.5
+}
+
+fn commanded_building_marker_radius(hit_size: f32) -> f32 {
+    hit_size / 1.4 + 1.0
+}
+
+fn command_overlay_color(controller: CommandOverlayController) -> CommandOverlayColor {
+    match controller {
+        CommandOverlayController::LogicAi => CommandOverlayColor::Malis,
+        CommandOverlayController::CommandAi | CommandOverlayController::Other => {
+            CommandOverlayColor::Accent
+        }
+    }
+}
+
+pub fn draw_command_unit_plan(
+    unit: CommandSelectableUnit,
+    selected: bool,
+) -> CommandUnitMarkerPlan {
+    CommandUnitMarkerPlan {
+        id: unit.id,
+        pos: unit.pos,
+        sides: 6,
+        radius: command_unit_marker_radius(unit.hit_size),
+        pulse_radius: 1.0,
+        color: if selected {
+            CommandOverlayColor::Remove
+        } else {
+            CommandOverlayColor::Accent
+        },
+        source: CommandMarkerSource::Selection,
+    }
+}
+
+pub fn draw_command_building_plan(
+    build: CommandSelectableBuilding,
+    selected: bool,
+) -> CommandBuildingMarkerPlan {
+    CommandBuildingMarkerPlan {
+        id: build.id,
+        pos: build.pos,
+        sides: 4,
+        radius: command_building_marker_radius(build.hit_size),
+        pulse_radius: 1.0,
+        color: if selected {
+            CommandOverlayColor::Remove
+        } else {
+            CommandOverlayColor::Accent
+        },
+        source: CommandMarkerSource::Selection,
+    }
+}
+
+pub fn command_targets_overlay_plan(
+    frame: CommandTargetsOverlayFrame,
+) -> CommandTargetsOverlayPlan {
+    if !frame.command_mode {
+        return CommandTargetsOverlayPlan::default();
+    }
+
+    CommandTargetsOverlayPlan {
+        target_markers: frame
+            .selected_units
+            .into_iter()
+            .filter(|unit| unit.command_draw_target)
+            .filter_map(|unit| unit.attack_target.map(|target| target.pos))
+            .map(|pos| CommandTargetMarkerPlan {
+                pos,
+                kind: CommandTargetMarkerKind::AttackTarget,
+                color: CommandOverlayColor::Remove,
+                alpha: 1.0,
+            })
+            .collect(),
+    }
+}
+
+pub fn command_overlay_plan(frame: CommandOverlayFrame) -> CommandOverlayPlan {
+    if !frame.command_mode {
+        return CommandOverlayPlan::default();
+    }
+
+    let mut plan = CommandOverlayPlan::default();
+
+    for unit in frame.selected_units {
+        if !unit.allow_command {
+            plan.removed_selected_units.push(unit.id);
+            continue;
+        }
+        plan.retained_selected_units.push(unit.id);
+
+        if (unit.is_flying || unit.allow_leg_step) != frame.flying_pass {
+            continue;
+        }
+
+        let color = command_overlay_color(unit.controller);
+        let mut last_pos = unit.pos;
+
+        if unit.controller == CommandOverlayController::CommandAi {
+            let line_dest = unit
+                .attack_target
+                .map(|target| target.pos)
+                .or(unit.target_pos);
+
+            if unit.command_draw_target {
+                if let (Some(target_pos), Some(line_to)) = (unit.target_pos, line_dest) {
+                    plan.target_lines.push(CommandOverlayLinePlan {
+                        from: unit.pos,
+                        to: line_to,
+                        from_margin: commanded_unit_marker_radius(unit.hit_size),
+                        to_margin: COMMAND_OVERLAY_LINE_LIMIT,
+                        color,
+                        alpha: COMMAND_OVERLAY_ALPHA,
+                    });
+
+                    if unit.attack_target.is_none() {
+                        plan.target_markers.push(CommandTargetMarkerPlan {
+                            pos: line_to,
+                            kind: CommandTargetMarkerKind::MoveSquare,
+                            color,
+                            alpha: COMMAND_OVERLAY_ALPHA,
+                        });
+
+                        if unit.enter_payload_command {
+                            plan.target_markers.push(CommandTargetMarkerPlan {
+                                pos: target_pos,
+                                kind: if unit.enter_payload_target_accepts {
+                                    CommandTargetMarkerKind::EnterPayloadAccepted
+                                } else {
+                                    CommandTargetMarkerKind::EnterPayloadRejected
+                                },
+                                color: if unit.enter_payload_target_accepts {
+                                    color
+                                } else {
+                                    CommandOverlayColor::Remove
+                                },
+                                alpha: 1.0,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if let Some(target) = unit.attack_target {
+                last_pos = target.pos;
+            } else if let Some(target_pos) = unit.target_pos {
+                last_pos = target_pos;
+            }
+        }
+
+        let radius = commanded_unit_marker_radius(unit.hit_size);
+        plan.unit_markers.push(CommandUnitMarkerPlan {
+            id: unit.id,
+            pos: unit.pos,
+            sides: 6,
+            radius,
+            pulse_radius: 0.5,
+            color,
+            source: CommandMarkerSource::Commanded,
+        });
+
+        if unit.controller == CommandOverlayController::CommandAi {
+            if unit.command_draw_target {
+                for next in &unit.command_queue {
+                    plan.queue_lines.push(CommandOverlayLinePlan {
+                        from: last_pos,
+                        to: next.pos,
+                        from_margin: COMMAND_OVERLAY_LINE_LIMIT,
+                        to_margin: COMMAND_OVERLAY_LINE_LIMIT,
+                        color,
+                        alpha: COMMAND_OVERLAY_ALPHA,
+                    });
+                    plan.queue_markers.push(CommandTargetMarkerPlan {
+                        pos: next.pos,
+                        kind: match next.kind {
+                            CommandOverlayTargetKind::Position => {
+                                CommandTargetMarkerKind::MoveSquare
+                            }
+                            CommandOverlayTargetKind::Entity => {
+                                CommandTargetMarkerKind::AttackTarget
+                            }
+                        },
+                        color: match next.kind {
+                            CommandOverlayTargetKind::Position => color,
+                            CommandOverlayTargetKind::Entity => CommandOverlayColor::Remove,
+                        },
+                        alpha: COMMAND_OVERLAY_ALPHA,
+                    });
+                    last_pos = next.pos;
+                }
+            }
+
+            if unit.target_pos.is_some() && unit.loop_payload_command {
+                if let Some(target_pos) = unit.target_pos {
+                    plan.payload_icons.push(CommandPayloadIconPlan {
+                        pos: target_pos,
+                        kind: if unit.has_payload {
+                            CommandPayloadIconKind::Download
+                        } else {
+                            CommandPayloadIconKind::Upload
+                        },
+                        offset_y: 11.0,
+                        size: 8.0,
+                        color,
+                    });
+                }
+
+                if let Some(first) = unit.command_queue.first() {
+                    plan.payload_icons.push(CommandPayloadIconPlan {
+                        pos: first.pos,
+                        kind: if unit.has_payload {
+                            CommandPayloadIconKind::Upload
+                        } else {
+                            CommandPayloadIconKind::Download
+                        },
+                        offset_y: 11.0,
+                        size: 8.0,
+                        color,
+                    });
+                }
+            }
+        }
+    }
+
+    if frame.flying_pass {
+        for build in frame.command_buildings {
+            plan.building_markers.push(CommandBuildingMarkerPlan {
+                id: build.id,
+                pos: build.pos,
+                sides: 4,
+                radius: commanded_building_marker_radius(build.hit_size),
+                pulse_radius: 0.0,
+                color: CommandOverlayColor::Accent,
+                source: CommandMarkerSource::Commanded,
+            });
+
+            if let Some(command_position) = build.command_position {
+                plan.target_lines.push(CommandOverlayLinePlan {
+                    from: build.pos,
+                    to: command_position,
+                    from_margin: build.hit_size / 2.0,
+                    to_margin: COMMAND_OVERLAY_LINE_LIMIT,
+                    color: CommandOverlayColor::Accent,
+                    alpha: COMMAND_OVERLAY_ALPHA,
+                });
+                plan.target_markers.push(CommandTargetMarkerPlan {
+                    pos: command_position,
+                    kind: CommandTargetMarkerKind::MoveSquare,
+                    color: CommandOverlayColor::Accent,
+                    alpha: COMMAND_OVERLAY_ALPHA,
+                });
+            }
+        }
+    }
+
+    plan
+}
+
+pub fn command_selection_overlay_plan(
+    frame: CommandSelectionOverlayFrame,
+) -> CommandSelectionOverlayPlan {
+    if !frame.command_mode {
+        return CommandSelectionOverlayPlan::default();
+    }
+
+    if frame.command_rect {
+        let unit_markers = frame
+            .rect_units
+            .into_iter()
+            .map(|unit| draw_command_unit_plan(unit, frame.selected_units.contains(&unit.id)))
+            .collect::<Vec<_>>();
+
+        let building_markers = if unit_markers.is_empty() {
+            frame
+                .rect_buildings
+                .into_iter()
+                .map(|build| {
+                    draw_command_building_plan(build, frame.command_buildings.contains(&build.id))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        return CommandSelectionOverlayPlan {
+            unit_markers,
+            building_markers,
+            rect_fill: Some(frame.rect),
+        };
+    }
+
+    if let Some(unit) = frame.hover_unit {
+        if !(!frame.multi_unit_select
+            && frame.selected_units.len() == 1
+            && frame.selected_units.contains(&unit.id))
+        {
+            return CommandSelectionOverlayPlan {
+                unit_markers: vec![draw_command_unit_plan(
+                    unit,
+                    frame.selected_units.contains(&unit.id),
+                )],
+                building_markers: Vec::new(),
+                rect_fill: None,
+            };
+        }
+    }
+
+    CommandSelectionOverlayPlan::default()
+}
+
 pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
     if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
         return CheckUnitPlan {
@@ -6171,6 +6698,215 @@ mod tests {
         });
         assert!(inactive.unit_batches.is_empty());
         assert!(inactive.command_buildings.is_none());
+    }
+
+    #[test]
+    fn command_overlay_plan_emits_commanded_lines_queue_payload_and_buildings() {
+        let unit = CommandOverlayUnit {
+            id: 1,
+            pos: Vec2::new(0.0, 0.0),
+            hit_size: 8.0,
+            allow_command: true,
+            is_flying: true,
+            allow_leg_step: false,
+            controller: CommandOverlayController::CommandAi,
+            command_draw_target: true,
+            target_pos: Some(Vec2::new(10.0, 0.0)),
+            attack_target: None,
+            command_queue: vec![
+                CommandOverlayTarget::position(Vec2::new(20.0, 0.0)),
+                CommandOverlayTarget::entity(Vec2::new(30.0, 0.0)),
+            ],
+            enter_payload_command: true,
+            enter_payload_target_accepts: false,
+            loop_payload_command: true,
+            has_payload: true,
+        };
+        let removed = CommandOverlayUnit {
+            id: 2,
+            allow_command: false,
+            ..unit.clone()
+        };
+        let build = CommandOverlayBuilding {
+            id: 9,
+            pos: Vec2::new(5.0, 5.0),
+            hit_size: 14.0,
+            command_position: Some(Vec2::new(12.0, 12.0)),
+        };
+
+        let plan = command_overlay_plan(CommandOverlayFrame {
+            command_mode: true,
+            flying_pass: true,
+            selected_units: vec![unit, removed],
+            command_buildings: vec![build],
+        });
+
+        assert_eq!(plan.retained_selected_units, vec![1]);
+        assert_eq!(plan.removed_selected_units, vec![2]);
+        assert_eq!(plan.unit_markers.len(), 1);
+        assert_eq!(plan.unit_markers[0].radius, 9.0);
+        assert_eq!(plan.target_lines.len(), 2);
+        assert_eq!(
+            plan.target_markers[0].kind,
+            CommandTargetMarkerKind::MoveSquare
+        );
+        assert!(plan
+            .target_markers
+            .iter()
+            .any(|marker| marker.kind == CommandTargetMarkerKind::EnterPayloadRejected));
+        assert_eq!(plan.queue_lines.len(), 2);
+        assert_eq!(
+            plan.queue_markers[0].kind,
+            CommandTargetMarkerKind::MoveSquare
+        );
+        assert_eq!(
+            plan.queue_markers[1].kind,
+            CommandTargetMarkerKind::AttackTarget
+        );
+        assert_eq!(
+            plan.payload_icons
+                .iter()
+                .map(|icon| icon.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                CommandPayloadIconKind::Download,
+                CommandPayloadIconKind::Upload
+            ]
+        );
+        assert_eq!(plan.building_markers.len(), 1);
+    }
+
+    #[test]
+    fn command_targets_overlay_plan_matches_java_attack_target_layer() {
+        let plan = command_targets_overlay_plan(CommandTargetsOverlayFrame {
+            command_mode: true,
+            selected_units: vec![
+                CommandOverlayUnit {
+                    id: 1,
+                    pos: Vec2::new(0.0, 0.0),
+                    hit_size: 8.0,
+                    allow_command: true,
+                    is_flying: false,
+                    allow_leg_step: false,
+                    controller: CommandOverlayController::CommandAi,
+                    command_draw_target: true,
+                    target_pos: Some(Vec2::new(5.0, 5.0)),
+                    attack_target: Some(CommandOverlayTarget::entity(Vec2::new(9.0, 9.0))),
+                    command_queue: Vec::new(),
+                    enter_payload_command: false,
+                    enter_payload_target_accepts: false,
+                    loop_payload_command: false,
+                    has_payload: false,
+                },
+                CommandOverlayUnit {
+                    id: 2,
+                    pos: Vec2::new(1.0, 1.0),
+                    hit_size: 8.0,
+                    allow_command: true,
+                    is_flying: false,
+                    allow_leg_step: false,
+                    controller: CommandOverlayController::CommandAi,
+                    command_draw_target: false,
+                    target_pos: Some(Vec2::new(6.0, 6.0)),
+                    attack_target: Some(CommandOverlayTarget::entity(Vec2::new(10.0, 10.0))),
+                    command_queue: Vec::new(),
+                    enter_payload_command: false,
+                    enter_payload_target_accepts: false,
+                    loop_payload_command: false,
+                    has_payload: false,
+                },
+            ],
+        });
+
+        assert_eq!(plan.target_markers.len(), 1);
+        assert_eq!(plan.target_markers[0].pos, Vec2::new(9.0, 9.0));
+        assert_eq!(
+            plan.target_markers[0].kind,
+            CommandTargetMarkerKind::AttackTarget
+        );
+    }
+
+    #[test]
+    fn command_selection_overlay_plan_prefers_rect_units_then_buildings_and_hover() {
+        let rect = SelectionRectFrame {
+            x: 1.0,
+            y: 2.0,
+            w: 3.0,
+            h: 4.0,
+        };
+        let unit = CommandSelectableUnit {
+            id: 1,
+            pos: Vec2::new(3.0, 4.0),
+            hit_size: 6.0,
+        };
+        let build = CommandSelectableBuilding {
+            id: 7,
+            pos: Vec2::new(5.0, 6.0),
+            hit_size: 12.0,
+        };
+
+        let units = command_selection_overlay_plan(CommandSelectionOverlayFrame {
+            command_mode: true,
+            command_rect: true,
+            rect,
+            selected_units: vec![1],
+            command_buildings: vec![7],
+            rect_units: vec![unit],
+            rect_buildings: vec![build],
+            hover_unit: None,
+            multi_unit_select: false,
+        });
+        assert_eq!(units.unit_markers.len(), 1);
+        assert!(units.building_markers.is_empty());
+        assert_eq!(units.unit_markers[0].color, CommandOverlayColor::Remove);
+        assert_eq!(units.rect_fill, Some(rect));
+
+        let buildings = command_selection_overlay_plan(CommandSelectionOverlayFrame {
+            command_mode: true,
+            command_rect: true,
+            rect,
+            selected_units: vec![],
+            command_buildings: vec![],
+            rect_units: vec![],
+            rect_buildings: vec![build],
+            hover_unit: None,
+            multi_unit_select: false,
+        });
+        assert_eq!(buildings.building_markers.len(), 1);
+        assert_eq!(
+            buildings.building_markers[0].color,
+            CommandOverlayColor::Accent
+        );
+
+        let hover_hidden = command_selection_overlay_plan(CommandSelectionOverlayFrame {
+            command_mode: true,
+            command_rect: false,
+            rect,
+            selected_units: vec![1],
+            command_buildings: vec![],
+            rect_units: vec![],
+            rect_buildings: vec![],
+            hover_unit: Some(unit),
+            multi_unit_select: false,
+        });
+        assert!(hover_hidden.unit_markers.is_empty());
+
+        let hover_multi = command_selection_overlay_plan(CommandSelectionOverlayFrame {
+            multi_unit_select: true,
+            hover_unit: Some(unit),
+            ..CommandSelectionOverlayFrame {
+                command_mode: true,
+                command_rect: false,
+                rect,
+                selected_units: vec![1],
+                command_buildings: vec![],
+                rect_units: vec![],
+                rect_buildings: vec![],
+                hover_unit: None,
+                multi_unit_select: false,
+            }
+        });
+        assert_eq!(hover_multi.unit_markers.len(), 1);
     }
 
     #[test]
