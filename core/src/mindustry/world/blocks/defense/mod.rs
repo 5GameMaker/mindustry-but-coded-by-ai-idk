@@ -1,6 +1,6 @@
 pub mod turrets;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Read, Write};
 
 use crate::mindustry::core::content_loader::ContentLoader;
@@ -659,6 +659,27 @@ pub fn regen_projector_update(
         warmup: state.warmup,
         total_time: state.total_time,
         optional_timer: state.optional_timer,
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RegenProjectorMendMap {
+    pub entries: BTreeMap<i32, f32>,
+}
+
+impl RegenProjectorMendMap {
+    pub fn record(&mut self, pos: i32, amount: f32, missing_health: f32) {
+        let capped = amount.min(missing_health);
+        let entry = self.entries.entry(pos).or_insert(0.0);
+        *entry = (*entry).max(capped);
+    }
+
+    pub fn drain(&mut self) -> Vec<(i32, f32)> {
+        std::mem::take(&mut self.entries).into_iter().collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 
@@ -2163,6 +2184,16 @@ mod tests {
         assert!(!suppressed.any_targets);
         assert_eq!(suppressed.heal_amount_percent, 0.0);
         assert!(!regen.did_regen);
+
+        let mut mend = RegenProjectorMendMap::default();
+        mend.record(10, 3.0, 20.0);
+        mend.record(10, 5.0, 20.0);
+        mend.record(10, 12.0, 7.0);
+        mend.record(11, 4.0, 2.5);
+        assert_eq!(mend.entries.get(&10), Some(&7.0));
+        assert_eq!(mend.entries.get(&11), Some(&2.5));
+        assert_eq!(mend.drain(), vec![(10, 7.0), (11, 2.5)]);
+        assert!(mend.is_empty());
     }
 
     #[test]
