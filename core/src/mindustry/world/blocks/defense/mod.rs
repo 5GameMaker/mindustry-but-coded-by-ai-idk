@@ -85,6 +85,54 @@ pub fn door_tapped_should_configure(
     !(units_in_tile && open) && origin_timer_ready
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoorChainNode {
+    pub id: i32,
+    pub open: bool,
+    pub units_in_tile: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoorChainToggle {
+    pub id: i32,
+    pub open: bool,
+    pub play_chain_effect: bool,
+    pub update_pathfinder: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoorChainTogglePlan {
+    pub play_origin_sound: bool,
+    pub play_origin_effect: bool,
+    pub toggles: Vec<DoorChainToggle>,
+}
+
+pub fn door_chain_toggle_plan(
+    doors: impl IntoIterator<Item = DoorChainNode>,
+    requested_open: bool,
+    world_generating: bool,
+    chain_effect: bool,
+) -> DoorChainTogglePlan {
+    let mut toggles = Vec::new();
+    for door in doors {
+        if (!requested_open && door.units_in_tile) || door.open == requested_open {
+            continue;
+        }
+        toggles.push(DoorChainToggle {
+            id: door.id,
+            open: requested_open,
+            play_chain_effect: chain_effect,
+            update_pathfinder: !world_generating,
+        });
+    }
+
+    DoorChainTogglePlan {
+        play_origin_sound: !world_generating,
+        play_origin_effect: !world_generating,
+        toggles,
+    }
+}
+
 pub fn write_door_state<W: Write>(write: &mut W, state: DoorState) -> io::Result<()> {
     write.write_all(&[state.open as u8])
 }
@@ -1704,6 +1752,82 @@ mod tests {
         assert!(!door_can_toggle(false, false, false, true));
         assert!(door_tapped_should_configure(false, true, true));
         assert!(!door_tapped_should_configure(true, true, true));
+        assert_eq!(
+            door_chain_toggle_plan(
+                [
+                    DoorChainNode {
+                        id: 1,
+                        open: false,
+                        units_in_tile: false,
+                    },
+                    DoorChainNode {
+                        id: 2,
+                        open: true,
+                        units_in_tile: false,
+                    },
+                    DoorChainNode {
+                        id: 3,
+                        open: false,
+                        units_in_tile: true,
+                    },
+                ],
+                true,
+                false,
+                true,
+            ),
+            DoorChainTogglePlan {
+                play_origin_sound: true,
+                play_origin_effect: true,
+                toggles: vec![
+                    DoorChainToggle {
+                        id: 1,
+                        open: true,
+                        play_chain_effect: true,
+                        update_pathfinder: true,
+                    },
+                    DoorChainToggle {
+                        id: 3,
+                        open: true,
+                        play_chain_effect: true,
+                        update_pathfinder: true,
+                    },
+                ],
+            }
+        );
+        assert_eq!(
+            door_chain_toggle_plan(
+                [
+                    DoorChainNode {
+                        id: 1,
+                        open: true,
+                        units_in_tile: false,
+                    },
+                    DoorChainNode {
+                        id: 2,
+                        open: true,
+                        units_in_tile: true,
+                    },
+                    DoorChainNode {
+                        id: 3,
+                        open: false,
+                        units_in_tile: false,
+                    },
+                ],
+                false,
+                true,
+                false,
+            ),
+            DoorChainTogglePlan {
+                play_origin_sound: false,
+                play_origin_effect: false,
+                toggles: vec![DoorChainToggle {
+                    id: 1,
+                    open: false,
+                    play_chain_effect: false,
+                    update_pathfinder: false,
+                }],
+            }
+        );
 
         let mut bytes = Vec::new();
         write_door_state(&mut bytes, DoorState { open: true }).unwrap();
