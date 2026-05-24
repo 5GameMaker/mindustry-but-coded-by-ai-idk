@@ -606,6 +606,47 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 将 draw plan 连接到 renderer 的 base/teamRegion 绘制；
 - setStats 文案与 bundle/localization 的最终桥接。
 
+### 7.7b Radar
+
+已推进：
+
+- `RadarState`
+- `RadarIconRegion`
+- `RadarRangePlan`
+- `RadarDrawCommand`
+- `RadarDrawPlan`
+- `radar_icons(...)`
+- `radar_fog_radius(...)`
+- `radar_force_update_needed(...)`
+- `radar_progress(...)`
+- `radar_can_pickup(...)`
+- `radar_place_plan(...)`
+- `radar_select_plan(...)`
+- `radar_draw_rotation(...)`
+- `radar_glow_alpha(...)`
+- `radar_draw_plan(...)`
+- `radar_update(...)`
+- `write_radar_state(...)`
+- `read_radar_state(...)`
+- 已对照 `Radar.updateTile()/drawPlace()/drawSelect()/draw()/icons()/canPickup()` 锁定：
+  - `fogRadius() = fogRadius * progress * smoothEfficiency`；
+  - `smoothEfficiency = lerpDelta(..., efficiency, 0.05)`；
+  - forceUpdate 阈值为 `abs(radius - lastRadius) >= 0.5`，且使用 progress 更新前的半径；
+  - `progress += edelta / discoveryTime` 后 clamp 到 `[0,1]`；
+  - `totalProgress += efficiency * edelta` 不 clamp；
+  - place 半径为 `fogRadius * tilesize`，select 半径为运行态 `fogRadius() * tilesize`；
+  - draw 旋转角为 `rotateSpeed * totalProgress`；
+  - glow alpha 为 `glowColor.a * (1 - glowMag + absin(glowScl, glowMag))`；
+  - icons 顺序为 baseRegion、region；
+  - `canPickup()` 恒为 false；
+  - Java write/read 只持久化 `progress`。
+
+仍需：
+
+- 接入真实 `fogControl.forceUpdate(team, this)`；
+- 将 dash circle / baseRegion / rotating region / additive glow 连接到 renderer；
+- content atlas 中 base/glow region 的加载与 outline icon 细节。
+
 ### 7.8 ShieldWall / ForceProjector / MendProjector / OverdriveProjector
 
 已推进：

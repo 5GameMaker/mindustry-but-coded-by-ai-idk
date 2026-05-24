@@ -1885,6 +1885,41 @@ pub struct RadarState {
     pub total_progress: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadarIconRegion {
+    Base,
+    Main,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadarRangePlan {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadarDrawCommand {
+    Base,
+    Region,
+    GlowAdditive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadarDrawPlan {
+    pub commands: &'static [RadarDrawCommand],
+    pub rotation: f32,
+    pub glow_alpha: f32,
+}
+
+const RADAR_ICONS: &[RadarIconRegion] = &[RadarIconRegion::Base, RadarIconRegion::Main];
+
+const RADAR_DRAW_COMMANDS: &[RadarDrawCommand] = &[
+    RadarDrawCommand::Base,
+    RadarDrawCommand::Region,
+    RadarDrawCommand::GlowAdditive,
+];
+
 impl Default for RadarState {
     fn default() -> Self {
         Self {
@@ -1896,8 +1931,81 @@ impl Default for RadarState {
     }
 }
 
+pub fn radar_icons() -> &'static [RadarIconRegion] {
+    RADAR_ICONS
+}
+
 pub fn radar_fog_radius(fog_radius: f32, progress: f32, smooth_efficiency: f32) -> f32 {
     fog_radius * progress * smooth_efficiency
+}
+
+pub fn radar_force_update_needed(
+    fog_radius: f32,
+    progress: f32,
+    smooth_efficiency: f32,
+    last_radius: f32,
+) -> bool {
+    (radar_fog_radius(fog_radius, progress, smooth_efficiency) - last_radius).abs() >= 0.5
+}
+
+pub fn radar_progress(state: &RadarState) -> f32 {
+    state.progress
+}
+
+pub fn radar_can_pickup() -> bool {
+    false
+}
+
+pub fn radar_place_plan(
+    tile_x: i32,
+    tile_y: i32,
+    tile_size: f32,
+    offset: f32,
+    fog_radius: f32,
+) -> RadarRangePlan {
+    RadarRangePlan {
+        center_x: tile_x as f32 * tile_size + offset,
+        center_y: tile_y as f32 * tile_size + offset,
+        radius: fog_radius * tile_size,
+    }
+}
+
+pub fn radar_select_plan(
+    x: f32,
+    y: f32,
+    fog_radius: f32,
+    progress: f32,
+    smooth_efficiency: f32,
+    tile_size: f32,
+) -> RadarRangePlan {
+    RadarRangePlan {
+        center_x: x,
+        center_y: y,
+        radius: radar_fog_radius(fog_radius, progress, smooth_efficiency) * tile_size,
+    }
+}
+
+pub fn radar_draw_rotation(rotate_speed: f32, total_progress: f32) -> f32 {
+    rotate_speed * total_progress
+}
+
+pub fn radar_glow_alpha(time: f32, glow_scl: f32, glow_mag: f32, glow_color_alpha: f32) -> f32 {
+    glow_color_alpha * (1.0 - glow_mag + absin_time(time, glow_scl, glow_mag))
+}
+
+pub fn radar_draw_plan(
+    state: &RadarState,
+    time: f32,
+    rotate_speed: f32,
+    glow_scl: f32,
+    glow_mag: f32,
+    glow_color_alpha: f32,
+) -> RadarDrawPlan {
+    RadarDrawPlan {
+        commands: RADAR_DRAW_COMMANDS,
+        rotation: radar_draw_rotation(rotate_speed, state.total_progress),
+        glow_alpha: radar_glow_alpha(time, glow_scl, glow_mag, glow_color_alpha),
+    }
 }
 
 pub fn radar_update(
@@ -1909,7 +2017,12 @@ pub fn radar_update(
 ) -> bool {
     state.smooth_efficiency = lerp_delta(state.smooth_efficiency, efficiency, 0.05);
     let radius = radar_fog_radius(fog_radius, state.progress, state.smooth_efficiency);
-    let force_update = (radius - state.last_radius).abs() >= 0.5;
+    let force_update = radar_force_update_needed(
+        fog_radius,
+        state.progress,
+        state.smooth_efficiency,
+        state.last_radius,
+    );
     if force_update {
         state.last_radius = radius;
     }
@@ -3710,17 +3823,69 @@ mod tests {
         let mut radar = RadarState::default();
         assert!(!radar_update(&mut radar, 1.0, 60.0, 10.0, 600.0));
         assert_eq!(radar.progress, 0.1);
+        assert_eq!(radar.total_progress, 60.0);
         assert_eq!(
             radar_fog_radius(10.0, radar.progress, radar.smooth_efficiency),
             1.0
         );
+        assert!(!radar_force_update_needed(10.0, 0.049, 1.0, 0.0));
+        assert!(radar_force_update_needed(10.0, 0.05, 1.0, 0.0));
+        assert!(radar_force_update_needed(10.0, 0.051, 1.0, 0.0));
         assert!(radar_update(&mut radar, 1.0, 60.0, 10.0, 600.0));
+        assert_eq!(radar.progress, 0.2);
+        assert_eq!(radar.last_radius, 1.0);
+        radar.progress = 0.99;
+        assert!(radar_update(&mut radar, 1.0, 60.0, 10.0, 600.0));
+        assert_eq!(radar.progress, 1.0);
         let mut bytes = Vec::new();
         write_radar_state(&mut bytes, &radar).unwrap();
+        assert_eq!(bytes.len(), 4);
+        let restored_radar = read_radar_state(&mut bytes.as_slice()).unwrap();
+        assert_eq!(restored_radar.progress, radar.progress);
+        assert_eq!(restored_radar.last_radius, 0.0);
+        assert_eq!(restored_radar.smooth_efficiency, 1.0);
+        assert_eq!(restored_radar.total_progress, 0.0);
         assert_eq!(
-            read_radar_state(&mut bytes.as_slice()).unwrap().progress,
-            radar.progress
+            radar_icons(),
+            &[RadarIconRegion::Base, RadarIconRegion::Main]
         );
+        assert!(!radar_can_pickup());
+        assert_eq!(radar_progress(&radar), radar.progress);
+        assert_eq!(
+            radar_place_plan(2, 3, 8.0, 4.0, 10.0),
+            RadarRangePlan {
+                center_x: 20.0,
+                center_y: 28.0,
+                radius: 80.0,
+            }
+        );
+        assert_eq!(
+            radar_select_plan(
+                40.0,
+                48.0,
+                10.0,
+                radar.progress,
+                radar.smooth_efficiency,
+                8.0
+            ),
+            RadarRangePlan {
+                center_x: 40.0,
+                center_y: 48.0,
+                radius: radar_fog_radius(10.0, radar.progress, radar.smooth_efficiency) * 8.0,
+            }
+        );
+        assert_eq!(radar_draw_rotation(2.0, radar.total_progress), 360.0);
+        let draw = radar_draw_plan(&radar, 0.0, 2.0, 5.0, 0.6, 1.0);
+        assert_eq!(
+            draw.commands,
+            &[
+                RadarDrawCommand::Base,
+                RadarDrawCommand::Region,
+                RadarDrawCommand::GlowAdditive,
+            ]
+        );
+        assert_eq!(draw.rotation, 360.0);
+        assert!((draw.glow_alpha - 0.4).abs() < 0.00001);
 
         assert_eq!(build_turret_elevation(-1.0, 3), 1.5);
         assert_eq!(build_turret_warmup_update(0.0, true, 0.8), 0.080000006);
