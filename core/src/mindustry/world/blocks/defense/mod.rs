@@ -864,6 +864,29 @@ pub struct BuildTurretUpdateStep {
     pub last_plan: Option<BlockPlan>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildTurretUnitTickInput {
+    pub unit_rotation: f32,
+    pub actively_building: bool,
+    pub build_plan_angle: Option<f32>,
+    pub suppressed: bool,
+    pub efficiency: f32,
+    pub potential_efficiency: f32,
+    pub time_scale: f32,
+    pub warmup: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildTurretUnitTickStep {
+    pub rotation: f32,
+    pub look_at: Option<f32>,
+    pub efficiency: f32,
+    pub potential_efficiency: f32,
+    pub build_speed_multiplier: f32,
+    pub speed_multiplier: f32,
+    pub warmup: f32,
+}
+
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
     if configured < 0.0 {
         size as f32 / 2.0
@@ -882,6 +905,33 @@ pub fn build_turret_warmup_update(warmup: f32, actively_building: bool, efficien
 
 pub fn build_turret_should_consume(plan_count: usize, heal_suppressed: bool) -> bool {
     plan_count > 0 && !heal_suppressed
+}
+
+pub fn build_turret_unit_tick(input: BuildTurretUnitTickInput) -> BuildTurretUnitTickStep {
+    let efficiency = if input.suppressed {
+        0.0
+    } else {
+        input.efficiency
+    };
+    let potential_efficiency = if input.suppressed {
+        0.0
+    } else {
+        input.potential_efficiency
+    };
+    let multiplier = potential_efficiency * input.time_scale;
+
+    BuildTurretUnitTickStep {
+        rotation: input.unit_rotation,
+        look_at: input
+            .actively_building
+            .then_some(input.build_plan_angle)
+            .flatten(),
+        efficiency,
+        potential_efficiency,
+        build_speed_multiplier: multiplier,
+        speed_multiplier: multiplier,
+        warmup: build_turret_warmup_update(input.warmup, input.actively_building, efficiency),
+    }
 }
 
 pub const BUILD_TURRET_UNIT_TYPE_PREFIX: &str = "turret-unit-";
@@ -1674,6 +1724,64 @@ mod tests {
             build_plan.config,
             crate::mindustry::io::TypeValue::String("cfg".into())
         );
+    }
+
+    #[test]
+    fn build_turret_unit_tick_matches_java_update_tile_front_half() {
+        let building = build_turret_unit_tick(BuildTurretUnitTickInput {
+            unit_rotation: 123.0,
+            actively_building: true,
+            build_plan_angle: Some(45.0),
+            suppressed: false,
+            efficiency: 0.8,
+            potential_efficiency: 0.75,
+            time_scale: 2.0,
+            warmup: 0.2,
+        });
+
+        assert_eq!(building.rotation, 123.0);
+        assert_eq!(building.look_at, Some(45.0));
+        assert_eq!(building.efficiency, 0.8);
+        assert_eq!(building.potential_efficiency, 0.75);
+        assert_eq!(building.build_speed_multiplier, 1.5);
+        assert_eq!(building.speed_multiplier, 1.5);
+        assert!((building.warmup - 0.26).abs() < f32::EPSILON);
+
+        let idle = build_turret_unit_tick(BuildTurretUnitTickInput {
+            unit_rotation: 270.0,
+            actively_building: false,
+            build_plan_angle: Some(180.0),
+            suppressed: false,
+            efficiency: 0.9,
+            potential_efficiency: 0.5,
+            time_scale: 1.5,
+            warmup: 0.6,
+        });
+
+        assert_eq!(idle.rotation, 270.0);
+        assert_eq!(idle.look_at, None);
+        assert_eq!(idle.build_speed_multiplier, 0.75);
+        assert_eq!(idle.speed_multiplier, 0.75);
+        assert_eq!(idle.warmup, 0.54);
+
+        let suppressed = build_turret_unit_tick(BuildTurretUnitTickInput {
+            unit_rotation: 30.0,
+            actively_building: true,
+            build_plan_angle: Some(90.0),
+            suppressed: true,
+            efficiency: 1.0,
+            potential_efficiency: 1.0,
+            time_scale: 3.0,
+            warmup: 0.5,
+        });
+
+        assert_eq!(suppressed.rotation, 30.0);
+        assert_eq!(suppressed.look_at, Some(90.0));
+        assert_eq!(suppressed.efficiency, 0.0);
+        assert_eq!(suppressed.potential_efficiency, 0.0);
+        assert_eq!(suppressed.build_speed_multiplier, 0.0);
+        assert_eq!(suppressed.speed_multiplier, 0.0);
+        assert_eq!(suppressed.warmup, 0.45);
     }
 
     #[test]
