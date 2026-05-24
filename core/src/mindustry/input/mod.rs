@@ -1,11 +1,16 @@
 // Mirrors upstream core/src/mindustry/input. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.
 
 pub mod binding;
+pub mod desktop_input;
 pub mod input_handler;
 pub mod place_mode;
 pub mod placement;
 
 pub use binding::{Binding, KeyBindingInput, KeyBindingSpec, KeyCode};
+pub use desktop_input::{
+    DesktopCameraPlan, DesktopCursor, DesktopInput, DesktopInputAction, DesktopInputFrame,
+    DesktopInputSettings, DesktopInputUpdate, DesktopPayloadAction, DesktopVec2,
+};
 pub use input_handler::{
     building_control_select, clear_items, clear_liquids, client_building_control_select_packet,
     client_command_building_packet, client_command_units_packet, client_delete_plans_packet,
