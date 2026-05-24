@@ -730,6 +730,71 @@ pub fn base_shield_unit_action(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseShieldDrawCommand {
+    SetShieldLayer,
+    SetShieldColor,
+    FillAnimatedPoly,
+    StrokeStaticPoly,
+    Reset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BaseShieldDrawPlan {
+    pub commands: &'static [BaseShieldDrawCommand],
+    pub radius: f32,
+    pub sides: i32,
+    pub hit_alpha: f32,
+    pub fill_alpha: f32,
+    pub stroke: f32,
+}
+
+const BASE_SHIELD_DRAW_COMMANDS_ANIMATED: &[BaseShieldDrawCommand] = &[
+    BaseShieldDrawCommand::SetShieldLayer,
+    BaseShieldDrawCommand::SetShieldColor,
+    BaseShieldDrawCommand::FillAnimatedPoly,
+    BaseShieldDrawCommand::Reset,
+];
+
+const BASE_SHIELD_DRAW_COMMANDS_STATIC: &[BaseShieldDrawCommand] = &[
+    BaseShieldDrawCommand::SetShieldLayer,
+    BaseShieldDrawCommand::SetShieldColor,
+    BaseShieldDrawCommand::StrokeStaticPoly,
+    BaseShieldDrawCommand::Reset,
+];
+
+const BASE_SHIELD_DRAW_COMMANDS_BROKEN: &[BaseShieldDrawCommand] = &[BaseShieldDrawCommand::Reset];
+
+pub fn base_shield_draw_plan(
+    broken: bool,
+    radius: f32,
+    sides: i32,
+    hit: f32,
+    animate_shields: bool,
+) -> BaseShieldDrawPlan {
+    let hit_alpha = hit.clamp(0.0, 1.0);
+    BaseShieldDrawPlan {
+        commands: if broken {
+            BASE_SHIELD_DRAW_COMMANDS_BROKEN
+        } else if animate_shields {
+            BASE_SHIELD_DRAW_COMMANDS_ANIMATED
+        } else {
+            BASE_SHIELD_DRAW_COMMANDS_STATIC
+        },
+        radius,
+        sides,
+        hit_alpha,
+        fill_alpha: if broken {
+            0.0
+        } else if animate_shields {
+            1.0
+        } else {
+            0.09 + (0.08 * hit).clamp(0.0, 1.0)
+        },
+        stroke: if broken || animate_shields { 0.0 } else { 1.5 },
+    }
+}
+
 pub fn write_base_shield_state<W: Write>(write: &mut W, state: &BaseShieldState) -> io::Result<()> {
     write_f32(write, state.smooth_radius)?;
     write.write_all(&[state.broken as u8])
@@ -2209,6 +2274,38 @@ mod tests {
             base_shield_unit_action(10.0, 20.0, 5.0),
             ShieldUnitAction::Kill
         );
+        let animated = base_shield_draw_plan(false, 42.0, 24, 1.2, true);
+        assert_eq!(
+            animated.commands,
+            &[
+                BaseShieldDrawCommand::SetShieldLayer,
+                BaseShieldDrawCommand::SetShieldColor,
+                BaseShieldDrawCommand::FillAnimatedPoly,
+                BaseShieldDrawCommand::Reset,
+            ]
+        );
+        assert_eq!(animated.radius, 42.0);
+        assert_eq!(animated.sides, 24);
+        assert_eq!(animated.hit_alpha, 1.0);
+        assert_eq!(animated.fill_alpha, 1.0);
+        assert_eq!(animated.stroke, 0.0);
+
+        let static_plan = base_shield_draw_plan(false, 30.0, 12, 0.5, false);
+        assert_eq!(
+            static_plan.commands,
+            &[
+                BaseShieldDrawCommand::SetShieldLayer,
+                BaseShieldDrawCommand::SetShieldColor,
+                BaseShieldDrawCommand::StrokeStaticPoly,
+                BaseShieldDrawCommand::Reset,
+            ]
+        );
+        assert_eq!(static_plan.fill_alpha, 0.09 + 0.08 * 0.5);
+        assert_eq!(static_plan.stroke, 1.5);
+
+        let broken = base_shield_draw_plan(true, 30.0, 12, 0.5, false);
+        assert_eq!(broken.commands, &[BaseShieldDrawCommand::Reset]);
+        assert_eq!(broken.fill_alpha, 0.0);
 
         let mut bytes = Vec::new();
         base.broken = true;
