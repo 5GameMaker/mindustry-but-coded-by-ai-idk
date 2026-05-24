@@ -334,6 +334,64 @@ pub struct BuilderAiRuntimeInput {
     pub next_assist_following: Option<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuilderAiFollowCandidate {
+    pub unit_id: i32,
+    pub can_build: bool,
+    pub is_self: bool,
+    pub actively_building: bool,
+    pub plan: Option<BuildPlan>,
+    pub construct_dst: Option<f32>,
+    pub construct_build_cost: Option<f32>,
+}
+
+impl BuilderAiFollowCandidate {
+    pub fn new(
+        unit_id: i32,
+        plan: BuildPlan,
+        construct_dst: f32,
+        construct_build_cost: f32,
+    ) -> Self {
+        Self {
+            unit_id,
+            can_build: true,
+            is_self: false,
+            actively_building: true,
+            plan: Some(plan),
+            construct_dst: Some(construct_dst),
+            construct_build_cost: Some(construct_build_cost),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuilderAiAssistCandidate {
+    pub unit_id: i32,
+    pub dead: bool,
+    pub is_builder: bool,
+    pub same_team: bool,
+    pub dst2: f32,
+}
+
+impl BuilderAiAssistCandidate {
+    pub const fn new(unit_id: i32, dst2: f32) -> Self {
+        Self {
+            unit_id,
+            dead: false,
+            is_builder: true,
+            same_team: true,
+            dst2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuilderAiFollowSearch {
+    pub following: Option<i32>,
+    pub assist_following: Option<i32>,
+    pub found: bool,
+}
+
 impl Default for BuilderAiRuntimeInput {
     fn default() -> Self {
         Self {
@@ -626,6 +684,62 @@ impl BuilderComp {
         BuilderAiMoveToAssist {
             range,
             moving: !within_assist_range,
+        }
+    }
+
+    pub fn choose_builder_ai_following<'a>(
+        &self,
+        candidates: impl IntoIterator<Item = &'a BuilderAiFollowCandidate>,
+    ) -> Option<i32> {
+        candidates
+            .into_iter()
+            .find(|candidate| {
+                if !candidate.can_build || candidate.is_self || !candidate.actively_building {
+                    return false;
+                }
+
+                if candidate.plan.is_none() {
+                    return false;
+                };
+
+                let Some(construct_dst) = candidate.construct_dst else {
+                    return false;
+                };
+                let Some(construct_build_cost) = candidate.construct_build_cost else {
+                    return false;
+                };
+
+                let speed = self.type_info.speed.max(f32::EPSILON);
+                let dist = (construct_dst - self.type_info.build_range).min(0.0);
+                dist / speed < construct_build_cost * 0.9
+            })
+            .map(|candidate| candidate.unit_id)
+    }
+
+    pub fn choose_builder_ai_assist_following<'a>(
+        candidates: impl IntoIterator<Item = &'a BuilderAiAssistCandidate>,
+    ) -> Option<i32> {
+        candidates
+            .into_iter()
+            .filter(|candidate| !candidate.dead && candidate.is_builder && candidate.same_team)
+            .min_by(|left, right| left.dst2.total_cmp(&right.dst2))
+            .map(|candidate| candidate.unit_id)
+    }
+
+    pub fn search_builder_ai_follow_targets<'a>(
+        &self,
+        follow_candidates: impl IntoIterator<Item = &'a BuilderAiFollowCandidate>,
+        assist_candidates: impl IntoIterator<Item = &'a BuilderAiAssistCandidate>,
+        only_assist: bool,
+    ) -> BuilderAiFollowSearch {
+        let following = self.choose_builder_ai_following(follow_candidates);
+        let assist_following = only_assist
+            .then(|| Self::choose_builder_ai_assist_following(assist_candidates))
+            .flatten();
+        BuilderAiFollowSearch {
+            following,
+            assist_following,
+            found: following.is_some(),
         }
     }
 
@@ -1439,5 +1553,97 @@ mod tests {
             rebuild.added_build_plan,
             Some(BuildPlan::new_place(1, 1, 0, "duo"))
         );
+    }
+
+    #[test]
+    fn builder_ai_follow_search_selects_first_reachable_active_builder() {
+        let mut unit = builder_unit();
+        unit.speed = 2.0;
+        unit.build_range = 40.0;
+        let builder = BuilderComp::new(unit, TeamId(1));
+
+        let self_candidate = BuilderAiFollowCandidate {
+            unit_id: 1,
+            is_self: true,
+            ..BuilderAiFollowCandidate::new(1, BuildPlan::new_place(1, 1, 0, "duo"), 80.0, 10.0)
+        };
+        let inactive = BuilderAiFollowCandidate {
+            unit_id: 2,
+            actively_building: false,
+            ..BuilderAiFollowCandidate::new(2, BuildPlan::new_place(2, 2, 0, "router"), 80.0, 10.0)
+        };
+        let no_construct = BuilderAiFollowCandidate {
+            unit_id: 3,
+            construct_dst: None,
+            construct_build_cost: None,
+            ..BuilderAiFollowCandidate::new(3, BuildPlan::new_place(3, 3, 0, "wall"), 80.0, 10.0)
+        };
+        let first_valid =
+            BuilderAiFollowCandidate::new(4, BuildPlan::new_place(4, 4, 0, "scatter"), 80.0, 10.0);
+        let later_valid =
+            BuilderAiFollowCandidate::new(5, BuildPlan::new_place(5, 5, 0, "duo"), 80.0, 10.0);
+
+        let selected = builder.choose_builder_ai_following(
+            [
+                self_candidate,
+                inactive,
+                no_construct,
+                first_valid,
+                later_valid,
+            ]
+            .iter(),
+        );
+
+        assert_eq!(selected, Some(4));
+
+        let too_late =
+            BuilderAiFollowCandidate::new(6, BuildPlan::new_place(6, 6, 0, "router"), 100.0, -1.0);
+        assert_eq!(builder.choose_builder_ai_following([too_late].iter()), None);
+    }
+
+    #[test]
+    fn builder_ai_assist_search_selects_nearest_valid_builder_player() {
+        let builder = BuilderComp::new(builder_unit(), TeamId(1));
+        let candidates = [
+            BuilderAiAssistCandidate::new(10, 100.0),
+            BuilderAiAssistCandidate::new(11, 50.0),
+            BuilderAiAssistCandidate {
+                unit_id: 12,
+                dead: true,
+                dst2: 1.0,
+                ..BuilderAiAssistCandidate::new(12, 1.0)
+            },
+            BuilderAiAssistCandidate {
+                unit_id: 13,
+                same_team: false,
+                dst2: 0.5,
+                ..BuilderAiAssistCandidate::new(13, 0.5)
+            },
+        ];
+
+        assert_eq!(
+            BuilderComp::choose_builder_ai_assist_following(candidates.iter()),
+            Some(11)
+        );
+
+        let follow =
+            BuilderAiFollowCandidate::new(21, BuildPlan::new_place(1, 1, 0, "router"), 32.0, 3.0);
+        let search = builder.search_builder_ai_follow_targets(
+            [follow.clone()].iter(),
+            candidates.iter(),
+            true,
+        );
+        assert_eq!(
+            search,
+            BuilderAiFollowSearch {
+                following: Some(21),
+                assist_following: Some(11),
+                found: true,
+            }
+        );
+
+        let no_assist =
+            builder.search_builder_ai_follow_targets([follow].iter(), candidates.iter(), false);
+        assert_eq!(no_assist.assist_following, None);
     }
 }
