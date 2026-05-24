@@ -560,7 +560,15 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_real_radius(...)`
 - `force_projector_shield(...)`
 - `force_projector_update(...)`
+- `force_projector_sense(...)`
+- `force_projector_set_shield(...)`
+- `force_projector_bar_fraction(...)`
+- `force_projector_absorb_bullet(...)`
 - `force_projector_absorb_explosion(...)`
+- `ForceProjectorBulletAbsorb`
+- `ForceProjectorDrawCommand`
+- `ForceProjectorDrawPlan`
+- `force_projector_draw_plan(...)`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
 - 已对照 `ForceProjector.updateTile()` 推进：
@@ -568,6 +576,23 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 破盾阈值与冷却；
   - 爆炸吸收；
   - Java write/read 的 5 个持久化字段。
+- 已对照 `ForceProjector.deflectBullets()` 锁定：
+  - 非同队；
+  - bullet type absorbable；
+  - 未被吸收；
+  - 点在正多边形内；
+  - 命中后 `hit = 1`、`buildup += shieldDamage`，并返回 effect/sound plan。
+- 已对照 `ForceProjector.setBars()` / `sense(...)` 锁定：
+  - shield bar fraction = `1 - buildup / (shieldHealth + phaseShieldBoost * phaseHeat)`；
+  - `LAccess.heat` 返回 `buildup`；
+  - `LAccess.shield` 返回剩余护盾；
+  - `setProp(LAccess.shield)` 反向设置 `buildup`。
+- 已对照 `ForceProjector.draw()` / `drawShield()` 锁定：
+  - buildup > 0 时先绘制 topRegion additive；
+  - `broken` 或 `realRadius <= 0.001` 时不绘制盾体但仍 final reset；
+  - animateShields 时走 shield layer + fill poly；
+  - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill poly + outline poly；
+  - `shieldRotation`、`sides`、`hit` layer offset 已进入 draw plan。
 - `MendProjectorState`
 - `mend_projector_update(...)`
 - `write_mend_projector_state(...)`
@@ -580,19 +605,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 
 仍需：
 
-- `ForceProjector.deflectBullets()` / bullet absorb：
-  - 非同队；
-  - bullet type absorbable；
-  - 未被吸收；
-  - 点在正多边形内；
-  - 命中后 `hit = 1`、`buildup += shieldDamage`，并返回 effect/sound plan。
-- `ForceProjector.setBars()` / shield bar fraction；
-- `ForceProjector.sense(LAccess.heat/shield)`；
-- `ForceProjector.draw()` 独立 draw plan：
-  - topRegion additive buildup 层；
-  - animate/static shield poly；
-  - shieldRotation / sides；
-  - `Draw.reset()` 顺序。
+- `ForceProjector.deflectBullets()` 接入真实 `Groups.bullet.intersect(...)` 与正多边形检测 adapter；
+- `ForceProjector.draw()` 接入真实 renderer/Draw dispatcher；
+- `ForceProjector.setBars()/sense/setProp` 接入真实 building runtime；
 - `ForceProjector.onRemoved/pickedUp/inFogTo/shouldAmbientSound/overwrote` 生命周期辅助；
 - `MendProjector` 真实 range indexer / world heal / drawPlace / drawSelect 接入；
 - `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描、status/effect、draw/select 接入；
