@@ -103,6 +103,45 @@ pub fn auto_door_trigger_size(block_size: i32, tile_size: f32, trigger_margin: f
     block_size as f32 * tile_size + trigger_margin * 2.0
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoDoorUpdatePlan {
+    pub should_scan_units: bool,
+    pub should_open: bool,
+    pub send_toggle: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoDoorSetOpenPlan {
+    pub open: bool,
+    pub update_pathfinder: bool,
+    pub play_effect: bool,
+    pub play_sound: bool,
+}
+
+pub fn auto_door_update_plan(
+    open: bool,
+    timer_ready: bool,
+    net_client: bool,
+    ground_units_in_trigger: bool,
+) -> AutoDoorUpdatePlan {
+    let should_scan_units = timer_ready && !net_client;
+    let should_open = auto_door_should_open(ground_units_in_trigger);
+    AutoDoorUpdatePlan {
+        should_scan_units,
+        should_open,
+        send_toggle: (should_scan_units && open != should_open).then_some(should_open),
+    }
+}
+
+pub fn auto_door_set_open_plan(open: bool, was_visible: bool) -> AutoDoorSetOpenPlan {
+    AutoDoorSetOpenPlan {
+        open,
+        update_pathfinder: true,
+        play_effect: was_visible,
+        play_sound: was_visible,
+    }
+}
+
 pub fn shock_mine_should_trigger(enabled: bool, same_team: bool, timer_ready: bool) -> bool {
     enabled && !same_team && timer_ready
 }
@@ -1675,6 +1714,48 @@ mod tests {
 
         assert!(auto_door_should_open(true));
         assert_eq!(auto_door_trigger_size(2, 8.0, 12.0), 40.0);
+        assert_eq!(
+            auto_door_update_plan(false, true, false, true),
+            AutoDoorUpdatePlan {
+                should_scan_units: true,
+                should_open: true,
+                send_toggle: Some(true),
+            }
+        );
+        assert_eq!(
+            auto_door_update_plan(true, true, false, true).send_toggle,
+            None
+        );
+        assert_eq!(
+            auto_door_update_plan(false, false, false, true),
+            AutoDoorUpdatePlan {
+                should_scan_units: false,
+                should_open: true,
+                send_toggle: None,
+            }
+        );
+        assert_eq!(
+            auto_door_update_plan(false, true, true, true).send_toggle,
+            None
+        );
+        assert_eq!(
+            auto_door_set_open_plan(true, true),
+            AutoDoorSetOpenPlan {
+                open: true,
+                update_pathfinder: true,
+                play_effect: true,
+                play_sound: true,
+            }
+        );
+        assert_eq!(
+            auto_door_set_open_plan(false, false),
+            AutoDoorSetOpenPlan {
+                open: false,
+                update_pathfinder: true,
+                play_effect: false,
+                play_sound: false,
+            }
+        );
 
         assert!(shock_mine_should_trigger(true, false, true));
         assert_eq!(
