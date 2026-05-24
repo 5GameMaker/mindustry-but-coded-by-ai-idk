@@ -756,6 +756,16 @@ impl BuildPlanBlockTransform {
         Self::new(1, TILE_SIZE as f32 / 2.0, true, false, false)
     }
 
+    pub fn java_block(size: i32) -> Self {
+        Self::new(
+            size,
+            ((size + 1) % 2) as f32 * TILE_SIZE as f32 / 2.0,
+            true,
+            false,
+            false,
+        )
+    }
+
     pub fn plan_rotation(self, rotation: i32) -> i32 {
         if !self.rotate && self.lock_rotation {
             0
@@ -977,6 +987,165 @@ pub struct RebuildAreaPlan {
     pub rebuild_plans: Vec<BuildPlan>,
     pub repair_plans: Vec<BuildPlan>,
     pub repair_tile_positions: Vec<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildPlanSnapshot {
+    pub plan: BuildPlan,
+    pub footprint: BuildPlanBlockTransform,
+    /// Optional packed tile position, used for Java `r.tile() == tile` style
+    /// selection checks without requiring a live `Tile` reference.
+    pub tile_pos: Option<i32>,
+}
+
+impl BuildPlanSnapshot {
+    pub fn new(plan: BuildPlan, footprint: BuildPlanBlockTransform) -> Self {
+        let tile_pos = Some(point2_pack(plan.x, plan.y));
+        Self {
+            plan,
+            footprint,
+            tile_pos,
+        }
+    }
+
+    pub fn without_tile(mut self) -> Self {
+        self.tile_pos = None;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlushBuildPlanCandidate {
+    pub plan: BuildPlan,
+    pub footprint: BuildPlanBlockTransform,
+    /// Result of `validPlace(plan.x, plan.y, plan.block, plan.rotation, null, true)`.
+    pub valid_place: bool,
+}
+
+impl FlushBuildPlanCandidate {
+    pub fn new(plan: BuildPlan, footprint: BuildPlanBlockTransform, valid_place: bool) -> Self {
+        Self {
+            plan,
+            footprint,
+            valid_place,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildQueuePosition {
+    Head,
+    Tail,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlushBuildPlanAction {
+    pub plan: BuildPlan,
+    pub position: BuildQueuePosition,
+    pub call_on_new_plan: bool,
+    pub insert_into_plan_tree: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FlushSelectPlanAction {
+    Add { plan: BuildPlan },
+    ReplaceSelect { index: usize, plan: BuildPlan },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlushSelectPlansPlan {
+    pub actions: Vec<FlushSelectPlanAction>,
+    pub final_select_plans: Vec<BuildPlan>,
+    pub skipped: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoveSelectionTileCandidate {
+    pub scan_x: i32,
+    pub scan_y: i32,
+    pub tile_x: i32,
+    pub tile_y: i32,
+    pub tile_pos: i32,
+    pub valid_break: bool,
+    pub break_tile: BreakBlockTileSnapshot,
+}
+
+impl RemoveSelectionTileCandidate {
+    pub fn new(scan_x: i32, scan_y: i32, tile_x: i32, tile_y: i32, valid_break: bool) -> Self {
+        Self {
+            scan_x,
+            scan_y,
+            tile_x,
+            tile_y,
+            tile_pos: point2_pack(tile_x, tile_y),
+            valid_break,
+            break_tile: BreakBlockTileSnapshot::new(scan_x, scan_y),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoveSelectionTeamPlanSnapshot {
+    pub x: i32,
+    pub y: i32,
+    pub footprint: BuildPlanBlockTransform,
+}
+
+impl RemoveSelectionTeamPlanSnapshot {
+    pub fn new(x: i32, y: i32, footprint: BuildPlanBlockTransform) -> Self {
+        Self { x, y, footprint }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoveSelectionFrame {
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
+    pub rotation: i32,
+    pub flush: bool,
+    pub max_length: i32,
+    pub player_dead: bool,
+    pub player_is_builder: bool,
+    pub net_active: bool,
+    pub world_tiles: Vec<RemoveSelectionTileCandidate>,
+    pub unit_plans: Vec<BuildPlanSnapshot>,
+    pub select_plans: Vec<BuildPlanSnapshot>,
+    pub team_plans: Vec<RemoveSelectionTeamPlanSnapshot>,
+}
+
+impl Default for RemoveSelectionFrame {
+    fn default() -> Self {
+        Self {
+            x1: 0,
+            y1: 0,
+            x2: 0,
+            y2: 0,
+            rotation: 0,
+            flush: false,
+            max_length: 0,
+            player_dead: false,
+            player_is_builder: false,
+            net_active: false,
+            world_tiles: Vec::new(),
+            unit_plans: Vec::new(),
+            select_plans: Vec::new(),
+            team_plans: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoveSelectionPlan {
+    pub selection: RebuildAreaSelection,
+    pub immediate_break_plans: Vec<BuildPlan>,
+    pub queued_break_plans: Vec<BuildPlan>,
+    pub remove_unit_plan_indices: Vec<usize>,
+    pub remove_select_plan_indices: Vec<usize>,
+    pub remove_team_plan_indices: Vec<usize>,
+    pub removed_team_plan_positions: Vec<i32>,
+    pub network_delete_positions: Vec<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3884,6 +4053,300 @@ pub fn rebuild_area_plan(frame: RebuildAreaFrame) -> RebuildAreaPlan {
     }
 }
 
+fn plan_candidate_valid(candidate: &FlushBuildPlanCandidate) -> bool {
+    candidate.valid_place && candidate.plan.block.is_some()
+}
+
+pub fn flush_build_plans_plan(
+    plans: &[FlushBuildPlanCandidate],
+    reverse: bool,
+) -> Vec<FlushBuildPlanAction> {
+    let mut actions = Vec::new();
+    if reverse {
+        for candidate in plans.iter().rev() {
+            if plan_candidate_valid(candidate) {
+                actions.push(FlushBuildPlanAction {
+                    plan: candidate.plan.copy(),
+                    position: BuildQueuePosition::Head,
+                    call_on_new_plan: true,
+                    insert_into_plan_tree: true,
+                });
+            }
+        }
+    } else {
+        for candidate in plans {
+            if plan_candidate_valid(candidate) {
+                actions.push(FlushBuildPlanAction {
+                    plan: candidate.plan.copy(),
+                    position: BuildQueuePosition::Tail,
+                    call_on_new_plan: true,
+                    insert_into_plan_tree: true,
+                });
+            }
+        }
+    }
+    actions
+}
+
+fn get_plan_snapshot_index(
+    unit_plans: &[BuildPlanSnapshot],
+    select_plans: &[BuildPlanSnapshot],
+    x: i32,
+    y: i32,
+    size: i32,
+    skip_select_index: Option<usize>,
+) -> Option<(bool, usize)> {
+    let offset = ((size + 1) % 2) as f32 * TILE_SIZE as f32 / 2.0;
+    let query = BuildBounds {
+        x: x as f32 * TILE_SIZE as f32 + offset - size as f32 * TILE_SIZE as f32 / 2.0,
+        y: y as f32 * TILE_SIZE as f32 + offset - size as f32 * TILE_SIZE as f32 / 2.0,
+        width: size as f32 * TILE_SIZE as f32,
+        height: size as f32 * TILE_SIZE as f32,
+    };
+
+    if let Some(index) = unit_plans.iter().position(|snapshot| {
+        snapshot.tile_pos.is_some()
+            && build_bounds_overlap(
+                query,
+                build_bounds_for_plan(snapshot.plan.x, snapshot.plan.y, snapshot.footprint),
+            )
+    }) {
+        return Some((false, index));
+    }
+
+    select_plans
+        .iter()
+        .enumerate()
+        .find(|(index, snapshot)| {
+            Some(*index) != skip_select_index
+                && snapshot.tile_pos.is_some()
+                && build_bounds_overlap(
+                    query,
+                    build_bounds_for_plan(snapshot.plan.x, snapshot.plan.y, snapshot.footprint),
+                )
+        })
+        .map(|(index, _)| (true, index))
+}
+
+pub fn flush_select_plans_plan(
+    plans: &[FlushBuildPlanCandidate],
+    unit_plans: &[BuildPlanSnapshot],
+    select_plans: &[BuildPlanSnapshot],
+) -> FlushSelectPlansPlan {
+    let mut actions = Vec::new();
+    let mut final_select: Vec<BuildPlanSnapshot> = select_plans.to_vec();
+    let mut skipped = 0;
+
+    for candidate in plans {
+        if !plan_candidate_valid(candidate) {
+            skipped += 1;
+            continue;
+        }
+
+        let Some(block) = candidate.plan.block.as_ref() else {
+            skipped += 1;
+            continue;
+        };
+
+        let other = get_plan_snapshot_index(
+            unit_plans,
+            &final_select,
+            candidate.plan.x,
+            candidate.plan.y,
+            candidate.footprint.size,
+            None,
+        );
+
+        match other {
+            None => {
+                let plan = candidate.plan.copy();
+                final_select.push(BuildPlanSnapshot::new(plan.clone(), candidate.footprint));
+                actions.push(FlushSelectPlanAction::Add { plan });
+            }
+            Some((true, index)) => {
+                let other = &final_select[index].plan;
+                if !other.breaking
+                    && other.x == candidate.plan.x
+                    && other.y == candidate.plan.y
+                    && final_select[index].footprint.size == candidate.footprint.size
+                {
+                    let plan = BuildPlan {
+                        block: Some(block.clone()),
+                        ..candidate.plan.copy()
+                    };
+                    final_select.remove(index);
+                    final_select.push(BuildPlanSnapshot::new(plan.clone(), candidate.footprint));
+                    actions.push(FlushSelectPlanAction::ReplaceSelect { index, plan });
+                } else {
+                    skipped += 1;
+                }
+            }
+            Some((false, _)) => {
+                skipped += 1;
+            }
+        }
+    }
+
+    FlushSelectPlansPlan {
+        actions,
+        final_select_plans: final_select
+            .into_iter()
+            .map(|snapshot| snapshot.plan)
+            .collect(),
+        skipped,
+    }
+}
+
+fn remove_selection_scan_positions(
+    frame: &RemoveSelectionFrame,
+    selection: RebuildAreaSelection,
+) -> Vec<(i32, i32)> {
+    let x_sign = (frame.x2 - frame.x1).signum();
+    let y_sign = (frame.y2 - frame.y1).signum();
+    let x_sign = if x_sign == 0 { 0 } else { x_sign };
+    let y_sign = if y_sign == 0 { 0 } else { y_sign };
+    let mut positions = Vec::new();
+    for x in 0..=(selection.x2 - selection.x).abs() {
+        for y in 0..=(selection.y2 - selection.y).abs() {
+            positions.push((frame.x1 + x * x_sign, frame.y1 + y * y_sign));
+        }
+    }
+    positions
+}
+
+pub fn remove_selection_plan(frame: RemoveSelectionFrame) -> RemoveSelectionPlan {
+    let result = super::placement::normalize_area(
+        frame.x1,
+        frame.y1,
+        frame.x2,
+        frame.y2,
+        frame.rotation,
+        false,
+        frame.max_length,
+    );
+    let selection = RebuildAreaSelection {
+        x: result.x,
+        y: result.y,
+        x2: result.x2,
+        y2: result.y2,
+        rotation: result.rotation,
+    };
+    let selection_bounds = BuildBounds {
+        x: result.x as f32 * TILE_SIZE as f32,
+        y: result.y as f32 * TILE_SIZE as f32,
+        width: (result.x2 - result.x) as f32 * TILE_SIZE as f32,
+        height: (result.y2 - result.y) as f32 * TILE_SIZE as f32,
+    };
+    let scan_positions = remove_selection_scan_positions(&frame, selection);
+
+    let mut immediate_break_plans = Vec::new();
+    let mut queued_break_plans = Vec::new();
+    let mut queued_break_tile_positions = std::collections::BTreeSet::new();
+
+    for (scan_x, scan_y) in scan_positions {
+        let Some(tile) = frame
+            .world_tiles
+            .iter()
+            .find(|tile| tile.scan_x == scan_x && tile.scan_y == scan_y)
+        else {
+            continue;
+        };
+
+        if !frame.flush {
+            if tile.valid_break {
+                if let Some(plan) = break_block_plan(BreakBlockFrame {
+                    player_is_builder: frame.player_is_builder,
+                    tile: Some(tile.break_tile),
+                }) {
+                    immediate_break_plans.push(plan);
+                }
+            }
+        } else if tile.valid_break
+            && !frame
+                .select_plans
+                .iter()
+                .any(|snapshot| snapshot.tile_pos == Some(tile.tile_pos))
+            && queued_break_tile_positions.insert(tile.tile_pos)
+        {
+            queued_break_plans.push(BuildPlan::new_break(tile.tile_x, tile.tile_y));
+        }
+    }
+
+    let mut remove_unit_plan_indices = Vec::new();
+    let mut remove_select_plan_indices = Vec::new();
+    let mut remove_team_plan_indices = Vec::new();
+    let mut removed_team_plan_positions = Vec::new();
+
+    if !frame.player_dead {
+        remove_unit_plan_indices.extend(
+            frame
+                .unit_plans
+                .iter()
+                .enumerate()
+                .filter(|(_, snapshot)| {
+                    !snapshot.plan.breaking
+                        && build_bounds_overlap(
+                            build_bounds_for_plan(
+                                snapshot.plan.x,
+                                snapshot.plan.y,
+                                snapshot.footprint,
+                            ),
+                            selection_bounds,
+                        )
+                })
+                .map(|(index, _)| index),
+        );
+
+        if frame.flush {
+            remove_select_plan_indices.extend(
+                frame
+                    .select_plans
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, snapshot)| {
+                        !snapshot.plan.breaking
+                            && build_bounds_overlap(
+                                build_bounds_for_plan(
+                                    snapshot.plan.x,
+                                    snapshot.plan.y,
+                                    snapshot.footprint,
+                                ),
+                                selection_bounds,
+                            )
+                    })
+                    .map(|(index, _)| index),
+            );
+        }
+    }
+
+    for (index, plan) in frame.team_plans.iter().enumerate() {
+        if build_bounds_overlap(
+            build_bounds_for_plan(plan.x, plan.y, plan.footprint),
+            selection_bounds,
+        ) {
+            remove_team_plan_indices.push(index);
+            removed_team_plan_positions.push(point2_pack(plan.x, plan.y));
+        }
+    }
+
+    let network_delete_positions = if frame.net_active && !removed_team_plan_positions.is_empty() {
+        removed_team_plan_positions.clone()
+    } else {
+        Vec::new()
+    };
+
+    RemoveSelectionPlan {
+        selection,
+        immediate_break_plans,
+        queued_break_plans,
+        remove_unit_plan_indices,
+        remove_select_plan_indices,
+        remove_team_plan_indices,
+        removed_team_plan_positions,
+        network_delete_positions,
+    }
+}
+
 pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
     if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
         return CheckUnitPlan {
@@ -6234,6 +6697,140 @@ mod tests {
         );
         assert_eq!(plan.repair_plans, vec![repair]);
         assert_eq!(plan.repair_tile_positions, vec![point2_pack(3, 3)]);
+    }
+
+    #[test]
+    fn flush_build_plans_plan_filters_invalid_and_marks_queue_position() {
+        let footprint = BuildPlanBlockTransform::single();
+        let first =
+            FlushBuildPlanCandidate::new(BuildPlan::new_place(1, 1, 0, "router"), footprint, true);
+        let invalid =
+            FlushBuildPlanCandidate::new(BuildPlan::new_place(2, 2, 0, "router"), footprint, false);
+        let breaking = FlushBuildPlanCandidate::new(BuildPlan::new_break(3, 3), footprint, true);
+        let second =
+            FlushBuildPlanCandidate::new(BuildPlan::new_place(4, 4, 1, "duo"), footprint, true);
+
+        let forward = flush_build_plans_plan(
+            &[first.clone(), invalid.clone(), breaking, second.clone()],
+            false,
+        );
+        assert_eq!(forward.len(), 2);
+        assert_eq!(forward[0].plan.block.as_deref(), Some("router"));
+        assert_eq!(forward[0].position, BuildQueuePosition::Tail);
+        assert!(forward[0].call_on_new_plan);
+        assert!(forward[0].insert_into_plan_tree);
+        assert_eq!(forward[1].plan.block.as_deref(), Some("duo"));
+
+        let reverse = flush_build_plans_plan(&[first, invalid, second], true);
+        assert_eq!(reverse.len(), 2);
+        assert_eq!(reverse[0].plan.block.as_deref(), Some("duo"));
+        assert_eq!(reverse[0].position, BuildQueuePosition::Head);
+        assert_eq!(reverse[1].plan.block.as_deref(), Some("router"));
+    }
+
+    #[test]
+    fn flush_select_plans_adds_replaces_and_skips_like_java_selection_buffer() {
+        let footprint = BuildPlanBlockTransform::single();
+        let existing = BuildPlanSnapshot::new(BuildPlan::new_place(1, 1, 0, "router"), footprint);
+        let blocking_unit =
+            BuildPlanSnapshot::new(BuildPlan::new_place(6, 6, 0, "router"), footprint);
+
+        let add =
+            FlushBuildPlanCandidate::new(BuildPlan::new_place(3, 3, 0, "router"), footprint, true);
+        let replace =
+            FlushBuildPlanCandidate::new(BuildPlan::new_place(1, 1, 2, "duo"), footprint, true);
+        let blocked_by_unit =
+            FlushBuildPlanCandidate::new(BuildPlan::new_place(6, 6, 0, "duo"), footprint, true);
+        let invalid =
+            FlushBuildPlanCandidate::new(BuildPlan::new_place(9, 9, 0, "duo"), footprint, false);
+
+        let plan = flush_select_plans_plan(
+            &[add, replace, blocked_by_unit, invalid],
+            &[blocking_unit],
+            &[existing],
+        );
+
+        assert_eq!(
+            plan.actions,
+            vec![
+                FlushSelectPlanAction::Add {
+                    plan: BuildPlan::new_place(3, 3, 0, "router")
+                },
+                FlushSelectPlanAction::ReplaceSelect {
+                    index: 0,
+                    plan: BuildPlan::new_place(1, 1, 2, "duo")
+                }
+            ]
+        );
+        assert_eq!(plan.skipped, 2);
+        assert_eq!(
+            plan.final_select_plans
+                .iter()
+                .map(|plan| (plan.x, plan.y, plan.block.as_deref(), plan.rotation))
+                .collect::<Vec<_>>(),
+            vec![(3, 3, Some("router"), 0), (1, 1, Some("duo"), 2)]
+        );
+    }
+
+    #[test]
+    fn remove_selection_plan_immediate_breaks_and_cleans_team_rebuilds() {
+        let footprint = BuildPlanBlockTransform::single();
+        let tile = RemoveSelectionTileCandidate {
+            break_tile: BreakBlockTileSnapshot::new(2, 2).with_build_origin(1, 1),
+            ..RemoveSelectionTileCandidate::new(2, 2, 1, 1, true)
+        };
+        let unit_plan = BuildPlanSnapshot::new(BuildPlan::new_place(2, 2, 0, "router"), footprint);
+        let select_plan = BuildPlanSnapshot::new(BuildPlan::new_place(2, 2, 0, "duo"), footprint);
+
+        let plan = remove_selection_plan(RemoveSelectionFrame {
+            x1: 2,
+            y1: 2,
+            x2: 3,
+            y2: 3,
+            player_is_builder: true,
+            net_active: true,
+            world_tiles: vec![tile],
+            unit_plans: vec![unit_plan],
+            select_plans: vec![select_plan],
+            team_plans: vec![RemoveSelectionTeamPlanSnapshot::new(2, 2, footprint)],
+            ..RemoveSelectionFrame::default()
+        });
+
+        assert_eq!(plan.immediate_break_plans, vec![BuildPlan::new_break(1, 1)]);
+        assert!(plan.queued_break_plans.is_empty());
+        assert_eq!(plan.remove_unit_plan_indices, vec![0]);
+        assert!(plan.remove_select_plan_indices.is_empty());
+        assert_eq!(plan.remove_team_plan_indices, vec![0]);
+        assert_eq!(plan.removed_team_plan_positions, vec![point2_pack(2, 2)]);
+        assert_eq!(plan.network_delete_positions, vec![point2_pack(2, 2)]);
+    }
+
+    #[test]
+    fn remove_selection_plan_flush_queues_breaks_and_removes_select_overlaps() {
+        let footprint = BuildPlanBlockTransform::java_block(1);
+        let selected_break = BuildPlanSnapshot::new(BuildPlan::new_break(1, 1), footprint);
+        let stale_select =
+            BuildPlanSnapshot::new(BuildPlan::new_place(3, 3, 0, "router"), footprint);
+
+        let plan = remove_selection_plan(RemoveSelectionFrame {
+            x1: 1,
+            y1: 1,
+            x2: 3,
+            y2: 3,
+            flush: true,
+            player_is_builder: true,
+            world_tiles: vec![
+                RemoveSelectionTileCandidate::new(1, 1, 1, 1, true),
+                RemoveSelectionTileCandidate::new(2, 2, 2, 2, true),
+            ],
+            select_plans: vec![selected_break, stale_select],
+            ..RemoveSelectionFrame::default()
+        });
+
+        assert!(plan.immediate_break_plans.is_empty());
+        assert_eq!(plan.queued_break_plans, vec![BuildPlan::new_break(2, 2)]);
+        assert_eq!(plan.remove_select_plan_indices, vec![1]);
+        assert!(plan.network_delete_positions.is_empty());
     }
 
     #[test]
