@@ -52,6 +52,7 @@ pub mod world_label;
 pub use block_unit::{BlockUnitBuilding, BlockUnitComp};
 pub use builder::{
     BuilderBlockInfo, BuilderComp, BuilderRequirement, BuilderSkipContext, BuilderTileSnapshot,
+    PrebuildAiRuntimeInput, PrebuildAiRuntimeState, PrebuildAiRuntimeStep,
 };
 pub use building::BuildingComp;
 pub use building_tether::{BuildingTetherAction, BuildingTetherComp, BuildingTetherRef};

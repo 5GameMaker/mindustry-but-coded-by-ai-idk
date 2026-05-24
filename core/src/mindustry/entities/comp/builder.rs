@@ -7,6 +7,11 @@
 
 use std::collections::VecDeque;
 
+use crate::mindustry::ai::{
+    prebuild_ai_update_movement_tick, PrebuildAiBlockInfo, PrebuildAiPlanSnapshot,
+    PrebuildAiTickDecision,
+};
+use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::TEAM_DERELICT;
 use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamPlanClaim};
@@ -182,6 +187,69 @@ pub struct BuilderComp {
     pub last_active: Option<BuildPlan>,
     pub last_size: i32,
     pub build_alpha: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrebuildAiRuntimeState {
+    pub collecting_items: bool,
+    pub mining: bool,
+    pub last_target_item: Option<ContentId>,
+    pub ore: Option<i32>,
+    pub collect_block: Option<PrebuildAiBlockInfo>,
+    pub last_plan: Option<TeamBlockPlan>,
+}
+
+impl Default for PrebuildAiRuntimeState {
+    fn default() -> Self {
+        Self {
+            collecting_items: false,
+            mining: false,
+            last_target_item: None,
+            ore: None,
+            collect_block: None,
+            last_plan: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrebuildAiRuntimeInput {
+    pub unit_flying: bool,
+    pub has_target: bool,
+    pub should_shoot: bool,
+    pub boost_when_building: bool,
+    pub floor_is_duct: bool,
+    pub floor_damage_taken: f32,
+    pub floor_is_deep: bool,
+    pub within_current_plan_range: bool,
+    pub construct_current_matches: bool,
+    pub timer_find_ready: bool,
+}
+
+impl Default for PrebuildAiRuntimeInput {
+    fn default() -> Self {
+        Self {
+            unit_flying: false,
+            has_target: false,
+            should_shoot: false,
+            boost_when_building: false,
+            floor_is_duct: false,
+            floor_damage_taken: 0.0,
+            floor_is_deep: false,
+            within_current_plan_range: true,
+            construct_current_matches: false,
+            timer_find_ready: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrebuildAiRuntimeStep {
+    pub decision: PrebuildAiTickDecision,
+    pub added_build_plan: Option<BuildPlan>,
+    pub update_building: bool,
+    pub collecting_items: bool,
+    pub last_plan: Option<TeamBlockPlan>,
 }
 
 impl BuilderComp {
@@ -374,6 +442,73 @@ impl BuilderComp {
         self.build_counter = self.build_counter.min(10.0);
         self.build_counter
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_prebuild_ai_tick<FValidBreak, FValidPlace, FPlanValid, FPlanCanBuild>(
+        &mut self,
+        state: &mut PrebuildAiRuntimeState,
+        input: PrebuildAiRuntimeInput,
+        valid_break: FValidBreak,
+        valid_place: FValidPlace,
+        next_plan: Option<PrebuildAiPlanSnapshot>,
+        plan_valid_place: FPlanValid,
+        plan_can_build: FPlanCanBuild,
+    ) -> PrebuildAiRuntimeStep
+    where
+        FValidBreak: FnMut(&BuildPlan) -> bool,
+        FValidPlace: FnMut(&BuildPlan) -> bool,
+        FPlanValid: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+        FPlanCanBuild: FnMut(&PrebuildAiPlanSnapshot) -> bool,
+    {
+        let unit_has_current_plan = self.build_plan().is_some();
+        let decision = prebuild_ai_update_movement_tick(
+            state.collecting_items,
+            unit_has_current_plan,
+            input.unit_flying,
+            input.has_target,
+            input.should_shoot,
+            input.boost_when_building,
+            input.floor_is_duct,
+            input.floor_damage_taken,
+            input.floor_is_deep,
+            self.type_info.build_range,
+            input.within_current_plan_range,
+            &mut self.plans,
+            &mut state.last_plan,
+            input.construct_current_matches,
+            valid_break,
+            valid_place,
+            input.timer_find_ready,
+            next_plan,
+            plan_valid_place,
+            plan_can_build,
+        );
+
+        self.update_building = decision.update_building;
+
+        let added_build_plan = decision.accept_plan.as_ref().and_then(|accepted| {
+            if !accepted.accepted {
+                return None;
+            }
+
+            state.collecting_items = accepted.collecting_items;
+            state.collect_block = accepted.collect_block.clone();
+            state.last_target_item = accepted.last_target_item;
+            state.ore = accepted.ore;
+            state.last_plan = accepted.last_plan.clone();
+
+            let build_plan = accepted.build_plan.clone()?;
+            self.add_build(build_plan.clone()).then_some(build_plan)
+        });
+
+        PrebuildAiRuntimeStep {
+            decision,
+            added_build_plan,
+            update_building: self.update_building,
+            collecting_items: state.collecting_items,
+            last_plan: state.last_plan.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -385,6 +520,16 @@ mod tests {
         unit.build_speed = 1.0;
         unit.build_range = 60.0;
         unit
+    }
+
+    fn runtime_plan(
+        x: i32,
+        y: i32,
+        name: &str,
+        category: crate::mindustry::r#type::Category,
+    ) -> PrebuildAiPlanSnapshot {
+        let block = PrebuildAiBlockInfo::new(name, category);
+        PrebuildAiPlanSnapshot::new(TeamBlockPlan::new(x, y, 0, name, None), block)
     }
 
     #[test]
@@ -561,5 +706,100 @@ mod tests {
         assert_eq!(builder.advance_build_counter(20.0), 10.0);
         builder.build_counter = f32::NAN;
         assert_eq!(builder.advance_build_counter(1.0), 0.0);
+    }
+
+    #[test]
+    fn builder_component_applies_prebuild_ai_tick_to_queue_and_runtime_state() {
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        let mut state = PrebuildAiRuntimeState::default();
+        let next = runtime_plan(
+            6,
+            7,
+            "router",
+            crate::mindustry::r#type::Category::Distribution,
+        );
+
+        let step = builder.apply_prebuild_ai_tick(
+            &mut state,
+            PrebuildAiRuntimeInput {
+                timer_find_ready: true,
+                ..PrebuildAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| false,
+            Some(next.clone()),
+            |_| true,
+            |_| false,
+        );
+
+        assert_eq!(
+            step.decision.branch,
+            crate::mindustry::ai::PrebuildAiTickBranch::FindNewPlan
+        );
+        assert!(step.collecting_items);
+        assert!(state.collecting_items);
+        assert_eq!(state.collect_block, Some(next.block));
+        assert_eq!(state.last_plan, Some(next.plan));
+        assert_eq!(
+            step.added_build_plan,
+            Some(BuildPlan::new_place(6, 7, 0, "router"))
+        );
+        assert_eq!(
+            builder.build_plan(),
+            Some(&BuildPlan::new_place(6, 7, 0, "router"))
+        );
+        assert!(builder.update_building);
+    }
+
+    #[test]
+    fn builder_component_applies_prebuild_ai_current_and_collecting_branches() {
+        let mut builder = BuilderComp::new(builder_unit(), TeamId(1));
+        builder.add_build(BuildPlan::new_place(2, 2, 0, "duo"));
+        let mut state = PrebuildAiRuntimeState {
+            last_plan: Some(TeamBlockPlan::new(2, 2, 0, "duo", None)),
+            ..PrebuildAiRuntimeState::default()
+        };
+
+        let current = builder.apply_prebuild_ai_tick(
+            &mut state,
+            PrebuildAiRuntimeInput {
+                within_current_plan_range: false,
+                ..PrebuildAiRuntimeInput::default()
+            },
+            |_| false,
+            |plan| plan.block.as_deref() == Some("duo"),
+            None,
+            |_| false,
+            |_| false,
+        );
+
+        assert_eq!(
+            current.decision.branch,
+            crate::mindustry::ai::PrebuildAiTickBranch::CurrentPlan
+        );
+        assert_eq!(current.added_build_plan, None);
+        assert!(builder.update_building);
+        assert_eq!(builder.plans.len(), 1);
+        assert_eq!(current.decision.boosting, Some(true));
+
+        state.collecting_items = true;
+        let collecting = builder.apply_prebuild_ai_tick(
+            &mut state,
+            PrebuildAiRuntimeInput {
+                boost_when_building: true,
+                ..PrebuildAiRuntimeInput::default()
+            },
+            |_| false,
+            |_| false,
+            None,
+            |_| false,
+            |_| false,
+        );
+        assert_eq!(
+            collecting.decision.branch,
+            crate::mindustry::ai::PrebuildAiTickBranch::Collecting
+        );
+        assert!(!builder.update_building);
+        assert_eq!(collecting.added_build_plan, None);
     }
 }
