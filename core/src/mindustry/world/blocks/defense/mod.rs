@@ -5,6 +5,7 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::BlockPlan;
+use crate::mindustry::io::TypeValue;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WallState {
@@ -782,6 +783,7 @@ pub fn read_radar_state<R: Read>(read: &mut R) -> io::Result<RadarState> {
 pub struct BuildTurretState {
     pub rotation: f32,
     pub warmup: f32,
+    pub following: Option<i32>,
     pub last_plan: Option<BlockPlan>,
     pub raw_plans: Vec<u8>,
 }
@@ -791,6 +793,7 @@ impl Default for BuildTurretState {
         Self {
             rotation: 90.0,
             warmup: 0.0,
+            following: None,
             last_plan: None,
             raw_plans: Vec::new(),
         }
@@ -810,6 +813,53 @@ pub struct BuildTurretPlanValidation {
     pub action: BuildTurretPlanAction,
     pub removed_plan: Option<BuildPlan>,
     pub remove_team_plan_at: Option<(i32, i32)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildTurretFollowCandidate {
+    pub unit_id: i32,
+    pub can_build: bool,
+    pub actively_building: bool,
+    pub plan: Option<BuildPlan>,
+    pub construct_within_range: bool,
+}
+
+impl BuildTurretFollowCandidate {
+    pub fn new(unit_id: i32, plan: BuildPlan) -> Self {
+        Self {
+            unit_id,
+            can_build: true,
+            actively_building: true,
+            plan: Some(plan),
+            construct_within_range: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildTurretUpdateAction {
+    Controlled,
+    ClearInvalidFollowing,
+    CopyFollowingPlan,
+    ClaimTeamPlan,
+    SelectFollowing,
+    ValidateCurrentPlan,
+    Idle,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildTurretUpdateStep {
+    pub action: BuildTurretUpdateAction,
+    pub update_building: bool,
+    pub update_build_logic: bool,
+    pub copied_following_plan: Option<BuildPlan>,
+    pub claimed_team_plan: Option<BlockPlan>,
+    pub added_build_plan: Option<BuildPlan>,
+    pub selected_following: Option<i32>,
+    pub validation: Option<BuildTurretPlanValidation>,
+    pub removed_self_plans: Vec<BuildPlan>,
+    pub following: Option<i32>,
+    pub last_plan: Option<BlockPlan>,
 }
 
 pub fn build_turret_elevation(configured: f32, size: i32) -> f32 {
@@ -832,6 +882,19 @@ pub fn build_turret_should_consume(plan_count: usize, heal_suppressed: bool) -> 
     plan_count > 0 && !heal_suppressed
 }
 
+pub fn build_turret_build_plan_from_team_plan(plan: &BlockPlan) -> BuildPlan {
+    let mut build_plan = BuildPlan::new_place(
+        plan.x as i32,
+        plan.y as i32,
+        plan.rotation as i32,
+        plan.block.clone(),
+    );
+    if let Some(config) = &plan.config {
+        build_plan.config = TypeValue::String(config.clone());
+    }
+    build_plan
+}
+
 pub fn build_turret_first_fit_plan<T, FWithin, FValid, FHasResources>(
     plans: &mut Vec<T>,
     within_range: FWithin,
@@ -851,6 +914,41 @@ where
     let returned = selected.clone();
     plans.push(selected);
     Some(returned)
+}
+
+pub fn build_turret_choose_following<'a>(
+    candidates: impl IntoIterator<Item = &'a BuildTurretFollowCandidate>,
+) -> Option<i32> {
+    candidates
+        .into_iter()
+        .find(|candidate| {
+            candidate.can_build
+                && candidate.actively_building
+                && candidate.plan.is_some()
+                && candidate.construct_within_range
+        })
+        .map(|candidate| candidate.unit_id)
+}
+
+pub fn build_turret_remove_self_plans(
+    unit_plans: &mut VecDeque<BuildPlan>,
+    self_plan_pos: Option<(i32, i32)>,
+) -> Vec<BuildPlan> {
+    let Some((self_x, self_y)) = self_plan_pos else {
+        return Vec::new();
+    };
+
+    let mut removed = Vec::new();
+    let mut kept = VecDeque::with_capacity(unit_plans.len());
+    while let Some(plan) = unit_plans.pop_front() {
+        if plan.x == self_x && plan.y == self_y && !plan.breaking {
+            removed.push(plan);
+        } else {
+            kept.push_back(plan);
+        }
+    }
+    *unit_plans = kept;
+    removed
 }
 
 pub fn build_turret_validate_current_plan<FValidBreak, FValidPlace>(
@@ -911,6 +1009,107 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn build_turret_update_tick<FWithin, FValidTeamPlan, FHasResources, FValidBreak, FValidPlace>(
+    state: &mut BuildTurretState,
+    unit_plans: &mut VecDeque<BuildPlan>,
+    team_plans: &mut Vec<BlockPlan>,
+    controlled: bool,
+    timer_target_ready: bool,
+    following_valid: bool,
+    following_actively_building: bool,
+    following_plan: Option<BuildPlan>,
+    follow_candidates: &[BuildTurretFollowCandidate],
+    conflicting_breaker: bool,
+    construct_current_matches: bool,
+    self_plan_pos: Option<(i32, i32)>,
+    within_range: FWithin,
+    valid_team_plan: FValidTeamPlan,
+    has_resources: FHasResources,
+    valid_break: FValidBreak,
+    valid_place: FValidPlace,
+) -> BuildTurretUpdateStep
+where
+    FWithin: Fn(&BlockPlan) -> bool,
+    FValidTeamPlan: Fn(&BlockPlan) -> bool,
+    FHasResources: Fn(&BlockPlan) -> bool,
+    FValidBreak: FnMut(&BuildPlan) -> bool,
+    FValidPlace: FnMut(&BuildPlan) -> bool,
+{
+    let mut action = BuildTurretUpdateAction::Idle;
+    let mut copied_following_plan = None;
+    let mut claimed_team_plan = None;
+    let mut added_build_plan = None;
+    let mut selected_following = None;
+    let mut validation = None;
+
+    if controlled {
+        state.following = None;
+        state.last_plan = None;
+        action = BuildTurretUpdateAction::Controlled;
+    } else if state.following.is_some() {
+        if !following_valid || !following_actively_building {
+            state.following = None;
+            unit_plans.clear();
+            action = BuildTurretUpdateAction::ClearInvalidFollowing;
+        } else {
+            unit_plans.clear();
+            if let Some(plan) = following_plan {
+                unit_plans.push_front(plan.clone());
+                copied_following_plan = Some(plan);
+            }
+            state.last_plan = None;
+            action = BuildTurretUpdateAction::CopyFollowingPlan;
+        }
+    } else if unit_plans.front().is_none() && timer_target_ready {
+        if let Some(plan) =
+            build_turret_first_fit_plan(team_plans, within_range, valid_team_plan, has_resources)
+        {
+            let build_plan = build_turret_build_plan_from_team_plan(&plan);
+            unit_plans.push_back(build_plan.clone());
+            state.last_plan = Some(plan.clone());
+            claimed_team_plan = Some(plan);
+            added_build_plan = Some(build_plan);
+            action = BuildTurretUpdateAction::ClaimTeamPlan;
+        }
+
+        if unit_plans.front().is_none() {
+            state.following = build_turret_choose_following(follow_candidates.iter());
+            if let Some(following) = state.following {
+                selected_following = Some(following);
+                action = BuildTurretUpdateAction::SelectFollowing;
+            }
+        }
+    } else if unit_plans.front().is_some() {
+        let result = build_turret_validate_current_plan(
+            state,
+            unit_plans,
+            conflicting_breaker,
+            construct_current_matches,
+            valid_break,
+            valid_place,
+        );
+        validation = Some(result);
+        action = BuildTurretUpdateAction::ValidateCurrentPlan;
+    }
+
+    let removed_self_plans = build_turret_remove_self_plans(unit_plans, self_plan_pos);
+
+    BuildTurretUpdateStep {
+        action,
+        update_building: !controlled,
+        update_build_logic: true,
+        copied_following_plan,
+        claimed_team_plan,
+        added_build_plan,
+        selected_following,
+        validation,
+        removed_self_plans,
+        following: state.following,
+        last_plan: state.last_plan.clone(),
+    }
+}
+
 pub fn build_turret_write_child<W: Write>(
     write: &mut W,
     state: &BuildTurretState,
@@ -926,6 +1125,7 @@ pub fn build_turret_read_child<R: Read>(read: &mut R) -> io::Result<BuildTurretS
     Ok(BuildTurretState {
         rotation,
         raw_plans,
+        following: None,
         last_plan: None,
         warmup: 0.0,
     })
@@ -1282,6 +1482,7 @@ mod tests {
         let build = BuildTurretState {
             rotation: 45.0,
             warmup: 0.6,
+            following: None,
             last_plan: None,
             raw_plans: vec![0, 2, 7, 9],
         };
@@ -1333,6 +1534,209 @@ mod tests {
             build_plan.config,
             crate::mindustry::io::TypeValue::String("cfg".into())
         );
+    }
+
+    #[test]
+    fn build_turret_update_claims_team_plan_before_following_candidates() {
+        let mut state = BuildTurretState::default();
+        let mut unit_plans = VecDeque::new();
+        let mut team_plans = vec![
+            BlockPlan::new(1, 1, 0, "duo", None),
+            BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+        ];
+        let followers = [BuildTurretFollowCandidate::new(
+            77,
+            BuildPlan::new_place(9, 9, 0, "wall"),
+        )];
+
+        let step = build_turret_update_tick(
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            false,
+            true,
+            false,
+            false,
+            None,
+            &followers,
+            false,
+            false,
+            None,
+            |plan| plan.x == 2,
+            |plan| plan.block == "router",
+            |_| true,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(step.action, BuildTurretUpdateAction::ClaimTeamPlan);
+        assert_eq!(
+            step.claimed_team_plan,
+            Some(BlockPlan::new(2, 2, 1, "router", Some("cfg".into())))
+        );
+        assert_eq!(
+            step.added_build_plan,
+            Some(BuildPlan::new_string_config(2, 2, 1, "router", "cfg"))
+        );
+        assert_eq!(state.following, None);
+        assert_eq!(
+            team_plans,
+            vec![
+                BlockPlan::new(1, 1, 0, "duo", None),
+                BlockPlan::new(2, 2, 1, "router", Some("cfg".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_turret_update_selects_following_when_no_team_plan_matches() {
+        let mut state = BuildTurretState::default();
+        let mut unit_plans = VecDeque::new();
+        let mut team_plans = vec![BlockPlan::new(1, 1, 0, "duo", None)];
+        let followers = [
+            BuildTurretFollowCandidate {
+                unit_id: 1,
+                actively_building: false,
+                ..BuildTurretFollowCandidate::new(1, BuildPlan::new_place(1, 1, 0, "duo"))
+            },
+            BuildTurretFollowCandidate::new(2, BuildPlan::new_place(3, 3, 0, "router")),
+        ];
+
+        let step = build_turret_update_tick(
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            false,
+            true,
+            false,
+            false,
+            None,
+            &followers,
+            false,
+            false,
+            None,
+            |_| false,
+            |_| true,
+            |_| true,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(step.action, BuildTurretUpdateAction::SelectFollowing);
+        assert_eq!(step.selected_following, Some(2));
+        assert_eq!(state.following, Some(2));
+        assert!(unit_plans.is_empty());
+        assert_eq!(team_plans, vec![BlockPlan::new(1, 1, 0, "duo", None)]);
+    }
+
+    #[test]
+    fn build_turret_update_following_copies_or_clears_plan() {
+        let mut state = BuildTurretState {
+            following: Some(7),
+            last_plan: Some(BlockPlan::new(4, 4, 0, "duo", None)),
+            ..BuildTurretState::default()
+        };
+        let mut unit_plans = VecDeque::from([BuildPlan::new_place(1, 1, 0, "wall")]);
+        let mut team_plans = Vec::new();
+
+        let copied = build_turret_update_tick(
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            false,
+            true,
+            true,
+            true,
+            Some(BuildPlan::new_place(6, 6, 0, "router")),
+            &[],
+            false,
+            false,
+            None,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(copied.action, BuildTurretUpdateAction::CopyFollowingPlan);
+        assert_eq!(
+            unit_plans,
+            VecDeque::from([BuildPlan::new_place(6, 6, 0, "router")])
+        );
+        assert_eq!(state.last_plan, None);
+
+        let cleared = build_turret_update_tick(
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            false,
+            true,
+            false,
+            false,
+            None,
+            &[],
+            false,
+            false,
+            None,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(
+            cleared.action,
+            BuildTurretUpdateAction::ClearInvalidFollowing
+        );
+        assert_eq!(state.following, None);
+        assert!(unit_plans.is_empty());
+    }
+
+    #[test]
+    fn build_turret_update_controlled_forgets_state_and_self_plan_is_removed() {
+        let mut state = BuildTurretState {
+            following: Some(9),
+            last_plan: Some(BlockPlan::new(4, 4, 0, "duo", None)),
+            ..BuildTurretState::default()
+        };
+        let mut unit_plans = VecDeque::from([
+            BuildPlan::new_place(4, 4, 0, "build-tower"),
+            BuildPlan::new_break(5, 5),
+        ]);
+        let mut team_plans = Vec::new();
+
+        let step = build_turret_update_tick(
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            true,
+            true,
+            true,
+            true,
+            Some(BuildPlan::new_place(1, 1, 0, "duo")),
+            &[],
+            false,
+            false,
+            Some((4, 4)),
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| false,
+            |_| true,
+        );
+
+        assert_eq!(step.action, BuildTurretUpdateAction::Controlled);
+        assert_eq!(step.update_building, false);
+        assert!(step.update_build_logic);
+        assert_eq!(state.following, None);
+        assert_eq!(state.last_plan, None);
+        assert_eq!(
+            step.removed_self_plans,
+            vec![BuildPlan::new_place(4, 4, 0, "build-tower")]
+        );
+        assert_eq!(unit_plans, VecDeque::from([BuildPlan::new_break(5, 5)]));
     }
 
     #[test]
