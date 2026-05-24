@@ -1534,6 +1534,127 @@ pub struct SelectionRectFrame {
     pub h: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct InputStateFrame {
+    pub state_menu: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputStatePlan {
+    pub clear_controlled_type: bool,
+    pub clear_logic_cutscene: bool,
+    pub force_hide_config: bool,
+    pub command_mode: Option<bool>,
+    pub command_rect: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectUnitsRectFrame {
+    pub command_mode: bool,
+    pub command_rect: bool,
+    pub tapped_one: bool,
+    pub multi_unit_select: bool,
+    pub selected_units: Vec<i32>,
+    pub rect_units: Vec<i32>,
+    pub rect_buildings: Vec<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectUnitsRectPlan {
+    pub selected_units: Vec<i32>,
+    pub command_buildings: Vec<i32>,
+    pub command_rect: bool,
+    pub fire_change_event: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectTypedUnitsFrame {
+    pub command_mode: bool,
+    pub selected_unit_type: Option<String>,
+    pub visible_units: Vec<(i32, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectTypedUnitsPlan {
+    pub selected_units: Vec<i32>,
+    pub fire_change_event: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandBuildTapCandidate {
+    pub id: i32,
+    pub same_team: bool,
+    pub commandable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TapCommandUnitFrame {
+    pub command_mode: bool,
+    pub selected_unit: Option<i32>,
+    pub build: Option<CommandBuildTapCandidate>,
+    pub selected_units: Vec<i32>,
+    pub command_buildings: Vec<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TapCommandUnitPlan {
+    pub selected_units: Vec<i32>,
+    pub command_buildings: Vec<i32>,
+    pub fire_change_event: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CommandAttackTarget {
+    Building(i32),
+    Unit(i32),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandTapFrame {
+    pub command_mode: bool,
+    pub selected_units: Vec<i32>,
+    pub command_buildings: Vec<i32>,
+    pub target: Vec2,
+    pub queue: bool,
+    pub allied_build_target: Option<i32>,
+    pub enemy_build_target: Option<i32>,
+    pub enemy_unit_target: Option<i32>,
+    pub max_chunk_size: usize,
+}
+
+impl Default for CommandTapFrame {
+    fn default() -> Self {
+        Self {
+            command_mode: false,
+            selected_units: Vec::new(),
+            command_buildings: Vec::new(),
+            target: Vec2::new(0.0, 0.0),
+            queue: false,
+            allied_build_target: None,
+            enemy_build_target: None,
+            enemy_unit_target: None,
+            max_chunk_size: 200,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandUnitsBatchPlan {
+    pub unit_ids: Vec<i32>,
+    pub attack_target: Option<CommandAttackTarget>,
+    pub target: Vec2,
+    pub queue: bool,
+    pub final_batch: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandTapPlan {
+    pub unit_batches: Vec<CommandUnitsBatchPlan>,
+    pub command_buildings: Option<(Vec<i32>, Vec2)>,
+    pub fire_attack_event: bool,
+    pub fire_position_event: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputHandlerLocalAction {
     UnitControlRemote,
@@ -5225,6 +5346,178 @@ where
         .collect()
 }
 
+pub fn update_state_plan(frame: InputStateFrame) -> InputStatePlan {
+    if frame.state_menu {
+        InputStatePlan {
+            clear_controlled_type: true,
+            clear_logic_cutscene: true,
+            force_hide_config: true,
+            command_mode: Some(false),
+            command_rect: Some(false),
+        }
+    } else {
+        InputStatePlan {
+            clear_controlled_type: false,
+            clear_logic_cutscene: false,
+            force_hide_config: false,
+            command_mode: None,
+            command_rect: None,
+        }
+    }
+}
+
+pub fn select_units_rect_plan(frame: SelectUnitsRectFrame) -> SelectUnitsRectPlan {
+    if !(frame.command_mode && frame.command_rect) {
+        return SelectUnitsRectPlan {
+            selected_units: frame.selected_units,
+            command_buildings: Vec::new(),
+            command_rect: frame.command_rect,
+            fire_change_event: false,
+        };
+    }
+
+    if frame.tapped_one {
+        return SelectUnitsRectPlan {
+            selected_units: frame.selected_units,
+            command_buildings: Vec::new(),
+            command_rect: false,
+            fire_change_event: false,
+        };
+    }
+
+    let mut selected_units = if frame.multi_unit_select {
+        frame
+            .selected_units
+            .into_iter()
+            .filter(|id| !frame.rect_units.contains(id))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    selected_units.extend(frame.rect_units);
+    let command_buildings = if selected_units.is_empty() {
+        frame.rect_buildings
+    } else {
+        Vec::new()
+    };
+
+    SelectUnitsRectPlan {
+        selected_units,
+        command_buildings,
+        command_rect: false,
+        fire_change_event: true,
+    }
+}
+
+pub fn select_typed_units_plan(frame: SelectTypedUnitsFrame) -> SelectTypedUnitsPlan {
+    if !frame.command_mode {
+        return SelectTypedUnitsPlan {
+            selected_units: Vec::new(),
+            fire_change_event: false,
+        };
+    }
+    let Some(unit_type) = frame.selected_unit_type else {
+        return SelectTypedUnitsPlan {
+            selected_units: Vec::new(),
+            fire_change_event: false,
+        };
+    };
+    SelectTypedUnitsPlan {
+        selected_units: frame
+            .visible_units
+            .into_iter()
+            .filter_map(|(id, ty)| (ty == unit_type).then_some(id))
+            .collect(),
+        fire_change_event: true,
+    }
+}
+
+pub fn tap_command_unit_plan(frame: TapCommandUnitFrame) -> TapCommandUnitPlan {
+    if !frame.command_mode {
+        return TapCommandUnitPlan {
+            selected_units: frame.selected_units,
+            command_buildings: frame.command_buildings,
+            fire_change_event: false,
+        };
+    }
+
+    if let Some(unit_id) = frame.selected_unit {
+        let mut selected_units = frame.selected_units;
+        if let Some(index) = selected_units.iter().position(|id| *id == unit_id) {
+            selected_units.remove(index);
+        } else {
+            selected_units.push(unit_id);
+        }
+        return TapCommandUnitPlan {
+            selected_units,
+            command_buildings: Vec::new(),
+            fire_change_event: true,
+        };
+    }
+
+    let mut command_buildings = Vec::new();
+    if let Some(build) = frame.build {
+        if build.same_team && build.commandable {
+            command_buildings = frame.command_buildings;
+            if let Some(index) = command_buildings.iter().position(|id| *id == build.id) {
+                command_buildings.remove(index);
+            } else {
+                command_buildings.push(build.id);
+            }
+        }
+    }
+
+    TapCommandUnitPlan {
+        selected_units: Vec::new(),
+        command_buildings,
+        fire_change_event: true,
+    }
+}
+
+pub fn command_tap_plan(frame: CommandTapFrame) -> CommandTapPlan {
+    if !frame.command_mode {
+        return CommandTapPlan {
+            unit_batches: Vec::new(),
+            command_buildings: None,
+            fire_attack_event: false,
+            fire_position_event: false,
+        };
+    }
+
+    let attack_target = if frame.enemy_build_target.is_some() {
+        frame.enemy_build_target.map(CommandAttackTarget::Building)
+    } else if frame.allied_build_target.is_none() {
+        frame.enemy_unit_target.map(CommandAttackTarget::Unit)
+    } else {
+        None
+    };
+
+    let max_chunk = frame.max_chunk_size.max(1);
+    let mut unit_batches = Vec::new();
+    if !frame.selected_units.is_empty() {
+        let chunks = frame.selected_units.chunks(max_chunk).collect::<Vec<_>>();
+        for (index, chunk) in chunks.iter().enumerate() {
+            unit_batches.push(CommandUnitsBatchPlan {
+                unit_ids: chunk.to_vec(),
+                attack_target,
+                target: frame.target,
+                queue: frame.queue,
+                final_batch: index + 1 == chunks.len(),
+            });
+        }
+    }
+
+    let command_buildings =
+        (!frame.command_buildings.is_empty()).then_some((frame.command_buildings, frame.target));
+
+    CommandTapPlan {
+        unit_batches,
+        command_buildings,
+        fire_attack_event: attack_target.is_some(),
+        fire_position_event: !frame.selected_units.is_empty() && attack_target.is_none(),
+    }
+}
+
 pub fn check_unit_plan(frame: CheckUnitFrame) -> CheckUnitPlan {
     if !frame.controlled_type_present || !frame.controlled_type_player_controllable {
         return CheckUnitPlan {
@@ -5715,6 +6008,169 @@ mod tests {
         assert!(consumes.consumed);
         assert!(consumes.actions.contains(&TileTappedAction::CallTapped));
         assert!(consumes.actions.contains(&TileTappedAction::HideInventory));
+    }
+
+    #[test]
+    fn command_mode_state_rect_and_typed_selection_plans_match_java_state_changes() {
+        assert_eq!(
+            update_state_plan(InputStateFrame { state_menu: true }),
+            InputStatePlan {
+                clear_controlled_type: true,
+                clear_logic_cutscene: true,
+                force_hide_config: true,
+                command_mode: Some(false),
+                command_rect: Some(false),
+            }
+        );
+        assert_eq!(
+            update_state_plan(InputStateFrame { state_menu: false }),
+            InputStatePlan {
+                clear_controlled_type: false,
+                clear_logic_cutscene: false,
+                force_hide_config: false,
+                command_mode: None,
+                command_rect: None,
+            }
+        );
+
+        let rect = select_units_rect_plan(SelectUnitsRectFrame {
+            command_mode: true,
+            command_rect: true,
+            tapped_one: false,
+            multi_unit_select: false,
+            selected_units: vec![9],
+            rect_units: vec![1, 2],
+            rect_buildings: vec![7],
+        });
+        assert_eq!(rect.selected_units, vec![1, 2]);
+        assert!(rect.command_buildings.is_empty());
+        assert!(!rect.command_rect);
+        assert!(rect.fire_change_event);
+
+        let buildings = select_units_rect_plan(SelectUnitsRectFrame {
+            command_mode: true,
+            command_rect: true,
+            tapped_one: false,
+            multi_unit_select: false,
+            selected_units: vec![9],
+            rect_units: vec![],
+            rect_buildings: vec![7, 8],
+        });
+        assert!(buildings.selected_units.is_empty());
+        assert_eq!(buildings.command_buildings, vec![7, 8]);
+
+        let typed = select_typed_units_plan(SelectTypedUnitsFrame {
+            command_mode: true,
+            selected_unit_type: Some("dagger".into()),
+            visible_units: vec![
+                (1, "dagger".into()),
+                (2, "flare".into()),
+                (3, "dagger".into()),
+            ],
+        });
+        assert_eq!(typed.selected_units, vec![1, 3]);
+        assert!(typed.fire_change_event);
+    }
+
+    #[test]
+    fn tap_command_unit_plan_toggles_units_or_command_buildings() {
+        let add = tap_command_unit_plan(TapCommandUnitFrame {
+            command_mode: true,
+            selected_unit: Some(2),
+            selected_units: vec![1],
+            command_buildings: vec![9],
+            build: None,
+        });
+        assert_eq!(add.selected_units, vec![1, 2]);
+        assert!(add.command_buildings.is_empty());
+        assert!(add.fire_change_event);
+
+        let remove = tap_command_unit_plan(TapCommandUnitFrame {
+            command_mode: true,
+            selected_unit: Some(2),
+            selected_units: vec![1, 2],
+            command_buildings: vec![],
+            build: None,
+        });
+        assert_eq!(remove.selected_units, vec![1]);
+
+        let build = tap_command_unit_plan(TapCommandUnitFrame {
+            command_mode: true,
+            selected_unit: None,
+            selected_units: vec![1],
+            command_buildings: vec![8],
+            build: Some(CommandBuildTapCandidate {
+                id: 9,
+                same_team: true,
+                commandable: true,
+            }),
+        });
+        assert!(build.selected_units.is_empty());
+        assert_eq!(build.command_buildings, vec![8, 9]);
+
+        let clear = tap_command_unit_plan(TapCommandUnitFrame {
+            command_mode: true,
+            selected_unit: None,
+            selected_units: vec![1],
+            command_buildings: vec![8],
+            build: Some(CommandBuildTapCandidate {
+                id: 9,
+                same_team: false,
+                commandable: true,
+            }),
+        });
+        assert!(clear.selected_units.is_empty());
+        assert!(clear.command_buildings.is_empty());
+    }
+
+    #[test]
+    fn command_tap_plan_splits_unit_batches_and_targets_enemies_or_positions() {
+        let target = Vec2::new(10.0, 20.0);
+        let plan = command_tap_plan(CommandTapFrame {
+            command_mode: true,
+            selected_units: vec![1, 2, 3, 4, 5],
+            command_buildings: vec![100, 101],
+            target,
+            queue: true,
+            enemy_unit_target: Some(9),
+            max_chunk_size: 2,
+            ..CommandTapFrame::default()
+        });
+
+        assert_eq!(plan.unit_batches.len(), 3);
+        assert_eq!(plan.unit_batches[0].unit_ids, vec![1, 2]);
+        assert_eq!(
+            plan.unit_batches[0].attack_target,
+            Some(CommandAttackTarget::Unit(9))
+        );
+        assert!(!plan.unit_batches[0].final_batch);
+        assert_eq!(plan.unit_batches[2].unit_ids, vec![5]);
+        assert!(plan.unit_batches[2].final_batch);
+        assert_eq!(plan.command_buildings, Some((vec![100, 101], target)));
+        assert!(plan.fire_attack_event);
+        assert!(!plan.fire_position_event);
+
+        let position = command_tap_plan(CommandTapFrame {
+            command_mode: true,
+            selected_units: vec![1],
+            target,
+            allied_build_target: Some(55),
+            enemy_unit_target: Some(9),
+            ..CommandTapFrame::default()
+        });
+        assert_eq!(position.unit_batches[0].attack_target, None);
+        assert!(position.fire_position_event);
+        assert!(!position.fire_attack_event);
+
+        let inactive = command_tap_plan(CommandTapFrame {
+            command_mode: false,
+            selected_units: vec![1],
+            command_buildings: vec![2],
+            target,
+            ..CommandTapFrame::default()
+        });
+        assert!(inactive.unit_batches.is_empty());
+        assert!(inactive.command_buildings.is_none());
     }
 
     #[test]
