@@ -475,6 +475,30 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `Door.updateChained()` 的真实 proximity flood-fill adapter；
 - 接入真实 Units/tree/pathfinder/Call runtime。
 
+### 7.6 RegenProjector
+
+已推进：
+
+- `regen_projector_heal_amount(...)`
+- `RegenProjectorState`
+- `RegenProjectorUpdatePlan`
+- `regen_projector_update(...)`
+- 已对照 `RegenProjector.updateTile()` 锁定：
+  - `warmup` 按上一帧 `didRegen` 通过 `approachDelta(..., 1/70)` 更新；
+  - `totalTime += warmup * delta`；
+  - 每 tick 先清 `didRegen/anyTargets`；
+  - suppression 时提前返回且不计算 targets/heal；
+  - `anyTargets` 来自 damaged targets；
+  - `optionalTimer += edelta * optionalEfficiency`，超过 `optionalUseTime` 后 consume 并归零；
+  - heal percent = `lerp(1, optionalMultiplier, optionalEfficiency) * healPercent`；
+  - 有可修复目标时标记 `didRegen`。
+
+仍需：
+
+- `updateTargets()` 的真实 indexer 范围扫描接入；
+- `mendMap` 的跨实例同帧聚合与 `lastUpdateFrame` 统一 heal 应用；
+- drawPlace/drawSelect 的范围和目标选中绘制规划。
+
 已完成 Rust 结构：
 
 ```text
