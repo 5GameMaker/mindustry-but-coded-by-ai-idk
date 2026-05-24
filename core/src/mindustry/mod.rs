@@ -21,4 +21,4 @@ pub mod ui;
 pub mod vars;
 pub mod world;
 
-pub const UPSTREAM_BASELINE: &str = "mindustry-upstream-v157.4";
+pub const UPSTREAM_BASELINE: &str = "mindustry-upstream-v158";
