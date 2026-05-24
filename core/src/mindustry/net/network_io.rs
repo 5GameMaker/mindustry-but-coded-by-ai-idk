@@ -87,6 +87,7 @@ pub struct NetworkWorldData {
     pub team_blocks_snapshot: Option<LegacyTeamBlocks>,
     pub markers_snapshot: Option<MapMarkers>,
     pub marker_summary: Option<MarkerRegionSummary>,
+    pub custom_chunks_snapshot: Option<CustomChunkSet>,
     pub content_header: Vec<u8>,
     pub content_patches: Vec<u8>,
     pub map_bytes: Vec<u8>,
@@ -116,6 +117,7 @@ impl Default for NetworkWorldData {
             team_blocks_snapshot: None,
             markers_snapshot: None,
             marker_summary: None,
+            custom_chunks_snapshot: None,
             content_header: Vec::new(),
             content_patches: Vec::new(),
             map_bytes: Vec::new(),
@@ -165,13 +167,19 @@ impl NetworkWorldData {
             None => self.content_patches.clone(),
         };
 
-        let custom_chunks = if !self.custom_chunks.is_empty() {
-            self.custom_chunks.clone()
-        } else {
-            let empty = CustomChunkSet::default();
-            let mut bytes = Vec::new();
-            write_custom_chunks(&mut bytes, &empty)?;
-            bytes
+        let custom_chunks = match &self.custom_chunks_snapshot {
+            Some(snapshot) => {
+                let mut bytes = Vec::new();
+                write_custom_chunks(&mut bytes, snapshot)?;
+                bytes
+            }
+            None if !self.custom_chunks.is_empty() => self.custom_chunks.clone(),
+            None => {
+                let empty = CustomChunkSet::default();
+                let mut bytes = Vec::new();
+                write_custom_chunks(&mut bytes, &empty)?;
+                bytes
+            }
         };
 
         Ok(NetworkWorldTailSections {
@@ -347,6 +355,7 @@ pub fn read_world_data_raw(bytes: &[u8]) -> Result<NetworkWorldData, NetworkIoEr
         team_blocks_snapshot: tail.team_blocks_snapshot,
         markers_snapshot: tail.markers_snapshot,
         marker_summary: tail.marker_summary,
+        custom_chunks_snapshot: tail.custom_chunks_snapshot,
         content_header: tail.content_header,
         content_patches: tail.content_patches,
         map_bytes: tail.map_bytes,
@@ -386,6 +395,7 @@ struct ParsedWorldTail {
     team_blocks_snapshot: Option<LegacyTeamBlocks>,
     markers_snapshot: Option<MapMarkers>,
     marker_summary: Option<MarkerRegionSummary>,
+    custom_chunks_snapshot: Option<CustomChunkSet>,
     content_header: Vec<u8>,
     content_patches: Vec<u8>,
     map_bytes: Vec<u8>,
@@ -477,6 +487,7 @@ fn parse_save_tail(remaining: &mut &[u8], out: &mut ParsedWorldTail) -> io::Resu
     if let Some((markers, custom_chunks)) = split_marker_region_and_custom_chunks(remaining) {
         out.markers_snapshot = parse_marker_region_bytes(&markers).ok();
         out.marker_summary = summarize_marker_region_bytes(&markers).ok();
+        out.custom_chunks_snapshot = read_custom_chunks(&mut custom_chunks.as_slice()).ok();
         out.markers = markers;
         out.custom_chunks = custom_chunks;
     } else {
@@ -1212,6 +1223,12 @@ mod tests {
             map_bytes: vec![0x03],
             team_blocks: vec![0x04],
             markers: vec![0x7b, 0x7d],
+            custom_chunks_snapshot: Some(CustomChunkSet {
+                chunks: vec![crate::mindustry::io::CustomChunk {
+                    name: "static-fog".into(),
+                    bytes: vec![9, 8, 7],
+                }],
+            }),
             ..NetworkWorldData::default()
         };
 
@@ -1229,7 +1246,11 @@ mod tests {
         )
         .unwrap();
         let mut expected_custom = Vec::new();
-        write_custom_chunks(&mut expected_custom, &CustomChunkSet::default()).unwrap();
+        write_custom_chunks(
+            &mut expected_custom,
+            data.custom_chunks_snapshot.as_ref().unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(tail.content_header, expected_header);
         assert_eq!(tail.content_patches, expected_patches);
@@ -1246,6 +1267,87 @@ mod tests {
         assert!(raw
             .windows(expected_patches.len())
             .any(|window| window == expected_patches.as_slice()));
+    }
+
+    #[test]
+    fn world_data_custom_chunk_snapshot_roundtrips_and_overrides_raw_bytes() {
+        let mut chunk_set = CustomChunkSet::default();
+        chunk_set.insert_or_replace("mod-a", vec![1, 2, 3]);
+        chunk_set.insert_or_replace("static-fog", vec![4]);
+        let mut custom_chunks = Vec::new();
+        write_custom_chunks(&mut custom_chunks, &chunk_set).unwrap();
+
+        let mut player = Vec::new();
+        write_io_i16(&mut player, 2).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_io_i32(&mut player, 0).unwrap();
+        write_command_id(&mut player, None).unwrap();
+        write_io_f32(&mut player, 0.0).unwrap();
+        write_io_f32(&mut player, 0.0).unwrap();
+        write_io_string(&mut player, None).unwrap();
+        write_io_i16(&mut player, -1).unwrap();
+        write_io_i32(&mut player, 0).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_team(&mut player, Some(TeamId(0))).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_unit_ref(&mut player, UnitRef::Null).unwrap();
+        write_io_f32(&mut player, 0.0).unwrap();
+        write_io_f32(&mut player, 0.0).unwrap();
+
+        let content_header_snapshot = ContentHeaderSnapshot {
+            entries: vec![ContentHeaderEntry {
+                content_type: 1,
+                names: vec!["copper".into()],
+            }],
+        };
+        let mut content_header = Vec::new();
+        write_content_header_snapshot(&mut content_header, &content_header_snapshot).unwrap();
+        let content_patches_snapshot = ContentPatchSet::default();
+        let mut content_patches = Vec::new();
+        write_content_patches(&mut content_patches, &content_patches_snapshot).unwrap();
+        let mut map_bytes = Vec::new();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_i16(&mut map_bytes, 2).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        let mut team_blocks = Vec::new();
+        write_io_i32(&mut team_blocks, 0).unwrap();
+
+        let decoded = read_world_data(
+            &write_world_data(&NetworkWorldData {
+                player_id: 7,
+                player_bytes: player,
+                content_header,
+                content_patches,
+                map_bytes,
+                team_blocks,
+                markers: ubjson_marker_region_with_classes(&["Minimap"]),
+                custom_chunks: custom_chunks.clone(),
+                ..NetworkWorldData::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(decoded.custom_chunks_snapshot.as_ref(), Some(&chunk_set));
+        assert_eq!(decoded.custom_chunks, custom_chunks);
+
+        let mut override_set = CustomChunkSet::default();
+        override_set.insert_or_replace("override", vec![9]);
+        let override_data = NetworkWorldData {
+            custom_chunks: b"raw-ignored".to_vec(),
+            custom_chunks_snapshot: Some(override_set.clone()),
+            ..NetworkWorldData::default()
+        };
+        let tail = override_data.materialized_tail_sections().unwrap();
+        let mut expected = Vec::new();
+        write_custom_chunks(&mut expected, &override_set).unwrap();
+        assert_eq!(tail.custom_chunks, expected);
     }
 
     #[test]
