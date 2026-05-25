@@ -37,14 +37,15 @@ use crate::mindustry::{
         ContinuousTurretState, ItemAmmoEntry, PointDefenseState, TractorBeamState, TurretState,
     },
     world::blocks::defense::{
-        build_turret_read_child_with_loader, effect_block_frame_input_from_game_update,
-        effect_block_update_building_slice_with_stores, read_auto_door_state,
-        read_base_shield_state, read_door_state, read_force_projector_state,
+        build_turret_read_child_with_loader, build_turret_write_child_with_loader,
+        effect_block_frame_input_from_game_update, effect_block_update_building_slice_with_stores,
+        read_auto_door_state, read_base_shield_state, read_door_state, read_force_projector_state,
         read_mend_projector_state, read_overdrive_projector_state, read_radar_state,
-        read_shield_wall_state, write_auto_door_state, write_door_state, write_shield_wall_state,
-        DoorState, EffectBlockFrameBatchReport, EffectBlockFrameBatchResources,
-        EffectBlockRuntimeState, EffectBlockRuntimeStateStore, EffectBlockTimerStateStore,
-        EffectProjectorRuntimeState, ShieldWallState,
+        read_shield_wall_state, write_auto_door_state, write_base_shield_state, write_door_state,
+        write_force_projector_state, write_mend_projector_state, write_overdrive_projector_state,
+        write_radar_state, write_shield_wall_state, DoorState, EffectBlockFrameBatchReport,
+        EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
+        EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
     world::blocks::distribution::{
         read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
@@ -156,6 +157,38 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Effect(effect), Some(state)) =
+        (block, runtime.effect_runtime_store.get(building.tile_pos))
+    {
+        match (effect.kind, state) {
+            (
+                EffectBlockKind::MendProjector,
+                EffectBlockRuntimeState::Projector(EffectProjectorRuntimeState::Mend(state)),
+            ) => {
+                write_mend_projector_state(write, state)?;
+            }
+            (
+                EffectBlockKind::OverdriveProjector,
+                EffectBlockRuntimeState::Projector(EffectProjectorRuntimeState::Overdrive(state)),
+            ) => {
+                write_overdrive_projector_state(write, state)?;
+            }
+            (EffectBlockKind::ForceProjector, EffectBlockRuntimeState::ForceProjector(state)) => {
+                write_force_projector_state(write, state)?;
+            }
+            (EffectBlockKind::Radar, EffectBlockRuntimeState::Radar(state)) => {
+                write_radar_state(write, state)?;
+            }
+            (EffectBlockKind::BaseShield, EffectBlockRuntimeState::BaseShield(state)) => {
+                write_base_shield_state(write, state)?;
+            }
+            (EffectBlockKind::BuildTurret, EffectBlockRuntimeState::BuildTurret(state)) => {
+                build_turret_write_child_with_loader(write, content, state)?;
+            }
+            _ => {}
+        }
+    }
+
     if let Some(state) = runtime.power_runtime_states.get(&building.tile_pos) {
         match (block, state) {
             (BlockDef::Power(power), GameRuntimePowerBlockState::Generator(state))
@@ -206,6 +239,14 @@ fn network_map_building_revision(
     let Some(block) = content.block(building.block.id) else {
         return 0;
     };
+
+    if let (BlockDef::Effect(effect), Some(EffectBlockRuntimeState::BaseShield(_))) =
+        (block, runtime.effect_runtime_store.get(building.tile_pos))
+    {
+        if effect.kind == EffectBlockKind::BaseShield {
+            return 1;
+        }
+    }
 
     match (block, runtime.power_runtime_states.get(&building.tile_pos)) {
         (
@@ -2478,7 +2519,8 @@ mod tests {
                 build_turret_write_child_with_loader, write_auto_door_state,
                 write_base_shield_state, write_door_state, write_force_projector_state,
                 write_radar_state, write_shield_wall_state, BaseShieldState, BuildTurretState,
-                DoorState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
+                DoorState, EffectBlockRuntimeState, EffectProjectorRuntimeState,
+                ForceProjectorState, MendProjectorState, OverdriveProjectorState, RadarState,
                 ShieldWallState,
             },
             blocks::distribution::{
@@ -3460,6 +3502,193 @@ mod tests {
             ),
             Some(GameRuntimePowerBlockState::Light(LightBlockState {
                 color: 0x12_34_56
+            }))
+        );
+    }
+
+    fn exported_effect_state_revision(state: &EffectBlockRuntimeState) -> u8 {
+        match state {
+            EffectBlockRuntimeState::BaseShield(_) => 1,
+            _ => 0,
+        }
+    }
+
+    fn roundtrip_exported_effect_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: EffectBlockRuntimeState,
+    ) -> Option<EffectBlockRuntimeState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_effect_state_revision(&state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(5),
+        ));
+        let building_snapshot = runtime.buildings()[0].clone();
+        runtime
+            .effect_runtime_store
+            .ensure_for_building(content, &building_snapshot, 0.0);
+        *runtime.effect_runtime_store.get_mut(tile_pos).unwrap() = state.clone();
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("effect block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("effect block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.effect_runtime_store.get(tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_effect_block_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        assert_eq!(
+            roundtrip_exported_effect_state(
+                &content,
+                "mend-projector",
+                1,
+                8,
+                EffectBlockRuntimeState::Projector(EffectProjectorRuntimeState::Mend(
+                    MendProjectorState {
+                        heat: 1.25,
+                        charge: 9.0,
+                        phase_heat: 0.5,
+                        smooth_efficiency: 2.0,
+                    },
+                )),
+            ),
+            Some(EffectBlockRuntimeState::Projector(
+                EffectProjectorRuntimeState::Mend(MendProjectorState {
+                    heat: 1.25,
+                    phase_heat: 0.5,
+                    ..MendProjectorState::default()
+                })
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_effect_state(
+                &content,
+                "overdrive-projector",
+                3,
+                8,
+                EffectBlockRuntimeState::Projector(EffectProjectorRuntimeState::Overdrive(
+                    OverdriveProjectorState {
+                        heat: 0.75,
+                        charge: 4.0,
+                        phase_heat: 0.35,
+                        smooth_efficiency: 1.5,
+                        use_progress: 0.25,
+                    },
+                )),
+            ),
+            Some(EffectBlockRuntimeState::Projector(
+                EffectProjectorRuntimeState::Overdrive(OverdriveProjectorState {
+                    heat: 0.75,
+                    phase_heat: 0.35,
+                    ..OverdriveProjectorState::default()
+                })
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_effect_state(
+                &content,
+                "force-projector",
+                5,
+                8,
+                EffectBlockRuntimeState::ForceProjector(ForceProjectorState {
+                    broken: false,
+                    buildup: 12.5,
+                    radscl: 0.75,
+                    hit: 0.8,
+                    warmup: 0.25,
+                    phase_heat: 0.5,
+                }),
+            ),
+            Some(EffectBlockRuntimeState::ForceProjector(
+                ForceProjectorState {
+                    broken: false,
+                    buildup: 12.5,
+                    radscl: 0.75,
+                    hit: 0.0,
+                    warmup: 0.25,
+                    phase_heat: 0.5,
+                }
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_effect_state(
+                &content,
+                "radar",
+                8,
+                8,
+                EffectBlockRuntimeState::Radar(RadarState {
+                    progress: 0.625,
+                    last_radius: 12.0,
+                    smooth_efficiency: 0.7,
+                    total_progress: 3.0,
+                }),
+            ),
+            Some(EffectBlockRuntimeState::Radar(RadarState {
+                progress: 0.625,
+                ..RadarState::default()
+            }))
+        );
+        assert_eq!(
+            roundtrip_exported_effect_state(
+                &content,
+                "shield-projector",
+                11,
+                8,
+                EffectBlockRuntimeState::BaseShield(BaseShieldState {
+                    broken: true,
+                    hit: 0.9,
+                    smooth_radius: 18.25,
+                }),
+            ),
+            Some(EffectBlockRuntimeState::BaseShield(BaseShieldState {
+                broken: true,
+                hit: 0.0,
+                smooth_radius: 18.25,
+            }))
+        );
+        assert_eq!(
+            roundtrip_exported_effect_state(
+                &content,
+                "build-tower",
+                14,
+                8,
+                EffectBlockRuntimeState::BuildTurret(BuildTurretState {
+                    rotation: 135.0,
+                    warmup: 0.6,
+                    plans: vec![BuildPlan::new_break(1, 2)],
+                    ..BuildTurretState::default()
+                }),
+            ),
+            Some(EffectBlockRuntimeState::BuildTurret(BuildTurretState {
+                rotation: 135.0,
+                plans: vec![BuildPlan::new_break(1, 2)],
+                ..BuildTurretState::default()
             }))
         );
     }
