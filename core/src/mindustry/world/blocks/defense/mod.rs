@@ -870,6 +870,14 @@ pub struct OverdriveProjectorUpdate {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OverdriveProjectorBoostPlan {
+    pub real_range: f32,
+    pub target_filter: ProjectorTargetFilter,
+    pub boost: f32,
+    pub boost_duration: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OverdriveProjectorStatsPlan {
     pub time_period: f32,
     pub speed_increase_percent: i32,
@@ -886,6 +894,18 @@ pub fn overdrive_real_boost(
     efficiency: f32,
 ) -> f32 {
     (speed_boost + phase_heat * speed_boost_phase) * efficiency
+}
+
+pub fn overdrive_projector_boost_plan(
+    update: &OverdriveProjectorUpdate,
+    reload: f32,
+) -> Option<OverdriveProjectorBoostPlan> {
+    update.applied_boost.then_some(OverdriveProjectorBoostPlan {
+        real_range: update.real_range,
+        target_filter: ProjectorTargetFilter::CanOverdrive,
+        boost: update.real_boost,
+        boost_duration: reload + 1.0,
+    })
 }
 
 pub fn overdrive_projector_stats_plan(
@@ -971,6 +991,10 @@ pub fn overdrive_projector_bar_fraction(
     } else {
         real_boost / limit
     }
+}
+
+pub fn overdrive_projector_bar_text_percent(real_boost: f32) -> i32 {
+    (real_boost * 100.0 - 100.0).max(0.0).round() as i32
 }
 
 pub fn overdrive_projector_place_plan(
@@ -4235,8 +4259,19 @@ mod tests {
         );
         assert!(update.applied_boost);
         assert!(update.consumed);
+        assert_eq!(over.charge, 0.0);
+        assert_eq!(over.use_progress, 0.5);
         assert_eq!(update.real_range, 81.0);
         assert!((update.real_boost - 1.5375).abs() < 0.00001);
+        assert_eq!(
+            overdrive_projector_boost_plan(&update, 60.0),
+            Some(OverdriveProjectorBoostPlan {
+                real_range: 81.0,
+                target_filter: ProjectorTargetFilter::CanOverdrive,
+                boost: update.real_boost,
+                boost_duration: 61.0,
+            })
+        );
 
         let mut bytes = Vec::new();
         write_overdrive_projector_state(&mut bytes, &over).unwrap();
@@ -4347,6 +4382,9 @@ mod tests {
             overdrive_projector_bar_fraction(1.2, false, 1.5, 0.75),
             1.2 / 1.5
         );
+        assert_eq!(overdrive_projector_bar_text_percent(1.5375), 54);
+        assert_eq!(overdrive_projector_bar_text_percent(1.2), 20);
+        assert_eq!(overdrive_projector_bar_text_percent(0.99), 0);
 
         let boosted_stats = overdrive_projector_stats_plan(1.5, 80.0, 400.0, true, 0.75, 20.0);
         assert_eq!(
@@ -4386,6 +4424,7 @@ mod tests {
         );
         assert_eq!(state.phase_heat, 0.5);
         assert_eq!(no_phase.real_range, 90.0);
+        assert_eq!(overdrive_projector_boost_plan(&no_phase, 60.0), None);
 
         let place = overdrive_projector_place_plan(4, 5, 8.0, 4.0, 80.0, 0.0);
         assert_eq!(

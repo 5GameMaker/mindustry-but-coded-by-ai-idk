@@ -903,6 +903,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `read_mend_projector_state(...)`
 - `OverdriveProjectorStatsPlan`
 - `overdrive_projector_stats_plan(...)`
+- `OverdriveProjectorBoostPlan`
+- `overdrive_projector_boost_plan(...)`
+- `overdrive_projector_bar_text_percent(...)`
 - `OverdriveProjectorState`
 - `overdrive_projector_update(...)`
 - `write_overdrive_projector_state(...)`
@@ -930,7 +933,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 下一步防御类方块的重点会放在：
 
 - `MendProjector`：纯语义层已补齐 stats、progress sense、timer-ready 消耗门控、place/select/light/draw plan 与 heal pulse plan；下一步接入真实 range/indexer 扫描、world heal 应用和 renderer/runtime；
-- `OverdriveProjector`：纯语义层已补齐 stats、boost bar、place/select/light/draw plan 和 Java 线框公式；下一步接入范围扫描、加速状态应用、效果/音效与真实 block runtime；
+- `OverdriveProjector`：纯语义层已补齐 stats、boost bar/text、boost application plan、place/select/light/draw plan 和 Java 线框公式；下一步接入真实范围扫描、目标 `applyBoost` 调用、效果/音效与真实 block runtime；
 - 继续把当前已完成的 helper 逐步收拢为真实 building 生命周期调用，避免长期停留在只被测试直接调用的辅助层。
 
 已完成 Rust 结构：
