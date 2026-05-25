@@ -120,6 +120,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 ## 5. 最近一次完成的具体实现
 
+### 2026-05-26 续作：BuildTurret raw plans fallback
+
+文件：
+
+- `core/src/mindustry/world/blocks/defense/mod.rs`
+- `core/src/mindustry/core/game_runtime.rs`
+- `MIGRATION.md`
+
+完成内容：
+
+1. `build_turret_read_child_with_loader(...)` 改为先读完 rotation 后的 plan bytes，再尝试 `TypeIO.read_build_plans(...)`：
+   - typed 解码成功且无尾字节：恢复 `BuildTurretState.plans`；
+   - typed 解码为 `None` 且无尾字节：恢复为空 plans；
+   - 解码失败或有尾字节：保留 `BuildTurretState.raw_plans`，避免旧图/内容映射不完整时整栋 building parse error。
+2. `GameRuntime` 增加 `game_runtime_preserves_build_turret_unparseable_raw_plans`，确认 map loader 仍能将 `BuildTurret` 写入 `EffectBlockRuntimeStateStore`。
+3. 已验证：
+   - `cargo test -p mindustry-core build_turret`
+   - `cargo check -p mindustry-core`
+
 ### 2026-05-26 续作：UnitAssembler 旧式 PayloadSeq fallback
 
 文件：

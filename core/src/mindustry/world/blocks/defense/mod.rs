@@ -5940,11 +5940,36 @@ pub fn build_turret_read_child_with_loader<R: Read>(
     loader: &ContentLoader,
 ) -> io::Result<BuildTurretState> {
     let rotation = read_f32(read)?;
-    let plans = type_io::read_build_plans(read, loader)?.unwrap_or_default();
+    let mut raw_plans = Vec::new();
+    read.read_to_end(&mut raw_plans)?;
+    let mut typed_read = raw_plans.as_slice();
+    match type_io::read_build_plans(&mut typed_read, loader) {
+        Ok(Some(plans)) if typed_read.is_empty() => {
+            return Ok(BuildTurretState {
+                rotation,
+                plans,
+                raw_plans: Vec::new(),
+                following: None,
+                last_plan: None,
+                warmup: 0.0,
+            });
+        }
+        Ok(None) if typed_read.is_empty() => {
+            return Ok(BuildTurretState {
+                rotation,
+                plans: Vec::new(),
+                raw_plans: Vec::new(),
+                following: None,
+                last_plan: None,
+                warmup: 0.0,
+            });
+        }
+        _ => {}
+    }
     Ok(BuildTurretState {
         rotation,
-        plans,
-        raw_plans: Vec::new(),
+        plans: Vec::new(),
+        raw_plans,
         following: None,
         last_plan: None,
         warmup: 0.0,
@@ -10711,6 +10736,18 @@ mod tests {
                 .plans,
             Vec::<BuildPlan>::new()
         );
+
+        let raw = BuildTurretState {
+            rotation: 225.0,
+            raw_plans: vec![0x00, 0x01, 0xff],
+            ..BuildTurretState::default()
+        };
+        bytes.clear();
+        build_turret_write_child_with_loader(&mut bytes, &loader, &raw).unwrap();
+        let restored = build_turret_read_child_with_loader(&mut bytes.as_slice(), &loader).unwrap();
+        assert_eq!(restored.rotation, 225.0);
+        assert!(restored.plans.is_empty());
+        assert_eq!(restored.raw_plans, raw.raw_plans);
     }
 
     #[test]

@@ -3133,6 +3133,37 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_preserves_build_turret_unparseable_raw_plans() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret_def = content.block_by_name("build-tower").unwrap();
+        let tile_pos = point2_pack(3, 2);
+        let saved = BuildingComp::new(tile_pos, turret_def.base().clone(), TeamId(1));
+        let state = BuildTurretState {
+            rotation: 225.0,
+            raw_plans: vec![0x00, 0x01, 0xff],
+            ..BuildTurretState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        build_turret_write_child_with_loader(&mut building_bytes, &content, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 15, turret_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.effect_runtime_store.get(tile_pos),
+            Some(&EffectBlockRuntimeState::BuildTurret(state))
+        );
+    }
+
+    #[test]
     fn game_runtime_loads_door_state_from_network_map_building_payload() {
         let content = ContentLoader::create_base_content().unwrap();
         let door_def = content.block_by_name("door").unwrap();
