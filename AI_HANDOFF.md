@@ -308,7 +308,8 @@ git -C 'D:/MDT/rust-mindustry' push origin main
    - 更新 wave / wavetime / tick；
    - 用 map tags + map snapshot 更新 `MapDescriptor`；
    - 解析并写入 `MapLocales`；
-   - 将 content patches 记录到 `DataPatcherState`。
+   - 将 content patches 记录到 `DataPatcherState`；
+   - 将 `NetworkWorldData.team_blocks_snapshot` 通过 `content_header_snapshot` 的 Java content id/name 映射物化到 runtime `Teams` build plans，避免 `SaveVersion.readTeamBlocks(...)` 结果只缓存不生效。
 
 已验证：
 
@@ -318,6 +319,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::core::net_client -- --test-threads=1
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::io::versions -- --test-threads=1
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::core::game_state -- --test-threads=1
+& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core apply_network_world_data
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test --workspace -- --skip mindustry::net::arc_net_provider::tests::* --test-threads=1
 ```
 

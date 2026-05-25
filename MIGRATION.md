@@ -1264,6 +1264,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 - `BlockPlan` 已新增 `config_value: TypeValue`，`SaveVersion.readTeamBlocks(...)` 读入的 typed config 会保留原始 `TypeValue`，同时继续提供字符串化 `config` 给现有 build/runtime helper 使用；导出 `LegacyTeamBlocks` 时优先写回 typed config，避免 content/team/point 等配置在 Java↔Rust save/world-stream 往返中退化成字符串。
 - `NetworkWorldData::bootstrap_for_connection(...)` 已开始按 Java `NetworkIO.writeWorld(...)` 的 `stream.writeInt(player.id); player.write(new Writes(stream));` 顺序写入最小 `NetworkPlayerData` body，Rust 客户端收到 bootstrap world stream 后可解析 player body 并发送 connect confirm。
 - `desktop::DesktopLauncher::sync_loaded_world_data(...)` 已在应用 `NetworkWorldData.map_snapshot` 后调用 `GameRuntime::load_network_map_with_buildings(...)`，使联机 world stream 中的 center building payload 开始进入真实客户端 runtime owned building 集合，而不再只停留在 `GameState.world` tile snapshot。
+- `GameState::apply_network_world_data(...)` 已把 `NetworkWorldData.team_blocks_snapshot` 接到 `apply_legacy_team_blocks(...)`：通过 `content_header_snapshot` 将 Java content id 映射回 block/item 等 content 名称，联机 world stream 的 `SaveVersion.readTeamBlocks(...)` 结果不再只停留在 `NetworkWorldData` sidecar，而会物化为 runtime `Teams` 的 build plans；缺少 team-blocks 时会清空旧 plans，避免换图后复用 stale plan。
 - marker/custom chunks 精确拆分；
 - UBJSON/JsonIO bytes；
 - world stream 应用到 `World`；

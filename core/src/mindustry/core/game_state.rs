@@ -486,6 +486,15 @@ impl GameState {
         self.fog_control
             .reset_world(map_width.max(0) as usize, map_height.max(0) as usize);
 
+        let content_header = world_data.content_header_snapshot.as_ref();
+        self.apply_legacy_team_blocks(
+            world_data.team_blocks_snapshot.as_ref(),
+            |block_id| content_header_name(content_header, ContentType::Block, block_id),
+            |content_type, content_id| {
+                content_header_name(content_header, content_type, content_id)
+            },
+        );
+
         self.markers = world_data.markers_snapshot.clone().unwrap_or_default();
         self.marker_summary = world_data.marker_summary.clone();
         self.custom_chunks = CustomChunkSet::default();
@@ -581,6 +590,21 @@ fn parse_tag_i32(tags: &BTreeMap<String, String>, key: &str) -> Option<i32> {
     tags.get(key).and_then(|value| value.parse().ok())
 }
 
+fn content_header_name(
+    snapshot: Option<&crate::mindustry::io::ContentHeaderSnapshot>,
+    content_type: ContentType,
+    id: ContentId,
+) -> Option<String> {
+    let snapshot = snapshot?;
+    let id = usize::try_from(id).ok()?;
+    snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.content_type == content_type.ordinal())
+        .and_then(|entry| entry.names.get(id))
+        .cloned()
+}
+
 fn legacy_team_block_plan<BlockName, ContentName>(
     plan: &crate::mindustry::io::LegacyTeamBlockPlan,
     block_name: &mut BlockName,
@@ -644,7 +668,11 @@ mod tests {
         game::{
             CoreInfo, MapMarkers, ObjectiveMarker, SpawnGroup, TEAM_CRUX, TEAM_MALIS, TEAM_SHARDED,
         },
-        io::{ContentPatchSet, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap},
+        io::{
+            ContentHeaderEntry, ContentHeaderSnapshot, ContentPatchSet, ContentRef,
+            LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, LegacyTeamBlockGroup,
+            LegacyTeamBlockPlan, LegacyTeamBlocks,
+        },
         net::{NetworkWorldData, StateSnapshotCallPacket},
         r#type::SectorPreset,
     };
@@ -795,6 +823,68 @@ mod tests {
                 content_patches_loaded: 2,
                 tail_parse_error: None,
             }
+        );
+    }
+
+    #[test]
+    fn apply_network_world_data_materializes_team_block_plans_from_content_header() {
+        let mut state = GameState::new();
+        state
+            .teams
+            .replace_plans([(TEAM_SHARDED, vec![BlockPlan::new(1, 1, 0, "old", None)])]);
+
+        let world = NetworkWorldData {
+            content_header_snapshot: Some(ContentHeaderSnapshot {
+                entries: vec![
+                    ContentHeaderEntry {
+                        content_type: ContentType::Block.ordinal(),
+                        names: vec!["air".into(), "router".into(), "junction".into()],
+                    },
+                    ContentHeaderEntry {
+                        content_type: ContentType::Item.ordinal(),
+                        names: vec!["copper".into(), "lead".into()],
+                    },
+                ],
+            }),
+            team_blocks_snapshot: Some(LegacyTeamBlocks {
+                groups: vec![LegacyTeamBlockGroup {
+                    team_id: TEAM_SHARDED as i32,
+                    plans: vec![
+                        LegacyTeamBlockPlan {
+                            x: 5,
+                            y: 6,
+                            rotation: 1,
+                            block_id: 1,
+                            config: TypeValue::String("cfg".into()),
+                        },
+                        LegacyTeamBlockPlan {
+                            x: 7,
+                            y: 8,
+                            rotation: 2,
+                            block_id: 2,
+                            config: TypeValue::Content(ContentRef::new(ContentType::Item, 1)),
+                        },
+                    ],
+                }],
+            }),
+            ..NetworkWorldData::default()
+        };
+
+        state.apply_network_world_data(&world);
+
+        assert_eq!(
+            state.teams.get_or_null(TEAM_SHARDED).unwrap().plans,
+            vec![
+                BlockPlan::new(5, 6, 1, "router", Some("cfg".into())),
+                BlockPlan::with_config_value(
+                    7,
+                    8,
+                    2,
+                    "junction",
+                    Some("lead".into()),
+                    TypeValue::Content(ContentRef::new(ContentType::Item, 1)),
+                ),
+            ]
         );
     }
 
