@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 
 use crate::mindustry::{
     content::blocks::{
-        BlockDef, DistributionBlockKind, EffectBlockKind, LiquidBlockKind, PayloadBlockKind,
-        PowerBlockKind, SandboxBlockKind, StorageBlockKind,
+        BlockDef, DefenseWallKind, DistributionBlockKind, EffectBlockKind, LiquidBlockKind,
+        PayloadBlockKind, PowerBlockKind, SandboxBlockKind, StorageBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -25,10 +25,11 @@ use crate::mindustry::{
     vars::TILE_SIZE,
     world::blocks::defense::{
         effect_block_frame_input_from_game_update, effect_block_update_building_slice_with_stores,
-        read_base_shield_state, read_force_projector_state, read_mend_projector_state,
-        read_overdrive_projector_state, read_radar_state, EffectBlockFrameBatchReport,
+        read_base_shield_state, read_door_state, read_force_projector_state,
+        read_mend_projector_state, read_overdrive_projector_state, read_radar_state,
+        read_shield_wall_state, DoorState, EffectBlockFrameBatchReport,
         EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
-        EffectBlockTimerStateStore, EffectProjectorRuntimeState,
+        EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
     world::blocks::distribution::{
         read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
@@ -174,6 +175,12 @@ pub enum GameRuntimeUnitBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeDefenseWallState {
+    Door(DoorState),
+    ShieldWall(ShieldWallState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
@@ -182,6 +189,7 @@ enum GameRuntimeLoadedBlockState {
     Storage(GameRuntimeStorageBlockState),
     Liquid(GameRuntimeLiquidBlockState),
     Unit(GameRuntimeUnitBlockState),
+    DefenseWall(GameRuntimeDefenseWallState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -196,6 +204,7 @@ pub struct GameRuntime {
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
+    pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
 }
 
 impl Default for GameRuntime {
@@ -217,6 +226,7 @@ impl GameRuntime {
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             unit_runtime_states: BTreeMap::new(),
+            defense_wall_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -263,6 +273,7 @@ impl GameRuntime {
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.unit_runtime_states.remove(&removed.tile_pos);
+        self.defense_wall_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -444,6 +455,11 @@ impl GameRuntime {
                         self.unit_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::DefenseWall(block_state) => {
+                        self.defense_wall_runtime_states
+                            .insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -547,8 +563,25 @@ impl GameRuntime {
                                                             revision,
                                                             building_payload,
                                                         )
-                                                        .map(|state| {
-                                                            state.map(GameRuntimeLoadedBlockState::Unit)
+                                                        .and_then(|state| {
+                                                            if state.is_some() {
+                                                                Ok(state.map(GameRuntimeLoadedBlockState::Unit))
+                                                            } else {
+                                                                Ok(None)
+                                                            }
+                                                        })
+                                                        .or_else(|err| match err {
+                                                            GameRuntimeBlockStateReadError::Unsupported => self
+                                                                .read_defense_wall_runtime_state_from_building_payload(
+                                                                    block,
+                                                                    building_payload,
+                                                                )
+                                                                .map(|state| {
+                                                                    state.map(GameRuntimeLoadedBlockState::DefenseWall)
+                                                                }),
+                                                            GameRuntimeBlockStateReadError::Parse => {
+                                                                Err(GameRuntimeBlockStateReadError::Parse)
+                                                            }
                                                         })
                                                     }
                                                     GameRuntimeBlockStateReadError::Parse => {
@@ -932,6 +965,30 @@ impl GameRuntime {
         }
     }
 
+    fn read_defense_wall_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeDefenseWallState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::DefenseWall(wall) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match wall.kind {
+            DefenseWallKind::Door | DefenseWallKind::AutoDoor => read_door_state(building_payload)
+                .map(|state| Some(GameRuntimeDefenseWallState::Door(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            DefenseWallKind::ShieldWall => read_shield_wall_state(building_payload)
+                .map(|state| Some(GameRuntimeDefenseWallState::ShieldWall(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
         let tile_pos = building.tile_pos;
         let mut cleared = 0;
@@ -983,6 +1040,7 @@ impl GameRuntime {
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.unit_runtime_states.clear();
+        self.defense_wall_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -1118,8 +1176,9 @@ mod tests {
         },
         world::{
             blocks::defense::{
-                write_base_shield_state, write_force_projector_state, write_radar_state,
-                BaseShieldState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
+                write_base_shield_state, write_door_state, write_force_projector_state,
+                write_radar_state, write_shield_wall_state, BaseShieldState, DoorState,
+                EffectBlockRuntimeState, ForceProjectorState, RadarState, ShieldWallState,
             },
             blocks::distribution::{
                 write_conveyor_state, write_directional_unloader_state, write_duct_router_state,
@@ -1907,6 +1966,65 @@ mod tests {
         assert_eq!(
             runtime.effect_runtime_store.get(tile_pos),
             Some(&EffectBlockRuntimeState::BaseShield(shield_state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_door_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let door_def = content.block_by_name("door").unwrap();
+        let tile_pos = point2_pack(1, 0);
+        let saved = BuildingComp::new(tile_pos, door_def.base().clone(), TeamId(1));
+        let state = DoorState { open: true };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_door_state(&mut building_bytes, state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 1, door_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.defense_wall_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDefenseWallState::Door(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_shield_wall_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let wall_def = content.block_by_name("shielded-wall").unwrap();
+        let tile_pos = point2_pack(2, 0);
+        let saved = BuildingComp::new(tile_pos, wall_def.base().clone(), TeamId(1));
+        let state = ShieldWallState {
+            shield: 75.0,
+            shield_radius: 1.0,
+            break_timer: 0.0,
+            hit: 0.0,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_shield_wall_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 2, wall_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.defense_wall_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDefenseWallState::ShieldWall(state))
         );
     }
 
