@@ -628,6 +628,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `base_shield_should_interact(...)`
 - `base_shield_unit_overlap(...)`
 - `base_shield_unit_action(...)`
+- `base_shield_unit_spark_chance_delta(...)`
+- `base_shield_should_emit_unit_spark(...)`
 - `write_base_shield_state(...)`
 - `read_base_shield_state(...)`
 - `BaseShieldDrawCommand`
@@ -650,7 +652,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - bullet 扫描矩形为 `(x - rad, y - rad, rad * 2, rad * 2)`；
   - unit 扫描半径为 `rad + 10f`；
   - 敌方、可吸收且在半径内的 bullet 被吸收；
-  - unit overlap 大于 0 时被 repel，大于 `hitSize * 1.5` 时 kill。
+  - unit overlap 大于 0 时被 repel，大于 `hitSize * 1.5` 时 kill；
+  - repel 分支按 `Mathf.chanceDelta(0.12f * Time.delta)` 计划 spark 副作用。
 - 已对照 `init()/drawPlace()/drawSelect()/radius()/inFogTo()` 锁定：
   - `init()` 使用 `updateClipRadius(radius)`；
   - place 圆心为 `tile * tilesize + offset`，半径为 block radius；

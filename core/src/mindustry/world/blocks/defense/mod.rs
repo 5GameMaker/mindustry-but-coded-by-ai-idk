@@ -1960,6 +1960,19 @@ pub fn base_shield_unit_action(
     }
 }
 
+pub fn base_shield_unit_spark_chance_delta(delta: f32) -> f32 {
+    (0.12 * delta * delta).clamp(0.0, 1.0)
+}
+
+pub fn base_shield_should_emit_unit_spark(
+    action: ShieldUnitAction,
+    delta: f32,
+    random: f32,
+) -> bool {
+    matches!(action, ShieldUnitAction::Repel { .. })
+        && random < base_shield_unit_spark_chance_delta(delta)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseShieldDrawCommand {
     SetShieldLayer,
@@ -4953,6 +4966,21 @@ mod tests {
             base_shield_unit_action(10.0, 20.0, 5.0),
             ShieldUnitAction::Kill
         );
+        let repel = base_shield_unit_action(10.0, 20.0, 18.0);
+        assert!((base_shield_unit_spark_chance_delta(2.0) - 0.48).abs() < 0.00001);
+        assert_eq!(base_shield_unit_spark_chance_delta(10.0), 1.0);
+        assert!(base_shield_should_emit_unit_spark(repel, 2.0, 0.47));
+        assert!(!base_shield_should_emit_unit_spark(repel, 2.0, 0.48));
+        assert!(!base_shield_should_emit_unit_spark(
+            ShieldUnitAction::Kill,
+            2.0,
+            0.0
+        ));
+        assert!(!base_shield_should_emit_unit_spark(
+            ShieldUnitAction::None,
+            2.0,
+            0.0
+        ));
         let animated = base_shield_draw_plan(false, 42.0, 24, 1.2, true);
         assert_eq!(
             animated.commands,
