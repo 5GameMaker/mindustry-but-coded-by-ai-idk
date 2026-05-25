@@ -956,11 +956,13 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_on_removed_plan(...)`
 - `force_projector_deflect_plan(...)`
 - `force_projector_draw_plan(...)`
+- `effect_force_projector_consume_phase_items(...)`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
 - 已对照 `ForceProjector.updateTile()` 推进：
   - `broken / buildup / radscl / warmup / phaseHeat / hit` 的主状态机；
   - `timer(timerUse, phaseUseTime / timeScale)` 已通过 `force_projector_update_with_timer(...)` 与 `effect_force_projector_update_building_frame_with_timer(...)` 接入 `BuildingTimerState` 侧车，返回 `should_consume_phase` 供上层触发 `consume()`；
+  - `effect_force_projector_consume_phase_items(...)` 已把 `should_consume_phase` 接到真实 `BuildingComp.items`，按 `EffectBlockData.boost_items` 和 Java `ConsumeItems.trigger(...)` 的 rounded amount 语义扣相位材料；
   - 破盾阈值与冷却；
   - 爆炸吸收；
   - Java write/read 的 5 个持久化字段。

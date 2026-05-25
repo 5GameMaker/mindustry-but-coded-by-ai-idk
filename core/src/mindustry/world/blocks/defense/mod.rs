@@ -3,7 +3,7 @@ pub mod turrets;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Read, Write};
 
-use crate::mindustry::content::blocks::{BlockDef, EffectBlockData, EffectBlockKind};
+use crate::mindustry::content::blocks::{BlockDef, EffectBlockData, EffectBlockKind, ItemAmount};
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::bullet::{BulletCreatePlan, BulletType};
@@ -16,6 +16,7 @@ use crate::mindustry::io::{type_io, TeamId, TypeValue};
 use crate::mindustry::logic::LAccess;
 use crate::mindustry::r#type::UnitType;
 use crate::mindustry::vars::TILE_SIZE;
+use crate::mindustry::world::consumers::consume_items_trigger_amount;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WallState {
@@ -3061,6 +3062,59 @@ pub fn effect_block_building_delta(building: &BuildingComp, frame: EffectBlockFr
 
 pub fn effect_block_building_edelta(building: &BuildingComp, frame: EffectBlockFrameInput) -> f32 {
     building.efficiency * effect_block_building_delta(building, frame)
+}
+
+pub fn effect_block_can_consume_items(
+    building: &BuildingComp,
+    stacks: &[ItemAmount],
+    multiplier: f32,
+) -> bool {
+    if stacks.is_empty() {
+        return true;
+    }
+    let Some(items) = building.items.as_ref() else {
+        return false;
+    };
+    stacks.iter().all(|stack| {
+        items.get(stack.item) >= consume_items_trigger_amount(stack.amount, multiplier)
+    })
+}
+
+pub fn effect_block_consume_items(
+    building: &mut BuildingComp,
+    stacks: &[ItemAmount],
+    multiplier: f32,
+) -> bool {
+    if !effect_block_can_consume_items(building, stacks, multiplier) {
+        return false;
+    }
+    let Some(items) = building.items.as_mut() else {
+        return stacks.is_empty();
+    };
+    for stack in stacks {
+        items.remove(
+            stack.item,
+            consume_items_trigger_amount(stack.amount, multiplier),
+        );
+    }
+    true
+}
+
+pub fn effect_block_consume_boost_items_when(
+    building: &mut BuildingComp,
+    block: &EffectBlockData,
+    should_consume: bool,
+) -> bool {
+    should_consume && effect_block_consume_items(building, &block.boost_items, 1.0)
+}
+
+pub fn effect_force_projector_consume_phase_items(
+    building: &mut BuildingComp,
+    block: &EffectBlockData,
+    update: ForceProjectorUpdate,
+) -> bool {
+    block.kind == EffectBlockKind::ForceProjector
+        && effect_block_consume_boost_items_when(building, block, update.should_consume_phase)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -7556,6 +7610,48 @@ mod tests {
             }
             other => panic!("unexpected dispatcher force projector report: {other:?}"),
         }
+    }
+
+    #[test]
+    fn force_projector_runtime_consumes_phase_items_only_on_timer_ready() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let force_def = content.block_by_name("force-projector").unwrap();
+        let force_block = effect_block(&content, "force-projector");
+        let phase_fabric = force_block.boost_items[0].item;
+        let mut building =
+            BuildingComp::new(point2_pack(14, 9), force_def.base().clone(), TeamId(1));
+        building.items.as_mut().unwrap().set(phase_fabric, 2);
+
+        assert!(!effect_force_projector_consume_phase_items(
+            &mut building,
+            force_block,
+            ForceProjectorUpdate {
+                broke_now: false,
+                should_consume_phase: false,
+            }
+        ));
+        assert_eq!(building.items.as_ref().unwrap().get(phase_fabric), 2);
+
+        assert!(effect_force_projector_consume_phase_items(
+            &mut building,
+            force_block,
+            ForceProjectorUpdate {
+                broke_now: false,
+                should_consume_phase: true,
+            }
+        ));
+        assert_eq!(building.items.as_ref().unwrap().get(phase_fabric), 1);
+
+        building.items.as_mut().unwrap().set(phase_fabric, 0);
+        assert!(!effect_force_projector_consume_phase_items(
+            &mut building,
+            force_block,
+            ForceProjectorUpdate {
+                broke_now: false,
+                should_consume_phase: true,
+            }
+        ));
+        assert_eq!(building.items.as_ref().unwrap().get(phase_fabric), 0);
     }
 
     #[test]
