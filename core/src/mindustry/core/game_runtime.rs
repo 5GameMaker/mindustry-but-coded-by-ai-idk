@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use crate::mindustry::{
-    content::blocks::{BlockDef, EffectBlockKind, SandboxBlockKind},
+    content::blocks::{BlockDef, EffectBlockKind, PayloadBlockKind, SandboxBlockKind},
     core::content_loader::ContentLoader,
     core::game_state::GameState,
     ctype::ContentId,
@@ -28,9 +28,10 @@ use crate::mindustry::{
         EffectBlockTimerStateStore, EffectProjectorRuntimeState,
     },
     world::blocks::payloads::{
-        read_empty_payload_block_build_common, read_payload_loader_extra,
-        read_payload_mass_driver_extra, read_payload_source_extra, PayloadBlockBuildState,
-        PayloadLoaderState, PayloadMassDriverState, PayloadSourceState,
+        read_empty_payload_block_build_common, read_empty_payload_conveyor_extra,
+        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_router_extra,
+        read_payload_source_extra, PayloadBlockBuildState, PayloadConveyorState,
+        PayloadLoaderState, PayloadMassDriverState, PayloadSortKey, PayloadSourceState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -88,6 +89,12 @@ pub enum GameRuntimePayloadBlockState {
     Source {
         common: PayloadBlockBuildState,
         source: PayloadSourceState,
+    },
+    Conveyor(PayloadConveyorState),
+    Router {
+        conveyor: PayloadConveyorState,
+        sorted: Option<PayloadSortKey>,
+        rec_dir: i32,
     },
 }
 
@@ -406,6 +413,30 @@ impl GameRuntime {
         }
 
         match block {
+            BlockDef::Payload(payload) => {
+                let (item_rotation, item) = read_empty_payload_conveyor_extra(building_payload)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let conveyor = PayloadConveyorState {
+                    item,
+                    item_rotation,
+                    ..PayloadConveyorState::default()
+                };
+                match payload.kind {
+                    PayloadBlockKind::PayloadConveyor => {
+                        Ok(Some(GameRuntimePayloadBlockState::Conveyor(conveyor)))
+                    }
+                    PayloadBlockKind::PayloadRouter => {
+                        let (sorted, rec_dir) =
+                            read_payload_router_extra(building_payload, revision)
+                                .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                        Ok(Some(GameRuntimePayloadBlockState::Router {
+                            conveyor,
+                            sorted,
+                            rec_dir,
+                        }))
+                    }
+                }
+            }
             BlockDef::PayloadMassDriver(_) => {
                 let common = read_empty_payload_block_build_common(building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
@@ -636,10 +667,11 @@ mod tests {
                 BaseShieldState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
             },
             blocks::payloads::{
-                write_payload_block_build_common, write_payload_loader_extra,
-                write_payload_mass_driver_extra, write_payload_source_extra,
-                PayloadBlockBuildState, PayloadDriverState, PayloadLoaderState,
-                PayloadMassDriverState, PayloadSourceState, Vec2,
+                write_payload_block_build_common, write_payload_conveyor_extra,
+                write_payload_loader_extra, write_payload_mass_driver_extra,
+                write_payload_router_extra, write_payload_source_extra, PayloadBlockBuildState,
+                PayloadConveyorState, PayloadDriverState, PayloadLoaderState,
+                PayloadMassDriverState, PayloadSortKey, PayloadSourceState, Vec2,
             },
             footprint_tiles, point2_pack, Block, Tile,
         },
@@ -1526,6 +1558,82 @@ mod tests {
         assert_eq!(
             runtime.payload_runtime_states.get(&tile_pos),
             Some(&GameRuntimePayloadBlockState::Source { common, source })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_conveyor_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let conveyor_def = content.block_by_name("payload-conveyor").unwrap();
+        let tile_pos = point2_pack(1, 4);
+        let mut saved = BuildingComp::new(tile_pos, conveyor_def.base().clone(), TeamId(6));
+        saved.set_rotation(1);
+        let conveyor = PayloadConveyorState {
+            item: None,
+            item_rotation: 33.0,
+            ..PayloadConveyorState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_conveyor_extra(&mut building_bytes, 12.0, conveyor.item_rotation, None)
+            .unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 25, conveyor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Conveyor(conveyor))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_router_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let tile_pos = point2_pack(2, 4);
+        let mut saved = BuildingComp::new(tile_pos, router_def.base().clone(), TeamId(6));
+        saved.set_rotation(2);
+        let conveyor = PayloadConveyorState {
+            item: None,
+            item_rotation: 180.0,
+            ..PayloadConveyorState::default()
+        };
+        let sorted = Some(PayloadSortKey {
+            content_type: 0,
+            id: router_def.base().id,
+        });
+        let rec_dir = 3;
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_conveyor_extra(&mut building_bytes, 6.0, conveyor.item_rotation, None)
+            .unwrap();
+        write_payload_router_extra(&mut building_bytes, sorted, rec_dir).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 26, router_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Router {
+                conveyor,
+                sorted,
+                rec_dir
+            })
         );
     }
 
