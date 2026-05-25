@@ -78,7 +78,8 @@ use crate::mindustry::{
         MessageBlockState,
     },
     world::blocks::payloads::{
-        block_producer_update, constructor_clear, constructor_configure, payload_block_move_in,
+        block_producer_update, constructor_clear, constructor_configure,
+        payload_block_handle_payload, payload_block_move_in, payload_block_move_out_step,
         payload_source_clear_config, payload_source_configure_block, payload_source_configure_unit,
         payload_source_update, payload_void_update, read_block_producer_progress,
         read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
@@ -124,8 +125,11 @@ use crate::mindustry::{
         ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
         UnitCargoUnloadPointState, UnitFactoryState,
     },
-    world::blocks::{is_construct_block_name, read_construct_block_state, ConstructBlockState},
-    world::{footprint_tiles, get_edges, Tile},
+    world::blocks::{
+        autotiler_direction, is_construct_block_name, read_construct_block_state,
+        ConstructBlockState,
+    },
+    world::{footprint_tiles, get_edges, point2_x, point2_y, Tile},
 };
 
 pub struct GameRuntimeEffectResources<'a, 'b> {
@@ -1337,6 +1341,9 @@ pub struct GameRuntimePayloadSourceFrameReport {
     pub updated_sources: usize,
     pub spawned_block_payloads: usize,
     pub spawned_unit_payloads: usize,
+    pub moved_out_payloads: usize,
+    pub arrived_output_payloads: usize,
+    pub transferred_payloads: usize,
     pub skipped_unit_payloads: usize,
     pub missing_runtime_states: usize,
     pub unknown_config_blocks: usize,
@@ -3448,9 +3455,10 @@ impl GameRuntime {
 
         let frame_delta = advanced.delta_ticks as f32;
         let mut report = GameRuntimePayloadSourceFrameReport::default();
+        let mut pending_payload_moves = Vec::new();
 
         for index in 0..self.buildings.len() {
-            let (tile_pos, block_id, team, enabled, rotdeg, x, y) = {
+            let (tile_pos, block_id, team, enabled, rotdeg, rotation, time_scale, x, y) = {
                 let building = &mut self.buildings[index];
                 let can_overdrive = content
                     .block(building.block.id)
@@ -3464,6 +3472,8 @@ impl GameRuntime {
                     building.team,
                     building.enabled,
                     building.rotdeg(),
+                    building.rotation,
+                    building.time_scale,
                     building.x,
                     building.y,
                 )
@@ -3480,6 +3490,17 @@ impl GameRuntime {
                 continue;
             }
             report.source_candidates += 1;
+
+            let trns = sandbox.base.size / 2 + 1;
+            let (dx, dy) = autotiler_direction(rotation);
+            let target_tile_pos = self
+                .state
+                .world
+                .build(
+                    point2_x(tile_pos) as i32 + dx * trns,
+                    point2_y(tile_pos) as i32 + dy * trns,
+                )
+                .map(|target| target.tile_pos);
 
             let Some(GameRuntimePayloadBlockState::Source { common, source }) =
                 self.payload_runtime_states.get_mut(&tile_pos)
@@ -3551,9 +3572,142 @@ impl GameRuntime {
                     }
                 }
             }
+
+            if common.payload.is_some() {
+                report.moved_out_payloads += 1;
+                let arrived = payload_block_move_out_step(
+                    common,
+                    rotdeg,
+                    sandbox.base.size,
+                    TILE_SIZE as f32,
+                    sandbox.payload_speed,
+                    sandbox.payload_rotate_speed,
+                    frame_delta * time_scale,
+                );
+                if arrived {
+                    report.arrived_output_payloads += 1;
+                    if let Some(target_tile_pos) = target_tile_pos {
+                        pending_payload_moves.push((tile_pos, target_tile_pos));
+                    }
+                }
+            }
+        }
+
+        for (source_tile_pos, target_tile_pos) in pending_payload_moves {
+            if self.transfer_payload_source_output_to_void(
+                content,
+                source_tile_pos,
+                target_tile_pos,
+            ) {
+                report.transferred_payloads += 1;
+            }
         }
 
         Some(report)
+    }
+
+    fn transfer_payload_source_output_to_void(
+        &mut self,
+        content: &ContentLoader,
+        source_tile_pos: i32,
+        target_tile_pos: i32,
+    ) -> bool {
+        if source_tile_pos == target_tile_pos {
+            return false;
+        }
+
+        let Some(source_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == source_tile_pos)
+        else {
+            return false;
+        };
+        let Some(target_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == target_tile_pos)
+        else {
+            return false;
+        };
+
+        if self.buildings[source_index].team != self.buildings[target_index].team {
+            return false;
+        }
+
+        let Some(BlockDef::Sandbox(target_sandbox)) =
+            content.block(self.buildings[target_index].block.id)
+        else {
+            return false;
+        };
+        if target_sandbox.kind != SandboxBlockKind::PayloadVoid {
+            return false;
+        }
+
+        let target_accepts = matches!(
+            self.payload_runtime_states.get(&target_tile_pos),
+            Some(GameRuntimePayloadBlockState::Void(common)) if common.payload.is_none()
+        );
+        if !target_accepts {
+            return false;
+        }
+
+        let source_pos = PayloadVec2 {
+            x: self.buildings[source_index].x,
+            y: self.buildings[source_index].y,
+        };
+        let target_pos = PayloadVec2 {
+            x: self.buildings[target_index].x,
+            y: self.buildings[target_index].y,
+        };
+        let target_size = self.buildings[target_index].block.size;
+
+        let Some((payload, payload_rotation)) = self
+            .payload_runtime_states
+            .get_mut(&source_tile_pos)
+            .and_then(|state| match state {
+                GameRuntimePayloadBlockState::Source { common, source } => {
+                    let payload = common.payload.take()?;
+                    source.has_payload = false;
+                    Some((payload, common.pay_rotation))
+                }
+                _ => None,
+            })
+        else {
+            return false;
+        };
+
+        let mut payload = Some(payload);
+        let transferred = match self.payload_runtime_states.get_mut(&target_tile_pos) {
+            Some(GameRuntimePayloadBlockState::Void(common)) if common.payload.is_none() => {
+                payload_block_handle_payload(
+                    common,
+                    payload.take().expect("payload should be present"),
+                    target_pos,
+                    source_pos,
+                    payload_rotation,
+                    target_size,
+                    TILE_SIZE as f32,
+                );
+                true
+            }
+            _ => false,
+        };
+
+        if !transferred {
+            if let Some(payload) = payload {
+                if let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+                    self.payload_runtime_states.get_mut(&source_tile_pos)
+                {
+                    if common.payload.is_none() {
+                        common.payload = Some(payload);
+                        source.has_payload = true;
+                    }
+                }
+            }
+        }
+
+        transferred
     }
 
     fn create_common_unit_payload_ref(
@@ -7754,7 +7908,7 @@ mod tests {
         );
 
         let report = runtime
-            .advance_owned_payload_sources(&content, 1.0)
+            .advance_owned_payload_sources(&content, 1.0 / 60.0)
             .unwrap();
 
         assert_eq!(
@@ -7765,6 +7919,9 @@ mod tests {
                 updated_sources: 1,
                 spawned_block_payloads: 1,
                 spawned_unit_payloads: 0,
+                moved_out_payloads: 1,
+                arrived_output_payloads: 0,
+                transferred_payloads: 0,
                 skipped_unit_payloads: 0,
                 missing_runtime_states: 0,
                 unknown_config_blocks: 0,
@@ -7778,7 +7935,8 @@ mod tests {
         };
         assert!(source.has_payload);
         assert!(source.scl > 0.0);
-        assert_eq!(common.pay_vector, Vec2::ZERO);
+        assert!(common.pay_vector.x.abs() < 0.001);
+        assert!(common.pay_vector.y > 0.69 && common.pay_vector.y < 0.71);
         assert_eq!(common.pay_rotation, 90.0);
         let Some(PayloadRef::Block {
             block,
@@ -7827,11 +7985,13 @@ mod tests {
         );
 
         let report = runtime
-            .advance_owned_payload_sources(&content, 1.0)
+            .advance_owned_payload_sources(&content, 1.0 / 60.0)
             .unwrap();
 
         assert_eq!(report.spawned_block_payloads, 0);
         assert_eq!(report.spawned_unit_payloads, 1);
+        assert_eq!(report.moved_out_payloads, 1);
+        assert_eq!(report.arrived_output_payloads, 0);
         assert_eq!(report.skipped_unit_payloads, 0);
         let Some(GameRuntimePayloadBlockState::Source { common, source }) =
             runtime.payload_runtime_states.get(&tile_pos)
@@ -7840,7 +8000,8 @@ mod tests {
         };
         assert!(source.has_payload);
         assert_eq!(source.unit, Some(flare));
-        assert_eq!(common.pay_vector, Vec2::ZERO);
+        assert!(common.pay_vector.x < -0.69 && common.pay_vector.x > -0.71);
+        assert!(common.pay_vector.y.abs() < 0.001);
         assert_eq!(common.pay_rotation, 180.0);
         let Some(PayloadRef::Unit {
             class_id,
@@ -7869,6 +8030,84 @@ mod tests {
                 ..type_io::CommandWire::new()
             })
         );
+    }
+
+    #[test]
+    fn game_runtime_payload_source_moves_payload_into_front_payload_void() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let source_tile = point2_pack(4, 4);
+        let void_tile = point2_pack(9, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, source_def.base().clone(), TeamId(6));
+        source_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(12, 9);
+        runtime.add_building(source_building);
+        runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState {
+                    config_block: Some(router_def.base().id),
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+
+        let report = runtime
+            .advance_owned_payload_sources(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.visited_buildings, 2);
+        assert_eq!(report.source_candidates, 1);
+        assert_eq!(report.spawned_block_payloads, 1);
+        assert_eq!(report.moved_out_payloads, 1);
+        assert_eq!(report.arrived_output_payloads, 1);
+        assert_eq!(report.transferred_payloads, 1);
+
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!source.has_payload);
+
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        let Some(PayloadRef::Block { block, .. }) = common.payload.as_ref() else {
+            panic!("payload void should receive the source build payload");
+        };
+        assert_eq!(*block, router_def.base().id);
+        assert_eq!(common.pay_vector, Vec2 { x: -20.0, y: 0.0 });
+        assert_eq!(common.pay_rotation, 0.0);
+
+        let void_report = runtime.advance_owned_payload_voids(&content, 1.0).unwrap();
+        assert_eq!(void_report.void_candidates, 1);
+        assert_eq!(void_report.incinerated_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
     }
 
     #[test]
