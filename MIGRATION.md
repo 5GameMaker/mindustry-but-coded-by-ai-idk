@@ -534,6 +534,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `DoorChainNode`
 - `DoorChainToggle`
 - `DoorChainTogglePlan`
+- `DoorChainGraphNode`
+- `door_chain_build_plan(...)`
 - `door_chain_toggle_plan(...)`
 - `DoorRegion`
 - `DoorDrawCommand`
@@ -563,6 +565,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 跳过已经是目标 open 状态的门；
   - `chainEffect` 控制链上门是否额外播放 effect；
   - 非生成中每个切换门更新 pathfinder。
+- 已对照 `Door.updateChained()` 的纯遍历部分锁定：
+  - 从 self 入队，按 `removeLast` / `addFirst` 形成与 Java 队列一致的 chain 顺序；
+  - 只串联 door 图中存在的邻接节点；
+  - 断开链与非门邻接不会串入当前 chain。
 - 已对照 `Door.getPlanRegion()`、`Door.draw()`、`AutoDoor.draw()` 锁定：
   - `config == Boolean.TRUE` 或 `open == true` 时选择 openRegion；
   - 否则选择默认 region。

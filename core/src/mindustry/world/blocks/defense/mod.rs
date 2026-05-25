@@ -290,6 +290,12 @@ pub struct DoorChainNode {
     pub units_in_tile: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoorChainGraphNode {
+    pub id: i32,
+    pub neighbors: Vec<i32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DoorChainToggle {
     pub id: i32,
@@ -303,6 +309,33 @@ pub struct DoorChainTogglePlan {
     pub play_origin_sound: bool,
     pub play_origin_effect: bool,
     pub toggles: Vec<DoorChainToggle>,
+}
+
+pub fn door_chain_build_plan(start_id: i32, doors: &[DoorChainGraphNode]) -> Vec<i32> {
+    if !doors.iter().any(|door| door.id == start_id) {
+        return Vec::new();
+    }
+
+    let mut chain = Vec::new();
+    let mut seen = vec![start_id];
+    let mut queue = VecDeque::new();
+    queue.push_back(start_id);
+
+    while let Some(next) = queue.pop_back() {
+        chain.push(next);
+        let Some(node) = doors.iter().find(|door| door.id == next) else {
+            continue;
+        };
+        for &neighbor in &node.neighbors {
+            if seen.contains(&neighbor) || !doors.iter().any(|door| door.id == neighbor) {
+                continue;
+            }
+            seen.push(neighbor);
+            queue.push_front(neighbor);
+        }
+    }
+
+    chain
 }
 
 pub fn door_chain_toggle_plan(
@@ -3980,6 +4013,27 @@ mod tests {
         assert_eq!(door_effect_for_current_open(true), DoorEffectKind::Close);
         assert_eq!(door_origin_id(10, None), 10);
         assert_eq!(door_origin_id(10, Some(7)), 7);
+        let door_graph = vec![
+            DoorChainGraphNode {
+                id: 1,
+                neighbors: vec![2],
+            },
+            DoorChainGraphNode {
+                id: 2,
+                neighbors: vec![1, 3],
+            },
+            DoorChainGraphNode {
+                id: 3,
+                neighbors: vec![2, 99],
+            },
+            DoorChainGraphNode {
+                id: 4,
+                neighbors: vec![],
+            },
+        ];
+        assert_eq!(door_chain_build_plan(1, &door_graph), vec![1, 2, 3]);
+        assert_eq!(door_chain_build_plan(4, &door_graph), vec![4]);
+        assert!(door_chain_build_plan(99, &door_graph).is_empty());
         assert_eq!(
             door_control_enabled_plan(false, 1.0, false, false, true),
             DoorControlPlan {
