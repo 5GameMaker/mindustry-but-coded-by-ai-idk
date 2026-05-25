@@ -77,6 +77,14 @@ impl StateSnapshotApplyResult {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GameUpdateFrameAdvance {
+    pub advanced: bool,
+    pub delta_ticks: f64,
+    pub tick: f64,
+    pub update_id: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkWorldApplyResult {
     pub rules_loaded: bool,
@@ -300,6 +308,32 @@ impl GameState {
 
     pub fn get_state(&self) -> GameStateState {
         self.state
+    }
+
+    pub fn advance_game_update_frame(&mut self, delta_seconds: f32) -> GameUpdateFrameAdvance {
+        let delta_ticks = if delta_seconds.is_finite() {
+            delta_seconds as f64 * 60.0
+        } else {
+            0.0
+        };
+
+        if self.is_game() && !self.is_paused() {
+            self.tick += delta_ticks;
+            self.update_id += 1;
+            GameUpdateFrameAdvance {
+                advanced: true,
+                delta_ticks,
+                tick: self.tick,
+                update_id: self.update_id,
+            }
+        } else {
+            GameUpdateFrameAdvance {
+                advanced: false,
+                delta_ticks: 0.0,
+                tick: self.tick,
+                update_id: self.update_id,
+            }
+        }
     }
 
     pub fn sync_teams_with_rules(&mut self) {
@@ -1013,6 +1047,51 @@ mod tests {
             ))
         );
         assert!(state.is_paused());
+    }
+
+    #[test]
+    fn advance_game_update_frame_matches_java_tick_and_update_id_gate() {
+        let mut state = GameState::new();
+
+        let menu = state.advance_game_update_frame(0.5);
+        assert_eq!(
+            menu,
+            GameUpdateFrameAdvance {
+                advanced: false,
+                delta_ticks: 0.0,
+                tick: 0.0,
+                update_id: 0,
+            }
+        );
+
+        state.set(GameStateState::Playing);
+        let first = state.advance_game_update_frame(0.5);
+        assert_eq!(
+            first,
+            GameUpdateFrameAdvance {
+                advanced: true,
+                delta_ticks: 30.0,
+                tick: 30.0,
+                update_id: 1,
+            }
+        );
+        let invalid_delta = state.advance_game_update_frame(f32::NAN);
+        assert!(invalid_delta.advanced);
+        assert_eq!(invalid_delta.delta_ticks, 0.0);
+        assert_eq!(invalid_delta.tick, 30.0);
+        assert_eq!(invalid_delta.update_id, 2);
+
+        state.set(GameStateState::Paused);
+        let paused = state.advance_game_update_frame(1.0);
+        assert_eq!(
+            paused,
+            GameUpdateFrameAdvance {
+                advanced: false,
+                delta_ticks: 0.0,
+                tick: 30.0,
+                update_id: 2,
+            }
+        );
     }
 
     #[test]

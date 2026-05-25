@@ -304,6 +304,11 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
   - `SaveEntitiesRegion`（按 Java `writeEntities()` 顺序保留 `entityMapping bytes -> teamBlocks -> worldEntities bytes`）；
   - markers/custom。
 - `GameState::apply_network_world_data(...)` 接入部分地图/波次/locales/patcher 状态。
+- `GameState::advance_game_update_frame(...)` 已对照 Java `Logic.update()` 的非暂停 game 分支，提供最小帧推进入口：
+  - 仅 `state.isGame() && !state.isPaused()` 时推进；
+  - `tick += deltaSeconds * 60`，非有限 delta 视为 0；
+  - 每个有效 game update frame 执行 `update_id += 1`；
+  - 该入口为后续真实 building/entity dispatcher、`RegenProjector.lastUpdateFrame` 等 update-id 门控提供统一帧边界。
 - `GameState::apply_legacy_team_blocks(...)` 已把 Java `SaveVersion.readTeamBlocks(...)` 输出落到 runtime `Teams.plans`；
 - `Teams::to_legacy_team_blocks(...)` / `GameState::export_legacy_team_blocks(...)` 已补 Java `SaveVersion.writeTeamBlocks(...)` 形态导出：
   - 按 active teams 导出；
