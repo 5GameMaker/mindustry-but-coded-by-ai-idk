@@ -3759,6 +3759,27 @@ pub fn effect_shockwave_tower_update_building_frame_with_timer<'a, 'b>(
     )
 }
 
+pub fn effect_shockwave_tower_update_building_frame_with_timer_store<'a, 'b>(
+    runtime_store: &mut EffectBlockRuntimeStateStore,
+    timer_store: &mut EffectBlockTimerStateStore,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    bullets: &mut [BulletComp],
+    bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+    frame: EffectBlockFrameInput,
+) -> Option<EffectBlockRuntimeReport> {
+    let timer = timer_store.ensure_for_building(content, building)?;
+    effect_shockwave_tower_update_building_frame_with_timer(
+        runtime_store,
+        timer,
+        content,
+        building,
+        bullets,
+        bullet_type,
+        frame,
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseShieldDrawCommand {
     SetShieldLayer,
@@ -5008,6 +5029,16 @@ pub fn effect_build_turret_timer_target_ready(
     )
 }
 
+pub fn effect_build_turret_timer_target_ready_from_store(
+    content: &ContentLoader,
+    building: &BuildingComp,
+    timer_store: &mut EffectBlockTimerStateStore,
+    frame: EffectBlockFrameInput,
+) -> Option<bool> {
+    let timer = timer_store.ensure_for_building(content, building)?;
+    effect_build_turret_timer_target_ready(content, building, timer, frame)
+}
+
 pub fn effect_build_turret_timer_target2_ready(
     content: &ContentLoader,
     building: &BuildingComp,
@@ -5027,6 +5058,16 @@ pub fn effect_build_turret_timer_target2_ready(
             BUILD_TURRET_TIMER_TARGET2_INTERVAL,
         ),
     )
+}
+
+pub fn effect_build_turret_timer_target2_ready_from_store(
+    content: &ContentLoader,
+    building: &BuildingComp,
+    timer_store: &mut EffectBlockTimerStateStore,
+    frame: EffectBlockFrameInput,
+) -> Option<bool> {
+    let timer = timer_store.ensure_for_building(content, building)?;
+    effect_build_turret_timer_target2_ready(content, building, timer, frame)
 }
 
 pub fn build_turret_unit_tick(input: BuildTurretUnitTickInput) -> BuildTurretUnitTickStep {
@@ -10691,6 +10732,80 @@ mod tests {
             BUILD_TURRET_TIMER_TARGET2_INTERVAL
         );
         assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET_SLOT), 0.0);
+    }
+
+    #[test]
+    fn build_turret_timer_store_keeps_target_slots_per_building() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let build_tower = content.block_by_name("build-tower").unwrap();
+        let building = BuildingComp::new(point2_pack(20, 9), build_tower.base().clone(), TeamId(1));
+        let mut timer_store = EffectBlockTimerStateStore::new();
+
+        assert!(!effect_build_turret_timer_target_ready_from_store(
+            &content,
+            &building,
+            &mut timer_store,
+            EffectBlockFrameInput {
+                delta: 14.0,
+                edelta: 14.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: 14.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        )
+        .unwrap());
+        assert!(!effect_build_turret_timer_target2_ready_from_store(
+            &content,
+            &building,
+            &mut timer_store,
+            EffectBlockFrameInput {
+                delta: 29.0,
+                edelta: 29.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: 29.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        )
+        .unwrap());
+        assert!(effect_build_turret_timer_target_ready_from_store(
+            &content,
+            &building,
+            &mut timer_store,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 3,
+                tile_size: TILE_SIZE as f32,
+                now: 15.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        )
+        .unwrap());
+        assert!(effect_build_turret_timer_target2_ready_from_store(
+            &content,
+            &building,
+            &mut timer_store,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 4,
+                tile_size: TILE_SIZE as f32,
+                now: 30.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        )
+        .unwrap());
+
+        let timer = timer_store.get(building.tile_pos).unwrap();
+        assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET_SLOT), 15.0);
+        assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET2_SLOT), 30.0);
+        assert_eq!(timer.timer.timers(), BuildingTimerState::DEFAULT_TIMERS);
     }
 
     #[test]
