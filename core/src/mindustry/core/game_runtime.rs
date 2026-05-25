@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 
 use crate::mindustry::{
     content::blocks::{
-        BlockDef, DistributionBlockKind, EffectBlockKind, PayloadBlockKind, PowerBlockKind,
-        SandboxBlockKind, StorageBlockKind,
+        BlockDef, DistributionBlockKind, EffectBlockKind, LiquidBlockKind, PayloadBlockKind,
+        PowerBlockKind, SandboxBlockKind, StorageBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -37,6 +37,7 @@ use crate::mindustry::{
         DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
         MassDriverState, StackConveyorState,
     },
+    world::blocks::liquid::{read_liquid_bridge_state, LiquidBridgeState},
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
         read_empty_payload_block_build_common, read_empty_payload_conveyor_extra,
@@ -155,12 +156,18 @@ pub enum GameRuntimeStorageBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeLiquidBlockState {
+    Bridge(LiquidBridgeState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
     Power(GameRuntimePowerBlockState),
     Distribution(GameRuntimeDistributionBlockState),
     Storage(GameRuntimeStorageBlockState),
+    Liquid(GameRuntimeLiquidBlockState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -173,6 +180,7 @@ pub struct GameRuntime {
     pub power_runtime_states: BTreeMap<i32, GameRuntimePowerBlockState>,
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
+    pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -192,6 +200,7 @@ impl GameRuntime {
             power_runtime_states: BTreeMap::new(),
             distribution_runtime_states: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
+            liquid_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -236,6 +245,7 @@ impl GameRuntime {
         self.power_runtime_states.remove(&removed.tile_pos);
         self.distribution_runtime_states.remove(&removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
+        self.liquid_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -409,6 +419,10 @@ impl GameRuntime {
                         self.storage_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Liquid(block_state) => {
+                        self.liquid_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -482,8 +496,26 @@ impl GameRuntime {
                                             revision,
                                             building_payload,
                                         )
-                                        .map(|state| {
-                                            state.map(GameRuntimeLoadedBlockState::Storage)
+                                        .and_then(|state| {
+                                            if state.is_some() {
+                                                Ok(state.map(GameRuntimeLoadedBlockState::Storage))
+                                            } else {
+                                                Ok(None)
+                                            }
+                                        })
+                                        .or_else(|err| match err {
+                                            GameRuntimeBlockStateReadError::Unsupported => self
+                                                .read_liquid_runtime_state_from_building_payload(
+                                                    block,
+                                                    revision,
+                                                    building_payload,
+                                                )
+                                                .map(|state| {
+                                                    state.map(GameRuntimeLoadedBlockState::Liquid)
+                                                }),
+                                            GameRuntimeBlockStateReadError::Parse => {
+                                                Err(GameRuntimeBlockStateReadError::Parse)
+                                            }
                                         }),
                                     GameRuntimeBlockStateReadError::Parse => {
                                         Err(GameRuntimeBlockStateReadError::Parse)
@@ -801,6 +833,30 @@ impl GameRuntime {
         }
     }
 
+    fn read_liquid_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeLiquidBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Liquid(liquid) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match liquid.kind {
+            LiquidBlockKind::LiquidBridge | LiquidBlockKind::DirectionLiquidBridge => {
+                read_liquid_bridge_state(building_payload, revision)
+                    .map(|state| Some(GameRuntimeLiquidBlockState::Bridge(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
         let tile_pos = building.tile_pos;
         let mut cleared = 0;
@@ -850,6 +906,7 @@ impl GameRuntime {
         self.power_runtime_states.clear();
         self.distribution_runtime_states.clear();
         self.storage_runtime_states.clear();
+        self.liquid_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -994,6 +1051,7 @@ mod tests {
                 DirectionalUnloaderState, DuctRouterState, ItemBridgeState, MassDriverState,
                 MassDriverStateKind,
             },
+            blocks::liquid::{write_liquid_bridge_state, LiquidBridgeState},
             blocks::payloads::{
                 write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
                 write_payload_block_build_common, write_payload_conveyor_extra,
@@ -2442,6 +2500,39 @@ mod tests {
         assert_eq!(
             runtime.storage_runtime_states.get(&tile_pos),
             Some(&GameRuntimeStorageBlockState::Core(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_liquid_bridge_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let bridge_def = content.block_by_name("bridge-conduit").unwrap();
+        let tile_pos = point2_pack(3, 0);
+        let saved = BuildingComp::new(tile_pos, bridge_def.base().clone(), TeamId(1));
+        let state = LiquidBridgeState {
+            link: point2_pack(5, 0),
+            warmup: 0.8,
+            incoming: vec![point2_pack(2, 0)],
+            was_moved: true,
+            moved: true,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_liquid_bridge_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 3, bridge_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.liquid_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLiquidBlockState::Bridge(state))
         );
     }
 
