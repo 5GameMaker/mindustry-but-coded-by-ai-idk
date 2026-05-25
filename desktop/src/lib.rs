@@ -1,6 +1,7 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, ClientConnectConfig, GameState, GameStateState, NetClient,
+    content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameState, GameStateState,
+    NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::PlayerComp;
@@ -23,6 +24,7 @@ pub struct DesktopLauncher {
     pub client: ClientLauncher,
     pub net_client: NetClient,
     pub game_state: GameState,
+    pub runtime: GameRuntime,
     pub player: PlayerComp,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
@@ -39,6 +41,7 @@ impl DesktopLauncher {
             client: ClientLauncher::new(AppContext::new("data")),
             net_client: NetClient::with_net(Net::new(Box::new(ArcNetProvider::new()))),
             game_state: GameState::new(),
+            runtime: GameRuntime::default(),
             player: PlayerComp::default(),
             connect_target,
             connect_error: None,
@@ -95,11 +98,13 @@ impl DesktopLauncher {
                 self.game_state.apply_network_world_data(world_data);
                 self.apply_network_player_data(world_data.player_id, world_data.player.as_ref());
                 self.apply_network_team_blocks(world_data.team_blocks_snapshot.as_ref());
+                self.sync_runtime_state_from_game_state();
                 self.last_applied_state_snapshot = None;
             }
             None => {
                 if self.last_applied_world_data.is_some() {
                     self.game_state = GameState::new();
+                    self.runtime = GameRuntime::default();
                     self.player = PlayerComp::default();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
@@ -129,6 +134,7 @@ impl DesktopLauncher {
         }
 
         self.game_state.apply_state_snapshot(&snapshot);
+        self.sync_runtime_state_from_game_state();
         self.last_applied_state_snapshot = Some(snapshot);
     }
 
@@ -145,7 +151,12 @@ impl DesktopLauncher {
 
         if connect_confirm_sent {
             self.game_state.set(GameStateState::Playing);
+            self.sync_runtime_state_from_game_state();
         }
+    }
+
+    fn sync_runtime_state_from_game_state(&mut self) {
+        self.runtime.state = self.game_state.clone();
     }
 
     fn apply_network_content_header(&mut self, snapshot: Option<&ContentHeaderSnapshot>) {
@@ -500,6 +511,8 @@ mod tests {
         assert_eq!(launcher.game_state.rand_seed1, 456);
         assert_eq!(launcher.game_state.world.width(), 3);
         assert_eq!(launcher.game_state.world.height(), 2);
+        assert_eq!(launcher.runtime.state.world.width(), 3);
+        assert_eq!(launcher.runtime.state.world.height(), 2);
         assert_eq!(
             launcher.game_state.world.load_events(),
             &[
@@ -561,6 +574,7 @@ mod tests {
         assert_eq!(launcher.game_state.enemies, snapshot.enemies);
         assert_eq!(launcher.game_state.game_over, snapshot.game_over);
         assert_eq!(launcher.game_state.server_tps, snapshot.tps as i32);
+        assert_eq!(launcher.runtime.state.server_tps, snapshot.tps as i32);
         assert_eq!(launcher.game_state.rand_seed0, snapshot.rand0);
         assert_eq!(launcher.game_state.rand_seed1, snapshot.rand1);
         assert_eq!(
@@ -837,6 +851,8 @@ mod tests {
         assert_eq!(launcher.game_state.map.name(), "empty");
         assert_eq!(launcher.game_state.world.width(), 0);
         assert_eq!(launcher.game_state.world.height(), 0);
+        assert_eq!(launcher.runtime.state.world.width(), 0);
+        assert_eq!(launcher.runtime.state.world.height(), 0);
         assert!(launcher.game_state.world.load_events().is_empty());
         assert_eq!(launcher.player, PlayerComp::default());
     }
