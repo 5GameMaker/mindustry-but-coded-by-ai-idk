@@ -1241,6 +1241,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
   - end 侧按 Java 顺序 reset player、PVP assign team、调用真实 `send_world_data(...)` 发送 world stream；
   - 这一步把 `world_reloader.rs` 的纯 plan 接到 `net_server.rs` 真实 world-data transport，后续可直接挂到地图重载/换图流程。
 - `BlockPlan` 已新增 `config_value: TypeValue`，`SaveVersion.readTeamBlocks(...)` 读入的 typed config 会保留原始 `TypeValue`，同时继续提供字符串化 `config` 给现有 build/runtime helper 使用；导出 `LegacyTeamBlocks` 时优先写回 typed config，避免 content/team/point 等配置在 Java↔Rust save/world-stream 往返中退化成字符串。
+- `NetworkWorldData::bootstrap_for_connection(...)` 已开始按 Java `NetworkIO.writeWorld(...)` 的 `stream.writeInt(player.id); player.write(new Writes(stream));` 顺序写入最小 `NetworkPlayerData` body，Rust 客户端收到 bootstrap world stream 后可解析 player body 并发送 connect confirm。
 - marker/custom chunks 精确拆分；
 - UBJSON/JsonIO bytes；
 - world stream 应用到 `World`；
@@ -1274,11 +1275,11 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 "C:/Users/yuyu/.cargo/bin/cargo.exe" check -p mindustry-core
 ```
 
-历史已知全包风险：
+当前已知全包状态：
 
-- 旧记录中 `cargo test -p mindustry-core` 曾有 `world_stream_with_java_like_payload_is_parsed_and_confirmed` 失败；
-- 后续交接记录又显示 workspace 测试曾通过；
-- 接手者必须以当前本地实测为准，不要只相信历史记录。
+- `cargo test -p mindustry-core` 已在本地通过：1781 passed / 0 failed；
+- 旧记录中的 `world_stream_with_java_like_payload_is_parsed_and_confirmed` 失败已通过补最小 player body 与测试期望修复；
+- 接手者仍必须以当前本地实测为准，不要只相信历史记录。
 
 ## 11. 接手者开工检查清单
 

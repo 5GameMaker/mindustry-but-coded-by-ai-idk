@@ -6083,7 +6083,14 @@ mod tests {
         assert_eq!(world.rules_json, "{}");
         assert_eq!(world.map_locales_json, "{}");
         assert!(world.map_tags.contains_key("name"));
-        assert!(world.player_bytes.is_empty());
+        let player = world
+            .player
+            .as_ref()
+            .expect("bootstrap stream should include a Java-like player body");
+        assert_eq!(player.revision, 2);
+        assert_eq!(player.team, TeamId(0));
+        assert_eq!(player.unit, UnitRef::Null);
+        assert!(!world.player_bytes.is_empty());
     }
 
     #[test]

@@ -5,7 +5,9 @@ use crate::mindustry::io::save::parse_marker_region_bytes;
 use crate::mindustry::io::type_io::{
     read_bool as read_io_bool, read_color, read_command_id, read_f32 as read_io_f32,
     read_i16 as read_io_i16, read_i32 as read_io_i32, read_string as read_io_string, read_team,
-    read_unit_ref, TeamId, UnitRef,
+    read_unit_ref, write_bool as write_io_bool, write_color, write_command_id,
+    write_f32 as write_io_f32, write_i16 as write_io_i16, write_i32 as write_io_i32,
+    write_string as write_io_string, write_team, write_unit_ref, RgbaColor, TeamId, UnitRef,
 };
 use crate::mindustry::io::{
     marker_region_bytes_from_map_markers, read_chunk_map, read_content_header_snapshot,
@@ -58,6 +60,52 @@ pub struct NetworkPlayerData {
     pub unit: UnitRef,
     pub x: f32,
     pub y: f32,
+}
+
+impl NetworkPlayerData {
+    pub fn bootstrap() -> Self {
+        Self {
+            revision: 2,
+            admin: false,
+            boosting: false,
+            color: 0,
+            last_command_id: None,
+            mouse_x: 0.0,
+            mouse_y: 0.0,
+            name: None,
+            selected_block_id: None,
+            selected_rotation: 0,
+            shooting: false,
+            team: TeamId(0),
+            typing: false,
+            unit: UnitRef::Null,
+            x: 0.0,
+            y: 0.0,
+        }
+    }
+
+    pub fn write_to<W: Write>(&self, write: &mut W) -> io::Result<()> {
+        write_io_i16(write, self.revision)?;
+        write_io_bool(write, self.admin)?;
+        write_io_bool(write, self.boosting)?;
+        write_color(write, RgbaColor::new(self.color))?;
+        if self.revision >= 1 {
+            write_command_id(write, self.last_command_id)?;
+        }
+        write_io_f32(write, self.mouse_x)?;
+        write_io_f32(write, self.mouse_y)?;
+        write_io_string(write, self.name.as_deref())?;
+        if self.revision >= 2 {
+            write_io_i16(write, self.selected_block_id.unwrap_or(-1))?;
+            write_io_i32(write, self.selected_rotation)?;
+        }
+        write_io_bool(write, self.shooting)?;
+        write_team(write, Some(self.team))?;
+        write_io_bool(write, self.typing)?;
+        write_unit_ref(write, self.unit)?;
+        write_io_f32(write, self.x)?;
+        write_io_f32(write, self.y)
+    }
 }
 
 /// Stage-1 Rust mirror of Java `NetworkIO.writeWorld(...)`.
@@ -140,9 +188,22 @@ impl NetworkWorldData {
 
         Self {
             player_id: connection_id,
+            player: Some(NetworkPlayerData::bootstrap()),
             map_tags,
             ..Self::default()
         }
+    }
+
+    pub fn materialized_player_bytes(&self) -> io::Result<Vec<u8>> {
+        if !self.player_bytes.is_empty() {
+            return Ok(self.player_bytes.clone());
+        }
+        let Some(player) = &self.player else {
+            return Ok(Vec::new());
+        };
+        let mut bytes = Vec::new();
+        player.write_to(&mut bytes)?;
+        Ok(bytes)
     }
 
     /// Builds Java `NetworkIO.writeWorld(...)` SaveVersion tail bytes from
@@ -321,7 +382,7 @@ pub fn write_world_data_raw(data: &NetworkWorldData) -> io::Result<Vec<u8>> {
     buffer.extend_from_slice(&data.rand_seed0.to_be_bytes());
     buffer.extend_from_slice(&data.rand_seed1.to_be_bytes());
     buffer.extend_from_slice(&data.player_id.to_be_bytes());
-    buffer.extend_from_slice(&data.player_bytes);
+    buffer.extend_from_slice(&data.materialized_player_bytes()?);
 
     // SaveVersion-backed tail. Prefer parsed snapshots when callers have them,
     // but retain raw section bytes for map/team/marker chunks until their write
