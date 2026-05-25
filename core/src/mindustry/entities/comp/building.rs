@@ -401,6 +401,10 @@ impl BuildingComp {
         self.enabled && !self.dead && self.initialized && supports_env && in_bounds
     }
 
+    pub fn should_update_tile(&self, no_update_disabled: bool) -> bool {
+        self.enabled || !no_update_disabled
+    }
+
     pub fn time_scale(&self) -> f32 {
         self.time_scale
     }
@@ -701,6 +705,19 @@ mod tests {
         building.advance_update_timing(1.0, false);
         assert_eq!(building.time_scale, 1.0);
         assert_eq!(building.time_scale_duration, 59.0);
+    }
+
+    #[test]
+    fn building_update_tile_gate_matches_java_no_update_disabled() {
+        let mut building = BuildingComp::new(point2_pack(1, 1), block(), TeamId(1));
+
+        building.enabled = true;
+        assert!(building.should_update_tile(false));
+        assert!(building.should_update_tile(true));
+
+        building.enabled = false;
+        assert!(building.should_update_tile(false));
+        assert!(!building.should_update_tile(true));
     }
 
     #[test]

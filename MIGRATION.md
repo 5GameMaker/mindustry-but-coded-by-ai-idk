@@ -978,6 +978,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `GameRuntime::advance_and_dispatch_effect_blocks(...)`
 - `GameRuntime::advance_owned_effect_blocks(...)`
 - `BuildingComp::advance_update_timing(...)`
+- `BuildingComp::should_update_tile(...)`
+- `BlockDef::no_update_disabled(...)`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
 - 已对照 `ForceProjector.updateTile()` 推进：
@@ -1128,6 +1130,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `core::GameRuntime` 已作为最小运行时 facade 接入 `GameState::advance_game_update_frame(...) -> effect_block_frame_input_from_game_update(...) -> effect_block_update_building_slice_with_stores(...)`，并持有 effect block runtime/timer sidecar store；该入口在帧推进前消费 world-load lifecycle 事件并清理 tile_pos keyed sidecar，避免换图复用旧状态；
   - `GameRuntime` 已持有最小 owned building 集合并通过 `add_building(...)` 按 Java `Tile.setBlock(...)` 的 block-size offset 规则同步 `World` footprint tile 的 `block/build` 引用；`advance_owned_effect_blocks(...)` 可直接驱动 runtime 自有建筑集合，向 Java `Groups.build.update()` 入口继续靠拢（真实 EntityGroup/indexer 仍待接入）；
   - `BuildingComp::advance_update_timing(...)` 已迁移 Java `BuildingComp.update()` 开头的 `timeScaleDuration -= Time.delta` / `!canOverdrive` 重置语义，并由 `GameRuntime::advance_and_dispatch_effect_blocks(...)` 在 batch dispatcher 前对传入建筑切片统一执行；
+  - `BlockDef::no_update_disabled(...)` / `BuildingComp::should_update_tile(...)` 已迁移 Java `if(enabled || !block.noUpdateDisabled) updateTile()` 的通用门控；effect block batch dispatcher 已先执行该门控，避免后续接入 `noUpdateDisabled=true` 的建筑时错误 tick；
   - `EffectBlockFrameBatchResources` / `effect_block_update_building_slice_with_stores(...)` 已形成外部 `&mut [BuildingComp]` 集合的最小遍历入口；内部用 source snapshot 避免借用冲突，同时把原始 building slice 作为 projector 目标集合，并在 report 后对源建筑执行物品消耗；
   - `effect_force_projector_update_building_frame(...)` / `effect_force_projector_update_building_frame_with_timer(...)` 已能从 `BuildingComp.efficiency/optional_efficiency/timeScale`、帧 delta 与 content `phaseUseTime/timerUse` 组装 ForceProjector runtime 输入；`FORCE_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback，且 broken/phase invalid/efficiency=0 时不触碰 timer slot；
   - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；

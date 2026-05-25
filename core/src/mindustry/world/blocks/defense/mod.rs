@@ -3945,7 +3945,13 @@ pub fn effect_block_update_building_slice_with_stores<'a, 'b>(
 
     for index in 0..buildings.len() {
         let source = buildings[index].clone();
-        let Some(block) = effect_block_data_for_building(content, &source) else {
+        let Some(block_def) = content.block(source.block.id) else {
+            continue;
+        };
+        if !source.should_update_tile(block_def.no_update_disabled()) {
+            continue;
+        }
+        let BlockDef::Effect(block) = block_def else {
             continue;
         };
         batch.effect_candidates += 1;

@@ -4624,6 +4624,18 @@ impl BlockDef {
         }
     }
 
+    pub fn no_update_disabled(&self) -> bool {
+        match self {
+            Self::DefenseWall(wall) => wall.no_update_disabled,
+            Self::Distribution(distribution) => distribution.no_update_disabled,
+            Self::Liquid(liquid) => liquid.no_update_disabled,
+            Self::Power(power) => power.no_update_disabled,
+            Self::Payload(payload) => payload.no_update_disabled,
+            Self::Sandbox(sandbox) => sandbox.no_update_disabled,
+            _ => false,
+        }
+    }
+
     pub fn as_floor(&self) -> Option<&FloorData> {
         match self {
             Self::Floor(floor) => Some(floor),
@@ -13163,6 +13175,30 @@ mod tests {
             .get_by_name("mend-projector")
             .unwrap()
             .can_overdrive());
+    }
+
+    #[test]
+    fn block_def_no_update_disabled_matches_java_overrides() {
+        let (_, _, registry) = load_test_registry();
+
+        assert!(!registry.get_by_name("duo").unwrap().no_update_disabled());
+        assert!(!registry
+            .get_by_name("mend-projector")
+            .unwrap()
+            .no_update_disabled());
+        assert!(registry
+            .get_by_name("junction")
+            .unwrap()
+            .no_update_disabled());
+        assert!(registry
+            .get_by_name("conduit")
+            .unwrap()
+            .no_update_disabled());
+        assert!(registry.get_by_name("diode").unwrap().no_update_disabled());
+        assert!(registry
+            .get_by_name("item-source")
+            .unwrap()
+            .no_update_disabled());
     }
 
     #[test]
