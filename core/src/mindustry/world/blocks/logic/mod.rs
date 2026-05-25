@@ -166,6 +166,49 @@ pub fn read_logic_display_state<R: Read>(
     Ok(LogicDisplayState::with_transform(transform))
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemoryBlockState {
+    pub memory: Vec<f64>,
+}
+
+impl MemoryBlockState {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            memory: vec![0.0; capacity],
+        }
+    }
+
+    pub fn from_values(values: impl Into<Vec<f64>>) -> Self {
+        Self {
+            memory: values.into(),
+        }
+    }
+}
+
+pub fn write_memory_state<W: Write>(write: &mut W, state: &MemoryBlockState) -> io::Result<()> {
+    write_i32(write, state.memory.len() as i32)?;
+    for value in &state.memory {
+        write_f64(write, *value)?;
+    }
+    Ok(())
+}
+
+pub fn read_memory_state<R: Read>(read: &mut R, capacity: usize) -> io::Result<MemoryBlockState> {
+    let mut state = MemoryBlockState::new(capacity);
+    let amount = read_i32(read)?;
+    if amount <= 0 {
+        return Ok(state);
+    }
+
+    for i in 0..amount as usize {
+        let value = read_f64(read)?;
+        if let Some(slot) = state.memory.get_mut(i) {
+            *slot = value;
+        }
+    }
+    Ok(state)
+}
+
 pub fn write_logic_config<W: Write>(write: W, config: &LogicConfig) -> io::Result<()> {
     if config.code.len() > LOGIC_MAX_BYTE_LEN {
         return Err(invalid_input(
@@ -365,6 +408,16 @@ fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
 
+fn read_f64<R: Read>(read: &mut R) -> io::Result<f64> {
+    let mut buf = [0; 8];
+    read.read_exact(&mut buf)?;
+    Ok(f64::from_be_bytes(buf))
+}
+
+fn write_f64<W: Write>(write: &mut W, value: f64) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
 fn invalid_input(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -438,6 +491,38 @@ mod tests {
             LogicDisplayState::default()
         );
         assert_eq!(legacy, [0xaa, 0xbb].as_slice());
+    }
+
+    #[test]
+    fn memory_state_roundtrips_java_double_array_payload() {
+        let state = MemoryBlockState::from_values(vec![1.0, -2.5, 42.25]);
+        let mut bytes = Vec::new();
+        write_memory_state(&mut bytes, &state).unwrap();
+        assert_eq!(bytes.len(), 4 + state.memory.len() * 8);
+        assert_eq!(read_memory_state(&mut bytes.as_slice(), 3).unwrap(), state);
+    }
+
+    #[test]
+    fn memory_state_read_consumes_extra_and_keeps_default_tail_like_java() {
+        let mut bytes = Vec::new();
+        write_memory_state(
+            &mut bytes,
+            &MemoryBlockState::from_values(vec![7.0, 8.0, 9.0]),
+        )
+        .unwrap();
+        let mut read = bytes.as_slice();
+        assert_eq!(
+            read_memory_state(&mut read, 2).unwrap(),
+            MemoryBlockState::from_values(vec![7.0, 8.0])
+        );
+        assert!(read.is_empty());
+
+        let mut short = Vec::new();
+        write_memory_state(&mut short, &MemoryBlockState::from_values(vec![4.5])).unwrap();
+        assert_eq!(
+            read_memory_state(&mut short.as_slice(), 3).unwrap(),
+            MemoryBlockState::from_values(vec![4.5, 0.0, 0.0])
+        );
     }
 
     #[test]
