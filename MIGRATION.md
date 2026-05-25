@@ -154,7 +154,7 @@ D:/MDT/mindustry-rust
 
 ```text
 upstream core/src .java: 774
-rust core/src .rs:      352
+rust core/src .rs:      353
 ```
 
 按 `core/src/mindustry` 子目录粗略统计：
@@ -1324,6 +1324,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 - 2026-05-26：对照 `BlockProducer.java` / `Constructor.java` 后确认 active 序列化顺序为 `PayloadBlockBuild` common -> `BlockProducer.progress` -> `Constructor.recipe(short)`，版本字节只存在于嵌套 `BuildPayload` 的 `block id + build.version + build.writeAll` 头中；已扩展 `constructor_recipe_resets_progress_and_roundtrips_short` 与 `block_producer_progress_and_item_acceptance_follow_java_build_shell`，覆盖 recipe 清空写 `-1`、不可生产配置仍按 Java 重置 progress、已有 payload 时 update 不推进生产且 heat/time 衰减；新增 `game_runtime_roundtrips_payload_constructor_block_payload_version`，锁定 constructor common 中嵌套 `BuildPayload` 的 version/build bytes 在 export -> load 后保留。
 - 2026-05-26：`GameRuntime` 新增 `advance_owned_payload_constructors_with_recipe_build_time(...)`，把 owned `PayloadConstructor` building 的 `BlockProducer.updateTile()` 最小语义接入真实 game update frame：随 `GameState::advance_game_update_frame(...)` 推进、刷新 building update permission、按 building efficiency/timeScale 计算 delta/edelta，驱动 `BlockProducerState.progress/heat/time`，达到 recipe build time 后生成 base-only `BuildPayload`、清零 `payVector` 并写回 `payload_runtime_states`。已用 `game_runtime_advances_owned_payload_constructor_into_build_payload` 验证 constructor sidecar 可从 progress 生产出嵌套 block payload；新建 payload 的 block-specific 默认 version/tail 仍需继续对齐。
 - 2026-05-26：`BlockDef` 新增 `requirements()` / `build_cost_multiplier()` / `explicit_build_time()` / `effective_build_time(items)`，按 Java `Block.init()` 公式计算 `buildTime`：显式 build time 优先，否则 `sum(requirements * item.cost)`，无 requirements 时默认为 `20f`，最后乘 `buildCostMultiplier`。`GameRuntime::advance_owned_payload_constructors(...)` 已改为直接使用 content registry 的 effective build time，不再要求调用方为普通路径传入 recipe build time 回调；保留 `advance_owned_payload_constructors_with_recipe_build_time(...)` 作为测试/特殊映射 seam。已用 `block_def_effective_build_time_matches_java_init_formula` 锁定 air/router/breach 三类默认、requirements+multiplier、显式 build time 路径。
+- 2026-05-26：`PayloadConstructorBlockData::can_produce_block(...)` 已对照 Java `Constructor.canProduce(Block)` 接入完整门禁：`BuildVisibility.visible(...)`、尺寸区间、非 `CoreBlock`、rules banned、环境可建造与 filter 命中；`GameRuntime::configure_owned_payload_constructor(...)` 已对照 Java `config(Block.class)` / `configClear` 接入 owned constructor 配置链，合法 recipe 写入 sidecar 与 `BuildingComp.config`，非法 recipe 不覆盖旧 recipe 但在 recipe 变化时重置 `BlockProducerState.progress`，clear 仅清 recipe/config 而不清 progress。已用 `payload_constructor_can_produce_respects_java_filters`、`game_runtime_configures_owned_payload_constructor_recipe`、`game_runtime_rejects_banned_payload_constructor_recipe_and_resets_progress`、`game_runtime_clears_owned_payload_constructor_recipe` 锁定。
 
 ## 10. 已知验证状态与风险
 
@@ -1340,6 +1341,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 - `cargo test -p mindustry-core` 已在本地通过：1782 passed / 0 failed；
 - `cargo test -p mindustry-desktop` 已在本地通过：12 passed / 0 failed；
 - 2026-05-25/26 本轮定向验证：`cargo test -p mindustry-core build_payload` 通过 9/9；`cargo test -p mindustry-core game_runtime_reports_trailing_block_state_bytes_after_successful_read` 通过 1/1；`cargo test -p mindustry-core game_runtime_loads_unit_factory_common_no_state_build_payload_before_factory_fields` 通过 1/1；`cargo test -p mindustry-core game_runtime_loads_unit_factory_common_unit_payload_before_factory_fields` 通过 1/1；`cargo test -p mindustry-core game_runtime_loads_unit_factory_common_nested_payload_conveyor_without_swallowing_factory_fields` 通过 1/1；`cargo test -p mindustry-core game_runtime_reads_payload_ammo_turret_state_and_filters_invalid_payloads` 通过 1/1；`cargo test -p mindustry-core payload` 通过 166/166；`cargo test -p mindustry-core turret` 通过 59/59；`cargo check -p mindustry-core` 通过，仅保留既有 unused warning；
+- 2026-05-26 constructor 配置闭环验证：`cargo test -p mindustry-core payload_constructor --no-fail-fast` 通过 8/8；`cargo check -p mindustry-core` 通过，仅保留既有 unused warning；`cargo test -p mindustry-server server_world_data_exports_owned_building_chunks_for_runtime_loader` 通过 1/1；`rustfmt --check core/src/mindustry/content/blocks.rs core/src/mindustry/core/game_runtime.rs` 与 `git diff --check` 通过；
 - 旧记录中的 `world_stream_with_java_like_payload_is_parsed_and_confirmed` 失败已通过补最小 player body 与测试期望修复；
 - 接手者仍必须以当前本地实测为准，不要只相信历史记录。
 

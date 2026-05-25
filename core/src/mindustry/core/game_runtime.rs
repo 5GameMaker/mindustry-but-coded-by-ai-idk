@@ -17,7 +17,7 @@ use crate::mindustry::{
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
-    ctype::ContentId,
+    ctype::{ContentId, ContentType},
     entities::{
         bullet::BulletType,
         comp::{BuildingComp, BulletComp, UnitComp},
@@ -78,9 +78,10 @@ use crate::mindustry::{
         MessageBlockState,
     },
     world::blocks::payloads::{
-        block_producer_update, read_block_producer_progress, read_constructor_recipe,
-        read_deconstructor_extra, read_payload_loader_extra, read_payload_mass_driver_extra,
-        read_payload_ref_to_end, read_payload_router_extra, read_payload_source_extra,
+        block_producer_update, constructor_clear, constructor_configure,
+        read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
+        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
+        read_payload_router_extra, read_payload_source_extra,
         read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
         write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
         write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
@@ -122,7 +123,7 @@ use crate::mindustry::{
         UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{is_construct_block_name, read_construct_block_state, ConstructBlockState},
-    world::{footprint_tiles, get_edges, Tile},
+    world::{footprint_tiles, get_edges, meta::build_visibility::BuildVisibilityContext, Tile},
 };
 
 pub struct GameRuntimeEffectResources<'a, 'b> {
@@ -1278,6 +1279,17 @@ pub struct GameRuntimePayloadConstructorFrameReport {
     pub missing_recipe_build_times: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadConstructorConfigureResult {
+    Configured,
+    Cleared,
+    Rejected,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotConstructor,
+    UnknownRecipe,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Construct(GameRuntimeConstructBlockState),
@@ -1362,6 +1374,64 @@ impl GameRuntime {
 
     pub fn export_network_map_snapshot(&self, content: &ContentLoader) -> LegacyShortChunkMap {
         export_network_map_snapshot_from_parts(self, content)
+    }
+
+    pub fn configure_owned_payload_constructor(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        recipe: Option<ContentId>,
+    ) -> GameRuntimePayloadConstructorConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimePayloadConstructorConfigureResult::MissingBuilding;
+        };
+
+        let constructor_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::PayloadConstructor(constructor)) => constructor,
+            Some(_) | None => return GameRuntimePayloadConstructorConfigureResult::NotConstructor,
+        };
+
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            producer,
+            recipe: current_recipe,
+            ..
+        }) = self.payload_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimePayloadConstructorConfigureResult::MissingRuntimeState;
+        };
+
+        let Some(recipe_id) = recipe else {
+            constructor_clear(current_recipe);
+            self.buildings[index].config = None;
+            return GameRuntimePayloadConstructorConfigureResult::Cleared;
+        };
+
+        let Some(recipe_block) = content.block(recipe_id) else {
+            return GameRuntimePayloadConstructorConfigureResult::UnknownRecipe;
+        };
+
+        let banned = self.state.rules.is_block_banned(&recipe_block.base().name);
+        let can_produce = constructor_block.can_produce_block(
+            recipe_block,
+            BuildVisibilityContext::default(),
+            self.state.rules.env,
+            banned,
+        );
+        if !can_produce {
+            constructor_configure(current_recipe, &mut producer.progress, recipe_id, false);
+            return GameRuntimePayloadConstructorConfigureResult::Rejected;
+        }
+
+        constructor_configure(current_recipe, &mut producer.progress, recipe_id, true);
+        self.buildings[index].config = Some(type_io::TypeValue::Content(type_io::ContentRef::new(
+            ContentType::Block,
+            recipe_id,
+        )));
+        GameRuntimePayloadConstructorConfigureResult::Configured
     }
 
     pub fn add_building(&mut self, building: BuildingComp) -> usize {
@@ -7593,6 +7663,180 @@ mod tests {
                 recipe
             })
         );
+    }
+
+    #[test]
+    fn game_runtime_configures_owned_payload_constructor_recipe() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let recipe_id = content
+            .block_by_name("tungsten-wall-large")
+            .unwrap()
+            .base()
+            .id;
+        let tile_pos = point2_pack(6, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            constructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 0.8,
+                    ..BlockProducerState::default()
+                },
+                recipe: None,
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_constructor(&content, tile_pos, Some(recipe_id)),
+            GameRuntimePayloadConstructorConfigureResult::Configured
+        );
+        assert_eq!(
+            runtime.buildings()[0].config.as_ref(),
+            Some(&TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Block,
+                recipe_id
+            )))
+        );
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            producer, recipe, ..
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert_eq!(*recipe, Some(recipe_id));
+        assert_eq!(producer.progress, 0.0);
+
+        let Some(GameRuntimePayloadBlockState::Constructor { producer, .. }) =
+            runtime.payload_runtime_states.get_mut(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        producer.progress = 0.75;
+
+        assert_eq!(
+            runtime.configure_owned_payload_constructor(&content, tile_pos, Some(recipe_id)),
+            GameRuntimePayloadConstructorConfigureResult::Configured
+        );
+        let Some(GameRuntimePayloadBlockState::Constructor { producer, .. }) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert_eq!(producer.progress, 0.75);
+    }
+
+    #[test]
+    fn game_runtime_rejects_banned_payload_constructor_recipe_and_resets_progress() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let current_id = content
+            .block_by_name("tungsten-wall-large")
+            .unwrap()
+            .base()
+            .id;
+        let banned_def = content.block_by_name("beryllium-wall-large").unwrap();
+        let banned_id = banned_def.base().id;
+        let tile_pos = point2_pack(6, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime
+            .state
+            .rules
+            .banned_blocks
+            .insert(banned_def.base().name.clone());
+        let mut building = BuildingComp::new(tile_pos, constructor_def.base().clone(), TeamId(6));
+        building.config = Some(TypeValue::Content(type_io::ContentRef::new(
+            ContentType::Block,
+            current_id,
+        )));
+        runtime.add_building(building);
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 0.8,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(current_id),
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_constructor(&content, tile_pos, Some(banned_id)),
+            GameRuntimePayloadConstructorConfigureResult::Rejected
+        );
+        assert_eq!(
+            runtime.buildings()[0].config.as_ref(),
+            Some(&TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Block,
+                current_id
+            )))
+        );
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            producer, recipe, ..
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert_eq!(*recipe, Some(current_id));
+        assert_eq!(producer.progress, 0.0);
+    }
+
+    #[test]
+    fn game_runtime_clears_owned_payload_constructor_recipe() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let recipe_id = content
+            .block_by_name("tungsten-wall-large")
+            .unwrap()
+            .base()
+            .id;
+        let tile_pos = point2_pack(6, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        let mut building = BuildingComp::new(tile_pos, constructor_def.base().clone(), TeamId(6));
+        building.config = Some(TypeValue::Content(type_io::ContentRef::new(
+            ContentType::Block,
+            recipe_id,
+        )));
+        runtime.add_building(building);
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 0.45,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(recipe_id),
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_constructor(&content, tile_pos, None),
+            GameRuntimePayloadConstructorConfigureResult::Cleared
+        );
+        assert_eq!(runtime.buildings()[0].config, None);
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            producer, recipe, ..
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert_eq!(*recipe, None);
+        assert_eq!(producer.progress, 0.45);
     }
 
     #[test]

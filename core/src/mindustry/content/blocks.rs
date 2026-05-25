@@ -10,7 +10,9 @@ use crate::mindustry::{
             SpawnBlockData, StaticTreeData, StaticWallData, TallBlockData, TreeBlockData,
         },
         blocks::MAX_CONSTRUCT_BLOCK_SIZE,
-        meta::{BlockFlag, BlockGroup, BuildVisibility, Env},
+        meta::{
+            build_visibility::BuildVisibilityContext, BlockFlag, BlockGroup, BuildVisibility, Env,
+        },
         Block, BlockId, CacheLayer,
     },
 };
@@ -3571,6 +3573,27 @@ impl PayloadConstructorBlockData {
         self.base.update = true;
         self.base.sync = true;
         self.base.group = BlockGroup::Payloads;
+    }
+
+    pub fn can_produce_block(
+        &self,
+        block: &BlockDef,
+        visibility_context: BuildVisibilityContext,
+        env: u32,
+        banned: bool,
+    ) -> bool {
+        let base = block.base();
+        base.build_visibility.visible(visibility_context)
+            && base.size >= self.min_block_size
+            && base.size <= self.max_block_size
+            && !matches!(block, BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core)
+            && !banned
+            && block.supports_env(env)
+            && (self.filter.is_empty()
+                || self
+                    .filter
+                    .iter()
+                    .any(|name| name.as_str() == base.name.as_str()))
     }
 
     fn finalize(&mut self, items: &[Item]) {
@@ -21294,6 +21317,61 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn payload_constructor_can_produce_respects_java_filters() {
+        let (_, _, registry) = load_test_registry();
+        let context = BuildVisibilityContext::default();
+        let constructor = registry
+            .get_payload_constructor_by_name("constructor")
+            .unwrap();
+        let tungsten_wall = registry.get_by_name("tungsten-wall-large").unwrap();
+        let router = registry.get_by_name("router").unwrap();
+
+        assert!(constructor.can_produce_block(tungsten_wall, context, Env::TERRESTRIAL, false));
+        assert!(!constructor.can_produce_block(router, context, Env::TERRESTRIAL, false));
+
+        let mut unrestricted = (*constructor).clone();
+        unrestricted.filter.clear();
+        let mut candidate = Block::new(30_100, "constructor-candidate");
+        candidate.size = 2;
+        candidate.env_enabled = Env::TERRESTRIAL;
+        candidate.build_visibility = BuildVisibility::Shown;
+        let candidate_def = BlockDef::Plain(candidate.clone());
+        assert!(unrestricted.can_produce_block(&candidate_def, context, Env::TERRESTRIAL, false));
+        assert!(!unrestricted.can_produce_block(&candidate_def, context, Env::TERRESTRIAL, true));
+
+        let mut hidden = candidate.clone();
+        hidden.build_visibility = BuildVisibility::Hidden;
+        assert!(!unrestricted.can_produce_block(
+            &BlockDef::Plain(hidden),
+            context,
+            Env::TERRESTRIAL,
+            false
+        ));
+
+        let mut too_large = candidate.clone();
+        too_large.size = unrestricted.max_block_size + 1;
+        assert!(!unrestricted.can_produce_block(
+            &BlockDef::Plain(too_large),
+            context,
+            Env::TERRESTRIAL,
+            false
+        ));
+
+        let mut space_only = candidate;
+        space_only.env_enabled = Env::SPACE;
+        assert!(!unrestricted.can_produce_block(
+            &BlockDef::Plain(space_only),
+            context,
+            Env::TERRESTRIAL,
+            false
+        ));
+
+        unrestricted.max_block_size = 9;
+        let core = registry.get_by_name("core-shard").unwrap();
+        assert!(!unrestricted.can_produce_block(core, context, Env::TERRESTRIAL, false));
     }
 
     #[test]
