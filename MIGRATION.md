@@ -908,6 +908,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_apply_absorb_to_bullet(...)`
 - `force_projector_absorb_bullet_comp(...)`
 - `force_projector_absorb_explosion(...)`
+- `ForceProjectorAbsorbEvent`
+- `ForceProjectorBreakEvent`
+- `force_projector_absorb_event(...)`
+- `force_projector_break_event(...)`
 - `ForceProjectorBulletAbsorb`
 - `ForceProjectorRemovedPlan`
 - `ForceProjectorDeflectPlan`
@@ -929,6 +933,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 未被吸收；
   - 点在正多边形内；
   - 命中后 `hit = 1`、`buildup += shieldDamage`，并返回 effect/sound plan。
+- 已将吸收/破盾副作用提升成运行态事件：
+  - `force_projector_absorb_event(...)` 将 `ForceProjectorBulletAbsorb` 与 bullet 坐标收束为可执行 `absorbEffect.at(bullet)` / `hitSound.at(x,y,...)` 事件；
+  - `force_projector_break_event(...)` 将 `force_projector_update(...)` 的 `broke_now` 结果收束为 `shieldBreakEffect.at(x,y,realRadius,teamColor)`、`breakSound.at(x,y)` 与 `Trigger.forceProjectorBreak` 事件计划；
+  - `fire_force_projector_break_trigger` 保持 Java `team != state.rules.defaultTeam` 门控，后续可由真实 event bus 执行。
 - 已将 bullet absorb 结果接到真实 `BulletComp::absorb()`：
   - `BulletComp::absorb()` 对齐 Java `absorbed = true; remove()` 的核心状态，当前设置 `absorbed/removed` 并清空 collision 记录，保持 `hit=false` 以保留 despawn 路径语义；
   - `force_projector_apply_absorb_to_bullet(...)` 只在 `ForceProjectorBulletAbsorb.absorbed` 为真时修改 bullet 状态。

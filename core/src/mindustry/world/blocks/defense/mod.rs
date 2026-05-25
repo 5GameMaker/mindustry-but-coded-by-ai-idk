@@ -1594,6 +1594,25 @@ pub struct ForceProjectorBulletAbsorb {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceProjectorAbsorbEvent {
+    pub x: f32,
+    pub y: f32,
+    pub play_absorb_effect: bool,
+    pub play_hit_sound: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceProjectorBreakEvent {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub team: TeamId,
+    pub play_shield_break_effect: bool,
+    pub play_break_sound: bool,
+    pub fire_force_projector_break_trigger: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ForceProjectorRemovedPlan {
     pub call_super_removed: bool,
     pub play_force_shrink: bool,
@@ -1649,6 +1668,18 @@ pub fn force_projector_apply_absorb_to_bullet(
     true
 }
 
+pub fn force_projector_absorb_event(
+    plan: &ForceProjectorBulletAbsorb,
+    bullet: &BulletComp,
+) -> Option<ForceProjectorAbsorbEvent> {
+    plan.absorbed.then_some(ForceProjectorAbsorbEvent {
+        x: bullet.x,
+        y: bullet.y,
+        play_absorb_effect: plan.hit_effect,
+        play_hit_sound: plan.sound_effect,
+    })
+}
+
 pub fn force_projector_absorb_bullet_comp(
     state: &mut ForceProjectorState,
     bullet: &mut BulletComp,
@@ -1666,6 +1697,30 @@ pub fn force_projector_absorb_bullet_comp(
     );
     force_projector_apply_absorb_to_bullet(&plan, bullet);
     plan
+}
+
+pub fn force_projector_break_event(
+    broke_now: bool,
+    state: &ForceProjectorState,
+    building: &BuildingComp,
+    radius: f32,
+    phase_radius_boost: f32,
+    default_team: TeamId,
+) -> Option<ForceProjectorBreakEvent> {
+    broke_now.then_some(ForceProjectorBreakEvent {
+        x: building.x,
+        y: building.y,
+        radius: force_projector_real_radius(
+            radius,
+            state.phase_heat,
+            phase_radius_boost,
+            state.radscl,
+        ),
+        team: building.team,
+        play_shield_break_effect: true,
+        play_break_sound: true,
+        fire_force_projector_break_trigger: building.team != default_team,
+    })
 }
 
 pub fn force_projector_on_removed_plan(
@@ -5506,6 +5561,78 @@ mod tests {
         assert_eq!(buildings[1].time_scale, 1.0);
         assert_eq!(buildings[2].time_scale, 1.0);
         assert_eq!(buildings[3].time_scale, 1.0);
+    }
+
+    #[test]
+    fn force_projector_runtime_events_capture_absorb_and_break_side_effects() {
+        let mut state = ForceProjectorState {
+            broken: false,
+            buildup: 800.0,
+            radscl: 1.0,
+            warmup: 1.0,
+            ..ForceProjectorState::default()
+        };
+        let mut building = projector_runtime_building(27, "force-projector");
+        building.set_pos(32.0, 48.0);
+        let broke_now = force_projector_update(
+            &mut state, 1.0, false, 0.0, 0.0, 0.0, 700.0, 400.0, 1.75, 0.35, 1.5,
+        );
+        assert!(broke_now);
+        assert!(state.broken);
+        assert_eq!(state.buildup, 700.0);
+
+        let break_event =
+            force_projector_break_event(broke_now, &state, &building, 101.7, 80.0, TeamId(0))
+                .unwrap();
+        assert_eq!(
+            break_event,
+            ForceProjectorBreakEvent {
+                x: 32.0,
+                y: 48.0,
+                radius: 101.7,
+                team: TeamId(1),
+                play_shield_break_effect: true,
+                play_break_sound: true,
+                fire_force_projector_break_trigger: true,
+            }
+        );
+        assert!(
+            !force_projector_break_event(broke_now, &state, &building, 101.7, 80.0, TeamId(1))
+                .unwrap()
+                .fire_force_projector_break_trigger
+        );
+        assert!(
+            force_projector_break_event(false, &state, &building, 101.7, 80.0, TeamId(0)).is_none()
+        );
+
+        let mut bullet = BulletComp::default();
+        bullet.x = 40.0;
+        bullet.y = 55.0;
+        let absorb = ForceProjectorBulletAbsorb {
+            absorbed: true,
+            hit_effect: true,
+            sound_effect: true,
+            buildup_added: 25.0,
+        };
+        assert_eq!(
+            force_projector_absorb_event(&absorb, &bullet),
+            Some(ForceProjectorAbsorbEvent {
+                x: 40.0,
+                y: 55.0,
+                play_absorb_effect: true,
+                play_hit_sound: true,
+            })
+        );
+        assert_eq!(
+            force_projector_absorb_event(
+                &ForceProjectorBulletAbsorb {
+                    absorbed: false,
+                    ..absorb
+                },
+                &bullet,
+            ),
+            None
+        );
     }
 
     #[test]
