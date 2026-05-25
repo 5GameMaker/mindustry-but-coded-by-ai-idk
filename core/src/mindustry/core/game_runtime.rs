@@ -22,7 +22,7 @@ use crate::mindustry::{
         EffectBlockFrameBatchReport, EffectBlockFrameBatchResources, EffectBlockRuntimeStateStore,
         EffectBlockTimerStateStore,
     },
-    world::{footprint_tiles, Tile},
+    world::{footprint_tiles, get_edges, Tile},
 };
 
 pub struct GameRuntimeEffectResources<'a, 'b> {
@@ -84,6 +84,7 @@ impl GameRuntime {
         let index = self.buildings.len();
         self.buildings.push(building);
         self.sync_world_footprint_refs(index);
+        self.refresh_owned_building_proximity();
         index
     }
 
@@ -104,6 +105,7 @@ impl GameRuntime {
         self.clear_world_refs_for_building(&removed);
         self.effect_runtime_store.remove(removed.tile_pos);
         self.effect_timer_store.remove(removed.tile_pos);
+        self.refresh_owned_building_proximity();
         Some(removed)
     }
 
@@ -118,6 +120,52 @@ impl GameRuntime {
             }
         }
         positions
+    }
+
+    pub fn refresh_owned_building_proximity(&mut self) -> usize {
+        let mut proximities = vec![Vec::new(); self.buildings.len()];
+
+        for (index, building) in self.buildings.iter().enumerate() {
+            let this_ref = building.pos_ref();
+            let tile_x = building.tile_x();
+            let tile_y = building.tile_y();
+            let team = building.team;
+
+            for point in get_edges(building.block.size.max(1)) {
+                let Some(other_ref) = self.state.world.build(tile_x + point.x, tile_y + point.y)
+                else {
+                    continue;
+                };
+                if other_ref.tile_pos == building.tile_pos {
+                    continue;
+                }
+                let Some(other_index) = self
+                    .buildings
+                    .iter()
+                    .position(|other| other.tile_pos == other_ref.tile_pos)
+                else {
+                    continue;
+                };
+                if self.buildings[other_index].team != team {
+                    continue;
+                }
+
+                let other_current_ref = self.buildings[other_index].pos_ref();
+                if !proximities[index].contains(&other_current_ref) {
+                    proximities[index].push(other_current_ref);
+                }
+                if !proximities[other_index].contains(&this_ref) {
+                    proximities[other_index].push(this_ref);
+                }
+            }
+        }
+
+        let mut total = 0;
+        for (building, proximity) in self.buildings.iter_mut().zip(proximities) {
+            total += proximity.len();
+            building.proximity = proximity;
+        }
+        total
     }
 
     pub fn clear_buildings(&mut self) {
@@ -652,6 +700,54 @@ mod tests {
         let old_center = runtime.state.world.tile(10, 10).unwrap();
         assert_eq!(old_center.block, Tile::AIR);
         assert!(old_center.build.is_none());
+    }
+
+    #[test]
+    fn game_runtime_refreshes_owned_building_proximity_like_java_edges() {
+        let mut large_block = Block::new(30_020, "test-large");
+        large_block.size = 3;
+        let small_block = Block::new(30_021, "test-small");
+        let enemy_block = Block::new(30_022, "test-enemy");
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+
+        let large_pos = point2_pack(10, 10);
+        let same_team_pos = point2_pack(12, 10);
+        let enemy_pos = point2_pack(10, 12);
+        runtime.add_building(BuildingComp::new(large_pos, large_block.clone(), TeamId(1)));
+        runtime.add_building(BuildingComp::new(
+            same_team_pos,
+            small_block.clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(enemy_pos, enemy_block, TeamId(2)));
+
+        let large = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == large_pos)
+            .unwrap();
+        let same_team = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == same_team_pos)
+            .unwrap();
+        let enemy = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == enemy_pos)
+            .unwrap();
+        assert_eq!(large.proximity, vec![same_team.pos_ref()]);
+        assert_eq!(same_team.proximity, vec![large.pos_ref()]);
+        assert!(enemy.proximity.is_empty());
+
+        runtime.remove_building_by_tile_pos(same_team_pos).unwrap();
+        let large = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == large_pos)
+            .unwrap();
+        assert!(large.proximity.is_empty());
     }
 
     #[test]
