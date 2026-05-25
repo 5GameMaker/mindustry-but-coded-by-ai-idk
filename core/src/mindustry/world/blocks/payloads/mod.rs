@@ -1,7 +1,7 @@
 use std::io::{self, Read, Write};
 
 use crate::mindustry::{
-    ctype::ContentId,
+    ctype::{ContentId, ContentType},
     world::{point2_pack, point2_x, point2_y, BlockId},
 };
 
@@ -979,6 +979,16 @@ pub fn read_terminal_payload_conveyor_extra<R: Read>(
 pub struct PayloadSortKey {
     pub content_type: i8,
     pub id: ContentId,
+}
+
+pub fn payload_ref_sort_key(payload: &PayloadRef) -> Option<PayloadSortKey> {
+    match payload {
+        PayloadRef::Block { block, .. } => Some(PayloadSortKey {
+            content_type: ContentType::Block.ordinal() as i8,
+            id: *block,
+        }),
+        PayloadRef::Unit { .. } => None,
+    }
 }
 
 pub fn payload_router_check_match(

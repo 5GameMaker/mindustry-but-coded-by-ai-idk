@@ -3260,6 +3260,28 @@ impl PayloadBlockData {
         self.configurable = true;
         self.clear_on_double_tap = true;
     }
+
+    pub fn can_sort_block(
+        &self,
+        block: &BlockDef,
+        visibility_context: BuildVisibilityContext,
+        env: u32,
+        banned: bool,
+    ) -> bool {
+        self.kind == PayloadBlockKind::PayloadRouter
+            && block.base().build_visibility.visible(visibility_context)
+            && block.base().size <= self.base.size
+            && !matches!(block, BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core)
+            && !banned
+            && block.supports_env(env)
+    }
+
+    pub fn can_sort_unit(&self, unit: &UnitType, env: u32, banned: bool) -> bool {
+        self.kind == PayloadBlockKind::PayloadRouter
+            && !unit.is_hidden()
+            && !banned
+            && unit.supports_env(env)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20791,6 +20813,9 @@ mod tests {
         let (all_items, _, registry) = load_test_registry();
         let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
         let payload = registry.get_payload_by_name("payload-router").unwrap();
+        let context = BuildVisibilityContext::default();
+        let router = registry.get_by_name("router").unwrap();
+        let core = registry.get_by_name("core-shard").unwrap();
 
         assert_eq!(payload.kind, PayloadBlockKind::PayloadRouter);
         assert_eq!(payload.base.group, BlockGroup::Payloads);
@@ -20820,6 +20845,8 @@ mod tests {
         assert!(payload.push_units);
         assert_eq!(payload.research_cost_multiplier, 1.0);
         assert!(payload.research_cost.is_empty());
+        assert!(payload.can_sort_block(router, context, Env::TERRESTRIAL, false));
+        assert!(!payload.can_sort_block(core, context, Env::TERRESTRIAL, false));
         assert_eq!(
             payload.requirements,
             vec![

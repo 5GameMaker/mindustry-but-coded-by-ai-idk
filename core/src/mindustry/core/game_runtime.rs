@@ -82,19 +82,20 @@ use crate::mindustry::{
         payload_block_handle_payload, payload_block_move_in, payload_block_move_out_step,
         payload_conveyor_accept_payload, payload_conveyor_cur_step,
         payload_conveyor_handle_payload, payload_conveyor_should_attempt_move,
-        payload_conveyor_update_timing, payload_source_clear_config,
-        payload_source_configure_block, payload_source_configure_unit, payload_source_update,
-        payload_void_update, read_block_producer_progress, read_constructor_recipe,
-        read_deconstructor_extra, read_payload_loader_extra, read_payload_mass_driver_extra,
-        read_payload_ref_to_end, read_payload_router_extra, read_payload_source_extra,
-        read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
-        write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
-        write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
-        write_payload_mass_driver_extra, write_payload_ref, write_payload_router_extra,
-        write_payload_source_extra, BlockProducerState, PayloadBlockBuildState,
-        PayloadConveyorState, PayloadDeconstructorState, PayloadLoaderState,
-        PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceSpawn, PayloadSourceState,
-        Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
+        payload_conveyor_update_timing, payload_ref_sort_key, payload_router_check_match,
+        payload_source_clear_config, payload_source_configure_block, payload_source_configure_unit,
+        payload_source_update, payload_void_update, read_block_producer_progress,
+        read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
+        read_payload_mass_driver_extra, read_payload_ref_to_end, read_payload_router_extra,
+        read_payload_source_extra, read_terminal_payload_block_build_common,
+        read_terminal_payload_conveyor_extra, write_block_producer_progress,
+        write_constructor_recipe, write_deconstructor_extra, write_payload_block_build_common,
+        write_payload_conveyor_extra, write_payload_loader_extra, write_payload_mass_driver_extra,
+        write_payload_ref, write_payload_router_extra, write_payload_source_extra,
+        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
+        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
+        PayloadSortKey, PayloadSourceSpawn, PayloadSourceState, Vec2 as PayloadVec2,
+        PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -513,6 +514,7 @@ fn write_network_map_block_state_tail<W: io::Write>(
                     conveyor,
                     sorted,
                     rec_dir,
+                    ..
                 },
             ) if payload.kind == PayloadBlockKind::PayloadRouter => {
                 write_payload_conveyor_extra(
@@ -1171,6 +1173,9 @@ pub enum GameRuntimePayloadBlockState {
         conveyor: PayloadConveyorState,
         sorted: Option<PayloadSortKey>,
         rec_dir: i32,
+        matches: bool,
+        smooth_rot: f32,
+        control_time: f32,
     },
     Deconstructor {
         common: PayloadBlockBuildState,
@@ -1404,6 +1409,25 @@ pub enum GameRuntimePayloadSourceCommandResult {
     NotPayloadSource,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadRouterConfig {
+    Block(ContentId),
+    Unit(ContentId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadRouterConfigureResult {
+    ConfiguredBlock,
+    ConfiguredUnit,
+    Cleared,
+    Rejected,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotPayloadRouter,
+    UnknownBlock,
+    UnknownUnit,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Construct(GameRuntimeConstructBlockState),
@@ -1626,6 +1650,104 @@ impl GameRuntime {
                 GameRuntimePayloadSourceConfigureResult::ConfiguredUnit
             }
         }
+    }
+
+    pub fn configure_owned_payload_router(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        config: Option<GameRuntimePayloadRouterConfig>,
+    ) -> GameRuntimePayloadRouterConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimePayloadRouterConfigureResult::MissingBuilding;
+        };
+
+        let router_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::Payload(payload)) if payload.kind == PayloadBlockKind::PayloadRouter => {
+                payload
+            }
+            Some(_) | None => return GameRuntimePayloadRouterConfigureResult::NotPayloadRouter,
+        };
+
+        let Some(GameRuntimePayloadBlockState::Router {
+            conveyor,
+            sorted,
+            rec_dir: _,
+            matches,
+            ..
+        }) = self.payload_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimePayloadRouterConfigureResult::MissingRuntimeState;
+        };
+
+        let Some(config) = config else {
+            *sorted = None;
+            *matches = false;
+            self.buildings[index].config = None;
+            return GameRuntimePayloadRouterConfigureResult::Cleared;
+        };
+
+        let (sorted_key, configured_result, content_type) = match config {
+            GameRuntimePayloadRouterConfig::Block(block_id) => {
+                let Some(block) = content.block(block_id) else {
+                    return GameRuntimePayloadRouterConfigureResult::UnknownBlock;
+                };
+                let banned = self.state.rules.is_block_banned(&block.base().name);
+                if !router_block.can_sort_block(
+                    block,
+                    self.state.build_visibility_context(),
+                    self.state.rules.env,
+                    banned,
+                ) {
+                    return GameRuntimePayloadRouterConfigureResult::Rejected;
+                }
+                (
+                    PayloadSortKey {
+                        content_type: ContentType::Block.ordinal() as i8,
+                        id: block_id,
+                    },
+                    GameRuntimePayloadRouterConfigureResult::ConfiguredBlock,
+                    ContentType::Block,
+                )
+            }
+            GameRuntimePayloadRouterConfig::Unit(unit_id) => {
+                let Some(unit) = content.unit(unit_id) else {
+                    return GameRuntimePayloadRouterConfigureResult::UnknownUnit;
+                };
+                let banned = self.state.rules.is_unit_banned(&unit.base.mappable.name);
+                if !router_block.can_sort_unit(unit, self.state.rules.env, banned) {
+                    return GameRuntimePayloadRouterConfigureResult::Rejected;
+                }
+                (
+                    PayloadSortKey {
+                        content_type: ContentType::Unit.ordinal() as i8,
+                        id: unit_id,
+                    },
+                    GameRuntimePayloadRouterConfigureResult::ConfiguredUnit,
+                    ContentType::Unit,
+                )
+            }
+        };
+        *sorted = Some(sorted_key);
+        *matches = conveyor
+            .item
+            .as_ref()
+            .and_then(|payload| payload_ref_sort_key(payload))
+            .map(|payload| {
+                payload_router_check_match(Some(sorted_key), Some(payload), router_block.invert)
+            })
+            .unwrap_or_else(|| {
+                payload_router_check_match(Some(sorted_key), None, router_block.invert)
+            });
+        self.buildings[index].config = Some(type_io::TypeValue::Content(type_io::ContentRef::new(
+            content_type,
+            sorted_key.id,
+        )));
+        configured_result
     }
 
     pub fn command_owned_payload_source(
@@ -2545,10 +2667,21 @@ impl GameRuntime {
                     };
                     let (sorted, rec_dir) = read_payload_router_extra(building_payload, revision)
                         .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                    let matches = payload_router_check_match(
+                        sorted,
+                        conveyor
+                            .item
+                            .as_ref()
+                            .and_then(|payload_ref| payload_ref_sort_key(payload_ref)),
+                        payload.invert,
+                    );
                     Ok(Some(GameRuntimePayloadBlockState::Router {
                         conveyor,
                         sorted,
                         rec_dir,
+                        matches,
+                        smooth_rot: 0.0,
+                        control_time: -1.0,
                     }))
                 }
             },
@@ -3670,6 +3803,7 @@ impl GameRuntime {
                 move_time: f32,
                 target_enabled: bool,
                 target_rotdeg: f32,
+                invert: bool,
             },
         }
 
@@ -3703,13 +3837,17 @@ impl GameRuntime {
                 TargetKind::Void
             }
             Some(BlockDef::Payload(payload_block))
-                if payload_block.kind == PayloadBlockKind::PayloadConveyor =>
+                if matches!(
+                    payload_block.kind,
+                    PayloadBlockKind::PayloadConveyor | PayloadBlockKind::PayloadRouter
+                ) =>
             {
                 TargetKind::Conveyor {
                     payload_limit: payload_block.payload_limit,
                     move_time: payload_block.move_time,
                     target_enabled: self.buildings[target_index].enabled,
                     target_rotdeg: self.buildings[target_index].rotdeg(),
+                    invert: payload_block.invert,
                 }
             }
             _ => return false,
@@ -3721,6 +3859,7 @@ impl GameRuntime {
                 common.payload.as_ref()
             }
             Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) => conveyor.item.as_ref(),
+            Some(GameRuntimePayloadBlockState::Router { conveyor, .. }) => conveyor.item.as_ref(),
             _ => None,
         };
         let Some(source_payload) = source_payload else {
@@ -3741,6 +3880,20 @@ impl GameRuntime {
                     ..
                 },
                 Some(GameRuntimePayloadBlockState::Conveyor(conveyor)),
+            ) => payload_conveyor_accept_payload(
+                conveyor.item.is_some(),
+                Self::payload_ref_fits_payload_limit(content, source_payload, payload_limit),
+                false,
+                target_enabled,
+                conveyor.progress,
+            ),
+            (
+                TargetKind::Conveyor {
+                    payload_limit,
+                    target_enabled,
+                    ..
+                },
+                Some(GameRuntimePayloadBlockState::Router { conveyor, .. }),
             ) => payload_conveyor_accept_payload(
                 conveyor.item.is_some(),
                 Self::payload_ref_fits_payload_limit(content, source_payload, payload_limit),
@@ -3786,6 +3939,10 @@ impl GameRuntime {
                     let payload = conveyor.item.take()?;
                     Some((payload, source_rotdeg))
                 }
+                GameRuntimePayloadBlockState::Router { conveyor, .. } => {
+                    let payload = conveyor.item.take()?;
+                    Some((payload, source_rotdeg))
+                }
                 _ => None,
             })
         else {
@@ -3817,6 +3974,7 @@ impl GameRuntime {
                     move_time,
                     target_enabled,
                     target_rotdeg,
+                    invert: _,
                 },
                 Some(GameRuntimePayloadBlockState::Conveyor(conveyor)),
             ) if payload_conveyor_accept_payload(
@@ -3841,6 +3999,76 @@ impl GameRuntime {
                     target_rotdeg,
                     source_angle_to_target,
                 );
+                true
+            }
+            (
+                TargetKind::Conveyor {
+                    payload_limit,
+                    move_time,
+                    target_enabled,
+                    target_rotdeg,
+                    invert,
+                },
+                Some(GameRuntimePayloadBlockState::Router {
+                    conveyor,
+                    sorted,
+                    rec_dir,
+                    matches,
+                    smooth_rot,
+                    control_time,
+                }),
+            ) if payload_conveyor_accept_payload(
+                conveyor.item.is_some(),
+                payload
+                    .as_ref()
+                    .map(|payload| {
+                        Self::payload_ref_fits_payload_limit(content, payload, payload_limit)
+                    })
+                    .unwrap_or(false),
+                false,
+                target_enabled,
+                conveyor.progress,
+            ) =>
+            {
+                let cur_step = payload_conveyor_cur_step(self.state.tick as f32, move_time);
+                payload_conveyor_handle_payload(
+                    conveyor,
+                    payload.take().expect("payload should be present"),
+                    cur_step,
+                    false,
+                    target_rotdeg,
+                    source_angle_to_target,
+                );
+                *matches = conveyor
+                    .item
+                    .as_ref()
+                    .and_then(|payload_ref| payload_ref_sort_key(payload_ref))
+                    .map(|payload_key| {
+                        payload_router_check_match(*sorted, Some(payload_key), invert)
+                    })
+                    .unwrap_or_else(|| payload_router_check_match(*sorted, None, invert));
+                if *control_time < 0.0 {
+                    let source_building = &self.buildings[source_index];
+                    let target_building = &self.buildings[target_index];
+                    let dx = source_building.x - target_building.x;
+                    let dy = source_building.y - target_building.y;
+                    *rec_dir = if dx.abs() > dy.abs() {
+                        if source_building.x <= target_building.x - 1.0 {
+                            0
+                        } else if source_building.x >= target_building.x + 1.0 {
+                            2
+                        } else {
+                            *rec_dir
+                        }
+                    } else if source_building.y <= target_building.y - 1.0 {
+                        1
+                    } else if source_building.y >= target_building.y + 1.0 {
+                        3
+                    } else {
+                        *rec_dir
+                    };
+                }
+                *smooth_rot = target_rotdeg;
                 true
             }
             _ => false,
@@ -3957,9 +4185,7 @@ impl GameRuntime {
                 )
                 .map(|target| target.tile_pos);
 
-            let Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) =
-                self.payload_runtime_states.get_mut(&tile_pos)
-            else {
+            let Some(state) = self.payload_runtime_states.get_mut(&tile_pos) else {
                 report.missing_runtime_states += 1;
                 continue;
             };
@@ -3967,16 +4193,44 @@ impl GameRuntime {
             let progress_time = tick;
             let progress = progress_time % payload_block.move_time;
             let interp_progress = (progress / payload_block.move_time).clamp(0.0, 1.0);
-            payload_conveyor_update_timing(
-                conveyor,
-                progress_time,
-                payload_block.move_time,
-                interp_progress,
-            );
+            let should_attempt_move = match state {
+                GameRuntimePayloadBlockState::Conveyor(conveyor) => {
+                    payload_conveyor_update_timing(
+                        conveyor,
+                        progress_time,
+                        payload_block.move_time,
+                        interp_progress,
+                    );
+                    let cur_step =
+                        payload_conveyor_cur_step(progress_time, payload_block.move_time);
+                    payload_conveyor_should_attempt_move(conveyor, cur_step)
+                }
+                GameRuntimePayloadBlockState::Router {
+                    conveyor,
+                    control_time,
+                    smooth_rot,
+                    ..
+                } => {
+                    payload_conveyor_update_timing(
+                        conveyor,
+                        progress_time,
+                        payload_block.move_time,
+                        interp_progress,
+                    );
+                    *control_time -= frame_delta;
+                    *smooth_rot = rotation as f32 * 90.0;
+                    let cur_step =
+                        payload_conveyor_cur_step(progress_time, payload_block.move_time);
+                    payload_conveyor_should_attempt_move(conveyor, cur_step)
+                }
+                _ => {
+                    report.missing_runtime_states += 1;
+                    continue;
+                }
+            };
             report.updated_conveyors += 1;
 
-            let cur_step = payload_conveyor_cur_step(progress_time, payload_block.move_time);
-            if payload_conveyor_should_attempt_move(conveyor, cur_step) {
+            if should_attempt_move {
                 report.attempted_moves += 1;
                 if let Some(target_tile_pos) = target_tile_pos {
                     pending_payload_moves.push((tile_pos, target_tile_pos));
@@ -6772,6 +7026,9 @@ mod tests {
                     conveyor: router_conveyor.clone(),
                     sorted,
                     rec_dir: 3,
+                    matches: false,
+                    smooth_rot: 0.0,
+                    control_time: -1.0,
                 },
             ),
             Some(GameRuntimePayloadBlockState::Router {
@@ -6781,6 +7038,9 @@ mod tests {
                 },
                 sorted,
                 rec_dir: 3,
+                matches: false,
+                smooth_rot: 0.0,
+                control_time: -1.0,
             })
         );
 
@@ -9027,7 +9287,10 @@ mod tests {
             Some(&GameRuntimePayloadBlockState::Router {
                 conveyor,
                 sorted,
-                rec_dir
+                rec_dir,
+                matches: false,
+                smooth_rot: 0.0,
+                control_time: -1.0,
             })
         );
     }
@@ -9075,8 +9338,87 @@ mod tests {
             Some(&GameRuntimePayloadBlockState::Router {
                 conveyor,
                 sorted,
-                rec_dir
+                rec_dir,
+                matches: false,
+                smooth_rot: 0.0,
+                control_time: -1.0,
             })
+        );
+    }
+
+    #[test]
+    fn game_runtime_configures_owned_payload_router_block_and_clears_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let door_def = content.block_by_name("door").unwrap();
+        let tile_pos = point2_pack(3, 4);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            router_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState {
+                    item: Some(base_only_build_payload_ref(&content, "door")),
+                    ..PayloadConveyorState::default()
+                },
+                sorted: None,
+                rec_dir: 0,
+                matches: false,
+                smooth_rot: 0.0,
+                control_time: -1.0,
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_router(
+                &content,
+                tile_pos,
+                Some(GameRuntimePayloadRouterConfig::Block(door_def.base().id)),
+            ),
+            GameRuntimePayloadRouterConfigureResult::ConfiguredBlock
+        );
+        assert_eq!(
+            runtime
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == tile_pos)
+                .and_then(|building| building.config.clone()),
+            Some(type_io::TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Block,
+                door_def.base().id
+            )))
+        );
+        let Some(GameRuntimePayloadBlockState::Router {
+            sorted, matches, ..
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert_eq!(
+            *sorted,
+            Some(PayloadSortKey {
+                content_type: ContentType::Block.ordinal() as i8,
+                id: door_def.base().id,
+            })
+        );
+        assert!(*matches);
+
+        assert_eq!(
+            runtime.configure_owned_payload_router(&content, tile_pos, None),
+            GameRuntimePayloadRouterConfigureResult::Cleared
+        );
+        assert_eq!(
+            runtime
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == tile_pos)
+                .and_then(|building| building.config.clone()),
+            None
         );
     }
 
