@@ -69,8 +69,10 @@ use crate::mindustry::{
     },
     world::blocks::logic::{
         read_canvas_state, read_logic_display_state, read_logic_processor_state, read_memory_state,
-        read_message_state, read_switch_enabled, CanvasBlockState, LogicDisplayState,
-        LogicProcessorState, MemoryBlockState, MessageBlockState,
+        read_message_state, read_switch_enabled, write_canvas_state, write_logic_display_state,
+        write_logic_processor_state, write_memory_state, write_message_state, write_switch_enabled,
+        CanvasBlockState, LogicDisplayState, LogicProcessorState, MemoryBlockState,
+        MessageBlockState,
     },
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
@@ -375,6 +377,41 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Logic(logic), Some(state)) =
+        (block, runtime.logic_runtime_states.get(&building.tile_pos))
+    {
+        match (logic.kind, state) {
+            (LogicBlockKind::Message, GameRuntimeLogicBlockState::Message(state)) => {
+                write_message_state(write, state)?;
+            }
+            (LogicBlockKind::Switch, GameRuntimeLogicBlockState::Switch { enabled }) => {
+                write_switch_enabled(write, *enabled)?;
+            }
+            (
+                LogicBlockKind::Display | LogicBlockKind::TileDisplay,
+                GameRuntimeLogicBlockState::Display(state),
+            ) => {
+                write_logic_display_state(write, state)?;
+            }
+            (LogicBlockKind::Memory, GameRuntimeLogicBlockState::Memory(state)) => {
+                write_memory_state(write, state)?;
+            }
+            (LogicBlockKind::Canvas, GameRuntimeLogicBlockState::Canvas(state)) => {
+                write_canvas_state(write, state)?;
+            }
+            (LogicBlockKind::Processor, GameRuntimeLogicBlockState::Processor(state)) => {
+                write_logic_processor_state(
+                    write,
+                    state,
+                    4,
+                    logic.privileged_only,
+                    logic.max_instructions_per_tick.max(1) as i16,
+                )?;
+            }
+            _ => {}
+        }
+    }
+
     if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(state))) =
         (block, runtime.liquid_runtime_states.get(&building.tile_pos))
     {
@@ -525,6 +562,20 @@ fn network_map_building_revision(
             (DistributionBlockKind::Sorter, GameRuntimeDistributionBlockState::Sorter(_)) => {
                 return 2;
             }
+            _ => {}
+        }
+    }
+
+    if let (BlockDef::Logic(logic), Some(state)) =
+        (block, runtime.logic_runtime_states.get(&building.tile_pos))
+    {
+        match (logic.kind, state) {
+            (LogicBlockKind::Switch, GameRuntimeLogicBlockState::Switch { .. })
+            | (
+                LogicBlockKind::Display | LogicBlockKind::TileDisplay,
+                GameRuntimeLogicBlockState::Display(_),
+            ) => return 1,
+            (LogicBlockKind::Processor, GameRuntimeLogicBlockState::Processor(_)) => return 4,
             _ => {}
         }
     }
@@ -4578,6 +4629,166 @@ mod tests {
                     ..unload
                 }
             ))
+        );
+    }
+
+    fn exported_logic_state_revision(
+        content: &ContentLoader,
+        block_name: &str,
+        state: &GameRuntimeLogicBlockState,
+    ) -> u8 {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let BlockDef::Logic(logic) = block_def else {
+            return 0;
+        };
+
+        match (logic.kind, state) {
+            (LogicBlockKind::Switch, GameRuntimeLogicBlockState::Switch { .. })
+            | (
+                LogicBlockKind::Display | LogicBlockKind::TileDisplay,
+                GameRuntimeLogicBlockState::Display(_),
+            ) => 1,
+            (LogicBlockKind::Processor, GameRuntimeLogicBlockState::Processor(_)) => 4,
+            _ => 0,
+        }
+    }
+
+    fn roundtrip_exported_logic_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeLogicBlockState,
+    ) -> Option<GameRuntimeLogicBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_logic_state_revision(content, block_name, &state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(13),
+        ));
+        runtime.logic_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 32;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("logic block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("logic block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.logic_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_logic_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        let message = MessageBlockState::new("alpha\nbeta");
+        assert_eq!(
+            roundtrip_exported_logic_state(
+                &content,
+                "message",
+                1,
+                20,
+                GameRuntimeLogicBlockState::Message(message.clone()),
+            ),
+            Some(GameRuntimeLogicBlockState::Message(message))
+        );
+
+        assert_eq!(
+            roundtrip_exported_logic_state(
+                &content,
+                "switch",
+                3,
+                20,
+                GameRuntimeLogicBlockState::Switch { enabled: true },
+            ),
+            Some(GameRuntimeLogicBlockState::Switch { enabled: true })
+        );
+
+        let display =
+            LogicDisplayState::with_transform([1.0, 0.0, 8.0, 0.0, 1.0, -4.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            roundtrip_exported_logic_state(
+                &content,
+                "logic-display",
+                6,
+                20,
+                GameRuntimeLogicBlockState::Display(display.clone()),
+            ),
+            Some(GameRuntimeLogicBlockState::Display(display))
+        );
+
+        let mut memory = MemoryBlockState::new(64);
+        memory.memory[0] = 7.0;
+        memory.memory[5] = -3.5;
+        memory.memory[63] = 99.25;
+        assert_eq!(
+            roundtrip_exported_logic_state(
+                &content,
+                "memory-cell",
+                10,
+                20,
+                GameRuntimeLogicBlockState::Memory(memory.clone()),
+            ),
+            Some(GameRuntimeLogicBlockState::Memory(memory))
+        );
+
+        let canvas_len = match content.block_by_name("canvas").unwrap() {
+            BlockDef::Logic(logic) => logic.canvas_data_bytes as usize,
+            _ => unreachable!(),
+        };
+        let mut canvas_data = vec![0; canvas_len];
+        canvas_data[0] = 0b0101_1010;
+        canvas_data[canvas_len - 1] = 0b1010_0101;
+        let canvas = CanvasBlockState::from_data(canvas_data);
+        assert_eq!(
+            roundtrip_exported_logic_state(
+                &content,
+                "canvas",
+                13,
+                20,
+                GameRuntimeLogicBlockState::Canvas(canvas.clone()),
+            ),
+            Some(GameRuntimeLogicBlockState::Canvas(canvas))
+        );
+
+        let config =
+            LogicConfig::from_code(b"set counter 1", vec![LogicLink::new(1, 0, "cell1", false)]);
+        let mut processor = LogicProcessorState::from_config(config).unwrap();
+        processor.variables = vec![LogicProcessorVariableState::new(
+            "counter",
+            TypeValue::Double(1.0),
+        )];
+        processor.tag = Some("loop".into());
+        processor.icon_tag = 'L' as u16;
+        processor.waits = vec![LogicProcessorWaitState::new(0, 0.25)];
+        processor.accumulator = 0.75;
+        assert_eq!(
+            roundtrip_exported_logic_state(
+                &content,
+                "micro-processor",
+                17,
+                20,
+                GameRuntimeLogicBlockState::Processor(processor.clone()),
+            ),
+            Some(GameRuntimeLogicBlockState::Processor(processor))
         );
     }
 
