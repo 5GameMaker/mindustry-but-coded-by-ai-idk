@@ -22,6 +22,7 @@ use crate::mindustry::{
         EffectBlockFrameBatchReport, EffectBlockFrameBatchResources, EffectBlockRuntimeStateStore,
         EffectBlockTimerStateStore,
     },
+    world::{footprint_tiles, Tile},
 };
 
 pub struct GameRuntimeEffectResources<'a, 'b> {
@@ -81,13 +82,15 @@ impl GameRuntime {
             .iter()
             .position(|existing| existing.tile_pos == building.tile_pos)
         {
+            let previous = self.buildings[index].clone();
+            self.clear_world_refs_for_building(&previous);
             self.buildings[index] = building;
-            self.sync_world_center_ref(index);
+            self.sync_world_footprint_refs(index);
             index
         } else {
             let index = self.buildings.len();
             self.buildings.push(building);
-            self.sync_world_center_ref(index);
+            self.sync_world_footprint_refs(index);
             index
         }
     }
@@ -97,20 +100,46 @@ impl GameRuntime {
         self.state.world.clear_buildings();
     }
 
+    pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
+        let tile_pos = building.tile_pos;
+        let mut cleared = 0;
+        for (x, y) in footprint_tiles(building.tile_x(), building.tile_y(), building.block.size) {
+            let Some(tile) = self.state.world.tile_mut(x, y) else {
+                continue;
+            };
+            if tile.build.is_some_and(|build| build.tile_pos == tile_pos) {
+                tile.build = None;
+                tile.block = Tile::AIR;
+                cleared += 1;
+            }
+        }
+        cleared
+    }
+
     pub fn sync_world_center_ref(&mut self, index: usize) -> bool {
+        self.sync_world_footprint_refs(index) > 0
+    }
+
+    pub fn sync_world_footprint_refs(&mut self, index: usize) -> usize {
         let Some(building) = self.buildings.get(index) else {
-            return false;
+            return 0;
         };
-        let Some(tile) = self
-            .state
-            .world
-            .tile_mut(building.tile_x(), building.tile_y())
-        else {
-            return false;
-        };
-        tile.block = building.block.id;
-        tile.build = Some(building.pos_ref());
-        true
+        let block_id = building.block.id;
+        let block_size = building.block.size;
+        let build_ref = building.pos_ref();
+        let center_x = building.tile_x();
+        let center_y = building.tile_y();
+
+        let mut synced = 0;
+        for (x, y) in footprint_tiles(center_x, center_y, block_size) {
+            let Some(tile) = self.state.world.tile_mut(x, y) else {
+                continue;
+            };
+            tile.block = block_id;
+            tile.build = Some(build_ref);
+            synced += 1;
+        }
+        synced
     }
 
     pub fn reset_effect_block_sidecars(&mut self) {
@@ -226,7 +255,9 @@ mod tests {
     use crate::mindustry::{
         core::GameStateState,
         io::TeamId,
-        world::{blocks::defense::EffectBlockRuntimeState, point2_pack},
+        world::{
+            blocks::defense::EffectBlockRuntimeState, footprint_tiles, point2_pack, Block, Tile,
+        },
     };
 
     fn noop_resources<'a, 'b>(
@@ -480,6 +511,33 @@ mod tests {
         assert_eq!(runtime.buildings()[0].time_scale_duration, 30.0);
         assert!(runtime.effect_runtime_store.get(tile_pos).is_some());
         assert!(runtime.effect_timer_store.get(tile_pos).is_some());
+    }
+
+    #[test]
+    fn game_runtime_owned_buildings_sync_multiblock_footprint_refs() {
+        let mut large_block = Block::new(30_000, "test-large");
+        large_block.size = 3;
+        let mut small_block = Block::new(30_001, "test-small");
+        small_block.size = 1;
+        let tile_pos = point2_pack(10, 10);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+
+        runtime.add_building(BuildingComp::new(tile_pos, large_block.clone(), TeamId(1)));
+        for (x, y) in footprint_tiles(10, 10, 3) {
+            let tile = runtime.state.world.tile(x, y).unwrap();
+            assert_eq!(tile.block, large_block.id);
+            assert_eq!(tile.build.unwrap().tile_pos, tile_pos);
+        }
+
+        runtime.add_building(BuildingComp::new(tile_pos, small_block.clone(), TeamId(1)));
+        let center = runtime.state.world.tile(10, 10).unwrap();
+        assert_eq!(center.block, small_block.id);
+        assert_eq!(center.build.unwrap().tile_pos, tile_pos);
+
+        let old_edge = runtime.state.world.tile(9, 9).unwrap();
+        assert_eq!(old_edge.block, Tile::AIR);
+        assert!(old_edge.build.is_none());
     }
 
     #[test]
