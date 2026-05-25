@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 
 use crate::mindustry::{
     content::blocks::{
-        BlockDef, CraftingBlockKind, DefenseWallKind, DistributionBlockKind, EffectBlockKind,
-        LiquidBlockKind, LogicBlockKind, PayloadBlockKind, PowerBlockKind, ProductionBlockKind,
-        SandboxBlockKind, StorageBlockKind, TurretBlockKind,
+        BlockDef, CampaignBlockKind, CraftingBlockKind, DefenseWallKind, DistributionBlockKind,
+        EffectBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind, PowerBlockKind,
+        ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -24,6 +24,10 @@ use crate::mindustry::{
     },
     io::LegacyShortChunkMap,
     vars::TILE_SIZE,
+    world::blocks::campaign::{
+        read_accelerator_state, read_landing_pad_state, read_launch_pad_state, AcceleratorState,
+        LandingPadState, LaunchPadState,
+    },
     world::blocks::defense::turrets::{
         continuous_turret_read_child, item_turret_read_ammo, point_defense_read_child,
         tractor_beam_read_child, turret_read_child, ContinuousTurretState, ItemAmmoEntry,
@@ -217,6 +221,13 @@ pub enum GameRuntimeLogicBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeCampaignBlockState {
+    LaunchPad(LaunchPadState),
+    LandingPad(LandingPadState),
+    Accelerator(AcceleratorState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeUnitBlockState {
     Factory(UnitFactoryState),
     Reconstructor(ReconstructorState),
@@ -260,6 +271,7 @@ enum GameRuntimeLoadedBlockState {
     Storage(GameRuntimeStorageBlockState),
     Liquid(GameRuntimeLiquidBlockState),
     Logic(GameRuntimeLogicBlockState),
+    Campaign(GameRuntimeCampaignBlockState),
     Unit(GameRuntimeUnitBlockState),
     DefenseWall(GameRuntimeDefenseWallState),
     Turret(GameRuntimeTurretBlockState),
@@ -279,6 +291,7 @@ pub struct GameRuntime {
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
+    pub campaign_runtime_states: BTreeMap<i32, GameRuntimeCampaignBlockState>,
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
     pub turret_runtime_states: BTreeMap<i32, GameRuntimeTurretBlockState>,
@@ -305,6 +318,7 @@ impl GameRuntime {
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
+            campaign_runtime_states: BTreeMap::new(),
             unit_runtime_states: BTreeMap::new(),
             defense_wall_runtime_states: BTreeMap::new(),
             turret_runtime_states: BTreeMap::new(),
@@ -356,6 +370,7 @@ impl GameRuntime {
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
+        self.campaign_runtime_states.remove(&removed.tile_pos);
         self.unit_runtime_states.remove(&removed.tile_pos);
         self.defense_wall_runtime_states.remove(&removed.tile_pos);
         self.turret_runtime_states.remove(&removed.tile_pos);
@@ -549,6 +564,10 @@ impl GameRuntime {
                         self.logic_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Campaign(block_state) => {
+                        self.campaign_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                     GameRuntimeLoadedBlockState::Unit(block_state) => {
                         self.unit_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
@@ -687,6 +706,19 @@ impl GameRuntime {
         match self.read_logic_runtime_state_from_building_payload(block, revision, building_payload)
         {
             Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Logic(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_campaign_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Campaign(state))),
             Ok(None) => return Ok(None),
             Err(GameRuntimeBlockStateReadError::Parse) => {
                 return Err(GameRuntimeBlockStateReadError::Parse);
@@ -1202,6 +1234,35 @@ impl GameRuntime {
         }
     }
 
+    fn read_campaign_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeCampaignBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Campaign(campaign) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match campaign.kind {
+            CampaignBlockKind::LaunchPad | CampaignBlockKind::AdvancedLaunchPad => {
+                read_launch_pad_state(building_payload, revision)
+                    .map(|state| Some(GameRuntimeCampaignBlockState::LaunchPad(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            CampaignBlockKind::LandingPad => read_landing_pad_state(building_payload, revision)
+                .map(|state| Some(GameRuntimeCampaignBlockState::LandingPad(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            CampaignBlockKind::Accelerator => read_accelerator_state(building_payload, revision)
+                .map(|state| Some(GameRuntimeCampaignBlockState::Accelerator(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+        }
+    }
+
     fn read_unit_runtime_state_from_building_payload(
         &self,
         block: &BlockDef,
@@ -1375,6 +1436,7 @@ impl GameRuntime {
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
+        self.campaign_runtime_states.clear();
         self.unit_runtime_states.clear();
         self.defense_wall_runtime_states.clear();
         self.turret_runtime_states.clear();
@@ -1516,6 +1578,9 @@ mod tests {
         },
         r#type::{PayloadKey, PayloadSeq},
         world::{
+            blocks::campaign::{
+                write_accelerator_state, write_landing_pad_state, write_launch_pad_state,
+            },
             blocks::defense::turrets::{
                 continuous_turret_write_child, item_turret_write_ammo, point_defense_write_child,
                 tractor_beam_write_child, turret_write_child, ContinuousTurretState, ItemAmmoEntry,
@@ -3784,6 +3849,113 @@ mod tests {
         assert_eq!(
             runtime.logic_runtime_states.get(&tile_pos),
             Some(&GameRuntimeLogicBlockState::Processor(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_launch_pad_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let launch_def = content.block_by_name("launch-pad").unwrap();
+        let tile_pos = point2_pack(0, 3);
+        let saved = BuildingComp::new(tile_pos, launch_def.base().clone(), TeamId(1));
+        let state = LaunchPadState {
+            launch_counter: 600.5,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_launch_pad_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 24, launch_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.campaign_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeCampaignBlockState::LaunchPad(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_landing_pad_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let landing_def = content.block_by_name("landing-pad").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let graphite = content
+            .item_by_name("graphite")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = point2_pack(1, 3);
+        let saved = BuildingComp::new(tile_pos, landing_def.base().clone(), TeamId(1));
+        let state = LandingPadState {
+            config: Some(copper),
+            priority: 123,
+            cooldown: 0.75,
+            arriving: Some(graphite),
+            arriving_timer: 0.5,
+            liquid_removed: 750.0,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_landing_pad_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 25, landing_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.campaign_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeCampaignBlockState::LandingPad(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_accelerator_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let accelerator_def = content.block_by_name("interplanetary-accelerator").unwrap();
+        let tile_pos = point2_pack(2, 3);
+        let saved = BuildingComp::new(tile_pos, accelerator_def.base().clone(), TeamId(1));
+        let state = AcceleratorState {
+            progress: 0.9,
+            launching: false,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_accelerator_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 26, accelerator_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.campaign_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeCampaignBlockState::Accelerator(state))
         );
     }
 

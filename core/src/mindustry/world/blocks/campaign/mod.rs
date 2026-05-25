@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{self, Read, Write};
 
 pub const DEFAULT_LAUNCH_PAYLOAD_LIFETIME: f32 = 120.0;
 pub const DEFAULT_LANDING_ARRIVAL_DURATION: f32 = 150.0;
@@ -70,6 +71,7 @@ pub fn launch_pad_update(
 #[derive(Debug, Clone, PartialEq)]
 pub struct LandingPadState {
     pub config: Option<i16>,
+    pub priority: i32,
     pub cooldown: f32,
     pub arriving: Option<i16>,
     pub arriving_timer: f32,
@@ -80,6 +82,7 @@ impl Default for LandingPadState {
     fn default() -> Self {
         Self {
             config: None,
+            priority: 0,
             cooldown: 0.0,
             arriving: None,
             arriving_timer: 0.0,
@@ -257,6 +260,103 @@ pub fn accelerator_consume_launch(state: &mut AcceleratorState) {
     state.launching = true;
 }
 
+pub fn write_launch_pad_state<W: Write>(write: &mut W, state: &LaunchPadState) -> io::Result<()> {
+    write_f32(write, state.launch_counter)
+}
+
+pub fn read_launch_pad_state<R: Read>(read: &mut R, revision: u8) -> io::Result<LaunchPadState> {
+    if revision >= 1 {
+        Ok(LaunchPadState {
+            launch_counter: read_f32(read)?,
+        })
+    } else {
+        Ok(LaunchPadState::default())
+    }
+}
+
+pub fn write_landing_pad_state<W: Write>(write: &mut W, state: &LandingPadState) -> io::Result<()> {
+    write_item_id(write, state.config)?;
+    write_i32(write, state.priority)?;
+    write_f32(write, state.cooldown)?;
+    write_item_id(write, state.arriving)?;
+    write_f32(write, state.arriving_timer)?;
+    write_f32(write, state.liquid_removed)
+}
+
+pub fn read_landing_pad_state<R: Read>(read: &mut R, revision: u8) -> io::Result<LandingPadState> {
+    let mut state = LandingPadState {
+        config: read_item_id(read)?,
+        priority: read_i32(read)?,
+        cooldown: read_f32(read)?,
+        ..LandingPadState::default()
+    };
+
+    if revision >= 1 {
+        state.arriving = read_item_id(read)?;
+        state.arriving_timer = read_f32(read)?;
+        state.liquid_removed = read_f32(read)?;
+    }
+
+    Ok(state)
+}
+
+pub fn write_accelerator_state<W: Write>(
+    write: &mut W,
+    state: &AcceleratorState,
+) -> io::Result<()> {
+    write_f32(write, state.progress)
+}
+
+pub fn read_accelerator_state<R: Read>(read: &mut R, revision: u8) -> io::Result<AcceleratorState> {
+    if revision >= 1 {
+        Ok(AcceleratorState {
+            progress: read_f32(read)?,
+            launching: false,
+        })
+    } else {
+        Ok(AcceleratorState::default())
+    }
+}
+
+fn read_item_id<R: Read>(read: &mut R) -> io::Result<Option<i16>> {
+    let id = read_i16(read)?;
+    Ok((id != -1).then_some(id))
+}
+
+fn write_item_id<W: Write>(write: &mut W, item: Option<i16>) -> io::Result<()> {
+    write_i16(write, item.unwrap_or(-1))
+}
+
+fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
+    let mut buf = [0; 2];
+    read.read_exact(&mut buf)?;
+    Ok(i16::from_be_bytes(buf))
+}
+
+fn write_i16<W: Write>(write: &mut W, value: i16) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_i32<R: Read>(read: &mut R) -> io::Result<i32> {
+    let mut buf = [0; 4];
+    read.read_exact(&mut buf)?;
+    Ok(i32::from_be_bytes(buf))
+}
+
+fn write_i32<W: Write>(write: &mut W, value: i32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
+    let mut buf = [0; 4];
+    read.read_exact(&mut buf)?;
+    Ok(f32::from_be_bytes(buf))
+}
+
+fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
@@ -383,5 +483,68 @@ mod tests {
         accelerator_consume_launch(&mut state);
         assert_eq!(state.progress, 0.0);
         assert!(state.launching);
+    }
+
+    #[test]
+    fn campaign_launch_and_accelerator_state_codecs_follow_revision_one_payloads() {
+        let launch = LaunchPadState {
+            launch_counter: 42.5,
+        };
+        let mut bytes = Vec::new();
+        write_launch_pad_state(&mut bytes, &launch).unwrap();
+        assert_eq!(
+            read_launch_pad_state(&mut bytes.as_slice(), 1).unwrap(),
+            launch
+        );
+        assert_eq!(
+            read_launch_pad_state(&mut [].as_slice(), 0).unwrap(),
+            LaunchPadState::default()
+        );
+
+        let accelerator = AcceleratorState {
+            progress: 0.75,
+            launching: true,
+        };
+        let mut bytes = Vec::new();
+        write_accelerator_state(&mut bytes, &accelerator).unwrap();
+        assert_eq!(
+            read_accelerator_state(&mut bytes.as_slice(), 1).unwrap(),
+            AcceleratorState {
+                progress: 0.75,
+                launching: false
+            }
+        );
+    }
+
+    #[test]
+    fn landing_pad_state_codec_keeps_priority_and_revision_one_arrival_fields() {
+        let state = LandingPadState {
+            config: Some(3),
+            priority: 123456,
+            cooldown: 0.5,
+            arriving: Some(4),
+            arriving_timer: 0.25,
+            liquid_removed: 750.0,
+        };
+        let mut bytes = Vec::new();
+        write_landing_pad_state(&mut bytes, &state).unwrap();
+        assert_eq!(
+            read_landing_pad_state(&mut bytes.as_slice(), 1).unwrap(),
+            state
+        );
+
+        let mut legacy = Vec::new();
+        write_item_id(&mut legacy, Some(5)).unwrap();
+        write_i32(&mut legacy, -9).unwrap();
+        write_f32(&mut legacy, 0.25).unwrap();
+        assert_eq!(
+            read_landing_pad_state(&mut legacy.as_slice(), 0).unwrap(),
+            LandingPadState {
+                config: Some(5),
+                priority: -9,
+                cooldown: 0.25,
+                ..LandingPadState::default()
+            }
+        );
     }
 }
