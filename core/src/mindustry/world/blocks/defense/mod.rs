@@ -5,6 +5,7 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::content::blocks::{BlockDef, EffectBlockData, EffectBlockKind, ItemAmount};
 use crate::mindustry::core::content_loader::ContentLoader;
+use crate::mindustry::core::game_state::GameUpdateFrameAdvance;
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::bullet::{BulletCreatePlan, BulletType};
 use crate::mindustry::entities::comp::{BuildingComp, BuildingTimerState, BulletComp, UnitComp};
@@ -3100,6 +3101,23 @@ pub struct EffectBlockFrameInput {
     pub now: f32,
     pub fog_enabled: bool,
     pub static_fog: bool,
+}
+
+pub fn effect_block_frame_input_from_game_update(
+    frame: GameUpdateFrameAdvance,
+    tile_size: f32,
+    fog_enabled: bool,
+    static_fog: bool,
+) -> Option<EffectBlockFrameInput> {
+    frame.advanced.then_some(EffectBlockFrameInput {
+        delta: frame.delta_ticks as f32,
+        edelta: frame.delta_ticks as f32,
+        update_id: frame.update_id,
+        tile_size,
+        now: frame.tick as f32,
+        fog_enabled,
+        static_fog,
+    })
 }
 
 pub enum EffectBlockFrameResources<'a, 'b> {
@@ -8221,6 +8239,59 @@ mod tests {
             Some(EffectBlockRuntimeState::Radar(_))
         ));
         assert!(timer_store.get(buildings[0].tile_pos).is_some());
+    }
+
+    #[test]
+    fn game_update_frame_drives_effect_block_building_slice_dispatch() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let silicon = mend_block.boost_items[0].item;
+        let mut mend = BuildingComp::new(point2_pack(27, 9), mend_def.base().clone(), TeamId(1));
+        mend.efficiency = 1.0;
+        mend.optional_efficiency = 1.0;
+        mend.items.as_mut().unwrap().set(silicon, 1);
+        let mut buildings = vec![mend];
+
+        let mut game = crate::mindustry::core::GameState::new();
+        game.set(crate::mindustry::core::GameStateState::Playing);
+        game.tick = mend_block.use_time as f64 - 30.0;
+        let advanced = game.advance_game_update_frame(0.5);
+        let frame =
+            effect_block_frame_input_from_game_update(advanced, TILE_SIZE as f32, true, true)
+                .unwrap();
+
+        let mut runtime_store = EffectBlockRuntimeStateStore::new();
+        let mut timer_store = EffectBlockTimerStateStore::new();
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let mut resources = EffectBlockFrameBatchResources {
+            fog_control: None,
+            bullets: &mut bullets,
+            bullet_type: &mut bullet_type,
+            units: &mut units,
+            suppressed: &mut suppressed,
+            force_coolant: &mut force_coolant,
+            spark_random: &mut spark_random,
+        };
+
+        let batch = effect_block_update_building_slice_with_stores(
+            &mut runtime_store,
+            &mut timer_store,
+            &content,
+            &mut buildings,
+            frame,
+            &mut resources,
+        );
+
+        assert_eq!(advanced.update_id, 1);
+        assert_eq!(frame.now, mend_block.use_time);
+        assert_eq!(batch.reports.len(), 1);
+        assert_eq!(buildings[0].items.as_ref().unwrap().get(silicon), 0);
     }
 
     #[test]
