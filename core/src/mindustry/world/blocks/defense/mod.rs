@@ -896,6 +896,14 @@ pub fn overdrive_real_boost(
     (speed_boost + phase_heat * speed_boost_phase) * efficiency
 }
 
+pub fn overdrive_projector_outputs_items() -> bool {
+    false
+}
+
+pub fn overdrive_projector_range(range: f32) -> f32 {
+    range
+}
+
 pub fn overdrive_projector_boost_plan(
     update: &OverdriveProjectorUpdate,
     reload: f32,
@@ -4369,6 +4377,8 @@ mod tests {
 
     #[test]
     fn overdrive_projector_bar_draw_select_and_stats_follow_java() {
+        assert!(!overdrive_projector_outputs_items());
+        assert_eq!(overdrive_projector_range(80.0), 80.0);
         assert_eq!(overdrive_speed_increase_percent(1.5), 50.0);
         assert_eq!(overdrive_production_time_seconds(400.0), 400.0 / 60.0);
         assert_eq!(overdrive_real_range(80.0, 0.5, 20.0), 90.0);

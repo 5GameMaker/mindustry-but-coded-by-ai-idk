@@ -904,6 +904,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `OverdriveProjectorStatsPlan`
 - `overdrive_projector_stats_plan(...)`
 - `OverdriveProjectorBoostPlan`
+- `overdrive_projector_outputs_items(...)`
+- `overdrive_projector_range(...)`
 - `overdrive_projector_boost_plan(...)`
 - `overdrive_projector_bar_text_percent(...)`
 - `OverdriveProjectorState`
