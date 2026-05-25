@@ -2955,6 +2955,17 @@ pub enum EffectBlockRuntimeResources<'a, 'b> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EffectBlockFrameInput {
+    pub delta: f32,
+    pub edelta: f32,
+    pub update_id: i64,
+    pub tile_size: f32,
+    pub now: f32,
+    pub fog_enabled: bool,
+    pub static_fog: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EffectBlockRuntimeReport {
     Projector(EffectProjectorRuntimeReport),
     Radar { forced_update: bool },
@@ -3120,6 +3131,33 @@ pub fn effect_block_update_building_runtime<'a, 'b>(
     let block = effect_block_data_for_building(content, building)?;
     let state = store.ensure_for_building(content, building, initial_reload_counter)?;
     effect_block_update_runtime_state(block, state, resources)
+}
+
+pub fn effect_radar_update_building_frame(
+    store: &mut EffectBlockRuntimeStateStore,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    fog_control: &mut FogControl,
+    frame: EffectBlockFrameInput,
+) -> Option<EffectBlockRuntimeReport> {
+    effect_block_update_building_runtime(
+        store,
+        content,
+        building,
+        0.0,
+        EffectBlockRuntimeResources::Radar {
+            fog_control,
+            input: EffectRadarRuntimeInput {
+                team: building.team,
+                tile_x: building.tile_x(),
+                tile_y: building.tile_y(),
+                efficiency: building.efficiency,
+                edelta: frame.edelta,
+                fog_enabled: frame.fog_enabled,
+                static_fog: frame.static_fog,
+            },
+        },
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6734,6 +6772,53 @@ mod tests {
             None
         );
         assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn effect_radar_building_frame_uses_game_update_delta_and_building_fields() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let radar_def = content.block_by_name("radar").unwrap();
+        let radar_building =
+            BuildingComp::new(point2_pack(3, 4), radar_def.base().clone(), TeamId(2));
+        let mut store = EffectBlockRuntimeStateStore::new();
+        let mut fog = FogControl::new(8, 8);
+        fog.ensure_data(2);
+        let mut game = crate::mindustry::core::GameState::new();
+        game.set(crate::mindustry::core::GameStateState::Playing);
+        let frame = game.advance_game_update_frame(0.5);
+
+        let report = effect_radar_update_building_frame(
+            &mut store,
+            &content,
+            &radar_building,
+            &mut fog,
+            EffectBlockFrameInput {
+                delta: frame.delta_ticks as f32,
+                edelta: frame.delta_ticks as f32 * radar_building.efficiency,
+                update_id: frame.update_id,
+                tile_size: TILE_SIZE as f32,
+                now: frame.tick as f32,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        );
+
+        assert_eq!(
+            report,
+            Some(EffectBlockRuntimeReport::Radar {
+                forced_update: false
+            })
+        );
+        match store.get(radar_building.tile_pos) {
+            Some(EffectBlockRuntimeState::Radar(radar)) => {
+                assert_eq!(radar.progress, 0.05);
+                assert_eq!(radar.total_progress, 30.0);
+                assert_eq!(radar.last_radius, 0.0);
+            }
+            other => panic!("unexpected radar frame state: {other:?}"),
+        }
+        assert_eq!(game.update_id, 1);
+        assert_eq!(game.tick, 30.0);
     }
 
     #[test]

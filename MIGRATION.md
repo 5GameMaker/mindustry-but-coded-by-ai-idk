@@ -1013,6 +1013,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `EffectProjectorRuntimeReport`
 - `EffectBlockRuntimeContext`
 - `EffectBlockRuntimeResources`
+- `EffectBlockFrameInput`
 - `EffectBlockRuntimeReport`
 - `EffectBlockRuntimeStateStore`
 - `effect_block_runtime_state_for(...)`
@@ -1022,6 +1023,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `effect_block_update_runtime(...)`
 - `effect_block_update_runtime_state(...)`
 - `effect_block_update_building_runtime(...)`
+- `effect_radar_update_building_frame(...)`
 - `projector_runtime_target_in_range(...)`
 - `projector_runtime_target_allowed(...)`
 - `mend_projector_outputs_items(...)`
@@ -1072,9 +1074,11 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `EffectBlockRuntimeStateStore` 已按 `BuildingComp.tile_pos` 管理 per-building effect runtime state，`ensure_for_building(...)` 会按 content 自动初始化并复用既有 state，非 effect block 不会污染状态表；
   - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield / ShockwaveTower` 四类上下文；
   - `EffectBlockRuntimeResources` 将“已存储 state”之外的 FogControl、content、building/bullet/unit 候选等资源单独传入，方便后续 building store 只保存 `EffectBlockRuntimeState`；
+  - `EffectBlockFrameInput` 开始承接 `GameState::advance_game_update_frame(...)` 输出的 `delta/update_id/tick` 以及 fog/tileSize 等帧级参数；
   - `effect_block_update_runtime(...)` 按传入上下文复用 `effect_projector_update_runtime(...)`、`effect_radar_update_runtime(...)`、`effect_base_shield_apply_runtime(...)` 与 `effect_shockwave_tower_apply_runtime(...)`；
   - `effect_block_update_runtime_state(...)` 已能从统一 `EffectBlockRuntimeState` 自动拆出具体 state 并调用对应 dispatcher，block/state/resource 不匹配时返回 `None`；
   - `effect_block_update_building_runtime(...)` 将 `BuildingComp.block.id -> EffectBlockData -> state store ensure -> runtime dispatch` 串成单栋建筑的一站式入口，为后续 `update_all_buildings(...)` 遍历打通最小调用链；
+  - `effect_radar_update_building_frame(...)` 已能直接从 `BuildingComp.team/tile_pos/efficiency` 与帧输入组装 Radar runtime 资源，测试覆盖了 `GameState::advance_game_update_frame(...) -> RadarState` 的最小帧推进路径；
   - `EffectBlockRuntimeReport` 将 projector report、Radar fog force-update、BaseShield runtime report 与 ShockwaveTower fire report 收束到同一返回类型；
   - 该入口仍保持显式上下文传参，避免把 `FogControl`、建筑 slice、bullet/unit slice 与 content loader 强行揉成一个巨型可变借用。
 
