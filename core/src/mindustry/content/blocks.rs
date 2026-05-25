@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::mindustry::{
     ctype::ContentId,
-    r#type::{Item, Liquid},
+    r#type::{Item, Liquid, PayloadKey},
     vars::TILE_SIZE,
     world::{
         blocks::environment::{
@@ -479,6 +479,7 @@ impl StorageBlockData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurretBlockKind {
     ItemTurret,
+    PayloadAmmoTurret,
     LiquidTurret,
     PowerTurret,
     LaserTurret,
@@ -899,6 +900,12 @@ pub struct TurretAmmo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PayloadTurretAmmo {
+    pub content: PayloadKey,
+    pub bullet: BulletSpec,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LiquidTurretAmmo {
     pub liquid: ContentId,
     pub bullet: BulletSpec,
@@ -917,6 +924,7 @@ pub struct TurretBlockData {
     pub kind: TurretBlockKind,
     pub requirements: Vec<ItemAmount>,
     pub ammo: Vec<TurretAmmo>,
+    pub payload_ammo: Vec<PayloadTurretAmmo>,
     pub liquid_ammo: Vec<LiquidTurretAmmo>,
     pub consume_liquids: Vec<LiquidAmount>,
     pub shoot_type: Option<Box<BulletSpec>>,
@@ -943,6 +951,7 @@ pub struct TurretBlockData {
     pub target_interval: f32,
     pub new_target_interval: f32,
     pub max_ammo: i32,
+    pub accepts_payload: bool,
     pub ammo_per_shot: i32,
     pub consume_ammo_once: bool,
     pub heat_requirement: f32,
@@ -1048,6 +1057,7 @@ impl TurretBlockData {
             kind,
             requirements: Vec::new(),
             ammo: Vec::new(),
+            payload_ammo: Vec::new(),
             liquid_ammo: Vec::new(),
             consume_liquids: Vec::new(),
             shoot_type: None,
@@ -1074,6 +1084,7 @@ impl TurretBlockData {
             target_interval: 20.0,
             new_target_interval: -1.0,
             max_ammo: 30,
+            accepts_payload: false,
             ammo_per_shot: 1,
             consume_ammo_once: true,
             heat_requirement: -1.0,
@@ -1187,6 +1198,10 @@ impl TurretBlockData {
             TurretBlockKind::ItemTurret => {
                 self.base.has_items = true;
             }
+            TurretBlockKind::PayloadAmmoTurret => {
+                self.max_ammo = 3;
+                self.accepts_payload = true;
+            }
             TurretBlockKind::LiquidTurret => {
                 self.base.has_liquids = true;
                 self.loop_sound = "loopSpray".into();
@@ -1269,6 +1284,13 @@ impl TurretBlockData {
         }
         if matches!(self.kind, TurretBlockKind::ItemTurret) && self.target_ground {
             for ammo in &self.ammo {
+                self.place_overlap_range = self
+                    .place_overlap_range
+                    .max(self.range + ammo.bullet.range_change + self.place_overlap_margin);
+            }
+        }
+        if matches!(self.kind, TurretBlockKind::PayloadAmmoTurret) && self.target_ground {
+            for ammo in &self.payload_ammo {
                 self.place_overlap_range = self
                     .place_overlap_range
                     .max(self.range + ammo.bullet.range_change + self.place_overlap_margin);

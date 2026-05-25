@@ -1,5 +1,10 @@
 use std::io::{self, Read, Write};
 
+use crate::mindustry::{
+    ctype::{ContentId, ContentType},
+    r#type::{PayloadKey, PayloadSeq},
+};
+
 pub const LOGIC_CONTROL_COOLDOWN: f32 = 60.0 * 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -593,6 +598,43 @@ pub fn item_turret_read_ammo<R: Read>(
     Ok((entries, total))
 }
 
+pub fn payload_ammo_turret_write_payloads<W: Write>(
+    write: &mut W,
+    payloads: &PayloadSeq,
+) -> io::Result<()> {
+    write.write_all(&payloads.write_java_new())
+}
+
+pub fn payload_ammo_turret_read_payloads<R: Read>(
+    read: &mut R,
+    is_valid_ammo: impl Fn(PayloadKey) -> bool,
+) -> io::Result<PayloadSeq> {
+    let count = read_i16(read)?;
+    if count >= 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "old block-only PayloadSeq format requires content registry",
+        ));
+    }
+
+    let mut seq = PayloadSeq::new();
+    for _ in 0..(-count) {
+        let content_type = ContentType::from_ordinal(read_u8(read)?).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown PayloadSeq content type ordinal",
+            )
+        })?;
+        let id = read_i16(read)? as ContentId;
+        let amount = read_i32(read)?;
+        let key = PayloadKey::new(content_type, id);
+        if is_valid_ammo(key) {
+            seq.add(key, amount);
+        }
+    }
+    Ok(seq)
+}
+
 pub fn liquid_turret_has_ammo(ammo_multiplier: Option<f32>, current_amount: f32) -> bool {
     ammo_multiplier
         .map(|multiplier| current_amount >= 1.0 / multiplier)
@@ -1109,6 +1151,18 @@ fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
     let mut buf = [0; 2];
     read.read_exact(&mut buf)?;
     Ok(i16::from_be_bytes(buf))
+}
+
+fn read_i32<R: Read>(read: &mut R) -> io::Result<i32> {
+    let mut buf = [0; 4];
+    read.read_exact(&mut buf)?;
+    Ok(i32::from_be_bytes(buf))
+}
+
+fn read_u8<R: Read>(read: &mut R) -> io::Result<u8> {
+    let mut buf = [0; 1];
+    read.read_exact(&mut buf)?;
+    Ok(buf[0])
 }
 
 #[cfg(test)]

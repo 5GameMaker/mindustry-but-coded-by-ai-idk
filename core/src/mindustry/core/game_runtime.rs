@@ -23,15 +23,16 @@ use crate::mindustry::{
         comp::{BuildingComp, BulletComp, UnitComp},
     },
     io::{type_io, LegacyShortChunkMap},
+    r#type::PayloadSeq,
     vars::TILE_SIZE,
     world::blocks::campaign::{
         read_accelerator_state, read_landing_pad_state, read_launch_pad_state, AcceleratorState,
         LandingPadState, LaunchPadState,
     },
     world::blocks::defense::turrets::{
-        continuous_turret_read_child, item_turret_read_ammo, point_defense_read_child,
-        tractor_beam_read_child, turret_read_child, ContinuousTurretState, ItemAmmoEntry,
-        PointDefenseState, TractorBeamState, TurretState,
+        continuous_turret_read_child, item_turret_read_ammo, payload_ammo_turret_read_payloads,
+        point_defense_read_child, tractor_beam_read_child, turret_read_child,
+        ContinuousTurretState, ItemAmmoEntry, PointDefenseState, TractorBeamState, TurretState,
     },
     world::blocks::defense::{
         build_turret_read_child_with_loader, effect_block_frame_input_from_game_update,
@@ -298,6 +299,10 @@ pub enum GameRuntimeTurretBlockState {
     Item {
         turret: TurretState,
         ammo: Vec<ItemAmmoEntry>,
+    },
+    PayloadAmmo {
+        turret: TurretState,
+        payloads: PayloadSeq,
     },
     Continuous {
         turret: TurretState,
@@ -1898,6 +1903,19 @@ impl GameRuntime {
                     ammo,
                 }))
             }
+            TurretBlockKind::PayloadAmmoTurret => {
+                let mut turret_state = turret_read_child(building_payload, revision)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let payloads = payload_ammo_turret_read_payloads(building_payload, |key| {
+                    turret.payload_ammo.iter().any(|ammo| ammo.content == key)
+                })
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                turret_state.total_ammo = payloads.total();
+                Ok(Some(GameRuntimeTurretBlockState::PayloadAmmo {
+                    turret: turret_state,
+                    payloads,
+                }))
+            }
             TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret => {
                 let turret_state = turret_read_child(building_payload, revision)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
@@ -2139,6 +2157,7 @@ impl GameRuntime {
 mod tests {
     use super::*;
     use crate::mindustry::{
+        content::blocks::{BulletKind, BulletSpec, PayloadTurretAmmo, TurretBlockData},
         core::GameStateState,
         ctype::{Content, ContentType},
         entities::units::BuildPlan,
@@ -2152,7 +2171,8 @@ mod tests {
                 write_accelerator_state, write_landing_pad_state, write_launch_pad_state,
             },
             blocks::defense::turrets::{
-                continuous_turret_write_child, item_turret_write_ammo, point_defense_write_child,
+                continuous_turret_write_child, item_turret_write_ammo,
+                payload_ammo_turret_write_payloads, point_defense_write_child,
                 tractor_beam_write_child, turret_write_child, ContinuousTurretState, ItemAmmoEntry,
                 PointDefenseState, TractorBeamState, TurretState,
             },
@@ -3262,6 +3282,51 @@ mod tests {
         assert_eq!(
             runtime.turret_runtime_states.get(&tile_pos),
             Some(&GameRuntimeTurretBlockState::Item { turret, ammo })
+        );
+    }
+
+    #[test]
+    fn game_runtime_reads_payload_ammo_turret_state_and_filters_invalid_payloads() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router = content.block_by_name("router").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let valid_key = PayloadKey::new(ContentType::Block, router.base().id);
+        let invalid_key = PayloadKey::new(ContentType::Unit, flare.id());
+        let mut turret_block =
+            TurretBlockData::new(900, "payload-ammo-test", TurretBlockKind::PayloadAmmoTurret);
+        turret_block.payload_ammo.push(PayloadTurretAmmo {
+            content: valid_key,
+            bullet: BulletSpec::new(BulletKind::Basic, 1.0, 1.0),
+        });
+        let block = BlockDef::Turret(turret_block);
+        let mut turret = TurretState {
+            reload_counter: 3.5,
+            rotation: 45.0,
+            ..TurretState::default()
+        };
+        let mut payloads = PayloadSeq::new();
+        payloads.add(valid_key, 2);
+        payloads.add(invalid_key, 1);
+        let mut building_payload = Vec::new();
+        turret_write_child(&mut building_payload, &turret).unwrap();
+        payload_ammo_turret_write_payloads(&mut building_payload, &payloads).unwrap();
+
+        let runtime = GameRuntime::default();
+        let mut payload_slice = building_payload.as_slice();
+        let loaded = runtime
+            .read_turret_runtime_state_from_building_payload(&block, 1, &mut payload_slice)
+            .unwrap();
+
+        let mut filtered = PayloadSeq::new();
+        filtered.add(valid_key, 2);
+        turret.total_ammo = 2;
+        assert!(payload_slice.is_empty());
+        assert_eq!(
+            loaded,
+            Some(GameRuntimeTurretBlockState::PayloadAmmo {
+                turret,
+                payloads: filtered,
+            })
         );
     }
 
