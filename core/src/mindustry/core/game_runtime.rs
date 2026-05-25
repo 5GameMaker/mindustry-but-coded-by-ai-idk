@@ -3026,6 +3026,18 @@ impl GameRuntime {
         should_reset
     }
 
+    pub fn advance_owned_payload_constructors(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimePayloadConstructorFrameReport> {
+        self.advance_owned_payload_constructors_with_recipe_build_time(
+            content,
+            delta_seconds,
+            |block| Some(block.effective_build_time(content.items())),
+        )
+    }
+
     pub fn advance_owned_payload_constructors_with_recipe_build_time(
         &mut self,
         content: &ContentLoader,
@@ -7619,9 +7631,7 @@ mod tests {
         );
 
         let report = runtime
-            .advance_owned_payload_constructors_with_recipe_build_time(&content, 1.0, |block| {
-                (block.base().id == router_def.base().id).then_some(10.0)
-            })
+            .advance_owned_payload_constructors(&content, 1.0)
             .unwrap();
 
         assert_eq!(

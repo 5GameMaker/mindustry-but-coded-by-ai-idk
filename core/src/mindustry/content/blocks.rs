@@ -4686,6 +4686,84 @@ impl BlockDef {
         }
     }
 
+    pub fn requirements(&self) -> &[ItemAmount] {
+        match self {
+            Self::Production(block) => &block.requirements,
+            Self::Storage(block) => &block.requirements,
+            Self::Turret(block) => &block.requirements,
+            Self::Crafting(block) => &block.requirements,
+            Self::DefenseWall(block) => &block.requirements,
+            Self::Effect(block) => &block.requirements,
+            Self::Distribution(block) => &block.requirements,
+            Self::Liquid(block) => &block.requirements,
+            Self::Power(block) => &block.requirements,
+            Self::UnitFactory(block) => &block.requirements,
+            Self::UnitReconstructor(block) => &block.requirements,
+            Self::UnitAssembler(block) => &block.requirements,
+            Self::UnitAssemblerModule(block) => &block.requirements,
+            Self::UnitRepairTower(block) => &block.requirements,
+            Self::Payload(block) => &block.requirements,
+            Self::PayloadMassDriver(block) => &block.requirements,
+            Self::PayloadDeconstructor(block) => &block.requirements,
+            Self::PayloadConstructor(block) => &block.requirements,
+            Self::PayloadLoader(block) => &block.requirements,
+            Self::Sandbox(block) => &block.requirements,
+            Self::Light(block) => &block.requirements,
+            Self::Legacy(block) => &block.requirements,
+            Self::Campaign(block) => &block.requirements,
+            Self::Logic(block) => &block.requirements,
+            Self::Plain(_)
+            | Self::Floor(_)
+            | Self::StaticWall(_)
+            | Self::StaticTree(_)
+            | Self::TreeBlock(_)
+            | Self::TallBlock(_)
+            | Self::Prop(_)
+            | Self::Ore(_) => &[],
+        }
+    }
+
+    pub fn build_cost_multiplier(&self) -> f32 {
+        match self {
+            Self::Storage(block) => block.build_cost_multiplier,
+            Self::Turret(block) => block.build_cost_multiplier,
+            Self::DefenseWall(block) => block.build_cost_multiplier,
+            Self::Distribution(block) => block.build_cost_multiplier,
+            Self::Liquid(block) => block.build_cost_multiplier,
+            Self::Campaign(block) => block.build_cost_multiplier,
+            _ => 1.0,
+        }
+    }
+
+    pub fn explicit_build_time(&self) -> Option<f32> {
+        match self {
+            Self::Turret(block) if block.build_time >= 0.0 => Some(block.build_time),
+            _ => None,
+        }
+    }
+
+    pub fn effective_build_time(&self, items: &[Item]) -> f32 {
+        let raw = self.explicit_build_time().unwrap_or_else(|| {
+            let requirements = self.requirements();
+            if requirements.is_empty() {
+                20.0
+            } else {
+                requirements
+                    .iter()
+                    .map(|stack| {
+                        let cost = usize::try_from(stack.item)
+                            .ok()
+                            .and_then(|index| items.get(index))
+                            .map(|item| item.cost)
+                            .unwrap_or(0.0);
+                        stack.amount as f32 * cost
+                    })
+                    .sum()
+            }
+        });
+        raw * self.build_cost_multiplier()
+    }
+
     pub fn can_overdrive(&self) -> bool {
         match self {
             Self::Plain(block) => block.has_building(),
@@ -13534,6 +13612,27 @@ mod tests {
             .get_by_name("mend-projector")
             .unwrap()
             .can_overdrive());
+    }
+
+    #[test]
+    fn block_def_effective_build_time_matches_java_init_formula() {
+        let (items, _, registry) = load_test_registry();
+        let assert_close = |actual: f32, expected: f32| {
+            assert!(
+                (actual - expected).abs() < 0.0001,
+                "expected {expected}, got {actual}"
+            );
+        };
+
+        let air = registry.get_by_name("air").unwrap();
+        assert_close(air.effective_build_time(&items), 20.0);
+
+        let router = registry.get_by_name("router").unwrap();
+        let copper = find_item(&items, "copper").unwrap();
+        assert_close(router.effective_build_time(&items), 3.0 * copper.cost * 4.0);
+
+        let breach = registry.get_by_name("breach").unwrap();
+        assert_close(breach.effective_build_time(&items), 60.0 * 9.0);
     }
 
     #[test]
