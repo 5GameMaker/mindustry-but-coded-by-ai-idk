@@ -3110,6 +3110,18 @@ pub fn effect_block_update_runtime_state<'a, 'b>(
     }
 }
 
+pub fn effect_block_update_building_runtime<'a, 'b>(
+    store: &'a mut EffectBlockRuntimeStateStore,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    initial_reload_counter: f32,
+    resources: EffectBlockRuntimeResources<'a, 'b>,
+) -> Option<EffectBlockRuntimeReport> {
+    let block = effect_block_data_for_building(content, building)?;
+    let state = store.ensure_for_building(content, building, initial_reload_counter)?;
+    effect_block_update_runtime_state(block, state, resources)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseShieldDrawCommand {
     SetShieldLayer,
@@ -6649,6 +6661,79 @@ mod tests {
             Some(EffectBlockRuntimeState::Radar(_))
         ));
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn effect_block_update_building_runtime_initializes_store_and_dispatches() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let radar_def = content.block_by_name("radar").unwrap();
+        let mut radar_building =
+            BuildingComp::new(point2_pack(49, 0), radar_def.base().clone(), TeamId(2));
+        radar_building.set_pos(24.0, 32.0);
+        let mut store = EffectBlockRuntimeStateStore::new();
+        let mut fog = FogControl::new(8, 8);
+        fog.ensure_data(2);
+
+        let report = effect_block_update_building_runtime(
+            &mut store,
+            &content,
+            &radar_building,
+            0.0,
+            EffectBlockRuntimeResources::Radar {
+                fog_control: &mut fog,
+                input: EffectRadarRuntimeInput {
+                    team: radar_building.team,
+                    tile_x: 3,
+                    tile_y: 4,
+                    efficiency: 1.0,
+                    edelta: 60.0,
+                    fog_enabled: true,
+                    static_fog: true,
+                },
+            },
+        );
+
+        assert_eq!(
+            report,
+            Some(EffectBlockRuntimeReport::Radar {
+                forced_update: false
+            })
+        );
+        assert_eq!(store.len(), 1);
+        match store.get(radar_building.tile_pos) {
+            Some(EffectBlockRuntimeState::Radar(radar)) => {
+                assert_eq!(radar.progress, 0.1);
+                assert_eq!(radar.total_progress, 60.0);
+            }
+            other => panic!("unexpected stored state after building update: {other:?}"),
+        }
+
+        let router_def = content.block_by_name("router").unwrap();
+        let router_building =
+            BuildingComp::new(point2_pack(50, 0), router_def.base().clone(), TeamId(2));
+        let mut fog = FogControl::new(8, 8);
+        assert_eq!(
+            effect_block_update_building_runtime(
+                &mut store,
+                &content,
+                &router_building,
+                0.0,
+                EffectBlockRuntimeResources::Radar {
+                    fog_control: &mut fog,
+                    input: EffectRadarRuntimeInput {
+                        team: router_building.team,
+                        tile_x: 0,
+                        tile_y: 0,
+                        efficiency: 1.0,
+                        edelta: 60.0,
+                        fog_enabled: true,
+                        static_fog: true,
+                    },
+                },
+            ),
+            None
+        );
+        assert_eq!(store.len(), 1);
     }
 
     #[test]
