@@ -564,6 +564,9 @@ impl GameRuntime {
                     None
                 }
             };
+            if block_state.is_some() && !building_bytes.is_empty() {
+                report.block_state_bytes_ignored += 1;
+            }
 
             let added_index = self.add_building(building);
             if let Some(block_state) = block_state {
@@ -2852,6 +2855,35 @@ mod tests {
         assert_eq!(report.buildings_added, 1);
         assert_eq!(report.block_states_added, 1);
         assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.defense_wall_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDefenseWallState::Door(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_reports_trailing_block_state_bytes_after_successful_read() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let door_def = content.block_by_name("door").unwrap();
+        let tile_pos = point2_pack(1, 0);
+        let saved = BuildingComp::new(tile_pos, door_def.base().clone(), TeamId(1));
+        let state = DoorState { open: true };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_door_state(&mut building_bytes, state).unwrap();
+        building_bytes.extend_from_slice(&[0xaa, 0xbb]);
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 1, door_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 1);
         assert_eq!(
             runtime.defense_wall_runtime_states.get(&tile_pos),
             Some(&GameRuntimeDefenseWallState::Door(state))

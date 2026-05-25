@@ -1290,6 +1290,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
   - 覆盖 `PayloadRouter` 的 `PayloadConveyorBuild` 前缀，以及 `PayloadMassDriver/PayloadLoader/PayloadDeconstructor/PayloadConstructor/PayloadSource/UnitFactory/Reconstructor/UnitAssembler` 的 `PayloadBlockBuild` common 前缀；
   - 读取顺序按 Java `Payload.write -> BuildPayload.write`：presence bool -> payload type -> block id -> build version -> `Building.writeAll`，再通过 `ContentLoader` 找 block、`BuildingComp::read_base` + 已迁移 block-specific reader 递归消费，避免吞掉后续子类字段；
   - 仍未完成：非 terminal `UnitPayload` exact codec、未迁移 block-specific nested payload state；遇到这些仍 Parse 失败，不能用 `read_to_end` 误吞后续字段。
+- 2026-05-25：`GameRuntimeMapLoadReport.block_state_bytes_ignored` 现在也会统计“block-specific state 成功读出但 payload 仍有 trailing bytes”的 building 记录；这是为了暴露 Java wire 少消费问题，当前只计数不阻断加载。
 
 ## 10. 已知验证状态与风险
 
@@ -1305,7 +1306,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 
 - `cargo test -p mindustry-core` 已在本地通过：1782 passed / 0 failed；
 - `cargo test -p mindustry-desktop` 已在本地通过：12 passed / 0 failed；
-- 2026-05-25 本轮定向验证：`cargo test -p mindustry-core build_payload` 通过 8/8；`cargo test -p mindustry-core payload` 通过 163/163；`cargo check -p mindustry-core` 通过，仅保留既有 unused warning；
+- 2026-05-25 本轮定向验证：`cargo test -p mindustry-core build_payload` 通过 8/8；`cargo test -p mindustry-core game_runtime_reports_trailing_block_state_bytes_after_successful_read` 通过 1/1；`cargo test -p mindustry-core payload` 通过 163/163；`cargo check -p mindustry-core` 通过，仅保留既有 unused warning；
 - 旧记录中的 `world_stream_with_java_like_payload_is_parsed_and_confirmed` 失败已通过补最小 player body 与测试期望修复；
 - 接手者仍必须以当前本地实测为准，不要只相信历史记录。
 
