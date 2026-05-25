@@ -10,7 +10,9 @@
 use std::collections::BTreeMap;
 
 use crate::mindustry::{
-    content::blocks::{BlockDef, EffectBlockKind, PayloadBlockKind, SandboxBlockKind},
+    content::blocks::{
+        BlockDef, EffectBlockKind, PayloadBlockKind, PowerBlockKind, SandboxBlockKind,
+    },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
     ctype::ContentId,
@@ -34,6 +36,12 @@ use crate::mindustry::{
         read_payload_router_extra, read_payload_source_extra, BlockProducerState,
         PayloadBlockBuildState, PayloadConveyorState, PayloadDeconstructorState,
         PayloadLoaderState, PayloadMassDriverState, PayloadSortKey, PayloadSourceState,
+    },
+    world::blocks::power::{
+        read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
+        read_nuclear_reactor_state, read_power_generator_state, read_variable_reactor_state,
+        HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
+        PowerGeneratorState, VariableReactorState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -110,9 +118,20 @@ pub enum GameRuntimePayloadBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimePowerBlockState {
+    Generator(PowerGeneratorState),
+    NuclearReactor(NuclearReactorState),
+    ImpactReactor(ImpactReactorState),
+    VariableReactor(VariableReactorState),
+    HeaterGenerator(HeaterGeneratorState),
+    Light(LightBlockState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
+    Power(GameRuntimePowerBlockState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,6 +141,7 @@ pub struct GameRuntime {
     pub effect_runtime_store: EffectBlockRuntimeStateStore,
     pub effect_timer_store: EffectBlockTimerStateStore,
     pub payload_runtime_states: BTreeMap<i32, GameRuntimePayloadBlockState>,
+    pub power_runtime_states: BTreeMap<i32, GameRuntimePowerBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -138,6 +158,7 @@ impl GameRuntime {
             effect_runtime_store: EffectBlockRuntimeStateStore::new(),
             effect_timer_store: EffectBlockTimerStateStore::new(),
             payload_runtime_states: BTreeMap::new(),
+            power_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -179,6 +200,7 @@ impl GameRuntime {
         self.effect_runtime_store.remove(removed.tile_pos);
         self.effect_timer_store.remove(removed.tile_pos);
         self.payload_runtime_states.remove(&removed.tile_pos);
+        self.power_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -338,6 +360,10 @@ impl GameRuntime {
                         self.payload_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Power(block_state) => {
+                        self.power_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -367,7 +393,25 @@ impl GameRuntime {
             }
             Err(GameRuntimeBlockStateReadError::Unsupported) => self
                 .read_payload_runtime_state_from_building_payload(block, revision, building_payload)
-                .map(|state| state.map(GameRuntimeLoadedBlockState::Payload)),
+                .and_then(|state| {
+                    if state.is_some() {
+                        Ok(state.map(GameRuntimeLoadedBlockState::Payload))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .or_else(|err| match err {
+                    GameRuntimeBlockStateReadError::Unsupported => self
+                        .read_power_runtime_state_from_building_payload(
+                            block,
+                            revision,
+                            building_payload,
+                        )
+                        .map(|state| state.map(GameRuntimeLoadedBlockState::Power)),
+                    GameRuntimeBlockStateReadError::Parse => {
+                        Err(GameRuntimeBlockStateReadError::Parse)
+                    }
+                }),
         }
     }
 
@@ -531,6 +575,56 @@ impl GameRuntime {
         }
     }
 
+    fn read_power_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimePowerBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let revision = revision as i32;
+
+        match block {
+            BlockDef::Power(power) => match power.kind {
+                PowerBlockKind::ConsumeGenerator
+                | PowerBlockKind::ThermalGenerator
+                | PowerBlockKind::SolarGenerator => {
+                    read_power_generator_state(building_payload, revision)
+                        .map(|state| Some(GameRuntimePowerBlockState::Generator(state)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                }
+                PowerBlockKind::NuclearReactor => {
+                    read_nuclear_reactor_state(building_payload, revision)
+                        .map(|state| Some(GameRuntimePowerBlockState::NuclearReactor(state)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                }
+                PowerBlockKind::ImpactReactor => {
+                    read_impact_reactor_state(building_payload, revision)
+                        .map(|state| Some(GameRuntimePowerBlockState::ImpactReactor(state)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                }
+                PowerBlockKind::VariableReactor => {
+                    read_variable_reactor_state(building_payload, revision)
+                        .map(|state| Some(GameRuntimePowerBlockState::VariableReactor(state)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                }
+                PowerBlockKind::HeaterGenerator => {
+                    read_heater_generator_state(building_payload, revision)
+                        .map(|state| Some(GameRuntimePowerBlockState::HeaterGenerator(state)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                }
+                _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+            },
+            BlockDef::Light(_) => read_light_block_state(building_payload)
+                .map(|state| Some(GameRuntimePowerBlockState::Light(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
         let tile_pos = building.tile_pos;
         let mut cleared = 0;
@@ -577,6 +671,7 @@ impl GameRuntime {
         self.effect_runtime_store.clear();
         self.effect_timer_store.clear();
         self.payload_runtime_states.clear();
+        self.power_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -721,6 +816,12 @@ mod tests {
                 PayloadBlockBuildState, PayloadConveyorState, PayloadDeconstructorState,
                 PayloadDriverState, PayloadLoaderState, PayloadMassDriverState, PayloadSortKey,
                 PayloadSourceState, Vec2,
+            },
+            blocks::power::{
+                write_heater_generator_state, write_impact_reactor_state, write_light_block_state,
+                write_nuclear_reactor_state, write_power_generator_state,
+                write_variable_reactor_state, HeaterGeneratorState, ImpactReactorState,
+                LightBlockState, NuclearReactorState, PowerGeneratorState, VariableReactorState,
             },
             footprint_tiles, point2_pack, Block, Tile,
         },
@@ -1774,6 +1875,197 @@ mod tests {
                 producer,
                 recipe
             })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_power_generator_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let generator_def = content.block_by_name("thermal-generator").unwrap();
+        let tile_pos = point2_pack(1, 5);
+        let saved = BuildingComp::new(tile_pos, generator_def.base().clone(), TeamId(2));
+        let state = PowerGeneratorState {
+            production_efficiency: 0.75,
+            generate_time: 4.0,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_power_generator_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 31, generator_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.power_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePowerBlockState::Generator(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_nuclear_reactor_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reactor_def = content.block_by_name("thorium-reactor").unwrap();
+        let tile_pos = point2_pack(2, 5);
+        let saved = BuildingComp::new(tile_pos, reactor_def.base().clone(), TeamId(2));
+        let state = NuclearReactorState {
+            generator: PowerGeneratorState {
+                production_efficiency: 0.5,
+                generate_time: 2.0,
+            },
+            heat: 0.8,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_nuclear_reactor_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 32, reactor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.power_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePowerBlockState::NuclearReactor(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_impact_reactor_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reactor_def = content.block_by_name("impact-reactor").unwrap();
+        let tile_pos = point2_pack(3, 5);
+        let saved = BuildingComp::new(tile_pos, reactor_def.base().clone(), TeamId(2));
+        let state = ImpactReactorState {
+            generator: PowerGeneratorState {
+                production_efficiency: 0.9,
+                generate_time: 1.5,
+            },
+            warmup: 0.6,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_impact_reactor_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 33, reactor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.power_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePowerBlockState::ImpactReactor(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_variable_reactor_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reactor_def = content.block_by_name("flux-reactor").unwrap();
+        let tile_pos = point2_pack(4, 5);
+        let saved = BuildingComp::new(tile_pos, reactor_def.base().clone(), TeamId(2));
+        let state = VariableReactorState {
+            generator: PowerGeneratorState {
+                production_efficiency: 0.4,
+                generate_time: 3.0,
+            },
+            heat: 7.5,
+            instability: 0.25,
+            warmup: 0.5,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_variable_reactor_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 34, reactor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.power_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePowerBlockState::VariableReactor(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_heater_generator_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let generator_def = content.block_by_name("neoplasia-reactor").unwrap();
+        let tile_pos = point2_pack(5, 5);
+        let saved = BuildingComp::new(tile_pos, generator_def.base().clone(), TeamId(2));
+        let state = HeaterGeneratorState {
+            generator: PowerGeneratorState {
+                production_efficiency: 0.3,
+                generate_time: 2.25,
+            },
+            heat: 12.0,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_heater_generator_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 35, generator_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.power_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePowerBlockState::HeaterGenerator(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_light_block_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let light_def = content.block_by_name("illuminator").unwrap();
+        let tile_pos = point2_pack(0, 5);
+        let saved = BuildingComp::new(tile_pos, light_def.base().clone(), TeamId(2));
+        let state = LightBlockState { color: 0x12_34_56 };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_light_block_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 30, light_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.power_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePowerBlockState::Light(state))
         );
     }
 
