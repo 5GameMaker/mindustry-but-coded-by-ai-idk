@@ -7,7 +7,7 @@
 //! it owns game-wide sidecar stores and dispatches externally supplied building
 //! slices from the real `GameState` frame source.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, io};
 
 use crate::mindustry::{
     content::blocks::{
@@ -22,7 +22,7 @@ use crate::mindustry::{
         bullet::BulletType,
         comp::{BuildingComp, BulletComp, UnitComp},
     },
-    io::LegacyShortChunkMap,
+    io::{type_io, LegacyShortChunkMap},
     vars::TILE_SIZE,
     world::blocks::campaign::{
         read_accelerator_state, read_landing_pad_state, read_launch_pad_state, AcceleratorState,
@@ -63,13 +63,13 @@ use crate::mindustry::{
     },
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
-        read_empty_payload_block_build_common, read_empty_payload_conveyor_extra,
         read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
         read_payload_router_extra, read_payload_source_extra,
         read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
         BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
-        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadSortKey,
-        PayloadSourceState,
+        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
+        PayloadSortKey, PayloadSourceState, Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE,
+        PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -689,6 +689,7 @@ impl GameRuntime {
         }
 
         match self.read_payload_runtime_state_from_building_payload(
+            content,
             block,
             revision,
             building_payload,
@@ -826,8 +827,12 @@ impl GameRuntime {
             Err(GameRuntimeBlockStateReadError::Unsupported) => {}
         }
 
-        match self.read_unit_runtime_state_from_building_payload(block, revision, building_payload)
-        {
+        match self.read_unit_runtime_state_from_building_payload(
+            content,
+            block,
+            revision,
+            building_payload,
+        ) {
             Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Unit(state))),
             Ok(None) => return Ok(None),
             Err(GameRuntimeBlockStateReadError::Parse) => {
@@ -928,8 +933,117 @@ impl GameRuntime {
         }
     }
 
+    fn read_exact_payload_block_build_common(
+        &self,
+        content: &ContentLoader,
+        read: &mut &[u8],
+    ) -> io::Result<PayloadBlockBuildState> {
+        let pay_vector = PayloadVec2 {
+            x: type_io::read_f32(read)?,
+            y: type_io::read_f32(read)?,
+        };
+        let pay_rotation = type_io::read_f32(read)?;
+        let payload = self.read_exact_payload_ref(content, read)?;
+        Ok(PayloadBlockBuildState {
+            payload,
+            pay_vector,
+            pay_rotation,
+            carried: false,
+        })
+    }
+
+    fn read_exact_payload_conveyor_extra(
+        &self,
+        content: &ContentLoader,
+        read: &mut &[u8],
+    ) -> io::Result<(f32, Option<PayloadRef>)> {
+        let _progress = type_io::read_f32(read)?;
+        let item_rotation = type_io::read_f32(read)?;
+        let item = self.read_exact_payload_ref(content, read)?;
+        Ok((item_rotation, item))
+    }
+
+    fn read_exact_payload_ref(
+        &self,
+        content: &ContentLoader,
+        read: &mut &[u8],
+    ) -> io::Result<Option<PayloadRef>> {
+        if !type_io::read_bool(read)? {
+            return Ok(None);
+        }
+
+        let payload_type = type_io::read_u8(read)?;
+        match payload_type {
+            PAYLOAD_BLOCK_TYPE => {
+                let block = type_io::read_i16(read)?;
+                let version = type_io::read_u8(read)?;
+                let Some(block_def) = content.block(block) else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "payload references unknown block id",
+                    ));
+                };
+                if !block_def.base().has_building() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "block payload references non-building block",
+                    ));
+                }
+
+                let before_build = *read;
+                let mut building_bytes = before_build;
+                let mut building = BuildingComp::new(
+                    crate::mindustry::world::point2_pack(0, 0),
+                    block_def.base().clone(),
+                    crate::mindustry::io::TeamId(0),
+                );
+                building.read_base(&mut building_bytes)?;
+
+                let mut state_bytes = building_bytes;
+                match self.read_runtime_state_from_building_payload(
+                    content,
+                    block_def,
+                    &building,
+                    version,
+                    &mut state_bytes,
+                ) {
+                    Ok(_) => {}
+                    Err(GameRuntimeBlockStateReadError::Unsupported) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "block payload contains unsupported non-terminal state",
+                        ));
+                    }
+                    Err(GameRuntimeBlockStateReadError::Parse) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "failed to parse nested block payload state",
+                        ));
+                    }
+                }
+
+                let consumed = before_build.len().saturating_sub(state_bytes.len());
+                *read = state_bytes;
+                Ok(Some(PayloadRef::Block {
+                    block,
+                    version,
+                    build_bytes: before_build[..consumed].to_vec(),
+                }))
+            }
+            PAYLOAD_UNIT_TYPE => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "non-terminal unit payload body requires exact unit codec",
+            )),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown payload type",
+            )),
+        }
+    }
+
     fn read_payload_runtime_state_from_building_payload(
         &self,
+        content: &ContentLoader,
         block: &BlockDef,
         revision: u8,
         building_payload: &mut &[u8],
@@ -952,7 +1066,8 @@ impl GameRuntime {
                     Ok(Some(GameRuntimePayloadBlockState::Conveyor(conveyor)))
                 }
                 PayloadBlockKind::PayloadRouter => {
-                    let (item_rotation, item) = read_empty_payload_conveyor_extra(building_payload)
+                    let (item_rotation, item) = self
+                        .read_exact_payload_conveyor_extra(content, building_payload)
                         .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                     let conveyor = PayloadConveyorState {
                         item,
@@ -969,7 +1084,8 @@ impl GameRuntime {
                 }
             },
             BlockDef::PayloadMassDriver(_) => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let driver = read_payload_mass_driver_extra(building_payload, revision)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
@@ -979,7 +1095,8 @@ impl GameRuntime {
                 }))
             }
             BlockDef::PayloadLoader(_) => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let exporting = read_payload_loader_extra(building_payload, revision)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
@@ -994,7 +1111,8 @@ impl GameRuntime {
                 }))
             }
             BlockDef::PayloadDeconstructor(_) => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let (progress, accum) = read_deconstructor_extra(building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
@@ -1013,7 +1131,8 @@ impl GameRuntime {
                 }))
             }
             BlockDef::PayloadConstructor(_) => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let progress = read_block_producer_progress(building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
@@ -1031,7 +1150,8 @@ impl GameRuntime {
                 }))
             }
             BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadSource => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let (unit, config_block, command_pos) =
                     read_payload_source_extra(building_payload, revision)
@@ -1474,6 +1594,7 @@ impl GameRuntime {
 
     fn read_unit_runtime_state_from_building_payload(
         &self,
+        content: &ContentLoader,
         block: &BlockDef,
         revision: u8,
         building_payload: &mut &[u8],
@@ -1484,14 +1605,16 @@ impl GameRuntime {
 
         match block {
             BlockDef::UnitFactory(_) => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 read_unit_factory_state(building_payload, revision as i32)
                     .map(|factory| Some(GameRuntimeUnitBlockState::Factory { common, factory }))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
             BlockDef::UnitReconstructor(_) => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 read_reconstructor_state(building_payload, revision as i32)
                     .map(|reconstructor| {
@@ -1508,7 +1631,8 @@ impl GameRuntime {
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
             BlockDef::UnitAssembler(_) => {
-                let common = read_empty_payload_block_build_common(building_payload)
+                let common = self
+                    .read_exact_payload_block_build_common(content, building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 read_unit_assembler_state(building_payload, revision as i32)
                     .map(|assembler| {
@@ -1973,6 +2097,19 @@ mod tests {
                 consecutives: (tile_count - 1) as u8,
             }],
             blocks,
+        }
+    }
+
+    fn door_build_payload_ref(content: &ContentLoader, open: bool) -> PayloadRef {
+        let door_def = content.block_by_name("door").unwrap();
+        let door = BuildingComp::new(point2_pack(0, 0), door_def.base().clone(), TeamId(1));
+        let mut build_bytes = Vec::new();
+        door.write_base(&mut build_bytes, false).unwrap();
+        write_door_state(&mut build_bytes, DoorState { open }).unwrap();
+        PayloadRef::Block {
+            block: door_def.base().id,
+            version: 0,
+            build_bytes,
         }
     }
 
@@ -3176,6 +3313,54 @@ mod tests {
         saved.write_base(&mut building_bytes, false).unwrap();
         write_payload_conveyor_extra(&mut building_bytes, 6.0, conveyor.item_rotation, None)
             .unwrap();
+        write_payload_router_extra(&mut building_bytes, sorted, rec_dir).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 26, router_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Router {
+                conveyor,
+                sorted,
+                rec_dir
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_router_exact_nonterminal_build_payload_before_sort_fields() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let tile_pos = point2_pack(2, 4);
+        let saved = BuildingComp::new(tile_pos, router_def.base().clone(), TeamId(6));
+        let item = door_build_payload_ref(&content, true);
+        let conveyor = PayloadConveyorState {
+            item: Some(item.clone()),
+            item_rotation: 90.0,
+            ..PayloadConveyorState::default()
+        };
+        let sorted = Some(PayloadSortKey {
+            content_type: ContentType::Block.ordinal() as i8,
+            id: router_def.base().id,
+        });
+        let rec_dir = 1;
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_conveyor_extra(
+            &mut building_bytes,
+            6.0,
+            conveyor.item_rotation,
+            Some(&item),
+        )
+        .unwrap();
         write_payload_router_extra(&mut building_bytes, sorted, rec_dir).unwrap();
 
         let mut runtime = GameRuntime::default();
@@ -4558,6 +4743,52 @@ mod tests {
         let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
         let common = PayloadBlockBuildState {
             payload: None,
+            pay_vector: Vec2 { x: 1.0, y: -2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let state = UnitFactoryState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 25.0,
+                ..Default::default()
+            },
+            current_plan: 1,
+            command_pos: Some(IoVec2 { x: 12.0, y: 34.0 }),
+            command_id: Some(2),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(3);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_unit_factory_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 4, factory_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Factory {
+                common,
+                factory: state
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_factory_common_build_payload_before_factory_fields() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("ground-factory").unwrap();
+        let tile_pos = point2_pack(4, 0);
+        let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
+        let payload = door_build_payload_ref(&content, true);
+        let common = PayloadBlockBuildState {
+            payload: Some(payload),
             pay_vector: Vec2 { x: 1.0, y: -2.0 },
             pay_rotation: 90.0,
             carried: false,
