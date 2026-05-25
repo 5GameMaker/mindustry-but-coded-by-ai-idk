@@ -82,7 +82,10 @@ use crate::mindustry::{
         read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
         read_payload_router_extra, read_payload_source_extra,
         read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
-        write_payload_block_build_common, BlockProducerState, PayloadBlockBuildState,
+        write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
+        write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
+        write_payload_mass_driver_extra, write_payload_ref, write_payload_router_extra,
+        write_payload_source_extra, BlockProducerState, PayloadBlockBuildState,
         PayloadConveyorState, PayloadDeconstructorState, PayloadLoaderState,
         PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
         Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
@@ -483,6 +486,96 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let Some(state) = runtime.payload_runtime_states.get(&building.tile_pos) {
+        match (block, state) {
+            (BlockDef::Payload(payload), GameRuntimePayloadBlockState::Conveyor(conveyor))
+                if payload.kind == PayloadBlockKind::PayloadConveyor =>
+            {
+                write_payload_conveyor_extra(
+                    write,
+                    conveyor.progress,
+                    conveyor.item_rotation,
+                    conveyor.item.as_ref(),
+                )?;
+            }
+            (
+                BlockDef::Payload(payload),
+                GameRuntimePayloadBlockState::Router {
+                    conveyor,
+                    sorted,
+                    rec_dir,
+                },
+            ) if payload.kind == PayloadBlockKind::PayloadRouter => {
+                write_payload_conveyor_extra(
+                    write,
+                    conveyor.progress,
+                    conveyor.item_rotation,
+                    conveyor.item.as_ref(),
+                )?;
+                write_payload_router_extra(write, *sorted, *rec_dir)?;
+            }
+            (
+                BlockDef::PayloadMassDriver(_),
+                GameRuntimePayloadBlockState::MassDriver { common, driver },
+            ) => {
+                write_payload_block_build_common(write, common)?;
+                write_payload_mass_driver_extra(write, driver)?;
+            }
+            (
+                BlockDef::PayloadLoader(_),
+                GameRuntimePayloadBlockState::Loader { common, loader },
+            ) => {
+                write_payload_block_build_common(write, common)?;
+                write_payload_loader_extra(write, loader.exporting)?;
+            }
+            (
+                BlockDef::PayloadDeconstructor(_),
+                GameRuntimePayloadBlockState::Deconstructor {
+                    common,
+                    deconstructor,
+                },
+            ) => {
+                write_payload_block_build_common(write, common)?;
+                write_deconstructor_extra(
+                    write,
+                    deconstructor.progress,
+                    deconstructor.accum.as_deref(),
+                )?;
+                write_payload_ref(write, deconstructor.deconstructing.as_ref())?;
+            }
+            (
+                BlockDef::PayloadConstructor(_),
+                GameRuntimePayloadBlockState::Constructor {
+                    common,
+                    producer,
+                    recipe,
+                },
+            ) => {
+                write_payload_block_build_common(write, common)?;
+                write_block_producer_progress(write, producer.progress)?;
+                write_constructor_recipe(write, *recipe)?;
+            }
+            (
+                BlockDef::Sandbox(sandbox),
+                GameRuntimePayloadBlockState::Source { common, source },
+            ) if sandbox.kind == SandboxBlockKind::PayloadSource => {
+                write_payload_block_build_common(write, common)?;
+                write_payload_source_extra(
+                    write,
+                    source.unit,
+                    source.config_block,
+                    source.command_pos,
+                )?;
+            }
+            (BlockDef::Sandbox(sandbox), GameRuntimePayloadBlockState::Void(common))
+                if sandbox.kind == SandboxBlockKind::PayloadVoid =>
+            {
+                write_payload_block_build_common(write, common)?;
+            }
+            _ => {}
+        }
+    }
+
     if let Some(state) = runtime.unit_runtime_states.get(&building.tile_pos) {
         match (block, state) {
             (BlockDef::UnitFactory(_), GameRuntimeUnitBlockState::Factory { common, factory }) => {
@@ -722,6 +815,26 @@ fn network_map_building_revision(
             | (CampaignBlockKind::LandingPad, GameRuntimeCampaignBlockState::LandingPad(_))
             | (CampaignBlockKind::Accelerator, GameRuntimeCampaignBlockState::Accelerator(_)) => {
                 return 1;
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(state) = runtime.payload_runtime_states.get(&building.tile_pos) {
+        match (block, state) {
+            (BlockDef::Payload(payload), GameRuntimePayloadBlockState::Router { .. })
+                if payload.kind == PayloadBlockKind::PayloadRouter =>
+            {
+                return 1
+            }
+            (BlockDef::PayloadMassDriver(_), GameRuntimePayloadBlockState::MassDriver { .. })
+            | (BlockDef::PayloadLoader(_), GameRuntimePayloadBlockState::Loader { .. }) => {
+                return 1;
+            }
+            (BlockDef::Sandbox(sandbox), GameRuntimePayloadBlockState::Source { .. })
+                if sandbox.kind == SandboxBlockKind::PayloadSource =>
+            {
+                return 1
             }
             _ => {}
         }
@@ -5433,6 +5546,288 @@ mod tests {
                 rotation: 315.0,
                 ..TractorBeamState::default()
             }))
+        );
+    }
+
+    fn exported_payload_state_revision(
+        block_def: &BlockDef,
+        state: &GameRuntimePayloadBlockState,
+    ) -> u8 {
+        match (block_def, state) {
+            (BlockDef::Payload(payload), GameRuntimePayloadBlockState::Router { .. })
+                if payload.kind == PayloadBlockKind::PayloadRouter =>
+            {
+                1
+            }
+            (BlockDef::PayloadMassDriver(_), GameRuntimePayloadBlockState::MassDriver { .. })
+            | (BlockDef::PayloadLoader(_), GameRuntimePayloadBlockState::Loader { .. }) => 1,
+            (BlockDef::Sandbox(sandbox), GameRuntimePayloadBlockState::Source { .. })
+                if sandbox.kind == SandboxBlockKind::PayloadSource =>
+            {
+                1
+            }
+            _ => 0,
+        }
+    }
+
+    fn roundtrip_exported_payload_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimePayloadBlockState,
+    ) -> Option<GameRuntimePayloadBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_payload_state_revision(block_def, &state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(17),
+        ));
+        runtime.payload_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 32;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("payload block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("payload block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.payload_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_payload_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let flare = content.unit_by_name("flare").unwrap().id();
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 1.5, y: -2.25 },
+            pay_rotation: 45.0,
+            carried: false,
+        };
+
+        let conveyor = PayloadConveyorState {
+            progress: 0.4,
+            item_rotation: 90.0,
+            animation: 1.0,
+            ..PayloadConveyorState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "payload-conveyor",
+                1,
+                26,
+                GameRuntimePayloadBlockState::Conveyor(conveyor.clone()),
+            ),
+            Some(GameRuntimePayloadBlockState::Conveyor(
+                PayloadConveyorState {
+                    item_rotation: 90.0,
+                    ..PayloadConveyorState::default()
+                }
+            ))
+        );
+
+        let router_conveyor = PayloadConveyorState {
+            progress: 0.75,
+            item_rotation: 180.0,
+            ..PayloadConveyorState::default()
+        };
+        let sorted = Some(PayloadSortKey {
+            content_type: ContentType::Block.ordinal() as i8,
+            id: router_def.base().id,
+        });
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "payload-router",
+                4,
+                26,
+                GameRuntimePayloadBlockState::Router {
+                    conveyor: router_conveyor.clone(),
+                    sorted,
+                    rec_dir: 3,
+                },
+            ),
+            Some(GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState {
+                    item_rotation: 180.0,
+                    ..PayloadConveyorState::default()
+                },
+                sorted,
+                rec_dir: 3,
+            })
+        );
+
+        let driver = PayloadMassDriverState {
+            link: point2_pack(9, 26),
+            turret_rotation: 135.0,
+            state: PayloadDriverState::Shooting,
+            reload_counter: 0.5,
+            charge: 0.75,
+            loaded: true,
+            charging: true,
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "payload-mass-driver",
+                7,
+                26,
+                GameRuntimePayloadBlockState::MassDriver {
+                    common: common.clone(),
+                    driver,
+                },
+            ),
+            Some(GameRuntimePayloadBlockState::MassDriver {
+                common: common.clone(),
+                driver,
+            })
+        );
+
+        let loader = PayloadLoaderState {
+            exporting: true,
+            payload_has_items: true,
+            payload_items_total: 7,
+            ..PayloadLoaderState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "payload-loader",
+                11,
+                26,
+                GameRuntimePayloadBlockState::Loader {
+                    common: common.clone(),
+                    loader,
+                },
+            ),
+            Some(GameRuntimePayloadBlockState::Loader {
+                common: common.clone(),
+                loader: PayloadLoaderState {
+                    exporting: true,
+                    ..PayloadLoaderState::default()
+                },
+            })
+        );
+
+        let deconstructor = PayloadDeconstructorState {
+            progress: 0.625,
+            accum: Some(vec![1.0, 2.0, 3.0]),
+            has_payload: true,
+            has_deconstructing: true,
+            deconstructing: None,
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "deconstructor",
+                15,
+                26,
+                GameRuntimePayloadBlockState::Deconstructor {
+                    common: common.clone(),
+                    deconstructor: deconstructor.clone(),
+                },
+            ),
+            Some(GameRuntimePayloadBlockState::Deconstructor {
+                common: common.clone(),
+                deconstructor: PayloadDeconstructorState {
+                    has_payload: false,
+                    has_deconstructing: false,
+                    ..deconstructor
+                },
+            })
+        );
+
+        let producer = BlockProducerState {
+            progress: 0.5,
+            time: 9.0,
+            heat: 0.75,
+            has_payload: true,
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "constructor",
+                19,
+                26,
+                GameRuntimePayloadBlockState::Constructor {
+                    common: common.clone(),
+                    producer,
+                    recipe: Some(router_def.base().id),
+                },
+            ),
+            Some(GameRuntimePayloadBlockState::Constructor {
+                common: common.clone(),
+                producer: BlockProducerState {
+                    progress: 0.5,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(router_def.base().id),
+            })
+        );
+
+        let source = PayloadSourceState {
+            unit: Some(flare),
+            command_pos: Some(PayloadVec2 { x: 8.0, y: 16.0 }),
+            has_payload: true,
+            scl: 0.5,
+            ..PayloadSourceState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "payload-source",
+                23,
+                26,
+                GameRuntimePayloadBlockState::Source {
+                    common: common.clone(),
+                    source,
+                },
+            ),
+            Some(GameRuntimePayloadBlockState::Source {
+                common: common.clone(),
+                source: PayloadSourceState {
+                    unit: Some(flare),
+                    command_pos: Some(PayloadVec2 { x: 8.0, y: 16.0 }),
+                    ..PayloadSourceState::default()
+                },
+            })
+        );
+
+        let void_common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: -1.0, y: 2.0 },
+            pay_rotation: 270.0,
+            carried: false,
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "payload-void",
+                27,
+                26,
+                GameRuntimePayloadBlockState::Void(void_common.clone()),
+            ),
+            Some(GameRuntimePayloadBlockState::Void(void_common))
         );
     }
 
