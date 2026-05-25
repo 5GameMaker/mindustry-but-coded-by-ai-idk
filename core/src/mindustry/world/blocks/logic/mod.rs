@@ -9,6 +9,8 @@ pub const MESSAGE_MAX_NEWLINES: usize = 24;
 pub const LOGIC_MAX_BYTE_LEN: usize = 1024 * 100;
 pub const LOGIC_MAX_LINKS: usize = 6000;
 pub const LOGIC_MAX_NAME_LENGTH: usize = 32;
+/// `arc.math.Mat` is a 3x3 matrix (`val.length == 9`) in upstream Arc.
+pub const LOGIC_DISPLAY_TRANSFORM_LEN: usize = 9;
 pub const DISPLAY_DRAW_TYPE: i32 = 30;
 pub const DISPLAY_SCALE_STEP: f32 = 0.05;
 pub const TILE_DISPLAY_TILE_SIZE: i32 = 32;
@@ -115,6 +117,53 @@ pub fn write_message_state<W: Write>(write: &mut W, state: &MessageBlockState) -
 
 pub fn read_message_state<R: Read>(read: &mut R) -> io::Result<MessageBlockState> {
     read_java_utf(read).map(MessageBlockState::new)
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LogicDisplayState {
+    pub transform: Option<[f32; LOGIC_DISPLAY_TRANSFORM_LEN]>,
+}
+
+impl LogicDisplayState {
+    pub fn with_transform(transform: [f32; LOGIC_DISPLAY_TRANSFORM_LEN]) -> Self {
+        Self {
+            transform: Some(transform),
+        }
+    }
+}
+
+pub fn write_logic_display_state<W: Write>(
+    write: &mut W,
+    state: &LogicDisplayState,
+) -> io::Result<()> {
+    if let Some(transform) = state.transform.as_ref() {
+        write.write_all(&[1])?;
+        for value in transform {
+            write_f32(write, *value)?;
+        }
+    } else {
+        write.write_all(&[0])?;
+    }
+    Ok(())
+}
+
+pub fn read_logic_display_state<R: Read>(
+    read: &mut R,
+    revision: u8,
+) -> io::Result<LogicDisplayState> {
+    if revision < 1 {
+        return Ok(LogicDisplayState::default());
+    }
+
+    if read_u8(read)? == 0 {
+        return Ok(LogicDisplayState::default());
+    }
+
+    let mut transform = [0.0; LOGIC_DISPLAY_TRANSFORM_LEN];
+    for value in &mut transform {
+        *value = read_f32(read)?;
+    }
+    Ok(LogicDisplayState::with_transform(transform))
 }
 
 pub fn write_logic_config<W: Write>(write: W, config: &LogicConfig) -> io::Result<()> {
@@ -306,6 +355,16 @@ fn write_i32<W: Write>(write: &mut W, value: i32) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
 
+fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
+    let mut buf = [0; 4];
+    read.read_exact(&mut buf)?;
+    Ok(f32::from_be_bytes(buf))
+}
+
+fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
 fn invalid_input(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -348,6 +407,37 @@ mod tests {
         let mut bytes = Vec::new();
         write_message_state(&mut bytes, &state).unwrap();
         assert_eq!(read_message_state(&mut bytes.as_slice()).unwrap(), state);
+    }
+
+    #[test]
+    fn logic_display_state_roundtrips_java_mat_payload() {
+        let state =
+            LogicDisplayState::with_transform([1.0, 0.0, 2.5, 0.0, 1.0, -3.25, 0.0, 0.0, 1.0]);
+        let mut bytes = Vec::new();
+        write_logic_display_state(&mut bytes, &state).unwrap();
+        assert_eq!(bytes.len(), 1 + LOGIC_DISPLAY_TRANSFORM_LEN * 4);
+        assert_eq!(
+            read_logic_display_state(&mut bytes.as_slice(), 1).unwrap(),
+            state
+        );
+
+        let mut empty = Vec::new();
+        write_logic_display_state(&mut empty, &LogicDisplayState::default()).unwrap();
+        assert_eq!(empty, vec![0]);
+        assert_eq!(
+            read_logic_display_state(&mut empty.as_slice(), 1).unwrap(),
+            LogicDisplayState::default()
+        );
+    }
+
+    #[test]
+    fn logic_display_state_revision_zero_does_not_consume_payload() {
+        let mut legacy = [0xaa, 0xbb].as_slice();
+        assert_eq!(
+            read_logic_display_state(&mut legacy, 0).unwrap(),
+            LogicDisplayState::default()
+        );
+        assert_eq!(legacy, [0xaa, 0xbb].as_slice());
     }
 
     #[test]
