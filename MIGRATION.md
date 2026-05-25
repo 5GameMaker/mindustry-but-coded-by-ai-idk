@@ -915,6 +915,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `mend_projector_outputs_items(...)`
 - `mend_projector_range(...)`
 - `mend_projector_update(...)`
+- `mend_projector_building_damaged(...)`
+- `mend_projector_try_heal_building(...)`
+- `mend_projector_apply_heal_to_buildings(...)`
 - `write_mend_projector_state(...)`
 - `read_mend_projector_state(...)`
 - `OverdriveProjectorStatsPlan`
@@ -930,6 +933,11 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `write_overdrive_projector_state(...)`
 - `read_overdrive_projector_state(...)`
 - `overdrive-dome` 变体当前按同类 overdrive 投射器状态机推进。
+- 已对照 `MendProjector.MendBuild.updateTile()` 的 heal pulse 分支补充真实建筑组件接线：
+  - `charge >= reload && canHeal` 时，`MendProjectorUpdate` 的 `heal_fraction` 现在可直接应用到上层 range/indexer 已筛出的 `BuildingComp` 候选；
+  - `mend_projector_try_heal_building(...)` 对齐 Java `b.damaged() && !b.isHealSuppressed()`，只治疗未死亡、血量低于 `maxHealth - 0.001` 且未被治疗抑制的目标；
+  - 治疗量按 `target.max_health * heal_fraction` 写入真实 `BuildingComp::heal(...)`，同步更新 `last_heal_time`，可由 `mend_projector_pulse_plan(fired, healed > 0)` 决定是否播放 heal sound；
+  - 真实 world/indexer 扫描、`Fx.healBlockFull` 与 sound 调度仍由后续 runtime/renderer 层承接。
 - 已对照 `OverdriveProjector.OverdriveBuild.updateTile()` 的 runtime boost 分支补充真实建筑组件接线：
   - `charge >= reload` 后由 `overdrive_projector_boost_plan(...)` 生成 `realRange / canOverdrive / realBoost / reload + 1`；
   - `overdrive_projector_apply_boost_to_buildings(...)` 对上层 range/indexer 已筛出的候选 `BuildingComp` 调用真实 `BuildingComp::apply_boost(...)`；
@@ -941,7 +949,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `ForceProjector.draw()` 接入真实 renderer/Draw dispatcher；
 - `ForceProjector.setBars()/sense/setProp` 接入真实 building runtime；
 - `DirectionalForceProjector` 接入真实 Groups.bullet.intersect、absorb effect、shield break effect 与 renderer；
-- `MendProjector` 真实 range indexer / world heal / drawPlace / drawSelect 接入；
+- `MendProjector` 真实 range indexer 扫描、content suppressable 细节、heal effect/sound、drawPlace / drawSelect 接入；
 - `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描/content `canOverdrive` 查询、status/effect、draw/select 接入；
 - 上述 helper 继续接入真实 block runtime，避免停留在单测 helper。
 

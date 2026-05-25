@@ -734,6 +734,45 @@ pub fn mend_projector_pulse_plan(fired: bool, healed_any: bool) -> MendProjector
     }
 }
 
+pub fn mend_projector_building_damaged(building: &BuildingComp) -> bool {
+    !building.dead && building.health < building.max_health - 0.001
+}
+
+pub fn mend_projector_try_heal_building(
+    building: &mut BuildingComp,
+    heal_fraction: f32,
+    now: f32,
+) -> bool {
+    if heal_fraction <= 0.0
+        || !mend_projector_building_damaged(building)
+        || building.is_heal_suppressed(now)
+    {
+        return false;
+    }
+
+    let before = building.health;
+    building.heal(building.max_health * heal_fraction, now);
+    building.health > before
+}
+
+pub fn mend_projector_apply_heal_to_buildings(
+    update: &MendProjectorUpdate,
+    now: f32,
+    buildings: &mut [BuildingComp],
+) -> usize {
+    if !update.fired {
+        return 0;
+    }
+
+    let mut healed = 0;
+    for building in buildings {
+        if mend_projector_try_heal_building(building, update.heal_fraction, now) {
+            healed += 1;
+        }
+    }
+    healed
+}
+
 pub fn mend_projector_place_plan(
     tile_x: i32,
     tile_y: i32,
@@ -4477,6 +4516,51 @@ mod tests {
                 scan_targets: true,
                 play_sound: false,
             }
+        );
+    }
+
+    #[test]
+    fn mend_projector_runtime_adapter_heals_only_damaged_unsuppressed_buildings() {
+        let update = MendProjectorUpdate {
+            fired: true,
+            real_range: 85.0,
+            heal_fraction: 0.25,
+            should_consume_optional: false,
+        };
+        let mut buildings = vec![
+            projector_runtime_building(20, "damaged-router"),
+            projector_runtime_building(21, "full-wall"),
+            projector_runtime_building(22, "suppressed-drill"),
+        ];
+        buildings[0].health = 40.0;
+        buildings[2].health = 40.0;
+        buildings[2].apply_heal_suppression(100.0, 20.0);
+
+        let healed = mend_projector_apply_heal_to_buildings(&update, 110.0, &mut buildings);
+
+        assert_eq!(healed, 1);
+        assert_eq!(buildings[0].health, 65.0);
+        assert!(buildings[0].recently_healed(110.0));
+        assert_eq!(buildings[1].health, buildings[1].max_health);
+        assert_eq!(buildings[1].last_heal_time, -60.0 * 10.0);
+        assert_eq!(buildings[2].health, 40.0);
+        assert!(!buildings[2].recently_healed(110.0));
+
+        assert_eq!(
+            mend_projector_pulse_plan(update.fired, healed > 0),
+            MendProjectorPulsePlan {
+                scan_targets: true,
+                play_sound: true,
+            }
+        );
+
+        let idle = MendProjectorUpdate {
+            fired: false,
+            ..update
+        };
+        assert_eq!(
+            mend_projector_apply_heal_to_buildings(&idle, 130.0, &mut buildings),
+            0
         );
     }
 
