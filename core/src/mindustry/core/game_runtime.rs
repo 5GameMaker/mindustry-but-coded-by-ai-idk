@@ -3362,6 +3362,55 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_reads_payload_ammo_turret_legacy_block_only_payloads() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router = content.block_by_name("router").unwrap();
+        let junction = content.block_by_name("junction").unwrap();
+        let valid_key = PayloadKey::new(ContentType::Block, router.base().id);
+        let invalid_key = PayloadKey::new(ContentType::Block, junction.base().id);
+        let mut turret_block = TurretBlockData::new(
+            901,
+            "payload-ammo-legacy-test",
+            TurretBlockKind::PayloadAmmoTurret,
+        );
+        turret_block.payload_ammo.push(PayloadTurretAmmo {
+            content: valid_key,
+            bullet: BulletSpec::new(BulletKind::Basic, 1.0, 1.0),
+        });
+        let block = BlockDef::Turret(turret_block);
+        let mut turret = TurretState {
+            reload_counter: 2.5,
+            rotation: 30.0,
+            ..TurretState::default()
+        };
+        let mut building_payload = Vec::new();
+        turret_write_child(&mut building_payload, &turret).unwrap();
+        building_payload.extend_from_slice(&2i16.to_be_bytes());
+        building_payload.extend_from_slice(&(valid_key.id as i16).to_be_bytes());
+        building_payload.extend_from_slice(&4i32.to_be_bytes());
+        building_payload.extend_from_slice(&(invalid_key.id as i16).to_be_bytes());
+        building_payload.extend_from_slice(&1i32.to_be_bytes());
+
+        let runtime = GameRuntime::default();
+        let mut payload_slice = building_payload.as_slice();
+        let loaded = runtime
+            .read_turret_runtime_state_from_building_payload(&block, 1, &mut payload_slice)
+            .unwrap();
+
+        let mut filtered = PayloadSeq::new();
+        filtered.add(valid_key, 4);
+        turret.total_ammo = 4;
+        assert!(payload_slice.is_empty());
+        assert_eq!(
+            loaded,
+            Some(GameRuntimeTurretBlockState::PayloadAmmo {
+                turret,
+                payloads: filtered,
+            })
+        );
+    }
+
+    #[test]
     fn game_runtime_loads_continuous_turret_state_from_network_map_building_payload() {
         let content = ContentLoader::create_base_content().unwrap();
         let turret_def = content.block_by_name("lustre").unwrap();

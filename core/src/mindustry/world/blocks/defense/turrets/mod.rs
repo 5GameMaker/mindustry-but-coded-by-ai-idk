@@ -611,14 +611,20 @@ pub fn payload_ammo_turret_read_payloads<R: Read>(
 ) -> io::Result<PayloadSeq> {
     let count = read_i16(read)?;
     if count >= 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "old block-only PayloadSeq format requires content registry",
-        ));
+        let mut seq = PayloadSeq::new();
+        for _ in 0..count {
+            let id = read_i16(read)? as ContentId;
+            let amount = read_i32(read)?;
+            let key = PayloadKey::new(ContentType::Block, id);
+            if is_valid_ammo(key) {
+                seq.add(key, amount);
+            }
+        }
+        return Ok(seq);
     }
 
     let mut seq = PayloadSeq::new();
-    for _ in 0..(-count) {
+    for _ in 0..(-(count as i32)) {
         let content_type = ContentType::from_ordinal(read_u8(read)?).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -1325,6 +1331,20 @@ mod tests {
             }]
         );
         assert_eq!(restored_total, 5);
+
+        let mut legacy_payloads = Vec::new();
+        legacy_payloads.extend_from_slice(&2i16.to_be_bytes());
+        legacy_payloads.extend_from_slice(&5i16.to_be_bytes());
+        legacy_payloads.extend_from_slice(&3i32.to_be_bytes());
+        legacy_payloads.extend_from_slice(&7i16.to_be_bytes());
+        legacy_payloads.extend_from_slice(&2i32.to_be_bytes());
+        let restored = payload_ammo_turret_read_payloads(&mut legacy_payloads.as_slice(), |key| {
+            key == PayloadKey::new(ContentType::Block, 5)
+        })
+        .unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored.total(), 3);
+        assert_eq!(restored.get(PayloadKey::new(ContentType::Block, 5)), 3);
 
         assert!(liquid_turret_has_ammo(Some(2.0), 0.5));
         assert!(!liquid_turret_has_ammo(Some(2.0), 0.49));

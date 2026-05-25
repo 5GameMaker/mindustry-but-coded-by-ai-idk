@@ -120,6 +120,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 ## 5. 最近一次完成的具体实现
 
+### 2026-05-26 续作：PayloadAmmoTurret 旧式 PayloadSeq fallback
+
+文件：
+
+- `core/src/mindustry/world/blocks/defense/turrets/mod.rs`
+- `core/src/mindustry/core/game_runtime.rs`
+- `MIGRATION.md`
+
+完成内容：
+
+1. `payload_ammo_turret_read_payloads(...)` 已支持 Java legacy 正数长度 block-only `PayloadSeq`：
+   - `count: short >= 0`
+   - `blockId: short`
+   - `amount: int`
+   - 以 `PayloadKey(ContentType::Block, blockId)` 过滤合法 ammo 后写入 `PayloadSeq`
+2. 保留新格式 `contentType + id + amount` 读取路径。
+3. 补 `game_runtime_reads_payload_ammo_turret_legacy_block_only_payloads`，确认 legacy payload ammo 通过 runtime reader 后会过滤非法 block 并更新 `totalAmmo`。
+4. 已验证：
+   - `cargo test -p mindustry-core item_liquid_and_power_turret_helpers_follow_upstream_ammo_rules`
+   - `cargo test -p mindustry-core turret`
+   - `cargo check -p mindustry-core`
+
 ### 2026-05-26 续作：LogicProcessor revision 0 runtime 回归
 
 文件：
