@@ -2,13 +2,17 @@ use std::io::{self, Read, Write};
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 
-use crate::mindustry::io::{read_java_utf, write_java_utf};
+use crate::mindustry::io::type_io::read_object_safe;
+use crate::mindustry::io::{
+    read_java_utf, read_string, write_java_utf, write_object, write_string, TypeValue,
+};
 
 pub const MESSAGE_MAX_TEXT_LENGTH: usize = 300;
 pub const MESSAGE_MAX_NEWLINES: usize = 24;
 pub const LOGIC_MAX_BYTE_LEN: usize = 1024 * 100;
 pub const LOGIC_MAX_LINKS: usize = 6000;
 pub const LOGIC_MAX_NAME_LENGTH: usize = 32;
+pub const LOGIC_MAX_COMPRESSED_LEN: usize = 16_000;
 /// `arc.math.Mat` is a 3x3 matrix (`val.length == 9`) in upstream Arc.
 pub const LOGIC_DISPLAY_TRANSFORM_LEN: usize = 9;
 pub const DISPLAY_DRAW_TYPE: i32 = 30;
@@ -251,6 +255,202 @@ pub fn read_canvas_state<R: Read>(
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicProcessorVariableState {
+    pub name: String,
+    pub value: TypeValue,
+}
+
+impl LogicProcessorVariableState {
+    pub fn new(name: impl Into<String>, value: TypeValue) -> Self {
+        Self {
+            name: name.into(),
+            value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicProcessorWaitState {
+    pub index: u16,
+    pub value: f32,
+}
+
+impl LogicProcessorWaitState {
+    pub fn new(index: u16, value: f32) -> Self {
+        Self { index, value }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LogicProcessorState {
+    pub compressed_code: Option<Vec<u8>>,
+    pub config: Option<LogicConfig>,
+    pub legacy_code: Option<String>,
+    pub legacy_link_positions: Vec<i32>,
+    pub variables: Vec<LogicProcessorVariableState>,
+    pub legacy_memory_slots: i32,
+    pub ipt: Option<i16>,
+    pub tag: Option<String>,
+    pub icon_tag: u16,
+    pub waits: Vec<LogicProcessorWaitState>,
+    pub accumulator: f32,
+}
+
+impl LogicProcessorState {
+    pub fn from_config(config: LogicConfig) -> io::Result<Self> {
+        let mut compressed = Vec::new();
+        write_logic_config(&mut compressed, &config)?;
+        Ok(Self {
+            compressed_code: Some(compressed),
+            config: Some(config),
+            ..Self::default()
+        })
+    }
+}
+
+pub fn write_logic_processor_state<W: Write>(
+    write: &mut W,
+    state: &LogicProcessorState,
+    revision: u8,
+    privileged: bool,
+) -> io::Result<()> {
+    if revision >= 1 {
+        let compressed = if let Some(compressed) = state.compressed_code.as_ref() {
+            compressed.clone()
+        } else if let Some(config) = state.config.as_ref() {
+            let mut compressed = Vec::new();
+            write_logic_config(&mut compressed, config)?;
+            compressed
+        } else {
+            Vec::new()
+        };
+        if compressed.len() > i32::MAX as usize {
+            return Err(invalid_input("processor compressed code too large"));
+        }
+        write_i32(write, compressed.len() as i32)?;
+        write.write_all(&compressed)?;
+    } else {
+        write_java_utf(write, state.legacy_code.as_deref().unwrap_or(""))?;
+        if state.legacy_link_positions.len() > i16::MAX as usize {
+            return Err(invalid_input("legacy processor link count too large"));
+        }
+        write_i16(write, state.legacy_link_positions.len() as i16)?;
+        for pos in &state.legacy_link_positions {
+            write_i32(write, *pos)?;
+        }
+    }
+
+    if state.variables.len() > i32::MAX as usize {
+        return Err(invalid_input("processor variable count too large"));
+    }
+    write_i32(write, state.variables.len() as i32)?;
+    for variable in &state.variables {
+        write_java_utf(write, &variable.name)?;
+        write_object(write, &variable.value)?;
+    }
+
+    write_i32(write, state.legacy_memory_slots)?;
+    if state.legacy_memory_slots > 0 {
+        for _ in 0..state.legacy_memory_slots {
+            write_f64(write, 0.0)?;
+        }
+    }
+
+    if privileged && revision >= 2 {
+        write_i16(write, state.ipt.unwrap_or(1))?;
+    }
+
+    if revision >= 3 {
+        write_string(write, state.tag.as_deref())?;
+        write_u16(write, state.icon_tag)?;
+    }
+
+    if revision >= 4 {
+        if state.waits.len() > u16::MAX as usize {
+            return Err(invalid_input("processor wait count too large"));
+        }
+        write_u16(write, state.waits.len() as u16)?;
+        for wait in &state.waits {
+            write_u16(write, wait.index)?;
+            write_f32(write, wait.value)?;
+        }
+        write_f32(write, state.accumulator)?;
+    }
+
+    Ok(())
+}
+
+pub fn read_logic_processor_state<R: Read>(
+    read: &mut R,
+    revision: u8,
+    privileged: bool,
+    max_instructions_per_tick: i16,
+) -> io::Result<LogicProcessorState> {
+    let mut state = LogicProcessorState::default();
+
+    if revision >= 1 {
+        let compressed_len = read_i32(read)?;
+        if compressed_len < 0 {
+            return Err(invalid_data("negative processor compressed length"));
+        }
+        let mut compressed = vec![0; compressed_len as usize];
+        read.read_exact(&mut compressed)?;
+        state.config = read_logic_config(compressed.as_slice(), None).ok();
+        state.compressed_code = Some(compressed);
+    } else {
+        state.legacy_code = Some(read_java_utf(read)?);
+        let total = read_i16(read)?;
+        if total > 0 {
+            state.legacy_link_positions.reserve(total as usize);
+            for _ in 0..total {
+                state.legacy_link_positions.push(read_i32(read)?);
+            }
+        }
+    }
+
+    let var_count = read_i32(read)?;
+    if var_count < 0 {
+        return Err(invalid_data("negative processor variable count"));
+    }
+    state.variables.reserve(var_count as usize);
+    for _ in 0..var_count {
+        let name = read_java_utf(read)?;
+        let value = read_object_safe(read)?;
+        state
+            .variables
+            .push(LogicProcessorVariableState::new(name, value));
+    }
+
+    state.legacy_memory_slots = read_i32(read)?;
+    if state.legacy_memory_slots > 0 {
+        skip_bytes(read, state.legacy_memory_slots as usize * 8)?;
+    }
+
+    if privileged && revision >= 2 {
+        let ipt = read_i16(read)?;
+        state.ipt = Some(ipt.clamp(1, max_instructions_per_tick.max(1)));
+    }
+
+    if revision >= 3 {
+        state.tag = read_string(read)?;
+        state.icon_tag = read_u16(read)?;
+    }
+
+    if revision >= 4 {
+        let waits = read_u16(read)? as usize;
+        state.waits.reserve(waits);
+        for _ in 0..waits {
+            let index = read_u16(read)?;
+            let value = read_f32(read)?;
+            state.waits.push(LogicProcessorWaitState::new(index, value));
+        }
+        state.accumulator = read_f32(read)?;
+    }
+
+    Ok(state)
+}
+
 pub fn write_logic_config<W: Write>(write: W, config: &LogicConfig) -> io::Result<()> {
     if config.code.len() > LOGIC_MAX_BYTE_LEN {
         return Err(invalid_input(
@@ -430,6 +630,16 @@ fn write_i16<W: Write>(write: &mut W, value: i16) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
 
+fn read_u16<R: Read>(read: &mut R) -> io::Result<u16> {
+    let mut buf = [0; 2];
+    read.read_exact(&mut buf)?;
+    Ok(u16::from_be_bytes(buf))
+}
+
+fn write_u16<W: Write>(write: &mut W, value: u16) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
 fn read_i32<R: Read>(read: &mut R) -> io::Result<i32> {
     let mut buf = [0; 4];
     read.read_exact(&mut buf)?;
@@ -595,6 +805,50 @@ mod tests {
             read_canvas_state(&mut read, 2).unwrap(),
             CanvasBlockState::new(2)
         );
+        assert!(read.is_empty());
+    }
+
+    #[test]
+    fn logic_processor_state_reads_current_revision_metadata_without_unboxing() {
+        let config =
+            LogicConfig::from_code(b"print \"hi\"", vec![LogicLink::new(2, -3, "cell1", false)]);
+        let mut state = LogicProcessorState::from_config(config.clone()).unwrap();
+        state.variables = vec![
+            LogicProcessorVariableState::new("@counter", TypeValue::Double(12.5)),
+            LogicProcessorVariableState::new("@unit", TypeValue::Unit(77)),
+        ];
+        state.ipt = Some(25);
+        state.tag = Some("core-loop".into());
+        state.icon_tag = 'A' as u16;
+        state.waits = vec![LogicProcessorWaitState::new(3, 0.75)];
+        state.accumulator = 0.5;
+
+        let mut bytes = Vec::new();
+        write_logic_processor_state(&mut bytes, &state, 4, true).unwrap();
+        let decoded = read_logic_processor_state(&mut bytes.as_slice(), 4, true, 40).unwrap();
+        assert_eq!(decoded, state);
+        assert_eq!(decoded.config, Some(config));
+    }
+
+    #[test]
+    fn logic_processor_state_revision_gates_and_skips_legacy_memory() {
+        let state = LogicProcessorState {
+            legacy_memory_slots: 2,
+            ..LogicProcessorState::default()
+        };
+        let mut bytes = Vec::new();
+        write_logic_processor_state(&mut bytes, &state, 1, true).unwrap();
+        let mut read = bytes.as_slice();
+        let decoded = read_logic_processor_state(&mut read, 1, true, 40).unwrap();
+
+        assert_eq!(decoded.compressed_code, Some(Vec::new()));
+        assert_eq!(decoded.config, None);
+        assert_eq!(decoded.legacy_memory_slots, 2);
+        assert_eq!(decoded.ipt, None);
+        assert_eq!(decoded.tag, None);
+        assert_eq!(decoded.icon_tag, 0);
+        assert!(decoded.waits.is_empty());
+        assert_eq!(decoded.accumulator, 0.0);
         assert!(read.is_empty());
     }
 

@@ -48,9 +48,9 @@ use crate::mindustry::{
     world::blocks::heat::{read_heat_producer_state, HeatProducerState},
     world::blocks::liquid::{read_liquid_bridge_state, LiquidBridgeState},
     world::blocks::logic::{
-        read_canvas_state, read_logic_display_state, read_memory_state, read_message_state,
-        read_switch_enabled, CanvasBlockState, LogicDisplayState, MemoryBlockState,
-        MessageBlockState,
+        read_canvas_state, read_logic_display_state, read_logic_processor_state, read_memory_state,
+        read_message_state, read_switch_enabled, CanvasBlockState, LogicDisplayState,
+        LogicProcessorState, MemoryBlockState, MessageBlockState,
     },
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
@@ -213,6 +213,7 @@ pub enum GameRuntimeLogicBlockState {
     Display(LogicDisplayState),
     Memory(MemoryBlockState),
     Canvas(CanvasBlockState),
+    Processor(LogicProcessorState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1190,7 +1191,14 @@ impl GameRuntime {
                     .map(|state| Some(GameRuntimeLogicBlockState::Canvas(state)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
-            LogicBlockKind::Processor => Err(GameRuntimeBlockStateReadError::Unsupported),
+            LogicBlockKind::Processor => read_logic_processor_state(
+                building_payload,
+                revision,
+                logic.privileged_only,
+                logic.max_instructions_per_tick.max(1) as i16,
+            )
+            .map(|state| Some(GameRuntimeLogicBlockState::Processor(state)))
+            .map_err(|_| GameRuntimeBlockStateReadError::Parse),
         }
     }
 
@@ -1503,7 +1511,8 @@ mod tests {
         ctype::ContentType,
         entities::units::BuildPlan,
         io::{
-            LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, Vec2 as IoVec2,
+            LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
+            Vec2 as IoVec2,
         },
         r#type::{PayloadKey, PayloadSeq},
         world::{
@@ -1527,8 +1536,9 @@ mod tests {
             blocks::heat::write_heat_producer_state,
             blocks::liquid::{write_liquid_bridge_state, LiquidBridgeState},
             blocks::logic::{
-                write_canvas_state, write_logic_display_state, write_memory_state,
-                write_message_state, write_switch_enabled,
+                write_canvas_state, write_logic_display_state, write_logic_processor_state,
+                write_memory_state, write_message_state, write_switch_enabled, LogicConfig,
+                LogicLink, LogicProcessorVariableState, LogicProcessorWaitState,
             },
             blocks::payloads::{
                 write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
@@ -3736,6 +3746,44 @@ mod tests {
         assert_eq!(
             runtime.logic_runtime_states.get(&tile_pos),
             Some(&GameRuntimeLogicBlockState::Canvas(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_processor_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let processor_def = content.block_by_name("micro-processor").unwrap();
+        let tile_pos = point2_pack(6, 2);
+        let saved = BuildingComp::new(tile_pos, processor_def.base().clone(), TeamId(1));
+        let config =
+            LogicConfig::from_code(b"set counter 1", vec![LogicLink::new(1, 0, "cell1", false)]);
+        let mut state = LogicProcessorState::from_config(config).unwrap();
+        state.variables = vec![LogicProcessorVariableState::new(
+            "counter",
+            TypeValue::Double(1.0),
+        )];
+        state.tag = Some("loop".into());
+        state.icon_tag = 'L' as u16;
+        state.waits = vec![LogicProcessorWaitState::new(0, 0.25)];
+        state.accumulator = 0.75;
+
+        let mut building_bytes = Vec::new();
+        building_bytes.push(4);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_logic_processor_state(&mut building_bytes, &state, 4, false).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 22, processor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.logic_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLogicBlockState::Processor(state))
         );
     }
 
