@@ -33,8 +33,10 @@ use crate::mindustry::{
         LandingPadState, LaunchPadState,
     },
     world::blocks::defense::turrets::{
-        continuous_turret_read_child, item_turret_read_ammo, payload_ammo_turret_read_payloads,
-        point_defense_read_child, tractor_beam_read_child, turret_read_child,
+        continuous_turret_read_child, continuous_turret_write_child, item_turret_read_ammo,
+        item_turret_write_ammo, payload_ammo_turret_read_payloads,
+        payload_ammo_turret_write_payloads, point_defense_read_child, point_defense_write_child,
+        tractor_beam_read_child, tractor_beam_write_child, turret_read_child, turret_write_child,
         ContinuousTurretState, ItemAmmoEntry, PointDefenseState, TractorBeamState, TurretState,
     },
     world::blocks::defense::{
@@ -201,6 +203,52 @@ fn write_network_map_block_state_tail<W: io::Write>(
             }
             (EffectBlockKind::BuildTurret, EffectBlockRuntimeState::BuildTurret(state)) => {
                 build_turret_write_child_with_loader(write, content, state)?;
+            }
+            _ => {}
+        }
+    }
+
+    if let (BlockDef::Turret(turret), Some(state)) =
+        (block, runtime.turret_runtime_states.get(&building.tile_pos))
+    {
+        match (turret.kind, state) {
+            (TurretBlockKind::ItemTurret, GameRuntimeTurretBlockState::Item { turret, ammo }) => {
+                turret_write_child(write, turret)?;
+                item_turret_write_ammo(write, ammo)?;
+            }
+            (
+                TurretBlockKind::PayloadAmmoTurret,
+                GameRuntimeTurretBlockState::PayloadAmmo { turret, payloads },
+            ) => {
+                turret_write_child(write, turret)?;
+                payload_ammo_turret_write_payloads(write, payloads)?;
+            }
+            (
+                TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret,
+                GameRuntimeTurretBlockState::Continuous { turret, continuous },
+            ) => {
+                turret_write_child(write, turret)?;
+                continuous_turret_write_child(write, continuous)?;
+            }
+            (
+                TurretBlockKind::PointDefenseTurret,
+                GameRuntimeTurretBlockState::PointDefense(state),
+            ) => {
+                point_defense_write_child(write, state)?;
+            }
+            (
+                TurretBlockKind::TractorBeamTurret,
+                GameRuntimeTurretBlockState::TractorBeam(state),
+            ) => {
+                tractor_beam_write_child(write, state)?;
+            }
+            (
+                TurretBlockKind::LiquidTurret
+                | TurretBlockKind::PowerTurret
+                | TurretBlockKind::LaserTurret,
+                GameRuntimeTurretBlockState::Generic(state),
+            ) => {
+                turret_write_child(write, state)?;
             }
             _ => {}
         }
@@ -537,6 +585,29 @@ fn network_map_building_revision(
     {
         if effect.kind == EffectBlockKind::BaseShield {
             return 1;
+        }
+    }
+
+    if let (BlockDef::Turret(turret), Some(state)) =
+        (block, runtime.turret_runtime_states.get(&building.tile_pos))
+    {
+        match (turret.kind, state) {
+            (TurretBlockKind::ItemTurret, GameRuntimeTurretBlockState::Item { .. }) => return 2,
+            (
+                TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret,
+                GameRuntimeTurretBlockState::Continuous { .. },
+            ) => return 3,
+            (
+                TurretBlockKind::PayloadAmmoTurret,
+                GameRuntimeTurretBlockState::PayloadAmmo { .. },
+            )
+            | (
+                TurretBlockKind::LiquidTurret
+                | TurretBlockKind::PowerTurret
+                | TurretBlockKind::LaserTurret,
+                GameRuntimeTurretBlockState::Generic(_),
+            ) => return 1,
+            _ => {}
         }
     }
 
@@ -5165,6 +5236,203 @@ mod tests {
                 GameRuntimeUnitBlockState::AssemblerModule(module_common.clone()),
             ),
             Some(GameRuntimeUnitBlockState::AssemblerModule(module_common))
+        );
+    }
+
+    fn exported_turret_state_revision(
+        block_def: &BlockDef,
+        state: &GameRuntimeTurretBlockState,
+    ) -> u8 {
+        let BlockDef::Turret(turret) = block_def else {
+            return 0;
+        };
+
+        match (turret.kind, state) {
+            (TurretBlockKind::ItemTurret, GameRuntimeTurretBlockState::Item { .. }) => 2,
+            (
+                TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret,
+                GameRuntimeTurretBlockState::Continuous { .. },
+            ) => 3,
+            (
+                TurretBlockKind::PayloadAmmoTurret,
+                GameRuntimeTurretBlockState::PayloadAmmo { .. },
+            )
+            | (
+                TurretBlockKind::LiquidTurret
+                | TurretBlockKind::PowerTurret
+                | TurretBlockKind::LaserTurret,
+                GameRuntimeTurretBlockState::Generic(_),
+            ) => 1,
+            _ => 0,
+        }
+    }
+
+    fn roundtrip_exported_turret_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeTurretBlockState,
+    ) -> Option<GameRuntimeTurretBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_turret_state_revision(block_def, &state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(16),
+        ));
+        runtime.turret_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 32;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("turret block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("turret block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.turret_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_turret_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+
+        let generic = TurretState {
+            reload_counter: 2.0,
+            rotation: 30.0,
+            ..TurretState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_turret_state(
+                &content,
+                "arc",
+                1,
+                30,
+                GameRuntimeTurretBlockState::Generic(generic.clone()),
+            ),
+            Some(GameRuntimeTurretBlockState::Generic(generic))
+        );
+
+        let item_turret = TurretState {
+            reload_counter: 3.5,
+            rotation: 45.0,
+            ..TurretState::default()
+        };
+        let ammo = vec![ItemAmmoEntry {
+            item_id: copper,
+            amount: 7,
+        }];
+        assert_eq!(
+            roundtrip_exported_turret_state(
+                &content,
+                "duo",
+                4,
+                30,
+                GameRuntimeTurretBlockState::Item {
+                    turret: item_turret.clone(),
+                    ammo: ammo.clone(),
+                },
+            ),
+            Some(GameRuntimeTurretBlockState::Item {
+                turret: TurretState {
+                    total_ammo: 7,
+                    ..item_turret
+                },
+                ammo
+            })
+        );
+
+        let continuous_turret = TurretState {
+            reload_counter: 6.0,
+            rotation: 135.0,
+            ..TurretState::default()
+        };
+        let continuous = ContinuousTurretState {
+            last_length: 38.0,
+            bullets: 2,
+        };
+        assert_eq!(
+            roundtrip_exported_turret_state(
+                &content,
+                "lustre",
+                7,
+                30,
+                GameRuntimeTurretBlockState::Continuous {
+                    turret: continuous_turret.clone(),
+                    continuous,
+                },
+            ),
+            Some(GameRuntimeTurretBlockState::Continuous {
+                turret: continuous_turret,
+                continuous: ContinuousTurretState {
+                    bullets: 0,
+                    ..continuous
+                },
+            })
+        );
+
+        let point = PointDefenseState {
+            rotation: 270.0,
+            has_target: true,
+            ..PointDefenseState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_turret_state(
+                &content,
+                "segment",
+                11,
+                30,
+                GameRuntimeTurretBlockState::PointDefense(point),
+            ),
+            Some(GameRuntimeTurretBlockState::PointDefense(
+                PointDefenseState {
+                    rotation: 270.0,
+                    ..PointDefenseState::default()
+                }
+            ))
+        );
+
+        let tractor = TractorBeamState {
+            rotation: 315.0,
+            strength: 0.5,
+            any: true,
+            ..TractorBeamState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_turret_state(
+                &content,
+                "parallax",
+                14,
+                30,
+                GameRuntimeTurretBlockState::TractorBeam(tractor),
+            ),
+            Some(GameRuntimeTurretBlockState::TractorBeam(TractorBeamState {
+                rotation: 315.0,
+                ..TractorBeamState::default()
+            }))
         );
     }
 
