@@ -1027,6 +1027,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `effect_block_update_building_runtime(...)`
 - `effect_radar_update_building_frame(...)`
 - `effect_projector_update_building_frame(...)`
+- `effect_base_shield_update_building_frame(...)`
+- `effect_shockwave_tower_update_building_frame(...)`
 - `projector_runtime_target_in_range(...)`
 - `projector_runtime_target_allowed(...)`
 - `mend_projector_outputs_items(...)`
@@ -1084,6 +1086,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_block_update_building_runtime(...)` 将 `BuildingComp.block.id -> EffectBlockData -> state store ensure -> runtime dispatch` 串成单栋建筑的一站式入口，为后续 `update_all_buildings(...)` 遍历打通最小调用链；
   - `effect_radar_update_building_frame(...)` 已能直接从 `BuildingComp.team/tile_pos/efficiency` 与帧输入组装 Radar runtime 资源，测试覆盖了 `GameState::advance_game_update_frame(...) -> RadarState` 的最小帧推进路径；
   - `effect_projector_update_building_frame(...)` 已能从 `BuildingComp` 与 `EffectBlockFrameInput` 组装 projector family runtime 输入，`RegenProjector` 测试覆盖了 `GameState::advance_game_update_frame(...) -> delta/edelta/update_id -> last_update_frame` 的状态门控链路；
+  - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；
+  - `effect_shockwave_tower_update_building_frame(...)` 已能从 `BuildingComp.potential_efficiency`、building delta/edelta、bullet 候选与 timer gate 组装 ShockwaveTower runtime 输入，写回 bullet damage/remove 与 `ShockwaveTowerState`；
   - `EffectBlockRuntimeReport` 将 projector report、Radar fog force-update、BaseShield runtime report 与 ShockwaveTower fire report 收束到同一返回类型；
   - 该入口仍保持显式上下文传参，避免把 `FogControl`、建筑 slice、bullet/unit slice 与 content loader 强行揉成一个巨型可变借用。
 

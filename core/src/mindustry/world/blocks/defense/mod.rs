@@ -3203,6 +3203,59 @@ pub fn effect_projector_update_building_frame(
     )
 }
 
+pub fn effect_base_shield_update_building_frame<'a, 'b>(
+    store: &mut EffectBlockRuntimeStateStore,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    bullets: &mut [BulletComp],
+    bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+    units: &mut [UnitComp],
+    frame: EffectBlockFrameInput,
+    spark_random: &mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
+) -> Option<EffectBlockRuntimeReport> {
+    effect_block_update_building_runtime(
+        store,
+        content,
+        building,
+        0.0,
+        EffectBlockRuntimeResources::BaseShield {
+            shield: building,
+            efficiency: building.efficiency,
+            bullets,
+            bullet_type,
+            units,
+            delta: effect_block_building_delta(building, frame),
+            spark_random,
+        },
+    )
+}
+
+pub fn effect_shockwave_tower_update_building_frame<'a, 'b>(
+    store: &mut EffectBlockRuntimeStateStore,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    bullets: &mut [BulletComp],
+    bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+    frame: EffectBlockFrameInput,
+    timer_ready: bool,
+) -> Option<EffectBlockRuntimeReport> {
+    effect_block_update_building_runtime(
+        store,
+        content,
+        building,
+        frame.edelta,
+        EffectBlockRuntimeResources::ShockwaveTower {
+            tower: building,
+            potential_efficiency: building.potential_efficiency,
+            edelta: effect_block_building_edelta(building, frame),
+            delta: effect_block_building_delta(building, frame),
+            bullets,
+            bullet_type,
+            timer_ready,
+        },
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseShieldDrawCommand {
     SetShieldLayer,
@@ -6940,6 +6993,146 @@ mod tests {
                 assert!(state.did_regen);
             }
             other => panic!("unexpected regen stored state: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effect_base_shield_building_frame_uses_building_efficiency_and_delta() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let shield_def = content.block_by_name("shield-projector").unwrap();
+        let mut shield_building =
+            BuildingComp::new(point2_pack(8, 8), shield_def.base().clone(), TeamId(1));
+        shield_building.set_pos(0.0, 0.0);
+        shield_building.efficiency = 1.0;
+
+        let absorbable = BulletType {
+            absorbable: true,
+            ..BulletType::default()
+        };
+        let mut bullet = BulletComp::default();
+        bullet.bullet_type_id = 0;
+        bullet.team = TeamId(2);
+        bullet.x = 8.0;
+        let mut bullets = vec![bullet];
+        let mut units = Vec::new();
+        let mut bullet_type = |id| (id == 0).then_some(&absorbable);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let mut game = crate::mindustry::core::GameState::new();
+        game.set(crate::mindustry::core::GameStateState::Playing);
+        let frame = game.advance_game_update_frame(0.5);
+        let mut store = EffectBlockRuntimeStateStore::new();
+
+        let report = effect_base_shield_update_building_frame(
+            &mut store,
+            &content,
+            &shield_building,
+            &mut bullets,
+            &mut bullet_type,
+            &mut units,
+            EffectBlockFrameInput {
+                delta: frame.delta_ticks as f32,
+                edelta: frame.delta_ticks as f32,
+                update_id: frame.update_id,
+                tile_size: TILE_SIZE as f32,
+                now: frame.tick as f32,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            &mut spark_random,
+        );
+
+        assert_eq!(
+            report,
+            Some(EffectBlockRuntimeReport::BaseShield(
+                BaseShieldRuntimeReport {
+                    active: true,
+                    radius: 10.0,
+                    bullets_absorbed: 1,
+                    units_repelled: 0,
+                    units_killed: 0,
+                    unit_sparks: 0,
+                }
+            ))
+        );
+        assert!(bullets[0].absorbed);
+        match store.get(shield_building.tile_pos) {
+            Some(EffectBlockRuntimeState::BaseShield(state)) => {
+                assert_eq!(state.smooth_radius, 10.0);
+            }
+            other => panic!("unexpected base shield stored state: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effect_shockwave_tower_building_frame_damages_hittable_enemy_bullets() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let shockwave_def = content.block_by_name("shockwave-tower").unwrap();
+        let shockwave_block = effect_block(&content, "shockwave-tower");
+        let mut tower_building =
+            BuildingComp::new(point2_pack(9, 9), shockwave_def.base().clone(), TeamId(1));
+        tower_building.set_pos(0.0, 0.0);
+        tower_building.efficiency = 1.0;
+        tower_building.potential_efficiency = 1.0;
+
+        let hittable = BulletType::default();
+        let mut bullet = BulletComp::default();
+        bullet.bullet_type_id = 0;
+        bullet.team = TeamId(2);
+        bullet.x = 1.0;
+        bullet.damage = 100.0;
+        let mut bullets = vec![bullet];
+        let mut bullet_type = |id| (id == 0).then_some(&hittable);
+        let mut store = EffectBlockRuntimeStateStore::new();
+        {
+            let state = store
+                .ensure_for_building(&content, &tower_building, 0.0)
+                .unwrap();
+            match state {
+                EffectBlockRuntimeState::ShockwaveTower(state) => {
+                    state.reload_counter = shockwave_block.reload;
+                }
+                other => panic!("unexpected shockwave initial state: {other:?}"),
+            }
+        }
+        let mut game = crate::mindustry::core::GameState::new();
+        game.set(crate::mindustry::core::GameStateState::Playing);
+        let frame = game.advance_game_update_frame(0.5);
+
+        let report = effect_shockwave_tower_update_building_frame(
+            &mut store,
+            &content,
+            &tower_building,
+            &mut bullets,
+            &mut bullet_type,
+            EffectBlockFrameInput {
+                delta: frame.delta_ticks as f32,
+                edelta: frame.delta_ticks as f32,
+                update_id: frame.update_id,
+                tile_size: TILE_SIZE as f32,
+                now: frame.tick as f32,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            true,
+        );
+
+        assert_eq!(
+            report,
+            Some(EffectBlockRuntimeReport::ShockwaveTower(
+                ShockwaveTowerFire {
+                    fired: true,
+                    wave_damage: 160.0,
+                    removed_targets: 1,
+                }
+            ))
+        );
+        assert!(bullets[0].removed);
+        match store.get(tower_building.tile_pos) {
+            Some(EffectBlockRuntimeState::ShockwaveTower(state)) => {
+                assert_eq!(state.reload_counter, 0.0);
+                assert!((state.heat - 0.625).abs() < 0.00001);
+            }
+            other => panic!("unexpected shockwave stored state: {other:?}"),
         }
     }
 
