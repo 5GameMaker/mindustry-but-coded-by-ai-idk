@@ -986,6 +986,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `shieldRotation`、`sides`、`hit` layer offset 已进入 draw plan。
 - `MendProjectorState`
 - `ProjectorRuntimeSource`
+- `EffectProjectorRuntimeState`
+- `EffectProjectorRuntimeInput`
+- `EffectProjectorRuntimeReport`
+- `effect_projector_update_runtime(...)`
 - `projector_runtime_target_in_range(...)`
 - `projector_runtime_target_allowed(...)`
 - `mend_projector_outputs_items(...)`
@@ -1025,6 +1029,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `BlockDef::can_overdrive()` 汇总 Java `Block.canOverdrive` 默认值与各类 block overrides，`overdrive_projector_apply_boost_with_content(...)` 已能通过 `ContentLoader` 读取真实 content metadata 过滤目标；
   - `overdrive_projector_apply_boost_runtime(...)` 已同时执行同队 + `realRange` 半径过滤 + content `canOverdrive` 过滤，作为后续 building dispatcher/world indexer 可直接调用的最小入口；
   - 低于目标当前 `time_scale` 的 boost 不会降低已有更高加速，也不会延长较高加速持续时间，行为沿用 `Building.applyBoost(...)`。
+- 已新增首个 content-backed effect projector dispatcher：
+  - `effect_projector_update_runtime(...)` 直接接收 `EffectBlockData`，按 `EffectBlockKind::MendProjector / OverdriveProjector` 分发到对应 state 与 runtime adapter；
+  - 调用方只需传入 `ProjectorRuntimeSource`、`ContentLoader` 与候选 `BuildingComp` slice，避免同时持有 `&mut BuildingComp` 和 `&mut [BuildingComp]`；
+  - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口，后续会继续扩展 `RegenProjector/Radar/BaseShield` 等分支。
 
 仍需：
 

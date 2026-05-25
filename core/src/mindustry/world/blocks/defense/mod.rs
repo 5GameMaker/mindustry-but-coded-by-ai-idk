@@ -3,6 +3,7 @@ pub mod turrets;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Read, Write};
 
+use crate::mindustry::content::blocks::{EffectBlockData, EffectBlockKind};
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::bullet::{BulletCreatePlan, BulletType};
@@ -744,6 +745,35 @@ pub fn projector_runtime_target_allowed(
     target.team == source.team && projector_runtime_target_in_range(source, target, range)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum EffectProjectorRuntimeState {
+    Mend(MendProjectorState),
+    Overdrive(OverdriveProjectorState),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EffectProjectorRuntimeInput {
+    pub source: ProjectorRuntimeSource,
+    pub efficiency: f32,
+    pub optional_efficiency: f32,
+    pub timer_ready: bool,
+    pub suppressed: bool,
+    pub delta: f32,
+    pub now: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EffectProjectorRuntimeReport {
+    Mend {
+        update: MendProjectorUpdate,
+        healed: usize,
+    },
+    Overdrive {
+        update: OverdriveProjectorUpdate,
+        boosted: usize,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProjectorPlacementPlan {
     pub center_x: f32,
@@ -1196,6 +1226,59 @@ pub fn overdrive_projector_apply_boost_runtime(
         projector_runtime_target_allowed(source, building, update.real_range)
             && overdrive_projector_can_overdrive_content(content, building.block.id)
     })
+}
+
+pub fn effect_projector_update_runtime(
+    block: &EffectBlockData,
+    state: &mut EffectProjectorRuntimeState,
+    input: EffectProjectorRuntimeInput,
+    content: &ContentLoader,
+    buildings: &mut [BuildingComp],
+) -> Option<EffectProjectorRuntimeReport> {
+    match (block.kind, state) {
+        (EffectBlockKind::MendProjector, EffectProjectorRuntimeState::Mend(state)) => {
+            let update = mend_projector_update_with_timer(
+                state,
+                input.efficiency,
+                input.optional_efficiency,
+                input.timer_ready,
+                !input.suppressed,
+                input.delta,
+                block.reload,
+                block.range,
+                block.heal_percent,
+                block.phase_boost,
+                block.phase_range_boost,
+            );
+            let healed =
+                mend_projector_apply_heal_runtime(&update, input.source, input.now, buildings);
+            Some(EffectProjectorRuntimeReport::Mend { update, healed })
+        }
+        (EffectBlockKind::OverdriveProjector, EffectProjectorRuntimeState::Overdrive(state)) => {
+            let update = overdrive_projector_update(
+                state,
+                input.efficiency,
+                input.optional_efficiency,
+                block.has_boost,
+                input.delta,
+                block.reload,
+                block.range,
+                block.phase_range_boost,
+                block.speed_boost,
+                block.speed_boost_phase,
+                block.use_time,
+            );
+            let boosted = overdrive_projector_apply_boost_runtime(
+                &update,
+                block.reload,
+                input.source,
+                content,
+                buildings,
+            );
+            Some(EffectProjectorRuntimeReport::Overdrive { update, boosted })
+        }
+        _ => None,
+    }
 }
 
 pub fn overdrive_projector_stats_plan(
@@ -4689,6 +4772,7 @@ fn segment_intersection_point(
 
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::content::blocks::BlockDef;
     use crate::mindustry::world::{point2_pack, Block};
 
     use super::*;
@@ -4697,6 +4781,13 @@ mod tests {
         let mut block = Block::new(id, name);
         block.health = 100;
         BuildingComp::new(point2_pack(id as i32, 0), block, TeamId(1))
+    }
+
+    fn effect_block<'a>(content: &'a ContentLoader, name: &str) -> &'a EffectBlockData {
+        match content.block_by_name(name).unwrap() {
+            BlockDef::Effect(effect) => effect,
+            other => panic!("expected effect block for {name}, got {other:?}"),
+        }
     }
 
     #[test]
@@ -5697,6 +5788,97 @@ mod tests {
         assert_eq!(buildings[1].time_scale, 1.0);
         assert_eq!(buildings[2].time_scale, 1.0);
         assert_eq!(buildings[3].time_scale, 1.0);
+    }
+
+    #[test]
+    fn effect_projector_runtime_dispatch_updates_mend_and_overdrive_from_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let overdrive_block = effect_block(&content, "overdrive-projector");
+        let drill = content.block_by_name("mechanical-drill").unwrap();
+        let wall = content.block_by_name("copper-wall").unwrap();
+
+        let source = ProjectorRuntimeSource {
+            x: 0.0,
+            y: 0.0,
+            team: TeamId(1),
+        };
+        let input = EffectProjectorRuntimeInput {
+            source,
+            efficiency: 1.0,
+            optional_efficiency: 0.0,
+            timer_ready: true,
+            suppressed: false,
+            delta: 0.0,
+            now: 400.0,
+        };
+
+        let mut mend_targets = vec![
+            BuildingComp::new(point2_pack(60, 0), wall.base().clone(), TeamId(1)),
+            BuildingComp::new(point2_pack(61, 0), wall.base().clone(), TeamId(2)),
+        ];
+        mend_targets[0].set_pos(20.0, 0.0);
+        mend_targets[0].health = 40.0;
+        mend_targets[1].set_pos(20.0, 0.0);
+        mend_targets[1].health = 40.0;
+        let mut mend_state = EffectProjectorRuntimeState::Mend(MendProjectorState {
+            charge: mend_block.reload,
+            ..MendProjectorState::default()
+        });
+        let mend_report = effect_projector_update_runtime(
+            mend_block,
+            &mut mend_state,
+            input,
+            &content,
+            &mut mend_targets,
+        );
+        match mend_report {
+            Some(EffectProjectorRuntimeReport::Mend { update, healed }) => {
+                assert!(update.fired);
+                assert_eq!(healed, 1);
+                assert!(mend_targets[0].health > 40.0);
+                assert_eq!(mend_targets[1].health, 40.0);
+            }
+            other => panic!("unexpected mend runtime report: {other:?}"),
+        }
+
+        let mut overdrive_targets = vec![
+            BuildingComp::new(point2_pack(62, 0), drill.base().clone(), TeamId(1)),
+            BuildingComp::new(point2_pack(63, 0), wall.base().clone(), TeamId(1)),
+        ];
+        overdrive_targets[0].set_pos(20.0, 0.0);
+        overdrive_targets[1].set_pos(20.0, 0.0);
+        let mut overdrive_state = EffectProjectorRuntimeState::Overdrive(OverdriveProjectorState {
+            charge: overdrive_block.reload,
+            ..OverdriveProjectorState::default()
+        });
+        let overdrive_report = effect_projector_update_runtime(
+            overdrive_block,
+            &mut overdrive_state,
+            input,
+            &content,
+            &mut overdrive_targets,
+        );
+        match overdrive_report {
+            Some(EffectProjectorRuntimeReport::Overdrive { update, boosted }) => {
+                assert!(update.applied_boost);
+                assert_eq!(boosted, 1);
+                assert!(overdrive_targets[0].time_scale > 1.0);
+                assert_eq!(overdrive_targets[1].time_scale, 1.0);
+            }
+            other => panic!("unexpected overdrive runtime report: {other:?}"),
+        }
+
+        assert_eq!(
+            effect_projector_update_runtime(
+                mend_block,
+                &mut overdrive_state,
+                input,
+                &content,
+                &mut overdrive_targets,
+            ),
+            None
+        );
     }
 
     #[test]
