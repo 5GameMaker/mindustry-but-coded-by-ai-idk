@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     content::blocks::{
         BlockDef, DistributionBlockKind, EffectBlockKind, PayloadBlockKind, PowerBlockKind,
-        SandboxBlockKind,
+        SandboxBlockKind, StorageBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -51,6 +51,7 @@ use crate::mindustry::{
         HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
         PowerGeneratorState, VariableReactorState,
     },
+    world::blocks::storage::{read_core_state, CoreBuildState},
     world::{footprint_tiles, get_edges, Tile},
 };
 
@@ -149,11 +150,17 @@ pub enum GameRuntimeDistributionBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeStorageBlockState {
+    Core(CoreBuildState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
     Power(GameRuntimePowerBlockState),
     Distribution(GameRuntimeDistributionBlockState),
+    Storage(GameRuntimeStorageBlockState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,6 +172,7 @@ pub struct GameRuntime {
     pub payload_runtime_states: BTreeMap<i32, GameRuntimePayloadBlockState>,
     pub power_runtime_states: BTreeMap<i32, GameRuntimePowerBlockState>,
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
+    pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -183,6 +191,7 @@ impl GameRuntime {
             payload_runtime_states: BTreeMap::new(),
             power_runtime_states: BTreeMap::new(),
             distribution_runtime_states: BTreeMap::new(),
+            storage_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -226,6 +235,7 @@ impl GameRuntime {
         self.payload_runtime_states.remove(&removed.tile_pos);
         self.power_runtime_states.remove(&removed.tile_pos);
         self.distribution_runtime_states.remove(&removed.tile_pos);
+        self.storage_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -395,6 +405,10 @@ impl GameRuntime {
                             .insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Storage(block_state) => {
+                        self.storage_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -454,7 +468,27 @@ impl GameRuntime {
                                     revision,
                                     building_payload,
                                 )
-                                .map(|state| state.map(GameRuntimeLoadedBlockState::Distribution)),
+                                .and_then(|state| {
+                                    if state.is_some() {
+                                        Ok(state.map(GameRuntimeLoadedBlockState::Distribution))
+                                    } else {
+                                        Ok(None)
+                                    }
+                                })
+                                .or_else(|err| match err {
+                                    GameRuntimeBlockStateReadError::Unsupported => self
+                                        .read_storage_runtime_state_from_building_payload(
+                                            block,
+                                            revision,
+                                            building_payload,
+                                        )
+                                        .map(|state| {
+                                            state.map(GameRuntimeLoadedBlockState::Storage)
+                                        }),
+                                    GameRuntimeBlockStateReadError::Parse => {
+                                        Err(GameRuntimeBlockStateReadError::Parse)
+                                    }
+                                }),
                             GameRuntimeBlockStateReadError::Parse => {
                                 Err(GameRuntimeBlockStateReadError::Parse)
                             }
@@ -745,6 +779,28 @@ impl GameRuntime {
         }
     }
 
+    fn read_storage_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeStorageBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Storage(storage) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match storage.kind {
+            StorageBlockKind::Core => read_core_state(building_payload, revision as i32)
+                .map(|state| Some(GameRuntimeStorageBlockState::Core(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            StorageBlockKind::Storage => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
         let tile_pos = building.tile_pos;
         let mut cleared = 0;
@@ -793,6 +849,7 @@ impl GameRuntime {
         self.payload_runtime_states.clear();
         self.power_runtime_states.clear();
         self.distribution_runtime_states.clear();
+        self.storage_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -923,7 +980,9 @@ mod tests {
     use super::*;
     use crate::mindustry::{
         core::GameStateState,
-        io::{LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId},
+        io::{
+            LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, Vec2 as IoVec2,
+        },
         world::{
             blocks::defense::{
                 write_base_shield_state, write_force_projector_state, write_radar_state,
@@ -950,6 +1009,7 @@ mod tests {
                 write_variable_reactor_state, HeaterGeneratorState, ImpactReactorState,
                 LightBlockState, NuclearReactorState, PowerGeneratorState, VariableReactorState,
             },
+            blocks::storage::{write_core_state, CoreBuildState},
             footprint_tiles, point2_pack, Block, Tile,
         },
     };
@@ -2352,6 +2412,36 @@ mod tests {
             Some(&GameRuntimeDistributionBlockState::DirectionalUnloader(
                 state
             ))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_core_storage_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let tile_pos = point2_pack(2, 0);
+        let saved = BuildingComp::new(tile_pos, core_def.base().clone(), TeamId(1));
+        let state = CoreBuildState {
+            command_pos: Some(IoVec2 { x: 64.0, y: 128.0 }),
+            ..CoreBuildState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_core_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 2, core_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.storage_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeStorageBlockState::Core(state))
         );
     }
 
