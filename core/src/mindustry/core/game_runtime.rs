@@ -86,8 +86,9 @@ use crate::mindustry::{
     },
     world::blocks::production::{
         read_beam_drill_state, read_burst_drill_state, read_drill_state,
-        read_generic_crafter_state, read_separator_state, BeamDrillState, BurstDrillState,
-        DrillState, GenericCrafterState, SeparatorState,
+        read_generic_crafter_state, read_separator_state, write_beam_drill_state,
+        write_burst_drill_state, write_drill_state, BeamDrillState, BurstDrillState, DrillState,
+        GenericCrafterState, SeparatorState,
     },
     world::blocks::sandbox::{
         read_item_source_config, read_liquid_source_config, ItemSourceState, LiquidSourceState,
@@ -228,6 +229,27 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Production(production), Some(state)) = (
+        block,
+        runtime.production_runtime_states.get(&building.tile_pos),
+    ) {
+        match (production.kind, state) {
+            (ProductionBlockKind::Drill, GameRuntimeProductionBlockState::Drill(state)) => {
+                write_drill_state(write, state)?;
+            }
+            (ProductionBlockKind::BeamDrill, GameRuntimeProductionBlockState::BeamDrill(state)) => {
+                write_beam_drill_state(write, state)?;
+            }
+            (
+                ProductionBlockKind::BurstDrill,
+                GameRuntimeProductionBlockState::BurstDrill(state),
+            ) => {
+                write_burst_drill_state(write, state)?;
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
 }
 
@@ -244,6 +266,27 @@ fn network_map_building_revision(
         (block, runtime.effect_runtime_store.get(building.tile_pos))
     {
         if effect.kind == EffectBlockKind::BaseShield {
+            return 1;
+        }
+    }
+
+    if let (
+        BlockDef::Production(production),
+        Some(
+            GameRuntimeProductionBlockState::Drill(_)
+            | GameRuntimeProductionBlockState::BeamDrill(_)
+            | GameRuntimeProductionBlockState::BurstDrill(_),
+        ),
+    ) = (
+        block,
+        runtime.production_runtime_states.get(&building.tile_pos),
+    ) {
+        if matches!(
+            production.kind,
+            ProductionBlockKind::Drill
+                | ProductionBlockKind::BeamDrill
+                | ProductionBlockKind::BurstDrill
+        ) {
             return 1;
         }
     }
@@ -3690,6 +3733,118 @@ mod tests {
                 plans: vec![BuildPlan::new_break(1, 2)],
                 ..BuildTurretState::default()
             }))
+        );
+    }
+
+    fn roundtrip_exported_production_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeProductionBlockState,
+    ) -> Option<GameRuntimeProductionBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(7),
+        ));
+        runtime
+            .production_runtime_states
+            .insert(tile_pos, state.clone());
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("production block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("production block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(1));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.production_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_production_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        assert_eq!(
+            roundtrip_exported_production_state(
+                &content,
+                "mechanical-drill",
+                1,
+                10,
+                GameRuntimeProductionBlockState::Drill(DrillState {
+                    progress: 120.0,
+                    warmup: 0.45,
+                    time_drilled: 7.0,
+                    last_drill_speed: 2.0,
+                }),
+            ),
+            Some(GameRuntimeProductionBlockState::Drill(DrillState {
+                progress: 120.0,
+                warmup: 0.45,
+                ..DrillState::default()
+            }))
+        );
+        assert_eq!(
+            roundtrip_exported_production_state(
+                &content,
+                "plasma-bore",
+                4,
+                10,
+                GameRuntimeProductionBlockState::BeamDrill(BeamDrillState {
+                    time: 44.0,
+                    warmup: 0.65,
+                    boost_warmup: 0.3,
+                    last_drill_speed: 2.5,
+                    facing_amount: 3,
+                    last_item: Some(2),
+                }),
+            ),
+            Some(GameRuntimeProductionBlockState::BeamDrill(BeamDrillState {
+                time: 44.0,
+                warmup: 0.65,
+                ..BeamDrillState::default()
+            }))
+        );
+        assert_eq!(
+            roundtrip_exported_production_state(
+                &content,
+                "impact-drill",
+                8,
+                10,
+                GameRuntimeProductionBlockState::BurstDrill(BurstDrillState {
+                    progress: 240.0,
+                    warmup: 0.72,
+                    time_drilled: 9.0,
+                    last_drill_speed: 1.2,
+                    smooth_progress: 0.99,
+                    invert_time: 0.5,
+                }),
+            ),
+            Some(GameRuntimeProductionBlockState::BurstDrill(
+                BurstDrillState {
+                    progress: 240.0,
+                    warmup: 0.72,
+                    ..BurstDrillState::default()
+                }
+            ))
         );
     }
 
