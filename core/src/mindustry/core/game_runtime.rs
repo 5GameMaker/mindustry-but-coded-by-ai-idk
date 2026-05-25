@@ -171,6 +171,7 @@ impl GameRuntime {
     pub fn clear_buildings(&mut self) {
         self.buildings.clear();
         self.state.world.clear_buildings();
+        self.reset_effect_block_sidecars();
     }
 
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
@@ -776,6 +777,34 @@ mod tests {
         runtime.state.world.load_generator(1, 1, |_| {});
         assert!(runtime.consume_world_load_events_and_reset_sidecars());
         assert!(runtime.buildings().is_empty());
+        assert!(runtime.effect_runtime_store.is_empty());
+        assert!(runtime.effect_timer_store.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_clear_buildings_resets_world_refs_and_sidecars() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let tile_pos = point2_pack(36, 9);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(64, 64);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            mend_def.base().clone(),
+            TeamId(1),
+        ));
+        let building_snapshot = runtime.buildings()[0].clone();
+        runtime
+            .effect_runtime_store
+            .ensure_for_building(&content, &building_snapshot, 0.0);
+        runtime
+            .effect_timer_store
+            .ensure_for_building(&content, &building_snapshot);
+
+        runtime.clear_buildings();
+
+        assert!(runtime.buildings().is_empty());
+        assert!(runtime.state.world.build_pos(tile_pos).is_none());
         assert!(runtime.effect_runtime_store.is_empty());
         assert!(runtime.effect_timer_store.is_empty());
     }
