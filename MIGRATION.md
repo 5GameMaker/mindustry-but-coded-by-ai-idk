@@ -1030,9 +1030,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `overdrive_projector_apply_boost_runtime(...)` 已同时执行同队 + `realRange` 半径过滤 + content `canOverdrive` 过滤，作为后续 building dispatcher/world indexer 可直接调用的最小入口；
   - 低于目标当前 `time_scale` 的 boost 不会降低已有更高加速，也不会延长较高加速持续时间，行为沿用 `Building.applyBoost(...)`。
 - 已新增首个 content-backed effect projector dispatcher：
-  - `effect_projector_update_runtime(...)` 直接接收 `EffectBlockData`，按 `EffectBlockKind::MendProjector / OverdriveProjector` 分发到对应 state 与 runtime adapter；
+  - `effect_projector_update_runtime(...)` 直接接收 `EffectBlockData`，按 `EffectBlockKind::MendProjector / OverdriveProjector / RegenProjector` 分发到对应 state 与 runtime adapter；
   - 调用方只需传入 `ProjectorRuntimeSource`、`ContentLoader` 与候选 `BuildingComp` slice，避免同时持有 `&mut BuildingComp` 和 `&mut [BuildingComp]`；
-  - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口，后续会继续扩展 `RegenProjector/Radar/BaseShield` 等分支。
+  - Regen 分支已经在 dispatcher 内完成 `damaged_targets` 判定、mendMap 记录、`last_update_frame/update_id` 门控和真实 `BuildingComp::heal(...)` 应用；
+  - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口，后续会继续扩展 `Radar/BaseShield` 等需要额外 FogControl 或 bullet/unit 输入的分支。
 
 仍需：
 

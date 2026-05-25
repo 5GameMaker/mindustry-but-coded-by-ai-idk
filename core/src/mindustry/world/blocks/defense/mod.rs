@@ -749,6 +749,11 @@ pub fn projector_runtime_target_allowed(
 pub enum EffectProjectorRuntimeState {
     Mend(MendProjectorState),
     Overdrive(OverdriveProjectorState),
+    Regen {
+        state: RegenProjectorState,
+        mend_map: RegenProjectorMendMap,
+        last_update_frame: i64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -759,6 +764,9 @@ pub struct EffectProjectorRuntimeInput {
     pub timer_ready: bool,
     pub suppressed: bool,
     pub delta: f32,
+    pub edelta: f32,
+    pub update_id: i64,
+    pub tile_size: f32,
     pub now: f32,
 }
 
@@ -771,6 +779,11 @@ pub enum EffectProjectorRuntimeReport {
     Overdrive {
         update: OverdriveProjectorUpdate,
         boosted: usize,
+    },
+    Regen {
+        update: RegenProjectorUpdatePlan,
+        recorded: usize,
+        applied: usize,
     },
 }
 
@@ -1276,6 +1289,63 @@ pub fn effect_projector_update_runtime(
                 buildings,
             );
             Some(EffectProjectorRuntimeReport::Overdrive { update, boosted })
+        }
+        (
+            EffectBlockKind::RegenProjector,
+            EffectProjectorRuntimeState::Regen {
+                state,
+                mend_map,
+                last_update_frame,
+            },
+        ) => {
+            let range = block.range as i32;
+            let damaged_targets = buildings.iter().any(|building| {
+                building.team == input.source.team
+                    && regen_projector_target_in_square(
+                        input.source,
+                        building,
+                        range,
+                        input.tile_size,
+                    )
+                    && mend_projector_building_damaged(building)
+            });
+            let update = regen_projector_update(
+                state,
+                input.suppressed,
+                damaged_targets,
+                input.efficiency,
+                input.edelta,
+                input.delta,
+                input.optional_efficiency,
+                block.optional_use_time,
+                block.optional_multiplier,
+                block.heal_percent,
+            );
+            let recorded = regen_projector_record_mend_runtime(
+                &update,
+                input.source,
+                range,
+                input.tile_size,
+                input.edelta,
+                input.now,
+                mend_map,
+                buildings,
+            );
+            let apply_plan = regen_projector_apply_plan(*last_update_frame, input.update_id);
+            let applied = regen_projector_apply_mend_plan_to_buildings(
+                &apply_plan,
+                mend_map,
+                buildings,
+                input.now,
+            );
+            if apply_plan.apply_mend_map {
+                *last_update_frame = input.update_id;
+            }
+            Some(EffectProjectorRuntimeReport::Regen {
+                update,
+                recorded,
+                applied,
+            })
         }
         _ => None,
     }
@@ -5810,6 +5880,9 @@ mod tests {
             timer_ready: true,
             suppressed: false,
             delta: 0.0,
+            edelta: 20.0,
+            update_id: 77,
+            tile_size: TILE_SIZE as f32,
             now: 400.0,
         };
 
@@ -5879,6 +5952,48 @@ mod tests {
             ),
             None
         );
+
+        let regen_block = effect_block(&content, "regen-projector");
+        let mut regen_targets = vec![
+            BuildingComp::new(point2_pack(64, 0), wall.base().clone(), TeamId(1)),
+            BuildingComp::new(point2_pack(65, 0), wall.base().clone(), TeamId(2)),
+        ];
+        regen_targets[0].set_pos(20.0, 20.0);
+        regen_targets[0].health = 40.0;
+        regen_targets[1].set_pos(20.0, 20.0);
+        regen_targets[1].health = 40.0;
+        let mut regen_state = EffectProjectorRuntimeState::Regen {
+            state: RegenProjectorState::default(),
+            mend_map: RegenProjectorMendMap::default(),
+            last_update_frame: -1,
+        };
+        let regen_report = effect_projector_update_runtime(
+            regen_block,
+            &mut regen_state,
+            input,
+            &content,
+            &mut regen_targets,
+        );
+        match regen_report {
+            Some(EffectProjectorRuntimeReport::Regen {
+                update,
+                recorded,
+                applied,
+            }) => {
+                assert!(update.any_targets);
+                assert_eq!(recorded, 1);
+                assert_eq!(applied, 1);
+                assert!(regen_targets[0].health > 40.0);
+                assert_eq!(regen_targets[1].health, 40.0);
+            }
+            other => panic!("unexpected regen runtime report: {other:?}"),
+        }
+        match regen_state {
+            EffectProjectorRuntimeState::Regen {
+                last_update_frame, ..
+            } => assert_eq!(last_update_frame, input.update_id),
+            other => panic!("unexpected regen runtime state: {other:?}"),
+        }
     }
 
     #[test]
