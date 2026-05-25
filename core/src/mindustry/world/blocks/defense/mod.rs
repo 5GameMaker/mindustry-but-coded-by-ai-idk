@@ -4757,6 +4757,7 @@ pub fn build_turret_should_consume(plan_count: usize, heal_suppressed: bool) -> 
 
 pub const BUILD_TURRET_TIMER_TARGET_SLOT: usize = 1;
 pub const BUILD_TURRET_TIMER_TARGET2_SLOT: usize = 2;
+pub const BUILD_TURRET_TIMER_TARGET2_INTERVAL: f32 = 30.0;
 
 pub fn effect_build_turret_timer_target_ready(
     content: &ContentLoader,
@@ -4775,6 +4776,27 @@ pub fn effect_build_turret_timer_target_ready(
                 .timer_target_slot
                 .unwrap_or(BUILD_TURRET_TIMER_TARGET_SLOT),
             block.target_interval as f32,
+        ),
+    )
+}
+
+pub fn effect_build_turret_timer_target2_ready(
+    content: &ContentLoader,
+    building: &BuildingComp,
+    timer: &mut BuildingTimerState,
+    frame: EffectBlockFrameInput,
+) -> Option<bool> {
+    let block = effect_block_data_for_building(content, building)?;
+    if block.kind != EffectBlockKind::BuildTurret {
+        return None;
+    }
+    timer.set_time(frame.now);
+    Some(
+        timer.timer(
+            block
+                .timer_target2_slot
+                .unwrap_or(BUILD_TURRET_TIMER_TARGET2_SLOT),
+            BUILD_TURRET_TIMER_TARGET2_INTERVAL,
         ),
     )
 }
@@ -5172,6 +5194,7 @@ pub fn build_turret_update_tick<FWithin, FValidTeamPlan, FHasResources, FValidBr
     team_plans: &mut Vec<BlockPlan>,
     controlled: bool,
     timer_target_ready: bool,
+    timer_target2_ready: bool,
     following_valid: bool,
     following_actively_building: bool,
     following_plan: Option<BuildPlan>,
@@ -5240,7 +5263,7 @@ where
         let result = build_turret_validate_current_plan(
             state,
             unit_plans,
-            conflicting_breaker,
+            timer_target2_ready && conflicting_breaker,
             construct_current_matches,
             valid_break,
             valid_place,
@@ -9927,6 +9950,7 @@ mod tests {
             &mut team_plans,
             false,
             true,
+            true,
             false,
             false,
             None,
@@ -9995,6 +10019,7 @@ mod tests {
             not_ready,
             false,
             false,
+            false,
             None,
             &[],
             false,
@@ -10035,6 +10060,7 @@ mod tests {
             ready,
             false,
             false,
+            false,
             None,
             &[],
             false,
@@ -10049,6 +10075,114 @@ mod tests {
         assert_eq!(claimed.action, BuildTurretUpdateAction::ClaimTeamPlan);
         assert_eq!(unit_plans.len(), 1);
         assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET_SLOT), 15.0);
+    }
+
+    #[test]
+    fn build_turret_timer_target2_sidecar_gates_conflicting_break_scan() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let build_tower = content.block_by_name("build-tower").unwrap();
+        let building = BuildingComp::new(point2_pack(13, 9), build_tower.base().clone(), TeamId(1));
+        let mut timer = BuildingTimerState::default();
+
+        let not_ready = effect_build_turret_timer_target2_ready(
+            &content,
+            &building,
+            &mut timer,
+            EffectBlockFrameInput {
+                delta: 29.0,
+                edelta: 29.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: BUILD_TURRET_TIMER_TARGET2_INTERVAL - 1.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        )
+        .unwrap();
+        assert!(!not_ready);
+
+        let mut state = BuildTurretState::default();
+        let mut unit_plans = VecDeque::from([BuildPlan::new_place(4, 5, 0, "router")]);
+        let mut team_plans = vec![BlockPlan::new(4, 5, 0, "router", None)];
+        let kept = build_turret_update_tick(
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            false,
+            false,
+            not_ready,
+            false,
+            false,
+            None,
+            &[],
+            true,
+            true,
+            None,
+            |_| false,
+            |_| true,
+            |_| true,
+            |_| false,
+            |_| true,
+        );
+        assert_eq!(kept.action, BuildTurretUpdateAction::ValidateCurrentPlan);
+        assert_eq!(
+            kept.validation.as_ref().unwrap().action,
+            BuildTurretPlanAction::Keep
+        );
+        assert_eq!(unit_plans.len(), 1);
+        assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET2_SLOT), 0.0);
+
+        let ready = effect_build_turret_timer_target2_ready(
+            &content,
+            &building,
+            &mut timer,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: BUILD_TURRET_TIMER_TARGET2_INTERVAL,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        )
+        .unwrap();
+        assert!(ready);
+
+        let dropped = build_turret_update_tick(
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            false,
+            false,
+            ready,
+            false,
+            false,
+            None,
+            &[],
+            true,
+            true,
+            None,
+            |_| false,
+            |_| true,
+            |_| true,
+            |_| false,
+            |_| true,
+        );
+        assert_eq!(
+            dropped.validation.as_ref().unwrap().action,
+            BuildTurretPlanAction::DropConflictingBreak
+        );
+        assert!(unit_plans.is_empty());
+        assert_eq!(
+            dropped.validation.unwrap().remove_team_plan_at,
+            Some((4, 5))
+        );
+        assert_eq!(
+            timer.timer.last_time(BUILD_TURRET_TIMER_TARGET2_SLOT),
+            BUILD_TURRET_TIMER_TARGET2_INTERVAL
+        );
+        assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET_SLOT), 0.0);
     }
 
     #[test]
@@ -10071,6 +10205,7 @@ mod tests {
             &mut team_plans,
             false,
             true,
+            false,
             false,
             false,
             None,
@@ -10108,6 +10243,7 @@ mod tests {
             &mut team_plans,
             false,
             true,
+            false,
             true,
             true,
             Some(BuildPlan::new_place(6, 6, 0, "router")),
@@ -10135,6 +10271,7 @@ mod tests {
             &mut team_plans,
             false,
             true,
+            false,
             false,
             false,
             None,
@@ -10174,6 +10311,7 @@ mod tests {
             &mut state,
             &mut unit_plans,
             &mut team_plans,
+            true,
             true,
             true,
             true,

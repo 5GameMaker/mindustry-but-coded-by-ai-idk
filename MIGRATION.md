@@ -1022,6 +1022,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `effect_block_building_delta(...)`
 - `effect_block_building_edelta(...)`
 - `effect_build_turret_timer_target_ready(...)`
+- `effect_build_turret_timer_target2_ready(...)`
 - `effect_block_runtime_state_for(...)`
 - `effect_block_data_for_building(...)`
 - `effect_block_runtime_state_for_building(...)`
@@ -1098,7 +1099,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；
   - `effect_shockwave_tower_update_building_frame(...)` 已能从 `BuildingComp.potential_efficiency`、building delta/edelta、bullet 候选与 timer gate 组装 ShockwaveTower runtime 输入，写回 bullet damage/remove 与 `ShockwaveTowerState`；
   - `effect_shockwave_tower_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 ShockwaveTower 的 `timer(timerCheck, checkInterval)` 门控；当前从 `EffectBlockData.timer_check_slot` 读取槽位，`SHOCKWAVE_TOWER_TIMER_CHECK_SLOT = 1` 作为 Java 对齐 fallback；
-  - `effect_build_turret_timer_target_ready(...)` 已开始把 `BuildingTimerState` 侧车接入 `BuildTurret` 的 `timer(timerTarget, targetInterval)` 队伍计划/跟随搜索门控；当前从 `EffectBlockData.timer_target_slot` 读取槽位，`BUILD_TURRET_TIMER_TARGET_SLOT = 1`、`BUILD_TURRET_TIMER_TARGET2_SLOT = 2` 作为 Java 对齐 fallback；
+  - `effect_build_turret_timer_target_ready(...)` 已开始把 `BuildingTimerState` 侧车接入 `BuildTurret` 的 `timer(timerTarget, targetInterval)` 队伍计划/跟随搜索门控；当前从 `EffectBlockData.timer_target_slot` 读取槽位，`BUILD_TURRET_TIMER_TARGET_SLOT = 1` 作为 Java 对齐 fallback；
+  - `effect_build_turret_timer_target2_ready(...)` 已把 `BuildTurret` 的 `timer.get(timerTarget2, 30f)` 冲突 break-plan 低频扫描门控显式建模；`BUILD_TURRET_TIMER_TARGET2_SLOT = 2`、`BUILD_TURRET_TIMER_TARGET2_INTERVAL = 30.0` 对齐 Java，`build_turret_update_tick(...)` 只有在该 gate ready 且外层扫描发现 `conflicting_breaker` 时才触发 `DropConflictingBreak`；
 - 已新增建筑 timer 侧车：
   - `core/src/mindustry/entities/comp/timer.rs` 新增 `BuildingTimerState`，默认 6 槽，对齐 Java `TimerComp` 的 `Interval(6)` 默认形态；
   - `BuildingTimerState::timer(index, time)` 保持 Java `Float.isInfinite(time) -> false` 与 slot-based `Interval.get(...)` 语义；
