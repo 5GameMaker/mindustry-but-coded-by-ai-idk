@@ -824,6 +824,51 @@ pub fn effect_block_runtime_state_for_building(
         .and_then(|block| effect_block_runtime_state_for(block, initial_reload_counter))
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EffectBlockRuntimeStateStore {
+    states: BTreeMap<i32, EffectBlockRuntimeState>,
+}
+
+impl EffectBlockRuntimeStateStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.states.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.states.is_empty()
+    }
+
+    pub fn get(&self, tile_pos: i32) -> Option<&EffectBlockRuntimeState> {
+        self.states.get(&tile_pos)
+    }
+
+    pub fn get_mut(&mut self, tile_pos: i32) -> Option<&mut EffectBlockRuntimeState> {
+        self.states.get_mut(&tile_pos)
+    }
+
+    pub fn remove(&mut self, tile_pos: i32) -> Option<EffectBlockRuntimeState> {
+        self.states.remove(&tile_pos)
+    }
+
+    pub fn ensure_for_building(
+        &mut self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+        initial_reload_counter: f32,
+    ) -> Option<&mut EffectBlockRuntimeState> {
+        if !self.states.contains_key(&building.tile_pos) {
+            let state =
+                effect_block_runtime_state_for_building(content, building, initial_reload_counter)?;
+            self.states.insert(building.tile_pos, state);
+        }
+        self.states.get_mut(&building.tile_pos)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EffectProjectorRuntimeInput {
     pub source: ProjectorRuntimeSource,
@@ -6556,6 +6601,54 @@ mod tests {
             BuildingComp::new(point2_pack(46, 0), router_def.base().clone(), TeamId(1));
         assert!(effect_block_data_for_building(&content, &router_building).is_none());
         assert!(effect_block_runtime_state_for_building(&content, &router_building, 0.0).is_none());
+    }
+
+    #[test]
+    fn effect_block_runtime_state_store_keeps_state_by_building_tile_pos() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let radar_def = content.block_by_name("radar").unwrap();
+        let mut radar_building =
+            BuildingComp::new(point2_pack(47, 0), radar_def.base().clone(), TeamId(1));
+        radar_building.set_pos(24.0, 32.0);
+
+        let mut store = EffectBlockRuntimeStateStore::new();
+        assert!(store.is_empty());
+        {
+            let state = store
+                .ensure_for_building(&content, &radar_building, 0.0)
+                .unwrap();
+            match state {
+                EffectBlockRuntimeState::Radar(radar) => radar.progress = 0.5,
+                other => panic!("unexpected runtime state: {other:?}"),
+            }
+        }
+        assert_eq!(store.len(), 1);
+        match store.get(radar_building.tile_pos) {
+            Some(EffectBlockRuntimeState::Radar(radar)) => assert_eq!(radar.progress, 0.5),
+            other => panic!("unexpected stored runtime state: {other:?}"),
+        }
+
+        let reused = store
+            .ensure_for_building(&content, &radar_building, 0.0)
+            .unwrap();
+        match reused {
+            EffectBlockRuntimeState::Radar(radar) => assert_eq!(radar.progress, 0.5),
+            other => panic!("unexpected reused runtime state: {other:?}"),
+        }
+
+        let router_def = content.block_by_name("router").unwrap();
+        let router_building =
+            BuildingComp::new(point2_pack(48, 0), router_def.base().clone(), TeamId(1));
+        assert!(store
+            .ensure_for_building(&content, &router_building, 0.0)
+            .is_none());
+        assert_eq!(store.len(), 1);
+
+        assert!(matches!(
+            store.remove(radar_building.tile_pos),
+            Some(EffectBlockRuntimeState::Radar(_))
+        ));
+        assert!(store.is_empty());
     }
 
     #[test]

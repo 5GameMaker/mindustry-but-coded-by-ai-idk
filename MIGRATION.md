@@ -1014,6 +1014,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `EffectBlockRuntimeContext`
 - `EffectBlockRuntimeResources`
 - `EffectBlockRuntimeReport`
+- `EffectBlockRuntimeStateStore`
 - `effect_block_runtime_state_for(...)`
 - `effect_block_data_for_building(...)`
 - `effect_block_runtime_state_for_building(...)`
@@ -1067,6 +1068,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 已新增跨 effect block 的轻量统一 runtime dispatcher：
   - `EffectBlockRuntimeState` / `effect_block_runtime_state_for(...)` 为已迁移的 effect block 创建统一状态容器，覆盖 projector family、ForceProjector、Radar、BuildTurret、BaseShield、ShockwaveTower；`ShockMine` 当前无持久运行态 state；
   - `effect_block_data_for_building(...)` / `effect_block_runtime_state_for_building(...)` 已能从 `BuildingComp.block.id` 通过 `ContentLoader` 找到 `BlockDef::Effect(...)` 并创建对应 state，为后续 building store 初始化提供入口；
+  - `EffectBlockRuntimeStateStore` 已按 `BuildingComp.tile_pos` 管理 per-building effect runtime state，`ensure_for_building(...)` 会按 content 自动初始化并复用既有 state，非 effect block 不会污染状态表；
   - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield / ShockwaveTower` 四类上下文；
   - `EffectBlockRuntimeResources` 将“已存储 state”之外的 FogControl、content、building/bullet/unit 候选等资源单独传入，方便后续 building store 只保存 `EffectBlockRuntimeState`；
   - `effect_block_update_runtime(...)` 按传入上下文复用 `effect_projector_update_runtime(...)`、`effect_radar_update_runtime(...)`、`effect_base_shield_apply_runtime(...)` 与 `effect_shockwave_tower_apply_runtime(...)`；
