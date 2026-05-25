@@ -5729,6 +5729,34 @@ mod tests {
             })
         );
 
+        let unloader = PayloadLoaderState {
+            exporting: true,
+            payload_has_items: true,
+            payload_items_total: 0,
+            has_battery: true,
+            payload_power_status: 0.0,
+            ..PayloadLoaderState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_payload_state(
+                &content,
+                "payload-unloader",
+                2,
+                28,
+                GameRuntimePayloadBlockState::Loader {
+                    common: common.clone(),
+                    loader: unloader,
+                },
+            ),
+            Some(GameRuntimePayloadBlockState::Loader {
+                common: common.clone(),
+                loader: PayloadLoaderState {
+                    exporting: true,
+                    ..PayloadLoaderState::default()
+                },
+            })
+        );
+
         let deconstructor = PayloadDeconstructorState {
             progress: 0.625,
             accum: Some(vec![1.0, 2.0, 3.0]),
@@ -6936,6 +6964,44 @@ mod tests {
         let report = runtime.load_network_map_with_buildings(
             &content,
             &single_building_network_map(6, 6, 15, loader_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Loader { common, loader })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_unloader_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let tile_pos = point2_pack(4, 2);
+        let mut saved = BuildingComp::new(tile_pos, unloader_def.base().clone(), TeamId(6));
+        saved.set_rotation(1);
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 2.0, y: -1.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let loader = PayloadLoaderState {
+            exporting: true,
+            ..PayloadLoaderState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_payload_loader_extra(&mut building_bytes, loader.exporting).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 16, unloader_def.base().id, building_bytes),
         );
 
         assert_eq!(report.buildings_added, 1);
