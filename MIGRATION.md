@@ -907,6 +907,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill poly + outline poly；
   - `shieldRotation`、`sides`、`hit` layer offset 已进入 draw plan。
 - `MendProjectorState`
+- `mend_projector_outputs_items(...)`
+- `mend_projector_range(...)`
 - `mend_projector_update(...)`
 - `write_mend_projector_state(...)`
 - `read_mend_projector_state(...)`

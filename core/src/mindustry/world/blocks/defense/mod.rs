@@ -687,6 +687,14 @@ pub fn mend_projector_real_range(range: f32, phase_heat: f32, phase_range_boost:
     range + phase_heat * phase_range_boost
 }
 
+pub fn mend_projector_outputs_items() -> bool {
+    false
+}
+
+pub fn mend_projector_range(range: f32) -> f32 {
+    range
+}
+
 pub fn mend_projector_heal_fraction(
     heal_percent: f32,
     phase_heat: f32,
@@ -4360,6 +4368,8 @@ mod tests {
 
     #[test]
     fn mend_projector_draw_select_sense_and_timer_plans_follow_java() {
+        assert!(!mend_projector_outputs_items());
+        assert_eq!(mend_projector_range(60.0), 60.0);
         assert_eq!(mend_projector_repair_time_seconds(250.0, 12.0), 34.72222);
         assert_eq!(mend_projector_range_blocks(60.0, 8.0), 7.5);
         assert_eq!(mend_projector_booster_multiplier(12.0, 12.0), 2.0);
