@@ -779,6 +779,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `radar_fog_event(...)`
 - `radar_apply_fog_force_update(...)`
 - `radar_update_with_fog_control(...)`
+- `EffectRadarRuntimeInput`
+- `effect_radar_update_runtime(...)`
 - `write_radar_state(...)`
 - `read_radar_state(...)`
 - 已对照 `Radar.updateTile()/drawPlace()/drawSelect()/draw()/icons()/canPickup()` 锁定：
@@ -798,10 +800,15 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 仅当半径变化达到 `>= 0.5` 时，使用 `state.last_radius` 构造 `FogEvent::get(tileX, tileY, round(fogRadius()), team)`；
   - `radar_apply_fog_force_update(...)` 调用真实 `FogControl::force_update(...)`，遵守 `rules.fog` 与 team fog data 是否已分配；
   - `static_fog=false` 时仍可标记 dynamic 更新，但不会写入 static fog event，保持与 Java `FogControl.forceUpdate(...)` 分支一致。
+- 已新增 content-backed Radar runtime dispatcher：
+  - `effect_radar_update_runtime(...)` 直接接收 `EffectBlockData`，仅在 `EffectBlockKind::Radar` 时执行；
+  - 分发时使用 content 中的 `fog_radius` 与 `discovery_time`，避免调用方继续手写 Java 默认参数；
+  - 输入显式携带 team/tile/efficiency/edelta/fog rules，后续可由真实 building update loop 在拆分 `FogControl` 借用后直接调用；
+  - 非 Radar effect block 返回 `None`，防止错误 state/block 组合静默推进。
 
 仍需：
 
-- 将 `radar_update_with_fog_control(...)` 挂入真实 building update dispatcher；
+- 将 `effect_radar_update_runtime(...)` 挂入真实 building update dispatcher；
 - 将 dash circle / baseRegion / rotating region / additive glow 连接到 renderer；
 - content atlas 中 base/glow region 的加载与 outline icon 细节。
 
@@ -1033,7 +1040,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_projector_update_runtime(...)` 直接接收 `EffectBlockData`，按 `EffectBlockKind::MendProjector / OverdriveProjector / RegenProjector` 分发到对应 state 与 runtime adapter；
   - 调用方只需传入 `ProjectorRuntimeSource`、`ContentLoader` 与候选 `BuildingComp` slice，避免同时持有 `&mut BuildingComp` 和 `&mut [BuildingComp]`；
   - Regen 分支已经在 dispatcher 内完成 `damaged_targets` 判定、mendMap 记录、`last_update_frame/update_id` 门控和真实 `BuildingComp::heal(...)` 应用；
-  - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口，后续会继续扩展 `Radar/BaseShield` 等需要额外 FogControl 或 bullet/unit 输入的分支。
+  - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口；`Radar` 因需要额外 `FogControl` 已拆到 `effect_radar_update_runtime(...)`，后续继续扩展 `BaseShield` 等需要 bullet/unit 输入的分支。
 
 仍需：
 

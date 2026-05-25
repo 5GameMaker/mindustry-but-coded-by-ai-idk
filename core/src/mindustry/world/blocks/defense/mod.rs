@@ -3709,6 +3709,17 @@ pub fn radar_apply_fog_force_update(
     should_update
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EffectRadarRuntimeInput {
+    pub team: TeamId,
+    pub tile_x: i32,
+    pub tile_y: i32,
+    pub efficiency: f32,
+    pub edelta: f32,
+    pub fog_enabled: bool,
+    pub static_fog: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn radar_update_with_fog_control(
     state: &mut RadarState,
@@ -3735,6 +3746,31 @@ pub fn radar_update_with_fog_control(
         fog_enabled,
         static_fog,
     )
+}
+
+pub fn effect_radar_update_runtime(
+    block: &EffectBlockData,
+    state: &mut RadarState,
+    fog_control: &mut FogControl,
+    input: EffectRadarRuntimeInput,
+) -> Option<bool> {
+    if block.kind != EffectBlockKind::Radar {
+        return None;
+    }
+
+    Some(radar_update_with_fog_control(
+        state,
+        fog_control,
+        input.team,
+        input.tile_x,
+        input.tile_y,
+        input.efficiency,
+        input.edelta,
+        block.fog_radius,
+        block.discovery_time,
+        input.fog_enabled,
+        input.static_fog,
+    ))
 }
 
 pub fn write_radar_state<W: Write>(write: &mut W, state: &RadarState) -> io::Result<()> {
@@ -7403,6 +7439,62 @@ mod tests {
         assert_eq!(event.y(), 2);
         assert_eq!(event.radius(), 2);
         assert_eq!(event.team(), 7);
+    }
+
+    #[test]
+    fn effect_radar_runtime_dispatch_uses_content_fog_radius_and_discovery_time() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let radar_block = effect_block(&content, "radar");
+        let mend_block = effect_block(&content, "mend-projector");
+        let mut radar = RadarState {
+            progress: 0.06,
+            last_radius: 0.0,
+            smooth_efficiency: 1.0,
+            total_progress: 0.0,
+        };
+        let mut fog = FogControl::new(8, 8);
+        fog.ensure_data(2).dynamic_updated = false;
+
+        let forced = effect_radar_update_runtime(
+            radar_block,
+            &mut radar,
+            &mut fog,
+            EffectRadarRuntimeInput {
+                team: TeamId(2),
+                tile_x: 3,
+                tile_y: 4,
+                efficiency: 1.0,
+                edelta: 60.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        );
+
+        assert_eq!(forced, Some(true));
+        assert!((radar.last_radius - 34.0 * 0.06).abs() < 0.00001);
+        assert!((radar.progress - 0.16).abs() < 0.00001);
+        assert_eq!(radar.total_progress, 60.0);
+        assert!(fog.data(2).unwrap().dynamic_updated);
+        fog.update_static();
+        assert!(fog.is_discovered(true, true, Some(2), false, 3, 4));
+
+        assert_eq!(
+            effect_radar_update_runtime(
+                mend_block,
+                &mut radar,
+                &mut fog,
+                EffectRadarRuntimeInput {
+                    team: TeamId(2),
+                    tile_x: 3,
+                    tile_y: 4,
+                    efficiency: 1.0,
+                    edelta: 60.0,
+                    fog_enabled: true,
+                    static_fog: true,
+                },
+            ),
+            None
+        );
     }
 
     #[test]
