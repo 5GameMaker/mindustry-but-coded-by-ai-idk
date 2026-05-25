@@ -1661,6 +1661,15 @@ pub fn regen_projector_heal_amount(
     amount.min(missing_health)
 }
 
+pub fn regen_projector_heal_amount_from_percent(
+    heal_amount_percent: f32,
+    edelta: f32,
+    block_health: f32,
+    missing_health: f32,
+) -> f32 {
+    (heal_amount_percent * edelta * block_health / 100.0).min(missing_health)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RegenProjectorState {
     pub warmup: f32,
@@ -1920,6 +1929,65 @@ impl RegenProjectorMendMap {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+pub fn regen_projector_record_building_mend(
+    mend_map: &mut RegenProjectorMendMap,
+    building: &BuildingComp,
+    heal_amount_percent: f32,
+    edelta: f32,
+    now: f32,
+) -> bool {
+    if heal_amount_percent <= 0.0
+        || !mend_projector_building_damaged(building)
+        || building.is_heal_suppressed(now)
+    {
+        return false;
+    }
+
+    let missing_health = (building.max_health - building.health).max(0.0);
+    let amount = regen_projector_heal_amount_from_percent(
+        heal_amount_percent,
+        edelta,
+        building.max_health,
+        missing_health,
+    );
+    mend_map.record(building.tile_pos, amount, missing_health);
+    amount > 0.0
+}
+
+pub fn regen_projector_apply_mend_map_to_buildings(
+    mend_map: &mut RegenProjectorMendMap,
+    buildings: &mut [BuildingComp],
+    now: f32,
+) -> usize {
+    let mut applied = 0;
+    for (pos, amount) in mend_map.drain() {
+        let Some(building) = buildings
+            .iter_mut()
+            .find(|building| building.tile_pos == pos)
+        else {
+            continue;
+        };
+        let before = building.health;
+        building.heal(amount, now);
+        if building.health > before {
+            applied += 1;
+        }
+    }
+    applied
+}
+
+pub fn regen_projector_apply_mend_plan_to_buildings(
+    plan: &RegenProjectorApplyPlan,
+    mend_map: &mut RegenProjectorMendMap,
+    buildings: &mut [BuildingComp],
+    now: f32,
+) -> usize {
+    if !plan.apply_mend_map {
+        return 0;
+    }
+    regen_projector_apply_mend_map_to_buildings(mend_map, buildings, now)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -5026,6 +5094,10 @@ mod tests {
             3.0
         );
         assert_eq!(
+            regen_projector_heal_amount_from_percent(0.3, 1.0, 1000.0, 20.0),
+            3.0
+        );
+        assert_eq!(
             regen_projector_heal_amount(1.0, 2.0, 12.0, 1.0, 1000.0, 20.0),
             20.0
         );
@@ -5080,6 +5152,82 @@ mod tests {
         assert_eq!(mend.entries.get(&11), Some(&2.5));
         assert_eq!(mend.drain(), vec![(10, 7.0), (11, 2.5)]);
         assert!(mend.is_empty());
+    }
+
+    #[test]
+    fn regen_projector_mend_map_applies_to_building_components_once_per_frame() {
+        let mut buildings = vec![
+            projector_runtime_building(30, "damaged-wall"),
+            projector_runtime_building(31, "nearly-full-wall"),
+            projector_runtime_building(32, "suppressed-wall"),
+        ];
+        buildings[0].health = 70.0;
+        buildings[1].health = 95.0;
+        buildings[2].health = 70.0;
+        buildings[2].apply_heal_suppression(200.0, 60.0);
+
+        let mut mend = RegenProjectorMendMap::default();
+        assert!(regen_projector_record_building_mend(
+            &mut mend,
+            &buildings[0],
+            0.4,
+            20.0,
+            210.0,
+        ));
+        assert!(regen_projector_record_building_mend(
+            &mut mend,
+            &buildings[0],
+            0.8,
+            20.0,
+            210.0,
+        ));
+        assert!(regen_projector_record_building_mend(
+            &mut mend,
+            &buildings[1],
+            0.8,
+            20.0,
+            210.0,
+        ));
+        assert!(!regen_projector_record_building_mend(
+            &mut mend,
+            &buildings[2],
+            0.8,
+            20.0,
+            210.0,
+        ));
+
+        assert_eq!(mend.entries.get(&buildings[0].tile_pos), Some(&16.0));
+        assert_eq!(mend.entries.get(&buildings[1].tile_pos), Some(&5.0));
+        assert!(!mend.entries.contains_key(&buildings[2].tile_pos));
+
+        let no_apply_plan = regen_projector_apply_plan(7, 7);
+        assert_eq!(
+            regen_projector_apply_mend_plan_to_buildings(
+                &no_apply_plan,
+                &mut mend,
+                &mut buildings,
+                220.0,
+            ),
+            0
+        );
+        assert!(!mend.is_empty());
+
+        let apply_plan = regen_projector_apply_plan(6, 7);
+        let applied = regen_projector_apply_mend_plan_to_buildings(
+            &apply_plan,
+            &mut mend,
+            &mut buildings,
+            220.0,
+        );
+
+        assert_eq!(applied, 2);
+        assert!(mend.is_empty());
+        assert_eq!(buildings[0].health, 86.0);
+        assert_eq!(buildings[1].health, 100.0);
+        assert_eq!(buildings[2].health, 70.0);
+        assert!(buildings[0].recently_healed(220.0));
+        assert!(buildings[1].recently_healed(220.0));
+        assert!(!buildings[2].recently_healed(220.0));
     }
 
     #[test]

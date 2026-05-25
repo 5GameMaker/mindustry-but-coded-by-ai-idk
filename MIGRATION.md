@@ -602,6 +602,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `regen_projector_light_plan(...)`
 - `regen_projector_apply_plan(...)`
 - `regen_projector_update(...)`
+- `regen_projector_heal_amount_from_percent(...)`
+- `regen_projector_record_building_mend(...)`
+- `regen_projector_apply_mend_map_to_buildings(...)`
+- `regen_projector_apply_mend_plan_to_buildings(...)`
 - 已对照 `RegenProjector.updateTile()` 锁定：
   - `warmup` 按上一帧 `didRegen` 通过 `approachDelta(..., 1/70)` 更新；
   - `totalTime += warmup * delta`；
@@ -615,6 +619,11 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 同一建筑同一帧只保留最大修复量，防止叠加；
   - 修复量受 missing health 上限约束；
   - drain 后清空，供统一应用 `heal/recentlyHealed`。
+- 已将 `mendMap` 接到真实 `BuildingComp` 治疗运行态：
+  - `regen_projector_record_building_mend(...)` 对齐 Java `!build.damaged() || build.isHealSuppressed()` 过滤，按 `tile_pos` 记录待治疗量；
+  - `regen_projector_apply_mend_plan_to_buildings(...)` 对齐 `lastUpdateFrame != state.updateId` 门控，只有跨 update frame 时才 drain 并应用；
+  - `regen_projector_apply_mend_map_to_buildings(...)` 按 `tile_pos` 查找候选 `BuildingComp`，调用真实 `BuildingComp::heal(amount, now)` 并清空 map；
+  - healed 目标可通过 `BuildingComp::recently_healed(now)` 验证，当前 Rust `heal(...)` 已负责更新 `last_heal_time`。
 
 - 已对照 `RegenProjector.drawPlace()/drawSelect()/drawLight()/setStats()` 锁定：
   - place/select 均使用 `range * tilesize` 的 dash square；
@@ -627,7 +636,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 仍需：
 
 - `updateTargets()` 的真实 indexer 范围扫描接入；
-- `lastUpdateFrame` 与真实 world.build(pos).heal/recentlyHealed 应用；
+  - 将 `regen_projector_apply_mend_plan_to_buildings(...)` 挂入真实 world/building dispatcher 的 `world.build(pos)` 查询；
 - drawPlace/drawSelect 的目标列表高亮接入真实 indexer / targets。
 
 ### 7.7 BaseShield
