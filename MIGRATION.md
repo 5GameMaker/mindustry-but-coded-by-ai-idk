@@ -658,11 +658,14 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `BaseShieldRangePlan`
 - `BaseShieldInteractionPlan`
 - `BaseShieldTintPlan`
+- `BaseShieldRuntimeReport`
 - `base_shield_clip_radius(...)`
 - `base_shield_radius(...)`
 - `base_shield_in_fog_to(...)`
 - `base_shield_should_absorb_bullet(...)`
 - `base_shield_apply_absorb_to_bullet(...)`
+- `base_shield_within_radius(...)`
+- `base_shield_apply_runtime(...)`
 - `base_shield_tint_plan(...)`
 - `base_shield_place_plan(...)`
 - `base_shield_select_plan(...)`
@@ -690,10 +693,16 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - hit 参与与 white 的 color clamp/blend。
 - `base_shield_apply_absorb_to_bullet(...)` 已接入 `BulletComp::absorb()`，让 BaseShield 的吸收判定能真实写入 bullet `absorbed/removed` 状态并清空碰撞记录。
 - `base_shield_apply_unit_action(...)` 已接入 `UnitComp`，对齐 Java `unit.kill()` 与 repel 分支的 `unit.vel.setZero(); unit.move(...)`：Kill 写入 `HealthComp::kill()`，Repel 清零速度并沿盾中心到单位方向移动 `overlap + 0.01`。
+- `base_shield_apply_runtime(...)` 已把 `BaseShieldBuild.updateTile()` 的核心扫描执行收束成可复用 runtime adapter：
+  - 先调用 `base_shield_update(...)` 写入 `smoothRadius`；
+  - `radius <= 1` 时不扫描，保持 Java `rad > 1` 门控；
+  - 对 bullet 侧跳过已移除/已吸收对象，经 `BulletType.absorbable`、敌队和半径内判定后调用真实 `BulletComp::absorb()`；
+  - 对 unit 侧按 `rad + 10` 做敌方单位候选过滤，再用 `base_shield_unit_action(...)` 执行真实 `UnitComp` repel/kill，并保留 spark 事件计数给后续 FX dispatcher；
+  - 这一步已把 BaseShield 的 bullet/unit 交互从单测直接调用 helper 提升为可挂接真实 `Groups.bullet.intersect(...)` / `Units.nearbyEnemies(...)` 或 world indexer 的统一入口。
 
 仍需：
 
-- 接入真实 Groups.bullet / Units.nearbyEnemies 运行态；
+- 将 `base_shield_apply_runtime(...)` 挂到真实 building update dispatcher 与 Groups/world indexer；
 - shieldColor/teamColor 到真实渲染颜色的 adapter；
 - drawPlace/drawSelect dash circle helper 接入真实 renderer。
 

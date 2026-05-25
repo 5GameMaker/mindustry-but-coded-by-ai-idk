@@ -8,6 +8,7 @@ use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::bullet::BulletType;
 use crate::mindustry::entities::comp::{BuildingComp, BulletComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
+use crate::mindustry::entities::SizedEntity;
 use crate::mindustry::game::{BlockPlan, FogControl, FogEvent};
 use crate::mindustry::io::{type_io, TeamId, TypeValue};
 use crate::mindustry::logic::LAccess;
@@ -2213,6 +2214,28 @@ pub fn base_shield_should_emit_unit_spark(
         && random < base_shield_unit_spark_chance_delta(delta)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BaseShieldRuntimeReport {
+    pub active: bool,
+    pub radius: f32,
+    pub bullets_absorbed: usize,
+    pub units_repelled: usize,
+    pub units_killed: usize,
+    pub unit_sparks: usize,
+}
+
+pub fn base_shield_within_radius(
+    center_x: f32,
+    center_y: f32,
+    x: f32,
+    y: f32,
+    radius: f32,
+) -> bool {
+    let dx = x - center_x;
+    let dy = y - center_y;
+    dx * dx + dy * dy <= radius * radius
+}
+
 pub fn base_shield_apply_unit_action(
     unit: &mut UnitComp,
     shield_x: f32,
@@ -2243,6 +2266,89 @@ pub fn base_shield_apply_unit_action(
             true
         }
     }
+}
+
+pub fn base_shield_apply_runtime<'a>(
+    state: &mut BaseShieldState,
+    shield: &BuildingComp,
+    radius: f32,
+    efficiency: f32,
+    bullets: &mut [BulletComp],
+    mut bullet_type: impl FnMut(ContentId) -> Option<&'a BulletType>,
+    units: &mut [UnitComp],
+    delta: f32,
+    mut spark_random: impl FnMut(&UnitComp) -> f32,
+) -> BaseShieldRuntimeReport {
+    let rad = base_shield_update(state, radius, efficiency);
+    if !base_shield_should_interact(rad) {
+        return BaseShieldRuntimeReport {
+            active: false,
+            radius: rad,
+            bullets_absorbed: 0,
+            units_repelled: 0,
+            units_killed: 0,
+            unit_sparks: 0,
+        };
+    }
+
+    let mut report = BaseShieldRuntimeReport {
+        active: true,
+        radius: rad,
+        bullets_absorbed: 0,
+        units_repelled: 0,
+        units_killed: 0,
+        unit_sparks: 0,
+    };
+
+    for bullet in bullets {
+        if bullet.removed || bullet.absorbed {
+            continue;
+        }
+        let Some(ty) = bullet_type(bullet.bullet_type_id) else {
+            continue;
+        };
+        let within_radius = base_shield_within_radius(shield.x, shield.y, bullet.x, bullet.y, rad);
+        let should_absorb = base_shield_should_absorb_bullet(
+            bullet.team != shield.team,
+            ty.absorbable,
+            within_radius,
+        );
+        if base_shield_apply_absorb_to_bullet(should_absorb, bullet) {
+            report.bullets_absorbed += 1;
+        }
+    }
+
+    for unit in units {
+        if unit.health.dead || unit.team_id() == shield.team {
+            continue;
+        }
+        if !base_shield_within_radius(shield.x, shield.y, unit.x(), unit.y(), rad + 10.0) {
+            continue;
+        }
+
+        let dx = unit.x() - shield.x;
+        let dy = unit.y() - shield.y;
+        let distance = (dx * dx + dy * dy).sqrt();
+        let action = base_shield_unit_action(unit.hit_size(), rad, distance);
+        match action {
+            ShieldUnitAction::Repel { .. } => {
+                if base_shield_apply_unit_action(unit, shield.x, shield.y, action) {
+                    report.units_repelled += 1;
+                    if base_shield_should_emit_unit_spark(action, delta, spark_random(unit)) {
+                        report.unit_sparks += 1;
+                    }
+                }
+            }
+            ShieldUnitAction::Kill => {
+                if base_shield_apply_unit_action(unit, shield.x, shield.y, action) {
+                    report.units_killed += 1;
+                }
+            }
+            ShieldUnitAction::None => {}
+        }
+    }
+
+    report
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5801,6 +5907,127 @@ mod tests {
         let restored = read_shield_wall_state(&mut bytes.as_slice()).unwrap();
         assert_eq!(restored.shield, wall.shield);
         assert_eq!(restored.shield_radius, 0.0);
+    }
+
+    #[test]
+    fn base_shield_runtime_adapter_scans_and_applies_entity_interactions() {
+        let mut shield = projector_runtime_building(40, "shield-projector");
+        shield.set_pos(0.0, 0.0);
+
+        let absorbable = BulletType {
+            absorbable: true,
+            ..BulletType::default()
+        };
+        let non_absorbable = BulletType {
+            absorbable: false,
+            ..BulletType::default()
+        };
+
+        let mut absorbed_bullet = BulletComp::default();
+        absorbed_bullet.bullet_type_id = 0;
+        absorbed_bullet.team = TeamId(2);
+        absorbed_bullet.x = 12.0;
+        absorbed_bullet.record_collision(7);
+
+        let mut same_team_bullet = BulletComp::default();
+        same_team_bullet.bullet_type_id = 0;
+        same_team_bullet.team = TeamId(1);
+        same_team_bullet.x = 12.0;
+
+        let mut outside_bullet = BulletComp::default();
+        outside_bullet.bullet_type_id = 0;
+        outside_bullet.team = TeamId(2);
+        outside_bullet.x = 25.0;
+
+        let mut blocked_type_bullet = BulletComp::default();
+        blocked_type_bullet.bullet_type_id = 1;
+        blocked_type_bullet.team = TeamId(2);
+        blocked_type_bullet.x = 12.0;
+
+        let mut bullets = vec![
+            absorbed_bullet,
+            same_team_bullet,
+            outside_bullet,
+            blocked_type_bullet,
+        ];
+
+        let mut unit_type = UnitType::new(1, "shield-runtime-unit");
+        unit_type.hit_size = 10.0;
+        unit_type.health = 100.0;
+
+        let mut repel_unit = UnitComp::new(1, unit_type.clone(), TeamId(2));
+        repel_unit.set_pos(22.0, 0.0);
+        repel_unit.vel.vel.x = 2.0;
+
+        let mut kill_unit = UnitComp::new(2, unit_type.clone(), TeamId(2));
+        kill_unit.set_pos(1.0, 0.0);
+
+        let mut same_team_unit = UnitComp::new(3, unit_type.clone(), TeamId(1));
+        same_team_unit.set_pos(1.0, 0.0);
+
+        let mut outside_unit = UnitComp::new(4, unit_type, TeamId(2));
+        outside_unit.set_pos(40.0, 0.0);
+
+        let mut units = vec![repel_unit, kill_unit, same_team_unit, outside_unit];
+        let mut state = BaseShieldState::default();
+        let report = base_shield_apply_runtime(
+            &mut state,
+            &shield,
+            400.0,
+            1.0,
+            &mut bullets,
+            |id| match id {
+                0 => Some(&absorbable),
+                1 => Some(&non_absorbable),
+                _ => None,
+            },
+            &mut units,
+            1.0,
+            |_| 0.0,
+        );
+
+        assert_eq!(
+            report,
+            BaseShieldRuntimeReport {
+                active: true,
+                radius: 20.0,
+                bullets_absorbed: 1,
+                units_repelled: 1,
+                units_killed: 1,
+                unit_sparks: 1,
+            }
+        );
+        assert!(bullets[0].absorbed);
+        assert!(bullets[0].removed);
+        assert!(bullets[0].collided_ids.is_empty());
+        assert!(!bullets[1].absorbed);
+        assert!(!bullets[2].absorbed);
+        assert!(!bullets[3].absorbed);
+
+        assert!((units[0].x() - 25.01).abs() < 0.00001);
+        assert_eq!(units[0].vel.vel.x, 0.0);
+        assert!(!units[0].health.dead);
+        assert!(units[1].health.dead);
+        assert!(!units[2].health.dead);
+        assert_eq!(units[2].x(), 1.0);
+        assert!(!units[3].health.dead);
+        assert_eq!(units[3].x(), 40.0);
+
+        let inactive = base_shield_apply_runtime(
+            &mut BaseShieldState::default(),
+            &shield,
+            10.0,
+            1.0,
+            &mut bullets,
+            |_| Some(&absorbable),
+            &mut units,
+            1.0,
+            |_| 0.0,
+        );
+        assert!(!inactive.active);
+        assert_eq!(inactive.bullets_absorbed, 0);
+        assert_eq!(inactive.units_repelled, 0);
+        assert_eq!(inactive.units_killed, 0);
     }
 
     #[test]
