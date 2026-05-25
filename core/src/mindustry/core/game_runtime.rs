@@ -78,6 +78,8 @@ use crate::mindustry::{
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
         read_nuclear_reactor_state, read_power_generator_state, read_variable_reactor_state,
+        write_heater_generator_state, write_impact_reactor_state, write_light_block_state,
+        write_nuclear_reactor_state, write_power_generator_state, write_variable_reactor_state,
         HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
         PowerGeneratorState, VariableReactorState,
     },
@@ -136,10 +138,10 @@ fn write_network_map_block_state_tail<W: io::Write>(
         return Ok(());
     };
 
-    if let Some(state) = runtime.defense_wall_runtime_states.get(&building.tile_pos) {
-        let BlockDef::DefenseWall(wall) = block else {
-            return Ok(());
-        };
+    if let (BlockDef::DefenseWall(wall), Some(state)) = (
+        block,
+        runtime.defense_wall_runtime_states.get(&building.tile_pos),
+    ) {
         match (wall.kind, state) {
             (DefenseWallKind::Door, GameRuntimeDefenseWallState::Door(state)) => {
                 write_door_state(write, *state)?;
@@ -154,7 +156,82 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let Some(state) = runtime.power_runtime_states.get(&building.tile_pos) {
+        match (block, state) {
+            (BlockDef::Power(power), GameRuntimePowerBlockState::Generator(state))
+                if matches!(
+                    power.kind,
+                    PowerBlockKind::ConsumeGenerator
+                        | PowerBlockKind::ThermalGenerator
+                        | PowerBlockKind::SolarGenerator
+                ) =>
+            {
+                write_power_generator_state(write, state)?;
+            }
+            (BlockDef::Power(power), GameRuntimePowerBlockState::NuclearReactor(state))
+                if power.kind == PowerBlockKind::NuclearReactor =>
+            {
+                write_nuclear_reactor_state(write, state)?;
+            }
+            (BlockDef::Power(power), GameRuntimePowerBlockState::ImpactReactor(state))
+                if power.kind == PowerBlockKind::ImpactReactor =>
+            {
+                write_impact_reactor_state(write, state)?;
+            }
+            (BlockDef::Power(power), GameRuntimePowerBlockState::VariableReactor(state))
+                if power.kind == PowerBlockKind::VariableReactor =>
+            {
+                write_variable_reactor_state(write, state)?;
+            }
+            (BlockDef::Power(power), GameRuntimePowerBlockState::HeaterGenerator(state))
+                if power.kind == PowerBlockKind::HeaterGenerator =>
+            {
+                write_heater_generator_state(write, state)?;
+            }
+            (BlockDef::Light(_), GameRuntimePowerBlockState::Light(state)) => {
+                write_light_block_state(write, state)?;
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
+}
+
+fn network_map_building_revision(
+    runtime: &GameRuntime,
+    content: &ContentLoader,
+    building: &BuildingComp,
+) -> u8 {
+    let Some(block) = content.block(building.block.id) else {
+        return 0;
+    };
+
+    match (block, runtime.power_runtime_states.get(&building.tile_pos)) {
+        (
+            BlockDef::Power(power),
+            Some(
+                GameRuntimePowerBlockState::Generator(_)
+                | GameRuntimePowerBlockState::NuclearReactor(_)
+                | GameRuntimePowerBlockState::ImpactReactor(_)
+                | GameRuntimePowerBlockState::VariableReactor(_)
+                | GameRuntimePowerBlockState::HeaterGenerator(_),
+            ),
+        ) if matches!(
+            power.kind,
+            PowerBlockKind::ConsumeGenerator
+                | PowerBlockKind::ThermalGenerator
+                | PowerBlockKind::SolarGenerator
+                | PowerBlockKind::NuclearReactor
+                | PowerBlockKind::ImpactReactor
+                | PowerBlockKind::VariableReactor
+                | PowerBlockKind::HeaterGenerator
+        ) =>
+        {
+            1
+        }
+        _ => 0,
+    }
 }
 
 fn network_map_building_payload(
@@ -164,10 +241,11 @@ fn network_map_building_payload(
 ) -> Vec<u8> {
     let mut bytes = Vec::new();
     // The outer byte is the block/build revision used by Java save-map chunks.
-    // Block-specific tail writers are still being migrated; writing revision 0
-    // plus the base BuildingComp payload lets clients recover identity, team,
-    // rotation, health and base modules immediately.
-    bytes.push(0);
+    // Most migrated writers still use the base revision 0. Java PowerGenerator
+    // overrides version() to 1 because generateTime was added behind
+    // revision>=1, so the runtime computes the revision from the actual block
+    // kind and sidecar state before writing block-specific tails.
+    bytes.push(network_map_building_revision(runtime, content, building));
     building
         .write_base(&mut bytes, false)
         .expect("BuildingComp base payload should be writable into Vec<u8>");
@@ -3195,6 +3273,193 @@ mod tests {
                 shield_radius: 1.0,
                 break_timer: 0.0,
                 hit: 0.0,
+            }))
+        );
+    }
+
+    fn exported_power_state_revision(state: &GameRuntimePowerBlockState) -> u8 {
+        match state {
+            GameRuntimePowerBlockState::Generator(_)
+            | GameRuntimePowerBlockState::NuclearReactor(_)
+            | GameRuntimePowerBlockState::ImpactReactor(_)
+            | GameRuntimePowerBlockState::VariableReactor(_)
+            | GameRuntimePowerBlockState::HeaterGenerator(_) => 1,
+            GameRuntimePowerBlockState::Light(_) => 0,
+        }
+    }
+
+    fn roundtrip_exported_power_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimePowerBlockState,
+    ) -> Option<GameRuntimePowerBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_power_state_revision(&state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.power_runtime_states.insert(tile_pos, state.clone());
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("power/light center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("power/light center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.power_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_power_and_light_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        assert_eq!(
+            roundtrip_exported_power_state(
+                &content,
+                "thermal-generator",
+                1,
+                6,
+                GameRuntimePowerBlockState::Generator(PowerGeneratorState {
+                    production_efficiency: 0.75,
+                    generate_time: 4.0,
+                }),
+            ),
+            Some(GameRuntimePowerBlockState::Generator(PowerGeneratorState {
+                production_efficiency: 0.75,
+                generate_time: 4.0,
+            }))
+        );
+        assert_eq!(
+            roundtrip_exported_power_state(
+                &content,
+                "thorium-reactor",
+                3,
+                6,
+                GameRuntimePowerBlockState::NuclearReactor(NuclearReactorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.5,
+                        generate_time: 2.0,
+                    },
+                    heat: 0.8,
+                }),
+            ),
+            Some(GameRuntimePowerBlockState::NuclearReactor(
+                NuclearReactorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.5,
+                        generate_time: 2.0,
+                    },
+                    heat: 0.8,
+                }
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_power_state(
+                &content,
+                "impact-reactor",
+                5,
+                6,
+                GameRuntimePowerBlockState::ImpactReactor(ImpactReactorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.9,
+                        generate_time: 1.5,
+                    },
+                    warmup: 0.6,
+                }),
+            ),
+            Some(GameRuntimePowerBlockState::ImpactReactor(
+                ImpactReactorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.9,
+                        generate_time: 1.5,
+                    },
+                    warmup: 0.6,
+                }
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_power_state(
+                &content,
+                "flux-reactor",
+                8,
+                6,
+                GameRuntimePowerBlockState::VariableReactor(VariableReactorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.4,
+                        generate_time: 3.0,
+                    },
+                    heat: 7.5,
+                    instability: 0.25,
+                    warmup: 0.5,
+                }),
+            ),
+            Some(GameRuntimePowerBlockState::VariableReactor(
+                VariableReactorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.4,
+                        generate_time: 3.0,
+                    },
+                    heat: 7.5,
+                    instability: 0.25,
+                    warmup: 0.5,
+                }
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_power_state(
+                &content,
+                "neoplasia-reactor",
+                11,
+                6,
+                GameRuntimePowerBlockState::HeaterGenerator(HeaterGeneratorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.3,
+                        generate_time: 2.25,
+                    },
+                    heat: 12.0,
+                }),
+            ),
+            Some(GameRuntimePowerBlockState::HeaterGenerator(
+                HeaterGeneratorState {
+                    generator: PowerGeneratorState {
+                        production_efficiency: 0.3,
+                        generate_time: 2.25,
+                    },
+                    heat: 12.0,
+                }
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_power_state(
+                &content,
+                "illuminator",
+                14,
+                6,
+                GameRuntimePowerBlockState::Light(LightBlockState { color: 0x12_34_56 }),
+            ),
+            Some(GameRuntimePowerBlockState::Light(LightBlockState {
+                color: 0x12_34_56
             }))
         );
     }

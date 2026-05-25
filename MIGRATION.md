@@ -319,9 +319,10 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
   - `export_network_map_snapshot_from_parts(...)` 接收 `World + &[BuildingComp]`，普通 block run 不再跨过 entity tile；
   - center tile 写 `has_entity=true/is_center=true/building=Some(...)`；
   - multi-tile footprint 的非中心 tile 写 `has_entity=true/is_center=false`，对齐 Java map chunk 的中心/非中心 building 记录形态；
-  - 当前 building chunk payload 先写 `revision 0 + BuildingComp::write_base(..., false)`，已能让 Rust runtime 读回 team/rotation/health/tile_pos/module base；
+  - 当前 building chunk payload 先写 `revision byte + BuildingComp::write_base(..., false)`，已能让 Rust runtime 读回 team/rotation/health/tile_pos/module base；
   - 导出侧已开始追加 block-specific tail：`Door` 写 1 byte open，`AutoDoor/blast-door` 写父/子双 bool，`ShieldWall` 写 shield f32，并通过 content registry 判定 block kind；
-  - 已补 `game_runtime_exports_network_map_snapshot_with_owned_building_chunks`、`game_runtime_exports_defense_wall_state_tail_in_network_map_snapshot` 与 `server_world_data_exports_owned_building_chunks_for_runtime_loader`，验证 core 导出和服务端 world stream 解码后的 `map_snapshot` 均可被 `GameRuntime::load_network_map_with_buildings(...)` 反向加载出 owned building / defense wall sidecar。
+  - power/light 导出已覆盖 `PowerGenerator` 系列与 `LightBlock`：generator/reactor/heater 按 Java `version()==1` 写 `productionEfficiency/generateTime` 及子类字段，light 按 revision 0 写 color；
+  - 已补 `game_runtime_exports_network_map_snapshot_with_owned_building_chunks`、`game_runtime_exports_defense_wall_state_tail_in_network_map_snapshot`、`game_runtime_exports_power_and_light_state_tail_in_network_map_snapshot` 与 `server_world_data_exports_owned_building_chunks_for_runtime_loader`，验证 core 导出和服务端 world stream 解码后的 `map_snapshot` 均可被 `GameRuntime::load_network_map_with_buildings(...)` 反向加载出 owned building / defense wall / power-light sidecar。
 
 仍需：
 
@@ -329,7 +330,7 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - markers/custom chunks 与完整 save dispatcher 的运行态接入；
 - 将 `RawSaveEnvelope` region 层与 runtime world/entities 物化流程接成完整 save read/write dispatcher；
 - `teamBlocks` 导出补 typed config 保真与 content header 临时映射写出；
-- building chunk 继续接入剩余 block-specific tail writers（炮塔/发电/生产/物流/payload/logic 等），避免只导出 base payload；
+- building chunk 继续接入剩余 block-specific tail writers（炮塔/生产/物流/payload/logic 等），避免只导出 base payload；
 - player/groups/world/entity 的完整应用；
 - 与 Java 原版服务端/客户端的持续互通测试。
 
@@ -1172,7 +1173,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `mindustry_server::ServerLauncher` 已持有 `GameRuntime`，并将 `update(...)` 调整为可变 tick 入口；后续服务端 world load、Groups.build 迁移和 effect block owned dispatch 可直接落到 server runtime，而不是停留在 core-only helper；
   - `ServerLauncher::update(...)` 已实际调用 `update_runtime_effect_blocks(...)`，以 base content loader 和空 bullet/unit 资源安全驱动 `GameRuntime::advance_owned_effect_blocks(...)`；当前无建筑时为空 batch，后续服务端建筑集合接入后会自然进入同一主循环；
   - `ServerLauncher` 现在保留 `last_runtime_effect_report`，并已用 server-level 测试证明 `update()` 能驱动真实 owned `mend-projector` 建筑进入 `GameRuntime::advance_owned_effect_blocks(...)`，创建 batch report 并消费 phase item；
-  - `ServerLauncher::flush_pending_world_data(...)` 已从最小 bootstrap payload 改为组装 runtime `NetworkWorldData`：写入 base `content_header_snapshot`、空 `content_patches_snapshot`、由 `GameRuntime::export_network_map_snapshot(&ContentLoader)` 生成的当前 world/building 轻量 map snapshot、`GameState::export_legacy_team_blocks(...)` 导出的 `team_blocks_snapshot`、markers/custom chunks，并在每个连接上补 Java `player.id + Player.write` body；这使新连接 world stream 开始携带服务端 runtime `Teams.plans` 与 owned building entity chunk，不再只是静态占位数据。当前 building chunk 已在 `revision 0 + BuildingComp::write_base(...)` 后追加 `Door/AutoDoor/ShieldWall` tail，后续需继续接入完整 `writeMap` 其他 block-specific tail serialization；
+  - `ServerLauncher::flush_pending_world_data(...)` 已从最小 bootstrap payload 改为组装 runtime `NetworkWorldData`：写入 base `content_header_snapshot`、空 `content_patches_snapshot`、由 `GameRuntime::export_network_map_snapshot(&ContentLoader)` 生成的当前 world/building 轻量 map snapshot、`GameState::export_legacy_team_blocks(...)` 导出的 `team_blocks_snapshot`、markers/custom chunks，并在每个连接上补 Java `player.id + Player.write` body；这使新连接 world stream 开始携带服务端 runtime `Teams.plans` 与 owned building entity chunk，不再只是静态占位数据。当前 building chunk 已在 `revision byte + BuildingComp::write_base(...)` 后追加 `Door/AutoDoor/ShieldWall` 和 PowerGenerator/LightBlock tail，其中 power generator 系列按 Java `version()==1` 写出，后续需继续接入完整 `writeMap` 其他 block-specific tail serialization；
   - `desktop::DesktopLauncher` 已持有 `GameRuntime`，并在网络 world data、state snapshot 与 client-loaded state 切换后同步 `runtime.state`；后续客户端世界/建筑/effect runtime 可以从现有 `game_state` 镜像逐步切换到统一 runtime facade；
   - `EffectBlockFrameBatchResources` / `effect_block_update_building_slice_with_stores(...)` 已形成外部 `&mut [BuildingComp]` 集合的最小遍历入口；内部用 source snapshot 避免借用冲突，同时把原始 building slice 作为 projector 目标集合，并在 report 后对源建筑执行物品消耗；
   - `effect_force_projector_update_building_frame(...)` / `effect_force_projector_update_building_frame_with_timer(...)` 已能从 `BuildingComp.efficiency/optional_efficiency/timeScale`、帧 delta 与 content `phaseUseTime/timerUse` 组装 ForceProjector runtime 输入；`FORCE_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback，且 broken/phase invalid/efficiency=0 时不触碰 timer slot；
