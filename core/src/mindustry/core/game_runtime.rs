@@ -17,7 +17,6 @@ use crate::mindustry::{
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
-    core::world::World,
     ctype::ContentId,
     entities::{
         bullet::BulletType,
@@ -42,9 +41,10 @@ use crate::mindustry::{
         effect_block_update_building_slice_with_stores, read_auto_door_state,
         read_base_shield_state, read_door_state, read_force_projector_state,
         read_mend_projector_state, read_overdrive_projector_state, read_radar_state,
-        read_shield_wall_state, DoorState, EffectBlockFrameBatchReport,
-        EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
-        EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
+        read_shield_wall_state, write_auto_door_state, write_door_state, write_shield_wall_state,
+        DoorState, EffectBlockFrameBatchReport, EffectBlockFrameBatchResources,
+        EffectBlockRuntimeState, EffectBlockRuntimeStateStore, EffectBlockTimerStateStore,
+        EffectProjectorRuntimeState, ShieldWallState,
     },
     world::blocks::distribution::{
         read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
@@ -126,7 +126,42 @@ struct GameRuntimeMapEntityRecord {
     building: Option<Vec<u8>>,
 }
 
-fn network_map_building_payload(building: &BuildingComp) -> Vec<u8> {
+fn write_network_map_block_state_tail<W: io::Write>(
+    runtime: &GameRuntime,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    write: &mut W,
+) -> io::Result<()> {
+    let Some(block) = content.block(building.block.id) else {
+        return Ok(());
+    };
+
+    if let Some(state) = runtime.defense_wall_runtime_states.get(&building.tile_pos) {
+        let BlockDef::DefenseWall(wall) = block else {
+            return Ok(());
+        };
+        match (wall.kind, state) {
+            (DefenseWallKind::Door, GameRuntimeDefenseWallState::Door(state)) => {
+                write_door_state(write, *state)?;
+            }
+            (DefenseWallKind::AutoDoor, GameRuntimeDefenseWallState::Door(state)) => {
+                write_auto_door_state(write, *state)?;
+            }
+            (DefenseWallKind::ShieldWall, GameRuntimeDefenseWallState::ShieldWall(state)) => {
+                write_shield_wall_state(write, state)?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn network_map_building_payload(
+    runtime: &GameRuntime,
+    content: &ContentLoader,
+    building: &BuildingComp,
+) -> Vec<u8> {
     let mut bytes = Vec::new();
     // The outer byte is the block/build revision used by Java save-map chunks.
     // Block-specific tail writers are still being migrated; writing revision 0
@@ -136,19 +171,22 @@ fn network_map_building_payload(building: &BuildingComp) -> Vec<u8> {
     building
         .write_base(&mut bytes, false)
         .expect("BuildingComp base payload should be writable into Vec<u8>");
+    write_network_map_block_state_tail(runtime, content, building, &mut bytes)
+        .expect("block-specific building payload should be writable into Vec<u8>");
     bytes
 }
 
 fn network_map_entity_records(
+    runtime: &GameRuntime,
+    content: &ContentLoader,
     width: usize,
     height: usize,
-    buildings: &[BuildingComp],
 ) -> BTreeMap<usize, GameRuntimeMapEntityRecord> {
     let mut records = BTreeMap::new();
-    for building in buildings {
+    for building in &runtime.buildings {
         let center_x = building.tile_x();
         let center_y = building.tile_y();
-        let center_payload = network_map_building_payload(building);
+        let center_payload = network_map_building_payload(runtime, content, building);
         for (x, y) in footprint_tiles(center_x, center_y, building.block.size) {
             if x < 0 || y < 0 {
                 continue;
@@ -184,14 +222,15 @@ fn network_map_tile_data(tile: &Tile) -> Option<LegacyMapTileData> {
 }
 
 fn export_network_map_snapshot_from_parts(
-    world: &World,
-    buildings: &[BuildingComp],
+    runtime: &GameRuntime,
+    content: &ContentLoader,
 ) -> LegacyShortChunkMap {
+    let world = &runtime.state.world;
     let width = u16::try_from(world.width()).unwrap_or(u16::MAX);
     let height = u16::try_from(world.height()).unwrap_or(u16::MAX);
     let tile_count = width as usize * height as usize;
     let tiles = world.tiles.iter().take(tile_count).collect::<Vec<_>>();
-    let entities = network_map_entity_records(width as usize, height as usize, buildings);
+    let entities = network_map_entity_records(runtime, content, width as usize, height as usize);
 
     let mut floors = Vec::new();
     let mut floor_start = 0usize;
@@ -577,8 +616,8 @@ impl GameRuntime {
         &mut self.buildings
     }
 
-    pub fn export_network_map_snapshot(&self) -> LegacyShortChunkMap {
-        export_network_map_snapshot_from_parts(&self.state.world, &self.buildings)
+    pub fn export_network_map_snapshot(&self, content: &ContentLoader) -> LegacyShortChunkMap {
+        export_network_map_snapshot_from_parts(self, content)
     }
 
     pub fn add_building(&mut self, building: BuildingComp) -> usize {
@@ -3026,7 +3065,7 @@ mod tests {
         runtime.state.world.resize(16, 16);
         runtime.add_building(saved);
 
-        let map = runtime.export_network_map_snapshot();
+        let map = runtime.export_network_map_snapshot(&content);
         let center_index = 5 + 5 * 16;
         let center = map
             .blocks
@@ -3072,6 +3111,92 @@ mod tests {
         assert_eq!(loaded_building.rotation, 1);
         assert_eq!(loaded_building.health, 33.0);
         assert_eq!(loaded_building.block.id, mend_def.base().id);
+    }
+
+    fn roundtrip_exported_defense_wall_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeDefenseWallState,
+    ) -> Option<GameRuntimeDefenseWallState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime
+            .defense_wall_runtime_states
+            .insert(tile_pos, state.clone());
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("defense wall center should be exported explicitly");
+        assert!(center
+            .building
+            .as_ref()
+            .is_some_and(|payload| payload.len() > 1));
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        loaded.defense_wall_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_defense_wall_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        assert_eq!(
+            roundtrip_exported_defense_wall_state(
+                &content,
+                "door",
+                2,
+                2,
+                GameRuntimeDefenseWallState::Door(DoorState { open: true }),
+            ),
+            Some(GameRuntimeDefenseWallState::Door(DoorState { open: true }))
+        );
+        assert_eq!(
+            roundtrip_exported_defense_wall_state(
+                &content,
+                "blast-door",
+                5,
+                5,
+                GameRuntimeDefenseWallState::Door(DoorState { open: true }),
+            ),
+            Some(GameRuntimeDefenseWallState::Door(DoorState { open: true }))
+        );
+        assert_eq!(
+            roundtrip_exported_defense_wall_state(
+                &content,
+                "shielded-wall",
+                9,
+                9,
+                GameRuntimeDefenseWallState::ShieldWall(ShieldWallState {
+                    shield: 44.0,
+                    shield_radius: 3.0,
+                    break_timer: 2.0,
+                    hit: 1.0,
+                }),
+            ),
+            Some(GameRuntimeDefenseWallState::ShieldWall(ShieldWallState {
+                shield: 44.0,
+                shield_radius: 1.0,
+                break_timer: 0.0,
+                hit: 0.0,
+            }))
+        );
     }
 
     #[test]

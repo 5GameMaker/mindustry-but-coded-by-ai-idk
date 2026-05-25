@@ -121,7 +121,10 @@ impl ServerLauncher {
             rand_seed1: self.runtime.state.rand_seed1,
             content_header_snapshot: Some(self.content_loader.content_header_snapshot()),
             content_patches_snapshot: Some(ContentPatchSet::default()),
-            map_snapshot: Some(self.runtime.export_network_map_snapshot()),
+            map_snapshot: Some(
+                self.runtime
+                    .export_network_map_snapshot(&self.content_loader),
+            ),
             team_blocks_snapshot: Some(team_blocks_snapshot),
             markers_snapshot: Some(self.runtime.state.markers.clone()),
             custom_chunks_snapshot: Some(self.runtime.state.custom_chunks.clone()),
