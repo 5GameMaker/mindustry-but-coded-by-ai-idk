@@ -2965,6 +2965,14 @@ pub struct EffectBlockFrameInput {
     pub static_fog: bool,
 }
 
+pub fn effect_block_building_delta(building: &BuildingComp, frame: EffectBlockFrameInput) -> f32 {
+    frame.delta * building.time_scale
+}
+
+pub fn effect_block_building_edelta(building: &BuildingComp, frame: EffectBlockFrameInput) -> f32 {
+    building.efficiency * effect_block_building_delta(building, frame)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EffectBlockRuntimeReport {
     Projector(EffectProjectorRuntimeReport),
@@ -3152,10 +3160,45 @@ pub fn effect_radar_update_building_frame(
                 tile_x: building.tile_x(),
                 tile_y: building.tile_y(),
                 efficiency: building.efficiency,
-                edelta: frame.edelta,
+                edelta: effect_block_building_edelta(building, frame),
                 fog_enabled: frame.fog_enabled,
                 static_fog: frame.static_fog,
             },
+        },
+    )
+}
+
+pub fn effect_projector_update_building_frame(
+    store: &mut EffectBlockRuntimeStateStore,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    buildings: &mut [BuildingComp],
+    frame: EffectBlockFrameInput,
+    timer_ready: bool,
+    suppressed: bool,
+) -> Option<EffectBlockRuntimeReport> {
+    let delta = effect_block_building_delta(building, frame);
+    let edelta = effect_block_building_edelta(building, frame);
+    effect_block_update_building_runtime(
+        store,
+        content,
+        building,
+        0.0,
+        EffectBlockRuntimeResources::Projector {
+            input: EffectProjectorRuntimeInput {
+                source: ProjectorRuntimeSource::from(building),
+                efficiency: building.efficiency,
+                optional_efficiency: building.optional_efficiency,
+                timer_ready,
+                suppressed,
+                delta,
+                edelta,
+                update_id: frame.update_id,
+                tile_size: frame.tile_size,
+                now: frame.now,
+            },
+            content,
+            buildings,
         },
     )
 }
@@ -6819,6 +6862,85 @@ mod tests {
         }
         assert_eq!(game.update_id, 1);
         assert_eq!(game.tick, 30.0);
+    }
+
+    #[test]
+    fn effect_projector_building_frame_drives_regen_update_id_gate() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let regen_def = content.block_by_name("regen-projector").unwrap();
+        let wall = content.block_by_name("copper-wall").unwrap();
+        let mut regen_building =
+            BuildingComp::new(point2_pack(5, 5), regen_def.base().clone(), TeamId(1));
+        regen_building.set_pos(40.0, 40.0);
+        regen_building.efficiency = 1.0;
+        regen_building.optional_efficiency = 0.0;
+        regen_building.time_scale = 2.0;
+
+        let mut target = BuildingComp::new(point2_pack(6, 5), wall.base().clone(), TeamId(1));
+        target.set_pos(48.0, 40.0);
+        target.health = 40.0;
+        let mut enemy = BuildingComp::new(point2_pack(7, 5), wall.base().clone(), TeamId(2));
+        enemy.set_pos(48.0, 40.0);
+        enemy.health = 40.0;
+        let mut targets = vec![target, enemy];
+
+        let mut game = crate::mindustry::core::GameState::new();
+        game.set(crate::mindustry::core::GameStateState::Playing);
+        let frame = game.advance_game_update_frame(0.5);
+        let frame_input = EffectBlockFrameInput {
+            delta: frame.delta_ticks as f32,
+            edelta: frame.delta_ticks as f32,
+            update_id: frame.update_id,
+            tile_size: TILE_SIZE as f32,
+            now: frame.tick as f32,
+            fog_enabled: true,
+            static_fog: true,
+        };
+        assert_eq!(
+            effect_block_building_delta(&regen_building, frame_input),
+            60.0
+        );
+        assert_eq!(
+            effect_block_building_edelta(&regen_building, frame_input),
+            60.0
+        );
+
+        let mut store = EffectBlockRuntimeStateStore::new();
+        let report = effect_projector_update_building_frame(
+            &mut store,
+            &content,
+            &regen_building,
+            &mut targets,
+            frame_input,
+            true,
+            false,
+        );
+
+        match report {
+            Some(EffectBlockRuntimeReport::Projector(EffectProjectorRuntimeReport::Regen {
+                update,
+                recorded,
+                applied,
+            })) => {
+                assert!(update.any_targets);
+                assert_eq!(recorded, 1);
+                assert_eq!(applied, 1);
+            }
+            other => panic!("unexpected regen frame report: {other:?}"),
+        }
+        assert!(targets[0].health > 40.0);
+        assert_eq!(targets[1].health, 40.0);
+        match store.get(regen_building.tile_pos) {
+            Some(EffectBlockRuntimeState::Projector(EffectProjectorRuntimeState::Regen {
+                last_update_frame,
+                state,
+                ..
+            })) => {
+                assert_eq!(*last_update_frame, frame.update_id);
+                assert!(state.did_regen);
+            }
+            other => panic!("unexpected regen stored state: {other:?}"),
+        }
     }
 
     #[test]
