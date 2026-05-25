@@ -55,9 +55,9 @@ use crate::mindustry::{
     },
     world::blocks::storage::{read_core_state, CoreBuildState},
     world::blocks::units::{
-        read_repair_turret_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
-        read_unit_factory_state, RepairTurretState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        read_repair_turret_state, read_unit_assembler_state, read_unit_cargo_loader_state,
+        read_unit_cargo_unload_state, read_unit_factory_state, RepairTurretState,
+        UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -172,6 +172,11 @@ pub enum GameRuntimeLiquidBlockState {
 pub enum GameRuntimeUnitBlockState {
     Factory(UnitFactoryState),
     RepairTower(RepairTurretState),
+    Assembler {
+        common: PayloadBlockBuildState,
+        assembler: UnitAssemblerState,
+    },
+    AssemblerModule(PayloadBlockBuildState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -961,6 +966,20 @@ impl GameRuntime {
                     .map(|state| Some(GameRuntimeUnitBlockState::RepairTower(state)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
+            BlockDef::UnitAssembler(_) => {
+                let common = read_empty_payload_block_build_common(building_payload)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                read_unit_assembler_state(building_payload, revision as i32)
+                    .map(|assembler| {
+                        Some(GameRuntimeUnitBlockState::Assembler { common, assembler })
+                    })
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            BlockDef::UnitAssemblerModule(_) => {
+                read_empty_payload_block_build_common(building_payload)
+                    .map(|common| Some(GameRuntimeUnitBlockState::AssemblerModule(common)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
@@ -1171,9 +1190,11 @@ mod tests {
     use super::*;
     use crate::mindustry::{
         core::GameStateState,
+        ctype::ContentType,
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, Vec2 as IoVec2,
         },
+        r#type::{PayloadKey, PayloadSeq},
         world::{
             blocks::defense::{
                 write_base_shield_state, write_door_state, write_force_projector_state,
@@ -1204,8 +1225,9 @@ mod tests {
             },
             blocks::storage::{write_core_state, CoreBuildState},
             blocks::units::{
-                write_repair_turret_state, write_unit_cargo_loader_state,
-                write_unit_cargo_unload_state, write_unit_factory_state, RepairTurretState,
+                write_repair_turret_state, write_unit_assembler_state,
+                write_unit_cargo_loader_state, write_unit_cargo_unload_state,
+                write_unit_factory_state, RepairTurretState, UnitAssemblerState,
                 UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
             },
             footprint_tiles, point2_pack, Block, Tile,
@@ -2797,6 +2819,85 @@ mod tests {
         assert_eq!(
             runtime.unit_runtime_states.get(&tile_pos),
             Some(&GameRuntimeUnitBlockState::RepairTower(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_assembler_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let wall_def = content.block_by_name("tungsten-wall").unwrap();
+        let tile_pos = point2_pack(0, 1);
+        let saved = BuildingComp::new(tile_pos, assembler_def.base().clone(), TeamId(1));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 0.25, y: -0.5 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Block, wall_def.base().id), 3);
+        let state = UnitAssemblerState {
+            progress: 0.6,
+            read_unit_ids: vec![101, 102, 103],
+            blocks,
+            command_pos: Some(IoVec2 { x: 64.0, y: 96.0 }),
+            ..UnitAssemblerState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_unit_assembler_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 6, assembler_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Assembler {
+                common,
+                assembler: state
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_assembler_module_common_payload_state_from_network_map_building_payload(
+    ) {
+        let content = ContentLoader::create_base_content().unwrap();
+        let module_def = content.block_by_name("basic-assembler-module").unwrap();
+        let tile_pos = point2_pack(1, 1);
+        let saved = BuildingComp::new(tile_pos, module_def.base().clone(), TeamId(1));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: -0.25, y: 0.5 },
+            pay_rotation: 180.0,
+            carried: false,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 7, module_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::AssemblerModule(common))
         );
     }
 

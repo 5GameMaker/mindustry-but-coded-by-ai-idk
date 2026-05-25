@@ -1,9 +1,13 @@
 use std::io::{self, Read, Write};
 
-use crate::mindustry::io::{
-    read_vec2,
-    type_io::{read_i16, write_i16},
-    write_vec2, Vec2,
+use crate::mindustry::{
+    ctype::{ContentId, ContentType},
+    io::{
+        read_vec2,
+        type_io::{read_i16, write_i16},
+        write_vec2, Vec2,
+    },
+    r#type::{PayloadKey, PayloadSeq},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -495,7 +499,7 @@ pub fn unit_assembler_accept_payload(
                 }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnitAssemblerState {
     pub progress: f32,
     pub warmup: f32,
@@ -508,6 +512,9 @@ pub struct UnitAssemblerState {
     pub current_tier: i32,
     pub last_tier: i32,
     pub was_occupied: bool,
+    pub read_unit_ids: Vec<i32>,
+    pub blocks: PayloadSeq,
+    pub command_pos: Option<Vec2>,
 }
 
 impl Default for UnitAssemblerState {
@@ -524,8 +531,51 @@ impl Default for UnitAssemblerState {
             current_tier: 0,
             last_tier: -2,
             was_occupied: false,
+            read_unit_ids: Vec::new(),
+            blocks: PayloadSeq::new(),
+            command_pos: None,
         }
     }
+}
+
+pub fn write_unit_assembler_state<W: Write>(
+    write: &mut W,
+    state: &UnitAssemblerState,
+) -> io::Result<()> {
+    write_f32(write, state.progress)?;
+    write.write_all(&[state.read_unit_ids.len() as u8])?;
+    for id in &state.read_unit_ids {
+        write_i32(write, *id)?;
+    }
+    write_payload_seq(write, &state.blocks)?;
+    write_vec_nullable(write, state.command_pos)
+}
+
+pub fn read_unit_assembler_state<R: Read>(
+    read: &mut R,
+    revision: i32,
+) -> io::Result<UnitAssemblerState> {
+    let progress = read_f32(read)?;
+    let mut count = [0; 1];
+    read.read_exact(&mut count)?;
+    let mut read_unit_ids = Vec::with_capacity(count[0] as usize);
+    for _ in 0..count[0] {
+        read_unit_ids.push(read_i32(read)?);
+    }
+    let blocks = read_payload_seq(read)?;
+    let command_pos = if revision >= 1 {
+        read_vec_nullable(read)?
+    } else {
+        None
+    };
+
+    Ok(UnitAssemblerState {
+        progress,
+        read_unit_ids,
+        blocks,
+        command_pos,
+        ..UnitAssemblerState::default()
+    })
 }
 
 pub fn unit_assembler_update_progress(
@@ -962,6 +1012,42 @@ fn direction(rotation: i32) -> (i32, i32) {
         2 => (-1, 0),
         _ => (0, -1),
     }
+}
+
+fn write_payload_seq<W: Write>(write: &mut W, seq: &PayloadSeq) -> io::Result<()> {
+    write_i16(write, -(seq.len() as i16))?;
+    for (key, amount) in seq.entries() {
+        write.write_all(&[key.content_type.ordinal()])?;
+        write_i16(write, key.id as i16)?;
+        write_i32(write, amount)?;
+    }
+    Ok(())
+}
+
+fn read_payload_seq<R: Read>(read: &mut R) -> io::Result<PayloadSeq> {
+    let count = read_i16(read)?;
+    if count >= 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "old block-only PayloadSeq format requires content registry",
+        ));
+    }
+
+    let mut seq = PayloadSeq::new();
+    for _ in 0..(-count) {
+        let mut ordinal = [0; 1];
+        read.read_exact(&mut ordinal)?;
+        let content_type = ContentType::from_ordinal(ordinal[0]).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown PayloadSeq content type ordinal {}", ordinal[0]),
+            )
+        })?;
+        let id = read_i16(read)? as ContentId;
+        let amount = read_i32(read)?;
+        seq.add(PayloadKey::new(content_type, id), amount);
+    }
+    Ok(seq)
 }
 
 fn write_command<W: Write>(write: &mut W, command_id: Option<u8>) -> io::Result<()> {
