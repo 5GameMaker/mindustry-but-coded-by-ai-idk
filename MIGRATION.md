@@ -707,6 +707,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `shock_mine_lightning_angles(...)`
 - `shock_mine_bullet_angles(...)`
 - `shock_mine_trigger_plan(...)`
+- `shock_mine_apply_trigger_to_building(...)`
 - 已对照 `ShockMine.unitOn()/triggered()/draw()/setStats()` 锁定：
   - 触发条件为 `enabled && unit.team != team && timer(timerDamage, cooldown)`；
   - 触发后自身承受 `tileDamage`；
@@ -715,10 +716,13 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - team top 绘制使用 `teamAlpha`；
   - stats damage 文案保留 tendrils 与 damage 的 2 位格式需求。
   - stats 文案按上游 `Core.bundle.format("bullet.lightning", tendrils, Strings.autoFixed(damage, 2)).replace("[stat]", "[white]")` 的英文 bundle 形态收口。
+- 已将 `unitOn()` 触发后的 self-damage 接到真实 `BuildingComp`：
+  - `shock_mine_apply_trigger_to_building(...)` 在 `ShockMineTriggerPlan.triggered` 为真时调用 `BuildingComp::damage(tileDamage, now)`；
+  - lightning 与 bullet 创建仍保留在 `ShockMineTriggerPlan` 的角度/伤害/长度输出中，等待后续接入真实 `Lightning.create(...)` 与 `BulletType.create(...)`。
 
 仍需：
 
-- 接入真实 `Lightning.create(...)`、`BulletType.create(...)` 与 `Building.damage(...)`；
+- 接入真实 `Lightning.create(...)`、`BulletType.create(...)`、effect/sound 与 Groups/entity dispatcher；
 - 将 draw plan 连接到 renderer 的 base/teamRegion 绘制；
 - setStats 文案与 bundle/localization 的最终桥接。
 

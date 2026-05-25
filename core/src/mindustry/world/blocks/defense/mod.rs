@@ -583,6 +583,19 @@ pub fn shock_mine_trigger_plan(
     }
 }
 
+pub fn shock_mine_apply_trigger_to_building(
+    building: &mut BuildingComp,
+    plan: &ShockMineTriggerPlan,
+    now: f32,
+) -> bool {
+    if !plan.triggered || plan.self_damage <= 0.0 {
+        return false;
+    }
+    let before = building.health;
+    building.damage(plan.self_damage, now);
+    building.health < before || building.dead
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MendProjectorState {
     pub heat: f32,
@@ -4510,6 +4523,39 @@ mod tests {
                 bullet_angles: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn shock_mine_runtime_adapter_applies_self_damage_and_preserves_side_effect_plan() {
+        let mut mine = projector_runtime_building(13, "shock-mine");
+        let plan = shock_mine_trigger_plan(
+            true,
+            false,
+            true,
+            5.0,
+            13.0,
+            10,
+            3,
+            &[90.0, 180.0, 270.0],
+            true,
+            4,
+            &[1.0, 2.0, 3.0, 4.0],
+        );
+
+        assert!(shock_mine_apply_trigger_to_building(
+            &mut mine, &plan, 500.0
+        ));
+        assert_eq!(mine.health, 95.0);
+        assert!(mine.recently_damaged(500.0));
+        assert_eq!(plan.lightning_angles, vec![90.0, 180.0, 270.0]);
+        assert_eq!(plan.bullet_angles, vec![1.0, 92.0, 183.0, 274.0]);
+
+        let blocked =
+            shock_mine_trigger_plan(true, true, true, 5.0, 13.0, 10, 3, &[90.0], false, 0, &[]);
+        assert!(!shock_mine_apply_trigger_to_building(
+            &mut mine, &blocked, 520.0,
+        ));
+        assert_eq!(mine.health, 95.0);
     }
 
     #[test]
