@@ -8,7 +8,7 @@
 //! slices from the real `GameState` frame source.
 
 use crate::mindustry::{
-    content::blocks::BlockDef,
+    content::blocks::{BlockDef, EffectBlockKind},
     core::content_loader::ContentLoader,
     core::game_state::GameState,
     ctype::ContentId,
@@ -20,8 +20,9 @@ use crate::mindustry::{
     vars::TILE_SIZE,
     world::blocks::defense::{
         effect_block_frame_input_from_game_update, effect_block_update_building_slice_with_stores,
-        EffectBlockFrameBatchReport, EffectBlockFrameBatchResources, EffectBlockRuntimeStateStore,
-        EffectBlockTimerStateStore,
+        read_force_projector_state, read_mend_projector_state, read_overdrive_projector_state,
+        EffectBlockFrameBatchReport, EffectBlockFrameBatchResources, EffectBlockRuntimeState,
+        EffectBlockRuntimeStateStore, EffectBlockTimerStateStore, EffectProjectorRuntimeState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -50,11 +51,20 @@ pub struct GameRuntimeMapLoadReport {
     pub tiles: usize,
     pub building_records: usize,
     pub buildings_added: usize,
+    pub block_states_added: usize,
     pub missing_block_defs: usize,
     pub skipped_non_building_blocks: usize,
     pub building_parse_errors: usize,
+    pub block_state_parse_errors: usize,
+    pub block_state_bytes_ignored: usize,
     pub disabled_buildings: usize,
     pub proximity_links: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameRuntimeBlockStateReadError {
+    Parse,
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -242,7 +252,33 @@ impl GameRuntime {
                 continue;
             }
 
-            self.add_building(building);
+            let block_state = match self
+                .read_effect_runtime_state_from_building_payload(block, &mut building_bytes)
+            {
+                Ok(state) => state,
+                Err(GameRuntimeBlockStateReadError::Parse) => {
+                    report.block_state_parse_errors += 1;
+                    None
+                }
+                Err(GameRuntimeBlockStateReadError::Unsupported) => {
+                    report.block_state_bytes_ignored += 1;
+                    None
+                }
+            };
+
+            let added_index = self.add_building(building);
+            if let Some(block_state) = block_state {
+                let tile_pos = self.buildings[added_index].tile_pos;
+                self.effect_runtime_store.ensure_for_building(
+                    content,
+                    &self.buildings[added_index],
+                    0.0,
+                );
+                if let Some(slot) = self.effect_runtime_store.get_mut(tile_pos) {
+                    *slot = block_state;
+                    report.block_states_added += 1;
+                }
+            }
             report.buildings_added += 1;
         }
 
@@ -250,6 +286,41 @@ impl GameRuntime {
         report.proximity_links = self.refresh_owned_building_proximity();
         self.state.world.clear_load_events();
         report
+    }
+
+    fn read_effect_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<EffectBlockRuntimeState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Effect(effect) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match effect.kind {
+            EffectBlockKind::MendProjector => read_mend_projector_state(building_payload)
+                .map(|state| {
+                    Some(EffectBlockRuntimeState::Projector(
+                        EffectProjectorRuntimeState::Mend(state),
+                    ))
+                })
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            EffectBlockKind::OverdriveProjector => read_overdrive_projector_state(building_payload)
+                .map(|state| {
+                    Some(EffectBlockRuntimeState::Projector(
+                        EffectProjectorRuntimeState::Overdrive(state),
+                    ))
+                })
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            EffectBlockKind::ForceProjector => read_force_projector_state(building_payload)
+                .map(|state| Some(EffectBlockRuntimeState::ForceProjector(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
     }
 
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
@@ -429,7 +500,10 @@ mod tests {
         core::GameStateState,
         io::{LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId},
         world::{
-            blocks::defense::EffectBlockRuntimeState, footprint_tiles, point2_pack, Block, Tile,
+            blocks::defense::{
+                write_force_projector_state, EffectBlockRuntimeState, ForceProjectorState,
+            },
+            footprint_tiles, point2_pack, Block, Tile,
         },
     };
 
@@ -972,6 +1046,90 @@ mod tests {
         assert_eq!(building.rotation, 3);
         assert_eq!(building.health, 42.0);
         assert_eq!(building.block.id, mend_def.base().id);
+    }
+
+    #[test]
+    fn game_runtime_loads_effect_block_specific_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let force_def = content.block_by_name("force-projector").unwrap();
+        let tile_pos = point2_pack(2, 2);
+        let mut saved = BuildingComp::new(tile_pos, force_def.base().clone(), TeamId(4));
+        saved.set_rotation(1);
+        let force_state = ForceProjectorState {
+            broken: false,
+            buildup: 12.5,
+            radscl: 0.75,
+            hit: 0.0,
+            warmup: 0.25,
+            phase_heat: 0.5,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_force_projector_state(&mut building_bytes, &force_state).unwrap();
+
+        let map = LegacyShortChunkMap {
+            width: 5,
+            height: 5,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 0,
+                ore_id: 0,
+                consecutives: 24,
+            }],
+            blocks: vec![
+                LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: Tile::AIR,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 11,
+                },
+                LegacyMapBlockRecord {
+                    index: 12,
+                    block_id: force_def.base().id,
+                    packed_flags: 1,
+                    has_entity: true,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: Some(building_bytes),
+                    consecutives: 0,
+                },
+                LegacyMapBlockRecord {
+                    index: 13,
+                    block_id: Tile::AIR,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 11,
+                },
+            ],
+        };
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(&content, &map);
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.effect_runtime_store.get(tile_pos),
+            Some(&EffectBlockRuntimeState::ForceProjector(force_state))
+        );
     }
 
     #[test]
