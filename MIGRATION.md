@@ -1137,6 +1137,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `GameRuntime::add_building(...)` 现在会在放置前清除新 footprint 覆盖到的旧中心建筑、proxy tile 引用以及对应 effect runtime/timer sidecar，避免多方块建筑被小建筑覆盖后遗留旧 `build` 引用；该行为对齐 Java `Tile.setBlock(...)` 多方块 first pass `other.setBlock(Blocks.air)` 的最小运行态语义；
   - `GameRuntime::refresh_owned_building_proximity(...)` 已迁移 Java `BuildingComp.updateProximity()` 的最小同队 edge-neighbor 语义：按 `Edges.getEdges(block.size)` 查询 `world.build(...)`，过滤异队/自身/游离引用，并在 `add_building(...)` / `remove_building_by_tile_pos(...)` 后刷新双向 proximity；
   - `GameRuntime::clear_buildings(...)` 已同步清理 `World` build refs 与 effect runtime/timer sidecar，防止后续 world reload 或 Groups.build 清空时复用旧 tile_pos 状态；
+  - `GameRuntime::load_network_map_with_buildings(...)` 已把 `LegacyShortChunkMap` 的 center building chunk 按 Java `SaveVersion.writeMap(...)` 的 `revision byte + build.writeAll(...)` 前缀处理，先物化 `BuildingComp::read_base(...)` 可覆盖的基础字段，再同步 owned buildings、world build refs、proximity 与 update permission；block-specific `read(...)` 状态仍待后续 dispatcher 承接；
   - `BuildingComp::advance_update_timing(...)` 已迁移 Java `BuildingComp.update()` 开头的 `timeScaleDuration -= Time.delta` / `!canOverdrive` 重置语义，并由 `GameRuntime::advance_and_dispatch_effect_blocks(...)` 在 batch dispatcher 前对传入建筑切片统一执行；
   - `BlockDef::no_update_disabled(...)` / `BuildingComp::should_update_tile(...)` 已迁移 Java `if(enabled || !block.noUpdateDisabled) updateTile()` 的通用门控；effect block batch dispatcher 已先执行该门控，避免后续接入 `noUpdateDisabled=true` 的建筑时错误 tick；
   - `BlockDef::supports_env(...)` 已迁移 Java `Block.supportsEnv(env)` 位掩码公式；`GameRuntime::refresh_owned_building_update_permissions(...)` 已对 owned buildings 执行最小 `checkAllowUpdate` 接线，越界或不支持当前 rules env 的建筑会被置为 disabled；
@@ -1242,6 +1243,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
   - 这一步把 `world_reloader.rs` 的纯 plan 接到 `net_server.rs` 真实 world-data transport，后续可直接挂到地图重载/换图流程。
 - `BlockPlan` 已新增 `config_value: TypeValue`，`SaveVersion.readTeamBlocks(...)` 读入的 typed config 会保留原始 `TypeValue`，同时继续提供字符串化 `config` 给现有 build/runtime helper 使用；导出 `LegacyTeamBlocks` 时优先写回 typed config，避免 content/team/point 等配置在 Java↔Rust save/world-stream 往返中退化成字符串。
 - `NetworkWorldData::bootstrap_for_connection(...)` 已开始按 Java `NetworkIO.writeWorld(...)` 的 `stream.writeInt(player.id); player.write(new Writes(stream));` 顺序写入最小 `NetworkPlayerData` body，Rust 客户端收到 bootstrap world stream 后可解析 player body 并发送 connect confirm。
+- `desktop::DesktopLauncher::sync_loaded_world_data(...)` 已在应用 `NetworkWorldData.map_snapshot` 后调用 `GameRuntime::load_network_map_with_buildings(...)`，使联机 world stream 中的 center building payload 开始进入真实客户端 runtime owned building 集合，而不再只停留在 `GameState.world` tile snapshot。
 - marker/custom chunks 精确拆分；
 - UBJSON/JsonIO bytes；
 - world stream 应用到 `World`；
@@ -1277,7 +1279,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 
 当前已知全包状态：
 
-- `cargo test -p mindustry-core` 已在本地通过：1781 passed / 0 failed；
+- `cargo test -p mindustry-core` 已在本地通过：1782 passed / 0 failed；
+- `cargo test -p mindustry-desktop` 已在本地通过：12 passed / 0 failed；
 - 旧记录中的 `world_stream_with_java_like_payload_is_parsed_and_confirmed` 失败已通过补最小 player body 与测试期望修复；
 - 接手者仍必须以当前本地实测为准，不要只相信历史记录。
 

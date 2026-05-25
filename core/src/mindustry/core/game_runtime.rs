@@ -16,6 +16,7 @@ use crate::mindustry::{
         bullet::BulletType,
         comp::{BuildingComp, BulletComp, UnitComp},
     },
+    io::LegacyShortChunkMap,
     vars::TILE_SIZE,
     world::blocks::defense::{
         effect_block_frame_input_from_game_update, effect_block_update_building_slice_with_stores,
@@ -42,6 +43,18 @@ pub struct GameRuntimeOwnedEffectResources<'a, 'b> {
     pub suppressed: &'a mut dyn FnMut(&BuildingComp) -> bool,
     pub force_coolant: &'a mut dyn FnMut(&BuildingComp) -> (f32, f32),
     pub spark_random: &'a mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameRuntimeMapLoadReport {
+    pub tiles: usize,
+    pub building_records: usize,
+    pub buildings_added: usize,
+    pub missing_block_defs: usize,
+    pub skipped_non_building_blocks: usize,
+    pub building_parse_errors: usize,
+    pub disabled_buildings: usize,
+    pub proximity_links: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,6 +185,71 @@ impl GameRuntime {
         self.buildings.clear();
         self.state.world.clear_buildings();
         self.reset_effect_block_sidecars();
+    }
+
+    pub fn load_network_map_with_buildings(
+        &mut self,
+        content: &ContentLoader,
+        map: &LegacyShortChunkMap,
+    ) -> GameRuntimeMapLoadReport {
+        self.buildings.clear();
+        self.reset_effect_block_sidecars();
+        self.state.world.load_network_map(map);
+
+        let mut report = GameRuntimeMapLoadReport {
+            tiles: map.tile_count(),
+            ..GameRuntimeMapLoadReport::default()
+        };
+
+        let width = map.width as usize;
+        if width == 0 {
+            self.state.world.clear_load_events();
+            return report;
+        }
+        for record in &map.blocks {
+            if !record.has_entity || !record.is_center {
+                continue;
+            }
+            report.building_records += 1;
+
+            let Some(block) = content.block(record.block_id) else {
+                report.missing_block_defs += 1;
+                continue;
+            };
+            if !block.base().has_building() {
+                report.skipped_non_building_blocks += 1;
+                continue;
+            }
+            let Some(bytes) = &record.building else {
+                report.building_parse_errors += 1;
+                continue;
+            };
+            let Some((_revision, building_payload)) = bytes.split_first() else {
+                report.building_parse_errors += 1;
+                continue;
+            };
+
+            let x = (record.index % width) as i32;
+            let y = (record.index / width) as i32;
+            let mut building = BuildingComp::new(
+                crate::mindustry::world::point2_pack(x, y),
+                block.base().clone(),
+                crate::mindustry::io::TeamId(0),
+            );
+            let mut building_bytes = building_payload;
+            if building.read_base(&mut building_bytes).is_err() {
+                report.building_parse_errors += 1;
+                continue;
+            }
+
+            self.add_building(building);
+            report.buildings_added += 1;
+        }
+
+        report.disabled_buildings = self.refresh_owned_building_update_permissions(content);
+        report.proximity_links = self.refresh_owned_building_proximity();
+        self.state.world.clear_load_events();
+        report
     }
 
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
@@ -349,7 +427,7 @@ mod tests {
     use super::*;
     use crate::mindustry::{
         core::GameStateState,
-        io::TeamId,
+        io::{LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId},
         world::{
             blocks::defense::EffectBlockRuntimeState, footprint_tiles, point2_pack, Block, Tile,
         },
@@ -807,6 +885,93 @@ mod tests {
         assert!(runtime.state.world.build_pos(tile_pos).is_none());
         assert!(runtime.effect_runtime_store.is_empty());
         assert!(runtime.effect_timer_store.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_loads_network_map_center_buildings_into_owned_runtime() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let tile_pos = point2_pack(2, 1);
+        let mut saved = BuildingComp::new(tile_pos, mend_def.base().clone(), TeamId(2));
+        saved.set_rotation(3);
+        saved.health = 42.0;
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+
+        let map = LegacyShortChunkMap {
+            width: 4,
+            height: 4,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 0,
+                ore_id: 0,
+                consecutives: 15,
+            }],
+            blocks: vec![
+                LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: Tile::AIR,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 5,
+                },
+                LegacyMapBlockRecord {
+                    index: 6,
+                    block_id: mend_def.base().id,
+                    packed_flags: 1,
+                    has_entity: true,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: Some(building_bytes),
+                    consecutives: 0,
+                },
+                LegacyMapBlockRecord {
+                    index: 7,
+                    block_id: Tile::AIR,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 8,
+                },
+            ],
+        };
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(&content, &map);
+
+        assert_eq!(report.tiles, 16);
+        assert_eq!(report.building_records, 1);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.building_parse_errors, 0);
+        assert!(runtime.state.world.load_events().is_empty());
+        assert_eq!(runtime.state.world.width(), 4);
+        assert_eq!(runtime.state.world.height(), 4);
+        assert_eq!(
+            runtime.state.world.build_pos(tile_pos).unwrap().tile_pos,
+            tile_pos
+        );
+        assert_eq!(runtime.buildings().len(), 1);
+        let building = &runtime.buildings()[0];
+        assert_eq!(building.tile_pos, tile_pos);
+        assert_eq!(building.team, TeamId(2));
+        assert_eq!(building.rotation, 3);
+        assert_eq!(building.health, 42.0);
+        assert_eq!(building.block.id, mend_def.base().id);
     }
 
     #[test]

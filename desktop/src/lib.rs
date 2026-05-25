@@ -1,13 +1,13 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameState, GameStateState,
-    NetClient,
+    content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
+    GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::PlayerComp;
 use mindustry_core::mindustry::io::{ContentHeaderSnapshot, LegacyTeamBlocks, TeamId};
 use mindustry_core::mindustry::net::{
-    ArcNetProvider, Net, NetworkPlayerData, StateSnapshotCallPacket,
+    ArcNetProvider, Net, NetworkPlayerData, NetworkWorldData, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::vars::AppContext;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -32,6 +32,7 @@ pub struct DesktopLauncher {
     content_loader: ContentLoader,
     last_applied_world_data: Option<mindustry_core::mindustry::net::NetworkWorldData>,
     last_applied_state_snapshot: Option<StateSnapshotCallPacket>,
+    last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
 }
 
 impl DesktopLauncher {
@@ -49,6 +50,7 @@ impl DesktopLauncher {
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_applied_world_data: None,
             last_applied_state_snapshot: None,
+            last_runtime_map_load_report: None,
         }
     }
 
@@ -98,7 +100,7 @@ impl DesktopLauncher {
                 self.game_state.apply_network_world_data(world_data);
                 self.apply_network_player_data(world_data.player_id, world_data.player.as_ref());
                 self.apply_network_team_blocks(world_data.team_blocks_snapshot.as_ref());
-                self.sync_runtime_state_from_game_state();
+                self.sync_runtime_state_from_world_data(world_data);
                 self.last_applied_state_snapshot = None;
             }
             None => {
@@ -108,6 +110,7 @@ impl DesktopLauncher {
                     self.player = PlayerComp::default();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
+                    self.last_runtime_map_load_report = None;
                 }
             }
         }
@@ -157,6 +160,17 @@ impl DesktopLauncher {
 
     fn sync_runtime_state_from_game_state(&mut self) {
         self.runtime.state = self.game_state.clone();
+    }
+
+    fn sync_runtime_state_from_world_data(&mut self, world_data: &NetworkWorldData) {
+        self.sync_runtime_state_from_game_state();
+        self.last_runtime_map_load_report = world_data.map_snapshot.as_ref().map(|map| {
+            self.runtime
+                .load_network_map_with_buildings(&self.content_loader, map)
+        });
+        if self.last_runtime_map_load_report.is_none() {
+            self.runtime.clear_buildings();
+        }
     }
 
     fn apply_network_content_header(&mut self, snapshot: Option<&ContentHeaderSnapshot>) {
@@ -289,7 +303,7 @@ mod tests {
         NetworkPlayerData, NetworkWorldData, StateSnapshotCallPacket,
     };
     use mindustry_core::mindustry::{
-        entities::PlayerComp,
+        entities::{comp::BuildingComp, PlayerComp},
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::{
             LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue, UnitRef,
@@ -628,7 +642,14 @@ mod tests {
             launcher.game_state.teams.get_or_null(7).unwrap().plans,
             vec![
                 BlockPlan::new(5, 6, 1, "router", Some("cfg".into())),
-                BlockPlan::new(7, 8, 2, "router", Some("9".into())),
+                BlockPlan::with_config_value(
+                    7,
+                    8,
+                    2,
+                    "router",
+                    Some("9".into()),
+                    TypeValue::Int(9),
+                ),
             ]
         );
     }
@@ -673,7 +694,14 @@ mod tests {
             launcher.game_state.teams.get_or_null(7).unwrap().plans,
             vec![
                 BlockPlan::new(5, 6, 1, "router", Some("cfg".into())),
-                BlockPlan::new(7, 8, 2, "router", Some("9".into())),
+                BlockPlan::with_config_value(
+                    7,
+                    8,
+                    2,
+                    "router",
+                    Some("9".into()),
+                    TypeValue::Int(9),
+                ),
             ]
         );
         assert!(launcher.content_loader.temporary_mapper().is_some());
@@ -855,6 +883,108 @@ mod tests {
         assert_eq!(launcher.runtime.state.world.height(), 0);
         assert!(launcher.game_state.world.load_events().is_empty());
         assert_eq!(launcher.player, PlayerComp::default());
+    }
+
+    #[test]
+    fn desktop_launcher_materializes_network_map_buildings_into_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mend_def = launcher
+            .content_loader
+            .block_by_name("mend-projector")
+            .unwrap();
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(1, 1);
+        let mut saved = BuildingComp::new(tile_pos, mend_def.base().clone(), TeamId(3));
+        saved.set_rotation(2);
+        saved.health = 55.0;
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+
+        let mut world_data = sample_network_world_data(None);
+        world_data.map_snapshot = Some(LegacyShortChunkMap {
+            width: 3,
+            height: 2,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 1,
+                ore_id: 0,
+                consecutives: 5,
+            }],
+            blocks: vec![
+                LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: 0,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 3,
+                },
+                LegacyMapBlockRecord {
+                    index: 4,
+                    block_id: mend_def.base().id,
+                    packed_flags: 1,
+                    has_entity: true,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: Some(building_bytes),
+                    consecutives: 0,
+                },
+                LegacyMapBlockRecord {
+                    index: 5,
+                    block_id: 0,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 0,
+                },
+            ],
+        });
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_map_load_report
+            .as_ref()
+            .expect("network map snapshot should be materialized into runtime");
+        assert_eq!(report.building_records, 1);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.building_parse_errors, 0);
+        assert_eq!(launcher.runtime.buildings().len(), 1);
+        let building = &launcher.runtime.buildings()[0];
+        assert_eq!(building.tile_pos, tile_pos);
+        assert_eq!(building.team, TeamId(3));
+        assert_eq!(building.rotation, 2);
+        assert_eq!(building.health, 55.0);
+        assert_eq!(
+            launcher
+                .runtime
+                .state
+                .world
+                .build_pos(tile_pos)
+                .unwrap()
+                .tile_pos,
+            tile_pos
+        );
     }
 
     #[test]
