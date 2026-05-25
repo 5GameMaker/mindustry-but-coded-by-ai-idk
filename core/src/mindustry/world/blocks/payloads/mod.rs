@@ -248,6 +248,40 @@ pub fn read_empty_payload_ref<R: Read>(read: &mut R) -> io::Result<Option<Payloa
     Ok(None)
 }
 
+pub fn read_payload_ref_to_end<R: Read>(read: &mut R) -> io::Result<Option<PayloadRef>> {
+    if !read_bool(read)? {
+        return Ok(None);
+    }
+
+    let payload_type = read_u8(read)?;
+    match payload_type {
+        PAYLOAD_BLOCK_TYPE => {
+            let block = read_i16(read)?;
+            let version = read_u8(read)?;
+            let mut build_bytes = Vec::new();
+            read.read_to_end(&mut build_bytes)?;
+            Ok(Some(PayloadRef::Block {
+                block,
+                version,
+                build_bytes,
+            }))
+        }
+        PAYLOAD_UNIT_TYPE => {
+            let class_id = read_u8(read)?;
+            let mut unit_bytes = Vec::new();
+            read.read_to_end(&mut unit_bytes)?;
+            Ok(Some(PayloadRef::Unit {
+                class_id,
+                unit_bytes,
+            }))
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unknown payload type",
+        )),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PayloadSourceState {
     pub unit: Option<ContentId>,
@@ -389,6 +423,7 @@ pub struct PayloadDeconstructorState {
     pub accum: Option<Vec<f32>>,
     pub has_payload: bool,
     pub has_deconstructing: bool,
+    pub deconstructing: Option<PayloadRef>,
 }
 
 impl Default for PayloadDeconstructorState {
@@ -398,6 +433,7 @@ impl Default for PayloadDeconstructorState {
             accum: None,
             has_payload: false,
             has_deconstructing: false,
+            deconstructing: None,
         }
     }
 }
@@ -913,6 +949,15 @@ pub fn read_empty_payload_conveyor_extra<R: Read>(
     Ok((item_rotation, item))
 }
 
+pub fn read_terminal_payload_conveyor_extra<R: Read>(
+    read: &mut R,
+) -> io::Result<(f32, f32, Option<PayloadRef>)> {
+    let progress = read_f32(read)?;
+    let item_rotation = read_f32(read)?;
+    let item = read_payload_ref_to_end(read)?;
+    Ok((progress, item_rotation, item))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PayloadSortKey {
     pub content_type: i8,
@@ -1343,6 +1388,32 @@ mod tests {
     }
 
     #[test]
+    fn terminal_payload_ref_reader_preserves_java_raw_body() {
+        let block = PayloadRef::Block {
+            block: 12,
+            version: 3,
+            build_bytes: vec![0xaa, 0xbb],
+        };
+        let mut bytes = Vec::new();
+        write_payload_ref(&mut bytes, Some(&block)).unwrap();
+        assert_eq!(
+            read_payload_ref_to_end(&mut bytes.as_slice()).unwrap(),
+            Some(block)
+        );
+
+        let unit = PayloadRef::Unit {
+            class_id: 9,
+            unit_bytes: vec![1, 2],
+        };
+        let mut bytes = Vec::new();
+        write_payload_ref(&mut bytes, Some(&unit)).unwrap();
+        assert_eq!(
+            read_payload_ref_to_end(&mut bytes.as_slice()).unwrap(),
+            Some(unit)
+        );
+    }
+
+    #[test]
     fn payload_block_common_state_moves_and_serializes_empty_payload_prefix() {
         let payload = PayloadRef::Unit {
             class_id: 7,
@@ -1741,6 +1812,18 @@ mod tests {
         let (rotation, item) = read_empty_payload_conveyor_extra(&mut bytes.as_slice()).unwrap();
         assert_eq!(rotation, 45.0);
         assert_eq!(item, None);
+
+        let payload = PayloadRef::Unit {
+            class_id: 7,
+            unit_bytes: vec![0xde, 0xad],
+        };
+        let mut bytes = Vec::new();
+        write_payload_conveyor_extra(&mut bytes, 12.0, 45.0, Some(&payload)).unwrap();
+        let (progress, rotation, item) =
+            read_terminal_payload_conveyor_extra(&mut bytes.as_slice()).unwrap();
+        assert_eq!(progress, 12.0);
+        assert_eq!(rotation, 45.0);
+        assert_eq!(item, Some(payload));
     }
 
     #[test]

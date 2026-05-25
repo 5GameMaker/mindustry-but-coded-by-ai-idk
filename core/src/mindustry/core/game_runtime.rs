@@ -63,10 +63,11 @@ use crate::mindustry::{
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
         read_empty_payload_block_build_common, read_empty_payload_conveyor_extra,
-        read_empty_payload_ref, read_payload_loader_extra, read_payload_mass_driver_extra,
-        read_payload_router_extra, read_payload_source_extra, BlockProducerState,
-        PayloadBlockBuildState, PayloadConveyorState, PayloadDeconstructorState,
-        PayloadLoaderState, PayloadMassDriverState, PayloadSortKey, PayloadSourceState,
+        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
+        read_payload_router_extra, read_payload_source_extra, read_terminal_payload_conveyor_extra,
+        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
+        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadSortKey,
+        PayloadSourceState,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -929,30 +930,35 @@ impl GameRuntime {
         }
 
         match block {
-            BlockDef::Payload(payload) => {
-                let (item_rotation, item) = read_empty_payload_conveyor_extra(building_payload)
-                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
-                let conveyor = PayloadConveyorState {
-                    item,
-                    item_rotation,
-                    ..PayloadConveyorState::default()
-                };
-                match payload.kind {
-                    PayloadBlockKind::PayloadConveyor => {
-                        Ok(Some(GameRuntimePayloadBlockState::Conveyor(conveyor)))
-                    }
-                    PayloadBlockKind::PayloadRouter => {
-                        let (sorted, rec_dir) =
-                            read_payload_router_extra(building_payload, revision)
-                                .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
-                        Ok(Some(GameRuntimePayloadBlockState::Router {
-                            conveyor,
-                            sorted,
-                            rec_dir,
-                        }))
-                    }
+            BlockDef::Payload(payload) => match payload.kind {
+                PayloadBlockKind::PayloadConveyor => {
+                    let (_progress, item_rotation, item) =
+                        read_terminal_payload_conveyor_extra(building_payload)
+                            .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                    let conveyor = PayloadConveyorState {
+                        item,
+                        item_rotation,
+                        ..PayloadConveyorState::default()
+                    };
+                    Ok(Some(GameRuntimePayloadBlockState::Conveyor(conveyor)))
                 }
-            }
+                PayloadBlockKind::PayloadRouter => {
+                    let (item_rotation, item) = read_empty_payload_conveyor_extra(building_payload)
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                    let conveyor = PayloadConveyorState {
+                        item,
+                        item_rotation,
+                        ..PayloadConveyorState::default()
+                    };
+                    let (sorted, rec_dir) = read_payload_router_extra(building_payload, revision)
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                    Ok(Some(GameRuntimePayloadBlockState::Router {
+                        conveyor,
+                        sorted,
+                        rec_dir,
+                    }))
+                }
+            },
             BlockDef::PayloadMassDriver(_) => {
                 let common = read_empty_payload_block_build_common(building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
@@ -983,13 +989,14 @@ impl GameRuntime {
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let (progress, accum) = read_deconstructor_extra(building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
-                let deconstructing = read_empty_payload_ref(building_payload)
+                let deconstructing = read_payload_ref_to_end(building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let deconstructor = PayloadDeconstructorState {
                     progress,
                     accum,
                     has_payload: common.payload.is_some(),
                     has_deconstructing: deconstructing.is_some(),
+                    deconstructing,
                 };
                 Ok(Some(GameRuntimePayloadBlockState::Deconstructor {
                     common,
@@ -1806,8 +1813,8 @@ mod tests {
                 write_payload_loader_extra, write_payload_mass_driver_extra, write_payload_ref,
                 write_payload_router_extra, write_payload_source_extra, BlockProducerState,
                 PayloadBlockBuildState, PayloadConveyorState, PayloadDeconstructorState,
-                PayloadDriverState, PayloadLoaderState, PayloadMassDriverState, PayloadSortKey,
-                PayloadSourceState, Vec2,
+                PayloadDriverState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
+                PayloadSortKey, PayloadSourceState, Vec2,
             },
             blocks::power::{
                 write_heater_generator_state, write_impact_reactor_state, write_light_block_state,
@@ -3012,6 +3019,49 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_loads_terminal_payload_conveyor_raw_item_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let conveyor_def = content.block_by_name("payload-conveyor").unwrap();
+        let router_id = content.block_by_name("router").unwrap().base().id;
+        let tile_pos = point2_pack(1, 4);
+        let saved = BuildingComp::new(tile_pos, conveyor_def.base().clone(), TeamId(6));
+        let item = PayloadRef::Block {
+            block: router_id,
+            version: 1,
+            build_bytes: vec![0xaa, 0xbb, 0xcc],
+        };
+        let conveyor = PayloadConveyorState {
+            item: Some(item.clone()),
+            item_rotation: 33.0,
+            ..PayloadConveyorState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_conveyor_extra(
+            &mut building_bytes,
+            12.0,
+            conveyor.item_rotation,
+            Some(&item),
+        )
+        .unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 25, conveyor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Conveyor(conveyor))
+        );
+    }
+
+    #[test]
     fn game_runtime_loads_payload_router_state_from_network_map_building_payload() {
         let content = ContentLoader::create_base_content().unwrap();
         let router_def = content.block_by_name("payload-router").unwrap();
@@ -3071,6 +3121,7 @@ mod tests {
             accum: Some(vec![1.0, 2.5, 0.25]),
             has_payload: false,
             has_deconstructing: false,
+            deconstructing: None,
         };
         let mut building_bytes = Vec::new();
         building_bytes.push(0);
@@ -3083,6 +3134,61 @@ mod tests {
         )
         .unwrap();
         write_payload_ref(&mut building_bytes, None).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 27, deconstructor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Deconstructor {
+                common,
+                deconstructor
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_terminal_payload_deconstructor_raw_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let deconstructor_def = content.block_by_name("small-deconstructor").unwrap();
+        let router_id = content.block_by_name("router").unwrap().base().id;
+        let tile_pos = point2_pack(3, 4);
+        let saved = BuildingComp::new(tile_pos, deconstructor_def.base().clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: -0.5, y: 0.75 },
+            pay_rotation: 15.0,
+            carried: false,
+        };
+        let deconstructing = PayloadRef::Block {
+            block: router_id,
+            version: 1,
+            build_bytes: vec![0x11, 0x22],
+        };
+        let deconstructor = PayloadDeconstructorState {
+            progress: 0.4,
+            accum: Some(vec![1.0, 2.5, 0.25]),
+            has_payload: false,
+            has_deconstructing: true,
+            deconstructing: Some(deconstructing.clone()),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_deconstructor_extra(
+            &mut building_bytes,
+            deconstructor.progress,
+            deconstructor.accum.as_deref(),
+        )
+        .unwrap();
+        write_payload_ref(&mut building_bytes, Some(&deconstructing)).unwrap();
 
         let mut runtime = GameRuntime::default();
         let report = runtime.load_network_map_with_buildings(
