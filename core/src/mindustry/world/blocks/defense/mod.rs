@@ -756,6 +756,55 @@ pub enum EffectProjectorRuntimeState {
     },
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum EffectBlockRuntimeState {
+    Projector(EffectProjectorRuntimeState),
+    ForceProjector(ForceProjectorState),
+    Radar(RadarState),
+    BuildTurret(BuildTurretState),
+    BaseShield(BaseShieldState),
+    ShockwaveTower(ShockwaveTowerState),
+}
+
+pub fn effect_block_runtime_state_for(
+    block: &EffectBlockData,
+    initial_reload_counter: f32,
+) -> Option<EffectBlockRuntimeState> {
+    match block.kind {
+        EffectBlockKind::MendProjector => Some(EffectBlockRuntimeState::Projector(
+            EffectProjectorRuntimeState::Mend(MendProjectorState::default()),
+        )),
+        EffectBlockKind::OverdriveProjector => Some(EffectBlockRuntimeState::Projector(
+            EffectProjectorRuntimeState::Overdrive(OverdriveProjectorState::default()),
+        )),
+        EffectBlockKind::RegenProjector => Some(EffectBlockRuntimeState::Projector(
+            EffectProjectorRuntimeState::Regen {
+                state: RegenProjectorState::default(),
+                mend_map: RegenProjectorMendMap::default(),
+                last_update_frame: -1,
+            },
+        )),
+        EffectBlockKind::Radar => Some(EffectBlockRuntimeState::Radar(RadarState::default())),
+        EffectBlockKind::BaseShield => Some(EffectBlockRuntimeState::BaseShield(
+            BaseShieldState::default(),
+        )),
+        EffectBlockKind::ForceProjector => Some(EffectBlockRuntimeState::ForceProjector(
+            ForceProjectorState::default(),
+        )),
+        EffectBlockKind::BuildTurret => Some(EffectBlockRuntimeState::BuildTurret(
+            BuildTurretState::default(),
+        )),
+        EffectBlockKind::ShockwaveTower => Some(EffectBlockRuntimeState::ShockwaveTower(
+            ShockwaveTowerState::new(if block.reload > 0.0 {
+                initial_reload_counter.clamp(0.0, block.reload)
+            } else {
+                0.0
+            }),
+        )),
+        EffectBlockKind::ShockMine => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EffectProjectorRuntimeInput {
     pub source: ProjectorRuntimeSource,
@@ -6292,6 +6341,65 @@ mod tests {
             } => assert_eq!(last_update_frame, input.update_id),
             other => panic!("unexpected regen runtime state: {other:?}"),
         }
+    }
+
+    #[test]
+    fn effect_block_runtime_state_factory_covers_supported_effect_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        assert!(matches!(
+            effect_block_runtime_state_for(effect_block(&content, "mend-projector"), 0.0),
+            Some(EffectBlockRuntimeState::Projector(
+                EffectProjectorRuntimeState::Mend(_)
+            ))
+        ));
+        assert!(matches!(
+            effect_block_runtime_state_for(effect_block(&content, "overdrive-projector"), 0.0),
+            Some(EffectBlockRuntimeState::Projector(
+                EffectProjectorRuntimeState::Overdrive(_)
+            ))
+        ));
+        assert!(matches!(
+            effect_block_runtime_state_for(effect_block(&content, "regen-projector"), 0.0),
+            Some(EffectBlockRuntimeState::Projector(
+                EffectProjectorRuntimeState::Regen {
+                    last_update_frame: -1,
+                    ..
+                }
+            ))
+        ));
+        assert!(matches!(
+            effect_block_runtime_state_for(effect_block(&content, "force-projector"), 0.0),
+            Some(EffectBlockRuntimeState::ForceProjector(_))
+        ));
+        assert!(matches!(
+            effect_block_runtime_state_for(effect_block(&content, "radar"), 0.0),
+            Some(EffectBlockRuntimeState::Radar(_))
+        ));
+        assert!(matches!(
+            effect_block_runtime_state_for(effect_block(&content, "build-tower"), 0.0),
+            Some(EffectBlockRuntimeState::BuildTurret(_))
+        ));
+        assert!(matches!(
+            effect_block_runtime_state_for(effect_block(&content, "shield-projector"), 0.0),
+            Some(EffectBlockRuntimeState::BaseShield(_))
+        ));
+
+        match effect_block_runtime_state_for(effect_block(&content, "shockwave-tower"), 999.0) {
+            Some(EffectBlockRuntimeState::ShockwaveTower(state)) => {
+                assert_eq!(
+                    state.reload_counter,
+                    effect_block(&content, "shockwave-tower").reload
+                );
+                assert_eq!(state.heat, 0.0);
+            }
+            other => panic!("unexpected shockwave runtime state: {other:?}"),
+        }
+
+        assert_eq!(
+            effect_block_runtime_state_for(effect_block(&content, "shock-mine"), 0.0),
+            None
+        );
     }
 
     #[test]

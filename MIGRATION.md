@@ -1008,10 +1008,12 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `MendProjectorState`
 - `ProjectorRuntimeSource`
 - `EffectProjectorRuntimeState`
+- `EffectBlockRuntimeState`
 - `EffectProjectorRuntimeInput`
 - `EffectProjectorRuntimeReport`
 - `EffectBlockRuntimeContext`
 - `EffectBlockRuntimeReport`
+- `effect_block_runtime_state_for(...)`
 - `effect_projector_update_runtime(...)`
 - `effect_block_update_runtime(...)`
 - `projector_runtime_target_in_range(...)`
@@ -1059,6 +1061,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - Regen 分支已经在 dispatcher 内完成 `damaged_targets` 判定、mendMap 记录、`last_update_frame/update_id` 门控和真实 `BuildingComp::heal(...)` 应用；
   - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口；`Radar` 因需要额外 `FogControl` 已拆到 `effect_radar_update_runtime(...)`，`BaseShield` 因需要 bullet/unit 输入已拆到 `effect_base_shield_apply_runtime(...)`，后续继续收束成更统一的 effect-block runtime dispatcher。
 - 已新增跨 effect block 的轻量统一 runtime dispatcher：
+  - `EffectBlockRuntimeState` / `effect_block_runtime_state_for(...)` 为已迁移的 effect block 创建统一状态容器，覆盖 projector family、ForceProjector、Radar、BuildTurret、BaseShield、ShockwaveTower；`ShockMine` 当前无持久运行态 state；
   - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield / ShockwaveTower` 四类上下文；
   - `effect_block_update_runtime(...)` 按传入上下文复用 `effect_projector_update_runtime(...)`、`effect_radar_update_runtime(...)`、`effect_base_shield_apply_runtime(...)` 与 `effect_shockwave_tower_apply_runtime(...)`；
   - `EffectBlockRuntimeReport` 将 projector report、Radar fog force-update、BaseShield runtime report 与 ShockwaveTower fire report 收束到同一返回类型；
