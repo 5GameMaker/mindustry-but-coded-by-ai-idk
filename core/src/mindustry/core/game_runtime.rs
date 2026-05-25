@@ -7,6 +7,8 @@
 //! it owns game-wide sidecar stores and dispatches externally supplied building
 //! slices from the real `GameState` frame source.
 
+use std::collections::BTreeMap;
+
 use crate::mindustry::{
     content::blocks::{BlockDef, EffectBlockKind},
     core::content_loader::ContentLoader,
@@ -24,6 +26,10 @@ use crate::mindustry::{
         read_overdrive_projector_state, read_radar_state, EffectBlockFrameBatchReport,
         EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
         EffectBlockTimerStateStore, EffectProjectorRuntimeState,
+    },
+    world::blocks::payloads::{
+        read_empty_payload_block_build_common, read_payload_mass_driver_extra,
+        PayloadBlockBuildState, PayloadMassDriverState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -69,11 +75,26 @@ enum GameRuntimeBlockStateReadError {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimePayloadBlockState {
+    MassDriver {
+        common: PayloadBlockBuildState,
+        driver: PayloadMassDriverState,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum GameRuntimeLoadedBlockState {
+    Effect(EffectBlockRuntimeState),
+    Payload(GameRuntimePayloadBlockState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntime {
     pub state: GameState,
     pub buildings: Vec<BuildingComp>,
     pub effect_runtime_store: EffectBlockRuntimeStateStore,
     pub effect_timer_store: EffectBlockTimerStateStore,
+    pub payload_runtime_states: BTreeMap<i32, GameRuntimePayloadBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -89,6 +110,7 @@ impl GameRuntime {
             buildings: Vec::new(),
             effect_runtime_store: EffectBlockRuntimeStateStore::new(),
             effect_timer_store: EffectBlockTimerStateStore::new(),
+            payload_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -129,6 +151,7 @@ impl GameRuntime {
         self.clear_world_refs_for_building(&removed);
         self.effect_runtime_store.remove(removed.tile_pos);
         self.effect_timer_store.remove(removed.tile_pos);
+        self.payload_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -253,7 +276,7 @@ impl GameRuntime {
                 continue;
             }
 
-            let block_state = match self.read_effect_runtime_state_from_building_payload(
+            let block_state = match self.read_runtime_state_from_building_payload(
                 block,
                 revision,
                 &mut building_bytes,
@@ -272,14 +295,22 @@ impl GameRuntime {
             let added_index = self.add_building(building);
             if let Some(block_state) = block_state {
                 let tile_pos = self.buildings[added_index].tile_pos;
-                self.effect_runtime_store.ensure_for_building(
-                    content,
-                    &self.buildings[added_index],
-                    0.0,
-                );
-                if let Some(slot) = self.effect_runtime_store.get_mut(tile_pos) {
-                    *slot = block_state;
-                    report.block_states_added += 1;
+                match block_state {
+                    GameRuntimeLoadedBlockState::Effect(block_state) => {
+                        self.effect_runtime_store.ensure_for_building(
+                            content,
+                            &self.buildings[added_index],
+                            0.0,
+                        );
+                        if let Some(slot) = self.effect_runtime_store.get_mut(tile_pos) {
+                            *slot = block_state;
+                            report.block_states_added += 1;
+                        }
+                    }
+                    GameRuntimeLoadedBlockState::Payload(block_state) => {
+                        self.payload_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -289,6 +320,28 @@ impl GameRuntime {
         report.proximity_links = self.refresh_owned_building_proximity();
         self.state.world.clear_load_events();
         report
+    }
+
+    fn read_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeLoadedBlockState>, GameRuntimeBlockStateReadError> {
+        match self.read_effect_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => Ok(Some(GameRuntimeLoadedBlockState::Effect(state))),
+            Ok(None) => Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                Err(GameRuntimeBlockStateReadError::Parse)
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => self
+                .read_payload_runtime_state_from_building_payload(block, revision, building_payload)
+                .map(|state| state.map(GameRuntimeLoadedBlockState::Payload)),
+        }
     }
 
     fn read_effect_runtime_state_from_building_payload(
@@ -329,6 +382,31 @@ impl GameRuntime {
             EffectBlockKind::BaseShield => read_base_shield_state(building_payload, revision)
                 .map(|state| Some(EffectBlockRuntimeState::BaseShield(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
+    fn read_payload_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimePayloadBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        match block {
+            BlockDef::PayloadMassDriver(_) => {
+                let common = read_empty_payload_block_build_common(building_payload)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let driver = read_payload_mass_driver_extra(building_payload, revision)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                Ok(Some(GameRuntimePayloadBlockState::MassDriver {
+                    common,
+                    driver,
+                }))
+            }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
@@ -378,6 +456,7 @@ impl GameRuntime {
     pub fn reset_effect_block_sidecars(&mut self) {
         self.effect_runtime_store.clear();
         self.effect_timer_store.clear();
+        self.payload_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -513,6 +592,10 @@ mod tests {
             blocks::defense::{
                 write_base_shield_state, write_force_projector_state, write_radar_state,
                 BaseShieldState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
+            },
+            blocks::payloads::{
+                write_payload_block_build_common, write_payload_mass_driver_extra,
+                PayloadBlockBuildState, PayloadDriverState, PayloadMassDriverState, Vec2,
             },
             footprint_tiles, point2_pack, Block, Tile,
         },
@@ -1272,6 +1355,49 @@ mod tests {
         assert_eq!(
             runtime.effect_runtime_store.get(tile_pos),
             Some(&EffectBlockRuntimeState::BaseShield(shield_state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_mass_driver_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("payload-mass-driver").unwrap();
+        let tile_pos = point2_pack(2, 3);
+        let mut saved = BuildingComp::new(tile_pos, driver_def.base().clone(), TeamId(6));
+        saved.set_rotation(1);
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 1.5, y: -2.25 },
+            pay_rotation: 45.0,
+            carried: false,
+        };
+        let driver = PayloadMassDriverState {
+            link: point2_pack(4, 3),
+            turret_rotation: 135.0,
+            state: PayloadDriverState::Shooting,
+            reload_counter: 0.5,
+            charge: 12.0,
+            loaded: true,
+            charging: true,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_payload_mass_driver_extra(&mut building_bytes, &driver).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 20, driver_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::MassDriver { common, driver })
         );
     }
 
