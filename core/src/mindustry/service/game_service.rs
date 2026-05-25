@@ -9,7 +9,9 @@ use std::collections::BTreeSet;
 
 use crate::mindustry::game::Trigger;
 
-use super::{Achievement, AchievementService, SStat, StatService};
+use super::{
+    Achievement, AchievementContext, AchievementService, AchievementState, SStat, StatService,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameServiceInitAction {
@@ -393,6 +395,15 @@ pub struct GameServiceEventPlan {
     pub achievements: BTreeSet<Achievement>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameServiceApplySummary {
+    pub stat_additions: usize,
+    pub stat_amount_additions: usize,
+    pub stat_sets: usize,
+    pub stat_max_updates: usize,
+    pub achievements_completed: usize,
+}
+
 impl GameServiceEventPlan {
     pub fn is_empty(&self) -> bool {
         self.stat_additions.is_empty()
@@ -400,6 +411,51 @@ impl GameServiceEventPlan {
             && self.stat_sets.is_empty()
             && self.stat_max_updates.is_empty()
             && self.achievements.is_empty()
+    }
+
+    pub fn apply_to<S>(
+        &self,
+        service: &mut S,
+        achievement_state: &mut AchievementState,
+        context: AchievementContext,
+    ) -> GameServiceApplySummary
+    where
+        S: AchievementService,
+    {
+        let mut summary = GameServiceApplySummary::default();
+
+        for stat in &self.stat_additions {
+            stat.increment(service);
+            summary.stat_additions += 1;
+        }
+
+        for (stat, amount) in &self.stat_amount_additions {
+            stat.add(service, *amount);
+            summary.stat_amount_additions += 1;
+        }
+
+        for (stat, amount) in &self.stat_sets {
+            stat.set(service, *amount);
+            summary.stat_sets += 1;
+        }
+
+        for (stat, amount) in &self.stat_max_updates {
+            let before = stat.get(service);
+            stat.max(service, *amount);
+            if *amount > before {
+                summary.stat_max_updates += 1;
+            }
+        }
+
+        for achievement in &self.achievements {
+            let was_achieved = achievement_state.is_achieved(*achievement, &*service);
+            achievement_state.complete(*achievement, service, context);
+            if !was_achieved && achievement_state.is_achieved(*achievement, &*service) {
+                summary.achievements_completed += 1;
+            }
+        }
+
+        summary
     }
 }
 
@@ -1161,8 +1217,45 @@ pub fn java_t5_units() -> BTreeSet<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
     use super::*;
     use crate::mindustry::service::{Achievement, AchievementContext, AchievementState, SStat};
+
+    #[derive(Debug, Default)]
+    struct RecordingService {
+        stats: BTreeMap<String, i32>,
+        completed: BTreeSet<String>,
+        stores: usize,
+    }
+
+    impl StatService for RecordingService {
+        fn get_stat(&self, name: &str, def: i32) -> i32 {
+            self.stats.get(name).copied().unwrap_or(def)
+        }
+
+        fn set_stat(&mut self, name: &str, amount: i32) {
+            self.stats.insert(name.into(), amount);
+        }
+
+        fn store_stats(&mut self) {
+            self.stores += 1;
+        }
+    }
+
+    impl AchievementService for RecordingService {
+        fn complete_achievement(&mut self, name: &str) {
+            self.completed.insert(name.into());
+        }
+
+        fn clear_achievement(&mut self, name: &str) {
+            self.completed.remove(name);
+        }
+
+        fn is_achieved(&self, name: &str) -> bool {
+            self.completed.contains(name)
+        }
+    }
 
     #[test]
     fn default_game_service_platform_methods_are_noop_like_java_defaults() {
@@ -1698,6 +1791,54 @@ mod tests {
                 player_count: 99,
             })
             .is_empty());
+    }
+
+    #[test]
+    fn event_plan_apply_to_writes_stats_and_achievements_into_service_runtime() {
+        let mut service = RecordingService::default();
+        let mut achievements = AchievementState::new();
+        let mut plan = GameServiceEventPlan {
+            stat_additions: vec![SStat::MapsMade],
+            stat_amount_additions: vec![(SStat::ItemsLaunched, 30)],
+            stat_sets: vec![(SStat::SectorsControlled, 7)],
+            stat_max_updates: vec![(SStat::MaxPlayersServer, 4)],
+            ..Default::default()
+        };
+        plan.achievements.insert(Achievement::JoinCommunityServer);
+
+        let summary = plan.apply_to(
+            &mut service,
+            &mut achievements,
+            AchievementContext::normal(),
+        );
+
+        assert_eq!(
+            summary,
+            GameServiceApplySummary {
+                stat_additions: 1,
+                stat_amount_additions: 1,
+                stat_sets: 1,
+                stat_max_updates: 1,
+                achievements_completed: 1,
+            }
+        );
+        assert_eq!(service.stats.get("mapsMade"), Some(&1));
+        assert_eq!(service.stats.get("itemsLaunched"), Some(&30));
+        assert_eq!(service.stats.get("sectorsControlled"), Some(&7));
+        assert_eq!(service.stats.get("maxPlayersServer"), Some(&4));
+        assert!(service.completed.contains("joinCommunityServer"));
+        assert_eq!(service.stores, 5);
+
+        let summary = plan.apply_to(
+            &mut service,
+            &mut achievements,
+            AchievementContext::normal(),
+        );
+        assert_eq!(summary.achievements_completed, 0);
+        assert_eq!(summary.stat_max_updates, 0);
+        assert_eq!(service.stats.get("mapsMade"), Some(&2));
+        assert_eq!(service.stats.get("itemsLaunched"), Some(&60));
+        assert_eq!(service.stats.get("maxPlayersServer"), Some(&4));
     }
 
     #[test]

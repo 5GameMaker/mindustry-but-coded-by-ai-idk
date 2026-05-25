@@ -968,6 +968,34 @@ BuildTurretUnitTypeConfig
 - health = 1；
 - afterPatch 同步 rotateSpeed/buildBeamOffset/range/buildSpeed。
 
+### 9.2 GameService / Achievement / SStat 事件桥接
+
+参考：
+
+```text
+D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/service/GameService.java
+D:/MDT/rust-mindustry/core/src/mindustry/service/game_service.rs
+D:/MDT/rust-mindustry/core/src/mindustry/service/s_stat.rs
+D:/MDT/rust-mindustry/core/src/mindustry/service/achievement.rs
+```
+
+已推进：
+
+- `GameServiceState` 已覆盖 Java `registerEvents()` 中大量事件分支的纯计划层；
+- `GameServiceEventPlan::apply_to(...)` 已把事件计划真正写入 `StatService` / `AchievementService` / `AchievementState`：
+  - `stat_additions` → `SStat::increment(...)`；
+  - `stat_amount_additions` → `SStat::add(...)`；
+  - `stat_sets` → `SStat::set(...)`；
+  - `stat_max_updates` → `SStat::max(...)`；
+  - `achievements` → `AchievementState::complete(...)`；
+- 这一步把 `MapMakeEvent`、`MapPublishEvent`、`PlayerJoin`、`ClientPreConnect` 等已有 plan 与真实服务写入接口接上，不再只停留在返回 plan 的 helper 层。
+
+仍需：
+
+- 将具体事件源（client/server runtime event bus、launcher、network callbacks）逐步调用对应 plan 并执行 `apply_to(...)`；
+- 对 `GameServiceUpdatePlan`、`GameServiceBlockBuildPlan`、`GameServiceUnitCreatePlan` 等专用 plan 增加同类 apply 桥；
+- 平台侧如 Steam/桌面服务接入后，应复用 `StatService` / `AchievementService` 接口，不要绕过本桥接层。
+
 ### 9.3 继续 NetworkIO / SaveVersion
 
 参考：

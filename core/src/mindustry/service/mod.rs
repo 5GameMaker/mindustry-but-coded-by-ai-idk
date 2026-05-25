@@ -8,11 +8,12 @@ pub use achievement::{
     Achievement, AchievementContext, AchievementData, AchievementService, AchievementState,
 };
 pub use game_service::{
-    DefaultGameService, GameService, GameServiceBlockBuildPlan, GameServiceBlockBuildSnapshot,
-    GameServiceBlockDestroySnapshot, GameServiceBuildingBulletDestroySnapshot,
-    GameServiceClientChatSnapshot, GameServiceClientPreConnectSnapshot, GameServiceEventPlan,
-    GameServiceFrameUpdateSnapshot, GameServiceGeneratorPressureExplodeSnapshot,
-    GameServiceInitAction, GameServiceLaunchItemSnapshot, GameServiceNewGameSnapshot,
+    DefaultGameService, GameService, GameServiceApplySummary, GameServiceBlockBuildPlan,
+    GameServiceBlockBuildSnapshot, GameServiceBlockDestroySnapshot,
+    GameServiceBuildingBulletDestroySnapshot, GameServiceClientChatSnapshot,
+    GameServiceClientPreConnectSnapshot, GameServiceEventPlan, GameServiceFrameUpdateSnapshot,
+    GameServiceGeneratorPressureExplodeSnapshot, GameServiceInitAction,
+    GameServiceLaunchItemSnapshot, GameServiceNewGameSnapshot,
     GameServiceNucleusGroundZeroSnapshot, GameServicePayloadDropSnapshot,
     GameServicePickupSnapshot, GameServicePlayerJoinSnapshot, GameServiceRegisterSnapshot,
     GameServiceResearchSnapshot, GameServiceSaveLoadSnapshot, GameServiceSectorCaptureSnapshot,
