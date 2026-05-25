@@ -1,8 +1,16 @@
 pub mod server_control;
 
-use mindustry_core::mindustry::core::{GameRuntime, NetServer};
+use mindustry_core::mindustry::core::{
+    content_loader::ContentLoader, GameRuntime, GameRuntimeOwnedEffectResources, NetServer,
+};
+use mindustry_core::mindustry::ctype::ContentId;
+use mindustry_core::mindustry::entities::{
+    bullet::BulletType,
+    comp::{BuildingComp, BulletComp, UnitComp},
+};
 use mindustry_core::mindustry::net::{write_minimal_world_data, ArcNetProvider, Net};
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
+use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
 use std::io;
@@ -13,6 +21,7 @@ pub struct ServerLauncher {
     pub args: Vec<String>,
     pub control: ServerControl,
     pub runtime: GameRuntime,
+    pub content_loader: ContentLoader,
     pub net_server: NetServer,
     pub network_error: Option<String>,
 }
@@ -28,6 +37,7 @@ impl ServerLauncher {
             context,
             control: ServerControl::new(args.clone()),
             runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
             args,
@@ -63,6 +73,7 @@ impl ServerLauncher {
     pub fn update(&mut self) {
         self.net_server.update();
         let _ = self.flush_pending_world_data();
+        let _ = self.update_runtime_effect_blocks(1.0 / 60.0);
     }
 
     pub fn flush_pending_world_data(&self) -> io::Result<usize> {
@@ -70,6 +81,31 @@ impl ServerLauncher {
             write_minimal_world_data(connection_id)
                 .expect("bootstrap world data payload should be encodable")
         })
+    }
+
+    pub fn update_runtime_effect_blocks(
+        &mut self,
+        delta_seconds: f32,
+    ) -> Option<EffectBlockFrameBatchReport> {
+        let mut bullets: Vec<BulletComp> = Vec::new();
+        let mut units: Vec<UnitComp> = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+
+        self.runtime.advance_owned_effect_blocks(
+            &self.content_loader,
+            delta_seconds,
+            GameRuntimeOwnedEffectResources {
+                bullets: &mut bullets,
+                bullet_type: &mut bullet_type,
+                units: &mut units,
+                suppressed: &mut suppressed,
+                force_coolant: &mut force_coolant,
+                spark_random: &mut spark_random,
+            },
+        )
     }
 }
 
@@ -103,7 +139,7 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::ServerLauncher;
-    use mindustry_core::mindustry::core::{GameRuntime, NetServer};
+    use mindustry_core::mindustry::core::{content_loader::ContentLoader, GameRuntime, NetServer};
     use mindustry_core::mindustry::net::{
         packet_ids, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host, HostCallback, Net,
         NetConnection, NetProvider, PacketKind, PacketSerializer, ProviderEvent,
@@ -289,6 +325,7 @@ mod tests {
             args: Vec::new(),
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -330,5 +367,21 @@ mod tests {
         assert!(!sent
             .iter()
             .any(|(_, packet, _)| matches!(packet, PacketKind::WorldDataBeginCallPacket(_))));
+    }
+
+    #[test]
+    fn server_runtime_effect_update_is_wired_to_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        assert!(launcher.update_runtime_effect_blocks(1.0 / 60.0).is_none());
+
+        launcher
+            .runtime
+            .state
+            .set(mindustry_core::mindustry::core::GameStateState::Playing);
+        let report = launcher
+            .update_runtime_effect_blocks(1.0 / 60.0)
+            .expect("playing runtime should produce an empty owned-building batch");
+        assert_eq!(report.visited_buildings, 0);
+        assert_eq!(launcher.runtime.state.update_id, 1);
     }
 }

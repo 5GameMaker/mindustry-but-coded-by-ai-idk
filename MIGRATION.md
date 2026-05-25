@@ -983,6 +983,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `BlockDef::supports_env(...)`
 - `GameRuntime::refresh_owned_building_update_permissions(...)`
 - `mindustry_server::ServerLauncher.runtime`
+- `mindustry_server::ServerLauncher::update_runtime_effect_blocks(...)`
 - `desktop::DesktopLauncher.runtime`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
@@ -1137,6 +1138,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `BlockDef::no_update_disabled(...)` / `BuildingComp::should_update_tile(...)` 已迁移 Java `if(enabled || !block.noUpdateDisabled) updateTile()` 的通用门控；effect block batch dispatcher 已先执行该门控，避免后续接入 `noUpdateDisabled=true` 的建筑时错误 tick；
   - `BlockDef::supports_env(...)` 已迁移 Java `Block.supportsEnv(env)` 位掩码公式；`GameRuntime::refresh_owned_building_update_permissions(...)` 已对 owned buildings 执行最小 `checkAllowUpdate` 接线，越界或不支持当前 rules env 的建筑会被置为 disabled；
   - `mindustry_server::ServerLauncher` 已持有 `GameRuntime`，并将 `update(...)` 调整为可变 tick 入口；后续服务端 world load、Groups.build 迁移和 effect block owned dispatch 可直接落到 server runtime，而不是停留在 core-only helper；
+  - `ServerLauncher::update(...)` 已实际调用 `update_runtime_effect_blocks(...)`，以 base content loader 和空 bullet/unit 资源安全驱动 `GameRuntime::advance_owned_effect_blocks(...)`；当前无建筑时为空 batch，后续服务端建筑集合接入后会自然进入同一主循环；
   - `desktop::DesktopLauncher` 已持有 `GameRuntime`，并在网络 world data、state snapshot 与 client-loaded state 切换后同步 `runtime.state`；后续客户端世界/建筑/effect runtime 可以从现有 `game_state` 镜像逐步切换到统一 runtime facade；
   - `EffectBlockFrameBatchResources` / `effect_block_update_building_slice_with_stores(...)` 已形成外部 `&mut [BuildingComp]` 集合的最小遍历入口；内部用 source snapshot 避免借用冲突，同时把原始 building slice 作为 projector 目标集合，并在 report 后对源建筑执行物品消耗；
   - `effect_force_projector_update_building_frame(...)` / `effect_force_projector_update_building_frame_with_timer(...)` 已能从 `BuildingComp.efficiency/optional_efficiency/timeScale`、帧 delta 与 content `phaseUseTime/timerUse` 组装 ForceProjector runtime 输入；`FORCE_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback，且 broken/phase invalid/efficiency=0 时不触碰 timer slot；
