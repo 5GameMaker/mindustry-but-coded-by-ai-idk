@@ -710,6 +710,41 @@ pub enum ProjectorTargetFilter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProjectorRuntimeSource {
+    pub x: f32,
+    pub y: f32,
+    pub team: TeamId,
+}
+
+impl From<&BuildingComp> for ProjectorRuntimeSource {
+    fn from(building: &BuildingComp) -> Self {
+        Self {
+            x: building.x,
+            y: building.y,
+            team: building.team,
+        }
+    }
+}
+
+pub fn projector_runtime_target_in_range(
+    source: ProjectorRuntimeSource,
+    target: &BuildingComp,
+    range: f32,
+) -> bool {
+    let dx = target.x - source.x;
+    let dy = target.y - source.y;
+    dx * dx + dy * dy <= range * range
+}
+
+pub fn projector_runtime_target_allowed(
+    source: ProjectorRuntimeSource,
+    target: &BuildingComp,
+    range: f32,
+) -> bool {
+    target.team == source.team && projector_runtime_target_in_range(source, target, range)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProjectorPlacementPlan {
     pub center_x: f32,
     pub center_y: f32,
@@ -860,6 +895,27 @@ pub fn mend_projector_apply_heal_to_buildings(
     let mut healed = 0;
     for building in buildings {
         if mend_projector_try_heal_building(building, update.heal_fraction, now) {
+            healed += 1;
+        }
+    }
+    healed
+}
+
+pub fn mend_projector_apply_heal_runtime(
+    update: &MendProjectorUpdate,
+    source: ProjectorRuntimeSource,
+    now: f32,
+    buildings: &mut [BuildingComp],
+) -> usize {
+    if !update.fired {
+        return 0;
+    }
+
+    let mut healed = 0;
+    for building in buildings {
+        if projector_runtime_target_allowed(source, building, update.real_range)
+            && mend_projector_try_heal_building(building, update.heal_fraction, now)
+        {
             healed += 1;
         }
     }
@@ -1126,6 +1182,19 @@ pub fn overdrive_projector_apply_boost_with_content(
 ) -> usize {
     overdrive_projector_apply_boost_to_buildings(update, reload, buildings, |building| {
         overdrive_projector_can_overdrive_content(content, building.block.id)
+    })
+}
+
+pub fn overdrive_projector_apply_boost_runtime(
+    update: &OverdriveProjectorUpdate,
+    reload: f32,
+    source: ProjectorRuntimeSource,
+    content: &ContentLoader,
+    buildings: &mut [BuildingComp],
+) -> usize {
+    overdrive_projector_apply_boost_to_buildings(update, reload, buildings, |building| {
+        projector_runtime_target_allowed(source, building, update.real_range)
+            && overdrive_projector_can_overdrive_content(content, building.block.id)
     })
 }
 
@@ -5127,6 +5196,75 @@ mod tests {
     }
 
     #[test]
+    fn mend_projector_runtime_adapter_filters_same_team_range_before_heal() {
+        let source = ProjectorRuntimeSource {
+            x: 0.0,
+            y: 0.0,
+            team: TeamId(1),
+        };
+        let update = MendProjectorUpdate {
+            fired: true,
+            real_range: 30.0,
+            heal_fraction: 0.25,
+            should_consume_optional: false,
+        };
+        let mut buildings = vec![
+            projector_runtime_building(23, "same-team-in-range"),
+            projector_runtime_building(24, "same-team-outside"),
+            projector_runtime_building(25, "enemy-in-range"),
+            projector_runtime_building(26, "same-team-suppressed"),
+        ];
+        buildings[0].set_pos(20.0, 0.0);
+        buildings[0].health = 40.0;
+        buildings[1].set_pos(40.0, 0.0);
+        buildings[1].health = 40.0;
+        buildings[2].set_pos(20.0, 0.0);
+        buildings[2].team = TeamId(2);
+        buildings[2].health = 40.0;
+        buildings[3].set_pos(24.0, 0.0);
+        buildings[3].health = 40.0;
+        buildings[3].apply_heal_suppression(200.0, 20.0);
+
+        assert!(projector_runtime_target_in_range(
+            source,
+            &buildings[0],
+            update.real_range
+        ));
+        assert!(projector_runtime_target_allowed(
+            source,
+            &buildings[0],
+            update.real_range
+        ));
+        assert!(!projector_runtime_target_allowed(
+            source,
+            &buildings[1],
+            update.real_range
+        ));
+        assert!(!projector_runtime_target_allowed(
+            source,
+            &buildings[2],
+            update.real_range
+        ));
+
+        let healed = mend_projector_apply_heal_runtime(&update, source, 210.0, &mut buildings);
+
+        assert_eq!(healed, 1);
+        assert_eq!(buildings[0].health, 65.0);
+        assert_eq!(buildings[1].health, 40.0);
+        assert_eq!(buildings[2].health, 40.0);
+        assert_eq!(buildings[3].health, 40.0);
+
+        let idle = MendProjectorUpdate {
+            fired: false,
+            ..update
+        };
+        assert_eq!(
+            mend_projector_apply_heal_runtime(&idle, source, 230.0, &mut buildings),
+            0
+        );
+    }
+
+    #[test]
     fn overdrive_projector_bar_draw_select_and_stats_follow_java() {
         assert!(!overdrive_projector_outputs_items());
         assert_eq!(overdrive_projector_range(80.0), 80.0);
@@ -5325,6 +5463,49 @@ mod tests {
         assert_eq!(buildings[0].time_scale, 1.5);
         assert_eq!(buildings[1].time_scale, 1.0);
         assert_eq!(buildings[2].time_scale, 1.0);
+    }
+
+    #[test]
+    fn overdrive_projector_runtime_adapter_filters_same_team_range_and_content_metadata() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let drill = content.block_by_name("mechanical-drill").unwrap();
+        let wall = content.block_by_name("copper-wall").unwrap();
+        let update = OverdriveProjectorUpdate {
+            applied_boost: true,
+            consumed: false,
+            real_range: 30.0,
+            real_boost: 1.5,
+        };
+        let source = ProjectorRuntimeSource {
+            x: 0.0,
+            y: 0.0,
+            team: TeamId(1),
+        };
+        let mut buildings = vec![
+            BuildingComp::new(point2_pack(50, 0), drill.base().clone(), TeamId(1)),
+            BuildingComp::new(point2_pack(51, 0), drill.base().clone(), TeamId(1)),
+            BuildingComp::new(point2_pack(52, 0), drill.base().clone(), TeamId(2)),
+            BuildingComp::new(point2_pack(53, 0), wall.base().clone(), TeamId(1)),
+        ];
+        buildings[0].set_pos(20.0, 0.0);
+        buildings[1].set_pos(40.0, 0.0);
+        buildings[2].set_pos(20.0, 0.0);
+        buildings[3].set_pos(20.0, 0.0);
+
+        let applied = overdrive_projector_apply_boost_runtime(
+            &update,
+            60.0,
+            source,
+            &content,
+            &mut buildings,
+        );
+
+        assert_eq!(applied, 1);
+        assert_eq!(buildings[0].time_scale, 1.5);
+        assert_eq!(buildings[0].time_scale_duration, 61.0);
+        assert_eq!(buildings[1].time_scale, 1.0);
+        assert_eq!(buildings[2].time_scale, 1.0);
+        assert_eq!(buildings[3].time_scale, 1.0);
     }
 
     #[test]

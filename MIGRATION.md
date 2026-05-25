@@ -964,12 +964,16 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill poly + outline poly；
   - `shieldRotation`、`sides`、`hit` layer offset 已进入 draw plan。
 - `MendProjectorState`
+- `ProjectorRuntimeSource`
+- `projector_runtime_target_in_range(...)`
+- `projector_runtime_target_allowed(...)`
 - `mend_projector_outputs_items(...)`
 - `mend_projector_range(...)`
 - `mend_projector_update(...)`
 - `mend_projector_building_damaged(...)`
 - `mend_projector_try_heal_building(...)`
 - `mend_projector_apply_heal_to_buildings(...)`
+- `mend_projector_apply_heal_runtime(...)`
 - `write_mend_projector_state(...)`
 - `read_mend_projector_state(...)`
 - `OverdriveProjectorStatsPlan`
@@ -981,6 +985,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `overdrive_projector_can_overdrive_content(...)`
 - `overdrive_projector_apply_boost_to_buildings(...)`
 - `overdrive_projector_apply_boost_with_content(...)`
+- `overdrive_projector_apply_boost_runtime(...)`
 - `overdrive_projector_bar_text_percent(...)`
 - `OverdriveProjectorState`
 - `overdrive_projector_update(...)`
@@ -991,11 +996,13 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `charge >= reload && canHeal` 时，`MendProjectorUpdate` 的 `heal_fraction` 现在可直接应用到上层 range/indexer 已筛出的 `BuildingComp` 候选；
   - `mend_projector_try_heal_building(...)` 对齐 Java `b.damaged() && !b.isHealSuppressed()`，只治疗未死亡、血量低于 `maxHealth - 0.001` 且未被治疗抑制的目标；
   - 治疗量按 `target.max_health * heal_fraction` 写入真实 `BuildingComp::heal(...)`，同步更新 `last_heal_time`，可由 `mend_projector_pulse_plan(fired, healed > 0)` 决定是否播放 heal sound；
-  - 真实 world/indexer 扫描、`Fx.healBlockFull` 与 sound 调度仍由后续 runtime/renderer 层承接。
+  - `mend_projector_apply_heal_runtime(...)` 已加入 `ProjectorRuntimeSource` 的同队 + 真实半径过滤，把 Java `indexer.eachBlock(this, realRange, ...)` 的最小运行态入口接到 `BuildingComp` 治疗；
+  - `Fx.healBlockFull` 与 sound 调度仍由后续 runtime/renderer 层承接。
 - 已对照 `OverdriveProjector.OverdriveBuild.updateTile()` 的 runtime boost 分支补充真实建筑组件接线：
   - `charge >= reload` 后由 `overdrive_projector_boost_plan(...)` 生成 `realRange / canOverdrive / realBoost / reload + 1`；
   - `overdrive_projector_apply_boost_to_buildings(...)` 对上层 range/indexer 已筛出的候选 `BuildingComp` 调用真实 `BuildingComp::apply_boost(...)`；
   - `BlockDef::can_overdrive()` 汇总 Java `Block.canOverdrive` 默认值与各类 block overrides，`overdrive_projector_apply_boost_with_content(...)` 已能通过 `ContentLoader` 读取真实 content metadata 过滤目标；
+  - `overdrive_projector_apply_boost_runtime(...)` 已同时执行同队 + `realRange` 半径过滤 + content `canOverdrive` 过滤，作为后续 building dispatcher/world indexer 可直接调用的最小入口；
   - 低于目标当前 `time_scale` 的 boost 不会降低已有更高加速，也不会延长较高加速持续时间，行为沿用 `Building.applyBoost(...)`。
 
 仍需：
