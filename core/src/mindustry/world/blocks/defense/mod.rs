@@ -2213,6 +2213,38 @@ pub fn base_shield_should_emit_unit_spark(
         && random < base_shield_unit_spark_chance_delta(delta)
 }
 
+pub fn base_shield_apply_unit_action(
+    unit: &mut UnitComp,
+    shield_x: f32,
+    shield_y: f32,
+    action: ShieldUnitAction,
+) -> bool {
+    match action {
+        ShieldUnitAction::None => false,
+        ShieldUnitAction::Kill => {
+            unit.health.kill();
+            unit.refresh_component_views();
+            true
+        }
+        ShieldUnitAction::Repel { distance } => {
+            unit.vel.vel.x = 0.0;
+            unit.vel.vel.y = 0.0;
+            let dx = unit.x() - shield_x;
+            let dy = unit.y() - shield_y;
+            let len = (dx * dx + dy * dy).sqrt();
+            if len > 0.00001 {
+                unit.set_pos(
+                    unit.x() + dx / len * distance,
+                    unit.y() + dy / len * distance,
+                );
+            } else {
+                unit.refresh_component_views();
+            }
+            true
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseShieldDrawCommand {
     SetShieldLayer,
@@ -5632,6 +5664,36 @@ mod tests {
             2.0,
             0.0
         ));
+        let mut unit_type = UnitType::new(1, "shield-test-unit");
+        unit_type.hit_size = 10.0;
+        unit_type.health = 100.0;
+        let mut repel_unit = UnitComp::new(1, unit_type.clone(), TeamId(2));
+        repel_unit.set_pos(18.0, 0.0);
+        repel_unit.vel.vel.x = 3.0;
+        repel_unit.vel.vel.y = 4.0;
+        let repel_action = base_shield_unit_action(10.0, 20.0, 18.0);
+        assert!(base_shield_apply_unit_action(
+            &mut repel_unit,
+            0.0,
+            0.0,
+            repel_action,
+        ));
+        assert!((repel_unit.x() - 25.01).abs() < 0.00001);
+        assert_eq!(repel_unit.y(), 0.0);
+        assert_eq!(repel_unit.vel.vel.x, 0.0);
+        assert_eq!(repel_unit.vel.vel.y, 0.0);
+        assert!(!repel_unit.health.dead);
+
+        let mut kill_unit = UnitComp::new(2, unit_type, TeamId(2));
+        kill_unit.set_pos(5.0, 0.0);
+        assert!(base_shield_apply_unit_action(
+            &mut kill_unit,
+            0.0,
+            0.0,
+            base_shield_unit_action(10.0, 20.0, 5.0),
+        ));
+        assert!(kill_unit.health.dead);
+        assert!(kill_unit.health.is_removed());
         let animated = base_shield_draw_plan(false, 42.0, 24, 1.2, true);
         assert_eq!(
             animated.commands,

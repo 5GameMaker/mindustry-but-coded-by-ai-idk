@@ -650,6 +650,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `base_shield_unit_action(...)`
 - `base_shield_unit_spark_chance_delta(...)`
 - `base_shield_should_emit_unit_spark(...)`
+- `base_shield_apply_unit_action(...)`
 - `write_base_shield_state(...)`
 - `read_base_shield_state(...)`
 - `BaseShieldDrawCommand`
@@ -688,6 +689,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `shieldColor == null` 时使用 team color，否则使用 shieldColor；
   - hit 参与与 white 的 color clamp/blend。
 - `base_shield_apply_absorb_to_bullet(...)` 已接入 `BulletComp::absorb()`，让 BaseShield 的吸收判定能真实写入 bullet `absorbed/removed` 状态并清空碰撞记录。
+- `base_shield_apply_unit_action(...)` 已接入 `UnitComp`，对齐 Java `unit.kill()` 与 repel 分支的 `unit.vel.setZero(); unit.move(...)`：Kill 写入 `HealthComp::kill()`，Repel 清零速度并沿盾中心到单位方向移动 `overlap + 0.01`。
 
 仍需：
 
