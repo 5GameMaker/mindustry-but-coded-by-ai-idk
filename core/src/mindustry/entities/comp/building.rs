@@ -365,6 +365,14 @@ impl BuildingComp {
         self.time_scale = self.time_scale.min(intensity);
     }
 
+    pub fn advance_update_timing(&mut self, delta: f32, can_overdrive: bool) {
+        let delta = if delta.is_finite() { delta } else { 0.0 };
+        self.time_scale_duration -= delta;
+        if self.time_scale_duration <= 0.0 || !can_overdrive {
+            self.time_scale = 1.0;
+        }
+    }
+
     pub fn apply_heal_suppression(&mut self, now: f32, duration: f32) {
         self.heal_suppression_time = now + duration;
     }
@@ -674,6 +682,25 @@ mod tests {
         building.apply_heal_suppression(10.0, 5.0);
         assert!(building.is_heal_suppressed(14.0));
         assert!(!building.is_heal_suppressed(16.0));
+    }
+
+    #[test]
+    fn building_update_timing_matches_java_timescale_duration_gate() {
+        let mut building = BuildingComp::new(point2_pack(1, 1), block(), TeamId(1));
+        building.apply_boost(2.0, 45.0);
+
+        building.advance_update_timing(15.0, true);
+        assert_eq!(building.time_scale, 2.0);
+        assert_eq!(building.time_scale_duration, 30.0);
+
+        building.advance_update_timing(30.0, true);
+        assert_eq!(building.time_scale, 1.0);
+        assert_eq!(building.time_scale_duration, 0.0);
+
+        building.apply_boost(3.0, 60.0);
+        building.advance_update_timing(1.0, false);
+        assert_eq!(building.time_scale, 1.0);
+        assert_eq!(building.time_scale_duration, 59.0);
     }
 
     #[test]

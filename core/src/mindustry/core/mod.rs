@@ -1,5 +1,6 @@
 pub mod content_loader;
 pub mod file_tree;
+pub mod game_runtime;
 pub mod game_state;
 pub mod net_client;
 pub mod net_server;
@@ -9,6 +10,7 @@ pub mod version;
 pub mod world;
 
 pub use file_tree::{normalize_path, AssetFile, FileTree, MusicAsset, SoundAsset};
+pub use game_runtime::{GameRuntime, GameRuntimeEffectResources};
 pub use game_state::{
     empty_map_descriptor, DataPatcherState, GameState, GameStateState, StateChangeEvent,
 };

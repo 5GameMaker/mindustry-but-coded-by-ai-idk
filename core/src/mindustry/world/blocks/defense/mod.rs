@@ -844,6 +844,10 @@ impl EffectBlockRuntimeStateStore {
         self.states.is_empty()
     }
 
+    pub fn clear(&mut self) {
+        self.states.clear();
+    }
+
     pub fn get(&self, tile_pos: i32) -> Option<&EffectBlockRuntimeState> {
         self.states.get(&tile_pos)
     }
@@ -887,6 +891,10 @@ impl EffectBlockTimerStateStore {
 
     pub fn is_empty(&self) -> bool {
         self.timers.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.timers.clear();
     }
 
     pub fn get(&self, tile_pos: i32) -> Option<&BuildingTimerState> {
