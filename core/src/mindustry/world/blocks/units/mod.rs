@@ -1027,10 +1027,13 @@ fn write_payload_seq<W: Write>(write: &mut W, seq: &PayloadSeq) -> io::Result<()
 fn read_payload_seq<R: Read>(read: &mut R) -> io::Result<PayloadSeq> {
     let count = read_i16(read)?;
     if count >= 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "old block-only PayloadSeq format requires content registry",
-        ));
+        let mut seq = PayloadSeq::new();
+        for _ in 0..count {
+            let id = read_i16(read)? as ContentId;
+            let amount = read_i32(read)?;
+            seq.add(PayloadKey::new(ContentType::Block, id), amount);
+        }
+        return Ok(seq);
     }
 
     let mut seq = PayloadSeq::new();

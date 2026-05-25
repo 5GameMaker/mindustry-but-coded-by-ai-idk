@@ -120,6 +120,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 ## 5. 最近一次完成的具体实现
 
+### 2026-05-26 续作：UnitAssembler 旧式 PayloadSeq fallback
+
+文件：
+
+- `core/src/mindustry/world/blocks/units/mod.rs`
+- `core/src/mindustry/type/payload_seq.rs`
+- `core/src/mindustry/core/game_runtime.rs`
+- `MIGRATION.md`
+
+完成内容：
+
+1. `UnitAssembler` 使用的 `read_payload_seq(...)` 已支持 Java `PayloadSeq.read()` 的旧式 block-only 正数长度格式：
+   - `count: short >= 0`
+   - 循环读取 `blockId: short`
+   - 循环读取 `amount: int`
+   - 以 `PayloadKey(ContentType::Block, blockId)` 写入 `PayloadSeq`
+2. 通用 `PayloadSeq::read_java_new(...)` 同步支持同一 legacy 格式，不再对旧格式直接报错。
+3. 补测试：
+   - `payload_seq_reads_java_legacy_block_only_format`
+   - `game_runtime_loads_unit_assembler_state_from_legacy_block_only_payload_seq`
+4. 已验证：
+   - `cargo test -p mindustry-core payload_seq`
+   - `cargo test -p mindustry-core unit_assembler`
+   - `cargo check -p mindustry-core`
+
 ### 2026-05-26 续作：PayloadMassDriver revision 0 runtime 回归
 
 文件：

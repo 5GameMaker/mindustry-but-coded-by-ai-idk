@@ -136,9 +136,31 @@ impl PayloadSeq {
         }
         let count = i16::from_be_bytes([bytes[0], bytes[1]]);
         if count >= 0 {
-            return Err("old block-only payload seq format requires content registry".to_string());
+            let count = count as usize;
+            let expected = 2 + count * 6;
+            if bytes.len() < expected {
+                return Err(format!(
+                    "legacy payload seq too short: expected {expected}, got {}",
+                    bytes.len()
+                ));
+            }
+            let mut seq = Self::new();
+            let mut offset = 2;
+            for _ in 0..count {
+                let id = i16::from_be_bytes([bytes[offset], bytes[offset + 1]]) as ContentId;
+                offset += 2;
+                let amount = i32::from_be_bytes([
+                    bytes[offset],
+                    bytes[offset + 1],
+                    bytes[offset + 2],
+                    bytes[offset + 3],
+                ]);
+                offset += 4;
+                seq.add(PayloadKey::new(ContentType::Block, id), amount);
+            }
+            return Ok(seq);
         }
-        let count = (-count) as usize;
+        let count = (-(count as i32)) as usize;
         let expected = 2 + count * 7;
         if bytes.len() < expected {
             return Err(format!(
@@ -207,5 +229,21 @@ mod tests {
         assert_eq!(seq.total(), 1);
         seq.clear();
         assert!(seq.is_empty());
+    }
+
+    #[test]
+    fn payload_seq_reads_java_legacy_block_only_format() {
+        let bytes = vec![
+            0x00, 0x02, // positive short size = old block-only format
+            0x00, 0x05, 0x00, 0x00, 0x00, 0x03, // block #5 amount 3
+            0x00, 0x07, 0x00, 0x00, 0x00, 0x02, // block #7 amount 2
+        ];
+        let decoded = PayloadSeq::read_java_new(&bytes).unwrap();
+
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded.total(), 5);
+        assert_eq!(decoded.get(PayloadKey::new(ContentType::Block, 5)), 3);
+        assert_eq!(decoded.get(PayloadKey::new(ContentType::Block, 7)), 2);
+        assert_eq!(decoded.get(PayloadKey::new(ContentType::Unit, 5)), 0);
     }
 }

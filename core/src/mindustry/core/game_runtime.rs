@@ -5504,6 +5504,70 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_loads_unit_assembler_state_from_legacy_block_only_payload_seq() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let wall_def = content.block_by_name("tungsten-wall").unwrap();
+        let large_wall_def = content.block_by_name("tungsten-wall-large").unwrap();
+        let tile_pos = point2_pack(0, 1);
+        let saved = BuildingComp::new(tile_pos, assembler_def.base().clone(), TeamId(1));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 0.25, y: -0.5 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Block, wall_def.base().id), 3);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall_def.base().id),
+            2,
+        );
+        let state = UnitAssemblerState {
+            progress: 0.6,
+            read_unit_ids: vec![101, 102],
+            blocks,
+            command_pos: Some(IoVec2 { x: 64.0, y: 96.0 }),
+            ..UnitAssemblerState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        building_bytes.extend_from_slice(&state.progress.to_bits().to_be_bytes());
+        building_bytes.push(state.read_unit_ids.len() as u8);
+        for id in &state.read_unit_ids {
+            building_bytes.extend_from_slice(&id.to_be_bytes());
+        }
+        building_bytes.extend_from_slice(&(state.blocks.len() as i16).to_be_bytes());
+        for (key, amount) in state.blocks.entries() {
+            assert_eq!(key.content_type, ContentType::Block);
+            building_bytes.extend_from_slice(&(key.id as i16).to_be_bytes());
+            building_bytes.extend_from_slice(&amount.to_be_bytes());
+        }
+        let command_pos = state.command_pos.unwrap();
+        building_bytes.extend_from_slice(&command_pos.x.to_bits().to_be_bytes());
+        building_bytes.extend_from_slice(&command_pos.y.to_bits().to_be_bytes());
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 6, assembler_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Assembler {
+                common,
+                assembler: state
+            })
+        );
+    }
+
+    #[test]
     fn game_runtime_loads_unit_assembler_module_common_payload_state_from_network_map_building_payload(
     ) {
         let content = ContentLoader::create_base_content().unwrap();
