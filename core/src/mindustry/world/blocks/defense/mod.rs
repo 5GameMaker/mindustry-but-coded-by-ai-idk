@@ -5,6 +5,7 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
+use crate::mindustry::entities::bullet::BulletType;
 use crate::mindustry::entities::comp::{BuildingComp, BulletComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::{BlockPlan, FogControl, FogEvent};
@@ -1498,6 +1499,25 @@ pub fn force_projector_apply_absorb_to_bullet(
     }
     bullet.absorb();
     true
+}
+
+pub fn force_projector_absorb_bullet_comp(
+    state: &mut ForceProjectorState,
+    bullet: &mut BulletComp,
+    bullet_type: &BulletType,
+    enemy_team: bool,
+    inside_polygon: bool,
+) -> ForceProjectorBulletAbsorb {
+    let plan = force_projector_absorb_bullet(
+        state,
+        enemy_team,
+        bullet_type.absorbable,
+        bullet.absorbed,
+        inside_polygon,
+        bullet_type.shield_damage(bullet.damage),
+    );
+    force_projector_apply_absorb_to_bullet(&plan, bullet);
+    plan
 }
 
 pub fn force_projector_on_removed_plan(
@@ -5100,6 +5120,35 @@ mod tests {
         assert!(absorbed_bullet.absorbed);
         assert!(absorbed_bullet.removed);
         let unchanged = force;
+        let mut typed_bullet = BulletComp::default();
+        typed_bullet.damage = 10.0;
+        let typed_bullet_type = BulletType {
+            absorbable: true,
+            shield_damage_multiplier: 2.5,
+            ..BulletType::default()
+        };
+        let typed_plan = force_projector_absorb_bullet_comp(
+            &mut force,
+            &mut typed_bullet,
+            &typed_bullet_type,
+            true,
+            true,
+        );
+        assert_eq!(typed_plan.buildup_added, 25.0);
+        assert!(typed_bullet.absorbed);
+        assert!(typed_bullet.removed);
+        assert!((force.buildup - 200.0).abs() < 0.00001);
+        let after_typed_absorb = force;
+        let repeated_plan = force_projector_absorb_bullet_comp(
+            &mut force,
+            &mut typed_bullet,
+            &typed_bullet_type,
+            true,
+            true,
+        );
+        assert!(!repeated_plan.absorbed);
+        assert_eq!(force, after_typed_absorb);
+        force = unchanged;
         assert_eq!(
             force_projector_absorb_bullet(&mut force, false, true, false, true, 10.0),
             ForceProjectorBulletAbsorb {

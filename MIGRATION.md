@@ -883,6 +883,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_bar_fraction(...)`
 - `force_projector_absorb_bullet(...)`
 - `force_projector_apply_absorb_to_bullet(...)`
+- `force_projector_absorb_bullet_comp(...)`
 - `force_projector_absorb_explosion(...)`
 - `ForceProjectorBulletAbsorb`
 - `ForceProjectorRemovedPlan`
@@ -908,6 +909,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 已将 bullet absorb 结果接到真实 `BulletComp::absorb()`：
   - `BulletComp::absorb()` 对齐 Java `absorbed = true; remove()` 的核心状态，当前设置 `absorbed/removed` 并清空 collision 记录，保持 `hit=false` 以保留 despawn 路径语义；
   - `force_projector_apply_absorb_to_bullet(...)` 只在 `ForceProjectorBulletAbsorb.absorbed` 为真时修改 bullet 状态。
+  - `force_projector_absorb_bullet_comp(...)` 已把 `BulletType::shield_damage(bullet.damage)`、`BulletType.absorbable` 和 `BulletComp.absorbed` 接入同一入口，避免调用方手动拼 Java `bullet.type.shieldDamage(bullet)` 语义。
 - 已对照 `ForceProjector.setBars()` / `sense(...)` 锁定：
   - shield bar fraction = `1 - buildup / (shieldHealth + phaseShieldBoost * phaseHeat)`；
   - `LAccess.heat` 返回 `buildup`；
