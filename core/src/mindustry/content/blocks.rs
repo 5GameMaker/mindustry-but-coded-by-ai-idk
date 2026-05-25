@@ -2737,6 +2737,7 @@ impl CraftingBlockData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitBlockKind {
     UnitFactory,
+    Reconstructor,
     UnitAssembler,
     UnitAssemblerModule,
     RepairTower,
@@ -2753,6 +2754,12 @@ pub struct UnitPlanSpec {
     pub unit: String,
     pub time: f32,
     pub requirements: Vec<ItemAmount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitUpgradeSpec {
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2856,6 +2863,81 @@ impl UnitFactoryBlockData {
                 }
                 self.base.item_capacity = self.base.item_capacity.max(requirement.amount * 2);
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitReconstructorBlockData {
+    pub base: Block,
+    pub kind: UnitBlockKind,
+    pub requirements: Vec<ItemAmount>,
+    pub research_cost: Vec<ItemAmount>,
+    pub research_cost_multiplier: f32,
+    pub consume_power: f32,
+    pub consume_items: Vec<ItemAmount>,
+    pub consume_liquids: Vec<LiquidAmount>,
+    pub upgrades: Vec<UnitUpgradeSpec>,
+    pub construct_time: f32,
+    pub configurable: bool,
+    pub outputs_payload: bool,
+    pub rotate: bool,
+    pub region_rotated1: i32,
+    pub region_rotated2: i32,
+    pub commandable: bool,
+    pub ambient_sound: String,
+    pub ambient_sound_volume: f32,
+    pub create_sound: String,
+    pub create_sound_volume: f32,
+    pub capacities: Vec<ItemAmount>,
+}
+
+impl UnitReconstructorBlockData {
+    pub fn new(id: BlockId, name: impl Into<String>, kind: UnitBlockKind) -> Self {
+        let mut base = Block::new(id, name);
+        base.update = true;
+        base.solid = true;
+        base.has_items = true;
+        base.group = BlockGroup::Units;
+        base.env_enabled = Env::TERRESTRIAL | Env::SPACE | Env::UNDERWATER;
+        base.flags.push(BlockFlag::Factory);
+        Self {
+            base,
+            kind,
+            requirements: Vec::new(),
+            research_cost: Vec::new(),
+            research_cost_multiplier: 1.0,
+            consume_power: 0.0,
+            consume_items: Vec::new(),
+            consume_liquids: Vec::new(),
+            upgrades: Vec::new(),
+            construct_time: 60.0 * 2.0,
+            configurable: true,
+            outputs_payload: true,
+            rotate: true,
+            region_rotated1: 1,
+            region_rotated2: 2,
+            commandable: true,
+            ambient_sound: "loopUnitBuilding".into(),
+            ambient_sound_volume: 0.09,
+            create_sound: "unitCreate".into(),
+            create_sound_volume: 1.0,
+            capacities: Vec::new(),
+        }
+    }
+
+    fn finalize(&mut self) {
+        self.base.consumes_power = self.consume_power > 0.0;
+        self.base.has_power = self.consume_power > 0.0;
+        self.base.has_liquids = !self.consume_liquids.is_empty();
+        self.base.item_capacity = 10;
+        self.capacities.clear();
+        for requirement in &self.consume_items {
+            self.capacities.push(ItemAmount {
+                item: requirement.item,
+                amount: requirement.amount * 2,
+            });
+            self.base.item_capacity = self.base.item_capacity.max(requirement.amount * 2);
         }
     }
 }
@@ -4527,6 +4609,7 @@ pub enum BlockDef {
     Liquid(LiquidBlockData),
     Power(PowerBlockData),
     UnitFactory(UnitFactoryBlockData),
+    UnitReconstructor(UnitReconstructorBlockData),
     UnitAssembler(UnitAssemblerBlockData),
     UnitAssemblerModule(UnitAssemblerModuleBlockData),
     UnitRepairTower(UnitRepairTowerBlockData),
@@ -4563,6 +4646,7 @@ impl BlockDef {
             Self::Liquid(liquid) => &liquid.base,
             Self::Power(power) => &power.base,
             Self::UnitFactory(factory) => &factory.base,
+            Self::UnitReconstructor(reconstructor) => &reconstructor.base,
             Self::UnitAssembler(assembler) => &assembler.base,
             Self::UnitAssemblerModule(module) => &module.base,
             Self::UnitRepairTower(tower) => &tower.base,
@@ -4608,6 +4692,7 @@ impl BlockDef {
                     )
             }
             Self::UnitFactory(_) => true,
+            Self::UnitReconstructor(_) => true,
             Self::UnitAssembler(_) => true,
             Self::UnitAssemblerModule(_) => true,
             Self::UnitRepairTower(_) => true,
@@ -4769,6 +4854,16 @@ impl BlockRegistry {
     pub fn get_unit_factory_by_name(&self, name: &str) -> Option<&UnitFactoryBlockData> {
         match self.get_by_name(name)? {
             BlockDef::UnitFactory(factory) => Some(factory),
+            _ => None,
+        }
+    }
+
+    pub fn get_unit_reconstructor_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&UnitReconstructorBlockData> {
+        match self.get_by_name(name)? {
+            BlockDef::UnitReconstructor(reconstructor) => Some(reconstructor),
             _ => None,
         }
     }
@@ -5106,6 +5201,20 @@ impl BlockRegistry {
         block.finalize();
         block.base.derive_layout_fields();
         self.insert(BlockDef::UnitFactory(block))
+    }
+
+    pub fn register_unit_reconstructor_block(
+        &mut self,
+        name: impl Into<String>,
+        kind: UnitBlockKind,
+        configure: impl FnOnce(&mut UnitReconstructorBlockData),
+    ) -> BlockId {
+        let id = self.next_id();
+        let mut block = UnitReconstructorBlockData::new(id, name, kind);
+        configure(&mut block);
+        block.finalize();
+        block.base.derive_layout_fields();
+        self.insert(BlockDef::UnitReconstructor(block))
     }
 
     pub fn register_unit_assembler_block(
@@ -6270,6 +6379,13 @@ fn unit_plan(items: &[Item], unit: &str, time: f32, specs: &[(&str, i32)]) -> Un
         unit: unit.into(),
         time,
         requirements,
+    }
+}
+
+fn unit_upgrade(from: &str, to: &str) -> UnitUpgradeSpec {
+    UnitUpgradeSpec {
+        from: from.into(),
+        to: to.into(),
     }
 }
 
@@ -12152,6 +12268,160 @@ fn register_unit_blocks(registry: &mut BlockRegistry, items: &[Item], liquids: &
         factory.consume_power = 1.2;
         factory.floating = true;
     });
+
+    registry.register_unit_reconstructor_block(
+        "additive-reconstructor",
+        UnitBlockKind::Reconstructor,
+        |reconstructor| {
+            set_requirements(
+                &mut reconstructor.requirements,
+                items,
+                &[("copper", 200), ("lead", 120), ("silicon", 90)],
+            );
+            reconstructor.base.size = 3;
+            reconstructor.consume_power = 3.0;
+            set_requirements(
+                &mut reconstructor.consume_items,
+                items,
+                &[("silicon", 40), ("graphite", 40)],
+            );
+            reconstructor.construct_time = 60.0 * 10.0;
+            reconstructor.upgrades = vec![
+                unit_upgrade("nova", "pulsar"),
+                unit_upgrade("dagger", "mace"),
+                unit_upgrade("crawler", "atrax"),
+                unit_upgrade("flare", "horizon"),
+                unit_upgrade("mono", "poly"),
+                unit_upgrade("risso", "minke"),
+                unit_upgrade("retusa", "oxynoe"),
+            ];
+        },
+    );
+
+    registry.register_unit_reconstructor_block(
+        "multiplicative-reconstructor",
+        UnitBlockKind::Reconstructor,
+        |reconstructor| {
+            set_requirements(
+                &mut reconstructor.requirements,
+                items,
+                &[
+                    ("lead", 650),
+                    ("silicon", 450),
+                    ("titanium", 350),
+                    ("thorium", 650),
+                ],
+            );
+            reconstructor.base.size = 5;
+            reconstructor.consume_power = 6.0;
+            set_requirements(
+                &mut reconstructor.consume_items,
+                items,
+                &[("silicon", 130), ("titanium", 80), ("metaglass", 40)],
+            );
+            reconstructor.construct_time = 60.0 * 30.0;
+            reconstructor.upgrades = vec![
+                unit_upgrade("horizon", "zenith"),
+                unit_upgrade("mace", "fortress"),
+                unit_upgrade("poly", "mega"),
+                unit_upgrade("minke", "bryde"),
+                unit_upgrade("pulsar", "quasar"),
+                unit_upgrade("atrax", "spiroct"),
+                unit_upgrade("oxynoe", "cyerce"),
+            ];
+        },
+    );
+
+    registry.register_unit_reconstructor_block(
+        "exponential-reconstructor",
+        UnitBlockKind::Reconstructor,
+        |reconstructor| {
+            set_requirements(
+                &mut reconstructor.requirements,
+                items,
+                &[
+                    ("lead", 2000),
+                    ("silicon", 1000),
+                    ("titanium", 2000),
+                    ("thorium", 750),
+                    ("plastanium", 450),
+                    ("phase-fabric", 600),
+                ],
+            );
+            reconstructor.base.size = 7;
+            reconstructor.consume_power = 13.0;
+            set_requirements(
+                &mut reconstructor.consume_items,
+                items,
+                &[("silicon", 850), ("titanium", 750), ("plastanium", 650)],
+            );
+            push_liquid_amount(
+                &mut reconstructor.consume_liquids,
+                liquids,
+                "cryofluid",
+                1.0,
+            );
+            reconstructor.create_sound = "unitCreateBig".into();
+            reconstructor.construct_time = 60.0 * 60.0 * 1.5;
+            reconstructor.upgrades = vec![
+                unit_upgrade("zenith", "antumbra"),
+                unit_upgrade("spiroct", "arkyid"),
+                unit_upgrade("fortress", "scepter"),
+                unit_upgrade("bryde", "sei"),
+                unit_upgrade("mega", "quad"),
+                unit_upgrade("quasar", "vela"),
+                unit_upgrade("cyerce", "aegires"),
+            ];
+        },
+    );
+
+    registry.register_unit_reconstructor_block(
+        "tetrative-reconstructor",
+        UnitBlockKind::Reconstructor,
+        |reconstructor| {
+            set_requirements(
+                &mut reconstructor.requirements,
+                items,
+                &[
+                    ("lead", 4000),
+                    ("silicon", 3000),
+                    ("thorium", 1000),
+                    ("plastanium", 600),
+                    ("phase-fabric", 600),
+                    ("surge-alloy", 800),
+                ],
+            );
+            reconstructor.base.size = 9;
+            reconstructor.consume_power = 25.0;
+            set_requirements(
+                &mut reconstructor.consume_items,
+                items,
+                &[
+                    ("silicon", 1000),
+                    ("plastanium", 600),
+                    ("surge-alloy", 500),
+                    ("phase-fabric", 350),
+                ],
+            );
+            push_liquid_amount(
+                &mut reconstructor.consume_liquids,
+                liquids,
+                "cryofluid",
+                3.0,
+            );
+            reconstructor.construct_time = 60.0 * 60.0 * 4.0;
+            reconstructor.create_sound = "unitCreateBig".into();
+            reconstructor.upgrades = vec![
+                unit_upgrade("antumbra", "eclipse"),
+                unit_upgrade("arkyid", "toxopid"),
+                unit_upgrade("scepter", "reign"),
+                unit_upgrade("sei", "omura"),
+                unit_upgrade("quad", "oct"),
+                unit_upgrade("vela", "corvus"),
+                unit_upgrade("aegires", "navanax"),
+            ];
+        },
+    );
 
     registry.register_unit_factory_block(
         "tank-fabricator",
@@ -19218,6 +19488,108 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn reconstructor_blocks_keep_upstream_subset_and_capacities() {
+        let (all_items, all_liquids, registry) = load_test_registry();
+        let item_id = |name: &str| find_item(&all_items, name).unwrap().base.mappable.base.id;
+        let liquid_id = |name: &str| liquid_id(&all_liquids, name).unwrap();
+
+        let additive = registry
+            .get_unit_reconstructor_by_name("additive-reconstructor")
+            .unwrap();
+        assert_eq!(additive.kind, UnitBlockKind::Reconstructor);
+        assert_eq!(additive.base.group, BlockGroup::Units);
+        assert_eq!(additive.base.flags, vec![BlockFlag::Factory]);
+        assert!(additive.base.update);
+        assert!(additive.base.solid);
+        assert!(additive.base.has_power);
+        assert!(additive.base.has_items);
+        assert!(!additive.base.has_liquids);
+        assert!(additive.configurable);
+        assert!(additive.outputs_payload);
+        assert!(additive.rotate);
+        assert_eq!(additive.region_rotated1, 1);
+        assert_eq!(additive.region_rotated2, 2);
+        assert!(additive.commandable);
+        assert_eq!(additive.ambient_sound, "loopUnitBuilding");
+        assert_eq!(additive.create_sound, "unitCreate");
+        assert_eq!(additive.base.size, 3);
+        assert_eq!(additive.consume_power, 3.0);
+        assert_eq!(additive.construct_time, 60.0 * 10.0);
+        assert_eq!(additive.base.item_capacity, 80);
+        assert_eq!(
+            additive.requirements,
+            vec![
+                ItemAmount {
+                    item: item_id("copper"),
+                    amount: 200
+                },
+                ItemAmount {
+                    item: item_id("lead"),
+                    amount: 120
+                },
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 90
+                }
+            ]
+        );
+        assert_eq!(
+            additive.consume_items,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 40
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 40
+                }
+            ]
+        );
+        assert_eq!(
+            additive.capacities,
+            vec![
+                ItemAmount {
+                    item: item_id("silicon"),
+                    amount: 80
+                },
+                ItemAmount {
+                    item: item_id("graphite"),
+                    amount: 80
+                }
+            ]
+        );
+        assert_eq!(additive.upgrades.len(), 7);
+        assert_eq!(additive.upgrades[0], unit_upgrade("nova", "pulsar"));
+        assert_eq!(additive.upgrades[6], unit_upgrade("retusa", "oxynoe"));
+
+        let exponential = registry
+            .get_unit_reconstructor_by_name("exponential-reconstructor")
+            .unwrap();
+        assert_eq!(exponential.base.size, 7);
+        assert_eq!(exponential.consume_power, 13.0);
+        assert_eq!(exponential.construct_time, 60.0 * 60.0 * 1.5);
+        assert!(exponential.base.has_liquids);
+        assert_eq!(exponential.create_sound, "unitCreateBig");
+        assert_eq!(exponential.base.item_capacity, 1700);
+        assert_eq!(
+            exponential.consume_liquids,
+            vec![LiquidAmount {
+                liquid: liquid_id("cryofluid"),
+                amount: 1.0
+            }]
+        );
+        assert_eq!(exponential.upgrades[0], unit_upgrade("zenith", "antumbra"));
+
+        assert!(registry
+            .get_unit_reconstructor_by_name("multiplicative-reconstructor")
+            .is_some());
+        assert!(registry
+            .get_unit_reconstructor_by_name("tetrative-reconstructor")
+            .is_some());
     }
 
     #[test]

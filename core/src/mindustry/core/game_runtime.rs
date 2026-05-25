@@ -68,9 +68,10 @@ use crate::mindustry::{
     },
     world::blocks::storage::{read_core_state, read_unloader_sort_item, CoreBuildState},
     world::blocks::units::{
-        read_repair_turret_state, read_unit_assembler_state, read_unit_cargo_loader_state,
-        read_unit_cargo_unload_state, read_unit_factory_state, RepairTurretState,
-        UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+        read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
+        read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
+        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -203,6 +204,7 @@ pub enum GameRuntimeLiquidBlockState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeUnitBlockState {
     Factory(UnitFactoryState),
+    Reconstructor(ReconstructorState),
     RepairTower(RepairTurretState),
     Assembler {
         common: PayloadBlockBuildState,
@@ -1134,6 +1136,11 @@ impl GameRuntime {
             BlockDef::UnitFactory(_) => read_unit_factory_state(building_payload, revision as i32)
                 .map(|state| Some(GameRuntimeUnitBlockState::Factory(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            BlockDef::UnitReconstructor(_) => {
+                read_reconstructor_state(building_payload, revision as i32)
+                    .map(|state| Some(GameRuntimeUnitBlockState::Reconstructor(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
             BlockDef::UnitRepairTower(_) => {
                 read_repair_turret_state(building_payload, revision as i32)
                     .map(|state| Some(GameRuntimeUnitBlockState::RepairTower(state)))
@@ -1467,7 +1474,7 @@ mod tests {
             },
             blocks::storage::{write_core_state, write_unloader_sort_item, CoreBuildState},
             blocks::units::{
-                write_repair_turret_state, write_unit_assembler_state,
+                write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
                 write_unit_cargo_loader_state, write_unit_cargo_unload_state,
                 write_unit_factory_state, RepairTurretState, UnitAssemblerState,
                 UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
@@ -3515,6 +3522,41 @@ mod tests {
         assert_eq!(
             runtime.unit_runtime_states.get(&tile_pos),
             Some(&GameRuntimeUnitBlockState::Factory(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_reconstructor_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let tile_pos = point2_pack(3, 0);
+        let saved = BuildingComp::new(tile_pos, reconstructor_def.base().clone(), TeamId(1));
+        let state = ReconstructorState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 11.0,
+                ..Default::default()
+            },
+            command_pos: Some(IoVec2 { x: 8.0, y: 16.0 }),
+            command_id: Some(3),
+            constructing: false,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(3);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_reconstructor_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 3, reconstructor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Reconstructor(state))
         );
     }
 
