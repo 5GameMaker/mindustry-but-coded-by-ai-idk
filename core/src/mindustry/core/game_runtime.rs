@@ -17,12 +17,15 @@ use crate::mindustry::{
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
+    core::world::World,
     ctype::ContentId,
     entities::{
         bullet::BulletType,
         comp::{BuildingComp, BulletComp, UnitComp},
     },
-    io::{type_io, LegacyShortChunkMap},
+    io::{
+        type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData, LegacyShortChunkMap,
+    },
     r#type::PayloadSeq,
     vars::TILE_SIZE,
     world::blocks::campaign::{
@@ -114,6 +117,180 @@ pub struct GameRuntimeOwnedEffectResources<'a, 'b> {
     pub suppressed: &'a mut dyn FnMut(&BuildingComp) -> bool,
     pub force_coolant: &'a mut dyn FnMut(&BuildingComp) -> (f32, f32),
     pub spark_random: &'a mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
+}
+
+#[derive(Debug, Clone)]
+struct GameRuntimeMapEntityRecord {
+    block_id: i16,
+    is_center: bool,
+    building: Option<Vec<u8>>,
+}
+
+fn network_map_building_payload(building: &BuildingComp) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    // The outer byte is the block/build revision used by Java save-map chunks.
+    // Block-specific tail writers are still being migrated; writing revision 0
+    // plus the base BuildingComp payload lets clients recover identity, team,
+    // rotation, health and base modules immediately.
+    bytes.push(0);
+    building
+        .write_base(&mut bytes, false)
+        .expect("BuildingComp base payload should be writable into Vec<u8>");
+    bytes
+}
+
+fn network_map_entity_records(
+    width: usize,
+    height: usize,
+    buildings: &[BuildingComp],
+) -> BTreeMap<usize, GameRuntimeMapEntityRecord> {
+    let mut records = BTreeMap::new();
+    for building in buildings {
+        let center_x = building.tile_x();
+        let center_y = building.tile_y();
+        let center_payload = network_map_building_payload(building);
+        for (x, y) in footprint_tiles(center_x, center_y, building.block.size) {
+            if x < 0 || y < 0 {
+                continue;
+            }
+            let x = x as usize;
+            let y = y as usize;
+            if x >= width || y >= height {
+                continue;
+            }
+            let index = x + y * width;
+            let is_center = x as i32 == center_x && y as i32 == center_y;
+            records.insert(
+                index,
+                GameRuntimeMapEntityRecord {
+                    block_id: building.block.id,
+                    is_center,
+                    building: is_center.then(|| center_payload.clone()),
+                },
+            );
+        }
+    }
+    records
+}
+
+fn network_map_tile_data(tile: &Tile) -> Option<LegacyMapTileData> {
+    (tile.data != 0 || tile.floor_data != 0 || tile.overlay_data != 0 || tile.extra_data != 0)
+        .then_some(LegacyMapTileData {
+            data: tile.data,
+            floor_data: tile.floor_data,
+            overlay_data: tile.overlay_data,
+            extra_data: tile.extra_data,
+        })
+}
+
+fn export_network_map_snapshot_from_parts(
+    world: &World,
+    buildings: &[BuildingComp],
+) -> LegacyShortChunkMap {
+    let width = u16::try_from(world.width()).unwrap_or(u16::MAX);
+    let height = u16::try_from(world.height()).unwrap_or(u16::MAX);
+    let tile_count = width as usize * height as usize;
+    let tiles = world.tiles.iter().take(tile_count).collect::<Vec<_>>();
+    let entities = network_map_entity_records(width as usize, height as usize, buildings);
+
+    let mut floors = Vec::new();
+    let mut floor_start = 0usize;
+    while floor_start < tiles.len() {
+        let floor = tiles[floor_start].floor;
+        let overlay = tiles[floor_start].overlay;
+        let mut len = 1usize;
+        while floor_start + len < tiles.len()
+            && len < u8::MAX as usize + 1
+            && tiles[floor_start + len].floor == floor
+            && tiles[floor_start + len].overlay == overlay
+        {
+            len += 1;
+        }
+        floors.push(LegacyMapFloorRecord {
+            index: floor_start,
+            floor_id: floor,
+            ore_id: overlay,
+            consecutives: (len - 1) as u8,
+        });
+        floor_start += len;
+    }
+
+    let mut blocks = Vec::new();
+    let mut block_start = 0usize;
+    while block_start < tiles.len() {
+        let tile = tiles[block_start];
+        let tile_data = network_map_tile_data(tile);
+        if let Some(entity) = entities.get(&block_start) {
+            blocks.push(LegacyMapBlockRecord {
+                index: block_start,
+                block_id: entity.block_id,
+                packed_flags: 1 | if tile_data.is_some() { 4 } else { 0 },
+                has_entity: true,
+                has_old_data: false,
+                has_new_data: tile_data.is_some(),
+                is_center: entity.is_center,
+                new_data: tile_data,
+                old_data: None,
+                building: entity.building.clone(),
+                consecutives: 0,
+            });
+            block_start += 1;
+            continue;
+        }
+
+        if let Some(tile_data) = tile_data {
+            blocks.push(LegacyMapBlockRecord {
+                index: block_start,
+                block_id: tile.block,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: true,
+                is_center: true,
+                new_data: Some(tile_data),
+                old_data: None,
+                building: None,
+                consecutives: 0,
+            });
+            block_start += 1;
+            continue;
+        }
+
+        let block = tile.block;
+        let mut len = 1usize;
+        while block_start + len < tiles.len()
+            && len < u8::MAX as usize + 1
+            && !entities.contains_key(&(block_start + len))
+            && tiles[block_start + len].block == block
+            && tiles[block_start + len].data == 0
+            && tiles[block_start + len].floor_data == 0
+            && tiles[block_start + len].overlay_data == 0
+            && tiles[block_start + len].extra_data == 0
+        {
+            len += 1;
+        }
+        blocks.push(LegacyMapBlockRecord {
+            index: block_start,
+            block_id: block,
+            packed_flags: 0,
+            has_entity: false,
+            has_old_data: false,
+            has_new_data: false,
+            is_center: true,
+            new_data: None,
+            old_data: None,
+            building: None,
+            consecutives: (len - 1) as u8,
+        });
+        block_start += len;
+    }
+
+    LegacyShortChunkMap {
+        width,
+        height,
+        floors,
+        blocks,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -398,6 +575,10 @@ impl GameRuntime {
 
     pub fn buildings_mut(&mut self) -> &mut [BuildingComp] {
         &mut self.buildings
+    }
+
+    pub fn export_network_map_snapshot(&self) -> LegacyShortChunkMap {
+        export_network_map_snapshot_from_parts(&self.state.world, &self.buildings)
     }
 
     pub fn add_building(&mut self, building: BuildingComp) -> usize {
@@ -2828,6 +3009,69 @@ mod tests {
         assert!(runtime.state.world.build_pos(tile_pos).is_none());
         assert!(runtime.effect_runtime_store.is_empty());
         assert!(runtime.effect_timer_store.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_exports_network_map_snapshot_with_owned_building_chunks() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let tile_pos = point2_pack(5, 5);
+        let mut saved = BuildingComp::new(tile_pos, mend_def.base().clone(), TeamId(3));
+        saved.set_rotation(1);
+        saved.health = 33.0;
+        let footprint_tiles = (saved.block.size * saved.block.size) as usize;
+        assert!(footprint_tiles > 1);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(saved);
+
+        let map = runtime.export_network_map_snapshot();
+        let center_index = 5 + 5 * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("building center should be exported as an explicit record");
+        assert_eq!(center.block_id, mend_def.base().id);
+        assert!(center.has_entity);
+        assert!(center.is_center);
+        assert!(center
+            .building
+            .as_ref()
+            .is_some_and(|payload| payload.len() > 1));
+        assert_eq!(center.consecutives, 0);
+
+        let entity_records = map
+            .blocks
+            .iter()
+            .filter(|record| record.has_entity)
+            .collect::<Vec<_>>();
+        assert_eq!(entity_records.len(), footprint_tiles);
+        assert_eq!(
+            entity_records
+                .iter()
+                .filter(|record| record.is_center)
+                .count(),
+            1
+        );
+        assert!(entity_records
+            .iter()
+            .filter(|record| !record.is_center)
+            .all(|record| record.building.is_none()));
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(&content, &map);
+        assert_eq!(report.building_records, 1);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.building_parse_errors, 0);
+
+        let loaded_building = &loaded.buildings()[0];
+        assert_eq!(loaded_building.tile_pos, tile_pos);
+        assert_eq!(loaded_building.team, TeamId(3));
+        assert_eq!(loaded_building.rotation, 1);
+        assert_eq!(loaded_building.health, 33.0);
+        assert_eq!(loaded_building.block.id, mend_def.base().id);
     }
 
     #[test]
