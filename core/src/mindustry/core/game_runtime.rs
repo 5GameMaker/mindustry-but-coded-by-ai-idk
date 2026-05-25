@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use crate::mindustry::{
-    content::blocks::{BlockDef, EffectBlockKind},
+    content::blocks::{BlockDef, EffectBlockKind, SandboxBlockKind},
     core::content_loader::ContentLoader,
     core::game_state::GameState,
     ctype::ContentId,
@@ -28,8 +28,9 @@ use crate::mindustry::{
         EffectBlockTimerStateStore, EffectProjectorRuntimeState,
     },
     world::blocks::payloads::{
-        read_empty_payload_block_build_common, read_payload_mass_driver_extra,
-        PayloadBlockBuildState, PayloadMassDriverState,
+        read_empty_payload_block_build_common, read_payload_loader_extra,
+        read_payload_mass_driver_extra, read_payload_source_extra, PayloadBlockBuildState,
+        PayloadLoaderState, PayloadMassDriverState, PayloadSourceState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -79,6 +80,14 @@ pub enum GameRuntimePayloadBlockState {
     MassDriver {
         common: PayloadBlockBuildState,
         driver: PayloadMassDriverState,
+    },
+    Loader {
+        common: PayloadBlockBuildState,
+        loader: PayloadLoaderState,
+    },
+    Source {
+        common: PayloadBlockBuildState,
+        source: PayloadSourceState,
     },
 }
 
@@ -407,6 +416,39 @@ impl GameRuntime {
                     driver,
                 }))
             }
+            BlockDef::PayloadLoader(_) => {
+                let common = read_empty_payload_block_build_common(building_payload)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let exporting = read_payload_loader_extra(building_payload, revision)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let loader = PayloadLoaderState {
+                    has_payload: common.payload.is_some(),
+                    exporting,
+                    ..PayloadLoaderState::default()
+                };
+                Ok(Some(GameRuntimePayloadBlockState::Loader {
+                    common,
+                    loader,
+                }))
+            }
+            BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadSource => {
+                let common = read_empty_payload_block_build_common(building_payload)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let (unit, config_block, command_pos) =
+                    read_payload_source_extra(building_payload, revision)
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let source = PayloadSourceState {
+                    unit,
+                    config_block,
+                    command_pos,
+                    has_payload: common.payload.is_some(),
+                    ..PayloadSourceState::default()
+                };
+                Ok(Some(GameRuntimePayloadBlockState::Source {
+                    common,
+                    source,
+                }))
+            }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
@@ -594,8 +636,10 @@ mod tests {
                 BaseShieldState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
             },
             blocks::payloads::{
-                write_payload_block_build_common, write_payload_mass_driver_extra,
-                PayloadBlockBuildState, PayloadDriverState, PayloadMassDriverState, Vec2,
+                write_payload_block_build_common, write_payload_loader_extra,
+                write_payload_mass_driver_extra, write_payload_source_extra,
+                PayloadBlockBuildState, PayloadDriverState, PayloadLoaderState,
+                PayloadMassDriverState, PayloadSourceState, Vec2,
             },
             footprint_tiles, point2_pack, Block, Tile,
         },
@@ -1398,6 +1442,90 @@ mod tests {
         assert_eq!(
             runtime.payload_runtime_states.get(&tile_pos),
             Some(&GameRuntimePayloadBlockState::MassDriver { common, driver })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_loader_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("payload-loader").unwrap();
+        let tile_pos = point2_pack(3, 2);
+        let mut saved = BuildingComp::new(tile_pos, loader_def.base().clone(), TeamId(6));
+        saved.set_rotation(3);
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: -1.0, y: 2.0 },
+            pay_rotation: 270.0,
+            carried: false,
+        };
+        let loader = PayloadLoaderState {
+            exporting: true,
+            ..PayloadLoaderState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_payload_loader_extra(&mut building_bytes, loader.exporting).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 15, loader_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Loader { common, loader })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_source_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let tile_pos = point2_pack(4, 2);
+        let saved = BuildingComp::new(tile_pos, source_def.base().clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 0.25, y: 0.5 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let source = PayloadSourceState {
+            unit: Some(0),
+            config_block: None,
+            command_pos: Some(Vec2 { x: 8.0, y: 16.0 }),
+            has_payload: false,
+            ..PayloadSourceState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_payload_source_extra(
+            &mut building_bytes,
+            source.unit,
+            source.config_block,
+            source.command_pos,
+        )
+        .unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 16, source_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Source { common, source })
         );
     }
 
