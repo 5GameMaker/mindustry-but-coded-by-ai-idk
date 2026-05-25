@@ -5176,6 +5176,80 @@ pub fn effect_build_turret_timer_target2_ready_from_store(
     effect_build_turret_timer_target2_ready(content, building, timer, frame)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn effect_build_turret_update_building_frame<
+    FWithin,
+    FValidTeamPlan,
+    FHasResources,
+    FValidBreak,
+    FValidPlace,
+>(
+    content: &ContentLoader,
+    building: &BuildingComp,
+    timer_store: &mut EffectBlockTimerStateStore,
+    state: &mut BuildTurretState,
+    unit_plans: &mut VecDeque<BuildPlan>,
+    team_plans: &mut Vec<BlockPlan>,
+    frame: EffectBlockFrameInput,
+    controlled: bool,
+    following_valid: bool,
+    following_actively_building: bool,
+    following_plan: Option<BuildPlan>,
+    follow_candidates: &[BuildTurretFollowCandidate],
+    conflicting_breaker: bool,
+    construct_current_matches: bool,
+    self_plan_pos: Option<(i32, i32)>,
+    within_range: FWithin,
+    valid_team_plan: FValidTeamPlan,
+    has_resources: FHasResources,
+    valid_break: FValidBreak,
+    valid_place: FValidPlace,
+) -> Option<BuildTurretUpdateStep>
+where
+    FWithin: Fn(&BlockPlan) -> bool,
+    FValidTeamPlan: Fn(&BlockPlan) -> bool,
+    FHasResources: Fn(&BlockPlan) -> bool,
+    FValidBreak: FnMut(&BuildPlan) -> bool,
+    FValidPlace: FnMut(&BuildPlan) -> bool,
+{
+    let block = effect_block_data_for_building(content, building)?;
+    if block.kind != EffectBlockKind::BuildTurret {
+        return None;
+    }
+
+    let timer_target_ready = if unit_plans.front().is_none() {
+        effect_build_turret_timer_target_ready_from_store(content, building, timer_store, frame)?
+    } else {
+        false
+    };
+    let timer_target2_ready = if unit_plans.front().is_some_and(|plan| !plan.breaking) {
+        effect_build_turret_timer_target2_ready_from_store(content, building, timer_store, frame)?
+    } else {
+        false
+    };
+
+    Some(build_turret_update_tick(
+        state,
+        unit_plans,
+        team_plans,
+        controlled,
+        timer_target_ready,
+        timer_target2_ready,
+        following_valid,
+        following_actively_building,
+        following_plan,
+        follow_candidates,
+        conflicting_breaker,
+        construct_current_matches,
+        self_plan_pos,
+        within_range,
+        valid_team_plan,
+        has_resources,
+        valid_break,
+        valid_place,
+    ))
+}
+
 pub fn build_turret_unit_tick(input: BuildTurretUnitTickInput) -> BuildTurretUnitTickStep {
     let efficiency = if input.suppressed {
         0.0
@@ -10992,6 +11066,93 @@ mod tests {
         assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET_SLOT), 15.0);
         assert_eq!(timer.timer.last_time(BUILD_TURRET_TIMER_TARGET2_SLOT), 30.0);
         assert_eq!(timer.timer.timers(), BuildingTimerState::DEFAULT_TIMERS);
+    }
+
+    #[test]
+    fn build_turret_building_frame_wrapper_claims_plan_after_timer_gate() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let build_tower = content.block_by_name("build-tower").unwrap();
+        let building = BuildingComp::new(point2_pack(23, 9), build_tower.base().clone(), TeamId(1));
+        let mut timer_store = EffectBlockTimerStateStore::new();
+        let mut state = BuildTurretState::default();
+        let mut unit_plans = VecDeque::new();
+        let mut team_plans = vec![BlockPlan::new(5, 5, 0, "router", None)];
+
+        let idle = effect_build_turret_update_building_frame(
+            &content,
+            &building,
+            &mut timer_store,
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            EffectBlockFrameInput {
+                delta: 14.0,
+                edelta: 14.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: 14.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            false,
+            false,
+            false,
+            None,
+            &[],
+            false,
+            false,
+            None,
+            |_| true,
+            |_| true,
+            |_| true,
+            |_| false,
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(idle.action, BuildTurretUpdateAction::Idle);
+        assert!(unit_plans.is_empty());
+
+        let claimed = effect_build_turret_update_building_frame(
+            &content,
+            &building,
+            &mut timer_store,
+            &mut state,
+            &mut unit_plans,
+            &mut team_plans,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: 15.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            false,
+            false,
+            false,
+            None,
+            &[],
+            false,
+            false,
+            None,
+            |_| true,
+            |_| true,
+            |_| true,
+            |_| false,
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(claimed.action, BuildTurretUpdateAction::ClaimTeamPlan);
+        assert_eq!(unit_plans.len(), 1);
+        assert_eq!(
+            timer_store
+                .get(building.tile_pos)
+                .unwrap()
+                .timer
+                .last_time(BUILD_TURRET_TIMER_TARGET_SLOT),
+            15.0
+        );
     }
 
     #[test]
