@@ -99,26 +99,56 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 最近已推送到 `main` 的提交包括：
 
-1. `bd17931 补齐载荷弹药炮塔状态读取`
-2. `9cceec3 接入单位载荷精确读取`
-3. `5d50757 支持无状态构造载荷读取`
-4. `1ac3c6e 区分嵌套载荷读取模式`
-5. `a309790 统计方块状态剩余字节`
-6. `3206cb3 接入非末尾构造载荷读取`
-7. `95872df 接入构造载荷精确读取`
-8. `e154545 接入世界流前置信息到游戏状态`
-9. `eaaec1e 展开存档地图到轻量瓦片`
-10. `c76842c 解析世界流玩家与存档头`
+1. `b51d8af 保留联机地图尾部原始数据`
+2. `fc7798f 服务端发送运行时队伍计划`
+3. `6f94257 接入联机队伍建造计划`
+4. `1226e49 兼容载荷炮塔旧式弹药`
+5. `a115351 锁定逻辑处理器旧版读取`
+6. `bd17931 补齐载荷弹药炮塔状态读取`
+7. `9cceec3 接入单位载荷精确读取`
+8. `5d50757 支持无状态构造载荷读取`
+9. `1ac3c6e 区分嵌套载荷读取模式`
+10. `a309790 统计方块状态剩余字节`
 
 本轮开始前最后确认时：
 
 - 当前分支：`main`
-- 最新提交：`bd17931 补齐载荷弹药炮塔状态读取`
+- 最新提交：`b51d8af 保留联机地图尾部原始数据`
 - `git status --short` 未显示已有未提交代码改动。
 
 ---
 
 ## 5. 最近一次完成的具体实现
+
+### 2026-05-26 续作：服务端 world stream 导出 owned building entity chunk
+
+文件：
+
+- `server/src/lib.rs`
+- `MIGRATION.md`
+- `AI_HANDOFF.md`
+
+完成内容：
+
+1. `ServerLauncher::network_world_data_template(...)` 组装 `map_snapshot` 时，已把 `runtime.buildings()` 传入 `runtime_world_map_snapshot(...)`。
+2. `runtime_world_map_snapshot(...)` 现在会为 owned building footprint 生成 Java chunk-map entity records：
+   - center tile：`has_entity=true`、`is_center=true`、`building=Some(bytes)`；
+   - non-center footprint tile：`has_entity=true`、`is_center=false`、不写 building chunk；
+   - 普通 block run 不再跨过 entity tile，保持 `write_chunk_map(...)` 的 run-cover 约束。
+3. `runtime_world_building_payload(...)` 当前写入最小可读 payload：
+   - 前置 block/build `revision` byte：`0`；
+   - 后接 `BuildingComp::write_base(..., false)`；
+   - block-specific tail writers 尚未接入，因此门、炮塔、发电机、payload block 等运行态子状态仍需继续补。
+4. 新增 `server_world_data_exports_owned_building_chunks_for_runtime_loader`：
+   - 构造服务端 runtime owned `router`；
+   - 触发连接后 world stream 下发；
+   - 解码 `NetworkWorldData.map_snapshot`；
+   - 断言 center record 带 building chunk；
+   - 再用 `GameRuntime::load_network_map_with_buildings(...)` 反向读回 team / rotation / health / tile_pos。
+5. 已验证：
+   - `cargo test -p mindustry-server server_world_data_exports_owned_building_chunks_for_runtime_loader -- --test-threads=1`
+   - `cargo test -p mindustry-server server_update_flushes_pending_world_data -- --test-threads=1`
+   - `cargo check -p mindustry-server`
 
 ### 2026-05-26 续作：PayloadAmmoTurret 旧式 PayloadSeq fallback
 
@@ -312,8 +342,9 @@ git -C 'D:/MDT/rust-mindustry' push origin main
    - 将 `NetworkWorldData.team_blocks_snapshot` 通过 `content_header_snapshot` 的 Java content id/name 映射物化到 runtime `Teams` build plans，避免 `SaveVersion.readTeamBlocks(...)` 结果只缓存不生效。
 5. `mindustry_server::ServerLauncher::flush_pending_world_data(...)` 已从 `write_minimal_world_data(...)` 升级为 runtime world-data 组装：
    - `network_world_data_template(...)` 会写入 base content header、空 content patches、当前 world 的轻量 map snapshot、runtime `Teams.plans` 导出的 `team_blocks_snapshot`、markers/custom chunks；
+   - 当前 world map snapshot 已开始导出 owned building entity chunk：center tile 写 `revision 0 + BuildingComp::write_base(...)`，multi-tile footprint 的非中心 tile 写 `has_entity=true/is_center=false`；
    - 每个连接发送前补 `player_id` 与 `NetworkPlayerData::bootstrap()`，再通过 `write_world_data(...)` 形成 Java-like compressed world stream；
-   - 当前 map snapshot 仍未写 building entity chunk，后续需要继续接完整 `SaveVersion.writeMap(...)` 的 building serialization。
+   - block-specific building tail serialization 尚未接入，后续需要继续对照完整 `SaveVersion.writeMap(...)` 补门/炮塔/生产/物流/payload/logic 等 state writers。
 
 已验证：
 

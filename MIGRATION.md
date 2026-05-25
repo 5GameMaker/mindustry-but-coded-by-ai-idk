@@ -315,6 +315,12 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
   - 可按 Java 行为兜底包含 sharded；
   - block name 由调用者映射为 content id；
   - 当前 runtime `BlockPlan.config` 以 Null/String 形式导出，typed config 保真仍待补。
+- `mindustry_server::ServerLauncher::network_world_data_template(...)` 已开始从真实 runtime 导出 owned building entity chunk：
+  - `runtime_world_map_snapshot(...)` 接收 `World + &[BuildingComp]`，普通 block run 不再跨过 entity tile；
+  - center tile 写 `has_entity=true/is_center=true/building=Some(...)`；
+  - multi-tile footprint 的非中心 tile 写 `has_entity=true/is_center=false`，对齐 Java map chunk 的中心/非中心 building 记录形态；
+  - 当前 building chunk payload 为 `revision 0 + BuildingComp::write_base(..., false)`，已能让 Rust runtime 读回 team/rotation/health/tile_pos/module base；
+  - 已补 `server_world_data_exports_owned_building_chunks_for_runtime_loader`，验证服务端 world stream 解码后的 `map_snapshot` 可被 `GameRuntime::load_network_map_with_buildings(...)` 反向加载出 owned building。
 
 仍需：
 
@@ -322,6 +328,7 @@ git -C "D:/MDT/rust-mindustry" -c http.version=HTTP/1.1 \
 - markers/custom chunks 与完整 save dispatcher 的运行态接入；
 - 将 `RawSaveEnvelope` region 层与 runtime world/entities 物化流程接成完整 save read/write dispatcher；
 - `teamBlocks` 导出补 typed config 保真与 content header 临时映射写出；
+- building chunk 继续接入 block-specific tail writers（门/炮塔/发电/生产/物流/payload/logic 等），避免只导出 base payload；
 - player/groups/world/entity 的完整应用；
 - 与 Java 原版服务端/客户端的持续互通测试。
 

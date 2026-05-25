@@ -16,10 +16,12 @@ use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, Net, NetworkPlayerData, NetworkWorldData,
 };
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
-use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
+use mindustry_core::mindustry::world::{
+    blocks::defense::EffectBlockFrameBatchReport, footprint_tiles,
+};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
-use std::io;
+use std::{collections::BTreeMap, io};
 
 #[derive(Debug, Clone)]
 pub struct ServerLauncher {
@@ -124,7 +126,10 @@ impl ServerLauncher {
             rand_seed1: self.runtime.state.rand_seed1,
             content_header_snapshot: Some(self.content_loader.content_header_snapshot()),
             content_patches_snapshot: Some(ContentPatchSet::default()),
-            map_snapshot: Some(runtime_world_map_snapshot(&self.runtime.state.world)),
+            map_snapshot: Some(runtime_world_map_snapshot(
+                &self.runtime.state.world,
+                self.runtime.buildings(),
+            )),
             team_blocks_snapshot: Some(team_blocks_snapshot),
             markers_snapshot: Some(self.runtime.state.markers.clone()),
             custom_chunks_snapshot: Some(self.runtime.state.custom_chunks.clone()),
@@ -158,11 +163,76 @@ impl ServerLauncher {
     }
 }
 
-fn runtime_world_map_snapshot(world: &World) -> LegacyShortChunkMap {
+#[derive(Debug, Clone)]
+struct RuntimeWorldEntityRecord {
+    block_id: i16,
+    is_center: bool,
+    building: Option<Vec<u8>>,
+}
+
+fn runtime_world_building_payload(building: &BuildingComp) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    // The outer byte is the block/build revision used by Java save-map chunks.
+    // Block-specific tail writers are still being migrated; writing revision 0
+    // plus the base BuildingComp payload lets Rust clients recover the runtime
+    // building identity, team, rotation, health and modules immediately.
+    bytes.push(0);
+    building
+        .write_base(&mut bytes, false)
+        .expect("BuildingComp base payload should be writable into Vec<u8>");
+    bytes
+}
+
+fn runtime_world_entity_records(
+    width: usize,
+    height: usize,
+    buildings: &[BuildingComp],
+) -> BTreeMap<usize, RuntimeWorldEntityRecord> {
+    let mut records = BTreeMap::new();
+    for building in buildings {
+        let center_x = building.tile_x();
+        let center_y = building.tile_y();
+        let center_payload = runtime_world_building_payload(building);
+        for (x, y) in footprint_tiles(center_x, center_y, building.block.size) {
+            if x < 0 || y < 0 {
+                continue;
+            }
+            let x = x as usize;
+            let y = y as usize;
+            if x >= width || y >= height {
+                continue;
+            }
+            let index = x + y * width;
+            let is_center = x as i32 == center_x && y as i32 == center_y;
+            records.insert(
+                index,
+                RuntimeWorldEntityRecord {
+                    block_id: building.block.id,
+                    is_center,
+                    building: is_center.then(|| center_payload.clone()),
+                },
+            );
+        }
+    }
+    records
+}
+
+fn runtime_tile_data(tile: &mindustry_core::mindustry::world::Tile) -> Option<LegacyMapTileData> {
+    (tile.data != 0 || tile.floor_data != 0 || tile.overlay_data != 0 || tile.extra_data != 0)
+        .then_some(LegacyMapTileData {
+            data: tile.data,
+            floor_data: tile.floor_data,
+            overlay_data: tile.overlay_data,
+            extra_data: tile.extra_data,
+        })
+}
+
+fn runtime_world_map_snapshot(world: &World, buildings: &[BuildingComp]) -> LegacyShortChunkMap {
     let width = u16::try_from(world.width()).unwrap_or(u16::MAX);
     let height = u16::try_from(world.height()).unwrap_or(u16::MAX);
     let tile_count = width as usize * height as usize;
     let tiles = world.tiles.iter().take(tile_count).collect::<Vec<_>>();
+    let entities = runtime_world_entity_records(width as usize, height as usize, buildings);
 
     let mut floors = Vec::new();
     let mut floor_start = 0usize;
@@ -190,11 +260,26 @@ fn runtime_world_map_snapshot(world: &World) -> LegacyShortChunkMap {
     let mut block_start = 0usize;
     while block_start < tiles.len() {
         let tile = tiles[block_start];
-        let has_tile_data = tile.data != 0
-            || tile.floor_data != 0
-            || tile.overlay_data != 0
-            || tile.extra_data != 0;
-        if has_tile_data {
+        let tile_data = runtime_tile_data(tile);
+        if let Some(entity) = entities.get(&block_start) {
+            blocks.push(LegacyMapBlockRecord {
+                index: block_start,
+                block_id: entity.block_id,
+                packed_flags: 1 | if tile_data.is_some() { 4 } else { 0 },
+                has_entity: true,
+                has_old_data: false,
+                has_new_data: tile_data.is_some(),
+                is_center: entity.is_center,
+                new_data: tile_data,
+                old_data: None,
+                building: entity.building.clone(),
+                consecutives: 0,
+            });
+            block_start += 1;
+            continue;
+        }
+
+        if let Some(tile_data) = tile_data {
             blocks.push(LegacyMapBlockRecord {
                 index: block_start,
                 block_id: tile.block,
@@ -203,12 +288,7 @@ fn runtime_world_map_snapshot(world: &World) -> LegacyShortChunkMap {
                 has_old_data: false,
                 has_new_data: true,
                 is_center: true,
-                new_data: Some(LegacyMapTileData {
-                    data: tile.data,
-                    floor_data: tile.floor_data,
-                    overlay_data: tile.overlay_data,
-                    extra_data: tile.extra_data,
-                }),
+                new_data: Some(tile_data),
                 old_data: None,
                 building: None,
                 consecutives: 0,
@@ -221,6 +301,7 @@ fn runtime_world_map_snapshot(world: &World) -> LegacyShortChunkMap {
         let mut len = 1usize;
         while block_start + len < tiles.len()
             && len < u8::MAX as usize + 1
+            && !entities.contains_key(&(block_start + len))
             && tiles[block_start + len].block == block
             && tiles[block_start + len].data == 0
             && tiles[block_start + len].floor_data == 0
@@ -614,6 +695,88 @@ mod tests {
         assert_eq!(sharded.plans[0].rotation, 1);
         assert_eq!(sharded.plans[0].block_id, router_id);
         assert_eq!(sharded.plans[0].config, TypeValue::String("cfg".into()));
+    }
+
+    #[test]
+    fn server_world_data_exports_owned_building_chunks_for_runtime_loader() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher {
+            context: AppContext::server("config"),
+            args: Vec::new(),
+            control: super::ServerControl::new(Vec::new()),
+            runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
+            net_server: NetServer::new(Net::new(Box::new(provider))),
+            network_error: None,
+        };
+
+        let router_def = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router");
+        let router_block = router_def.base().clone();
+        let router_id = router_block.id;
+        let tile_pos = point2_pack(4, 4);
+        let mut router = BuildingComp::new(tile_pos, router_block, TeamId(1));
+        router.set_rotation(2);
+        router.health = 12.5;
+        launcher.runtime.state.world.resize(12, 12);
+        launcher.runtime.add_building(router);
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(73),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "127.0.0.1:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(73),
+                false,
+                PacketKind::ConnectPacket(connect_packet("rust-loader")),
+            );
+        }
+
+        launcher.update();
+
+        let sent = sent.lock().unwrap();
+        let world_data = decode_captured_world_data(&sent, 73);
+        let map = world_data
+            .map_snapshot
+            .expect("runtime map snapshot should be sent in world data");
+        let center_index = 4 + 4 * 12;
+        let record = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("owned building center should be an explicit block record");
+        assert_eq!(record.block_id, router_id);
+        assert!(record.has_entity);
+        assert!(record.is_center);
+        assert!(record
+            .building
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > 1));
+        assert_eq!(record.consecutives, 0);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(&launcher.content_loader, &map);
+        assert_eq!(report.building_records, 1);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.building_parse_errors, 0);
+        assert_eq!(loaded.buildings().len(), 1);
+        let loaded_router = &loaded.buildings()[0];
+        assert_eq!(loaded_router.tile_pos, tile_pos);
+        assert_eq!(loaded_router.block.id, router_id);
+        assert_eq!(loaded_router.team, TeamId(1));
+        assert_eq!(loaded_router.rotation, 2);
+        assert_eq!(loaded_router.health, 12.5);
     }
 
     #[test]
