@@ -851,6 +851,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `directional_force_projector_deflect_plan(...)`
 - `directional_force_projector_draw_plan(...)`
 - `directional_force_projector_absorb_bullet(...)`
+- `directional_force_projector_absorb_bullet_comp(...)`
 - 已对照 `ShieldWall.draw()` 锁定：
   - 总是先绘制 base region；
   - `shieldRadius <= 0` 时只输出 region；
@@ -869,6 +870,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - deflect segment 为 `(length, ±shieldRadius)` 旋转平移，扫描 bounds 在 segment bbox 基础上 grow `padSize`；
   - animated shield 走 rect、edge lines 与 caps，静态 shield 走 fill/stroke rect；
   - top additive alpha = `buildup / shieldHealth * 0.75`。
+  - `directional_force_projector_absorb_bullet_comp(...)` 已把几何相交判定接到真实 `BulletComp::absorb()`，并使用 `BulletType::shield_damage(bullet.damage)` 写入 `buildup`。
 - `ForceProjectorState`
 - `force_projector_real_radius(...)`
 - `force_projector_shield(...)`

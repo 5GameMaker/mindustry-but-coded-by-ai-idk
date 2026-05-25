@@ -2884,6 +2884,42 @@ pub fn directional_force_projector_absorb_bullet(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn directional_force_projector_absorb_bullet_comp(
+    state: &mut DirectionalForceProjectorState,
+    bullet: &mut BulletComp,
+    bullet_type: &BulletType,
+    enemy_team: bool,
+    delta: f32,
+    projector_x: f32,
+    projector_y: f32,
+    length: f32,
+    rotation_degrees: f32,
+) -> bool {
+    if bullet.absorbed {
+        return false;
+    }
+    let absorbed = directional_force_projector_absorb_bullet(
+        state,
+        enemy_team,
+        bullet_type.absorbable,
+        bullet.x,
+        bullet.y,
+        bullet.velocity.x,
+        bullet.velocity.y,
+        bullet_type.shield_damage(bullet.damage),
+        delta,
+        projector_x,
+        projector_y,
+        length,
+        rotation_degrees,
+    );
+    if absorbed {
+        bullet.absorb();
+    }
+    absorbed
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RadarState {
     pub progress: f32,
@@ -5828,6 +5864,49 @@ mod tests {
         ));
         assert_eq!(directional.hit, 1.0);
         assert!(directional.buildup >= 50.0);
+        let mut directional_runtime = DirectionalForceProjectorState {
+            broken: false,
+            shield_radius: 10.0,
+            ..DirectionalForceProjectorState::default()
+        };
+        let mut typed_bullet = BulletComp::default();
+        typed_bullet.x = 30.0;
+        typed_bullet.y = 0.0;
+        typed_bullet.velocity.x = 10.0;
+        typed_bullet.damage = 10.0;
+        let typed_bullet_type = BulletType {
+            absorbable: true,
+            shield_damage_multiplier: 3.0,
+            ..BulletType::default()
+        };
+        assert!(directional_force_projector_absorb_bullet_comp(
+            &mut directional_runtime,
+            &mut typed_bullet,
+            &typed_bullet_type,
+            true,
+            1.0,
+            0.0,
+            0.0,
+            40.0,
+            0.0
+        ));
+        assert_eq!(directional_runtime.hit, 1.0);
+        assert_eq!(directional_runtime.buildup, 30.0);
+        assert!(typed_bullet.absorbed);
+        assert!(typed_bullet.removed);
+        let after_absorb = directional_runtime;
+        assert!(!directional_force_projector_absorb_bullet_comp(
+            &mut directional_runtime,
+            &mut typed_bullet,
+            &typed_bullet_type,
+            true,
+            1.0,
+            0.0,
+            0.0,
+            40.0,
+            0.0
+        ));
+        assert_eq!(directional_runtime, after_absorb);
         directional_force_projector_picked_up(&mut directional);
         assert_eq!(directional.shield_radius, 0.0);
         assert_eq!(directional.warmup, 0.0);
