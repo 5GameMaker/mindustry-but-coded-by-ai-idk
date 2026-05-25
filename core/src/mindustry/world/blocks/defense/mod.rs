@@ -1802,11 +1802,18 @@ pub fn force_projector_bar_fraction(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ForceProjectorUpdate {
+    pub broke_now: bool,
+    pub should_consume_phase: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
-pub fn force_projector_update(
+pub fn force_projector_update_with_timer(
     state: &mut ForceProjectorState,
     efficiency: f32,
     phase_valid: bool,
+    timer_ready: bool,
     coolant_efficiency: f32,
     coolant_heat_capacity: f32,
     delta: f32,
@@ -1815,8 +1822,9 @@ pub fn force_projector_update(
     cooldown_normal: f32,
     cooldown_broken_base: f32,
     cooldown_liquid: f32,
-) -> bool {
+) -> ForceProjectorUpdate {
     state.phase_heat = lerp_delta(state.phase_heat, if phase_valid { 1.0 } else { 0.0 }, 0.1);
+    let should_consume_phase = phase_valid && !state.broken && timer_ready && efficiency > 0.0;
     state.radscl = lerp_delta(
         state.radscl,
         if state.broken { 0.0 } else { state.warmup },
@@ -1848,7 +1856,41 @@ pub fn force_projector_update(
     if state.hit > 0.0 {
         state.hit -= 1.0 / 5.0 * delta;
     }
-    broke_now
+    ForceProjectorUpdate {
+        broke_now,
+        should_consume_phase,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn force_projector_update(
+    state: &mut ForceProjectorState,
+    efficiency: f32,
+    phase_valid: bool,
+    coolant_efficiency: f32,
+    coolant_heat_capacity: f32,
+    delta: f32,
+    shield_health: f32,
+    phase_shield_boost: f32,
+    cooldown_normal: f32,
+    cooldown_broken_base: f32,
+    cooldown_liquid: f32,
+) -> bool {
+    force_projector_update_with_timer(
+        state,
+        efficiency,
+        phase_valid,
+        true,
+        coolant_efficiency,
+        coolant_heat_capacity,
+        delta,
+        shield_health,
+        phase_shield_boost,
+        cooldown_normal,
+        cooldown_broken_base,
+        cooldown_liquid,
+    )
+    .broke_now
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2890,6 +2932,37 @@ pub fn effect_base_shield_apply_runtime<'a>(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn effect_force_projector_update_runtime(
+    block: &EffectBlockData,
+    state: &mut ForceProjectorState,
+    efficiency: f32,
+    phase_valid: bool,
+    timer_ready: bool,
+    coolant_efficiency: f32,
+    coolant_heat_capacity: f32,
+    delta: f32,
+) -> Option<ForceProjectorUpdate> {
+    if block.kind != EffectBlockKind::ForceProjector {
+        return None;
+    }
+
+    Some(force_projector_update_with_timer(
+        state,
+        efficiency,
+        phase_valid,
+        timer_ready,
+        coolant_efficiency,
+        coolant_heat_capacity,
+        delta,
+        block.shield_health,
+        block.phase_shield_boost,
+        block.cooldown_normal,
+        block.cooldown_broken_base,
+        block.cooldown_liquid,
+    ))
+}
+
 pub enum EffectBlockRuntimeContext<'a, 'b> {
     Projector {
         state: &'a mut EffectProjectorRuntimeState,
@@ -2901,6 +2974,15 @@ pub enum EffectBlockRuntimeContext<'a, 'b> {
         state: &'a mut RadarState,
         fog_control: &'a mut FogControl,
         input: EffectRadarRuntimeInput,
+    },
+    ForceProjector {
+        state: &'a mut ForceProjectorState,
+        efficiency: f32,
+        phase_valid: bool,
+        timer_ready: bool,
+        coolant_efficiency: f32,
+        coolant_heat_capacity: f32,
+        delta: f32,
     },
     BaseShield {
         state: &'a mut BaseShieldState,
@@ -2933,6 +3015,14 @@ pub enum EffectBlockRuntimeResources<'a, 'b> {
     Radar {
         fog_control: &'a mut FogControl,
         input: EffectRadarRuntimeInput,
+    },
+    ForceProjector {
+        efficiency: f32,
+        phase_valid: bool,
+        timer_ready: bool,
+        coolant_efficiency: f32,
+        coolant_heat_capacity: f32,
+        delta: f32,
     },
     BaseShield {
         shield: &'a BuildingComp,
@@ -2977,6 +3067,7 @@ pub fn effect_block_building_edelta(building: &BuildingComp, frame: EffectBlockF
 pub enum EffectBlockRuntimeReport {
     Projector(EffectProjectorRuntimeReport),
     Radar { forced_update: bool },
+    ForceProjector(ForceProjectorUpdate),
     BaseShield(BaseShieldRuntimeReport),
     ShockwaveTower(ShockwaveTowerFire),
 }
@@ -2999,6 +3090,25 @@ pub fn effect_block_update_runtime<'a, 'b>(
             input,
         } => effect_radar_update_runtime(block, state, fog_control, input)
             .map(|forced_update| EffectBlockRuntimeReport::Radar { forced_update }),
+        EffectBlockRuntimeContext::ForceProjector {
+            state,
+            efficiency,
+            phase_valid,
+            timer_ready,
+            coolant_efficiency,
+            coolant_heat_capacity,
+            delta,
+        } => effect_force_projector_update_runtime(
+            block,
+            state,
+            efficiency,
+            phase_valid,
+            timer_ready,
+            coolant_efficiency,
+            coolant_heat_capacity,
+            delta,
+        )
+        .map(EffectBlockRuntimeReport::ForceProjector),
         EffectBlockRuntimeContext::BaseShield {
             state,
             shield,
@@ -3075,6 +3185,28 @@ pub fn effect_block_update_runtime_state<'a, 'b>(
                 state,
                 fog_control,
                 input,
+            },
+        ),
+        (
+            EffectBlockRuntimeState::ForceProjector(state),
+            EffectBlockRuntimeResources::ForceProjector {
+                efficiency,
+                phase_valid,
+                timer_ready,
+                coolant_efficiency,
+                coolant_heat_capacity,
+                delta,
+            },
+        ) => effect_block_update_runtime(
+            block,
+            EffectBlockRuntimeContext::ForceProjector {
+                state,
+                efficiency,
+                phase_valid,
+                timer_ready,
+                coolant_efficiency,
+                coolant_heat_capacity,
+                delta,
             },
         ),
         (
@@ -3235,6 +3367,81 @@ pub fn effect_projector_update_building_frame_with_timer(
         timer_ready,
         suppressed,
     )
+}
+
+pub const FORCE_PROJECTOR_TIMER_USE_SLOT: usize = 1;
+
+#[allow(clippy::too_many_arguments)]
+pub fn effect_force_projector_update_building_frame(
+    store: &mut EffectBlockRuntimeStateStore,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    frame: EffectBlockFrameInput,
+    timer_ready: bool,
+    coolant_efficiency: f32,
+    coolant_heat_capacity: f32,
+) -> Option<EffectBlockRuntimeReport> {
+    let block = effect_block_data_for_building(content, building)?;
+    if block.kind != EffectBlockKind::ForceProjector {
+        return None;
+    }
+    effect_block_update_building_runtime(
+        store,
+        content,
+        building,
+        0.0,
+        EffectBlockRuntimeResources::ForceProjector {
+            efficiency: building.efficiency,
+            phase_valid: !block.boost_items.is_empty() && building.optional_efficiency > 0.0,
+            timer_ready,
+            coolant_efficiency,
+            coolant_heat_capacity,
+            delta: effect_block_building_delta(building, frame),
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn effect_force_projector_update_building_frame_with_timer(
+    store: &mut EffectBlockRuntimeStateStore,
+    timer: &mut BuildingTimerState,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    frame: EffectBlockFrameInput,
+    coolant_efficiency: f32,
+    coolant_heat_capacity: f32,
+) -> Option<EffectBlockRuntimeReport> {
+    let block = effect_block_data_for_building(content, building)?;
+    if block.kind != EffectBlockKind::ForceProjector {
+        return None;
+    }
+    let state = store.ensure_for_building(content, building, 0.0)?;
+    let EffectBlockRuntimeState::ForceProjector(force_state) = state else {
+        return None;
+    };
+    let phase_valid = !block.boost_items.is_empty() && building.optional_efficiency > 0.0;
+    let timer_ready = if phase_valid && !force_state.broken && building.efficiency > 0.0 {
+        timer.set_time(frame.now);
+        timer.timer(
+            block
+                .timer_use_slot
+                .unwrap_or(FORCE_PROJECTOR_TIMER_USE_SLOT),
+            block.phase_use_time / building.time_scale,
+        )
+    } else {
+        false
+    };
+    effect_force_projector_update_runtime(
+        block,
+        force_state,
+        building.efficiency,
+        phase_valid,
+        timer_ready,
+        coolant_efficiency,
+        coolant_heat_capacity,
+        effect_block_building_delta(building, frame),
+    )
+    .map(EffectBlockRuntimeReport::ForceProjector)
 }
 
 pub fn effect_base_shield_update_building_frame<'a, 'b>(
@@ -6764,10 +6971,12 @@ mod tests {
     fn effect_block_runtime_state_factory_covers_supported_effect_content() {
         let content = ContentLoader::create_base_content().unwrap();
         let mend = effect_block(&content, "mend-projector");
+        let force = effect_block(&content, "force-projector");
         let shockwave = effect_block(&content, "shockwave-tower");
         let build_tower = effect_block(&content, "build-tower");
 
         assert_eq!(mend.timer_use_slot, Some(MEND_PROJECTOR_TIMER_USE_SLOT));
+        assert_eq!(force.timer_use_slot, Some(FORCE_PROJECTOR_TIMER_USE_SLOT));
         assert_eq!(
             shockwave.timer_check_slot,
             Some(SHOCKWAVE_TOWER_TIMER_CHECK_SLOT)
@@ -6804,7 +7013,7 @@ mod tests {
             ))
         ));
         assert!(matches!(
-            effect_block_runtime_state_for(effect_block(&content, "force-projector"), 0.0),
+            effect_block_runtime_state_for(force, 0.0),
             Some(EffectBlockRuntimeState::ForceProjector(_))
         ));
         assert!(matches!(
@@ -7169,6 +7378,161 @@ mod tests {
             timer.timer.last_time(MEND_PROJECTOR_TIMER_USE_SLOT),
             effect_block(&content, "mend-projector").use_time
         );
+    }
+
+    #[test]
+    fn force_projector_timer_gate_controls_phase_consume_report() {
+        let mut state = ForceProjectorState {
+            broken: false,
+            ..ForceProjectorState::default()
+        };
+
+        let blocked = force_projector_update_with_timer(
+            &mut state, 1.0, true, false, 0.0, 0.0, 0.0, 700.0, 400.0, 1.75, 0.35, 1.5,
+        );
+        assert!(!blocked.broke_now);
+        assert!(!blocked.should_consume_phase);
+
+        let ready = force_projector_update_with_timer(
+            &mut state, 1.0, true, true, 0.0, 0.0, 0.0, 700.0, 400.0, 1.75, 0.35, 1.5,
+        );
+        assert!(!ready.broke_now);
+        assert!(ready.should_consume_phase);
+
+        let broken = force_projector_update_with_timer(
+            &mut ForceProjectorState {
+                broken: true,
+                ..ForceProjectorState::default()
+            },
+            1.0,
+            true,
+            true,
+            0.0,
+            0.0,
+            0.0,
+            700.0,
+            400.0,
+            1.75,
+            0.35,
+            1.5,
+        );
+        assert!(!broken.should_consume_phase);
+    }
+
+    #[test]
+    fn effect_force_projector_building_frame_uses_timer_sidecar_for_phase_consume() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let force_def = content.block_by_name("force-projector").unwrap();
+        let force_block = effect_block(&content, "force-projector");
+        let mut building =
+            BuildingComp::new(point2_pack(12, 9), force_def.base().clone(), TeamId(1));
+        building.efficiency = 1.0;
+        building.optional_efficiency = 1.0;
+        building.time_scale = 2.0;
+
+        let mut store = EffectBlockRuntimeStateStore::new();
+        let mut timer = BuildingTimerState::default();
+
+        let while_broken = effect_force_projector_update_building_frame_with_timer(
+            &mut store,
+            &mut timer,
+            &content,
+            &building,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: 10.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            0.0,
+            0.0,
+        );
+        match while_broken {
+            Some(EffectBlockRuntimeReport::ForceProjector(update)) => {
+                assert!(!update.should_consume_phase)
+            }
+            other => panic!("unexpected force projector report while broken: {other:?}"),
+        }
+        assert_eq!(timer.timer.last_time(FORCE_PROJECTOR_TIMER_USE_SLOT), 0.0);
+
+        let before_interval = effect_force_projector_update_building_frame_with_timer(
+            &mut store,
+            &mut timer,
+            &content,
+            &building,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: force_block.phase_use_time / building.time_scale - 1.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            0.0,
+            0.0,
+        );
+        match before_interval {
+            Some(EffectBlockRuntimeReport::ForceProjector(update)) => {
+                assert!(!update.should_consume_phase)
+            }
+            other => panic!("unexpected pre-timer force projector report: {other:?}"),
+        }
+
+        let after_interval = effect_force_projector_update_building_frame_with_timer(
+            &mut store,
+            &mut timer,
+            &content,
+            &building,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 3,
+                tile_size: TILE_SIZE as f32,
+                now: force_block.phase_use_time / building.time_scale,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            0.0,
+            0.0,
+        );
+        match after_interval {
+            Some(EffectBlockRuntimeReport::ForceProjector(update)) => {
+                assert!(update.should_consume_phase)
+            }
+            other => panic!("unexpected timer-ready force projector report: {other:?}"),
+        }
+        assert_eq!(
+            timer.timer.last_time(FORCE_PROJECTOR_TIMER_USE_SLOT),
+            force_block.phase_use_time / building.time_scale
+        );
+
+        let dispatch_ready = effect_force_projector_update_building_frame(
+            &mut store,
+            &content,
+            &building,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 4,
+                tile_size: TILE_SIZE as f32,
+                now: force_block.phase_use_time / building.time_scale + 1.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            true,
+            0.0,
+            0.0,
+        );
+        match dispatch_ready {
+            Some(EffectBlockRuntimeReport::ForceProjector(update)) => {
+                assert!(update.should_consume_phase)
+            }
+            other => panic!("unexpected dispatcher force projector report: {other:?}"),
+        }
     }
 
     #[test]

@@ -927,8 +927,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 吸收命中时现在会把 bullet 坐标移动到 shield segment 的真实交点，再执行 `BulletComp::absorb()`，对齐 Java `b.set(intersectOut); b.absorb(); paramEffect.at(b)` 的顺序。
   - `directional_force_projector_absorb_event(...)` 与 `directional_force_projector_break_event(...)` 已将吸收 FX 与破盾 FX 收束为运行态事件计划，等待后续 renderer/effect dispatcher 执行。
 - `ForceProjectorState`
+- `ForceProjectorUpdate`
 - `force_projector_real_radius(...)`
 - `force_projector_shield(...)`
+- `force_projector_update_with_timer(...)`
 - `force_projector_update(...)`
 - `force_projector_sense(...)`
 - `force_projector_set_shield(...)`
@@ -958,6 +960,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `read_force_projector_state(...)`
 - 已对照 `ForceProjector.updateTile()` 推进：
   - `broken / buildup / radscl / warmup / phaseHeat / hit` 的主状态机；
+  - `timer(timerUse, phaseUseTime / timeScale)` 已通过 `force_projector_update_with_timer(...)` 与 `effect_force_projector_update_building_frame_with_timer(...)` 接入 `BuildingTimerState` 侧车，返回 `should_consume_phase` 供上层触发 `consume()`；
   - 破盾阈值与冷却；
   - 爆炸吸收；
   - Java write/read 的 5 个持久化字段。
@@ -1080,7 +1083,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `EffectBlockRuntimeState` / `effect_block_runtime_state_for(...)` 为已迁移的 effect block 创建统一状态容器，覆盖 projector family、ForceProjector、Radar、BuildTurret、BaseShield、ShockwaveTower；`ShockMine` 当前无持久运行态 state；
   - `effect_block_data_for_building(...)` / `effect_block_runtime_state_for_building(...)` 已能从 `BuildingComp.block.id` 通过 `ContentLoader` 找到 `BlockDef::Effect(...)` 并创建对应 state，为后续 building store 初始化提供入口；
   - `EffectBlockRuntimeStateStore` 已按 `BuildingComp.tile_pos` 管理 per-building effect runtime state，`ensure_for_building(...)` 会按 content 自动初始化并复用既有 state，非 effect block 不会污染状态表；
-  - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield / ShockwaveTower` 四类上下文；
+  - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / ForceProjector / BaseShield / ShockwaveTower` 五类上下文；
   - `EffectBlockRuntimeResources` 将“已存储 state”之外的 FogControl、content、building/bullet/unit 候选等资源单独传入，方便后续 building store 只保存 `EffectBlockRuntimeState`；
   - `EffectBlockFrameInput` 开始承接 `GameState::advance_game_update_frame(...)` 输出的 `delta/update_id/tick` 以及 fog/tileSize 等帧级参数；
   - `effect_block_building_delta(...)` / `effect_block_building_edelta(...)` 对齐 Java `BuildingComp.delta() = Time.delta * timeScale` 与 `edelta() = efficiency * delta()` 的核心公式；
@@ -1091,6 +1094,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_projector_update_building_frame(...)` 已能从 `BuildingComp` 与 `EffectBlockFrameInput` 组装 projector family runtime 输入，`RegenProjector` 测试覆盖了 `GameState::advance_game_update_frame(...) -> delta/edelta/update_id -> last_update_frame` 的状态门控链路；
   - `EffectBlockData` 已新增 `timer_slots / timer_use_slot / timer_check_slot / timer_target_slot / timer_target2_slot`，用于记录 Java `Block.timerDump` 占 0 号槽后各 effect block 自定义 timer 的 content-backed 槽位；
   - `effect_projector_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 `MendProjector` 的 `timer(timerUse, useTime / timeScale)` 可选消耗门控；当前从 `EffectBlockData.timer_use_slot` 读取槽位，`MEND_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback；
+  - `effect_force_projector_update_building_frame(...)` / `effect_force_projector_update_building_frame_with_timer(...)` 已能从 `BuildingComp.efficiency/optional_efficiency/timeScale`、帧 delta 与 content `phaseUseTime/timerUse` 组装 ForceProjector runtime 输入；`FORCE_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback，且 broken/phase invalid/efficiency=0 时不触碰 timer slot；
   - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；
   - `effect_shockwave_tower_update_building_frame(...)` 已能从 `BuildingComp.potential_efficiency`、building delta/edelta、bullet 候选与 timer gate 组装 ShockwaveTower runtime 输入，写回 bullet damage/remove 与 `ShockwaveTowerState`；
   - `effect_shockwave_tower_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 ShockwaveTower 的 `timer(timerCheck, checkInterval)` 门控；当前从 `EffectBlockData.timer_check_slot` 读取槽位，`SHOCKWAVE_TOWER_TIMER_CHECK_SLOT = 1` 作为 Java 对齐 fallback；

@@ -22101,6 +22101,8 @@ mod tests {
         assert!(force.consume_coolant);
         assert_eq!(force.ambient_sound, "loopShield");
         assert_eq!(force.ambient_sound_volume, 0.1);
+        assert_eq!(force.timer_use_slot, Some(1));
+        assert_eq!(force.timer_slots, 2);
         assert_eq!(
             force.requirements,
             vec![
