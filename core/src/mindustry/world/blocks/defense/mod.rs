@@ -7,7 +7,7 @@ use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::comp::{BuildingComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
-use crate::mindustry::game::BlockPlan;
+use crate::mindustry::game::{BlockPlan, FogControl, FogEvent};
 use crate::mindustry::io::{type_io, TeamId, TypeValue};
 use crate::mindustry::logic::LAccess;
 use crate::mindustry::r#type::UnitType;
@@ -2898,6 +2898,55 @@ pub fn radar_update(
     force_update
 }
 
+pub fn radar_fog_event(tile_x: i32, tile_y: i32, radius: f32, team: TeamId) -> FogEvent {
+    FogEvent::get(tile_x, tile_y, radius.round() as i32, team.0 as i32)
+}
+
+pub fn radar_apply_fog_force_update(
+    fog_control: &mut FogControl,
+    team: TeamId,
+    tile_x: i32,
+    tile_y: i32,
+    radius: f32,
+    fog_enabled: bool,
+    static_fog: bool,
+) -> bool {
+    let event = radar_fog_event(tile_x, tile_y, radius, team);
+    let should_update = fog_enabled && fog_control.data(team.0).is_some();
+    if should_update {
+        fog_control.force_update(event, fog_enabled, static_fog);
+    }
+    should_update
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn radar_update_with_fog_control(
+    state: &mut RadarState,
+    fog_control: &mut FogControl,
+    team: TeamId,
+    tile_x: i32,
+    tile_y: i32,
+    efficiency: f32,
+    edelta: f32,
+    fog_radius: f32,
+    discovery_time: f32,
+    fog_enabled: bool,
+    static_fog: bool,
+) -> bool {
+    if !radar_update(state, efficiency, edelta, fog_radius, discovery_time) {
+        return false;
+    }
+    radar_apply_fog_force_update(
+        fog_control,
+        team,
+        tile_x,
+        tile_y,
+        state.last_radius,
+        fog_enabled,
+        static_fog,
+    )
+}
+
 pub fn write_radar_state<W: Write>(write: &mut W, state: &RadarState) -> io::Result<()> {
     write_f32(write, state.progress)
 }
@@ -5583,6 +5632,84 @@ mod tests {
         );
         assert_eq!((draw.x, draw.y), (16.0, 24.0));
         assert_eq!(draw.top_rotation, 180.0);
+    }
+
+    #[test]
+    fn radar_runtime_adapter_emits_fog_event_into_fog_control() {
+        let mut radar = RadarState {
+            progress: 0.06,
+            last_radius: 0.0,
+            smooth_efficiency: 1.0,
+            total_progress: 0.0,
+        };
+        let mut fog = FogControl::new(8, 8);
+        fog.ensure_data(2).dynamic_updated = false;
+
+        let forced = radar_update_with_fog_control(
+            &mut radar,
+            &mut fog,
+            TeamId(2),
+            3,
+            4,
+            1.0,
+            60.0,
+            10.0,
+            600.0,
+            true,
+            true,
+        );
+
+        assert!(forced);
+        assert!((radar.last_radius - 0.6).abs() < 0.00001);
+        assert!(fog.data(2).unwrap().dynamic_updated);
+        fog.update_static();
+        assert!(fog.is_discovered(true, true, Some(2), false, 3, 4));
+
+        let event = radar_fog_event(1, 2, 1.5, TeamId(7));
+        assert_eq!(event.x(), 1);
+        assert_eq!(event.y(), 2);
+        assert_eq!(event.radius(), 2);
+        assert_eq!(event.team(), 7);
+    }
+
+    #[test]
+    fn radar_runtime_adapter_respects_fog_rules_and_allocated_team_data() {
+        let mut fog = FogControl::new(8, 8);
+        fog.ensure_data(2).dynamic_updated = false;
+
+        assert!(!radar_apply_fog_force_update(
+            &mut fog,
+            TeamId(2),
+            3,
+            4,
+            1.0,
+            false,
+            true,
+        ));
+        assert!(!fog.data(2).unwrap().dynamic_updated);
+
+        assert!(!radar_apply_fog_force_update(
+            &mut fog,
+            TeamId(3),
+            3,
+            4,
+            1.0,
+            true,
+            true,
+        ));
+
+        assert!(radar_apply_fog_force_update(
+            &mut fog,
+            TeamId(2),
+            3,
+            4,
+            1.0,
+            true,
+            false,
+        ));
+        assert!(fog.data(2).unwrap().dynamic_updated);
+        fog.update_static();
+        assert!(!fog.is_discovered(true, true, Some(2), false, 3, 4));
     }
 
     #[test]
