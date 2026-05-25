@@ -209,6 +209,48 @@ pub fn read_memory_state<R: Read>(read: &mut R, capacity: usize) -> io::Result<M
     Ok(state)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanvasBlockState {
+    pub data: Vec<u8>,
+}
+
+impl CanvasBlockState {
+    pub fn new(data_len: usize) -> Self {
+        Self {
+            data: vec![0; data_len],
+        }
+    }
+
+    pub fn from_data(data: impl Into<Vec<u8>>) -> Self {
+        Self { data: data.into() }
+    }
+}
+
+pub fn write_canvas_state<W: Write>(write: &mut W, state: &CanvasBlockState) -> io::Result<()> {
+    write_i32(write, state.data.len() as i32)?;
+    write.write_all(&state.data)
+}
+
+pub fn read_canvas_state<R: Read>(
+    read: &mut R,
+    expected_len: usize,
+) -> io::Result<CanvasBlockState> {
+    let len = read_i32(read)?;
+    if len < 0 {
+        return Err(invalid_data("negative canvas data length"));
+    }
+
+    let len = len as usize;
+    if len == expected_len {
+        let mut state = CanvasBlockState::new(expected_len);
+        read.read_exact(&mut state.data)?;
+        Ok(state)
+    } else {
+        skip_bytes(read, len)?;
+        Ok(CanvasBlockState::new(expected_len))
+    }
+}
+
 pub fn write_logic_config<W: Write>(write: W, config: &LogicConfig) -> io::Result<()> {
     if config.code.len() > LOGIC_MAX_BYTE_LEN {
         return Err(invalid_input(
@@ -418,6 +460,16 @@ fn write_f64<W: Write>(write: &mut W, value: f64) -> io::Result<()> {
     write.write_all(&value.to_be_bytes())
 }
 
+fn skip_bytes<R: Read>(read: &mut R, mut len: usize) -> io::Result<()> {
+    let mut buf = [0; 1024];
+    while len > 0 {
+        let take = len.min(buf.len());
+        read.read_exact(&mut buf[..take])?;
+        len -= take;
+    }
+    Ok(())
+}
+
 fn invalid_input(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -523,6 +575,27 @@ mod tests {
             read_memory_state(&mut short.as_slice(), 3).unwrap(),
             MemoryBlockState::from_values(vec![4.5, 0.0, 0.0])
         );
+    }
+
+    #[test]
+    fn canvas_state_roundtrips_java_length_prefixed_bytes() {
+        let state = CanvasBlockState::from_data(vec![0x12, 0x34, 0x56]);
+        let mut bytes = Vec::new();
+        write_canvas_state(&mut bytes, &state).unwrap();
+        assert_eq!(bytes.len(), 4 + state.data.len());
+        assert_eq!(read_canvas_state(&mut bytes.as_slice(), 3).unwrap(), state);
+    }
+
+    #[test]
+    fn canvas_state_mismatched_length_is_consumed_and_keeps_default_data_like_java() {
+        let mut bytes = Vec::new();
+        write_canvas_state(&mut bytes, &CanvasBlockState::from_data(vec![1, 2, 3])).unwrap();
+        let mut read = bytes.as_slice();
+        assert_eq!(
+            read_canvas_state(&mut read, 2).unwrap(),
+            CanvasBlockState::new(2)
+        );
+        assert!(read.is_empty());
     }
 
     #[test]

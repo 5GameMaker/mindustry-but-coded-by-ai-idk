@@ -48,8 +48,9 @@ use crate::mindustry::{
     world::blocks::heat::{read_heat_producer_state, HeatProducerState},
     world::blocks::liquid::{read_liquid_bridge_state, LiquidBridgeState},
     world::blocks::logic::{
-        read_logic_display_state, read_memory_state, read_message_state, read_switch_enabled,
-        LogicDisplayState, MemoryBlockState, MessageBlockState,
+        read_canvas_state, read_logic_display_state, read_memory_state, read_message_state,
+        read_switch_enabled, CanvasBlockState, LogicDisplayState, MemoryBlockState,
+        MessageBlockState,
     },
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
@@ -211,6 +212,7 @@ pub enum GameRuntimeLogicBlockState {
     Switch { enabled: bool },
     Display(LogicDisplayState),
     Memory(MemoryBlockState),
+    Canvas(CanvasBlockState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1183,9 +1185,12 @@ impl GameRuntime {
                     .map(|state| Some(GameRuntimeLogicBlockState::Memory(state)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
-            LogicBlockKind::Processor | LogicBlockKind::Canvas => {
-                Err(GameRuntimeBlockStateReadError::Unsupported)
+            LogicBlockKind::Canvas => {
+                read_canvas_state(building_payload, logic.canvas_data_bytes.max(0) as usize)
+                    .map(|state| Some(GameRuntimeLogicBlockState::Canvas(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
+            LogicBlockKind::Processor => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
 
@@ -1522,8 +1527,8 @@ mod tests {
             blocks::heat::write_heat_producer_state,
             blocks::liquid::{write_liquid_bridge_state, LiquidBridgeState},
             blocks::logic::{
-                write_logic_display_state, write_memory_state, write_message_state,
-                write_switch_enabled,
+                write_canvas_state, write_logic_display_state, write_memory_state,
+                write_message_state, write_switch_enabled,
             },
             blocks::payloads::{
                 write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
@@ -3697,6 +3702,40 @@ mod tests {
         assert_eq!(
             runtime.logic_runtime_states.get(&tile_pos),
             Some(&GameRuntimeLogicBlockState::Memory(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_canvas_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let canvas_def = content.block_by_name("canvas").unwrap();
+        let tile_pos = point2_pack(5, 2);
+        let saved = BuildingComp::new(tile_pos, canvas_def.base().clone(), TeamId(1));
+        let expected_len = match canvas_def {
+            BlockDef::Logic(logic) => logic.canvas_data_bytes as usize,
+            _ => unreachable!(),
+        };
+        let mut data = vec![0; expected_len];
+        data[0] = 0b0101_1010;
+        data[expected_len - 1] = 0b1010_0101;
+        let state = CanvasBlockState::from_data(data);
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_canvas_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 21, canvas_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.logic_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLogicBlockState::Canvas(state))
         );
     }
 
