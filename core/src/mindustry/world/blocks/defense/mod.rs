@@ -3126,6 +3126,23 @@ pub enum EffectBlockFrameResources<'a, 'b> {
     },
 }
 
+pub struct EffectBlockFrameBatchResources<'a, 'b> {
+    pub fog_control: Option<&'a mut FogControl>,
+    pub bullets: &'a mut [BulletComp],
+    pub bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+    pub units: &'a mut [UnitComp],
+    pub suppressed: &'a mut dyn FnMut(&BuildingComp) -> bool,
+    pub force_coolant: &'a mut dyn FnMut(&BuildingComp) -> (f32, f32),
+    pub spark_random: &'a mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EffectBlockFrameBatchReport {
+    pub visited_buildings: usize,
+    pub effect_candidates: usize,
+    pub reports: Vec<(i32, EffectBlockRuntimeReport)>,
+}
+
 pub fn effect_block_building_delta(building: &BuildingComp, frame: EffectBlockFrameInput) -> f32 {
     frame.delta * building.time_scale
 }
@@ -3884,6 +3901,108 @@ pub fn effect_block_update_building_frame_with_stores<'a, 'b>(
         ),
         _ => None,
     }
+}
+
+pub fn effect_block_update_building_slice_with_stores<'a, 'b>(
+    runtime_store: &mut EffectBlockRuntimeStateStore,
+    timer_store: &mut EffectBlockTimerStateStore,
+    content: &ContentLoader,
+    buildings: &mut [BuildingComp],
+    frame: EffectBlockFrameInput,
+    resources: &mut EffectBlockFrameBatchResources<'a, 'b>,
+) -> EffectBlockFrameBatchReport {
+    let mut batch = EffectBlockFrameBatchReport {
+        visited_buildings: buildings.len(),
+        effect_candidates: 0,
+        reports: Vec::new(),
+    };
+
+    for index in 0..buildings.len() {
+        let source = buildings[index].clone();
+        let Some(block) = effect_block_data_for_building(content, &source) else {
+            continue;
+        };
+        batch.effect_candidates += 1;
+
+        let report = match block.kind {
+            EffectBlockKind::MendProjector
+            | EffectBlockKind::OverdriveProjector
+            | EffectBlockKind::RegenProjector => {
+                let Some(timer) = timer_store.ensure_for_building(content, &source) else {
+                    continue;
+                };
+                effect_projector_update_building_frame_with_timer(
+                    runtime_store,
+                    timer,
+                    content,
+                    &source,
+                    buildings,
+                    frame,
+                    (resources.suppressed)(&source),
+                )
+            }
+            EffectBlockKind::Radar => {
+                let Some(fog_control) = resources.fog_control.as_deref_mut() else {
+                    continue;
+                };
+                effect_radar_update_building_frame(
+                    runtime_store,
+                    content,
+                    &source,
+                    fog_control,
+                    frame,
+                )
+            }
+            EffectBlockKind::ForceProjector => {
+                let Some(timer) = timer_store.ensure_for_building(content, &source) else {
+                    continue;
+                };
+                let (coolant_efficiency, coolant_heat_capacity) =
+                    (resources.force_coolant)(&source);
+                effect_force_projector_update_building_frame_with_timer(
+                    runtime_store,
+                    timer,
+                    content,
+                    &source,
+                    frame,
+                    coolant_efficiency,
+                    coolant_heat_capacity,
+                )
+            }
+            EffectBlockKind::BaseShield => effect_base_shield_update_building_frame(
+                runtime_store,
+                content,
+                &source,
+                &mut *resources.bullets,
+                &mut *resources.bullet_type,
+                &mut *resources.units,
+                frame,
+                &mut *resources.spark_random,
+            ),
+            EffectBlockKind::ShockwaveTower => {
+                let Some(timer) = timer_store.ensure_for_building(content, &source) else {
+                    continue;
+                };
+                effect_shockwave_tower_update_building_frame_with_timer(
+                    runtime_store,
+                    timer,
+                    content,
+                    &source,
+                    &mut *resources.bullets,
+                    &mut *resources.bullet_type,
+                    frame,
+                )
+            }
+            EffectBlockKind::BuildTurret | EffectBlockKind::ShockMine => None,
+        };
+
+        if let Some(report) = report {
+            effect_block_consume_source_items_from_report(&mut buildings[index], block, &report);
+            batch.reports.push((source.tile_pos, report));
+        }
+    }
+
+    batch
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8031,6 +8150,77 @@ mod tests {
             runtime_store.get(radar_building.tile_pos),
             Some(EffectBlockRuntimeState::Radar(_))
         ));
+    }
+
+    #[test]
+    fn effect_block_slice_dispatch_updates_external_building_collection() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let radar_def = content.block_by_name("radar").unwrap();
+        let router = content.block_by_name("router").unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let silicon = mend_block.boost_items[0].item;
+
+        let mut mend = BuildingComp::new(point2_pack(24, 9), mend_def.base().clone(), TeamId(1));
+        mend.efficiency = 1.0;
+        mend.optional_efficiency = 1.0;
+        mend.items.as_mut().unwrap().set(silicon, 1);
+        let mut target = BuildingComp::new(point2_pack(25, 9), router.base().clone(), TeamId(1));
+        target.health = 40.0;
+        let mut radar = BuildingComp::new(point2_pack(26, 9), radar_def.base().clone(), TeamId(2));
+        radar.efficiency = 1.0;
+        let mut buildings = vec![mend, target, radar];
+
+        let mut runtime_store = EffectBlockRuntimeStateStore::new();
+        let mut timer_store = EffectBlockTimerStateStore::new();
+        let mut fog = FogControl::new(32, 32);
+        fog.ensure_data(2);
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let mut resources = EffectBlockFrameBatchResources {
+            fog_control: Some(&mut fog),
+            bullets: &mut bullets,
+            bullet_type: &mut bullet_type,
+            units: &mut units,
+            suppressed: &mut suppressed,
+            force_coolant: &mut force_coolant,
+            spark_random: &mut spark_random,
+        };
+
+        let batch = effect_block_update_building_slice_with_stores(
+            &mut runtime_store,
+            &mut timer_store,
+            &content,
+            &mut buildings,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: mend_block.use_time,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            &mut resources,
+        );
+
+        assert_eq!(batch.visited_buildings, 3);
+        assert_eq!(batch.effect_candidates, 2);
+        assert_eq!(batch.reports.len(), 2);
+        assert_eq!(buildings[0].items.as_ref().unwrap().get(silicon), 0);
+        assert!(matches!(
+            runtime_store.get(buildings[0].tile_pos),
+            Some(EffectBlockRuntimeState::Projector(_))
+        ));
+        assert!(matches!(
+            runtime_store.get(buildings[2].tile_pos),
+            Some(EffectBlockRuntimeState::Radar(_))
+        ));
+        assert!(timer_store.get(buildings[0].tile_pos).is_some());
     }
 
     #[test]
