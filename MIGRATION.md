@@ -839,6 +839,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `shockwave_tower_warmup(...)`
 - `shockwave_tower_draw_plan(...)`
 - `shockwave_tower_update(...)`
+- `shockwave_tower_bullet_in_scan_square(...)`
+- `shockwave_tower_should_scan_targets(...)`
+- `shockwave_tower_apply_runtime(...)`
+- `effect_shockwave_tower_apply_runtime(...)`
 - `shockwave_tower_progress(...)`
 - `shockwave_tower_should_consume(...)`
 - 已对照 `ShockwaveTower.updateTile()/setStats()/drawPlace()/drawSelect()/draw()/sense()/warmup()/shouldConsume()` 锁定：
@@ -851,10 +855,15 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - stats damage/range/reload per second 与 Java 公式一致；
   - draw heat additive alpha = `heat`，shape color lerp = `heat^2`，shape radius = `shapeRadius * potentialEfficiency`，rotation = `Time.time * shapeRotateSpeed`；
   - `sense(progress) = reloadCounter / reload`，`warmup() = heat`，`shouldConsume() = reloadCounter < reload`。
+- 已将 ShockwaveTower 开火分支接入真实 `BulletComp` 候选：
+  - `shockwave_tower_apply_runtime(...)` 在 `reloadCounter + edelta >= reload && timerReady` 时按 Java `Groups.bullet.intersect(x-range, y-range, range*2, range*2)` 的方形扫描语义筛选候选；
+  - 仅处理异队、未 removed 且 `BulletType.hittable` 的 bullet；
+  - 开火后将 wave damage 写回 `BulletComp.damage`，不足以剩余的目标写 `removed=true`；
+  - `effect_shockwave_tower_apply_runtime(...)` 使用 content 中的 `reload/range/bullet_damage/falloff_count/cooldown_multiplier`，避免调用方手写上游参数。
 
 仍需：
 
-- 接入真实 `Groups.bullet.intersect(...)`、hit/wave effect、sound、shake 与 Trigger 事件；
+- 接入真实 Groups bullet 存储遍历、hit/wave effect、sound、shake 与 Trigger 事件；
 - 将 heatRegion additive 和 effect-layer polygon 接入 renderer；
 - timerCheck/checkInterval 连接到真实 building timer。
 
@@ -1050,9 +1059,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - Regen 分支已经在 dispatcher 内完成 `damaged_targets` 判定、mendMap 记录、`last_update_frame/update_id` 门控和真实 `BuildingComp::heal(...)` 应用；
   - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口；`Radar` 因需要额外 `FogControl` 已拆到 `effect_radar_update_runtime(...)`，`BaseShield` 因需要 bullet/unit 输入已拆到 `effect_base_shield_apply_runtime(...)`，后续继续收束成更统一的 effect-block runtime dispatcher。
 - 已新增跨 effect block 的轻量统一 runtime dispatcher：
-  - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield` 三类上下文；
-  - `effect_block_update_runtime(...)` 按传入上下文复用 `effect_projector_update_runtime(...)`、`effect_radar_update_runtime(...)`、`effect_base_shield_apply_runtime(...)`；
-  - `EffectBlockRuntimeReport` 将 projector report、Radar fog force-update 和 BaseShield runtime report 收束到同一返回类型；
+  - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield / ShockwaveTower` 四类上下文；
+  - `effect_block_update_runtime(...)` 按传入上下文复用 `effect_projector_update_runtime(...)`、`effect_radar_update_runtime(...)`、`effect_base_shield_apply_runtime(...)` 与 `effect_shockwave_tower_apply_runtime(...)`；
+  - `EffectBlockRuntimeReport` 将 projector report、Radar fog force-update、BaseShield runtime report 与 ShockwaveTower fire report 收束到同一返回类型；
   - 该入口仍保持显式上下文传参，避免把 `FogControl`、建筑 slice、bullet/unit slice 与 content loader 强行揉成一个巨型可变借用。
 
 仍需：

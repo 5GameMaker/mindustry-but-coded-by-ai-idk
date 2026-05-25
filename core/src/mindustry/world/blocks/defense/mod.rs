@@ -2799,6 +2799,16 @@ pub enum EffectBlockRuntimeContext<'a, 'b> {
         delta: f32,
         spark_random: &'a mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
     },
+    ShockwaveTower {
+        state: &'a mut ShockwaveTowerState,
+        tower: &'a BuildingComp,
+        potential_efficiency: f32,
+        edelta: f32,
+        delta: f32,
+        bullets: &'a mut [BulletComp],
+        bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+        timer_ready: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2806,6 +2816,7 @@ pub enum EffectBlockRuntimeReport {
     Projector(EffectProjectorRuntimeReport),
     Radar { forced_update: bool },
     BaseShield(BaseShieldRuntimeReport),
+    ShockwaveTower(ShockwaveTowerFire),
 }
 
 pub fn effect_block_update_runtime<'a, 'b>(
@@ -2847,6 +2858,27 @@ pub fn effect_block_update_runtime<'a, 'b>(
             spark_random,
         )
         .map(EffectBlockRuntimeReport::BaseShield),
+        EffectBlockRuntimeContext::ShockwaveTower {
+            state,
+            tower,
+            potential_efficiency,
+            edelta,
+            delta,
+            bullets,
+            bullet_type,
+            timer_ready,
+        } => effect_shockwave_tower_apply_runtime(
+            block,
+            state,
+            tower,
+            potential_efficiency,
+            edelta,
+            delta,
+            bullets,
+            bullet_type,
+            timer_ready,
+        )
+        .map(EffectBlockRuntimeReport::ShockwaveTower),
     }
 }
 
@@ -4829,6 +4861,134 @@ pub fn shockwave_tower_update(
     state.heat =
         shockwave_tower_heat_after_cooldown(state.heat, delta, reload, cooldown_multiplier);
     fire
+}
+
+pub fn shockwave_tower_bullet_in_scan_square(
+    tower_x: f32,
+    tower_y: f32,
+    range: f32,
+    bullet_x: f32,
+    bullet_y: f32,
+) -> bool {
+    bullet_x >= tower_x - range
+        && bullet_x <= tower_x + range
+        && bullet_y >= tower_y - range
+        && bullet_y <= tower_y + range
+}
+
+pub fn shockwave_tower_should_scan_targets(
+    potential_efficiency: f32,
+    reload_counter: f32,
+    edelta: f32,
+    reload: f32,
+    timer_ready: bool,
+) -> bool {
+    potential_efficiency > 0.0 && reload_counter + edelta >= reload && timer_ready
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn shockwave_tower_apply_runtime<'a>(
+    state: &mut ShockwaveTowerState,
+    tower: &BuildingComp,
+    potential_efficiency: f32,
+    edelta: f32,
+    delta: f32,
+    reload: f32,
+    range: f32,
+    bullet_damage: f32,
+    falloff_count: f32,
+    bullets: &mut [BulletComp],
+    mut bullet_type: impl FnMut(ContentId) -> Option<&'a BulletType>,
+    timer_ready: bool,
+    cooldown_multiplier: f32,
+) -> ShockwaveTowerFire {
+    let mut target_indices = Vec::new();
+    let mut target_damages = Vec::new();
+
+    if shockwave_tower_should_scan_targets(
+        potential_efficiency,
+        state.reload_counter,
+        edelta,
+        reload,
+        timer_ready,
+    ) {
+        for (index, bullet) in bullets.iter().enumerate() {
+            if bullet.removed
+                || bullet.team == tower.team
+                || !shockwave_tower_bullet_in_scan_square(
+                    tower.x, tower.y, range, bullet.x, bullet.y,
+                )
+            {
+                continue;
+            }
+            let Some(ty) = bullet_type(bullet.bullet_type_id) else {
+                continue;
+            };
+            if ty.hittable {
+                target_indices.push(index);
+                target_damages.push(bullet.damage);
+            }
+        }
+    }
+
+    let fire = shockwave_tower_update(
+        state,
+        potential_efficiency,
+        edelta,
+        delta,
+        reload,
+        bullet_damage,
+        falloff_count,
+        &mut target_damages,
+        timer_ready,
+        cooldown_multiplier,
+    );
+
+    if fire.fired {
+        for (index, damage) in target_indices.into_iter().zip(target_damages.into_iter()) {
+            let bullet = &mut bullets[index];
+            if damage <= 0.0 {
+                bullet.removed = true;
+            } else {
+                bullet.damage = damage;
+            }
+        }
+    }
+
+    fire
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn effect_shockwave_tower_apply_runtime<'a>(
+    block: &EffectBlockData,
+    state: &mut ShockwaveTowerState,
+    tower: &BuildingComp,
+    potential_efficiency: f32,
+    edelta: f32,
+    delta: f32,
+    bullets: &mut [BulletComp],
+    bullet_type: impl FnMut(ContentId) -> Option<&'a BulletType>,
+    timer_ready: bool,
+) -> Option<ShockwaveTowerFire> {
+    if block.kind != EffectBlockKind::ShockwaveTower {
+        return None;
+    }
+
+    Some(shockwave_tower_apply_runtime(
+        state,
+        tower,
+        potential_efficiency,
+        edelta,
+        delta,
+        block.reload,
+        block.range,
+        block.bullet_damage,
+        block.falloff_count,
+        bullets,
+        bullet_type,
+        timer_ready,
+        block.cooldown_multiplier,
+    ))
 }
 
 pub fn shockwave_tower_progress(reload_counter: f32, reload: f32) -> f32 {
@@ -8625,5 +8785,151 @@ mod tests {
         );
         assert!(!blocked.fired);
         assert_eq!(no_efficiency.reload_counter, 10.0);
+    }
+
+    #[test]
+    fn effect_shockwave_tower_runtime_dispatch_uses_content_and_mutates_bullets() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let shockwave_block = effect_block(&content, "shockwave-tower");
+        let radar_block = effect_block(&content, "radar");
+        let mut tower_building = projector_runtime_building(43, "shockwave-tower");
+        tower_building.set_pos(0.0, 0.0);
+
+        let hittable = BulletType::default();
+        let unhittable = BulletType {
+            hittable: false,
+            ..BulletType::default()
+        };
+
+        let mut removed_target = BulletComp::default();
+        removed_target.bullet_type_id = 0;
+        removed_target.team = TeamId(2);
+        removed_target.x = 100.0;
+        removed_target.damage = 100.0;
+
+        let mut damaged_target = BulletComp::default();
+        damaged_target.bullet_type_id = 0;
+        damaged_target.team = TeamId(2);
+        damaged_target.x = -100.0;
+        damaged_target.damage = 500.0;
+
+        let mut same_team = BulletComp::default();
+        same_team.bullet_type_id = 0;
+        same_team.team = TeamId(1);
+        same_team.x = 10.0;
+        same_team.damage = 100.0;
+
+        let mut outside = BulletComp::default();
+        outside.bullet_type_id = 0;
+        outside.team = TeamId(2);
+        outside.x = 200.0;
+        outside.damage = 100.0;
+
+        let mut not_hittable = BulletComp::default();
+        not_hittable.bullet_type_id = 1;
+        not_hittable.team = TeamId(2);
+        not_hittable.x = 10.0;
+        not_hittable.damage = 100.0;
+
+        let mut bullets = vec![
+            removed_target,
+            damaged_target,
+            same_team,
+            outside,
+            not_hittable,
+        ];
+        let mut state = ShockwaveTowerState {
+            reload_counter: shockwave_block.reload,
+            heat: 0.0,
+        };
+
+        let report = effect_shockwave_tower_apply_runtime(
+            shockwave_block,
+            &mut state,
+            &tower_building,
+            1.0,
+            0.0,
+            0.0,
+            &mut bullets,
+            |id| match id {
+                0 => Some(&hittable),
+                1 => Some(&unhittable),
+                _ => None,
+            },
+            true,
+        );
+
+        assert_eq!(
+            report,
+            Some(ShockwaveTowerFire {
+                fired: true,
+                wave_damage: 160.0,
+                removed_targets: 1,
+            })
+        );
+        assert!(bullets[0].removed);
+        assert_eq!(bullets[1].damage, 340.0);
+        assert!(!bullets[2].removed);
+        assert_eq!(bullets[2].damage, 100.0);
+        assert!(!bullets[3].removed);
+        assert_eq!(bullets[3].damage, 100.0);
+        assert!(!bullets[4].removed);
+        assert_eq!(bullets[4].damage, 100.0);
+        assert_eq!(state.reload_counter, 0.0);
+        assert_eq!(state.heat, 1.0);
+
+        let mut mismatch_state = ShockwaveTowerState {
+            reload_counter: shockwave_block.reload,
+            heat: 0.0,
+        };
+        assert_eq!(
+            effect_shockwave_tower_apply_runtime(
+                radar_block,
+                &mut mismatch_state,
+                &tower_building,
+                1.0,
+                0.0,
+                0.0,
+                &mut bullets,
+                |_| Some(&hittable),
+                true,
+            ),
+            None
+        );
+
+        let mut dispatch_bullet = BulletComp::default();
+        dispatch_bullet.bullet_type_id = 0;
+        dispatch_bullet.team = TeamId(2);
+        dispatch_bullet.x = 1.0;
+        dispatch_bullet.damage = 50.0;
+        let mut dispatch_bullets = vec![dispatch_bullet];
+        let mut dispatch_state = ShockwaveTowerState {
+            reload_counter: shockwave_block.reload,
+            heat: 0.0,
+        };
+        let mut bullet_type = |id| (id == 0).then_some(&hittable);
+        assert_eq!(
+            effect_block_update_runtime(
+                shockwave_block,
+                EffectBlockRuntimeContext::ShockwaveTower {
+                    state: &mut dispatch_state,
+                    tower: &tower_building,
+                    potential_efficiency: 1.0,
+                    edelta: 0.0,
+                    delta: 0.0,
+                    bullets: &mut dispatch_bullets,
+                    bullet_type: &mut bullet_type,
+                    timer_ready: true,
+                },
+            ),
+            Some(EffectBlockRuntimeReport::ShockwaveTower(
+                ShockwaveTowerFire {
+                    fired: true,
+                    wave_damage: 160.0,
+                    removed_targets: 1,
+                }
+            ))
+        );
+        assert!(dispatch_bullets[0].removed);
     }
 }
