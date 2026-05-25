@@ -1321,6 +1321,9 @@ pub struct GameRuntimePayloadConstructorFrameReport {
     pub constructor_candidates: usize,
     pub updated_constructors: usize,
     pub produced_payloads: usize,
+    pub moved_out_payloads: usize,
+    pub arrived_output_payloads: usize,
+    pub transferred_payloads: usize,
     pub missing_runtime_states: usize,
     pub missing_recipe_build_times: usize,
 }
@@ -3338,9 +3341,10 @@ impl GameRuntime {
 
         let frame_delta = advanced.delta_ticks as f32;
         let mut report = GameRuntimePayloadConstructorFrameReport::default();
+        let mut pending_payload_moves = Vec::new();
 
         for index in 0..self.buildings.len() {
-            let (tile_pos, block_id, team, enabled, efficiency, time_scale) = {
+            let (tile_pos, block_id, team, enabled, efficiency, rotation, rotdeg, time_scale) = {
                 let building = &mut self.buildings[index];
                 let can_overdrive = content
                     .block(building.block.id)
@@ -3354,6 +3358,8 @@ impl GameRuntime {
                     building.team,
                     building.enabled,
                     building.efficiency,
+                    building.rotation,
+                    building.rotdeg(),
                     building.time_scale,
                 )
             };
@@ -3366,6 +3372,17 @@ impl GameRuntime {
                 continue;
             };
             report.constructor_candidates += 1;
+
+            let trns = constructor.base.size / 2 + 1;
+            let (dx, dy) = autotiler_direction(rotation);
+            let target_tile_pos = self
+                .state
+                .world
+                .build(
+                    point2_x(tile_pos) as i32 + dx * trns,
+                    point2_y(tile_pos) as i32 + dy * trns,
+                )
+                .map(|target| target.tile_pos);
 
             let Some(GameRuntimePayloadBlockState::Constructor { recipe, .. }) =
                 self.payload_runtime_states.get(&tile_pos)
@@ -3433,6 +3450,31 @@ impl GameRuntime {
                         report.produced_payloads += 1;
                     }
                 }
+            }
+
+            if common.payload.is_some() {
+                report.moved_out_payloads += 1;
+                let arrived = payload_block_move_out_step(
+                    common,
+                    rotdeg,
+                    constructor.base.size,
+                    TILE_SIZE as f32,
+                    constructor.payload_speed,
+                    constructor.payload_rotate_speed,
+                    frame_delta * time_scale,
+                );
+                if arrived {
+                    report.arrived_output_payloads += 1;
+                    if let Some(target_tile_pos) = target_tile_pos {
+                        pending_payload_moves.push((tile_pos, target_tile_pos));
+                    }
+                }
+            }
+        }
+
+        for (source_tile_pos, target_tile_pos) in pending_payload_moves {
+            if self.transfer_payload_output_to_void(content, source_tile_pos, target_tile_pos) {
+                report.transferred_payloads += 1;
             }
         }
 
@@ -3594,11 +3636,7 @@ impl GameRuntime {
         }
 
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
-            if self.transfer_payload_source_output_to_void(
-                content,
-                source_tile_pos,
-                target_tile_pos,
-            ) {
+            if self.transfer_payload_output_to_void(content, source_tile_pos, target_tile_pos) {
                 report.transferred_payloads += 1;
             }
         }
@@ -3606,7 +3644,7 @@ impl GameRuntime {
         Some(report)
     }
 
-    fn transfer_payload_source_output_to_void(
+    fn transfer_payload_output_to_void(
         &mut self,
         content: &ContentLoader,
         source_tile_pos: i32,
@@ -3671,6 +3709,13 @@ impl GameRuntime {
                     source.has_payload = false;
                     Some((payload, common.pay_rotation))
                 }
+                GameRuntimePayloadBlockState::Constructor {
+                    common, producer, ..
+                } => {
+                    let payload = common.payload.take()?;
+                    producer.has_payload = false;
+                    Some((payload, common.pay_rotation))
+                }
                 _ => None,
             })
         else {
@@ -3696,13 +3741,22 @@ impl GameRuntime {
 
         if !transferred {
             if let Some(payload) = payload {
-                if let Some(GameRuntimePayloadBlockState::Source { common, source }) =
-                    self.payload_runtime_states.get_mut(&source_tile_pos)
-                {
-                    if common.payload.is_none() {
-                        common.payload = Some(payload);
-                        source.has_payload = true;
+                match self.payload_runtime_states.get_mut(&source_tile_pos) {
+                    Some(GameRuntimePayloadBlockState::Source { common, source }) => {
+                        if common.payload.is_none() {
+                            common.payload = Some(payload);
+                            source.has_payload = true;
+                        }
                     }
+                    Some(GameRuntimePayloadBlockState::Constructor {
+                        common, producer, ..
+                    }) => {
+                        if common.payload.is_none() {
+                            common.payload = Some(payload);
+                            producer.has_payload = true;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -9015,7 +9069,7 @@ mod tests {
         );
 
         let report = runtime
-            .advance_owned_payload_constructors(&content, 1.0)
+            .advance_owned_payload_constructors(&content, 1.0 / 60.0)
             .unwrap();
 
         assert_eq!(
@@ -9025,6 +9079,9 @@ mod tests {
                 constructor_candidates: 1,
                 updated_constructors: 1,
                 produced_payloads: 1,
+                moved_out_payloads: 1,
+                arrived_output_payloads: 0,
+                transferred_payloads: 0,
                 missing_runtime_states: 0,
                 missing_recipe_build_times: 0,
             }
@@ -9036,9 +9093,10 @@ mod tests {
         else {
             panic!("constructor sidecar should remain present");
         };
-        assert_eq!(producer.progress, 0.5);
+        assert!(producer.progress > 0.09 && producer.progress < 0.11);
         assert!(producer.has_payload);
-        assert_eq!(common.pay_vector, Vec2 { x: 0.0, y: 0.0 });
+        assert!(common.pay_vector.x > 0.69 && common.pay_vector.x < 0.71);
+        assert!(common.pay_vector.y.abs() < 0.001);
         assert_eq!(common.pay_rotation, 0.0);
         let Some(PayloadRef::Block {
             block,
@@ -9051,6 +9109,94 @@ mod tests {
         assert_eq!(*block, router_def.base().id);
         assert_eq!(*version, 0);
         assert!(!build_bytes.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_payload_constructor_moves_output_into_front_payload_void() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let constructor_tile = point2_pack(4, 4);
+        let trns = constructor_def.base().size / 2 + 1;
+        let void_center_x = 4 + trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(void_center_x, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(14, 9);
+        let mut constructor_building =
+            BuildingComp::new(constructor_tile, constructor_def.base().clone(), TeamId(6));
+        constructor_building.set_rotation(0);
+        for (item, amount) in
+            scaled_block_requirements(router_def, runtime.state.rules.build_cost_multiplier)
+        {
+            constructor_building
+                .items
+                .as_mut()
+                .unwrap()
+                .set(item, amount);
+        }
+        runtime.add_building(constructor_building);
+        runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            constructor_tile,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 9.5,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(router_def.base().id),
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+
+        let report = runtime
+            .advance_owned_payload_constructors(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.constructor_candidates, 1);
+        assert_eq!(report.produced_payloads, 1);
+        assert_eq!(report.moved_out_payloads, 1);
+        assert_eq!(report.arrived_output_payloads, 1);
+        assert_eq!(report.transferred_payloads, 1);
+
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            common, producer, ..
+        }) = runtime.payload_runtime_states.get(&constructor_tile)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!producer.has_payload);
+
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        let Some(PayloadRef::Block { block, .. }) = common.payload.as_ref() else {
+            panic!("payload void should receive the constructor build payload");
+        };
+        assert_eq!(*block, router_def.base().id);
+        assert_eq!(
+            common.pay_vector,
+            Vec2 {
+                x: -(void_def.base().size as f32 * 8.0 / 2.0),
+                y: 0.0
+            }
+        );
+
+        let void_report = runtime.advance_owned_payload_voids(&content, 1.0).unwrap();
+        assert_eq!(void_report.incinerated_payloads, 1);
     }
 
     #[test]
