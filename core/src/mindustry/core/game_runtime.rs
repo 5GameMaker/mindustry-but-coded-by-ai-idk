@@ -20,9 +20,10 @@ use crate::mindustry::{
     vars::TILE_SIZE,
     world::blocks::defense::{
         effect_block_frame_input_from_game_update, effect_block_update_building_slice_with_stores,
-        read_force_projector_state, read_mend_projector_state, read_overdrive_projector_state,
-        EffectBlockFrameBatchReport, EffectBlockFrameBatchResources, EffectBlockRuntimeState,
-        EffectBlockRuntimeStateStore, EffectBlockTimerStateStore, EffectProjectorRuntimeState,
+        read_base_shield_state, read_force_projector_state, read_mend_projector_state,
+        read_overdrive_projector_state, read_radar_state, EffectBlockFrameBatchReport,
+        EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
+        EffectBlockTimerStateStore, EffectProjectorRuntimeState,
     },
     world::{footprint_tiles, get_edges, Tile},
 };
@@ -234,7 +235,7 @@ impl GameRuntime {
                 report.building_parse_errors += 1;
                 continue;
             };
-            let Some((_revision, building_payload)) = bytes.split_first() else {
+            let Some((&revision, building_payload)) = bytes.split_first() else {
                 report.building_parse_errors += 1;
                 continue;
             };
@@ -252,9 +253,11 @@ impl GameRuntime {
                 continue;
             }
 
-            let block_state = match self
-                .read_effect_runtime_state_from_building_payload(block, &mut building_bytes)
-            {
+            let block_state = match self.read_effect_runtime_state_from_building_payload(
+                block,
+                revision,
+                &mut building_bytes,
+            ) {
                 Ok(state) => state,
                 Err(GameRuntimeBlockStateReadError::Parse) => {
                     report.block_state_parse_errors += 1;
@@ -291,6 +294,7 @@ impl GameRuntime {
     fn read_effect_runtime_state_from_building_payload(
         &self,
         block: &BlockDef,
+        revision: u8,
         building_payload: &mut &[u8],
     ) -> Result<Option<EffectBlockRuntimeState>, GameRuntimeBlockStateReadError> {
         if building_payload.is_empty() {
@@ -318,6 +322,12 @@ impl GameRuntime {
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
             EffectBlockKind::ForceProjector => read_force_projector_state(building_payload)
                 .map(|state| Some(EffectBlockRuntimeState::ForceProjector(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            EffectBlockKind::Radar => read_radar_state(building_payload)
+                .map(|state| Some(EffectBlockRuntimeState::Radar(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            EffectBlockKind::BaseShield => read_base_shield_state(building_payload, revision)
+                .map(|state| Some(EffectBlockRuntimeState::BaseShield(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
@@ -501,7 +511,8 @@ mod tests {
         io::{LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId},
         world::{
             blocks::defense::{
-                write_force_projector_state, EffectBlockRuntimeState, ForceProjectorState,
+                write_base_shield_state, write_force_projector_state, write_radar_state,
+                BaseShieldState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
             },
             footprint_tiles, point2_pack, Block, Tile,
         },
@@ -542,6 +553,76 @@ mod tests {
             suppressed,
             force_coolant,
             spark_random,
+        }
+    }
+
+    fn single_building_network_map(
+        width: u16,
+        height: u16,
+        index: usize,
+        block_id: i16,
+        building_bytes: Vec<u8>,
+    ) -> LegacyShortChunkMap {
+        let tile_count = width as usize * height as usize;
+        assert!(index < tile_count);
+        let mut blocks = Vec::new();
+
+        if index > 0 {
+            blocks.push(LegacyMapBlockRecord {
+                index: 0,
+                block_id: Tile::AIR,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: None,
+                building: None,
+                consecutives: (index - 1) as u8,
+            });
+        }
+
+        blocks.push(LegacyMapBlockRecord {
+            index,
+            block_id,
+            packed_flags: 1,
+            has_entity: true,
+            has_old_data: false,
+            has_new_data: false,
+            is_center: true,
+            new_data: None,
+            old_data: None,
+            building: Some(building_bytes),
+            consecutives: 0,
+        });
+
+        if index + 1 < tile_count {
+            blocks.push(LegacyMapBlockRecord {
+                index: index + 1,
+                block_id: Tile::AIR,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: false,
+                is_center: true,
+                new_data: None,
+                old_data: None,
+                building: None,
+                consecutives: (tile_count - index - 2) as u8,
+            });
+        }
+
+        LegacyShortChunkMap {
+            width,
+            height,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 0,
+                ore_id: 0,
+                consecutives: (tile_count - 1) as u8,
+            }],
+            blocks,
         }
     }
 
@@ -1129,6 +1210,68 @@ mod tests {
         assert_eq!(
             runtime.effect_runtime_store.get(tile_pos),
             Some(&EffectBlockRuntimeState::ForceProjector(force_state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_radar_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let radar_def = content.block_by_name("radar").unwrap();
+        let tile_pos = point2_pack(1, 2);
+        let mut saved = BuildingComp::new(tile_pos, radar_def.base().clone(), TeamId(3));
+        saved.set_rotation(2);
+        let radar_state = RadarState {
+            progress: 0.625,
+            ..RadarState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_radar_state(&mut building_bytes, &radar_state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(4, 4, 9, radar_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.effect_runtime_store.get(tile_pos),
+            Some(&EffectBlockRuntimeState::Radar(radar_state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_base_shield_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let shield_def = content.block_by_name("shield-projector").unwrap();
+        let tile_pos = point2_pack(2, 2);
+        let saved = BuildingComp::new(tile_pos, shield_def.base().clone(), TeamId(5));
+        let shield_state = BaseShieldState {
+            broken: true,
+            hit: 0.0,
+            smooth_radius: 18.25,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_base_shield_state(&mut building_bytes, &shield_state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(5, 5, 12, shield_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.effect_runtime_store.get(tile_pos),
+            Some(&EffectBlockRuntimeState::BaseShield(shield_state))
         );
     }
 
