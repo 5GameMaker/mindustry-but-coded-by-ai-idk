@@ -843,6 +843,26 @@ pub fn burst_drill_update(
     }
 }
 
+pub fn write_burst_drill_state<W: Write>(write: &mut W, state: &BurstDrillState) -> io::Result<()> {
+    // Java BurstDrillBuild inherits DrillBuild.write(...), so the persisted
+    // wire image is exactly DrillBuild's progress/warmup pair; the burst-only
+    // smoothProgress/invertTime fields are runtime-only and reset after load.
+    write_f32(write, state.progress)?;
+    write_f32(write, state.warmup)
+}
+
+pub fn read_burst_drill_state<R: Read>(read: &mut R, revision: u8) -> io::Result<BurstDrillState> {
+    if revision >= 1 {
+        Ok(BurstDrillState {
+            progress: read_f32(read)?,
+            warmup: read_f32(read)?,
+            ..Default::default()
+        })
+    } else {
+        Ok(BurstDrillState::default())
+    }
+}
+
 pub fn heat_crafter_calculate_heat(side_heat: &[f32]) -> f32 {
     side_heat.iter().copied().sum()
 }
@@ -1328,6 +1348,14 @@ mod tests {
             &mut state, false, 0, 10, 2, 100.0, 1.0, 0.0, 2.0, 10.0, 200.0,
         );
         assert_eq!(blocked.produced, 0);
+
+        let mut bytes = Vec::new();
+        write_burst_drill_state(&mut bytes, &state).unwrap();
+        let restored = read_burst_drill_state(&mut bytes.as_slice(), 1).unwrap();
+        assert_eq!(restored.progress, state.progress);
+        assert_eq!(restored.warmup, state.warmup);
+        assert_eq!(restored.smooth_progress, 0.0);
+        assert_eq!(restored.invert_time, 0.0);
     }
 
     #[test]

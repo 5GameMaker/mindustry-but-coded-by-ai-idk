@@ -12,7 +12,8 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     content::blocks::{
         BlockDef, DefenseWallKind, DistributionBlockKind, EffectBlockKind, LiquidBlockKind,
-        PayloadBlockKind, PowerBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
+        PayloadBlockKind, PowerBlockKind, ProductionBlockKind, SandboxBlockKind, StorageBlockKind,
+        TurretBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -58,6 +59,10 @@ use crate::mindustry::{
         read_nuclear_reactor_state, read_power_generator_state, read_variable_reactor_state,
         HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
         PowerGeneratorState, VariableReactorState,
+    },
+    world::blocks::production::{
+        read_beam_drill_state, read_burst_drill_state, read_drill_state, BeamDrillState,
+        BurstDrillState, DrillState,
     },
     world::blocks::storage::{read_core_state, read_unloader_sort_item, CoreBuildState},
     world::blocks::units::{
@@ -150,6 +155,13 @@ pub enum GameRuntimePowerBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeProductionBlockState {
+    Drill(DrillState),
+    BeamDrill(BeamDrillState),
+    BurstDrill(BurstDrillState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeDistributionBlockState {
     Conveyor(ConveyorState),
     StackConveyor(StackConveyorState),
@@ -213,6 +225,7 @@ enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
     Power(GameRuntimePowerBlockState),
+    Production(GameRuntimeProductionBlockState),
     Distribution(GameRuntimeDistributionBlockState),
     Storage(GameRuntimeStorageBlockState),
     Liquid(GameRuntimeLiquidBlockState),
@@ -229,6 +242,7 @@ pub struct GameRuntime {
     pub effect_timer_store: EffectBlockTimerStateStore,
     pub payload_runtime_states: BTreeMap<i32, GameRuntimePayloadBlockState>,
     pub power_runtime_states: BTreeMap<i32, GameRuntimePowerBlockState>,
+    pub production_runtime_states: BTreeMap<i32, GameRuntimeProductionBlockState>,
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
@@ -252,6 +266,7 @@ impl GameRuntime {
             effect_timer_store: EffectBlockTimerStateStore::new(),
             payload_runtime_states: BTreeMap::new(),
             power_runtime_states: BTreeMap::new(),
+            production_runtime_states: BTreeMap::new(),
             distribution_runtime_states: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
@@ -300,6 +315,7 @@ impl GameRuntime {
         self.effect_timer_store.remove(removed.tile_pos);
         self.payload_runtime_states.remove(&removed.tile_pos);
         self.power_runtime_states.remove(&removed.tile_pos);
+        self.production_runtime_states.remove(&removed.tile_pos);
         self.distribution_runtime_states.remove(&removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
@@ -471,6 +487,10 @@ impl GameRuntime {
                         self.power_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Production(block_state) => {
+                        self.production_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                     GameRuntimeLoadedBlockState::Distribution(block_state) => {
                         self.distribution_runtime_states
                             .insert(tile_pos, block_state);
@@ -522,142 +542,115 @@ impl GameRuntime {
             revision,
             building_payload,
         ) {
-            Ok(Some(state)) => Ok(Some(GameRuntimeLoadedBlockState::Effect(state))),
-            Ok(None) => Ok(None),
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Effect(state))),
+            Ok(None) => return Ok(None),
             Err(GameRuntimeBlockStateReadError::Parse) => {
-                Err(GameRuntimeBlockStateReadError::Parse)
+                return Err(GameRuntimeBlockStateReadError::Parse);
             }
-            Err(GameRuntimeBlockStateReadError::Unsupported) => self
-                .read_payload_runtime_state_from_building_payload(block, revision, building_payload)
-                .and_then(|state| {
-                    if state.is_some() {
-                        Ok(state.map(GameRuntimeLoadedBlockState::Payload))
-                    } else {
-                        Ok(None)
-                    }
-                })
-                .or_else(|err| match err {
-                    GameRuntimeBlockStateReadError::Unsupported => self
-                        .read_power_runtime_state_from_building_payload(
-                            block,
-                            revision,
-                            building_payload,
-                        )
-                        .and_then(|state| {
-                            if state.is_some() {
-                                Ok(state.map(GameRuntimeLoadedBlockState::Power))
-                            } else {
-                                Ok(None)
-                            }
-                        })
-                        .or_else(|err| match err {
-                            GameRuntimeBlockStateReadError::Unsupported => self
-                                .read_distribution_runtime_state_from_building_payload(
-                                    block,
-                                    building,
-                                    revision,
-                                    building_payload,
-                                )
-                                .and_then(|state| {
-                                    if state.is_some() {
-                                        Ok(state.map(GameRuntimeLoadedBlockState::Distribution))
-                                    } else {
-                                        Ok(None)
-                                    }
-                                })
-                                .or_else(|err| match err {
-                                    GameRuntimeBlockStateReadError::Unsupported => self
-                                        .read_storage_runtime_state_from_building_payload(
-                                            block,
-                                            revision,
-                                            building_payload,
-                                        )
-                                        .and_then(|state| {
-                                            if state.is_some() {
-                                                Ok(state.map(GameRuntimeLoadedBlockState::Storage))
-                                            } else {
-                                                Ok(None)
-                                            }
-                                        })
-                                        .or_else(|err| match err {
-                                            GameRuntimeBlockStateReadError::Unsupported => self
-                                                .read_liquid_runtime_state_from_building_payload(
-                                                    block,
-                                                    revision,
-                                                    building_payload,
-                                                )
-                                                .and_then(|state| {
-                                                    if state.is_some() {
-                                                        Ok(state.map(
-                                                            GameRuntimeLoadedBlockState::Liquid,
-                                                        ))
-                                                    } else {
-                                                        Ok(None)
-                                                    }
-                                                })
-                                                .or_else(|err| match err {
-                                                    GameRuntimeBlockStateReadError::Unsupported => {
-                                                        self.read_unit_runtime_state_from_building_payload(
-                                                            block,
-                                                            revision,
-                                                            building_payload,
-                                                        )
-                                                        .and_then(|state| {
-                                                            if state.is_some() {
-                                                                Ok(state.map(GameRuntimeLoadedBlockState::Unit))
-                                                            } else {
-                                                                Ok(None)
-                                                            }
-                                                        })
-                                                        .or_else(|err| match err {
-                                                            GameRuntimeBlockStateReadError::Unsupported => self
-                                                                .read_turret_runtime_state_from_building_payload(
-                                                                    block,
-                                                                    revision,
-                                                                    building_payload,
-                                                                )
-                                                                .map(|state| {
-                                                                    state.map(GameRuntimeLoadedBlockState::Turret)
-                                                                })
-                                                                .or_else(|err| match err {
-                                                                    GameRuntimeBlockStateReadError::Unsupported => self
-                                                                        .read_defense_wall_runtime_state_from_building_payload(
-                                                                            block,
-                                                                            building_payload,
-                                                                        )
-                                                                        .map(|state| {
-                                                                            state.map(GameRuntimeLoadedBlockState::DefenseWall)
-                                                                        }),
-                                                                    GameRuntimeBlockStateReadError::Parse => {
-                                                                        Err(GameRuntimeBlockStateReadError::Parse)
-                                                                    }
-                                                                }),
-                                                            GameRuntimeBlockStateReadError::Parse => {
-                                                                Err(GameRuntimeBlockStateReadError::Parse)
-                                                            }
-                                                        })
-                                                    }
-                                                    GameRuntimeBlockStateReadError::Parse => {
-                                                        Err(GameRuntimeBlockStateReadError::Parse)
-                                                    }
-                                                }),
-                                            GameRuntimeBlockStateReadError::Parse => {
-                                                Err(GameRuntimeBlockStateReadError::Parse)
-                                            }
-                                        }),
-                                    GameRuntimeBlockStateReadError::Parse => {
-                                        Err(GameRuntimeBlockStateReadError::Parse)
-                                    }
-                                }),
-                            GameRuntimeBlockStateReadError::Parse => {
-                                Err(GameRuntimeBlockStateReadError::Parse)
-                            }
-                        }),
-                    GameRuntimeBlockStateReadError::Parse => {
-                        Err(GameRuntimeBlockStateReadError::Parse)
-                    }
-                }),
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
         }
+
+        match self.read_payload_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Payload(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_power_runtime_state_from_building_payload(block, revision, building_payload)
+        {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Power(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_production_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Production(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_distribution_runtime_state_from_building_payload(
+            block,
+            building,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Distribution(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_storage_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Storage(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_liquid_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Liquid(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_unit_runtime_state_from_building_payload(block, revision, building_payload)
+        {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Unit(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_turret_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Turret(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        self.read_defense_wall_runtime_state_from_building_payload(block, building_payload)
+            .map(|state| state.map(GameRuntimeLoadedBlockState::DefenseWall))
     }
 
     fn read_effect_runtime_state_from_building_payload(
@@ -873,6 +866,36 @@ impl GameRuntime {
                 .map(|state| Some(GameRuntimePowerBlockState::Light(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
+    fn read_production_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeProductionBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Production(production) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match production.kind {
+            ProductionBlockKind::Drill => read_drill_state(building_payload, revision)
+                .map(|state| Some(GameRuntimeProductionBlockState::Drill(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            ProductionBlockKind::BeamDrill => read_beam_drill_state(building_payload, revision)
+                .map(|state| Some(GameRuntimeProductionBlockState::BeamDrill(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            ProductionBlockKind::BurstDrill => read_burst_drill_state(building_payload, revision)
+                .map(|state| Some(GameRuntimeProductionBlockState::BurstDrill(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            ProductionBlockKind::SolidPump
+            | ProductionBlockKind::Fracker
+            | ProductionBlockKind::WallCrafter => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
 
@@ -1182,6 +1205,7 @@ impl GameRuntime {
         self.effect_timer_store.clear();
         self.payload_runtime_states.clear();
         self.power_runtime_states.clear();
+        self.production_runtime_states.clear();
         self.distribution_runtime_states.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
@@ -1357,6 +1381,9 @@ mod tests {
                 write_nuclear_reactor_state, write_power_generator_state,
                 write_variable_reactor_state, HeaterGeneratorState, ImpactReactorState,
                 LightBlockState, NuclearReactorState, PowerGeneratorState, VariableReactorState,
+            },
+            blocks::production::{
+                write_beam_drill_state, write_burst_drill_state, write_drill_state,
             },
             blocks::storage::{write_core_state, write_unloader_sort_item, CoreBuildState},
             blocks::units::{
@@ -2832,6 +2859,128 @@ mod tests {
         assert_eq!(
             runtime.power_runtime_states.get(&tile_pos),
             Some(&GameRuntimePowerBlockState::Light(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_drill_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let drill_def = content.block_by_name("mechanical-drill").unwrap();
+        let tile_pos = point2_pack(1, 6);
+        let saved = BuildingComp::new(tile_pos, drill_def.base().clone(), TeamId(2));
+        let state = DrillState {
+            progress: 120.0,
+            warmup: 0.45,
+            ..Default::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_drill_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 49, drill_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.production_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeProductionBlockState::Drill(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_skips_wall_crafter_without_java_block_specific_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let crusher_def = content.block_by_name("cliff-crusher").unwrap();
+        let tile_pos = point2_pack(2, 6);
+        let saved = BuildingComp::new(tile_pos, crusher_def.base().clone(), TeamId(2));
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 50, crusher_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 0);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert!(runtime.production_runtime_states.get(&tile_pos).is_none());
+    }
+
+    #[test]
+    fn game_runtime_loads_beam_drill_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let bore_def = content.block_by_name("plasma-bore").unwrap();
+        let tile_pos = point2_pack(3, 6);
+        let saved = BuildingComp::new(tile_pos, bore_def.base().clone(), TeamId(2));
+        let state = BeamDrillState {
+            time: 44.0,
+            warmup: 0.65,
+            ..Default::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_beam_drill_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 51, bore_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.production_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeProductionBlockState::BeamDrill(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_burst_drill_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let drill_def = content.block_by_name("impact-drill").unwrap();
+        let tile_pos = point2_pack(4, 6);
+        let saved = BuildingComp::new(tile_pos, drill_def.base().clone(), TeamId(2));
+        let state = BurstDrillState {
+            progress: 240.0,
+            warmup: 0.72,
+            smooth_progress: 0.99,
+            invert_time: 0.5,
+            ..Default::default()
+        };
+        let expected = BurstDrillState {
+            smooth_progress: 0.0,
+            invert_time: 0.0,
+            ..state
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_burst_drill_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 52, drill_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.production_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeProductionBlockState::BurstDrill(expected))
         );
     }
 
