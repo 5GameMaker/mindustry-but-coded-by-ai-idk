@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     content::blocks::{
         BlockDef, DefenseWallKind, DistributionBlockKind, EffectBlockKind, LiquidBlockKind,
-        PayloadBlockKind, PowerBlockKind, SandboxBlockKind, StorageBlockKind,
+        PayloadBlockKind, PowerBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -23,6 +23,11 @@ use crate::mindustry::{
     },
     io::LegacyShortChunkMap,
     vars::TILE_SIZE,
+    world::blocks::defense::turrets::{
+        continuous_turret_read_child, item_turret_read_ammo, point_defense_read_child,
+        tractor_beam_read_child, turret_read_child, ContinuousTurretState, ItemAmmoEntry,
+        PointDefenseState, TractorBeamState, TurretState,
+    },
     world::blocks::defense::{
         effect_block_frame_input_from_game_update, effect_block_update_building_slice_with_stores,
         read_base_shield_state, read_door_state, read_force_projector_state,
@@ -186,6 +191,21 @@ pub enum GameRuntimeDefenseWallState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeTurretBlockState {
+    Generic(TurretState),
+    Item {
+        turret: TurretState,
+        ammo: Vec<ItemAmmoEntry>,
+    },
+    Continuous {
+        turret: TurretState,
+        continuous: ContinuousTurretState,
+    },
+    PointDefense(PointDefenseState),
+    TractorBeam(TractorBeamState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
@@ -195,6 +215,7 @@ enum GameRuntimeLoadedBlockState {
     Liquid(GameRuntimeLiquidBlockState),
     Unit(GameRuntimeUnitBlockState),
     DefenseWall(GameRuntimeDefenseWallState),
+    Turret(GameRuntimeTurretBlockState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,6 +231,7 @@ pub struct GameRuntime {
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
+    pub turret_runtime_states: BTreeMap<i32, GameRuntimeTurretBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -232,6 +254,7 @@ impl GameRuntime {
             liquid_runtime_states: BTreeMap::new(),
             unit_runtime_states: BTreeMap::new(),
             defense_wall_runtime_states: BTreeMap::new(),
+            turret_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -279,6 +302,7 @@ impl GameRuntime {
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.unit_runtime_states.remove(&removed.tile_pos);
         self.defense_wall_runtime_states.remove(&removed.tile_pos);
+        self.turret_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -465,6 +489,10 @@ impl GameRuntime {
                             .insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Turret(block_state) => {
+                        self.turret_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -577,12 +605,26 @@ impl GameRuntime {
                                                         })
                                                         .or_else(|err| match err {
                                                             GameRuntimeBlockStateReadError::Unsupported => self
-                                                                .read_defense_wall_runtime_state_from_building_payload(
+                                                                .read_turret_runtime_state_from_building_payload(
                                                                     block,
+                                                                    revision,
                                                                     building_payload,
                                                                 )
                                                                 .map(|state| {
-                                                                    state.map(GameRuntimeLoadedBlockState::DefenseWall)
+                                                                    state.map(GameRuntimeLoadedBlockState::Turret)
+                                                                })
+                                                                .or_else(|err| match err {
+                                                                    GameRuntimeBlockStateReadError::Unsupported => self
+                                                                        .read_defense_wall_runtime_state_from_building_payload(
+                                                                            block,
+                                                                            building_payload,
+                                                                        )
+                                                                        .map(|state| {
+                                                                            state.map(GameRuntimeLoadedBlockState::DefenseWall)
+                                                                        }),
+                                                                    GameRuntimeBlockStateReadError::Parse => {
+                                                                        Err(GameRuntimeBlockStateReadError::Parse)
+                                                                    }
                                                                 }),
                                                             GameRuntimeBlockStateReadError::Parse => {
                                                                 Err(GameRuntimeBlockStateReadError::Parse)
@@ -984,6 +1026,60 @@ impl GameRuntime {
         }
     }
 
+    fn read_turret_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeTurretBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Turret(turret) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match turret.kind {
+            TurretBlockKind::ItemTurret => {
+                let mut turret_state = turret_read_child(building_payload, revision)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let (ammo, total_ammo) =
+                    item_turret_read_ammo(building_payload, revision, turret.max_ammo, |item_id| {
+                        turret.ammo.iter().any(|ammo| ammo.item == item_id)
+                    })
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                turret_state.total_ammo = total_ammo;
+                Ok(Some(GameRuntimeTurretBlockState::Item {
+                    turret: turret_state,
+                    ammo,
+                }))
+            }
+            TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret => {
+                let turret_state = turret_read_child(building_payload, revision)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let continuous =
+                    continuous_turret_read_child(building_payload, revision, turret.base.size)
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                Ok(Some(GameRuntimeTurretBlockState::Continuous {
+                    turret: turret_state,
+                    continuous,
+                }))
+            }
+            TurretBlockKind::PointDefenseTurret => point_defense_read_child(building_payload)
+                .map(|state| Some(GameRuntimeTurretBlockState::PointDefense(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            TurretBlockKind::TractorBeamTurret => tractor_beam_read_child(building_payload)
+                .map(|state| Some(GameRuntimeTurretBlockState::TractorBeam(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            TurretBlockKind::LiquidTurret
+            | TurretBlockKind::PowerTurret
+            | TurretBlockKind::LaserTurret => turret_read_child(building_payload, revision)
+                .map(|state| Some(GameRuntimeTurretBlockState::Generic(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+        }
+    }
+
     fn read_defense_wall_runtime_state_from_building_payload(
         &self,
         block: &BlockDef,
@@ -1060,6 +1156,7 @@ impl GameRuntime {
         self.liquid_runtime_states.clear();
         self.unit_runtime_states.clear();
         self.defense_wall_runtime_states.clear();
+        self.turret_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -1196,6 +1293,11 @@ mod tests {
         },
         r#type::{PayloadKey, PayloadSeq},
         world::{
+            blocks::defense::turrets::{
+                continuous_turret_write_child, item_turret_write_ammo, point_defense_write_child,
+                tractor_beam_write_child, turret_write_child, ContinuousTurretState, ItemAmmoEntry,
+                PointDefenseState, TractorBeamState, TurretState,
+            },
             blocks::defense::{
                 write_base_shield_state, write_door_state, write_force_projector_state,
                 write_radar_state, write_shield_wall_state, BaseShieldState, DoorState,
@@ -2047,6 +2149,140 @@ mod tests {
         assert_eq!(
             runtime.defense_wall_runtime_states.get(&tile_pos),
             Some(&GameRuntimeDefenseWallState::ShieldWall(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_item_turret_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret_def = content.block_by_name("duo").unwrap();
+        let copper = content.item_by_name("copper").unwrap();
+        let tile_pos = point2_pack(2, 1);
+        let saved = BuildingComp::new(tile_pos, turret_def.base().clone(), TeamId(1));
+        let mut turret = TurretState {
+            reload_counter: 3.5,
+            rotation: 45.0,
+            ..TurretState::default()
+        };
+        let ammo = vec![ItemAmmoEntry {
+            item_id: copper.base.mappable.base.id,
+            amount: 7,
+        }];
+        let mut building_bytes = Vec::new();
+        building_bytes.push(2);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        turret_write_child(&mut building_bytes, &turret).unwrap();
+        item_turret_write_ammo(&mut building_bytes, &ammo).unwrap();
+        turret.total_ammo = 7;
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 8, turret_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::Item { turret, ammo })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_continuous_turret_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret_def = content.block_by_name("lustre").unwrap();
+        let tile_pos = point2_pack(3, 1);
+        let saved = BuildingComp::new(tile_pos, turret_def.base().clone(), TeamId(1));
+        let turret = TurretState {
+            reload_counter: 6.0,
+            rotation: 135.0,
+            ..TurretState::default()
+        };
+        let continuous = ContinuousTurretState {
+            last_length: 38.0,
+            bullets: 0,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(3);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        turret_write_child(&mut building_bytes, &turret).unwrap();
+        continuous_turret_write_child(&mut building_bytes, &continuous).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 9, turret_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::Continuous { turret, continuous })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_point_defense_turret_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret_def = content.block_by_name("segment").unwrap();
+        let tile_pos = point2_pack(4, 1);
+        let saved = BuildingComp::new(tile_pos, turret_def.base().clone(), TeamId(1));
+        let state = PointDefenseState {
+            rotation: 270.0,
+            ..PointDefenseState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        point_defense_write_child(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 10, turret_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::PointDefense(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_tractor_beam_turret_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret_def = content.block_by_name("parallax").unwrap();
+        let tile_pos = point2_pack(5, 1);
+        let saved = BuildingComp::new(tile_pos, turret_def.base().clone(), TeamId(1));
+        let state = TractorBeamState {
+            rotation: 315.0,
+            ..TractorBeamState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        tractor_beam_write_child(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 11, turret_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::TractorBeam(state))
         );
     }
 
