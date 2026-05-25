@@ -1008,6 +1008,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 
 优先补：
 
+- `WorldReloader.begin()/end()` 已新增 `NetServer::begin_world_reload(...)` / `end_world_reload(...)` runtime adapter：
+  - begin 侧按 Java 顺序清远端玩家 unit、标记 logic reset、向 reloader 存下的远端连接发送 `WorldDataBeginCallPacket`；
+  - end 侧按 Java 顺序 reset player、PVP assign team、调用真实 `send_world_data(...)` 发送 world stream；
+  - 这一步把 `world_reloader.rs` 的纯 plan 接到 `net_server.rs` 真实 world-data transport，后续可直接挂到地图重载/换图流程。
 - marker/custom chunks 精确拆分；
 - UBJSON/JsonIO bytes；
 - world stream 应用到 `World`；

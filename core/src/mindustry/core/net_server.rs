@@ -13,7 +13,8 @@ use crate::mindustry::net::{
     KickReason, Net, NetConnection, PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket,
     SendChatMessageCallPacket, SendMessageCallPacket2, SentPacket, ServerResponse,
     StateSnapshotCallPacket, SteamAdminData, StreamBegin, StreamChunk, TileConfigCallPacket,
-    TileTapCallPacket, WorldDataBeginCallPacket,
+    TileTapCallPacket, WorldDataBeginCallPacket, WorldReloadBeginAction, WorldReloadBeginPlan,
+    WorldReloadEndAction, WorldReloadEndPlan, WorldReloadPlayer, WorldReloader,
 };
 use crate::mindustry::vars::{MAX_TCP_SIZE, MAX_TEXT_LENGTH};
 
@@ -362,6 +363,17 @@ pub struct NetServerState {
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
     pub last_updated_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NetServerWorldReloadSummary {
+    pub cleared_player_units: Vec<i32>,
+    pub reset_logic: bool,
+    pub reset_net: bool,
+    pub world_data_begin_connections: Vec<i32>,
+    pub reset_players: Vec<i32>,
+    pub assigned_teams: Vec<(i32, TeamId)>,
+    pub world_data_connections: Vec<i32>,
 }
 
 #[derive(Clone)]
@@ -755,6 +767,103 @@ impl NetServer {
     ) -> io::Result<()> {
         self.send_world_data_begin(connection_id)?;
         self.send_world_data(connection_id, bytes)
+    }
+
+    pub fn begin_world_reload(
+        &self,
+        reloader: &mut WorldReloader,
+        net_client: bool,
+        players: &mut [WorldReloadPlayer],
+    ) -> io::Result<(WorldReloadBeginPlan, NetServerWorldReloadSummary)> {
+        let plan = reloader.begin(self.is_server(), net_client, players);
+        let begin_connections = reloader
+            .stored_players()
+            .iter()
+            .map(|player| player.connection_id)
+            .collect::<Vec<_>>();
+        let summary = self.apply_world_reload_begin_actions(&plan.actions, &begin_connections)?;
+        Ok((plan, summary))
+    }
+
+    pub fn end_world_reload<F, A>(
+        &self,
+        reloader: &WorldReloader,
+        players: &mut [WorldReloadPlayer],
+        pvp: bool,
+        assign_team: A,
+        world_data: F,
+    ) -> io::Result<(WorldReloadEndPlan, NetServerWorldReloadSummary)>
+    where
+        F: FnMut(i32) -> Vec<u8>,
+        A: FnMut(
+            &crate::mindustry::net::StoredReloadPlayer,
+            &[crate::mindustry::net::StoredReloadPlayer],
+        ) -> TeamId,
+    {
+        let plan = reloader.end(players, pvp, assign_team);
+        let summary = self.apply_world_reload_end_actions(&plan.actions, world_data)?;
+        Ok((plan, summary))
+    }
+
+    pub fn apply_world_reload_begin_actions(
+        &self,
+        actions: &[WorldReloadBeginAction],
+        begin_connections: &[i32],
+    ) -> io::Result<NetServerWorldReloadSummary> {
+        let mut summary = NetServerWorldReloadSummary::default();
+
+        for action in actions {
+            match *action {
+                WorldReloadBeginAction::ClearPlayerUnit(connection_id) => {
+                    summary.cleared_player_units.push(connection_id);
+                }
+                WorldReloadBeginAction::ResetLogic => {
+                    summary.reset_logic = true;
+                }
+                WorldReloadBeginAction::ResetNet => {
+                    summary.reset_net = true;
+                }
+                WorldReloadBeginAction::SendWorldDataBegin => {
+                    for &connection_id in begin_connections {
+                        self.send_world_data_begin(connection_id)?;
+                        summary.world_data_begin_connections.push(connection_id);
+                    }
+                }
+            }
+        }
+
+        Ok(summary)
+    }
+
+    pub fn apply_world_reload_end_actions<F>(
+        &self,
+        actions: &[WorldReloadEndAction],
+        mut world_data: F,
+    ) -> io::Result<NetServerWorldReloadSummary>
+    where
+        F: FnMut(i32) -> Vec<u8>,
+    {
+        let mut summary = NetServerWorldReloadSummary::default();
+
+        for action in actions {
+            match *action {
+                WorldReloadEndAction::ResetPlayer { connection_id, .. } => {
+                    summary.reset_players.push(connection_id);
+                }
+                WorldReloadEndAction::AssignTeam {
+                    connection_id,
+                    team,
+                } => {
+                    summary.assigned_teams.push((connection_id, team));
+                }
+                WorldReloadEndAction::SendWorldData { connection_id } => {
+                    self.send_world_data(connection_id, world_data(connection_id))?;
+                    summary.world_data_connections.push(connection_id);
+                }
+            }
+        }
+
+        Ok(summary)
     }
 
     pub fn send_client_plan_snapshot_received(
@@ -3316,15 +3425,15 @@ mod tests {
         HostCallback, KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
         PingResponseCallPacket, ProviderEvent, RequestDebugStatusCallPacket, RotateBlockCallPacket,
         SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData,
-        TileConfigCallPacket, TileTapCallPacket,
+        TileConfigCallPacket, TileTapCallPacket, WorldReloadPlayer, WorldReloader,
     };
     use crate::mindustry::vars::{MAX_TCP_SIZE, MAX_TEXT_LENGTH};
     use crate::mindustry::world::block::Block;
 
     use super::{
-        ConnectPacketValidationContext, NetServer, NetServerState, PlayerPreviewPlanSource,
-        JAVA_CHAT_MIN_CONNECT_AGE_MS, JAVA_DEFAULT_KICK_DURATION_MS, JAVA_PACKET_SPAM_LIMIT,
-        PLAN_PREVIEW_CHUNK_SIZE,
+        ConnectPacketValidationContext, NetServer, NetServerState, NetServerWorldReloadSummary,
+        PlayerPreviewPlanSource, JAVA_CHAT_MIN_CONNECT_AGE_MS, JAVA_DEFAULT_KICK_DURATION_MS,
+        JAVA_PACKET_SPAM_LIMIT, PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -6173,6 +6282,89 @@ mod tests {
         assert!(sent
             .iter()
             .all(|(connection_id, _, reliable)| *connection_id == 12 && *reliable));
+    }
+
+    #[test]
+    fn world_reloader_server_adapter_sends_begin_and_end_world_data_in_java_order() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+            ..Default::default()
+        };
+        let server = NetServer::new(Net::new(Box::new(provider)));
+        {
+            let state = server.state();
+            state.lock().unwrap().server = true;
+        }
+        let mut reloader = WorldReloader::new();
+        let mut players = vec![
+            WorldReloadPlayer::local(1, TeamId(1)),
+            WorldReloadPlayer::remote(2, TeamId(2)),
+            WorldReloadPlayer::remote(3, TeamId(3)),
+        ];
+
+        let (begin_plan, begin_summary) = server
+            .begin_world_reload(&mut reloader, false, &mut players)
+            .unwrap();
+
+        assert!(begin_plan.was_server);
+        assert_eq!(
+            begin_summary,
+            NetServerWorldReloadSummary {
+                cleared_player_units: vec![2, 3],
+                reset_logic: true,
+                world_data_begin_connections: vec![2, 3],
+                ..Default::default()
+            }
+        );
+        assert!(players[0].has_unit);
+        assert!(!players[1].has_unit);
+        assert!(!players[2].has_unit);
+
+        let (end_plan, end_summary) = server
+            .end_world_reload(
+                &reloader,
+                &mut players,
+                true,
+                |stored, _| TeamId(stored.connection_id as u8 + 10),
+                |connection_id| vec![connection_id as u8],
+            )
+            .unwrap();
+
+        assert!(end_plan.was_server);
+        assert_eq!(players[1].team, TeamId(12));
+        assert_eq!(players[2].team, TeamId(13));
+        assert_eq!(
+            end_summary,
+            NetServerWorldReloadSummary {
+                reset_players: vec![2, 3],
+                assigned_teams: vec![(2, TeamId(12)), (3, TeamId(13))],
+                world_data_connections: vec![2, 3],
+                ..Default::default()
+            }
+        );
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 6);
+        assert!(matches!(sent[0].1, PacketKind::WorldDataBeginCallPacket(_)));
+        assert!(matches!(sent[1].1, PacketKind::WorldDataBeginCallPacket(_)));
+        assert_eq!(sent[0].0, 2);
+        assert_eq!(sent[1].0, 3);
+        assert!(matches!(sent[2].1, PacketKind::StreamBegin(_)));
+        assert!(matches!(sent[3].1, PacketKind::StreamChunk(_)));
+        assert_eq!(sent[2].0, 2);
+        assert_eq!(sent[3].0, 2);
+        assert!(matches!(sent[4].1, PacketKind::StreamBegin(_)));
+        assert!(matches!(sent[5].1, PacketKind::StreamChunk(_)));
+        assert_eq!(sent[4].0, 3);
+        assert_eq!(sent[5].0, 3);
+        drop(sent);
+
+        let state = server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.world_data_begin_sent, 2);
+        assert_eq!(state.world_streams_sent, 2);
+        assert_eq!(state.next_world_stream_id, 2);
     }
 
     #[test]
