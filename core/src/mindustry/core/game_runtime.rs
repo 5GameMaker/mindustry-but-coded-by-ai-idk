@@ -79,6 +79,7 @@ use crate::mindustry::{
     },
     world::blocks::payloads::{
         block_producer_update, constructor_clear, constructor_configure, payload_block_move_in,
+        payload_source_clear_config, payload_source_configure_block, payload_source_configure_unit,
         payload_source_update, payload_void_update, read_block_producer_progress,
         read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
         read_payload_mass_driver_extra, read_payload_ref_to_end, read_payload_router_extra,
@@ -1351,6 +1352,25 @@ pub enum GameRuntimePayloadConstructorConfigureResult {
     UnknownRecipe,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadSourceConfig {
+    Block(ContentId),
+    Unit(ContentId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadSourceConfigureResult {
+    ConfiguredBlock,
+    ConfiguredUnit,
+    Cleared,
+    Rejected,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotPayloadSource,
+    UnknownBlock,
+    UnknownUnit,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Construct(GameRuntimeConstructBlockState),
@@ -1493,6 +1513,86 @@ impl GameRuntime {
             recipe_id,
         )));
         GameRuntimePayloadConstructorConfigureResult::Configured
+    }
+
+    pub fn configure_owned_payload_source(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        config: Option<GameRuntimePayloadSourceConfig>,
+    ) -> GameRuntimePayloadSourceConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimePayloadSourceConfigureResult::MissingBuilding;
+        };
+
+        let source_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::PayloadSource => {
+                sandbox
+            }
+            Some(_) | None => return GameRuntimePayloadSourceConfigureResult::NotPayloadSource,
+        };
+
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            self.payload_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimePayloadSourceConfigureResult::MissingRuntimeState;
+        };
+
+        let Some(config) = config else {
+            payload_source_clear_config(source);
+            common.payload = None;
+            self.buildings[index].config = None;
+            return GameRuntimePayloadSourceConfigureResult::Cleared;
+        };
+
+        match config {
+            GameRuntimePayloadSourceConfig::Block(block_id) => {
+                let Some(block) = content.block(block_id) else {
+                    return GameRuntimePayloadSourceConfigureResult::UnknownBlock;
+                };
+                let banned = self.state.rules.is_block_banned(&block.base().name);
+                if !source_block.can_payload_source_produce_block(
+                    block,
+                    self.state.build_visibility_context(),
+                    self.state.rules.env,
+                    banned,
+                ) {
+                    return GameRuntimePayloadSourceConfigureResult::Rejected;
+                }
+
+                if source.config_block != Some(block_id) || source.unit.is_some() {
+                    common.payload = None;
+                }
+                payload_source_configure_block(source, block_id);
+                self.buildings[index].config = Some(type_io::TypeValue::Content(
+                    type_io::ContentRef::new(ContentType::Block, block_id),
+                ));
+                GameRuntimePayloadSourceConfigureResult::ConfiguredBlock
+            }
+            GameRuntimePayloadSourceConfig::Unit(unit_id) => {
+                let Some(unit) = content.unit(unit_id) else {
+                    return GameRuntimePayloadSourceConfigureResult::UnknownUnit;
+                };
+                let banned = self.state.rules.is_unit_banned(&unit.base.mappable.name);
+                if !source_block.can_payload_source_produce_unit(unit, self.state.rules.env, banned)
+                {
+                    return GameRuntimePayloadSourceConfigureResult::Rejected;
+                }
+
+                if source.unit != Some(unit_id) || source.config_block.is_some() {
+                    common.payload = None;
+                }
+                payload_source_configure_unit(source, unit_id);
+                self.buildings[index].config = Some(type_io::TypeValue::Content(
+                    type_io::ContentRef::new(ContentType::Unit, unit_id),
+                ));
+                GameRuntimePayloadSourceConfigureResult::ConfiguredUnit
+            }
+        }
     }
 
     pub fn add_building(&mut self, building: BuildingComp) -> usize {
@@ -7605,6 +7705,212 @@ mod tests {
         assert!(common.payload.is_none());
         assert!(!source.has_payload);
         assert_eq!(source.unit, Some(flare));
+    }
+
+    #[test]
+    fn game_runtime_configures_owned_payload_source_block_and_clears_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let router_id = content.block_by_name("router").unwrap().base().id;
+        let flare = content.unit_by_name("flare").unwrap().id();
+        let tile_pos = point2_pack(0, 5);
+        let common = PayloadBlockBuildState {
+            payload: Some(base_only_build_payload_ref(&content, "duo")),
+            pay_vector: Vec2 { x: 1.0, y: 1.0 },
+            pay_rotation: 180.0,
+            carried: false,
+        };
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            source_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Source {
+                common,
+                source: PayloadSourceState {
+                    unit: Some(flare),
+                    has_payload: true,
+                    scl: 0.5,
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_source(
+                &content,
+                tile_pos,
+                Some(GameRuntimePayloadSourceConfig::Block(router_id)),
+            ),
+            GameRuntimePayloadSourceConfigureResult::ConfiguredBlock
+        );
+        assert_eq!(
+            runtime.buildings()[0].config.as_ref(),
+            Some(&TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Block,
+                router_id
+            )))
+        );
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(source.config_block, Some(router_id));
+        assert_eq!(source.unit, None);
+        assert!(!source.has_payload);
+        assert_eq!(source.scl, 0.0);
+    }
+
+    #[test]
+    fn game_runtime_payload_source_repeated_same_block_config_preserves_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let router_id = content.block_by_name("router").unwrap().base().id;
+        let tile_pos = point2_pack(0, 5);
+        let common = PayloadBlockBuildState {
+            payload: Some(base_only_build_payload_ref(&content, "router")),
+            pay_vector: Vec2::ZERO,
+            pay_rotation: 90.0,
+            carried: false,
+        };
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            source_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Source {
+                common: common.clone(),
+                source: PayloadSourceState {
+                    config_block: Some(router_id),
+                    has_payload: true,
+                    scl: 0.75,
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_source(
+                &content,
+                tile_pos,
+                Some(GameRuntimePayloadSourceConfig::Block(router_id)),
+            ),
+            GameRuntimePayloadSourceConfigureResult::ConfiguredBlock
+        );
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Source {
+                common,
+                source: PayloadSourceState {
+                    config_block: Some(router_id),
+                    has_payload: true,
+                    scl: 0.75,
+                    ..PayloadSourceState::default()
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_rejects_banned_payload_source_unit() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let tile_pos = point2_pack(0, 5);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime
+            .state
+            .rules
+            .banned_units
+            .insert(flare.base.mappable.name.clone());
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            source_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState::default(),
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_source(
+                &content,
+                tile_pos,
+                Some(GameRuntimePayloadSourceConfig::Unit(flare.id())),
+            ),
+            GameRuntimePayloadSourceConfigureResult::Rejected
+        );
+        assert_eq!(runtime.buildings()[0].config, None);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState::default(),
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_clears_owned_payload_source_config() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let router_id = content.block_by_name("router").unwrap().base().id;
+        let tile_pos = point2_pack(0, 5);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        let mut building = BuildingComp::new(tile_pos, source_def.base().clone(), TeamId(6));
+        building.config = Some(TypeValue::Content(type_io::ContentRef::new(
+            ContentType::Block,
+            router_id,
+        )));
+        runtime.add_building(building);
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState {
+                    payload: Some(base_only_build_payload_ref(&content, "router")),
+                    ..PayloadBlockBuildState::default()
+                },
+                source: PayloadSourceState {
+                    config_block: Some(router_id),
+                    has_payload: true,
+                    scl: 0.5,
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_source(&content, tile_pos, None),
+            GameRuntimePayloadSourceConfigureResult::Cleared
+        );
+        assert_eq!(runtime.buildings()[0].config, None);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState::default(),
+            })
+        );
     }
 
     #[test]

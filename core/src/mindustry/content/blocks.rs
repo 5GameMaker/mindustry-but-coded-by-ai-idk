@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::mindustry::{
     ctype::ContentId,
-    r#type::{Item, Liquid, PayloadKey},
+    r#type::{Item, Liquid, PayloadKey, UnitType},
     vars::TILE_SIZE,
     world::{
         blocks::environment::{
@@ -3940,6 +3940,31 @@ impl SandboxBlockData {
         self.base.has_power = false;
         self.rotate = true;
         self.accepts_unit_payloads = true;
+    }
+
+    pub fn can_payload_source_produce_block(
+        &self,
+        block: &BlockDef,
+        visibility_context: BuildVisibilityContext,
+        env: u32,
+        banned: bool,
+    ) -> bool {
+        if self.kind != SandboxBlockKind::PayloadSource {
+            return false;
+        }
+        let base = block.base();
+        base.build_visibility.visible(visibility_context)
+            && base.size < self.base.size
+            && !matches!(block, BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core)
+            && !banned
+            && block.supports_env(env)
+    }
+
+    pub fn can_payload_source_produce_unit(&self, unit: &UnitType, env: u32, banned: bool) -> bool {
+        self.kind == SandboxBlockKind::PayloadSource
+            && !unit.is_hidden()
+            && !banned
+            && unit.supports_env(env)
     }
 
     fn finalize(&mut self, items: &[Item]) {
@@ -21372,6 +21397,40 @@ mod tests {
         unrestricted.max_block_size = 9;
         let core = registry.get_by_name("core-shard").unwrap();
         assert!(!unrestricted.can_produce_block(core, context, Env::TERRESTRIAL, false));
+    }
+
+    #[test]
+    fn payload_source_can_produce_respects_java_filters() {
+        let (_, _, registry) = load_test_registry();
+        let context = BuildVisibilityContext::default();
+        let source = registry.get_sandbox_by_name("payload-source").unwrap();
+        let router = registry.get_by_name("router").unwrap();
+        let core = registry.get_by_name("core-shard").unwrap();
+
+        assert!(source.can_payload_source_produce_block(router, context, Env::TERRESTRIAL, false));
+        assert!(!source.can_payload_source_produce_block(core, context, Env::TERRESTRIAL, false));
+        assert!(!source.can_payload_source_produce_block(router, context, Env::TERRESTRIAL, true));
+
+        let mut hidden = Block::new(30_101, "hidden-source-candidate");
+        hidden.size = 1;
+        hidden.env_enabled = Env::TERRESTRIAL;
+        hidden.build_visibility = BuildVisibility::Hidden;
+        assert!(!source.can_payload_source_produce_block(
+            &BlockDef::Plain(hidden),
+            context,
+            Env::TERRESTRIAL,
+            false
+        ));
+
+        let mut unit = UnitType::new(30_102, "source-unit-candidate");
+        unit.env_enabled = Env::TERRESTRIAL;
+        assert!(source.can_payload_source_produce_unit(&unit, Env::TERRESTRIAL, false));
+        assert!(!source.can_payload_source_produce_unit(&unit, Env::TERRESTRIAL, true));
+        unit.hidden = true;
+        assert!(!source.can_payload_source_produce_unit(&unit, Env::TERRESTRIAL, false));
+        unit.hidden = false;
+        unit.env_enabled = Env::SPACE;
+        assert!(!source.can_payload_source_produce_unit(&unit, Env::TERRESTRIAL, false));
     }
 
     #[test]
