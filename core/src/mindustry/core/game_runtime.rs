@@ -78,9 +78,9 @@ use crate::mindustry::{
         MessageBlockState,
     },
     world::blocks::payloads::{
-        read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
-        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
-        read_payload_router_extra, read_payload_source_extra,
+        block_producer_update, read_block_producer_progress, read_constructor_recipe,
+        read_deconstructor_extra, read_payload_loader_extra, read_payload_mass_driver_extra,
+        read_payload_ref_to_end, read_payload_router_extra, read_payload_source_extra,
         read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
         write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
         write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
@@ -1266,6 +1266,16 @@ pub enum GameRuntimeTurretBlockState {
 pub struct GameRuntimeConstructBlockState {
     pub size: i32,
     pub state: ConstructBlockState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimePayloadConstructorFrameReport {
+    pub visited_buildings: usize,
+    pub constructor_candidates: usize,
+    pub updated_constructors: usize,
+    pub produced_payloads: usize,
+    pub missing_runtime_states: usize,
+    pub missing_recipe_build_times: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3014,6 +3024,110 @@ impl GameRuntime {
             self.state.world.clear_load_events();
         }
         should_reset
+    }
+
+    pub fn advance_owned_payload_constructors_with_recipe_build_time(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+        mut recipe_build_time: impl FnMut(&BlockDef) -> Option<f32>,
+    ) -> Option<GameRuntimePayloadConstructorFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+
+        self.refresh_owned_building_update_permissions(content);
+
+        let frame_delta = advanced.delta_ticks as f32;
+        let mut report = GameRuntimePayloadConstructorFrameReport::default();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, team, enabled, efficiency, time_scale) = {
+                let building = &mut self.buildings[index];
+                let can_overdrive = content
+                    .block(building.block.id)
+                    .map(BlockDef::can_overdrive)
+                    .unwrap_or(false);
+                building.advance_update_timing(frame_delta, can_overdrive);
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.team,
+                    building.enabled,
+                    building.efficiency,
+                    building.time_scale,
+                )
+            };
+
+            if !enabled {
+                continue;
+            }
+
+            let Some(BlockDef::PayloadConstructor(constructor)) = content.block(block_id) else {
+                continue;
+            };
+            report.constructor_candidates += 1;
+
+            let Some(GameRuntimePayloadBlockState::Constructor {
+                common,
+                producer,
+                recipe,
+            }) = self.payload_runtime_states.get_mut(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            producer.has_payload = common.payload.is_some();
+            let recipe_def = recipe.and_then(|recipe_id| content.block(recipe_id));
+            let recipe_build_time = recipe_def.and_then(|block| {
+                recipe_build_time(block)
+                    .filter(|build_time| build_time.is_finite() && *build_time > 0.0)
+            });
+
+            if recipe.is_some() && recipe_build_time.is_none() {
+                report.missing_recipe_build_times += 1;
+            }
+
+            let before_had_payload = producer.has_payload;
+            let step = block_producer_update(
+                producer,
+                recipe_build_time,
+                efficiency,
+                constructor.build_speed,
+                frame_delta * time_scale * efficiency,
+                frame_delta * time_scale,
+            );
+            report.updated_constructors += 1;
+
+            if step.produced && !before_had_payload {
+                if let Some(recipe_def) = recipe_def {
+                    let payload_building = BuildingComp::new(
+                        crate::mindustry::world::point2_pack(0, 0),
+                        recipe_def.base().clone(),
+                        team,
+                    );
+                    let mut build_bytes = Vec::new();
+                    if payload_building.write_base(&mut build_bytes, false).is_ok() {
+                        common.payload = Some(PayloadRef::Block {
+                            block: recipe_def.base().id,
+                            version: 0,
+                            build_bytes,
+                        });
+                        common.pay_vector = PayloadVec2 { x: 0.0, y: 0.0 };
+                        common.pay_rotation = 0.0;
+                        producer.has_payload = true;
+                        report.produced_payloads += 1;
+                    }
+                }
+            }
+        }
+
+        Some(report)
     }
 
     pub fn advance_and_dispatch_effect_blocks<'a, 'b>(
@@ -7467,6 +7581,82 @@ mod tests {
                 recipe
             })
         );
+    }
+
+    #[test]
+    fn game_runtime_advances_owned_payload_constructor_into_build_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let recipe = Some(router_def.base().id);
+        let tile_pos = point2_pack(6, 4);
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 4.0, y: -2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let producer = BlockProducerState {
+            progress: 9.5,
+            ..BlockProducerState::default()
+        };
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            constructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Constructor {
+                common,
+                producer,
+                recipe,
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_constructors_with_recipe_build_time(&content, 1.0, |block| {
+                (block.base().id == router_def.base().id).then_some(10.0)
+            })
+            .unwrap();
+
+        assert_eq!(
+            report,
+            GameRuntimePayloadConstructorFrameReport {
+                visited_buildings: 1,
+                constructor_candidates: 1,
+                updated_constructors: 1,
+                produced_payloads: 1,
+                missing_runtime_states: 0,
+                missing_recipe_build_times: 0,
+            }
+        );
+        assert_eq!(runtime.state.update_id, 1);
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            common, producer, ..
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert_eq!(producer.progress, 0.5);
+        assert!(producer.has_payload);
+        assert_eq!(common.pay_vector, Vec2 { x: 0.0, y: 0.0 });
+        assert_eq!(common.pay_rotation, 0.0);
+        let Some(PayloadRef::Block {
+            block,
+            version,
+            build_bytes,
+        }) = common.payload.as_ref()
+        else {
+            panic!("constructor should create a build payload");
+        };
+        assert_eq!(*block, router_def.base().id);
+        assert_eq!(*version, 0);
+        assert!(!build_bytes.is_empty());
     }
 
     #[test]
