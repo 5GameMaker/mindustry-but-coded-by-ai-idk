@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
-use crate::mindustry::entities::comp::UnitComp;
+use crate::mindustry::entities::comp::{BuildingComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::BlockPlan;
 use crate::mindustry::io::{type_io, TeamId, TypeValue};
@@ -955,6 +955,26 @@ pub fn overdrive_projector_boost_plan(
         boost: update.real_boost,
         boost_duration: reload + 1.0,
     })
+}
+
+pub fn overdrive_projector_apply_boost_to_buildings(
+    update: &OverdriveProjectorUpdate,
+    reload: f32,
+    buildings: &mut [BuildingComp],
+    mut can_overdrive: impl FnMut(&BuildingComp) -> bool,
+) -> usize {
+    let Some(plan) = overdrive_projector_boost_plan(update, reload) else {
+        return 0;
+    };
+
+    let mut applied = 0;
+    for building in buildings {
+        if can_overdrive(building) {
+            building.apply_boost(plan.boost, plan.boost_duration);
+            applied += 1;
+        }
+    }
+    applied
 }
 
 pub fn overdrive_projector_stats_plan(
@@ -3929,7 +3949,15 @@ fn segments_intersect(a1: (f32, f32), a2: (f32, f32), b1: (f32, f32), b2: (f32, 
 
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::world::{point2_pack, Block};
+
     use super::*;
+
+    fn projector_runtime_building(id: i16, name: &str) -> BuildingComp {
+        let mut block = Block::new(id, name);
+        block.health = 100;
+        BuildingComp::new(point2_pack(id as i32, 0), block, TeamId(1))
+    }
 
     #[test]
     fn wall_door_auto_door_and_mine_helpers_follow_upstream() {
@@ -4556,6 +4584,60 @@ mod tests {
         assert_eq!(wide.line_radius, 7.55);
         assert_eq!(wide.line_width, 4.0);
         assert!(wide.mirrored_points);
+    }
+
+    #[test]
+    fn overdrive_projector_runtime_adapter_applies_boost_to_building_components() {
+        let update = OverdriveProjectorUpdate {
+            applied_boost: true,
+            consumed: false,
+            real_range: 81.0,
+            real_boost: 1.5,
+        };
+        let mut buildings = vec![
+            projector_runtime_building(10, "boostable-router"),
+            projector_runtime_building(11, "non-boostable-wall"),
+            projector_runtime_building(12, "already-faster-drill"),
+        ];
+        buildings[2].apply_boost(2.0, 5.0);
+
+        let applied =
+            overdrive_projector_apply_boost_to_buildings(&update, 60.0, &mut buildings, |build| {
+                build.block.id != 11
+            });
+
+        assert_eq!(applied, 2);
+        assert_eq!(buildings[0].time_scale, 1.5);
+        assert_eq!(buildings[0].time_scale_duration, 61.0);
+        assert_eq!(buildings[1].time_scale, 1.0);
+        assert_eq!(buildings[1].time_scale_duration, 0.0);
+        assert_eq!(buildings[2].time_scale, 2.0);
+        assert_eq!(buildings[2].time_scale_duration, 5.0);
+
+        let stronger = OverdriveProjectorUpdate {
+            real_boost: 2.2,
+            ..update
+        };
+        assert_eq!(
+            overdrive_projector_apply_boost_to_buildings(
+                &stronger,
+                60.0,
+                &mut buildings,
+                |build| build.block.id == 12,
+            ),
+            1
+        );
+        assert_eq!(buildings[2].time_scale, 2.2);
+        assert_eq!(buildings[2].time_scale_duration, 61.0);
+
+        let idle = OverdriveProjectorUpdate {
+            applied_boost: false,
+            ..update
+        };
+        assert_eq!(
+            overdrive_projector_apply_boost_to_buildings(&idle, 60.0, &mut buildings, |_| true,),
+            0
+        );
     }
 
     #[test]
