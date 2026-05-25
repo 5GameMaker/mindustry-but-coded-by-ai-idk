@@ -12,8 +12,8 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     content::blocks::{
         BlockDef, CampaignBlockKind, CraftingBlockKind, DefenseWallKind, DistributionBlockKind,
-        EffectBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind, PowerBlockKind,
-        ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
+        EffectBlockKind, LegacyBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind,
+        PowerBlockKind, ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -50,6 +50,10 @@ use crate::mindustry::{
         MassDriverState, SorterState, StackConveyorState,
     },
     world::blocks::heat::{read_heat_producer_state, HeatProducerState},
+    world::blocks::legacy::{
+        read_legacy_command_center_extra, read_legacy_mech_pad_extra,
+        read_legacy_unit_factory_extra, LegacyUnitFactoryExtra,
+    },
     world::blocks::liquid::{read_liquid_bridge_state, LiquidBridgeState},
     world::blocks::logic::{
         read_canvas_state, read_logic_display_state, read_logic_processor_state, read_memory_state,
@@ -228,6 +232,13 @@ pub enum GameRuntimeCampaignBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeLegacyBlockState {
+    CommandCenter(u8),
+    MechPad([f32; 3]),
+    UnitFactory(LegacyUnitFactoryExtra),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeUnitBlockState {
     Factory(UnitFactoryState),
     Reconstructor(ReconstructorState),
@@ -272,6 +283,7 @@ enum GameRuntimeLoadedBlockState {
     Liquid(GameRuntimeLiquidBlockState),
     Logic(GameRuntimeLogicBlockState),
     Campaign(GameRuntimeCampaignBlockState),
+    Legacy(GameRuntimeLegacyBlockState),
     Unit(GameRuntimeUnitBlockState),
     DefenseWall(GameRuntimeDefenseWallState),
     Turret(GameRuntimeTurretBlockState),
@@ -292,6 +304,7 @@ pub struct GameRuntime {
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
     pub campaign_runtime_states: BTreeMap<i32, GameRuntimeCampaignBlockState>,
+    pub legacy_runtime_states: BTreeMap<i32, GameRuntimeLegacyBlockState>,
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
     pub turret_runtime_states: BTreeMap<i32, GameRuntimeTurretBlockState>,
@@ -319,6 +332,7 @@ impl GameRuntime {
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
             campaign_runtime_states: BTreeMap::new(),
+            legacy_runtime_states: BTreeMap::new(),
             unit_runtime_states: BTreeMap::new(),
             defense_wall_runtime_states: BTreeMap::new(),
             turret_runtime_states: BTreeMap::new(),
@@ -371,6 +385,7 @@ impl GameRuntime {
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
         self.campaign_runtime_states.remove(&removed.tile_pos);
+        self.legacy_runtime_states.remove(&removed.tile_pos);
         self.unit_runtime_states.remove(&removed.tile_pos);
         self.defense_wall_runtime_states.remove(&removed.tile_pos);
         self.turret_runtime_states.remove(&removed.tile_pos);
@@ -568,6 +583,10 @@ impl GameRuntime {
                         self.campaign_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Legacy(block_state) => {
+                        self.legacy_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                     GameRuntimeLoadedBlockState::Unit(block_state) => {
                         self.unit_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
@@ -719,6 +738,19 @@ impl GameRuntime {
             building_payload,
         ) {
             Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Campaign(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_legacy_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Legacy(state))),
             Ok(None) => return Ok(None),
             Err(GameRuntimeBlockStateReadError::Parse) => {
                 return Err(GameRuntimeBlockStateReadError::Parse);
@@ -1263,6 +1295,35 @@ impl GameRuntime {
         }
     }
 
+    fn read_legacy_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeLegacyBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Legacy(legacy) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match legacy.kind {
+            LegacyBlockKind::CommandCenter => read_legacy_command_center_extra(building_payload)
+                .map(|value| Some(GameRuntimeLegacyBlockState::CommandCenter(value)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            LegacyBlockKind::MechPad => read_legacy_mech_pad_extra(building_payload)
+                .map(|values| Some(GameRuntimeLegacyBlockState::MechPad(values)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            LegacyBlockKind::UnitFactory => {
+                read_legacy_unit_factory_extra(building_payload, revision)
+                    .map(|extra| Some(GameRuntimeLegacyBlockState::UnitFactory(extra)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+        }
+    }
+
     fn read_unit_runtime_state_from_building_payload(
         &self,
         block: &BlockDef,
@@ -1437,6 +1498,7 @@ impl GameRuntime {
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
         self.campaign_runtime_states.clear();
+        self.legacy_runtime_states.clear();
         self.unit_runtime_states.clear();
         self.defense_wall_runtime_states.clear();
         self.turret_runtime_states.clear();
@@ -1599,6 +1661,10 @@ mod tests {
                 ItemBridgeState, MassDriverState, MassDriverStateKind, SorterState,
             },
             blocks::heat::write_heat_producer_state,
+            blocks::legacy::{
+                write_legacy_command_center_extra, write_legacy_mech_pad_extra,
+                write_legacy_unit_factory_extra,
+            },
             blocks::liquid::{write_liquid_bridge_state, LiquidBridgeState},
             blocks::logic::{
                 write_canvas_state, write_logic_display_state, write_logic_processor_state,
@@ -3956,6 +4022,89 @@ mod tests {
         assert_eq!(
             runtime.campaign_runtime_states.get(&tile_pos),
             Some(&GameRuntimeCampaignBlockState::Accelerator(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_legacy_command_center_extra_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let command_def = content.block_by_name("command-center").unwrap();
+        let tile_pos = point2_pack(3, 3);
+        let saved = BuildingComp::new(tile_pos, command_def.base().clone(), TeamId(1));
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_legacy_command_center_extra(&mut building_bytes).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 27, command_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.legacy_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLegacyBlockState::CommandCenter(0))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_legacy_mech_pad_extra_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mech_def = content.block_by_name("legacy-mech-pad").unwrap();
+        let tile_pos = point2_pack(4, 3);
+        let saved = BuildingComp::new(tile_pos, mech_def.base().clone(), TeamId(1));
+        let values = [1.0, 2.5, -3.0];
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_legacy_mech_pad_extra(&mut building_bytes, values).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 28, mech_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.legacy_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLegacyBlockState::MechPad(values))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_legacy_unit_factory_extra_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("legacy-unit-factory").unwrap();
+        let tile_pos = point2_pack(5, 3);
+        let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
+        let extra = LegacyUnitFactoryExtra {
+            build_time: 120.0,
+            spawn_count: Some(3),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_legacy_unit_factory_extra(&mut building_bytes, 0, &extra).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 29, factory_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.legacy_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLegacyBlockState::UnitFactory(extra))
         );
     }
 

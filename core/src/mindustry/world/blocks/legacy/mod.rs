@@ -30,6 +30,13 @@ pub fn read_legacy_mech_pad_extra<R: Read>(read: &mut R) -> io::Result<[f32; 3]>
     Ok([read_f32(read)?, read_f32(read)?, read_f32(read)?])
 }
 
+pub fn write_legacy_mech_pad_extra<W: Write>(write: &mut W, values: [f32; 3]) -> io::Result<()> {
+    for value in values {
+        write_f32(write, value)?;
+    }
+    Ok(())
+}
+
 pub fn read_legacy_unit_factory_extra<R: Read>(
     read: &mut R,
     revision: u8,
@@ -44,6 +51,18 @@ pub fn read_legacy_unit_factory_extra<R: Read>(
         build_time,
         spawn_count,
     })
+}
+
+pub fn write_legacy_unit_factory_extra<W: Write>(
+    write: &mut W,
+    revision: u8,
+    extra: &LegacyUnitFactoryExtra,
+) -> io::Result<()> {
+    write_f32(write, extra.build_time)?;
+    if revision == 0 {
+        write_i32(write, extra.spawn_count.unwrap_or(0))?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -72,10 +91,18 @@ fn read_i32<R: Read>(read: &mut R) -> io::Result<i32> {
     Ok(i32::from_be_bytes(buf))
 }
 
+fn write_i32<W: Write>(write: &mut W, value: i32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
 fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
     let mut buf = [0; 4];
     read.read_exact(&mut buf)?;
     Ok(f32::from_be_bytes(buf))
+}
+
+fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
 }
 
 #[cfg(test)]
@@ -108,9 +135,7 @@ mod tests {
     #[test]
     fn legacy_mech_pad_discards_three_float_payload_values() {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&1.25f32.to_be_bytes());
-        bytes.extend_from_slice(&(-2.0f32).to_be_bytes());
-        bytes.extend_from_slice(&3.5f32.to_be_bytes());
+        write_legacy_mech_pad_extra(&mut bytes, [1.25, -2.0, 3.5]).unwrap();
         let extra = read_legacy_mech_pad_extra(&mut bytes.as_slice()).unwrap();
         assert_eq!(extra, [1.25, -2.0, 3.5]);
     }
@@ -118,8 +143,15 @@ mod tests {
     #[test]
     fn legacy_unit_factory_reads_build_time_and_revision_zero_spawn_count() {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&42.0f32.to_be_bytes());
-        bytes.extend_from_slice(&7i32.to_be_bytes());
+        write_legacy_unit_factory_extra(
+            &mut bytes,
+            0,
+            &LegacyUnitFactoryExtra {
+                build_time: 42.0,
+                spawn_count: Some(7),
+            },
+        )
+        .unwrap();
         let extra = read_legacy_unit_factory_extra(&mut bytes.as_slice(), 0).unwrap();
         assert_eq!(
             extra,
@@ -130,7 +162,15 @@ mod tests {
         );
 
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&11.0f32.to_be_bytes());
+        write_legacy_unit_factory_extra(
+            &mut bytes,
+            1,
+            &LegacyUnitFactoryExtra {
+                build_time: 11.0,
+                spawn_count: Some(99),
+            },
+        )
+        .unwrap();
         let extra = read_legacy_unit_factory_extra(&mut bytes.as_slice(), 1).unwrap();
         assert_eq!(extra.spawn_count, None);
         assert_eq!(extra.build_time, 11.0);
