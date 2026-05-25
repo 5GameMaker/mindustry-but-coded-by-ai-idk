@@ -870,6 +870,52 @@ impl EffectBlockRuntimeStateStore {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EffectBlockTimerStateStore {
+    timers: BTreeMap<i32, BuildingTimerState>,
+}
+
+impl EffectBlockTimerStateStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.timers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.timers.is_empty()
+    }
+
+    pub fn get(&self, tile_pos: i32) -> Option<&BuildingTimerState> {
+        self.timers.get(&tile_pos)
+    }
+
+    pub fn get_mut(&mut self, tile_pos: i32) -> Option<&mut BuildingTimerState> {
+        self.timers.get_mut(&tile_pos)
+    }
+
+    pub fn remove(&mut self, tile_pos: i32) -> Option<BuildingTimerState> {
+        self.timers.remove(&tile_pos)
+    }
+
+    pub fn ensure_for_building(
+        &mut self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> Option<&mut BuildingTimerState> {
+        let block = effect_block_data_for_building(content, building)?;
+        if !self.timers.contains_key(&building.tile_pos) {
+            self.timers.insert(
+                building.tile_pos,
+                BuildingTimerState::new(block.timer_slots.max(BuildingTimerState::DEFAULT_TIMERS)),
+            );
+        }
+        self.timers.get_mut(&building.tile_pos)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EffectProjectorRuntimeInput {
     pub source: ProjectorRuntimeSource,
@@ -3484,6 +3530,27 @@ pub fn effect_projector_update_building_frame_with_timer_and_consume(
     Some(report)
 }
 
+pub fn effect_projector_update_building_frame_with_timer_store_and_consume(
+    runtime_store: &mut EffectBlockRuntimeStateStore,
+    timer_store: &mut EffectBlockTimerStateStore,
+    content: &ContentLoader,
+    building: &mut BuildingComp,
+    buildings: &mut [BuildingComp],
+    frame: EffectBlockFrameInput,
+    suppressed: bool,
+) -> Option<EffectBlockRuntimeReport> {
+    let timer = timer_store.ensure_for_building(content, building)?;
+    effect_projector_update_building_frame_with_timer_and_consume(
+        runtime_store,
+        timer,
+        content,
+        building,
+        buildings,
+        frame,
+        suppressed,
+    )
+}
+
 pub const FORCE_PROJECTOR_TIMER_USE_SLOT: usize = 1;
 
 #[allow(clippy::too_many_arguments)]
@@ -3581,6 +3648,28 @@ pub fn effect_force_projector_update_building_frame_with_timer_and_consume(
     let block = effect_block_data_for_building(content, building)?;
     effect_block_consume_source_items_from_report(building, block, &report);
     Some(report)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn effect_force_projector_update_building_frame_with_timer_store_and_consume(
+    runtime_store: &mut EffectBlockRuntimeStateStore,
+    timer_store: &mut EffectBlockTimerStateStore,
+    content: &ContentLoader,
+    building: &mut BuildingComp,
+    frame: EffectBlockFrameInput,
+    coolant_efficiency: f32,
+    coolant_heat_capacity: f32,
+) -> Option<EffectBlockRuntimeReport> {
+    let timer = timer_store.ensure_for_building(content, building)?;
+    effect_force_projector_update_building_frame_with_timer_and_consume(
+        runtime_store,
+        timer,
+        content,
+        building,
+        frame,
+        coolant_efficiency,
+        coolant_heat_capacity,
+    )
 }
 
 pub fn effect_base_shield_update_building_frame<'a, 'b>(
@@ -7581,6 +7670,65 @@ mod tests {
             })) => assert!(update.should_consume_optional),
             other => panic!("unexpected consuming mend report: {other:?}"),
         }
+        assert_eq!(mend_building.items.as_ref().unwrap().get(silicon), 0);
+    }
+
+    #[test]
+    fn effect_block_timer_store_keys_timer_sidecars_by_building_tile() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let silicon = mend_block.boost_items[0].item;
+        let mut mend_building =
+            BuildingComp::new(point2_pack(19, 9), mend_def.base().clone(), TeamId(1));
+        mend_building.efficiency = 1.0;
+        mend_building.optional_efficiency = 1.0;
+        mend_building.items.as_mut().unwrap().set(silicon, 1);
+
+        let mut runtime_store = EffectBlockRuntimeStateStore::new();
+        let mut timer_store = EffectBlockTimerStateStore::new();
+        let mut targets = Vec::new();
+        let report = effect_projector_update_building_frame_with_timer_store_and_consume(
+            &mut runtime_store,
+            &mut timer_store,
+            &content,
+            &mut mend_building,
+            &mut targets,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: mend_block.use_time,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            false,
+        );
+
+        assert!(matches!(
+            report,
+            Some(EffectBlockRuntimeReport::Projector(
+                EffectProjectorRuntimeReport::Mend { .. }
+            ))
+        ));
+        assert_eq!(timer_store.len(), 1);
+        assert_eq!(
+            timer_store
+                .get(mend_building.tile_pos)
+                .unwrap()
+                .timer
+                .timers(),
+            BuildingTimerState::DEFAULT_TIMERS
+        );
+        assert_eq!(
+            timer_store
+                .get(mend_building.tile_pos)
+                .unwrap()
+                .timer
+                .last_time(MEND_PROJECTOR_TIMER_USE_SLOT),
+            mend_block.use_time
+        );
         assert_eq!(mend_building.items.as_ref().unwrap().get(silicon), 0);
     }
 
