@@ -982,6 +982,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `BlockDef::no_update_disabled(...)`
 - `BlockDef::supports_env(...)`
 - `GameRuntime::refresh_owned_building_update_permissions(...)`
+- `mindustry_server::ServerLauncher.runtime`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
 - 已对照 `ForceProjector.updateTile()` 推进：
@@ -1134,6 +1135,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `BuildingComp::advance_update_timing(...)` 已迁移 Java `BuildingComp.update()` 开头的 `timeScaleDuration -= Time.delta` / `!canOverdrive` 重置语义，并由 `GameRuntime::advance_and_dispatch_effect_blocks(...)` 在 batch dispatcher 前对传入建筑切片统一执行；
   - `BlockDef::no_update_disabled(...)` / `BuildingComp::should_update_tile(...)` 已迁移 Java `if(enabled || !block.noUpdateDisabled) updateTile()` 的通用门控；effect block batch dispatcher 已先执行该门控，避免后续接入 `noUpdateDisabled=true` 的建筑时错误 tick；
   - `BlockDef::supports_env(...)` 已迁移 Java `Block.supportsEnv(env)` 位掩码公式；`GameRuntime::refresh_owned_building_update_permissions(...)` 已对 owned buildings 执行最小 `checkAllowUpdate` 接线，越界或不支持当前 rules env 的建筑会被置为 disabled；
+  - `mindustry_server::ServerLauncher` 已持有 `GameRuntime`，并将 `update(...)` 调整为可变 tick 入口；后续服务端 world load、Groups.build 迁移和 effect block owned dispatch 可直接落到 server runtime，而不是停留在 core-only helper；
   - `EffectBlockFrameBatchResources` / `effect_block_update_building_slice_with_stores(...)` 已形成外部 `&mut [BuildingComp]` 集合的最小遍历入口；内部用 source snapshot 避免借用冲突，同时把原始 building slice 作为 projector 目标集合，并在 report 后对源建筑执行物品消耗；
   - `effect_force_projector_update_building_frame(...)` / `effect_force_projector_update_building_frame_with_timer(...)` 已能从 `BuildingComp.efficiency/optional_efficiency/timeScale`、帧 delta 与 content `phaseUseTime/timerUse` 组装 ForceProjector runtime 输入；`FORCE_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback，且 broken/phase invalid/efficiency=0 时不触碰 timer slot；
   - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；

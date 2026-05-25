@@ -1,6 +1,6 @@
 pub mod server_control;
 
-use mindustry_core::mindustry::core::NetServer;
+use mindustry_core::mindustry::core::{GameRuntime, NetServer};
 use mindustry_core::mindustry::net::{write_minimal_world_data, ArcNetProvider, Net};
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -12,6 +12,7 @@ pub struct ServerLauncher {
     pub context: AppContext,
     pub args: Vec<String>,
     pub control: ServerControl,
+    pub runtime: GameRuntime,
     pub net_server: NetServer,
     pub network_error: Option<String>,
 }
@@ -26,6 +27,7 @@ impl ServerLauncher {
         Self {
             context,
             control: ServerControl::new(args.clone()),
+            runtime: GameRuntime::default(),
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
             args,
@@ -58,7 +60,7 @@ impl ServerLauncher {
         self.net_server.close();
     }
 
-    pub fn update(&self) {
+    pub fn update(&mut self) {
         self.net_server.update();
         let _ = self.flush_pending_world_data();
     }
@@ -101,7 +103,7 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::ServerLauncher;
-    use mindustry_core::mindustry::core::NetServer;
+    use mindustry_core::mindustry::core::{GameRuntime, NetServer};
     use mindustry_core::mindustry::net::{
         packet_ids, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host, HostCallback, Net,
         NetConnection, NetProvider, PacketKind, PacketSerializer, ProviderEvent,
@@ -133,6 +135,9 @@ mod tests {
         ]);
 
         assert_eq!(launcher.context.port, port);
+        assert!(launcher.runtime.buildings().is_empty());
+        assert!(launcher.runtime.effect_runtime_store.is_empty());
+        assert!(launcher.runtime.effect_timer_store.is_empty());
 
         launcher.init();
 
@@ -260,7 +265,7 @@ mod tests {
 
     fn connect_packet(name: &str) -> ConnectPacket {
         ConnectPacket {
-            version: 157,
+            version: 158,
             version_type: "official".into(),
             mods: Vec::new(),
             name: name.into(),
@@ -279,10 +284,11 @@ mod tests {
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
         };
-        let launcher = ServerLauncher {
+        let mut launcher = ServerLauncher {
             context: AppContext::server("config"),
             args: Vec::new(),
             control: super::ServerControl::new(Vec::new()),
+            runtime: GameRuntime::default(),
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
