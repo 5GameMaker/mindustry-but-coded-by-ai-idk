@@ -249,7 +249,7 @@ impl Default for DuctState {
 }
 
 pub fn write_duct_state<W: Write>(write: &mut W, state: &DuctState) -> io::Result<()> {
-    write_i32(write, state.rec_dir)
+    write_i8(write, state.rec_dir as i8)
 }
 
 pub fn read_duct_state<R: Read>(
@@ -258,7 +258,11 @@ pub fn read_duct_state<R: Read>(
     current: Option<ContentId>,
 ) -> io::Result<DuctState> {
     Ok(DuctState {
-        rec_dir: if revision >= 1 { read_i32(read)? } else { -1 },
+        rec_dir: if revision >= 1 {
+            read_i8(read)? as i32
+        } else {
+            -1
+        },
         current,
     })
 }
@@ -447,7 +451,7 @@ pub fn write_directional_unloader_state<W: Write>(
     state: &DirectionalUnloaderState,
 ) -> io::Result<()> {
     write_i16(write, state.unload_item.unwrap_or(-1))?;
-    write_i32(write, state.offset)
+    write_i16(write, state.offset as i16)
 }
 
 pub fn read_directional_unloader_state<R: Read>(
@@ -456,7 +460,7 @@ pub fn read_directional_unloader_state<R: Read>(
     let item = read_i16(read)?;
     Ok(DirectionalUnloaderState {
         unload_item: (item >= 0).then_some(item),
-        offset: read_i32(read)?,
+        offset: read_i16(read)? as i32,
     })
 }
 
