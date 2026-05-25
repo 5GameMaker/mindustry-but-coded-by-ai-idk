@@ -298,7 +298,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
    - 能解析 `rules_json`、`map_locales_json`、`map_tags`、`wave`、`wavetime`、`tick`、随机种子和 `player_id`；
    - 能解析生成类 `mindustry.gen.Player.write(...)` 的 revision 0/1/2 玩家 wire body；
    - 能继续解析 `SaveIO` 尾部前缀：content header、content patches、map、team blocks；
-   - marker/custom chunks 仍以 raw tail 保留，后续要补 UBJSON marker codec 后才能精确拆分。
+   - marker/custom chunks 已能按 Java `markers -> custom chunks` 顺序拆分；成功时会填充 `markers_snapshot`、`marker_summary` 与 `custom_chunks_snapshot`，失败时仍有 raw bytes 路径但完整 raw-tail 兜底仍待加强。
 2. `NetClient` 收到 world stream 后：
    - 解析成功才自动发送 `ConnectConfirmCallPacket`；
    - 解析失败不确认、不结束加载态，并记录错误；
@@ -310,6 +310,10 @@ git -C 'D:/MDT/rust-mindustry' push origin main
    - 解析并写入 `MapLocales`；
    - 将 content patches 记录到 `DataPatcherState`；
    - 将 `NetworkWorldData.team_blocks_snapshot` 通过 `content_header_snapshot` 的 Java content id/name 映射物化到 runtime `Teams` build plans，避免 `SaveVersion.readTeamBlocks(...)` 结果只缓存不生效。
+5. `mindustry_server::ServerLauncher::flush_pending_world_data(...)` 已从 `write_minimal_world_data(...)` 升级为 runtime world-data 组装：
+   - `network_world_data_template(...)` 会写入 base content header、空 content patches、当前 world 的轻量 map snapshot、runtime `Teams.plans` 导出的 `team_blocks_snapshot`、markers/custom chunks；
+   - 每个连接发送前补 `player_id` 与 `NetworkPlayerData::bootstrap()`，再通过 `write_world_data(...)` 形成 Java-like compressed world stream；
+   - 当前 map snapshot 仍未写 building entity chunk，后续需要继续接完整 `SaveVersion.writeMap(...)` 的 building serialization。
 
 已验证：
 
@@ -320,6 +324,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::io::versions -- --test-threads=1
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core mindustry::core::game_state -- --test-threads=1
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-core apply_network_world_data
+& 'C:/Users/yuyu/.cargo/bin/cargo.exe' test -p mindustry-server server_update_flushes_pending_world_data
 & 'C:/Users/yuyu/.cargo/bin/cargo.exe' test --workspace -- --skip mindustry::net::arc_net_provider::tests::* --test-threads=1
 ```
 

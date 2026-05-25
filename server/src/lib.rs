@@ -1,14 +1,20 @@
 pub mod server_control;
 
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, GameRuntime, GameRuntimeOwnedEffectResources, NetServer,
+    content_loader::ContentLoader, GameRuntime, GameRuntimeOwnedEffectResources, NetServer, World,
 };
 use mindustry_core::mindustry::ctype::ContentId;
 use mindustry_core::mindustry::entities::{
     bullet::BulletType,
     comp::{BuildingComp, BulletComp, UnitComp},
 };
-use mindustry_core::mindustry::net::{write_minimal_world_data, ArcNetProvider, Net};
+use mindustry_core::mindustry::io::{
+    ContentPatchSet, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
+    LegacyShortChunkMap,
+};
+use mindustry_core::mindustry::net::{
+    write_world_data, ArcNetProvider, Net, NetworkPlayerData, NetworkWorldData,
+};
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -78,11 +84,52 @@ impl ServerLauncher {
         self.last_runtime_effect_report = self.update_runtime_effect_blocks(1.0 / 60.0);
     }
 
-    pub fn flush_pending_world_data(&self) -> io::Result<usize> {
+    pub fn flush_pending_world_data(&mut self) -> io::Result<usize> {
+        let template = self.network_world_data_template();
         self.net_server.send_pending_world_data(|connection_id| {
-            write_minimal_world_data(connection_id)
-                .expect("bootstrap world data payload should be encodable")
+            let mut world_data = template.clone();
+            world_data.player_id = connection_id;
+            world_data.player = Some(NetworkPlayerData::bootstrap());
+            write_world_data(&world_data).expect("runtime world data payload should be encodable")
         })
+    }
+
+    pub fn network_world_data_template(&mut self) -> NetworkWorldData {
+        let mut map_tags = self.runtime.state.map.tags.clone();
+        map_tags
+            .entry("name".into())
+            .or_insert_with(|| self.runtime.state.map.name().to_string());
+        map_tags
+            .entry("width".into())
+            .or_insert_with(|| self.runtime.state.world.width().to_string());
+        map_tags
+            .entry("height".into())
+            .or_insert_with(|| self.runtime.state.world.height().to_string());
+
+        let team_blocks_snapshot = self.runtime.state.export_legacy_team_blocks(
+            |name| {
+                self.content_loader
+                    .block_by_name(name)
+                    .map(|block| block.base().id)
+            },
+            true,
+        );
+
+        NetworkWorldData {
+            map_tags,
+            wave: self.runtime.state.wave,
+            wave_time: self.runtime.state.wavetime,
+            tick: self.runtime.state.tick,
+            rand_seed0: self.runtime.state.rand_seed0,
+            rand_seed1: self.runtime.state.rand_seed1,
+            content_header_snapshot: Some(self.content_loader.content_header_snapshot()),
+            content_patches_snapshot: Some(ContentPatchSet::default()),
+            map_snapshot: Some(runtime_world_map_snapshot(&self.runtime.state.world)),
+            team_blocks_snapshot: Some(team_blocks_snapshot),
+            markers_snapshot: Some(self.runtime.state.markers.clone()),
+            custom_chunks_snapshot: Some(self.runtime.state.custom_chunks.clone()),
+            ..NetworkWorldData::default()
+        }
     }
 
     pub fn update_runtime_effect_blocks(
@@ -108,6 +155,101 @@ impl ServerLauncher {
                 spark_random: &mut spark_random,
             },
         )
+    }
+}
+
+fn runtime_world_map_snapshot(world: &World) -> LegacyShortChunkMap {
+    let width = u16::try_from(world.width()).unwrap_or(u16::MAX);
+    let height = u16::try_from(world.height()).unwrap_or(u16::MAX);
+    let tile_count = width as usize * height as usize;
+    let tiles = world.tiles.iter().take(tile_count).collect::<Vec<_>>();
+
+    let mut floors = Vec::new();
+    let mut floor_start = 0usize;
+    while floor_start < tiles.len() {
+        let floor = tiles[floor_start].floor;
+        let overlay = tiles[floor_start].overlay;
+        let mut len = 1usize;
+        while floor_start + len < tiles.len()
+            && len < u8::MAX as usize + 1
+            && tiles[floor_start + len].floor == floor
+            && tiles[floor_start + len].overlay == overlay
+        {
+            len += 1;
+        }
+        floors.push(LegacyMapFloorRecord {
+            index: floor_start,
+            floor_id: floor,
+            ore_id: overlay,
+            consecutives: (len - 1) as u8,
+        });
+        floor_start += len;
+    }
+
+    let mut blocks = Vec::new();
+    let mut block_start = 0usize;
+    while block_start < tiles.len() {
+        let tile = tiles[block_start];
+        let has_tile_data = tile.data != 0
+            || tile.floor_data != 0
+            || tile.overlay_data != 0
+            || tile.extra_data != 0;
+        if has_tile_data {
+            blocks.push(LegacyMapBlockRecord {
+                index: block_start,
+                block_id: tile.block,
+                packed_flags: 0,
+                has_entity: false,
+                has_old_data: false,
+                has_new_data: true,
+                is_center: true,
+                new_data: Some(LegacyMapTileData {
+                    data: tile.data,
+                    floor_data: tile.floor_data,
+                    overlay_data: tile.overlay_data,
+                    extra_data: tile.extra_data,
+                }),
+                old_data: None,
+                building: None,
+                consecutives: 0,
+            });
+            block_start += 1;
+            continue;
+        }
+
+        let block = tile.block;
+        let mut len = 1usize;
+        while block_start + len < tiles.len()
+            && len < u8::MAX as usize + 1
+            && tiles[block_start + len].block == block
+            && tiles[block_start + len].data == 0
+            && tiles[block_start + len].floor_data == 0
+            && tiles[block_start + len].overlay_data == 0
+            && tiles[block_start + len].extra_data == 0
+        {
+            len += 1;
+        }
+        blocks.push(LegacyMapBlockRecord {
+            index: block_start,
+            block_id: block,
+            packed_flags: 0,
+            has_entity: false,
+            has_old_data: false,
+            has_new_data: false,
+            is_center: true,
+            new_data: None,
+            old_data: None,
+            building: None,
+            consecutives: (len - 1) as u8,
+        });
+        block_start += len;
+    }
+
+    LegacyShortChunkMap {
+        width,
+        height,
+        floors,
+        blocks,
     }
 }
 
@@ -146,10 +288,12 @@ mod tests {
         content_loader::ContentLoader, GameRuntime, GameStateState, NetServer,
     };
     use mindustry_core::mindustry::entities::comp::BuildingComp;
-    use mindustry_core::mindustry::io::TeamId;
+    use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
+    use mindustry_core::mindustry::io::{TeamId, TypeValue};
     use mindustry_core::mindustry::net::{
-        packet_ids, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host, HostCallback, Net,
-        NetConnection, NetProvider, PacketKind, PacketSerializer, ProviderEvent,
+        packet_ids, read_world_data, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host,
+        HostCallback, Net, NetConnection, NetProvider, NetworkWorldData, PacketKind,
+        PacketSerializer, ProviderEvent,
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::point2_pack;
@@ -322,6 +466,30 @@ mod tests {
         }
     }
 
+    fn decode_captured_world_data(
+        sent: &[(i32, PacketKind, bool)],
+        connection_id: i32,
+    ) -> NetworkWorldData {
+        let mut total = None;
+        let mut bytes = Vec::new();
+        for (target, packet, reliable) in sent {
+            if *target != connection_id {
+                continue;
+            }
+            assert!(*reliable);
+            match packet {
+                PacketKind::StreamBegin(begin) if begin.packet_type == packet_ids::WORLD_STREAM => {
+                    total = Some(begin.total as usize);
+                }
+                PacketKind::StreamChunk(chunk) => bytes.extend_from_slice(&chunk.data),
+                _ => {}
+            }
+        }
+
+        assert_eq!(Some(bytes.len()), total);
+        read_world_data(&bytes).expect("captured world stream should decode")
+    }
+
     #[test]
     fn server_update_flushes_pending_world_data_after_connect_packet() {
         let sent = Arc::new(Mutex::new(Vec::new()));
@@ -367,15 +535,85 @@ mod tests {
         }
 
         let sent = sent.lock().unwrap();
-        assert_eq!(sent.len(), 2);
-        assert_eq!(sent[0].0, 71);
-        assert_eq!(sent[1].0, 71);
+        assert!(sent.len() >= 2);
+        assert!(sent
+            .iter()
+            .all(|(connection_id, _, _)| *connection_id == 71));
         assert!(sent.iter().all(|(_, _, reliable)| *reliable));
         assert!(matches!(sent[0].1, PacketKind::StreamBegin(_)));
-        assert!(matches!(sent[1].1, PacketKind::StreamChunk(_)));
+        assert!(sent[1..]
+            .iter()
+            .all(|(_, packet, _)| matches!(packet, PacketKind::StreamChunk(_))));
+        assert_eq!(decode_captured_world_data(&sent, 71).player_id, 71);
         assert!(!sent
             .iter()
             .any(|(_, packet, _)| matches!(packet, PacketKind::WorldDataBeginCallPacket(_))));
+    }
+
+    #[test]
+    fn server_update_flushes_pending_world_data_with_runtime_team_blocks_snapshot() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher {
+            context: AppContext::server("config"),
+            args: Vec::new(),
+            control: super::ServerControl::new(Vec::new()),
+            runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
+            net_server: NetServer::new(Net::new(Box::new(provider))),
+            network_error: None,
+        };
+        let router_id = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router")
+            .base()
+            .id;
+        launcher.runtime.state.teams.replace_plans([(
+            TEAM_SHARDED,
+            vec![BlockPlan::new(5, 6, 1, "router", Some("cfg".into()))],
+        )]);
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(72),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "127.0.0.1:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(72),
+                false,
+                PacketKind::ConnectPacket(connect_packet("rust-builder")),
+            );
+        }
+
+        launcher.update();
+
+        let sent = sent.lock().unwrap();
+        let world_data = decode_captured_world_data(&sent, 72);
+        assert_eq!(world_data.player_id, 72);
+        assert!(world_data.content_header_snapshot.is_some());
+        assert!(world_data.map_snapshot.is_some());
+        let team_blocks = world_data
+            .team_blocks_snapshot
+            .expect("runtime team plans should be exported into world data");
+        let sharded = team_blocks
+            .groups
+            .iter()
+            .find(|group| group.team_id == TEAM_SHARDED as i32)
+            .expect("Java writeTeamBlocks includes sharded data");
+        assert_eq!(sharded.plans.len(), 1);
+        assert_eq!(sharded.plans[0].x, 5);
+        assert_eq!(sharded.plans[0].y, 6);
+        assert_eq!(sharded.plans[0].rotation, 1);
+        assert_eq!(sharded.plans[0].block_id, router_id);
+        assert_eq!(sharded.plans[0].config, TypeValue::String("cfg".into()));
     }
 
     #[test]
