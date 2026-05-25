@@ -51,7 +51,10 @@ use crate::mindustry::{
         read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
         read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
         read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
-        read_stack_conveyor_state, BufferedItemBridgeState, ConveyorState,
+        read_stack_conveyor_state, write_buffered_bridge_state, write_conveyor_state,
+        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
+        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
+        write_stack_conveyor_state, BufferedItemBridgeState, ConveyorState,
         DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
         MassDriverState, SorterState, StackConveyorState,
     },
@@ -99,13 +102,15 @@ use crate::mindustry::{
         write_liquid_source_config, ItemSourceState, LiquidSourceState,
     },
     world::blocks::storage::{
-        read_core_state, read_unloader_sort_item, write_core_state, CoreBuildState,
+        read_core_state, read_unloader_sort_item, write_core_state, write_unloader_sort_item,
+        CoreBuildState,
     },
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        write_unit_cargo_loader_state, write_unit_cargo_unload_state, ReconstructorState,
+        RepairTurretState, UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState,
+        UnitFactoryState,
     },
     world::blocks::{is_construct_block_name, read_construct_block_state, ConstructBlockState},
     world::{footprint_tiles, get_edges, Tile},
@@ -284,6 +289,92 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Distribution(distribution), Some(state)) = (
+        block,
+        runtime.distribution_runtime_states.get(&building.tile_pos),
+    ) {
+        match (distribution.kind, state) {
+            (
+                DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor,
+                GameRuntimeDistributionBlockState::Conveyor(state),
+            ) => {
+                write_conveyor_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::StackConveyor,
+                GameRuntimeDistributionBlockState::StackConveyor(state),
+            ) => {
+                write_stack_conveyor_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::ItemBridge | DistributionBlockKind::DuctBridge,
+                GameRuntimeDistributionBlockState::ItemBridge(state),
+            ) => {
+                write_item_bridge_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::BufferedItemBridge,
+                GameRuntimeDistributionBlockState::BufferedItemBridge(state),
+            ) => {
+                write_buffered_bridge_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::MassDriver,
+                GameRuntimeDistributionBlockState::MassDriver(state),
+            ) => {
+                write_mass_driver_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::DirectionalUnloader,
+                GameRuntimeDistributionBlockState::DirectionalUnloader(state),
+            ) => {
+                write_directional_unloader_state(write, state)?;
+            }
+            (DistributionBlockKind::Duct, GameRuntimeDistributionBlockState::Duct(state)) => {
+                write_duct_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::DuctRouter
+                | DistributionBlockKind::OverflowDuct
+                | DistributionBlockKind::StackRouter,
+                GameRuntimeDistributionBlockState::DuctRouter(state),
+            ) => {
+                write_duct_router_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::Junction,
+                GameRuntimeDistributionBlockState::DuctJunction(state),
+            ) => {
+                write_duct_junction_state(write, state)?;
+            }
+            (DistributionBlockKind::Sorter, GameRuntimeDistributionBlockState::Sorter(state)) => {
+                write_sorter_state(write, state)?;
+            }
+            (
+                DistributionBlockKind::Unloader,
+                GameRuntimeDistributionBlockState::Unloader(sort_item),
+            ) => {
+                write_unloader_sort_item(write, sort_item.map(i32::from))?;
+            }
+            (
+                DistributionBlockKind::UnitCargoLoader,
+                GameRuntimeDistributionBlockState::UnitCargoLoader(state),
+            ) => {
+                write_unit_cargo_loader_state(
+                    write,
+                    (state.read_unit_id >= 0).then_some(state.read_unit_id),
+                )?;
+            }
+            (
+                DistributionBlockKind::UnitCargoUnloadPoint,
+                GameRuntimeDistributionBlockState::UnitCargoUnload(state),
+            ) => {
+                write_unit_cargo_unload_state(write, state)?;
+            }
+            _ => {}
+        }
+    }
+
     if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(state))) =
         (block, runtime.liquid_runtime_states.get(&building.tile_pos))
     {
@@ -397,6 +488,44 @@ fn network_map_building_revision(
     ) {
         if storage.kind == StorageBlockKind::Core {
             return 1;
+        }
+    }
+
+    if let (BlockDef::Distribution(distribution), Some(state)) = (
+        block,
+        runtime.distribution_runtime_states.get(&building.tile_pos),
+    ) {
+        match (distribution.kind, state) {
+            (
+                DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor,
+                GameRuntimeDistributionBlockState::Conveyor(_),
+            )
+            | (
+                DistributionBlockKind::ItemBridge | DistributionBlockKind::DuctBridge,
+                GameRuntimeDistributionBlockState::ItemBridge(_),
+            )
+            | (
+                DistributionBlockKind::BufferedItemBridge,
+                GameRuntimeDistributionBlockState::BufferedItemBridge(_),
+            )
+            | (DistributionBlockKind::Duct, GameRuntimeDistributionBlockState::Duct(_))
+            | (
+                DistributionBlockKind::DuctRouter
+                | DistributionBlockKind::OverflowDuct
+                | DistributionBlockKind::StackRouter,
+                GameRuntimeDistributionBlockState::DuctRouter(_),
+            )
+            | (
+                DistributionBlockKind::Junction,
+                GameRuntimeDistributionBlockState::DuctJunction(_),
+            )
+            | (DistributionBlockKind::Unloader, GameRuntimeDistributionBlockState::Unloader(_)) => {
+                return 1
+            }
+            (DistributionBlockKind::Sorter, GameRuntimeDistributionBlockState::Sorter(_)) => {
+                return 2;
+            }
+            _ => {}
         }
     }
 
@@ -4102,6 +4231,353 @@ mod tests {
                 },
                 heat: HeatProducerState { heat: 3.25 },
             })
+        );
+    }
+
+    fn exported_distribution_state_revision(
+        content: &ContentLoader,
+        block_name: &str,
+        state: &GameRuntimeDistributionBlockState,
+    ) -> u8 {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let BlockDef::Distribution(distribution) = block_def else {
+            return 0;
+        };
+
+        match (distribution.kind, state) {
+            (
+                DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor,
+                GameRuntimeDistributionBlockState::Conveyor(_),
+            )
+            | (
+                DistributionBlockKind::ItemBridge | DistributionBlockKind::DuctBridge,
+                GameRuntimeDistributionBlockState::ItemBridge(_),
+            )
+            | (
+                DistributionBlockKind::BufferedItemBridge,
+                GameRuntimeDistributionBlockState::BufferedItemBridge(_),
+            )
+            | (DistributionBlockKind::Duct, GameRuntimeDistributionBlockState::Duct(_))
+            | (
+                DistributionBlockKind::DuctRouter
+                | DistributionBlockKind::OverflowDuct
+                | DistributionBlockKind::StackRouter,
+                GameRuntimeDistributionBlockState::DuctRouter(_),
+            )
+            | (
+                DistributionBlockKind::Junction,
+                GameRuntimeDistributionBlockState::DuctJunction(_),
+            )
+            | (DistributionBlockKind::Unloader, GameRuntimeDistributionBlockState::Unloader(_)) => {
+                1
+            }
+            (DistributionBlockKind::Sorter, GameRuntimeDistributionBlockState::Sorter(_)) => 2,
+            _ => 0,
+        }
+    }
+
+    fn roundtrip_exported_distribution_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeDistributionBlockState,
+    ) -> Option<GameRuntimeDistributionBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_distribution_state_revision(content, block_name, &state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(11),
+        ));
+        runtime.distribution_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 32;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("distribution block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("distribution block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.distribution_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_distribution_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+
+        let conveyor = ConveyorState {
+            items: vec![ConveyorItemState {
+                item: copper,
+                x: 0.0,
+                y: 0.0,
+            }],
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "conveyor",
+                1,
+                15,
+                GameRuntimeDistributionBlockState::Conveyor(conveyor.clone()),
+            ),
+            Some(GameRuntimeDistributionBlockState::Conveyor(conveyor))
+        );
+
+        let stack = StackConveyorState {
+            link: point2_pack(5, 15),
+            cooldown: 0.25,
+            last_item: Some(copper),
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "plastanium-conveyor",
+                3,
+                15,
+                GameRuntimeDistributionBlockState::StackConveyor(stack),
+            ),
+            Some(GameRuntimeDistributionBlockState::StackConveyor(
+                StackConveyorState {
+                    last_item: None,
+                    ..stack
+                }
+            ))
+        );
+
+        let bridge = ItemBridgeState {
+            link: point2_pack(8, 15),
+            warmup: 0.6,
+            incoming: vec![point2_pack(2, 15), point2_pack(4, 15)],
+            was_moved: false,
+            moved: true,
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "phase-conveyor",
+                5,
+                15,
+                GameRuntimeDistributionBlockState::ItemBridge(bridge.clone()),
+            ),
+            Some(GameRuntimeDistributionBlockState::ItemBridge(
+                ItemBridgeState {
+                    was_moved: true,
+                    moved: true,
+                    ..bridge
+                }
+            ))
+        );
+
+        let buffered = BufferedItemBridgeState {
+            bridge: ItemBridgeState {
+                link: point2_pack(11, 15),
+                warmup: 0.45,
+                incoming: vec![point2_pack(9, 15)],
+                was_moved: true,
+                moved: false,
+            },
+            index: 2,
+            buffer: vec![123, 456],
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "bridge-conveyor",
+                9,
+                15,
+                GameRuntimeDistributionBlockState::BufferedItemBridge(buffered.clone()),
+            ),
+            Some(GameRuntimeDistributionBlockState::BufferedItemBridge(
+                BufferedItemBridgeState {
+                    bridge: ItemBridgeState {
+                        was_moved: true,
+                        moved: true,
+                        ..buffered.bridge.clone()
+                    },
+                    ..buffered.clone()
+                }
+            ))
+        );
+
+        let mass_driver = MassDriverState {
+            link: point2_pack(16, 15),
+            rotation: 135.0,
+            state: MassDriverStateKind::Shooting,
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "mass-driver",
+                13,
+                15,
+                GameRuntimeDistributionBlockState::MassDriver(mass_driver),
+            ),
+            Some(GameRuntimeDistributionBlockState::MassDriver(mass_driver))
+        );
+
+        let duct = DuctState {
+            rec_dir: 2,
+            current: Some(copper),
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "duct",
+                17,
+                15,
+                GameRuntimeDistributionBlockState::Duct(duct),
+            ),
+            Some(GameRuntimeDistributionBlockState::Duct(DuctState {
+                current: None,
+                ..duct
+            }))
+        );
+
+        let duct_router = DuctRouterState {
+            sort_item: Some(lead),
+            current: Some(copper),
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "duct-router",
+                19,
+                15,
+                GameRuntimeDistributionBlockState::DuctRouter(duct_router),
+            ),
+            Some(GameRuntimeDistributionBlockState::DuctRouter(
+                DuctRouterState {
+                    current: None,
+                    ..duct_router
+                }
+            ))
+        );
+
+        let junction = DuctJunctionState {
+            times: [1.0, 2.0, 3.0, 4.0],
+            item_data: [Some(copper), None, Some(lead), None],
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "junction",
+                21,
+                15,
+                GameRuntimeDistributionBlockState::DuctJunction(junction.clone()),
+            ),
+            Some(GameRuntimeDistributionBlockState::DuctJunction(junction))
+        );
+
+        let directional = DirectionalUnloaderState {
+            unload_item: Some(lead),
+            offset: 17,
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "duct-unloader",
+                23,
+                15,
+                GameRuntimeDistributionBlockState::DirectionalUnloader(directional),
+            ),
+            Some(GameRuntimeDistributionBlockState::DirectionalUnloader(
+                directional
+            ))
+        );
+
+        let sorter = SorterState {
+            sort_item: Some(copper),
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "sorter",
+                25,
+                15,
+                GameRuntimeDistributionBlockState::Sorter(sorter),
+            ),
+            Some(GameRuntimeDistributionBlockState::Sorter(sorter))
+        );
+
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "unloader",
+                27,
+                15,
+                GameRuntimeDistributionBlockState::Unloader(Some(lead)),
+            ),
+            Some(GameRuntimeDistributionBlockState::Unloader(Some(lead)))
+        );
+
+        let loader = UnitCargoLoaderState {
+            read_unit_id: 77,
+            build_progress: 0.5,
+            total_progress: 3.0,
+            warmup: 0.25,
+            readyness: 0.75,
+            has_unit: true,
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "unit-cargo-loader",
+                4,
+                19,
+                GameRuntimeDistributionBlockState::UnitCargoLoader(loader),
+            ),
+            Some(GameRuntimeDistributionBlockState::UnitCargoLoader(
+                UnitCargoLoaderState {
+                    read_unit_id: 77,
+                    ..UnitCargoLoaderState::default()
+                }
+            ))
+        );
+
+        let unload = UnitCargoUnloadPointState {
+            item_id: Some(copper as i32),
+            stale_timer: 99.0,
+            stale: true,
+        };
+        assert_eq!(
+            roundtrip_exported_distribution_state(
+                &content,
+                "unit-cargo-unload-point",
+                9,
+                19,
+                GameRuntimeDistributionBlockState::UnitCargoUnload(unload),
+            ),
+            Some(GameRuntimeDistributionBlockState::UnitCargoUnload(
+                UnitCargoUnloadPointState {
+                    stale_timer: 0.0,
+                    ..unload
+                }
+            ))
         );
     }
 
