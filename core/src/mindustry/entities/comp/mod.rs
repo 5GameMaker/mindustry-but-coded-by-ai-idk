@@ -97,7 +97,7 @@ pub use tank::{TankComp, TankType, TankUpdateInput, TankUpdatePlan};
 pub use team::{TeamComp, TeamRulesView};
 pub use timed::TimedComp;
 pub use timed_kill::TimedKillComp;
-pub use timer::{Interval, TimerComp};
+pub use timer::{BuildingTimerState, Interval, TimerComp};
 pub use underwater_move::{UnderwaterDrawPlan, UnderwaterMoveComp};
 pub use unit::{
     PrebuildAiUnitInput, UnitCollisionLayer, UnitComp, UnitControllerState, UnitFloorSnapshot,

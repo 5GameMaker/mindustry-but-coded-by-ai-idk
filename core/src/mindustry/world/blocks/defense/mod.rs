@@ -7,7 +7,7 @@ use crate::mindustry::content::blocks::{BlockDef, EffectBlockData, EffectBlockKi
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::bullet::{BulletCreatePlan, BulletType};
-use crate::mindustry::entities::comp::{BuildingComp, BulletComp, UnitComp};
+use crate::mindustry::entities::comp::{BuildingComp, BuildingTimerState, BulletComp, UnitComp};
 use crate::mindustry::entities::lightning::{LightningConfig, LightningSeedState};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::SizedEntity;
@@ -3253,6 +3253,35 @@ pub fn effect_shockwave_tower_update_building_frame<'a, 'b>(
             bullet_type,
             timer_ready,
         },
+    )
+}
+
+pub const SHOCKWAVE_TOWER_TIMER_CHECK_SLOT: usize = 0;
+
+pub fn effect_shockwave_tower_update_building_frame_with_timer<'a, 'b>(
+    store: &mut EffectBlockRuntimeStateStore,
+    timer: &mut BuildingTimerState,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    bullets: &mut [BulletComp],
+    bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+    frame: EffectBlockFrameInput,
+) -> Option<EffectBlockRuntimeReport> {
+    let block = effect_block_data_for_building(content, building)?;
+    if block.kind != EffectBlockKind::ShockwaveTower {
+        return None;
+    }
+
+    timer.set_time(frame.now);
+    let timer_ready = timer.timer(SHOCKWAVE_TOWER_TIMER_CHECK_SLOT, block.check_interval);
+    effect_shockwave_tower_update_building_frame(
+        store,
+        content,
+        building,
+        bullets,
+        bullet_type,
+        frame,
+        timer_ready,
     )
 }
 
@@ -7134,6 +7163,102 @@ mod tests {
             }
             other => panic!("unexpected shockwave stored state: {other:?}"),
         }
+    }
+
+    #[test]
+    fn effect_shockwave_tower_building_frame_uses_building_timer_sidecar() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let shockwave_def = content.block_by_name("shockwave-tower").unwrap();
+        let shockwave_block = effect_block(&content, "shockwave-tower");
+        let mut tower_building =
+            BuildingComp::new(point2_pack(10, 9), shockwave_def.base().clone(), TeamId(1));
+        tower_building.set_pos(0.0, 0.0);
+        tower_building.efficiency = 1.0;
+        tower_building.potential_efficiency = 1.0;
+
+        let hittable = BulletType::default();
+        let mut bullet = BulletComp::default();
+        bullet.bullet_type_id = 0;
+        bullet.team = TeamId(2);
+        bullet.x = 1.0;
+        bullet.damage = 100.0;
+        let mut bullets = vec![bullet];
+        let mut bullet_type = |id| (id == 0).then_some(&hittable);
+        let mut store = EffectBlockRuntimeStateStore::new();
+        {
+            let state = store
+                .ensure_for_building(&content, &tower_building, 0.0)
+                .unwrap();
+            match state {
+                EffectBlockRuntimeState::ShockwaveTower(state) => {
+                    state.reload_counter = shockwave_block.reload;
+                }
+                other => panic!("unexpected shockwave initial state: {other:?}"),
+            }
+        }
+        let mut timer = BuildingTimerState::default();
+
+        let blocked = effect_shockwave_tower_update_building_frame_with_timer(
+            &mut store,
+            &mut timer,
+            &content,
+            &tower_building,
+            &mut bullets,
+            &mut bullet_type,
+            EffectBlockFrameInput {
+                delta: 3.0,
+                edelta: 3.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: 3.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        );
+        assert_eq!(
+            blocked,
+            Some(EffectBlockRuntimeReport::ShockwaveTower(
+                ShockwaveTowerFire {
+                    fired: false,
+                    wave_damage: 0.0,
+                    removed_targets: 0,
+                }
+            ))
+        );
+        assert!(!bullets[0].removed);
+
+        let fired = effect_shockwave_tower_update_building_frame_with_timer(
+            &mut store,
+            &mut timer,
+            &content,
+            &tower_building,
+            &mut bullets,
+            &mut bullet_type,
+            EffectBlockFrameInput {
+                delta: 5.0,
+                edelta: 5.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: shockwave_block.check_interval,
+                fog_enabled: true,
+                static_fog: true,
+            },
+        );
+        assert_eq!(
+            fired,
+            Some(EffectBlockRuntimeReport::ShockwaveTower(
+                ShockwaveTowerFire {
+                    fired: true,
+                    wave_damage: 160.0,
+                    removed_targets: 1,
+                }
+            ))
+        );
+        assert!(bullets[0].removed);
+        assert_eq!(
+            timer.timer.last_time(SHOCKWAVE_TOWER_TIMER_CHECK_SLOT),
+            shockwave_block.check_interval
+        );
     }
 
     #[test]
