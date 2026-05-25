@@ -3467,6 +3467,23 @@ pub fn effect_projector_update_building_frame_with_timer(
     )
 }
 
+pub fn effect_projector_update_building_frame_with_timer_and_consume(
+    store: &mut EffectBlockRuntimeStateStore,
+    timer: &mut BuildingTimerState,
+    content: &ContentLoader,
+    building: &mut BuildingComp,
+    buildings: &mut [BuildingComp],
+    frame: EffectBlockFrameInput,
+    suppressed: bool,
+) -> Option<EffectBlockRuntimeReport> {
+    let report = effect_projector_update_building_frame_with_timer(
+        store, timer, content, building, buildings, frame, suppressed,
+    )?;
+    let block = effect_block_data_for_building(content, building)?;
+    effect_block_consume_source_items_from_report(building, block, &report);
+    Some(report)
+}
+
 pub const FORCE_PROJECTOR_TIMER_USE_SLOT: usize = 1;
 
 #[allow(clippy::too_many_arguments)]
@@ -3540,6 +3557,30 @@ pub fn effect_force_projector_update_building_frame_with_timer(
         effect_block_building_delta(building, frame),
     )
     .map(EffectBlockRuntimeReport::ForceProjector)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn effect_force_projector_update_building_frame_with_timer_and_consume(
+    store: &mut EffectBlockRuntimeStateStore,
+    timer: &mut BuildingTimerState,
+    content: &ContentLoader,
+    building: &mut BuildingComp,
+    frame: EffectBlockFrameInput,
+    coolant_efficiency: f32,
+    coolant_heat_capacity: f32,
+) -> Option<EffectBlockRuntimeReport> {
+    let report = effect_force_projector_update_building_frame_with_timer(
+        store,
+        timer,
+        content,
+        building,
+        frame,
+        coolant_efficiency,
+        coolant_heat_capacity,
+    )?;
+    let block = effect_block_data_for_building(content, building)?;
+    effect_block_consume_source_items_from_report(building, block, &report);
+    Some(report)
 }
 
 pub fn effect_base_shield_update_building_frame<'a, 'b>(
@@ -7502,6 +7543,48 @@ mod tests {
     }
 
     #[test]
+    fn effect_projector_building_frame_with_consume_removes_mend_boost_item() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let silicon = mend_block.boost_items[0].item;
+        let mut mend_building =
+            BuildingComp::new(point2_pack(12, 9), mend_def.base().clone(), TeamId(1));
+        mend_building.efficiency = 1.0;
+        mend_building.optional_efficiency = 1.0;
+        mend_building.items.as_mut().unwrap().set(silicon, 1);
+        let mut store = EffectBlockRuntimeStateStore::new();
+        let mut timer = BuildingTimerState::default();
+        let mut targets = Vec::new();
+
+        let report = effect_projector_update_building_frame_with_timer_and_consume(
+            &mut store,
+            &mut timer,
+            &content,
+            &mut mend_building,
+            &mut targets,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: mend_block.use_time,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            false,
+        );
+        match report {
+            Some(EffectBlockRuntimeReport::Projector(EffectProjectorRuntimeReport::Mend {
+                update,
+                ..
+            })) => assert!(update.should_consume_optional),
+            other => panic!("unexpected consuming mend report: {other:?}"),
+        }
+        assert_eq!(mend_building.items.as_ref().unwrap().get(silicon), 0);
+    }
+
+    #[test]
     fn force_projector_timer_gate_controls_phase_consume_report() {
         let mut state = ForceProjectorState {
             broken: false,
@@ -7695,6 +7778,67 @@ mod tests {
                 should_consume_phase: true,
             }
         ));
+        assert_eq!(building.items.as_ref().unwrap().get(phase_fabric), 0);
+    }
+
+    #[test]
+    fn effect_force_projector_building_frame_with_consume_removes_phase_item() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let force_def = content.block_by_name("force-projector").unwrap();
+        let force_block = effect_block(&content, "force-projector");
+        let phase_fabric = force_block.boost_items[0].item;
+        let mut building =
+            BuildingComp::new(point2_pack(18, 9), force_def.base().clone(), TeamId(1));
+        building.efficiency = 1.0;
+        building.optional_efficiency = 1.0;
+        building.time_scale = 2.0;
+        building.items.as_mut().unwrap().set(phase_fabric, 1);
+        let mut store = EffectBlockRuntimeStateStore::new();
+        let mut timer = BuildingTimerState::default();
+
+        let _ = effect_force_projector_update_building_frame_with_timer_and_consume(
+            &mut store,
+            &mut timer,
+            &content,
+            &mut building,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: 10.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            0.0,
+            0.0,
+        );
+        assert_eq!(building.items.as_ref().unwrap().get(phase_fabric), 1);
+
+        let force_interval = force_block.phase_use_time / building.time_scale;
+        let ready = effect_force_projector_update_building_frame_with_timer_and_consume(
+            &mut store,
+            &mut timer,
+            &content,
+            &mut building,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: force_interval,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            0.0,
+            0.0,
+        );
+        match ready {
+            Some(EffectBlockRuntimeReport::ForceProjector(update)) => {
+                assert!(update.should_consume_phase)
+            }
+            other => panic!("unexpected consuming force projector report: {other:?}"),
+        }
         assert_eq!(building.items.as_ref().unwrap().get(phase_fabric), 0);
     }
 
