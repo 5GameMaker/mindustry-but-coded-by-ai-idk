@@ -120,6 +120,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 ## 5. 最近一次完成的具体实现
 
+### 2026-05-26 续作：LogicProcessor revision 0 runtime 回归
+
+文件：
+
+- `core/src/mindustry/core/game_runtime.rs`
+- `MIGRATION.md`
+
+完成内容：
+
+1. 补 `game_runtime_loads_processor_revision_zero_legacy_code_and_links`，构造 Java 旧 revision 0 processor payload：
+   - `code`：Java UTF `"end"`；
+   - `links total`：`short`；
+   - `link positions`：`int[]`；
+   - `varcount = 0`；
+   - `memory = 0`；
+   - 不写 revision 1+ compressed、revision 2+ ipt、revision 3+ tag/iconTag、revision 4+ waits/accumulator。
+2. 断言 `GameRuntime::load_network_map_with_buildings(...)` 能恢复 `LogicProcessorState.legacy_code` 与 `legacy_link_positions`。
+3. 已验证：
+   - `cargo test -p mindustry-core game_runtime_loads_processor_revision_zero_legacy_code_and_links`
+   - `cargo test -p mindustry-core logic_processor`
+   - `cargo check -p mindustry-core`
+
 ### 2026-05-26 续作：BuildTurret raw plans fallback
 
 文件：

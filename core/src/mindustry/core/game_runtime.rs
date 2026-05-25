@@ -4919,6 +4919,44 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_loads_processor_revision_zero_legacy_code_and_links() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let processor_def = content.block_by_name("micro-processor").unwrap();
+        let tile_pos = point2_pack(6, 2);
+        let saved = BuildingComp::new(tile_pos, processor_def.base().clone(), TeamId(1));
+        let state = LogicProcessorState {
+            legacy_code: Some("end".into()),
+            legacy_link_positions: vec![point2_pack(1, 2), point2_pack(3, 4)],
+            ..LogicProcessorState::default()
+        };
+
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        building_bytes.extend_from_slice(&[0, 3, b'e', b'n', b'd']);
+        building_bytes.extend_from_slice(&(state.legacy_link_positions.len() as i16).to_be_bytes());
+        for pos in &state.legacy_link_positions {
+            building_bytes.extend_from_slice(&pos.to_be_bytes());
+        }
+        building_bytes.extend_from_slice(&0i32.to_be_bytes());
+        building_bytes.extend_from_slice(&0i32.to_be_bytes());
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 22, processor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.logic_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLogicBlockState::Processor(state))
+        );
+    }
+
+    #[test]
     fn game_runtime_loads_launch_pad_state_from_network_map_building_payload() {
         let content = ContentLoader::create_base_content().unwrap();
         let launch_def = content.block_by_name("launch-pad").unwrap();
