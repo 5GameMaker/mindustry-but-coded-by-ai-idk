@@ -956,6 +956,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_on_removed_plan(...)`
 - `force_projector_deflect_plan(...)`
 - `force_projector_draw_plan(...)`
+- `effect_projector_consume_source_items(...)`
+- `effect_block_consume_source_items_from_report(...)`
 - `effect_force_projector_consume_phase_items(...)`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
@@ -1097,6 +1099,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_projector_update_building_frame(...)` 已能从 `BuildingComp` 与 `EffectBlockFrameInput` 组装 projector family runtime 输入，`RegenProjector` 测试覆盖了 `GameState::advance_game_update_frame(...) -> delta/edelta/update_id -> last_update_frame` 的状态门控链路；
   - `EffectBlockData` 已新增 `timer_slots / timer_use_slot / timer_check_slot / timer_target_slot / timer_target2_slot`，用于记录 Java `Block.timerDump` 占 0 号槽后各 effect block 自定义 timer 的 content-backed 槽位；
   - `effect_projector_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 `MendProjector` 的 `timer(timerUse, useTime / timeScale)` 可选消耗门控；当前从 `EffectBlockData.timer_use_slot` 读取槽位，`MEND_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback；
+  - `effect_projector_consume_source_items(...)` 已把 projector runtime report 的 `MendProjectorUpdate.should_consume_optional`、`OverdriveProjectorUpdate.consumed` 与 `RegenProjectorUpdatePlan.consume_optional` 接到源 `BuildingComp.items` 扣料；普通 Overdrive 扣 `boost_items`，OverdriveDome 扣 `consume_items`，对齐 Java `Building.consume() -> ConsumeItems.trigger(...)` 的副作用拆分；
+  - `effect_block_consume_source_items_from_report(...)` 已提供跨 `EffectBlockRuntimeReport` 的统一源建筑扣料入口，覆盖 projector family 与 ForceProjector；
   - `effect_force_projector_update_building_frame(...)` / `effect_force_projector_update_building_frame_with_timer(...)` 已能从 `BuildingComp.efficiency/optional_efficiency/timeScale`、帧 delta 与 content `phaseUseTime/timerUse` 组装 ForceProjector runtime 输入；`FORCE_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback，且 broken/phase invalid/efficiency=0 时不触碰 timer slot；
   - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；
   - `effect_shockwave_tower_update_building_frame(...)` 已能从 `BuildingComp.potential_efficiency`、building delta/edelta、bullet 候选与 timer gate 组装 ShockwaveTower runtime 输入，写回 bullet damage/remove 与 `ShockwaveTowerState`；

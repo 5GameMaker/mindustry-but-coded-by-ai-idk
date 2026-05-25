@@ -3117,6 +3117,34 @@ pub fn effect_force_projector_consume_phase_items(
         && effect_block_consume_boost_items_when(building, block, update.should_consume_phase)
 }
 
+pub fn effect_projector_consume_source_items(
+    building: &mut BuildingComp,
+    block: &EffectBlockData,
+    report: &EffectProjectorRuntimeReport,
+) -> bool {
+    match (block.kind, report) {
+        (EffectBlockKind::MendProjector, EffectProjectorRuntimeReport::Mend { update, .. }) => {
+            effect_block_consume_boost_items_when(building, block, update.should_consume_optional)
+        }
+        (
+            EffectBlockKind::OverdriveProjector,
+            EffectProjectorRuntimeReport::Overdrive { update, .. },
+        ) => {
+            if !update.consumed {
+                false
+            } else if block.has_boost {
+                effect_block_consume_items(building, &block.boost_items, 1.0)
+            } else {
+                effect_block_consume_items(building, &block.consume_items, 1.0)
+            }
+        }
+        (EffectBlockKind::RegenProjector, EffectProjectorRuntimeReport::Regen { update, .. }) => {
+            effect_block_consume_boost_items_when(building, block, update.consume_optional)
+        }
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EffectBlockRuntimeReport {
     Projector(EffectProjectorRuntimeReport),
@@ -3124,6 +3152,22 @@ pub enum EffectBlockRuntimeReport {
     ForceProjector(ForceProjectorUpdate),
     BaseShield(BaseShieldRuntimeReport),
     ShockwaveTower(ShockwaveTowerFire),
+}
+
+pub fn effect_block_consume_source_items_from_report(
+    building: &mut BuildingComp,
+    block: &EffectBlockData,
+    report: &EffectBlockRuntimeReport,
+) -> bool {
+    match report {
+        EffectBlockRuntimeReport::Projector(report) => {
+            effect_projector_consume_source_items(building, block, report)
+        }
+        EffectBlockRuntimeReport::ForceProjector(update) => {
+            effect_force_projector_consume_phase_items(building, block, *update)
+        }
+        _ => false,
+    }
 }
 
 pub fn effect_block_update_runtime<'a, 'b>(
@@ -7652,6 +7696,82 @@ mod tests {
             }
         ));
         assert_eq!(building.items.as_ref().unwrap().get(phase_fabric), 0);
+    }
+
+    #[test]
+    fn effect_projector_source_consume_applies_mend_and_overdrive_item_reports() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let silicon = mend_block.boost_items[0].item;
+        let mut mend_building =
+            BuildingComp::new(point2_pack(15, 9), mend_def.base().clone(), TeamId(1));
+        mend_building.items.as_mut().unwrap().set(silicon, 2);
+        let mend_report = EffectProjectorRuntimeReport::Mend {
+            update: MendProjectorUpdate {
+                fired: true,
+                real_range: mend_block.range,
+                heal_fraction: 0.12,
+                should_consume_optional: true,
+            },
+            healed: 1,
+        };
+        assert!(effect_projector_consume_source_items(
+            &mut mend_building,
+            mend_block,
+            &mend_report
+        ));
+        assert_eq!(mend_building.items.as_ref().unwrap().get(silicon), 1);
+
+        let overdrive_def = content.block_by_name("overdrive-projector").unwrap();
+        let overdrive_block = effect_block(&content, "overdrive-projector");
+        let phase_fabric = overdrive_block.boost_items[0].item;
+        let mut overdrive_building =
+            BuildingComp::new(point2_pack(16, 9), overdrive_def.base().clone(), TeamId(1));
+        overdrive_building
+            .items
+            .as_mut()
+            .unwrap()
+            .set(phase_fabric, 1);
+        let overdrive_report = EffectProjectorRuntimeReport::Overdrive {
+            update: OverdriveProjectorUpdate {
+                applied_boost: false,
+                consumed: true,
+                real_range: overdrive_block.range,
+                real_boost: 1.0,
+            },
+            boosted: 0,
+        };
+        assert!(effect_projector_consume_source_items(
+            &mut overdrive_building,
+            overdrive_block,
+            &overdrive_report
+        ));
+        assert_eq!(
+            overdrive_building.items.as_ref().unwrap().get(phase_fabric),
+            0
+        );
+
+        let dome_def = content.block_by_name("overdrive-dome").unwrap();
+        let dome_block = effect_block(&content, "overdrive-dome");
+        let mut dome_building =
+            BuildingComp::new(point2_pack(17, 9), dome_def.base().clone(), TeamId(1));
+        for stack in &dome_block.consume_items {
+            dome_building
+                .items
+                .as_mut()
+                .unwrap()
+                .set(stack.item, stack.amount);
+        }
+        assert!(effect_projector_consume_source_items(
+            &mut dome_building,
+            dome_block,
+            &overdrive_report
+        ));
+        for stack in &dome_block.consume_items {
+            assert_eq!(dome_building.items.as_ref().unwrap().get(stack.item), 0);
+        }
     }
 
     #[test]
