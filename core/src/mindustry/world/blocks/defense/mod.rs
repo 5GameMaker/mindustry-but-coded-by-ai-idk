@@ -2777,6 +2777,79 @@ pub fn effect_base_shield_apply_runtime<'a>(
     ))
 }
 
+pub enum EffectBlockRuntimeContext<'a, 'b> {
+    Projector {
+        state: &'a mut EffectProjectorRuntimeState,
+        input: EffectProjectorRuntimeInput,
+        content: &'a ContentLoader,
+        buildings: &'a mut [BuildingComp],
+    },
+    Radar {
+        state: &'a mut RadarState,
+        fog_control: &'a mut FogControl,
+        input: EffectRadarRuntimeInput,
+    },
+    BaseShield {
+        state: &'a mut BaseShieldState,
+        shield: &'a BuildingComp,
+        efficiency: f32,
+        bullets: &'a mut [BulletComp],
+        bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+        units: &'a mut [UnitComp],
+        delta: f32,
+        spark_random: &'a mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EffectBlockRuntimeReport {
+    Projector(EffectProjectorRuntimeReport),
+    Radar { forced_update: bool },
+    BaseShield(BaseShieldRuntimeReport),
+}
+
+pub fn effect_block_update_runtime<'a, 'b>(
+    block: &EffectBlockData,
+    context: EffectBlockRuntimeContext<'a, 'b>,
+) -> Option<EffectBlockRuntimeReport> {
+    match context {
+        EffectBlockRuntimeContext::Projector {
+            state,
+            input,
+            content,
+            buildings,
+        } => effect_projector_update_runtime(block, state, input, content, buildings)
+            .map(EffectBlockRuntimeReport::Projector),
+        EffectBlockRuntimeContext::Radar {
+            state,
+            fog_control,
+            input,
+        } => effect_radar_update_runtime(block, state, fog_control, input)
+            .map(|forced_update| EffectBlockRuntimeReport::Radar { forced_update }),
+        EffectBlockRuntimeContext::BaseShield {
+            state,
+            shield,
+            efficiency,
+            bullets,
+            bullet_type,
+            units,
+            delta,
+            spark_random,
+        } => effect_base_shield_apply_runtime(
+            block,
+            state,
+            shield,
+            efficiency,
+            bullets,
+            bullet_type,
+            units,
+            delta,
+            spark_random,
+        )
+        .map(EffectBlockRuntimeReport::BaseShield),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseShieldDrawCommand {
     SetShieldLayer,
@@ -7154,6 +7227,128 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn effect_block_runtime_dispatch_routes_projector_radar_and_base_shield() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let radar_block = effect_block(&content, "radar");
+        let shield_block = effect_block(&content, "shield-projector");
+
+        let mut projector_state = EffectProjectorRuntimeState::Mend(MendProjectorState {
+            charge: mend_block.reload,
+            ..MendProjectorState::default()
+        });
+        let mut no_buildings = Vec::new();
+        let projector_report = effect_block_update_runtime(
+            mend_block,
+            EffectBlockRuntimeContext::Projector {
+                state: &mut projector_state,
+                input: EffectProjectorRuntimeInput {
+                    source: ProjectorRuntimeSource {
+                        x: 0.0,
+                        y: 0.0,
+                        team: TeamId(1),
+                    },
+                    efficiency: 1.0,
+                    optional_efficiency: 0.0,
+                    timer_ready: true,
+                    suppressed: false,
+                    delta: 0.0,
+                    edelta: 60.0,
+                    update_id: 1,
+                    tile_size: TILE_SIZE as f32,
+                    now: 0.0,
+                },
+                content: &content,
+                buildings: &mut no_buildings,
+            },
+        );
+        match projector_report {
+            Some(EffectBlockRuntimeReport::Projector(EffectProjectorRuntimeReport::Mend {
+                update,
+                healed,
+            })) => {
+                assert!(update.fired);
+                assert_eq!(healed, 0);
+            }
+            other => panic!("unexpected projector report: {other:?}"),
+        }
+
+        let mut radar = RadarState {
+            progress: 0.06,
+            last_radius: 0.0,
+            smooth_efficiency: 1.0,
+            total_progress: 0.0,
+        };
+        let mut fog = FogControl::new(8, 8);
+        fog.ensure_data(2);
+        let radar_report = effect_block_update_runtime(
+            radar_block,
+            EffectBlockRuntimeContext::Radar {
+                state: &mut radar,
+                fog_control: &mut fog,
+                input: EffectRadarRuntimeInput {
+                    team: TeamId(2),
+                    tile_x: 3,
+                    tile_y: 4,
+                    efficiency: 1.0,
+                    edelta: 60.0,
+                    fog_enabled: true,
+                    static_fog: true,
+                },
+            },
+        );
+        assert_eq!(
+            radar_report,
+            Some(EffectBlockRuntimeReport::Radar {
+                forced_update: true
+            })
+        );
+
+        let absorbable = BulletType {
+            absorbable: true,
+            ..BulletType::default()
+        };
+        let mut bullet = BulletComp::default();
+        bullet.bullet_type_id = 0;
+        bullet.team = TeamId(2);
+        bullet.x = 9.0;
+        let mut bullets = vec![bullet];
+        let mut units = Vec::new();
+        let mut bullet_type = |id| (id == 0).then_some(&absorbable);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let mut shield_state = BaseShieldState::default();
+        let mut shield = projector_runtime_building(42, "shield-projector");
+        shield.set_pos(0.0, 0.0);
+        let shield_report = effect_block_update_runtime(
+            shield_block,
+            EffectBlockRuntimeContext::BaseShield {
+                state: &mut shield_state,
+                shield: &shield,
+                efficiency: 1.0,
+                bullets: &mut bullets,
+                bullet_type: &mut bullet_type,
+                units: &mut units,
+                delta: 1.0,
+                spark_random: &mut spark_random,
+            },
+        );
+        assert_eq!(
+            shield_report,
+            Some(EffectBlockRuntimeReport::BaseShield(
+                BaseShieldRuntimeReport {
+                    active: true,
+                    radius: 10.0,
+                    bullets_absorbed: 1,
+                    units_repelled: 0,
+                    units_killed: 0,
+                    unit_sparks: 0,
+                }
+            ))
+        );
+        assert!(bullets[0].absorbed);
     }
 
     #[test]

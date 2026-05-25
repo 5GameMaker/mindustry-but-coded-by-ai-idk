@@ -1001,7 +1001,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `EffectProjectorRuntimeState`
 - `EffectProjectorRuntimeInput`
 - `EffectProjectorRuntimeReport`
+- `EffectBlockRuntimeContext`
+- `EffectBlockRuntimeReport`
 - `effect_projector_update_runtime(...)`
+- `effect_block_update_runtime(...)`
 - `projector_runtime_target_in_range(...)`
 - `projector_runtime_target_allowed(...)`
 - `mend_projector_outputs_items(...)`
@@ -1046,6 +1049,11 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 调用方只需传入 `ProjectorRuntimeSource`、`ContentLoader` 与候选 `BuildingComp` slice，避免同时持有 `&mut BuildingComp` 和 `&mut [BuildingComp]`；
   - Regen 分支已经在 dispatcher 内完成 `damaged_targets` 判定、mendMap 记录、`last_update_frame/update_id` 门控和真实 `BuildingComp::heal(...)` 应用；
   - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口；`Radar` 因需要额外 `FogControl` 已拆到 `effect_radar_update_runtime(...)`，`BaseShield` 因需要 bullet/unit 输入已拆到 `effect_base_shield_apply_runtime(...)`，后续继续收束成更统一的 effect-block runtime dispatcher。
+- 已新增跨 effect block 的轻量统一 runtime dispatcher：
+  - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield` 三类上下文；
+  - `effect_block_update_runtime(...)` 按传入上下文复用 `effect_projector_update_runtime(...)`、`effect_radar_update_runtime(...)`、`effect_base_shield_apply_runtime(...)`；
+  - `EffectBlockRuntimeReport` 将 projector report、Radar fog force-update 和 BaseShield runtime report 收束到同一返回类型；
+  - 该入口仍保持显式上下文传参，避免把 `FogControl`、建筑 slice、bullet/unit slice 与 content loader 强行揉成一个巨型可变借用。
 
 仍需：
 
