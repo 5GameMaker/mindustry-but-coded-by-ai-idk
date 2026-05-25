@@ -3203,7 +3203,7 @@ pub fn effect_projector_update_building_frame(
     )
 }
 
-pub const MEND_PROJECTOR_TIMER_USE_SLOT: usize = 0;
+pub const MEND_PROJECTOR_TIMER_USE_SLOT: usize = 1;
 
 pub fn effect_projector_update_building_frame_with_timer(
     store: &mut EffectBlockRuntimeStateStore,
@@ -3218,7 +3218,9 @@ pub fn effect_projector_update_building_frame_with_timer(
     let timer_ready = if block.kind == EffectBlockKind::MendProjector {
         timer.set_time(frame.now);
         timer.timer(
-            MEND_PROJECTOR_TIMER_USE_SLOT,
+            block
+                .timer_use_slot
+                .unwrap_or(MEND_PROJECTOR_TIMER_USE_SLOT),
             block.use_time / building.time_scale,
         )
     } else {
@@ -3288,7 +3290,7 @@ pub fn effect_shockwave_tower_update_building_frame<'a, 'b>(
     )
 }
 
-pub const SHOCKWAVE_TOWER_TIMER_CHECK_SLOT: usize = 0;
+pub const SHOCKWAVE_TOWER_TIMER_CHECK_SLOT: usize = 1;
 
 pub fn effect_shockwave_tower_update_building_frame_with_timer<'a, 'b>(
     store: &mut EffectBlockRuntimeStateStore,
@@ -3305,7 +3307,12 @@ pub fn effect_shockwave_tower_update_building_frame_with_timer<'a, 'b>(
     }
 
     timer.set_time(frame.now);
-    let timer_ready = timer.timer(SHOCKWAVE_TOWER_TIMER_CHECK_SLOT, block.check_interval);
+    let timer_ready = timer.timer(
+        block
+            .timer_check_slot
+            .unwrap_or(SHOCKWAVE_TOWER_TIMER_CHECK_SLOT),
+        block.check_interval,
+    );
     effect_shockwave_tower_update_building_frame(
         store,
         content,
@@ -4541,8 +4548,8 @@ pub fn build_turret_should_consume(plan_count: usize, heal_suppressed: bool) -> 
     plan_count > 0 && !heal_suppressed
 }
 
-pub const BUILD_TURRET_TIMER_TARGET_SLOT: usize = 0;
-pub const BUILD_TURRET_TIMER_TARGET2_SLOT: usize = 1;
+pub const BUILD_TURRET_TIMER_TARGET_SLOT: usize = 1;
+pub const BUILD_TURRET_TIMER_TARGET2_SLOT: usize = 2;
 
 pub fn effect_build_turret_timer_target_ready(
     content: &ContentLoader,
@@ -4555,7 +4562,14 @@ pub fn effect_build_turret_timer_target_ready(
         return None;
     }
     timer.set_time(frame.now);
-    Some(timer.timer(BUILD_TURRET_TIMER_TARGET_SLOT, block.target_interval as f32))
+    Some(
+        timer.timer(
+            block
+                .timer_target_slot
+                .unwrap_or(BUILD_TURRET_TIMER_TARGET_SLOT),
+            block.target_interval as f32,
+        ),
+    )
 }
 
 pub fn build_turret_unit_tick(input: BuildTurretUnitTickInput) -> BuildTurretUnitTickStep {
@@ -6749,9 +6763,27 @@ mod tests {
     #[test]
     fn effect_block_runtime_state_factory_covers_supported_effect_content() {
         let content = ContentLoader::create_base_content().unwrap();
+        let mend = effect_block(&content, "mend-projector");
+        let shockwave = effect_block(&content, "shockwave-tower");
+        let build_tower = effect_block(&content, "build-tower");
+
+        assert_eq!(mend.timer_use_slot, Some(MEND_PROJECTOR_TIMER_USE_SLOT));
+        assert_eq!(
+            shockwave.timer_check_slot,
+            Some(SHOCKWAVE_TOWER_TIMER_CHECK_SLOT)
+        );
+        assert_eq!(
+            build_tower.timer_target_slot,
+            Some(BUILD_TURRET_TIMER_TARGET_SLOT)
+        );
+        assert_eq!(
+            build_tower.timer_target2_slot,
+            Some(BUILD_TURRET_TIMER_TARGET2_SLOT)
+        );
+        assert_eq!(build_tower.timer_slots, 3);
 
         assert!(matches!(
-            effect_block_runtime_state_for(effect_block(&content, "mend-projector"), 0.0),
+            effect_block_runtime_state_for(mend, 0.0),
             Some(EffectBlockRuntimeState::Projector(
                 EffectProjectorRuntimeState::Mend(_)
             ))
@@ -6788,12 +6820,9 @@ mod tests {
             Some(EffectBlockRuntimeState::BaseShield(_))
         ));
 
-        match effect_block_runtime_state_for(effect_block(&content, "shockwave-tower"), 999.0) {
+        match effect_block_runtime_state_for(shockwave, 999.0) {
             Some(EffectBlockRuntimeState::ShockwaveTower(state)) => {
-                assert_eq!(
-                    state.reload_counter,
-                    effect_block(&content, "shockwave-tower").reload
-                );
+                assert_eq!(state.reload_counter, shockwave.reload);
                 assert_eq!(state.heat, 0.0);
             }
             other => panic!("unexpected shockwave runtime state: {other:?}"),

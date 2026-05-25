@@ -1089,11 +1089,12 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_block_update_building_runtime(...)` 将 `BuildingComp.block.id -> EffectBlockData -> state store ensure -> runtime dispatch` 串成单栋建筑的一站式入口，为后续 `update_all_buildings(...)` 遍历打通最小调用链；
   - `effect_radar_update_building_frame(...)` 已能直接从 `BuildingComp.team/tile_pos/efficiency` 与帧输入组装 Radar runtime 资源，测试覆盖了 `GameState::advance_game_update_frame(...) -> RadarState` 的最小帧推进路径；
   - `effect_projector_update_building_frame(...)` 已能从 `BuildingComp` 与 `EffectBlockFrameInput` 组装 projector family runtime 输入，`RegenProjector` 测试覆盖了 `GameState::advance_game_update_frame(...) -> delta/edelta/update_id -> last_update_frame` 的状态门控链路；
-  - `effect_projector_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 `MendProjector` 的 `timer(timerUse, useTime / timeScale)` 可选消耗门控；当前用 `MEND_PROJECTOR_TIMER_USE_SLOT = 0` 作为过渡槽位；
+  - `EffectBlockData` 已新增 `timer_slots / timer_use_slot / timer_check_slot / timer_target_slot / timer_target2_slot`，用于记录 Java `Block.timerDump` 占 0 号槽后各 effect block 自定义 timer 的 content-backed 槽位；
+  - `effect_projector_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 `MendProjector` 的 `timer(timerUse, useTime / timeScale)` 可选消耗门控；当前从 `EffectBlockData.timer_use_slot` 读取槽位，`MEND_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback；
   - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；
   - `effect_shockwave_tower_update_building_frame(...)` 已能从 `BuildingComp.potential_efficiency`、building delta/edelta、bullet 候选与 timer gate 组装 ShockwaveTower runtime 输入，写回 bullet damage/remove 与 `ShockwaveTowerState`；
-  - `effect_shockwave_tower_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 ShockwaveTower 的 `timer(timerCheck, checkInterval)` 门控；当前用 `SHOCKWAVE_TOWER_TIMER_CHECK_SLOT = 0` 作为过渡槽位，后续应随完整 block timer slot 分配迁移替换；
-  - `effect_build_turret_timer_target_ready(...)` 已开始把 `BuildingTimerState` 侧车接入 `BuildTurret` 的 `timer(timerTarget, targetInterval)` 队伍计划/跟随搜索门控；当前用 `BUILD_TURRET_TIMER_TARGET_SLOT = 0`、`BUILD_TURRET_TIMER_TARGET2_SLOT = 1` 作为过渡槽位；
+  - `effect_shockwave_tower_update_building_frame_with_timer(...)` 已开始把 `BuildingTimerState` 侧车接入 ShockwaveTower 的 `timer(timerCheck, checkInterval)` 门控；当前从 `EffectBlockData.timer_check_slot` 读取槽位，`SHOCKWAVE_TOWER_TIMER_CHECK_SLOT = 1` 作为 Java 对齐 fallback；
+  - `effect_build_turret_timer_target_ready(...)` 已开始把 `BuildingTimerState` 侧车接入 `BuildTurret` 的 `timer(timerTarget, targetInterval)` 队伍计划/跟随搜索门控；当前从 `EffectBlockData.timer_target_slot` 读取槽位，`BUILD_TURRET_TIMER_TARGET_SLOT = 1`、`BUILD_TURRET_TIMER_TARGET2_SLOT = 2` 作为 Java 对齐 fallback；
 - 已新增建筑 timer 侧车：
   - `core/src/mindustry/entities/comp/timer.rs` 新增 `BuildingTimerState`，默认 6 槽，对齐 Java `TimerComp` 的 `Interval(6)` 默认形态；
   - `BuildingTimerState::timer(index, time)` 保持 Java `Float.isInfinite(time) -> false` 与 slot-based `Interval.get(...)` 语义；

@@ -1439,6 +1439,11 @@ pub struct EffectBlockData {
     pub drawer: String,
     pub rotate_draw: bool,
     pub rebuildable: bool,
+    pub timer_slots: usize,
+    pub timer_use_slot: Option<usize>,
+    pub timer_check_slot: Option<usize>,
+    pub timer_target_slot: Option<usize>,
+    pub timer_target2_slot: Option<usize>,
     pub bullet_damage: f32,
     pub falloff_count: f32,
     pub shake: f32,
@@ -1510,6 +1515,11 @@ impl EffectBlockData {
             drawer: String::new(),
             rotate_draw: true,
             rebuildable: true,
+            timer_slots: 1,
+            timer_use_slot: None,
+            timer_check_slot: None,
+            timer_target_slot: None,
+            timer_target2_slot: None,
             bullet_damage: 0.0,
             falloff_count: 0.0,
             shake: 0.0,
@@ -1541,6 +1551,8 @@ impl EffectBlockData {
                 self.phase_boost = 12.0;
                 self.phase_range_boost = 50.0;
                 self.use_time = 400.0;
+                self.timer_use_slot = Some(1);
+                self.timer_slots = self.timer_slots.max(2);
             }
             EffectBlockKind::OverdriveProjector => {
                 self.base.solid = true;
@@ -1584,6 +1596,8 @@ impl EffectBlockData {
                 self.cooldown_broken_base = 0.35;
                 self.coolant_consumption = 0.1;
                 self.consume_coolant = true;
+                self.timer_use_slot = Some(1);
+                self.timer_slots = self.timer_slots.max(2);
             }
             EffectBlockKind::ShockMine => {
                 self.base.update = false;
@@ -1621,6 +1635,9 @@ impl EffectBlockData {
                 self.build_beam_offset = 5.0;
                 self.target_interval = 15;
                 self.elevation = -1.0;
+                self.timer_target_slot = Some(1);
+                self.timer_target2_slot = Some(2);
+                self.timer_slots = self.timer_slots.max(3);
             }
             EffectBlockKind::RegenProjector => {
                 self.base.solid = true;
@@ -1656,6 +1673,8 @@ impl EffectBlockData {
                 self.shape_rotate_speed = 1.0;
                 self.shape_radius = 6.0;
                 self.shape_sides = 4;
+                self.timer_check_slot = Some(1);
+                self.timer_slots = self.timer_slots.max(2);
             }
             EffectBlockKind::BaseShield => {
                 self.base.has_power = true;
