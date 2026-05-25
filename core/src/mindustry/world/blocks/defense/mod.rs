@@ -5,8 +5,9 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
-use crate::mindustry::entities::bullet::BulletType;
+use crate::mindustry::entities::bullet::{BulletCreatePlan, BulletType};
 use crate::mindustry::entities::comp::{BuildingComp, BulletComp, UnitComp};
+use crate::mindustry::entities::lightning::{LightningConfig, LightningSeedState};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::SizedEntity;
 use crate::mindustry::game::{BlockPlan, FogControl, FogEvent};
@@ -506,6 +507,30 @@ pub struct ShockMineTriggerPlan {
     pub bullet_angles: Vec<f32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockMineLightningCreateEvent {
+    pub team: TeamId,
+    pub bullet_type_id: ContentId,
+    pub color_rgba: u32,
+    pub config: LightningConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShockMineBulletCreateEvent {
+    pub team: TeamId,
+    pub bullet_type_id: ContentId,
+    pub owner_tile_pos: i32,
+    pub x: f32,
+    pub y: f32,
+    pub plan: BulletCreatePlan,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ShockMineSideEffectPlan {
+    pub lightnings: Vec<ShockMineLightningCreateEvent>,
+    pub bullets: Vec<ShockMineBulletCreateEvent>,
+}
+
 pub fn shock_mine_stats_plan(tendrils: i32) -> ShockMineStatsPlan {
     ShockMineStatsPlan {
         tendrils,
@@ -596,6 +621,59 @@ pub fn shock_mine_apply_trigger_to_building(
     let before = building.health;
     building.damage(plan.self_damage, now);
     building.health < before || building.dead
+}
+
+pub fn shock_mine_side_effect_plan(
+    building: &BuildingComp,
+    plan: &ShockMineTriggerPlan,
+    lightning_bullet_type_id: ContentId,
+    lightning_color_rgba: u32,
+    lightning_seed_state: &mut LightningSeedState,
+    bullet_type_id: Option<ContentId>,
+    bullet_type: Option<&BulletType>,
+) -> ShockMineSideEffectPlan {
+    if !plan.triggered {
+        return ShockMineSideEffectPlan::default();
+    }
+
+    let lightnings = plan
+        .lightning_angles
+        .iter()
+        .map(|&angle| ShockMineLightningCreateEvent {
+            team: building.team,
+            bullet_type_id: lightning_bullet_type_id,
+            color_rgba: lightning_color_rgba,
+            config: LightningConfig::new(
+                lightning_seed_state.next_seed(),
+                building.x,
+                building.y,
+                angle,
+                plan.lightning_length,
+            )
+            .with_damage(plan.lightning_damage),
+        })
+        .collect();
+
+    let bullets = match (bullet_type_id, bullet_type) {
+        (Some(bullet_type_id), Some(bullet_type)) => plan
+            .bullet_angles
+            .iter()
+            .map(|&angle| ShockMineBulletCreateEvent {
+                team: building.team,
+                bullet_type_id,
+                owner_tile_pos: building.tile_pos,
+                x: building.x,
+                y: building.y,
+                plan: bullet_type.create_plan(angle, 0.0, 0.0, None, 1.0, 1.0, false),
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    ShockMineSideEffectPlan {
+        lightnings,
+        bullets,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4769,6 +4847,94 @@ mod tests {
             &mut mine, &blocked, 520.0,
         ));
         assert_eq!(mine.health, 95.0);
+    }
+
+    #[test]
+    fn shock_mine_runtime_adapter_emits_lightning_and_bullet_create_events() {
+        let mut mine = projector_runtime_building(14, "shock-mine");
+        mine.set_pos(48.0, 64.0);
+        let plan = shock_mine_trigger_plan(
+            true,
+            false,
+            true,
+            7.0,
+            25.0,
+            10,
+            3,
+            &[90.0, 180.0, 270.0],
+            true,
+            4,
+            &[1.0, 2.0, 3.0, 4.0],
+        );
+        let bullet_type = BulletType {
+            damage: 6.0,
+            speed: 2.5,
+            lifetime: 30.0,
+            ..BulletType::default()
+        };
+        let mut seeds = LightningSeedState { last_seed: 41 };
+        let side_effects = shock_mine_side_effect_plan(
+            &mine,
+            &plan,
+            2,
+            0x70d6_ffff,
+            &mut seeds,
+            Some(5),
+            Some(&bullet_type),
+        );
+
+        assert_eq!(seeds.last_seed, 44);
+        assert_eq!(side_effects.lightnings.len(), 3);
+        assert_eq!(
+            side_effects.lightnings[0],
+            ShockMineLightningCreateEvent {
+                team: TeamId(1),
+                bullet_type_id: 2,
+                color_rgba: 0x70d6_ffff,
+                config: LightningConfig::new(41, 48.0, 64.0, 90.0, 10).with_damage(25.0),
+            }
+        );
+        assert_eq!(side_effects.lightnings[1].config.seed, 42);
+        assert_eq!(side_effects.lightnings[2].config.rotation, 270.0);
+
+        assert_eq!(side_effects.bullets.len(), 4);
+        assert_eq!(
+            side_effects.bullets[0],
+            ShockMineBulletCreateEvent {
+                team: TeamId(1),
+                bullet_type_id: 5,
+                owner_tile_pos: mine.tile_pos,
+                x: 48.0,
+                y: 64.0,
+                plan: BulletCreatePlan {
+                    angle: 1.0,
+                    damage: 6.0,
+                    velocity_scale: 1.0,
+                    lifetime_scale: 1.0,
+                    lifetime: 30.0,
+                    speed: 2.5,
+                },
+            }
+        );
+        assert_eq!(side_effects.bullets[1].plan.angle, 92.0);
+        assert_eq!(side_effects.bullets[2].plan.angle, 183.0);
+        assert_eq!(side_effects.bullets[3].plan.angle, 274.0);
+
+        let blocked =
+            shock_mine_trigger_plan(true, true, true, 7.0, 25.0, 10, 3, &[90.0], true, 4, &[1.0]);
+        let mut blocked_seeds = LightningSeedState { last_seed: 99 };
+        let blocked_effects = shock_mine_side_effect_plan(
+            &mine,
+            &blocked,
+            2,
+            0x70d6_ffff,
+            &mut blocked_seeds,
+            Some(5),
+            Some(&bullet_type),
+        );
+        assert!(blocked_effects.lightnings.is_empty());
+        assert!(blocked_effects.bullets.is_empty());
+        assert_eq!(blocked_seeds.last_seed, 99);
     }
 
     #[test]
