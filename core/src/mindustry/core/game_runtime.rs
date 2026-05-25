@@ -96,7 +96,9 @@ use crate::mindustry::{
     world::blocks::sandbox::{
         read_item_source_config, read_liquid_source_config, ItemSourceState, LiquidSourceState,
     },
-    world::blocks::storage::{read_core_state, read_unloader_sort_item, CoreBuildState},
+    world::blocks::storage::{
+        read_core_state, read_unloader_sort_item, write_core_state, CoreBuildState,
+    },
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
@@ -288,6 +290,15 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Storage(storage), Some(GameRuntimeStorageBlockState::Core(state))) = (
+        block,
+        runtime.storage_runtime_states.get(&building.tile_pos),
+    ) {
+        if storage.kind == StorageBlockKind::Core {
+            write_core_state(write, state)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -342,6 +353,15 @@ fn network_map_building_revision(
         (block, runtime.liquid_runtime_states.get(&building.tile_pos))
     {
         if liquid.kind == LiquidBlockKind::LiquidBridge {
+            return 1;
+        }
+    }
+
+    if let (BlockDef::Storage(storage), Some(GameRuntimeStorageBlockState::Core(_))) = (
+        block,
+        runtime.storage_runtime_states.get(&building.tile_pos),
+    ) {
+        if storage.kind == StorageBlockKind::Core {
             return 1;
         }
     }
@@ -4105,6 +4125,72 @@ mod tests {
                 was_moved: true,
                 moved: true,
                 ..state
+            }))
+        );
+    }
+
+    fn roundtrip_exported_storage_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeStorageBlockState,
+    ) -> Option<GameRuntimeStorageBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(10),
+        ));
+        runtime.storage_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("storage block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("storage block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(1));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.storage_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_core_storage_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let state = CoreBuildState {
+            storage_capacity: 100,
+            no_effect: true,
+            iframes: 4.0,
+            thruster_time: 2.0,
+            command_pos: Some(IoVec2 { x: 64.0, y: 128.0 }),
+        };
+        assert_eq!(
+            roundtrip_exported_storage_state(
+                &content,
+                "core-shard",
+                10,
+                13,
+                GameRuntimeStorageBlockState::Core(state),
+            ),
+            Some(GameRuntimeStorageBlockState::Core(CoreBuildState {
+                command_pos: Some(IoVec2 { x: 64.0, y: 128.0 }),
+                ..CoreBuildState::default()
             }))
         );
     }
