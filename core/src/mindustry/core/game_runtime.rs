@@ -142,6 +142,16 @@ enum GameRuntimePayloadReadMode {
     NestedExact,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameRuntimeUnitPayloadSchema {
+    Common,
+    BaseRotation,
+    Payloads,
+    BuildingPayloads,
+    Missile,
+    Ammo,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimePayloadBlockState {
     MassDriver {
@@ -1046,14 +1056,127 @@ impl GameRuntime {
                     build_bytes: before_build[..consumed].to_vec(),
                 }))
             }
-            PAYLOAD_UNIT_TYPE => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "non-terminal unit payload body requires exact unit codec",
-            )),
+            PAYLOAD_UNIT_TYPE => {
+                let class_id = type_io::read_u8(read)?;
+                let before_unit = *read;
+                self.read_exact_unit_payload_body(content, class_id, read)?;
+                let consumed = before_unit.len().saturating_sub(read.len());
+                Ok(Some(PayloadRef::Unit {
+                    class_id,
+                    unit_bytes: before_unit[..consumed].to_vec(),
+                }))
+            }
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "unknown payload type",
             )),
+        }
+    }
+
+    fn read_exact_unit_payload_body(
+        &self,
+        content: &ContentLoader,
+        class_id: u8,
+        read: &mut &[u8],
+    ) -> io::Result<()> {
+        let revision = type_io::read_i16(read)?;
+        let schema = Self::unit_payload_schema(class_id, revision).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported non-terminal unit payload class/revision",
+            )
+        })?;
+
+        type_io::skip_abilities(read)?;
+        if matches!(schema, GameRuntimeUnitPayloadSchema::Ammo) {
+            type_io::read_f32(read)?;
+        } else {
+            type_io::read_f32(read)?;
+            type_io::read_f32(read)?;
+        }
+        if matches!(schema, GameRuntimeUnitPayloadSchema::BaseRotation) {
+            type_io::read_f32(read)?;
+        }
+        if matches!(schema, GameRuntimeUnitPayloadSchema::BuildingPayloads) {
+            type_io::read_building_ref(read)?;
+        }
+        type_io::read_controller(read)?;
+        type_io::read_f32(read)?;
+        type_io::read_u64(read)?;
+        type_io::read_f32(read)?;
+        type_io::read_bool(read)?;
+        if matches!(schema, GameRuntimeUnitPayloadSchema::Missile) {
+            type_io::read_f32(read)?;
+        }
+        type_io::read_tile_pos(read)?;
+        type_io::skip_mounts(read)?;
+        if matches!(
+            schema,
+            GameRuntimeUnitPayloadSchema::Payloads | GameRuntimeUnitPayloadSchema::BuildingPayloads
+        ) {
+            self.read_exact_unit_payload_seq(content, read)?;
+        }
+        type_io::read_plans_queue(read, content)?;
+        type_io::read_f32(read)?;
+        type_io::read_f32(read)?;
+        type_io::read_bool(read)?;
+        type_io::read_items(read, content)?;
+        type_io::read_statuses(read, content)?;
+        type_io::read_team(read)?;
+        type_io::read_unit_type(read, content)?;
+        if matches!(schema, GameRuntimeUnitPayloadSchema::Missile) {
+            type_io::read_f32(read)?;
+        }
+        type_io::read_bool(read)?;
+        type_io::read_vec2(read)?;
+        type_io::read_f32(read)?;
+        type_io::read_f32(read)?;
+        Ok(())
+    }
+
+    fn read_exact_unit_payload_seq(
+        &self,
+        content: &ContentLoader,
+        read: &mut &[u8],
+    ) -> io::Result<()> {
+        let len = type_io::read_i32(read)?;
+        if len < 0 || len as usize > type_io::MAX_ARRAY_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid unit payload sequence length",
+            ));
+        }
+        for _ in 0..len {
+            self.read_exact_payload_ref(content, read)?;
+        }
+        Ok(())
+    }
+
+    fn unit_payload_schema(class_id: u8, revision: i16) -> Option<GameRuntimeUnitPayloadSchema> {
+        match (class_id, revision) {
+            (0, 5)
+            | (2, 9)
+            | (3, 9)
+            | (16, 8)
+            | (18, 7)
+            | (20, 9)
+            | (21, 8)
+            | (24, 9)
+            | (29, 5)
+            | (30, 5)
+            | (31, 5)
+            | (33, 5)
+            | (43, 2)
+            | (45, 2)
+            | (46, 2) => Some(GameRuntimeUnitPayloadSchema::Common),
+            (4, 9) | (17, 7) | (19, 5) | (32, 5) => {
+                Some(GameRuntimeUnitPayloadSchema::BaseRotation)
+            }
+            (5, 7) | (23, 8) | (26, 7) => Some(GameRuntimeUnitPayloadSchema::Payloads),
+            (36, 3) => Some(GameRuntimeUnitPayloadSchema::BuildingPayloads),
+            (39, 3) => Some(GameRuntimeUnitPayloadSchema::Missile),
+            (40, 1) | (44, 0) | (47, 1) => Some(GameRuntimeUnitPayloadSchema::Ammo),
+            _ => None,
         }
     }
 
@@ -2017,7 +2140,7 @@ mod tests {
     use super::*;
     use crate::mindustry::{
         core::GameStateState,
-        ctype::ContentType,
+        ctype::{Content, ContentType},
         entities::units::BuildPlan,
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
@@ -2219,6 +2342,39 @@ mod tests {
             block: block_def.base().id,
             version: 0,
             build_bytes,
+        }
+    }
+
+    fn flare_unit_payload_ref(content: &ContentLoader) -> PayloadRef {
+        let flare = content.unit_by_name("flare").unwrap();
+        let mut unit_bytes = Vec::new();
+        type_io::write_i16(&mut unit_bytes, 9).unwrap();
+        type_io::write_u8(&mut unit_bytes, 0).unwrap();
+        type_io::write_f32(&mut unit_bytes, 8.0).unwrap();
+        type_io::write_f32(&mut unit_bytes, -6.0).unwrap();
+        type_io::write_u8(&mut unit_bytes, 2).unwrap();
+        type_io::write_f32(&mut unit_bytes, 0.0).unwrap();
+        type_io::write_u64(&mut unit_bytes, 0.0f64.to_bits()).unwrap();
+        type_io::write_f32(&mut unit_bytes, 120.0).unwrap();
+        type_io::write_bool(&mut unit_bytes, false).unwrap();
+        type_io::write_tile_pos(&mut unit_bytes, None).unwrap();
+        type_io::write_u8(&mut unit_bytes, 0).unwrap();
+        type_io::write_i32(&mut unit_bytes, 0).unwrap();
+        type_io::write_f32(&mut unit_bytes, 135.0).unwrap();
+        type_io::write_f32(&mut unit_bytes, 2.0).unwrap();
+        type_io::write_bool(&mut unit_bytes, false).unwrap();
+        type_io::write_i16(&mut unit_bytes, -1).unwrap();
+        type_io::write_i32(&mut unit_bytes, 0).unwrap();
+        type_io::write_i32(&mut unit_bytes, 0).unwrap();
+        type_io::write_team(&mut unit_bytes, Some(TeamId(1))).unwrap();
+        type_io::write_i16(&mut unit_bytes, flare.id()).unwrap();
+        type_io::write_bool(&mut unit_bytes, false).unwrap();
+        type_io::write_vec2(&mut unit_bytes, IoVec2 { x: 0.25, y: -0.5 }).unwrap();
+        type_io::write_f32(&mut unit_bytes, 64.0).unwrap();
+        type_io::write_f32(&mut unit_bytes, 96.0).unwrap();
+        PayloadRef::Unit {
+            class_id: 3,
+            unit_bytes,
         }
     }
 
@@ -4987,6 +5143,52 @@ mod tests {
         let tile_pos = point2_pack(4, 0);
         let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
         let payload = base_only_build_payload_ref(&content, "router");
+        let common = PayloadBlockBuildState {
+            payload: Some(payload),
+            pay_vector: Vec2 { x: 1.0, y: -2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let state = UnitFactoryState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 25.0,
+                ..Default::default()
+            },
+            current_plan: 1,
+            command_pos: Some(IoVec2 { x: 12.0, y: 34.0 }),
+            command_id: Some(2),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(3);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_unit_factory_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 4, factory_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Factory {
+                common,
+                factory: state
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_factory_common_unit_payload_before_factory_fields() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("ground-factory").unwrap();
+        let tile_pos = point2_pack(4, 0);
+        let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
+        let payload = flare_unit_payload_ref(&content);
         let common = PayloadBlockBuildState {
             payload: Some(payload),
             pay_vector: Vec2 { x: 1.0, y: -2.0 },
