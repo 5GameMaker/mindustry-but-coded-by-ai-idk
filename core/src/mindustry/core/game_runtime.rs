@@ -79,17 +79,18 @@ use crate::mindustry::{
     },
     world::blocks::payloads::{
         block_producer_update, constructor_clear, constructor_configure, payload_block_move_in,
-        payload_void_update, read_block_producer_progress, read_constructor_recipe,
-        read_deconstructor_extra, read_payload_loader_extra, read_payload_mass_driver_extra,
-        read_payload_ref_to_end, read_payload_router_extra, read_payload_source_extra,
-        read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
-        write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
-        write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
-        write_payload_mass_driver_extra, write_payload_ref, write_payload_router_extra,
-        write_payload_source_extra, BlockProducerState, PayloadBlockBuildState,
-        PayloadConveyorState, PayloadDeconstructorState, PayloadLoaderState,
-        PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
-        Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
+        payload_source_update, payload_void_update, read_block_producer_progress,
+        read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
+        read_payload_mass_driver_extra, read_payload_ref_to_end, read_payload_router_extra,
+        read_payload_source_extra, read_terminal_payload_block_build_common,
+        read_terminal_payload_conveyor_extra, write_block_producer_progress,
+        write_constructor_recipe, write_deconstructor_extra, write_payload_block_build_common,
+        write_payload_conveyor_extra, write_payload_loader_extra, write_payload_mass_driver_extra,
+        write_payload_ref, write_payload_router_extra, write_payload_source_extra,
+        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
+        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
+        PayloadSortKey, PayloadSourceSpawn, PayloadSourceState, Vec2 as PayloadVec2,
+        PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -1326,6 +1327,17 @@ pub struct GameRuntimePayloadVoidFrameReport {
     pub updated_voids: usize,
     pub incinerated_payloads: usize,
     pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimePayloadSourceFrameReport {
+    pub visited_buildings: usize,
+    pub source_candidates: usize,
+    pub updated_sources: usize,
+    pub spawned_block_payloads: usize,
+    pub skipped_unit_payloads: usize,
+    pub missing_runtime_states: usize,
+    pub unknown_config_blocks: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3267,6 +3279,103 @@ impl GameRuntime {
                         common.pay_rotation = 0.0;
                         producer.has_payload = true;
                         report.produced_payloads += 1;
+                    }
+                }
+            }
+        }
+
+        Some(report)
+    }
+
+    pub fn advance_owned_payload_sources(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimePayloadSourceFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+
+        self.refresh_owned_building_update_permissions(content);
+
+        let frame_delta = advanced.delta_ticks as f32;
+        let mut report = GameRuntimePayloadSourceFrameReport::default();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, team, enabled, rotdeg) = {
+                let building = &mut self.buildings[index];
+                let can_overdrive = content
+                    .block(building.block.id)
+                    .map(BlockDef::can_overdrive)
+                    .unwrap_or(false);
+                building.advance_update_timing(frame_delta, can_overdrive);
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.team,
+                    building.enabled,
+                    building.rotdeg(),
+                )
+            };
+
+            if !enabled {
+                continue;
+            }
+
+            let Some(BlockDef::Sandbox(sandbox)) = content.block(block_id) else {
+                continue;
+            };
+            if sandbox.kind != SandboxBlockKind::PayloadSource {
+                continue;
+            }
+            report.source_candidates += 1;
+
+            let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+                self.payload_runtime_states.get_mut(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            source.has_payload = common.payload.is_some();
+            let spawn = payload_source_update(source);
+            report.updated_sources += 1;
+
+            match spawn {
+                PayloadSourceSpawn::None => {}
+                PayloadSourceSpawn::Unit(_) => {
+                    source.has_payload = common.payload.is_some();
+                    report.skipped_unit_payloads += 1;
+                }
+                PayloadSourceSpawn::Block(block_id) => {
+                    let Some(block_def) = content.block(block_id) else {
+                        source.has_payload = common.payload.is_some();
+                        report.unknown_config_blocks += 1;
+                        continue;
+                    };
+
+                    let payload_building = BuildingComp::new(
+                        crate::mindustry::world::point2_pack(0, 0),
+                        block_def.base().clone(),
+                        team,
+                    );
+                    let mut build_bytes = Vec::new();
+                    if payload_building.write_base(&mut build_bytes, false).is_ok() {
+                        common.payload = Some(PayloadRef::Block {
+                            block: block_def.base().id,
+                            version: 0,
+                            build_bytes,
+                        });
+                        common.pay_vector = PayloadVec2::ZERO;
+                        common.pay_rotation = rotdeg;
+                        source.has_payload = true;
+                        report.spawned_block_payloads += 1;
+                    } else {
+                        source.has_payload = common.payload.is_some();
                     }
                 }
             }
@@ -7392,6 +7501,110 @@ mod tests {
             runtime.payload_runtime_states.get(&tile_pos),
             Some(&GameRuntimePayloadBlockState::Source { common, source })
         );
+    }
+
+    #[test]
+    fn game_runtime_payload_source_spawns_configured_block_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let tile_pos = point2_pack(0, 5);
+        let mut building = BuildingComp::new(tile_pos, source_def.base().clone(), TeamId(6));
+        building.set_rotation(1);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(building);
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState {
+                    config_block: Some(router_def.base().id),
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_sources(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(
+            report,
+            GameRuntimePayloadSourceFrameReport {
+                visited_buildings: 1,
+                source_candidates: 1,
+                updated_sources: 1,
+                spawned_block_payloads: 1,
+                skipped_unit_payloads: 0,
+                missing_runtime_states: 0,
+                unknown_config_blocks: 0,
+            }
+        );
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(source.has_payload);
+        assert!(source.scl > 0.0);
+        assert_eq!(common.pay_vector, Vec2::ZERO);
+        assert_eq!(common.pay_rotation, 90.0);
+        let Some(PayloadRef::Block {
+            block,
+            version,
+            build_bytes,
+        }) = common.payload.as_ref()
+        else {
+            panic!("payload source should create a build payload");
+        };
+        assert_eq!(*block, router_def.base().id);
+        assert_eq!(*version, 0);
+        assert!(!build_bytes.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_payload_source_defers_unit_payload_until_unit_runtime_codec() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let flare = content.unit_by_name("flare").unwrap().id();
+        let tile_pos = point2_pack(0, 5);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            source_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState {
+                    unit: Some(flare),
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_sources(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.spawned_block_payloads, 0);
+        assert_eq!(report.skipped_unit_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!source.has_payload);
+        assert_eq!(source.unit, Some(flare));
     }
 
     #[test]
