@@ -29,10 +29,10 @@ use crate::mindustry::{
         PointDefenseState, TractorBeamState, TurretState,
     },
     world::blocks::defense::{
-        effect_block_frame_input_from_game_update, effect_block_update_building_slice_with_stores,
-        read_base_shield_state, read_door_state, read_force_projector_state,
-        read_mend_projector_state, read_overdrive_projector_state, read_radar_state,
-        read_shield_wall_state, DoorState, EffectBlockFrameBatchReport,
+        build_turret_read_child_with_loader, effect_block_frame_input_from_game_update,
+        effect_block_update_building_slice_with_stores, read_base_shield_state, read_door_state,
+        read_force_projector_state, read_mend_projector_state, read_overdrive_projector_state,
+        read_radar_state, read_shield_wall_state, DoorState, EffectBlockFrameBatchReport,
         EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
         EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
@@ -431,6 +431,7 @@ impl GameRuntime {
             }
 
             let block_state = match self.read_runtime_state_from_building_payload(
+                content,
                 block,
                 &building,
                 revision,
@@ -509,12 +510,14 @@ impl GameRuntime {
 
     fn read_runtime_state_from_building_payload(
         &self,
+        content: &ContentLoader,
         block: &BlockDef,
         building: &BuildingComp,
         revision: u8,
         building_payload: &mut &[u8],
     ) -> Result<Option<GameRuntimeLoadedBlockState>, GameRuntimeBlockStateReadError> {
         match self.read_effect_runtime_state_from_building_payload(
+            content,
             block,
             revision,
             building_payload,
@@ -659,6 +662,7 @@ impl GameRuntime {
 
     fn read_effect_runtime_state_from_building_payload(
         &self,
+        content: &ContentLoader,
         block: &BlockDef,
         revision: u8,
         building_payload: &mut &[u8],
@@ -695,6 +699,11 @@ impl GameRuntime {
             EffectBlockKind::BaseShield => read_base_shield_state(building_payload, revision)
                 .map(|state| Some(EffectBlockRuntimeState::BaseShield(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            EffectBlockKind::BuildTurret => {
+                build_turret_read_child_with_loader(building_payload, content)
+                    .map(|state| Some(EffectBlockRuntimeState::BuildTurret(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
@@ -1310,6 +1319,7 @@ mod tests {
     use crate::mindustry::{
         core::GameStateState,
         ctype::ContentType,
+        entities::units::BuildPlan,
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, Vec2 as IoVec2,
         },
@@ -1321,9 +1331,10 @@ mod tests {
                 PointDefenseState, TractorBeamState, TurretState,
             },
             blocks::defense::{
-                write_base_shield_state, write_door_state, write_force_projector_state,
-                write_radar_state, write_shield_wall_state, BaseShieldState, DoorState,
-                EffectBlockRuntimeState, ForceProjectorState, RadarState, ShieldWallState,
+                build_turret_write_child_with_loader, write_base_shield_state, write_door_state,
+                write_force_projector_state, write_radar_state, write_shield_wall_state,
+                BaseShieldState, BuildTurretState, DoorState, EffectBlockRuntimeState,
+                ForceProjectorState, RadarState, ShieldWallState,
             },
             blocks::distribution::{
                 write_conveyor_state, write_directional_unloader_state, write_duct_router_state,
@@ -2112,6 +2123,37 @@ mod tests {
         assert_eq!(
             runtime.effect_runtime_store.get(tile_pos),
             Some(&EffectBlockRuntimeState::BaseShield(shield_state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_build_turret_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret_def = content.block_by_name("build-tower").unwrap();
+        let tile_pos = point2_pack(3, 2);
+        let saved = BuildingComp::new(tile_pos, turret_def.base().clone(), TeamId(1));
+        let state = BuildTurretState {
+            rotation: 135.0,
+            plans: vec![BuildPlan::new_break(1, 2)],
+            ..BuildTurretState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        build_turret_write_child_with_loader(&mut building_bytes, &content, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 15, turret_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.effect_runtime_store.get(tile_pos),
+            Some(&EffectBlockRuntimeState::BuildTurret(state))
         );
     }
 
