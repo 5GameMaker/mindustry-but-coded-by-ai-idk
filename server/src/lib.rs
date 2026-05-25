@@ -22,6 +22,7 @@ pub struct ServerLauncher {
     pub control: ServerControl,
     pub runtime: GameRuntime,
     pub content_loader: ContentLoader,
+    pub last_runtime_effect_report: Option<EffectBlockFrameBatchReport>,
     pub net_server: NetServer,
     pub network_error: Option<String>,
 }
@@ -38,6 +39,7 @@ impl ServerLauncher {
             control: ServerControl::new(args.clone()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
             args,
@@ -73,7 +75,7 @@ impl ServerLauncher {
     pub fn update(&mut self) {
         self.net_server.update();
         let _ = self.flush_pending_world_data();
-        let _ = self.update_runtime_effect_blocks(1.0 / 60.0);
+        self.last_runtime_effect_report = self.update_runtime_effect_blocks(1.0 / 60.0);
     }
 
     pub fn flush_pending_world_data(&self) -> io::Result<usize> {
@@ -139,12 +141,18 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::ServerLauncher;
-    use mindustry_core::mindustry::core::{content_loader::ContentLoader, GameRuntime, NetServer};
+    use mindustry_core::mindustry::content::blocks::BlockDef;
+    use mindustry_core::mindustry::core::{
+        content_loader::ContentLoader, GameRuntime, GameStateState, NetServer,
+    };
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
     use mindustry_core::mindustry::net::{
         packet_ids, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host, HostCallback, Net,
         NetConnection, NetProvider, PacketKind, PacketSerializer, ProviderEvent,
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
+    use mindustry_core::mindustry::world::point2_pack;
     use std::io;
     use std::net::{TcpListener, UdpSocket};
     use std::sync::{Arc, Mutex};
@@ -326,6 +334,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -382,6 +391,48 @@ mod tests {
             .update_runtime_effect_blocks(1.0 / 60.0)
             .expect("playing runtime should produce an empty owned-building batch");
         assert_eq!(report.visited_buildings, 0);
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_effect_building_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let mend_def = launcher
+            .content_loader
+            .block_by_name("mend-projector")
+            .unwrap();
+        let mend_block = match mend_def {
+            BlockDef::Effect(effect) => effect,
+            _ => unreachable!(),
+        };
+        let silicon = mend_block.boost_items[0].item;
+        let mut mend = BuildingComp::new(point2_pack(8, 8), mend_def.base().clone(), TeamId(1));
+        mend.efficiency = 1.0;
+        mend.optional_efficiency = 1.0;
+        mend.items.as_mut().unwrap().set(silicon, 1);
+
+        launcher.runtime.state.world.resize(32, 32);
+        launcher.runtime.add_building(mend);
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.tick = mend_block.use_time as f64 - 1.0;
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_effect_report
+            .as_ref()
+            .expect("server update should keep the latest runtime effect batch");
+        assert_eq!(report.visited_buildings, 1);
+        assert_eq!(report.effect_candidates, 1);
+        assert_eq!(report.reports.len(), 1);
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(silicon),
+            0
+        );
         assert_eq!(launcher.runtime.state.update_id, 1);
     }
 }
