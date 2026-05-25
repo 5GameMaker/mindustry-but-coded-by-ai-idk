@@ -99,26 +99,54 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 最近已推送到 `main` 的提交包括：
 
-1. `e154545 接入世界流前置信息到游戏状态`
-2. `eaaec1e 展开存档地图到轻量瓦片`
-3. `c76842c 解析世界流玩家与存档头`
-4. `c11610e 接入服务端最小世界数据流`
-5. `aaa62c7 补充迁移交接文档`
-6. `9c23edd 支持服务端端口参数`
-7. `2d19084 保持桌面客户端网络循环运行`
-8. `571d58d 支持桌面客户端参数连接`
-9. `643bef9 接入桌面客户端真实网络层`
-10. `355376b 保持服务端网络循环运行`
+1. `bd17931 补齐载荷弹药炮塔状态读取`
+2. `9cceec3 接入单位载荷精确读取`
+3. `5d50757 支持无状态构造载荷读取`
+4. `1ac3c6e 区分嵌套载荷读取模式`
+5. `a309790 统计方块状态剩余字节`
+6. `3206cb3 接入非末尾构造载荷读取`
+7. `95872df 接入构造载荷精确读取`
+8. `e154545 接入世界流前置信息到游戏状态`
+9. `eaaec1e 展开存档地图到轻量瓦片`
+10. `c76842c 解析世界流玩家与存档头`
 
-最后确认时：
+本轮开始前最后确认时：
 
 - 当前分支：`main`
-- 最新提交：`e154545 接入世界流前置信息到游戏状态`
-- `git status --short` 未显示已有未提交代码改动（创建本文档除外）。
+- 最新提交：`bd17931 补齐载荷弹药炮塔状态读取`
+- `git status --short` 未显示已有未提交代码改动。
 
 ---
 
 ## 5. 最近一次完成的具体实现
+
+### 2026-05-26 续作：LogicProcessor Java wire parity 收紧
+
+文件：
+
+- `core/src/mindustry/world/blocks/logic/mod.rs`
+- `core/src/mindustry/core/game_runtime.rs`
+- `MIGRATION.md`
+
+完成内容：
+
+1. `write_logic_processor_state(...)` 新增 `max_instructions_per_tick` 参数，`privileged && revision >= 2` 写出 `ipt` 时按 Java `Mathf.clamp(ipt, 1, maxInstructionsPerTick)` 收紧。
+2. `LogicProcessor` 写出 memory 字段改为固定 `0`，匹配 Java `LogicBuild.write()` 的 `//no memory -> write.i(0)`；读入仍保留 legacy memory slot skip，兼容旧图/旧存档。
+3. 补充 revision 2/3 原始字节 sentinel 边界测试：
+   - revision 2 privileged 只消费 `ipt`，并验证 clamp 后 sentinel 未被吞；
+   - revision 3 unprivileged 直接从 `tag/iconTag` 开始，不误读不存在的 `ipt`；
+   - writer memory 固定 0 与 writer ipt clamp 均有单测锁定。
+4. 已验证：
+   - `cargo test -p mindustry-core logic_processor`
+   - `cargo test -p mindustry-core game_runtime_loads_processor_state_from_network_map_building_payload`
+   - `cargo check -p mindustry-core`
+
+后续注意：
+
+- `LogicProcessor` 变量读取仍使用 `read_object_safe(...)`，与 Java `TypeIO.readObjectBoxed(read, true)` 的宽松/boxed 语义还不是完全等价；后续要补可配置 boxed reader，尤其是 BuildingBox/UnitBox 类对象的延迟 unbox。
+- `GameRuntime` 当前已能读入 processor sidecar，但还缺少统一写回/保存出口，以及将变量、links、wait timers 恢复到真实 `LExecutor` 的 runtime 接入。
+
+### 较早完成：世界流前置信息
 
 文件：
 

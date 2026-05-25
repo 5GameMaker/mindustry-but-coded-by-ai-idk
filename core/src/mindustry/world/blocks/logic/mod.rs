@@ -314,6 +314,7 @@ pub fn write_logic_processor_state<W: Write>(
     state: &LogicProcessorState,
     revision: u8,
     privileged: bool,
+    max_instructions_per_tick: i16,
 ) -> io::Result<()> {
     if revision >= 1 {
         let compressed = if let Some(compressed) = state.compressed_code.as_ref() {
@@ -350,15 +351,18 @@ pub fn write_logic_processor_state<W: Write>(
         write_object(write, &variable.value)?;
     }
 
-    write_i32(write, state.legacy_memory_slots)?;
-    if state.legacy_memory_slots > 0 {
-        for _ in 0..state.legacy_memory_slots {
-            write_f64(write, 0.0)?;
-        }
-    }
+    // Upstream Java still reads legacy memory slots for old saves, but current
+    // `LogicBuild.write` always emits `write.i(0)` here (`//no memory`).
+    write_i32(write, 0)?;
 
     if privileged && revision >= 2 {
-        write_i16(write, state.ipt.unwrap_or(1))?;
+        write_i16(
+            write,
+            state
+                .ipt
+                .unwrap_or(1)
+                .clamp(1, max_instructions_per_tick.max(1)),
+        )?;
     }
 
     if revision >= 3 {
@@ -692,6 +696,15 @@ fn invalid_data(message: &'static str) -> io::Error {
 mod tests {
     use super::*;
 
+    fn write_processor_revision_prefix(bytes: &mut Vec<u8>) {
+        let mut compressed = Vec::new();
+        write_logic_config(&mut compressed, &LogicConfig::from_code([], Vec::new())).unwrap();
+        write_i32(bytes, compressed.len() as i32).unwrap();
+        bytes.extend_from_slice(&compressed);
+        write_i32(bytes, 0).unwrap();
+        write_i32(bytes, 0).unwrap();
+    }
+
     #[test]
     fn message_config_trims_and_keeps_java_newline_limit() {
         let input = format!("  a{}b  ", "\n".repeat(MESSAGE_MAX_NEWLINES + 3));
@@ -824,7 +837,7 @@ mod tests {
         state.accumulator = 0.5;
 
         let mut bytes = Vec::new();
-        write_logic_processor_state(&mut bytes, &state, 4, true).unwrap();
+        write_logic_processor_state(&mut bytes, &state, 4, true, 40).unwrap();
         let decoded = read_logic_processor_state(&mut bytes.as_slice(), 4, true, 40).unwrap();
         assert_eq!(decoded, state);
         assert_eq!(decoded.config, Some(config));
@@ -832,12 +845,13 @@ mod tests {
 
     #[test]
     fn logic_processor_state_revision_gates_and_skips_legacy_memory() {
-        let state = LogicProcessorState {
-            legacy_memory_slots: 2,
-            ..LogicProcessorState::default()
-        };
         let mut bytes = Vec::new();
-        write_logic_processor_state(&mut bytes, &state, 1, true).unwrap();
+        write_i32(&mut bytes, 0).unwrap();
+        write_i32(&mut bytes, 0).unwrap();
+        write_i32(&mut bytes, 2).unwrap();
+        write_f64(&mut bytes, 7.0).unwrap();
+        write_f64(&mut bytes, 8.0).unwrap();
+        bytes.push(0x7f);
         let mut read = bytes.as_slice();
         let decoded = read_logic_processor_state(&mut read, 1, true, 40).unwrap();
 
@@ -849,7 +863,77 @@ mod tests {
         assert_eq!(decoded.icon_tag, 0);
         assert!(decoded.waits.is_empty());
         assert_eq!(decoded.accumulator, 0.0);
+        assert_eq!(read, [0x7f].as_slice());
+    }
+
+    #[test]
+    fn logic_processor_writer_emits_zero_memory_slots_like_java() {
+        let state = LogicProcessorState {
+            legacy_memory_slots: 2,
+            ..LogicProcessorState::default()
+        };
+        let mut bytes = Vec::new();
+        write_logic_processor_state(&mut bytes, &state, 1, true, 40).unwrap();
+
+        let mut read = bytes.as_slice();
+        assert_eq!(read_i32(&mut read).unwrap(), 0);
+        assert_eq!(read_i32(&mut read).unwrap(), 0);
+        assert_eq!(read_i32(&mut read).unwrap(), 0);
         assert!(read.is_empty());
+    }
+
+    #[test]
+    fn logic_processor_writer_clamps_privileged_ipt_like_java() {
+        let state = LogicProcessorState {
+            ipt: Some(100),
+            ..LogicProcessorState::default()
+        };
+        let mut bytes = Vec::new();
+        write_logic_processor_state(&mut bytes, &state, 2, true, 40).unwrap();
+
+        let mut read = bytes.as_slice();
+        assert_eq!(read_i32(&mut read).unwrap(), 0);
+        assert_eq!(read_i32(&mut read).unwrap(), 0);
+        assert_eq!(read_i32(&mut read).unwrap(), 0);
+        assert_eq!(read_i16(&mut read).unwrap(), 40);
+        assert!(read.is_empty());
+    }
+
+    #[test]
+    fn logic_processor_revision_two_privileged_ipt_consumes_only_ipt() {
+        let mut bytes = Vec::new();
+        write_processor_revision_prefix(&mut bytes);
+        write_i16(&mut bytes, 100).unwrap();
+        bytes.push(0x7f);
+
+        let mut read = bytes.as_slice();
+        let decoded = read_logic_processor_state(&mut read, 2, true, 40).unwrap();
+
+        assert_eq!(decoded.ipt, Some(40));
+        assert_eq!(decoded.tag, None);
+        assert_eq!(decoded.icon_tag, 0);
+        assert!(decoded.waits.is_empty());
+        assert_eq!(decoded.accumulator, 0.0);
+        assert_eq!(read, [0x7f].as_slice());
+    }
+
+    #[test]
+    fn logic_processor_revision_three_unprivileged_tag_starts_without_ipt() {
+        let mut bytes = Vec::new();
+        write_processor_revision_prefix(&mut bytes);
+        write_string(&mut bytes, Some("core-loop")).unwrap();
+        write_u16(&mut bytes, 'A' as u16).unwrap();
+        bytes.push(0x7f);
+
+        let mut read = bytes.as_slice();
+        let decoded = read_logic_processor_state(&mut read, 3, false, 40).unwrap();
+
+        assert_eq!(decoded.ipt, None);
+        assert_eq!(decoded.tag.as_deref(), Some("core-loop"));
+        assert_eq!(decoded.icon_tag, 'A' as u16);
+        assert!(decoded.waits.is_empty());
+        assert_eq!(decoded.accumulator, 0.0);
+        assert_eq!(read, [0x7f].as_slice());
     }
 
     #[test]

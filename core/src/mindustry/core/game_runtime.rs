@@ -4829,7 +4829,7 @@ mod tests {
         let mut building_bytes = Vec::new();
         building_bytes.push(4);
         saved.write_base(&mut building_bytes, false).unwrap();
-        write_logic_processor_state(&mut building_bytes, &state, 4, false).unwrap();
+        write_logic_processor_state(&mut building_bytes, &state, 4, false, 40).unwrap();
 
         let mut runtime = GameRuntime::default();
         let report = runtime.load_network_map_with_buildings(
