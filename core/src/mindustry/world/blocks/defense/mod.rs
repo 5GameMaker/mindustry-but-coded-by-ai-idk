@@ -414,6 +414,17 @@ pub fn read_door_state<R: Read>(read: &mut R) -> io::Result<DoorState> {
     Ok(DoorState { open: buf[0] != 0 })
 }
 
+pub fn write_auto_door_state<W: Write>(write: &mut W, state: DoorState) -> io::Result<()> {
+    // AutoDoorBuild.write() calls DoorBuild.write() and then writes `open` again.
+    write_door_state(write, state)?;
+    write_door_state(write, state)
+}
+
+pub fn read_auto_door_state<R: Read>(read: &mut R) -> io::Result<DoorState> {
+    let _door_parent = read_door_state(read)?;
+    read_door_state(read)
+}
+
 pub fn auto_door_should_open(ground_units_in_trigger: bool) -> bool {
     ground_units_in_trigger
 }
@@ -6697,6 +6708,13 @@ mod tests {
         write_door_state(&mut bytes, DoorState { open: true }).unwrap();
         assert_eq!(
             read_door_state(&mut bytes.as_slice()).unwrap(),
+            DoorState { open: true }
+        );
+        let mut bytes = Vec::new();
+        write_auto_door_state(&mut bytes, DoorState { open: true }).unwrap();
+        assert_eq!(bytes, vec![1, 1]);
+        assert_eq!(
+            read_auto_door_state(&mut bytes.as_slice()).unwrap(),
             DoorState { open: true }
         );
 

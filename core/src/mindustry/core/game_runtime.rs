@@ -35,9 +35,10 @@ use crate::mindustry::{
     },
     world::blocks::defense::{
         build_turret_read_child_with_loader, effect_block_frame_input_from_game_update,
-        effect_block_update_building_slice_with_stores, read_base_shield_state, read_door_state,
-        read_force_projector_state, read_mend_projector_state, read_overdrive_projector_state,
-        read_radar_state, read_shield_wall_state, DoorState, EffectBlockFrameBatchReport,
+        effect_block_update_building_slice_with_stores, read_auto_door_state,
+        read_base_shield_state, read_door_state, read_force_projector_state,
+        read_mend_projector_state, read_overdrive_projector_state, read_radar_state,
+        read_shield_wall_state, DoorState, EffectBlockFrameBatchReport,
         EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
         EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
@@ -1592,7 +1593,10 @@ impl GameRuntime {
         };
 
         match wall.kind {
-            DefenseWallKind::Door | DefenseWallKind::AutoDoor => read_door_state(building_payload)
+            DefenseWallKind::Door => read_door_state(building_payload)
+                .map(|state| Some(GameRuntimeDefenseWallState::Door(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            DefenseWallKind::AutoDoor => read_auto_door_state(building_payload)
                 .map(|state| Some(GameRuntimeDefenseWallState::Door(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
             DefenseWallKind::ShieldWall => read_shield_wall_state(building_payload)
@@ -1809,10 +1813,11 @@ mod tests {
                 PointDefenseState, TractorBeamState, TurretState,
             },
             blocks::defense::{
-                build_turret_write_child_with_loader, write_base_shield_state, write_door_state,
-                write_force_projector_state, write_radar_state, write_shield_wall_state,
-                BaseShieldState, BuildTurretState, DoorState, EffectBlockRuntimeState,
-                ForceProjectorState, RadarState, ShieldWallState,
+                build_turret_write_child_with_loader, write_auto_door_state,
+                write_base_shield_state, write_door_state, write_force_projector_state,
+                write_radar_state, write_shield_wall_state, BaseShieldState, BuildTurretState,
+                DoorState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
+                ShieldWallState,
             },
             blocks::distribution::{
                 write_conveyor_state, write_directional_unloader_state, write_duct_router_state,
@@ -2705,6 +2710,33 @@ mod tests {
         let report = runtime.load_network_map_with_buildings(
             &content,
             &single_building_network_map(6, 6, 1, door_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.defense_wall_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDefenseWallState::Door(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_auto_door_state_and_consumes_parent_child_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let door_def = content.block_by_name("blast-door").unwrap();
+        let tile_pos = point2_pack(2, 0);
+        let saved = BuildingComp::new(tile_pos, door_def.base().clone(), TeamId(1));
+        let state = DoorState { open: true };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_auto_door_state(&mut building_bytes, state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 2, door_def.base().id, building_bytes),
         );
 
         assert_eq!(report.buildings_added, 1);
