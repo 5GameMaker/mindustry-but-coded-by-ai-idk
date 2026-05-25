@@ -6,9 +6,10 @@ use crate::mindustry::{
     vars::TILE_SIZE,
     world::{
         blocks::environment::{
-            FloorData, OreBlockData, PropData, PropKind, SeaBushData, StaticTreeData,
-            StaticWallData, TallBlockData, TreeBlockData,
+            FloorData, OreBlockData, OverlayFloorData, PropData, PropKind, SeaBushData,
+            SpawnBlockData, StaticTreeData, StaticWallData, TallBlockData, TreeBlockData,
         },
+        blocks::MAX_CONSTRUCT_BLOCK_SIZE,
         meta::{BlockFlag, BlockGroup, BuildVisibility, Env},
         Block, BlockId, CacheLayer,
     },
@@ -5513,6 +5514,7 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
     // Java Blocks.load() starts with AirBlock("air"). Keeping id 0 stable is
     // important because floors fall back to air when no wall/decoration exists.
     registry.register_plain("air");
+    register_internal_prelude_blocks(&mut registry);
 
     register_environment_base(&mut registry, liquids);
     register_environment_walls(&mut registry);
@@ -5541,6 +5543,64 @@ pub fn load(items: &[Item], liquids: &[Liquid]) -> BlockRegistry {
 
     registry.finalize_floor_links();
     registry
+}
+
+fn register_internal_prelude_blocks(registry: &mut BlockRegistry) {
+    // Java registers these internal/editor blocks before all visible floors:
+    // spawn, remove-wall, remove-ore, cliff, then ConstructBlock build1..build16.
+    // Preserving this prefix keeps vanilla block ids and Java save/network maps aligned.
+    let id = registry.next_id();
+    let spawn = SpawnBlockData::new(id, "spawn");
+    registry.insert(BlockDef::Floor(spawn.overlay.floor));
+
+    let id = registry.next_id();
+    let mut remove_wall = Block::new(id, "remove-wall");
+    remove_wall.allow_rectangle_placement = true;
+    remove_wall.place_effect = "rotateBlock".into();
+    remove_wall.instant_build = true;
+    remove_wall.ignore_build_darkness = true;
+    remove_wall.placeable_liquid = true;
+    remove_wall.build_visibility = BuildVisibility::Hidden;
+    remove_wall.derive_layout_fields();
+    registry.insert(BlockDef::Plain(remove_wall));
+
+    let id = registry.next_id();
+    let mut remove_ore = OverlayFloorData::new(id, "remove-ore").floor;
+    remove_ore.base.allow_rectangle_placement = true;
+    remove_ore.base.place_effect = "rotateBlock".into();
+    remove_ore.base.instant_build = true;
+    remove_ore.base.ignore_build_darkness = true;
+    remove_ore.base.placeable_liquid = true;
+    remove_ore.base.build_visibility = BuildVisibility::Hidden;
+    remove_ore.base.variants = 0;
+    registry.insert(BlockDef::Floor(remove_ore));
+
+    let id = registry.next_id();
+    let mut cliff = Block::new(id, "cliff");
+    cliff.breakable = false;
+    cliff.always_replace = false;
+    cliff.solid = true;
+    cliff.cache_layer = CacheLayer::Walls;
+    cliff.fills_tile = false;
+    cliff.has_shadow = false;
+    cliff.save_data = true;
+    cliff.build_visibility = BuildVisibility::Hidden;
+    cliff.derive_layout_fields();
+    registry.insert(BlockDef::Plain(cliff));
+
+    for size in 1..=MAX_CONSTRUCT_BLOCK_SIZE {
+        let id = registry.next_id();
+        let mut build = Block::new(id, format!("build{size}"));
+        build.size = size;
+        build.update = true;
+        build.health = 10;
+        build.consumes_tap = true;
+        build.solid = true;
+        build.sync = true;
+        build.build_visibility = BuildVisibility::Hidden;
+        build.derive_layout_fields();
+        registry.insert(BlockDef::Plain(build));
+    }
 }
 
 fn register_environment_base(registry: &mut BlockRegistry, liquids: &[Liquid]) {
@@ -24388,6 +24448,33 @@ mod tests {
         registry.finalize_floor_links();
 
         assert_eq!(registry.get_floor_by_name("lonely-floor").unwrap().wall, 0);
+    }
+
+    #[test]
+    fn internal_prelude_blocks_keep_java_blocks_load_prefix() {
+        let (_, _, registry) = load_test_registry();
+
+        assert_eq!(registry.id_by_name("air"), Some(0));
+        assert_eq!(registry.id_by_name("spawn"), Some(1));
+        assert_eq!(registry.id_by_name("remove-wall"), Some(2));
+        assert_eq!(registry.id_by_name("remove-ore"), Some(3));
+        assert_eq!(registry.id_by_name("cliff"), Some(4));
+        assert_eq!(registry.id_by_name("build1"), Some(5));
+        assert_eq!(registry.id_by_name("build16"), Some(20));
+        assert_eq!(registry.id_by_name("deep-water"), Some(21));
+
+        let build4 = registry.get_by_name("build4").unwrap().base();
+        assert_eq!(build4.size, 4);
+        assert!(build4.update);
+        assert!(build4.sync);
+        assert_eq!(build4.health, 10);
+        assert!(build4.consumes_tap);
+        assert_eq!(build4.build_visibility, BuildVisibility::Hidden);
+
+        let cliff = registry.get_by_name("cliff").unwrap().base();
+        assert!(cliff.save_data);
+        assert_eq!(cliff.cache_layer, CacheLayer::Walls);
+        assert!(!cliff.fills_tile);
     }
 
     #[test]

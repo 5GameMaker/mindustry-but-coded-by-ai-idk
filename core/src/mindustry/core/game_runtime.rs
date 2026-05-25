@@ -89,6 +89,7 @@ use crate::mindustry::{
         ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
         UnitCargoUnloadPointState, UnitFactoryState,
     },
+    world::blocks::{is_construct_block_name, read_construct_block_state, ConstructBlockState},
     world::{footprint_tiles, get_edges, Tile},
 };
 
@@ -281,7 +282,14 @@ pub enum GameRuntimeTurretBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeConstructBlockState {
+    pub size: i32,
+    pub state: ConstructBlockState,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
+    Construct(GameRuntimeConstructBlockState),
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
     Power(GameRuntimePowerBlockState),
@@ -319,6 +327,7 @@ pub struct GameRuntime {
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
     pub turret_runtime_states: BTreeMap<i32, GameRuntimeTurretBlockState>,
+    pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -348,6 +357,7 @@ impl GameRuntime {
             unit_runtime_states: BTreeMap::new(),
             defense_wall_runtime_states: BTreeMap::new(),
             turret_runtime_states: BTreeMap::new(),
+            construct_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -402,6 +412,7 @@ impl GameRuntime {
         self.unit_runtime_states.remove(&removed.tile_pos);
         self.defense_wall_runtime_states.remove(&removed.tile_pos);
         self.turret_runtime_states.remove(&removed.tile_pos);
+        self.construct_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -548,6 +559,10 @@ impl GameRuntime {
             if let Some(block_state) = block_state {
                 let tile_pos = self.buildings[added_index].tile_pos;
                 match block_state {
+                    GameRuntimeLoadedBlockState::Construct(block_state) => {
+                        self.construct_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                     GameRuntimeLoadedBlockState::Effect(block_state) => {
                         self.effect_runtime_store.ensure_for_building(
                             content,
@@ -636,6 +651,19 @@ impl GameRuntime {
         revision: u8,
         building_payload: &mut &[u8],
     ) -> Result<Option<GameRuntimeLoadedBlockState>, GameRuntimeBlockStateReadError> {
+        match self.read_construct_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Construct(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
         match self.read_effect_runtime_state_from_building_payload(
             content,
             block,
@@ -813,6 +841,33 @@ impl GameRuntime {
 
         self.read_defense_wall_runtime_state_from_building_payload(block, building_payload)
             .map(|state| state.map(GameRuntimeLoadedBlockState::DefenseWall))
+    }
+
+    fn read_construct_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeConstructBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Plain(block) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+        if !is_construct_block_name(&block.name) {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        }
+
+        read_construct_block_state(building_payload, revision)
+            .map(|state| {
+                Some(GameRuntimeConstructBlockState {
+                    size: block.size,
+                    state,
+                })
+            })
+            .map_err(|_| GameRuntimeBlockStateReadError::Parse)
     }
 
     fn read_effect_runtime_state_from_building_payload(
@@ -1575,6 +1630,7 @@ impl GameRuntime {
         self.unit_runtime_states.clear();
         self.defense_wall_runtime_states.clear();
         self.turret_runtime_states.clear();
+        self.construct_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -1771,6 +1827,7 @@ mod tests {
                 write_unit_factory_state, RepairTurretState, UnitAssemblerState,
                 UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
             },
+            blocks::{write_construct_block_state, ConstructAccumulatorEntry, ConstructBlockState},
             footprint_tiles, point2_pack, Block, Tile,
         },
     };
@@ -2467,6 +2524,44 @@ mod tests {
         assert_eq!(
             runtime.effect_runtime_store.get(tile_pos),
             Some(&EffectBlockRuntimeState::ForceProjector(force_state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_construct_block_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let build_def = content.block_by_name("build4").unwrap();
+        let previous = content.block_by_name("router").map(|block| block.base().id);
+        let current = content.block_by_name("duo").map(|block| block.base().id);
+        let tile_pos = point2_pack(4, 2);
+        let saved = BuildingComp::new(tile_pos, build_def.base().clone(), TeamId(1));
+        let state = ConstructBlockState {
+            progress: 0.5,
+            previous,
+            current,
+            accumulator: Some(vec![ConstructAccumulatorEntry {
+                accumulator: 1.0,
+                total_accumulator: 2.0,
+                items_left: 3,
+            }]),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_construct_block_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 16, build_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.construct_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeConstructBlockState { size: 4, state })
         );
     }
 

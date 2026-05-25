@@ -1,4 +1,9 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    io::{self, Read, Write},
+};
+
+use crate::mindustry::ctype::ContentId;
 
 use crate::mindustry::world::meta::{Attribute, AttributeEnvironment};
 
@@ -30,6 +35,154 @@ pub trait RotBlock {
 
 pub trait ExplosionShield {
     fn absorb_explosion(&mut self, x: f32, y: f32, damage: f32) -> bool;
+}
+
+pub const MAX_CONSTRUCT_BLOCK_SIZE: i32 = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConstructAccumulatorEntry {
+    pub accumulator: f32,
+    pub total_accumulator: f32,
+    pub items_left: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstructBlockState {
+    pub progress: f32,
+    pub previous: Option<ContentId>,
+    pub current: Option<ContentId>,
+    pub accumulator: Option<Vec<ConstructAccumulatorEntry>>,
+}
+
+impl Default for ConstructBlockState {
+    fn default() -> Self {
+        Self {
+            progress: 0.0,
+            previous: None,
+            current: None,
+            accumulator: None,
+        }
+    }
+}
+
+pub fn construct_block_size_from_name(name: &str) -> Option<i32> {
+    let size = name.strip_prefix("build")?.parse::<i32>().ok()?;
+    (1..=MAX_CONSTRUCT_BLOCK_SIZE)
+        .contains(&size)
+        .then_some(size)
+}
+
+pub fn is_construct_block_name(name: &str) -> bool {
+    construct_block_size_from_name(name).is_some()
+}
+
+pub fn write_construct_block_state<W: Write>(
+    write: &mut W,
+    state: &ConstructBlockState,
+) -> io::Result<()> {
+    write_f32(write, state.progress)?;
+    write_i16(write, state.previous.unwrap_or(-1))?;
+    write_i16(write, state.current.unwrap_or(-1))?;
+
+    if let Some(accumulator) = &state.accumulator {
+        if accumulator.len() > i8::MAX as usize {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "construct accumulator is too large for Java byte length",
+            ));
+        }
+        write_i8(write, accumulator.len() as i8)?;
+        for entry in accumulator {
+            write_f32(write, entry.accumulator)?;
+            write_f32(write, entry.total_accumulator)?;
+            write_i32(write, entry.items_left)?;
+        }
+    } else {
+        write_i8(write, -1)?;
+    }
+
+    Ok(())
+}
+
+pub fn read_construct_block_state<R: Read>(
+    read: &mut R,
+    revision: u8,
+) -> io::Result<ConstructBlockState> {
+    let progress = read_f32(read)?;
+    let previous = read_content_id_or_none(read)?;
+    let current = read_content_id_or_none(read)?;
+    let accumulator_len = read_i8(read)?;
+
+    let accumulator = if accumulator_len == -1 {
+        None
+    } else if accumulator_len < -1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "negative construct accumulator length",
+        ));
+    } else {
+        let mut accumulator = Vec::with_capacity(accumulator_len as usize);
+        for _ in 0..accumulator_len {
+            accumulator.push(ConstructAccumulatorEntry {
+                accumulator: read_f32(read)?,
+                total_accumulator: read_f32(read)?,
+                items_left: if revision >= 1 { read_i32(read)? } else { 0 },
+            });
+        }
+        Some(accumulator)
+    };
+
+    Ok(ConstructBlockState {
+        progress,
+        previous,
+        current,
+        accumulator,
+    })
+}
+
+fn read_content_id_or_none<R: Read>(read: &mut R) -> io::Result<Option<ContentId>> {
+    let id = read_i16(read)?;
+    Ok((id != -1).then_some(id))
+}
+
+fn write_i8<W: Write>(write: &mut W, value: i8) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_i8<R: Read>(read: &mut R) -> io::Result<i8> {
+    let mut buf = [0; 1];
+    read.read_exact(&mut buf)?;
+    Ok(i8::from_be_bytes(buf))
+}
+
+fn write_i16<W: Write>(write: &mut W, value: i16) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_i16<R: Read>(read: &mut R) -> io::Result<i16> {
+    let mut buf = [0; 2];
+    read.read_exact(&mut buf)?;
+    Ok(i16::from_be_bytes(buf))
+}
+
+fn write_i32<W: Write>(write: &mut W, value: i32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_i32<R: Read>(read: &mut R) -> io::Result<i32> {
+    let mut buf = [0; 4];
+    read.read_exact(&mut buf)?;
+    Ok(i32::from_be_bytes(buf))
+}
+
+fn write_f32<W: Write>(write: &mut W, value: f32) -> io::Result<()> {
+    write.write_all(&value.to_be_bytes())
+}
+
+fn read_f32<R: Read>(read: &mut R) -> io::Result<f32> {
+    let mut buf = [0; 4];
+    read.read_exact(&mut buf)?;
+    Ok(f32::from_be_bytes(buf))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,6 +560,62 @@ mod tests {
         let variants = tile_bitmask_variant_region_names("ore", 2);
         assert_eq!(variants[0][0], "ore-1-0");
         assert_eq!(variants[1][46], "ore-2-46");
+    }
+
+    #[test]
+    fn construct_block_name_and_state_codec_follow_java_payload_order() {
+        assert_eq!(construct_block_size_from_name("build1"), Some(1));
+        assert_eq!(construct_block_size_from_name("build16"), Some(16));
+        assert_eq!(construct_block_size_from_name("build17"), None);
+        assert_eq!(construct_block_size_from_name("buildx"), None);
+
+        let state = ConstructBlockState {
+            progress: 0.625,
+            previous: Some(7),
+            current: Some(9),
+            accumulator: Some(vec![
+                ConstructAccumulatorEntry {
+                    accumulator: 1.25,
+                    total_accumulator: 2.5,
+                    items_left: 11,
+                },
+                ConstructAccumulatorEntry {
+                    accumulator: 3.75,
+                    total_accumulator: 4.5,
+                    items_left: 0,
+                },
+            ]),
+        };
+
+        let mut bytes = Vec::new();
+        write_construct_block_state(&mut bytes, &state).unwrap();
+        let restored = read_construct_block_state(&mut bytes.as_slice(), 1).unwrap();
+        assert_eq!(restored, state);
+
+        let mut legacy_bytes = Vec::new();
+        write_f32(&mut legacy_bytes, 0.625).unwrap();
+        write_i16(&mut legacy_bytes, 7).unwrap();
+        write_i16(&mut legacy_bytes, 9).unwrap();
+        write_i8(&mut legacy_bytes, 1).unwrap();
+        write_f32(&mut legacy_bytes, 1.25).unwrap();
+        write_f32(&mut legacy_bytes, 2.5).unwrap();
+
+        let legacy = read_construct_block_state(&mut legacy_bytes.as_slice(), 0);
+        assert!(
+            legacy.is_ok(),
+            "revision 0 consumes accumulator floats without itemsLeft"
+        );
+        let legacy = legacy.unwrap();
+        assert_eq!(legacy.previous, Some(7));
+        assert_eq!(legacy.current, Some(9));
+        assert_eq!(
+            legacy.accumulator.unwrap()[0],
+            ConstructAccumulatorEntry {
+                accumulator: 1.25,
+                total_accumulator: 2.5,
+                items_left: 0,
+            }
+        );
     }
 
     #[test]
