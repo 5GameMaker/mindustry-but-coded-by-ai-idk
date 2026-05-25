@@ -21,7 +21,9 @@ use crate::mindustry::{
     maps::MapDescriptor,
     net::{NetworkWorldData, StateSnapshotCallPacket},
     r#type::{MapLocales, Sector},
-    world::{blocks::Attributes, modules::ItemModule},
+    world::{
+        blocks::Attributes, meta::build_visibility::BuildVisibilityContext, modules::ItemModule,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -308,6 +310,24 @@ impl GameState {
 
     pub fn get_state(&self) -> GameStateState {
         self.state
+    }
+
+    pub fn build_visibility_context(&self) -> BuildVisibilityContext {
+        BuildVisibilityContext {
+            has_state: true,
+            game: self.is_game(),
+            editor: self.is_editor(),
+            campaign: self.is_campaign(),
+            infinite_resources: self.rules.infinite_resources,
+            core_zone_present: false,
+            allow_edit_world_processors: self.rules.allow_edit_world_processors,
+            legacy_launch_pads: false,
+            advanced_launch_pad_present: false,
+            advanced_launch_pad_unlocked: false,
+            lighting: self.rules.lighting,
+            unit_ammo: self.rules.unit_ammo,
+            fog: self.rules.fog,
+        }
     }
 
     pub fn advance_game_update_frame(&mut self, delta_seconds: f32) -> GameUpdateFrameAdvance {
@@ -694,6 +714,7 @@ mod tests {
         assert_eq!(state.get_state(), GameStateState::Menu);
         assert!(state.is_menu());
         assert!(!state.is_game());
+        assert!(!state.build_visibility_context().game);
         assert_eq!(state.map.name(), "empty");
         assert_eq!(state.world.width(), 0);
         assert_eq!(state.world.height(), 0);
@@ -711,6 +732,40 @@ mod tests {
         assert_eq!(state.enemies, 0);
         assert!(state.playtesting_map.is_none());
         assert!(state.sector.is_none());
+    }
+
+    #[test]
+    fn build_visibility_context_reflects_state_and_rules() {
+        let mut state = GameState::new();
+        let menu = state.build_visibility_context();
+        assert!(menu.has_state);
+        assert!(!menu.game);
+        assert!(!menu.editor);
+        assert!(!menu.campaign);
+        assert!(!menu.infinite_resources);
+
+        state.set(GameStateState::Playing);
+        state.rules.editor = true;
+        state.rules.infinite_resources = true;
+        state.rules.allow_edit_world_processors = true;
+        state.rules.lighting = true;
+        state.rules.unit_ammo = true;
+        state.rules.fog = true;
+        state.set_sector(Some(Sector::new(7)));
+
+        let context = state.build_visibility_context();
+        assert!(context.game);
+        assert!(context.editor);
+        assert!(context.campaign);
+        assert!(context.infinite_resources);
+        assert!(context.allow_edit_world_processors);
+        assert!(context.lighting);
+        assert!(context.unit_ammo);
+        assert!(context.fog);
+        assert!(!context.core_zone_present);
+        assert!(!context.legacy_launch_pads);
+        assert!(!context.advanced_launch_pad_present);
+        assert!(!context.advanced_launch_pad_unlocked);
     }
 
     #[test]

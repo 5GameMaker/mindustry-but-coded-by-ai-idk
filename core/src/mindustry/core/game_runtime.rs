@@ -123,7 +123,7 @@ use crate::mindustry::{
         UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{is_construct_block_name, read_construct_block_state, ConstructBlockState},
-    world::{footprint_tiles, get_edges, meta::build_visibility::BuildVisibilityContext, Tile},
+    world::{footprint_tiles, get_edges, Tile},
 };
 
 pub struct GameRuntimeEffectResources<'a, 'b> {
@@ -1457,7 +1457,7 @@ impl GameRuntime {
         let banned = self.state.rules.is_block_banned(&recipe_block.base().name);
         let can_produce = constructor_block.can_produce_block(
             recipe_block,
-            BuildVisibilityContext::default(),
+            self.state.build_visibility_context(),
             self.state.rules.env,
             banned,
         );
