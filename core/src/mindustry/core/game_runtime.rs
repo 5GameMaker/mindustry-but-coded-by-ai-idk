@@ -55,7 +55,7 @@ use crate::mindustry::{
         DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
         MassDriverState, SorterState, StackConveyorState,
     },
-    world::blocks::heat::{read_heat_producer_state, HeatProducerState},
+    world::blocks::heat::{read_heat_producer_state, write_heat_producer_state, HeatProducerState},
     world::blocks::legacy::{
         read_legacy_command_center_extra, read_legacy_mech_pad_extra,
         read_legacy_unit_factory_extra, LegacyUnitFactoryExtra,
@@ -87,8 +87,9 @@ use crate::mindustry::{
     world::blocks::production::{
         read_beam_drill_state, read_burst_drill_state, read_drill_state,
         read_generic_crafter_state, read_separator_state, write_beam_drill_state,
-        write_burst_drill_state, write_drill_state, BeamDrillState, BurstDrillState, DrillState,
-        GenericCrafterState, SeparatorState,
+        write_burst_drill_state, write_drill_state, write_generic_crafter_state,
+        write_separator_state, BeamDrillState, BurstDrillState, DrillState, GenericCrafterState,
+        SeparatorState,
     },
     world::blocks::sandbox::{
         read_item_source_config, read_liquid_source_config, ItemSourceState, LiquidSourceState,
@@ -250,6 +251,33 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Crafting(crafting), Some(state)) = (
+        block,
+        runtime.crafting_runtime_states.get(&building.tile_pos),
+    ) {
+        match (crafting.kind, state) {
+            (
+                CraftingBlockKind::GenericCrafter
+                | CraftingBlockKind::AttributeCrafter
+                | CraftingBlockKind::HeatCrafter,
+                GameRuntimeCraftingBlockState::GenericCrafter(state),
+            ) => {
+                write_generic_crafter_state(write, state, crafting.legacy_read_warmup)?;
+            }
+            (CraftingBlockKind::Separator, GameRuntimeCraftingBlockState::Separator(state)) => {
+                write_separator_state(write, state)?;
+            }
+            (
+                CraftingBlockKind::HeatProducer,
+                GameRuntimeCraftingBlockState::HeatProducer { crafter, heat },
+            ) => {
+                write_generic_crafter_state(write, crafter, crafting.legacy_read_warmup)?;
+                write_heat_producer_state(write, heat)?;
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
 }
 
@@ -287,6 +315,15 @@ fn network_map_building_revision(
                 | ProductionBlockKind::BeamDrill
                 | ProductionBlockKind::BurstDrill
         ) {
+            return 1;
+        }
+    }
+
+    if let (BlockDef::Crafting(crafting), Some(GameRuntimeCraftingBlockState::Separator(_))) = (
+        block,
+        runtime.crafting_runtime_states.get(&building.tile_pos),
+    ) {
+        if crafting.kind == CraftingBlockKind::Separator {
             return 1;
         }
     }
@@ -3845,6 +3882,145 @@ mod tests {
                     ..BurstDrillState::default()
                 }
             ))
+        );
+    }
+
+    fn exported_crafting_state_revision(state: &GameRuntimeCraftingBlockState) -> u8 {
+        match state {
+            GameRuntimeCraftingBlockState::Separator(_) => 1,
+            _ => 0,
+        }
+    }
+
+    fn roundtrip_exported_crafting_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeCraftingBlockState,
+    ) -> Option<GameRuntimeCraftingBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_crafting_state_revision(&state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(8),
+        ));
+        runtime.crafting_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("crafting block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("crafting block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.crafting_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_crafting_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+
+        assert_eq!(
+            roundtrip_exported_crafting_state(
+                &content,
+                "graphite-press",
+                1,
+                12,
+                GameRuntimeCraftingBlockState::GenericCrafter(GenericCrafterState {
+                    progress: 0.375,
+                    total_progress: 9.0,
+                    warmup: 0.5,
+                }),
+            ),
+            Some(GameRuntimeCraftingBlockState::GenericCrafter(
+                GenericCrafterState {
+                    progress: 0.375,
+                    warmup: 0.5,
+                    ..GenericCrafterState::default()
+                }
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_crafting_state(
+                &content,
+                "cultivator",
+                4,
+                12,
+                GameRuntimeCraftingBlockState::GenericCrafter(GenericCrafterState {
+                    progress: 0.875,
+                    total_progress: 4.0,
+                    warmup: 0.25,
+                }),
+            ),
+            Some(GameRuntimeCraftingBlockState::GenericCrafter(
+                GenericCrafterState {
+                    progress: 0.875,
+                    warmup: 0.25,
+                    ..GenericCrafterState::default()
+                }
+            ))
+        );
+        assert_eq!(
+            roundtrip_exported_crafting_state(
+                &content,
+                "separator",
+                7,
+                12,
+                GameRuntimeCraftingBlockState::Separator(SeparatorState {
+                    progress: 0.8,
+                    total_progress: 7.0,
+                    warmup: 0.25,
+                    seed: 12_345,
+                }),
+            ),
+            Some(GameRuntimeCraftingBlockState::Separator(SeparatorState {
+                progress: 0.8,
+                warmup: 0.25,
+                seed: 12_345,
+                ..SeparatorState::default()
+            }))
+        );
+        assert_eq!(
+            roundtrip_exported_crafting_state(
+                &content,
+                "oxidation-chamber",
+                11,
+                12,
+                GameRuntimeCraftingBlockState::HeatProducer {
+                    crafter: GenericCrafterState {
+                        progress: 0.2,
+                        total_progress: 5.0,
+                        warmup: 0.6,
+                    },
+                    heat: HeatProducerState { heat: 3.25 },
+                },
+            ),
+            Some(GameRuntimeCraftingBlockState::HeatProducer {
+                crafter: GenericCrafterState {
+                    progress: 0.2,
+                    warmup: 0.6,
+                    ..GenericCrafterState::default()
+                },
+                heat: HeatProducerState { heat: 3.25 },
+            })
         );
     }
 
