@@ -53,6 +53,11 @@ use crate::mindustry::{
         PowerGeneratorState, VariableReactorState,
     },
     world::blocks::storage::{read_core_state, CoreBuildState},
+    world::blocks::units::{
+        read_repair_turret_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
+        read_unit_factory_state, RepairTurretState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
+    },
     world::{footprint_tiles, get_edges, Tile},
 };
 
@@ -148,6 +153,8 @@ pub enum GameRuntimeDistributionBlockState {
     Duct(DuctState),
     DuctRouter(DuctRouterState),
     DuctJunction(DuctJunctionState),
+    UnitCargoLoader(UnitCargoLoaderState),
+    UnitCargoUnload(UnitCargoUnloadPointState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +168,12 @@ pub enum GameRuntimeLiquidBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeUnitBlockState {
+    Factory(UnitFactoryState),
+    RepairTower(RepairTurretState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
@@ -168,6 +181,7 @@ enum GameRuntimeLoadedBlockState {
     Distribution(GameRuntimeDistributionBlockState),
     Storage(GameRuntimeStorageBlockState),
     Liquid(GameRuntimeLiquidBlockState),
+    Unit(GameRuntimeUnitBlockState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,6 +195,7 @@ pub struct GameRuntime {
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
+    pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -201,6 +216,7 @@ impl GameRuntime {
             distribution_runtime_states: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
+            unit_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -246,6 +262,7 @@ impl GameRuntime {
         self.distribution_runtime_states.remove(&removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
+        self.unit_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -423,6 +440,10 @@ impl GameRuntime {
                         self.liquid_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Unit(block_state) => {
+                        self.unit_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -510,8 +531,29 @@ impl GameRuntime {
                                                     revision,
                                                     building_payload,
                                                 )
-                                                .map(|state| {
-                                                    state.map(GameRuntimeLoadedBlockState::Liquid)
+                                                .and_then(|state| {
+                                                    if state.is_some() {
+                                                        Ok(state.map(
+                                                            GameRuntimeLoadedBlockState::Liquid,
+                                                        ))
+                                                    } else {
+                                                        Ok(None)
+                                                    }
+                                                })
+                                                .or_else(|err| match err {
+                                                    GameRuntimeBlockStateReadError::Unsupported => {
+                                                        self.read_unit_runtime_state_from_building_payload(
+                                                            block,
+                                                            revision,
+                                                            building_payload,
+                                                        )
+                                                        .map(|state| {
+                                                            state.map(GameRuntimeLoadedBlockState::Unit)
+                                                        })
+                                                    }
+                                                    GameRuntimeBlockStateReadError::Parse => {
+                                                        Err(GameRuntimeBlockStateReadError::Parse)
+                                                    }
                                                 }),
                                             GameRuntimeBlockStateReadError::Parse => {
                                                 Err(GameRuntimeBlockStateReadError::Parse)
@@ -807,6 +849,16 @@ impl GameRuntime {
             DistributionBlockKind::Junction => read_duct_junction_state(building_payload)
                 .map(|state| Some(GameRuntimeDistributionBlockState::DuctJunction(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            DistributionBlockKind::UnitCargoLoader => {
+                read_unit_cargo_loader_state(building_payload)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::UnitCargoUnloadPoint => {
+                read_unit_cargo_unload_state(building_payload)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
@@ -851,6 +903,29 @@ impl GameRuntime {
             LiquidBlockKind::LiquidBridge | LiquidBlockKind::DirectionLiquidBridge => {
                 read_liquid_bridge_state(building_payload, revision)
                     .map(|state| Some(GameRuntimeLiquidBlockState::Bridge(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
+    fn read_unit_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeUnitBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        match block {
+            BlockDef::UnitFactory(_) => read_unit_factory_state(building_payload, revision as i32)
+                .map(|state| Some(GameRuntimeUnitBlockState::Factory(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            BlockDef::UnitRepairTower(_) => {
+                read_repair_turret_state(building_payload, revision as i32)
+                    .map(|state| Some(GameRuntimeUnitBlockState::RepairTower(state)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
@@ -907,6 +982,7 @@ impl GameRuntime {
         self.distribution_runtime_states.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
+        self.unit_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -1068,6 +1144,11 @@ mod tests {
                 LightBlockState, NuclearReactorState, PowerGeneratorState, VariableReactorState,
             },
             blocks::storage::{write_core_state, CoreBuildState},
+            blocks::units::{
+                write_repair_turret_state, write_unit_cargo_loader_state,
+                write_unit_cargo_unload_state, write_unit_factory_state, RepairTurretState,
+                UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+            },
             footprint_tiles, point2_pack, Block, Tile,
         },
     };
@@ -2533,6 +2614,132 @@ mod tests {
         assert_eq!(
             runtime.liquid_runtime_states.get(&tile_pos),
             Some(&GameRuntimeLiquidBlockState::Bridge(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_factory_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("ground-factory").unwrap();
+        let tile_pos = point2_pack(4, 0);
+        let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
+        let state = UnitFactoryState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 25.0,
+                ..Default::default()
+            },
+            current_plan: 1,
+            command_pos: Some(IoVec2 { x: 12.0, y: 34.0 }),
+            command_id: Some(2),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(3);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_unit_factory_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 4, factory_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Factory(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_repair_tower_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let tower_def = content.block_by_name("unit-repair-tower").unwrap();
+        let tile_pos = point2_pack(5, 0);
+        let saved = BuildingComp::new(tile_pos, tower_def.base().clone(), TeamId(1));
+        let state = RepairTurretState {
+            rotation: 45.0,
+            ..RepairTurretState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_repair_turret_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 5, tower_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::RepairTower(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_cargo_loader_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("unit-cargo-loader").unwrap();
+        let tile_pos = point2_pack(0, 1);
+        let saved = BuildingComp::new(tile_pos, loader_def.base().clone(), TeamId(1));
+        let state = UnitCargoLoaderState {
+            read_unit_id: 77,
+            ..UnitCargoLoaderState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_unit_cargo_loader_state(&mut building_bytes, Some(state.read_unit_id)).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 6, loader_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::UnitCargoLoader(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_cargo_unload_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unload_def = content.block_by_name("unit-cargo-unload-point").unwrap();
+        let tile_pos = point2_pack(1, 0);
+        let saved = BuildingComp::new(tile_pos, unload_def.base().clone(), TeamId(1));
+        let state = UnitCargoUnloadPointState {
+            item_id: Some(0),
+            stale_timer: 0.0,
+            stale: true,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_unit_cargo_unload_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 1, unload_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::UnitCargoUnload(state))
         );
     }
 
