@@ -10,7 +10,7 @@ pub mod version;
 pub mod world;
 
 pub use file_tree::{normalize_path, AssetFile, FileTree, MusicAsset, SoundAsset};
-pub use game_runtime::{GameRuntime, GameRuntimeEffectResources};
+pub use game_runtime::{GameRuntime, GameRuntimeEffectResources, GameRuntimeOwnedEffectResources};
 pub use game_state::{
     empty_map_descriptor, DataPatcherState, GameState, GameStateState, StateChangeEvent,
 };
