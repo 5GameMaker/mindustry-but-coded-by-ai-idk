@@ -661,6 +661,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `base_shield_radius(...)`
 - `base_shield_in_fog_to(...)`
 - `base_shield_should_absorb_bullet(...)`
+- `base_shield_apply_absorb_to_bullet(...)`
 - `base_shield_tint_plan(...)`
 - `base_shield_place_plan(...)`
 - `base_shield_select_plan(...)`
@@ -686,6 +687,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 非 animateShields 时 stroke 1.5、alpha `0.09 + clamp(0.08 * hit)`、fill+lines poly；
   - `shieldColor == null` 时使用 team color，否则使用 shieldColor；
   - hit 参与与 white 的 color clamp/blend。
+- `base_shield_apply_absorb_to_bullet(...)` 已接入 `BulletComp::absorb()`，让 BaseShield 的吸收判定能真实写入 bullet `absorbed/removed` 状态并清空碰撞记录。
 
 仍需：
 
@@ -880,6 +882,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `force_projector_overwrote(...)`
 - `force_projector_bar_fraction(...)`
 - `force_projector_absorb_bullet(...)`
+- `force_projector_apply_absorb_to_bullet(...)`
 - `force_projector_absorb_explosion(...)`
 - `ForceProjectorBulletAbsorb`
 - `ForceProjectorRemovedPlan`
@@ -902,6 +905,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 未被吸收；
   - 点在正多边形内；
   - 命中后 `hit = 1`、`buildup += shieldDamage`，并返回 effect/sound plan。
+- 已将 bullet absorb 结果接到真实 `BulletComp::absorb()`：
+  - `BulletComp::absorb()` 对齐 Java `absorbed = true; remove()` 的核心状态，当前设置 `absorbed/removed` 并清空 collision 记录，保持 `hit=false` 以保留 despawn 路径语义；
+  - `force_projector_apply_absorb_to_bullet(...)` 只在 `ForceProjectorBulletAbsorb.absorbed` 为真时修改 bullet 状态。
 - 已对照 `ForceProjector.setBars()` / `sense(...)` 锁定：
   - shield bar fraction = `1 - buildup / (shieldHealth + phaseShieldBoost * phaseHeat)`；
   - `LAccess.heat` 返回 `buildup`；

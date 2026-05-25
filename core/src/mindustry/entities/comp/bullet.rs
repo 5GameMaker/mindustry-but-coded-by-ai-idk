@@ -178,6 +178,12 @@ impl BulletComp {
         self.collided_ids.clear();
     }
 
+    pub fn absorb(&mut self) {
+        self.absorbed = true;
+        self.removed = true;
+        self.clear_collisions();
+    }
+
     pub fn init_vel(&mut self, angle: f32, amount: f32) {
         self.velocity = vector_from_angle(angle, amount);
         self.rotation = angle;
@@ -667,6 +673,22 @@ mod tests {
         bullet.clear_collisions();
         assert!(!bullet.has_collided(7));
         assert_eq!(bullet.drop_last_collision(), None);
+    }
+
+    #[test]
+    fn bullet_component_absorb_matches_java_absorb_remove_side_effect() {
+        let mut bullet = BulletComp::new(3, TeamId(1), EntityRef::new(42), 0.0, 0.0);
+        bullet.record_collision(7);
+
+        assert!(!bullet.absorbed);
+        assert!(!bullet.removed);
+        assert!(!bullet.hit);
+        bullet.absorb();
+        assert!(bullet.absorbed);
+        assert!(bullet.removed);
+        assert!(!bullet.hit);
+        assert!(bullet.collided_ids.is_empty());
+        assert!(!bullet.is_active());
     }
 
     #[test]

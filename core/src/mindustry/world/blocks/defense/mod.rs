@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
-use crate::mindustry::entities::comp::{BuildingComp, UnitComp};
+use crate::mindustry::entities::comp::{BuildingComp, BulletComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::{BlockPlan, FogControl, FogEvent};
 use crate::mindustry::io::{type_io, TeamId, TypeValue};
@@ -1489,6 +1489,17 @@ pub fn force_projector_absorb_bullet(
     }
 }
 
+pub fn force_projector_apply_absorb_to_bullet(
+    plan: &ForceProjectorBulletAbsorb,
+    bullet: &mut BulletComp,
+) -> bool {
+    if !plan.absorbed {
+        return false;
+    }
+    bullet.absorb();
+    true
+}
+
 pub fn force_projector_on_removed_plan(
     state: &ForceProjectorState,
     radius: f32,
@@ -2089,6 +2100,14 @@ pub fn base_shield_should_absorb_bullet(
     within_radius: bool,
 ) -> bool {
     enemy_team && absorbable && within_radius
+}
+
+pub fn base_shield_apply_absorb_to_bullet(should_absorb: bool, bullet: &mut BulletComp) -> bool {
+    if !should_absorb {
+        return false;
+    }
+    bullet.absorb();
+    true
 }
 
 pub fn base_shield_tint_plan(shield_color_present: bool, hit: f32) -> BaseShieldTintPlan {
@@ -5073,6 +5092,13 @@ mod tests {
         );
         assert_eq!(force.hit, 1.0);
         assert!((force.buildup - 175.0).abs() < 0.00001);
+        let mut absorbed_bullet = BulletComp::default();
+        assert!(force_projector_apply_absorb_to_bullet(
+            &bullet,
+            &mut absorbed_bullet,
+        ));
+        assert!(absorbed_bullet.absorbed);
+        assert!(absorbed_bullet.removed);
         let unchanged = force;
         assert_eq!(
             force_projector_absorb_bullet(&mut force, false, true, false, true, 10.0),
@@ -5478,6 +5504,12 @@ mod tests {
         assert!(!base_shield_should_absorb_bullet(false, true, true));
         assert!(!base_shield_should_absorb_bullet(true, false, true));
         assert!(!base_shield_should_absorb_bullet(true, true, false));
+        let mut shield_bullet = BulletComp::default();
+        shield_bullet.record_collision(99);
+        assert!(base_shield_apply_absorb_to_bullet(true, &mut shield_bullet));
+        assert!(shield_bullet.absorbed);
+        assert!(shield_bullet.removed);
+        assert!(shield_bullet.collided_ids.is_empty());
         assert_eq!(
             base_shield_tint_plan(false, 0.5),
             BaseShieldTintPlan {
