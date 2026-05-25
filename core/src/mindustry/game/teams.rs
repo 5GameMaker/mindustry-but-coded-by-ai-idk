@@ -33,13 +33,14 @@ impl CoreInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockPlan {
     pub x: i16,
     pub y: i16,
     pub rotation: i16,
     pub block: String,
     pub config: Option<String>,
+    pub config_value: TypeValue,
     pub removed: bool,
 }
 
@@ -56,13 +57,33 @@ impl BlockPlan {
             y: y as i16,
             rotation,
             block: block.into(),
+            config_value: block_plan_config_to_legacy(&config),
             config,
+            removed: false,
+        }
+    }
+
+    pub fn with_config_value(
+        x: i32,
+        y: i32,
+        rotation: i16,
+        block: impl Into<String>,
+        config: Option<String>,
+        config_value: TypeValue,
+    ) -> Self {
+        Self {
+            x: x as i16,
+            y: y as i16,
+            rotation,
+            block: block.into(),
+            config,
+            config_value,
             removed: false,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TeamPlanClaim {
     NoPlans,
     NoUsablePlan,
@@ -265,7 +286,7 @@ impl TeamData {
                         y: plan.y,
                         rotation: plan.rotation,
                         block_id,
-                        config: block_plan_config_to_legacy(&plan.config),
+                        config: plan.config_value.clone(),
                     })
                 })
                 .collect(),

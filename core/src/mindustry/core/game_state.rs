@@ -557,14 +557,14 @@ where
     ContentName: FnMut(ContentType, ContentId) -> Option<String>,
 {
     let block = block_name(plan.block_id)?;
-    Some(BlockPlan {
-        x: plan.x,
-        y: plan.y,
-        rotation: plan.rotation,
+    Some(BlockPlan::with_config_value(
+        plan.x as i32,
+        plan.y as i32,
+        plan.rotation,
         block,
-        config: legacy_team_block_config(&plan.config, content_name),
-        removed: false,
-    })
+        legacy_team_block_config(&plan.config, content_name),
+        plan.config.clone(),
+    ))
 }
 
 fn legacy_team_block_config<ContentName>(
@@ -867,8 +867,28 @@ mod tests {
             state.teams.get_or_null(7).unwrap().plans,
             vec![
                 BlockPlan::new(5, 6, 1, "router", Some("cfg".into())),
-                BlockPlan::new(8, 9, 2, "junction", Some("copper".into())),
+                BlockPlan::with_config_value(
+                    8,
+                    9,
+                    2,
+                    "junction",
+                    Some("copper".into()),
+                    TypeValue::Content(ContentRef::new(ContentType::Item, 4)),
+                ),
             ]
+        );
+        state.teams.register_core(CoreInfo::new(99, 7, 0.0, 0.0));
+        let exported = state.export_legacy_team_blocks(
+            |name| match name {
+                "router" => Some(2),
+                "junction" => Some(3),
+                _ => None,
+            },
+            false,
+        );
+        assert_eq!(
+            exported.groups[0].plans[1].config,
+            TypeValue::Content(ContentRef::new(ContentType::Item, 4))
         );
 
         state.apply_legacy_team_blocks(None, |_| None, |_, _| None);
