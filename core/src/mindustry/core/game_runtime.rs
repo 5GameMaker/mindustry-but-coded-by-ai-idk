@@ -39,9 +39,10 @@ use crate::mindustry::{
     world::blocks::distribution::{
         read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
         read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
-        read_mass_driver_state, read_stack_conveyor_state, BufferedItemBridgeState, ConveyorState,
+        read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
+        read_stack_conveyor_state, BufferedItemBridgeState, ConveyorState,
         DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
-        MassDriverState, StackConveyorState,
+        MassDriverState, SorterState, StackConveyorState,
     },
     world::blocks::liquid::{read_liquid_bridge_state, LiquidBridgeState},
     world::blocks::payloads::{
@@ -58,7 +59,7 @@ use crate::mindustry::{
         HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
         PowerGeneratorState, VariableReactorState,
     },
-    world::blocks::storage::{read_core_state, CoreBuildState},
+    world::blocks::storage::{read_core_state, read_unloader_sort_item, CoreBuildState},
     world::blocks::units::{
         read_repair_turret_state, read_unit_assembler_state, read_unit_cargo_loader_state,
         read_unit_cargo_unload_state, read_unit_factory_state, RepairTurretState,
@@ -161,6 +162,8 @@ pub enum GameRuntimeDistributionBlockState {
     DuctJunction(DuctJunctionState),
     UnitCargoLoader(UnitCargoLoaderState),
     UnitCargoUnload(UnitCargoUnloadPointState),
+    Sorter(SorterState),
+    Unloader(Option<ContentId>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -921,7 +924,9 @@ impl GameRuntime {
                     .map(|state| Some(GameRuntimeDistributionBlockState::Duct(state)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
-            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+            DistributionBlockKind::DuctRouter
+            | DistributionBlockKind::OverflowDuct
+            | DistributionBlockKind::StackRouter => {
                 read_duct_router_state(building_payload, revision, current_item)
                     .map(|state| Some(GameRuntimeDistributionBlockState::DuctRouter(state)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
@@ -929,6 +934,23 @@ impl GameRuntime {
             DistributionBlockKind::Junction => read_duct_junction_state(building_payload)
                 .map(|state| Some(GameRuntimeDistributionBlockState::DuctJunction(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            DistributionBlockKind::Sorter => read_sorter_state(building_payload, revision)
+                .map(|state| Some(GameRuntimeDistributionBlockState::Sorter(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            DistributionBlockKind::OverflowGate => {
+                read_overflow_gate_legacy_payload(building_payload, revision)
+                    .map(|_| None)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::Unloader => {
+                read_unloader_sort_item(building_payload, revision as i32)
+                    .map(|sort_item| {
+                        Some(GameRuntimeDistributionBlockState::Unloader(
+                            sort_item.map(|id| id as ContentId),
+                        ))
+                    })
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
             DistributionBlockKind::UnitCargoLoader => {
                 read_unit_cargo_loader_state(building_payload)
                     .map(|state| Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)))
@@ -1305,9 +1327,9 @@ mod tests {
             },
             blocks::distribution::{
                 write_conveyor_state, write_directional_unloader_state, write_duct_router_state,
-                write_item_bridge_state, write_mass_driver_state, ConveyorItemState, ConveyorState,
-                DirectionalUnloaderState, DuctRouterState, ItemBridgeState, MassDriverState,
-                MassDriverStateKind,
+                write_item_bridge_state, write_mass_driver_state, write_sorter_state,
+                ConveyorItemState, ConveyorState, DirectionalUnloaderState, DuctRouterState,
+                ItemBridgeState, MassDriverState, MassDriverStateKind, SorterState,
             },
             blocks::liquid::{write_liquid_bridge_state, LiquidBridgeState},
             blocks::payloads::{
@@ -1325,7 +1347,7 @@ mod tests {
                 write_variable_reactor_state, HeaterGeneratorState, ImpactReactorState,
                 LightBlockState, NuclearReactorState, PowerGeneratorState, VariableReactorState,
             },
-            blocks::storage::{write_core_state, CoreBuildState},
+            blocks::storage::{write_core_state, write_unloader_sort_item, CoreBuildState},
             blocks::units::{
                 write_repair_turret_state, write_unit_assembler_state,
                 write_unit_cargo_loader_state, write_unit_cargo_unload_state,
@@ -2927,6 +2949,92 @@ mod tests {
             Some(&GameRuntimeDistributionBlockState::DirectionalUnloader(
                 state
             ))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_sorter_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let sorter_def = content.block_by_name("sorter").unwrap();
+        let tile_pos = point2_pack(0, 2);
+        let saved = BuildingComp::new(tile_pos, sorter_def.base().clone(), TeamId(1));
+        let state = SorterState { sort_item: Some(0) };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(2);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_sorter_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 12, sorter_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::Sorter(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unloader_sort_item_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("unloader").unwrap();
+        let tile_pos = point2_pack(1, 2);
+        let saved = BuildingComp::new(tile_pos, unloader_def.base().clone(), TeamId(1));
+        let sort_item = Some(1);
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_unloader_sort_item(&mut building_bytes, sort_item).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 13, unloader_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::Unloader(
+                sort_item.map(|id| id as ContentId)
+            ))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_stack_router_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("surge-router").unwrap();
+        let tile_pos = point2_pack(2, 2);
+        let saved = BuildingComp::new(tile_pos, router_def.base().clone(), TeamId(1));
+        let state = DuctRouterState {
+            sort_item: Some(2),
+            current: None,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_duct_router_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 14, router_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::DuctRouter(state))
         );
     }
 

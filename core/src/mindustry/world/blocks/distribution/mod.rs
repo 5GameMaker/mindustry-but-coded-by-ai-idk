@@ -1,6 +1,6 @@
 use std::io::{self, Read, Write};
 
-use crate::mindustry::ctype::ContentId;
+use crate::mindustry::{ctype::ContentId, world::DirectionalItemBuffer};
 
 pub mod chained_building;
 
@@ -37,6 +37,36 @@ pub fn sorter_rejects_instant_three_chain(
     target_instant: bool,
 ) -> bool {
     direct && source_instant && target_instant
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SorterState {
+    pub sort_item: Option<ContentId>,
+}
+
+pub fn write_sorter_state<W: Write>(write: &mut W, state: &SorterState) -> io::Result<()> {
+    write_i16(write, state.sort_item.unwrap_or(-1))
+}
+
+pub fn read_sorter_state<R: Read>(read: &mut R, revision: u8) -> io::Result<SorterState> {
+    let item = read_i16(read)?;
+    if revision == 1 {
+        let mut legacy = DirectionalItemBuffer::new(20);
+        legacy.read(read)?;
+    }
+    Ok(SorterState {
+        sort_item: (item >= 0).then_some(item),
+    })
+}
+
+pub fn read_overflow_gate_legacy_payload<R: Read>(read: &mut R, revision: u8) -> io::Result<()> {
+    if revision == 1 {
+        let mut legacy = DirectionalItemBuffer::new(25);
+        legacy.read(read)?;
+    } else if revision == 3 {
+        let _legacy_rotation_bits = read_i32(read)?;
+    }
+    Ok(())
 }
 
 pub fn choose_side_route(
