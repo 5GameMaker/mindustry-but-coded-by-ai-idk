@@ -2,7 +2,7 @@ use std::io::{self, Read, Write};
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 
-use crate::mindustry::io::type_io::read_object_safe;
+use crate::mindustry::io::type_io::read_object_boxed;
 use crate::mindustry::io::{
     read_java_utf, read_string, write_java_utf, write_object, write_string, TypeValue,
 };
@@ -420,7 +420,7 @@ pub fn read_logic_processor_state<R: Read>(
     state.variables.reserve(var_count as usize);
     for _ in 0..var_count {
         let name = read_java_utf(read)?;
-        let value = read_object_safe(read)?;
+        let value = read_object_boxed(read)?;
         state
             .variables
             .push(LogicProcessorVariableState::new(name, value));
@@ -897,6 +897,33 @@ mod tests {
         assert_eq!(read_i32(&mut read).unwrap(), 0);
         assert_eq!(read_i16(&mut read).unwrap(), 40);
         assert!(read.is_empty());
+    }
+
+    #[test]
+    fn logic_processor_reads_boxed_vars_without_safe_string_limit() {
+        let long = "x".repeat(1201);
+        let mut bytes = Vec::new();
+        let mut compressed = Vec::new();
+        write_logic_config(&mut compressed, &LogicConfig::from_code([], Vec::new())).unwrap();
+        write_i32(&mut bytes, compressed.len() as i32).unwrap();
+        bytes.extend_from_slice(&compressed);
+        write_i32(&mut bytes, 1).unwrap();
+        write_java_utf(&mut bytes, "message").unwrap();
+        write_object(&mut bytes, &TypeValue::String(long.clone())).unwrap();
+        write_i32(&mut bytes, 0).unwrap();
+        bytes.push(0x7f);
+
+        let mut read = bytes.as_slice();
+        let decoded = read_logic_processor_state(&mut read, 1, false, 40).unwrap();
+
+        assert_eq!(
+            decoded.variables,
+            vec![LogicProcessorVariableState::new(
+                "message",
+                TypeValue::String(long)
+            )]
+        );
+        assert_eq!(read, [0x7f].as_slice());
     }
 
     #[test]

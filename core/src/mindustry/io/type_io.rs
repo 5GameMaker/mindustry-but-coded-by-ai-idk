@@ -515,6 +515,16 @@ pub fn read_object<R: Read>(read: &mut R) -> io::Result<TypeValue> {
     read_object_inner(read, true)
 }
 
+/// Java `TypeIO.readObjectBoxed(read, true)` wire reader.
+///
+/// Rust currently preserves boxed building/unit references as their stable wire
+/// ids (`TypeValue::Building` / `TypeValue::Unit`) instead of eagerly unboxing
+/// them into live world references. This keeps processor save-load payloads
+/// relocatable until the caller can resolve them against the loaded world.
+pub fn read_object_boxed<R: Read>(read: &mut R) -> io::Result<TypeValue> {
+    read_object_inner_limited(read, true, 200, None)
+}
+
 pub fn read_object_safe<R: Read>(read: &mut R) -> io::Result<TypeValue> {
     read_object_inner_limited(read, true, MAX_ARRAY_SIZE, Some(1000))
 }
@@ -2625,6 +2635,28 @@ mod tests {
         let ints = TypeValue::IntArray(vec![1, 2, 3]);
         write_object(&mut bytes, &ints).unwrap();
         assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), ints);
+    }
+
+    #[test]
+    fn boxed_object_reader_matches_java_processor_var_limits() {
+        let long = TypeValue::String("x".repeat(1201));
+        let mut bytes = Vec::new();
+        write_object(&mut bytes, &long).unwrap();
+        assert_eq!(read_object_boxed(&mut bytes.as_slice()).unwrap(), long);
+
+        let mut ok = vec![21];
+        write_i16(&mut ok, 200).unwrap();
+        for value in 0..200 {
+            write_i32(&mut ok, value).unwrap();
+        }
+        assert_eq!(
+            read_object_boxed(&mut ok.as_slice()).unwrap(),
+            TypeValue::IntArray((0..200).collect())
+        );
+
+        let mut too_many = vec![21];
+        write_i16(&mut too_many, 201).unwrap();
+        assert!(read_object_boxed(&mut too_many.as_slice()).is_err());
     }
 
     #[test]
