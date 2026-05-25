@@ -60,7 +60,9 @@ use crate::mindustry::{
         read_legacy_command_center_extra, read_legacy_mech_pad_extra,
         read_legacy_unit_factory_extra, LegacyUnitFactoryExtra,
     },
-    world::blocks::liquid::{read_liquid_bridge_state, LiquidBridgeState},
+    world::blocks::liquid::{
+        read_liquid_bridge_state, write_liquid_bridge_state, LiquidBridgeState,
+    },
     world::blocks::logic::{
         read_canvas_state, read_logic_display_state, read_logic_processor_state, read_memory_state,
         read_message_state, read_switch_enabled, CanvasBlockState, LogicDisplayState,
@@ -278,6 +280,14 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(state))) =
+        (block, runtime.liquid_runtime_states.get(&building.tile_pos))
+    {
+        if liquid.kind == LiquidBlockKind::LiquidBridge {
+            write_liquid_bridge_state(write, state)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -324,6 +334,14 @@ fn network_map_building_revision(
         runtime.crafting_runtime_states.get(&building.tile_pos),
     ) {
         if crafting.kind == CraftingBlockKind::Separator {
+            return 1;
+        }
+    }
+
+    if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(_))) =
+        (block, runtime.liquid_runtime_states.get(&building.tile_pos))
+    {
+        if liquid.kind == LiquidBlockKind::LiquidBridge {
             return 1;
         }
     }
@@ -4021,6 +4039,73 @@ mod tests {
                 },
                 heat: HeatProducerState { heat: 3.25 },
             })
+        );
+    }
+
+    fn roundtrip_exported_liquid_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeLiquidBlockState,
+    ) -> Option<GameRuntimeLiquidBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(9),
+        ));
+        runtime.liquid_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("liquid block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("liquid block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(1));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.liquid_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_liquid_bridge_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let state = LiquidBridgeState {
+            link: point2_pack(6, 13),
+            warmup: 0.8,
+            incoming: vec![point2_pack(2, 13), point2_pack(3, 13)],
+            was_moved: true,
+            moved: false,
+        };
+        assert_eq!(
+            roundtrip_exported_liquid_state(
+                &content,
+                "bridge-conduit",
+                4,
+                13,
+                GameRuntimeLiquidBlockState::Bridge(state.clone()),
+            ),
+            Some(GameRuntimeLiquidBlockState::Bridge(LiquidBridgeState {
+                was_moved: true,
+                moved: true,
+                ..state
+            }))
         );
     }
 
