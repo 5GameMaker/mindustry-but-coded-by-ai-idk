@@ -204,14 +204,9 @@ pub fn read_empty_payload_block_build_common<R: Read>(
         y: read_f32(read)?,
     };
     let pay_rotation = read_f32(read)?;
-    if read_bool(read)? {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "non-empty payload body requires block/unit codec",
-        ));
-    }
+    let payload = read_empty_payload_ref(read)?;
     Ok(PayloadBlockBuildState {
-        payload: None,
+        payload,
         pay_vector,
         pay_rotation,
         carried: false,
@@ -241,6 +236,16 @@ pub fn write_payload_ref<W: Write>(write: &mut W, payload: Option<&PayloadRef>) 
             write.write_all(unit_bytes)
         }
     }
+}
+
+pub fn read_empty_payload_ref<R: Read>(read: &mut R) -> io::Result<Option<PayloadRef>> {
+    if read_bool(read)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "non-empty payload body requires block/unit codec",
+        ));
+    }
+    Ok(None)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -904,13 +909,8 @@ pub fn read_empty_payload_conveyor_extra<R: Read>(
 ) -> io::Result<(f32, Option<PayloadRef>)> {
     let _progress = read_f32(read)?;
     let item_rotation = read_f32(read)?;
-    if read_bool(read)? {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "non-empty conveyor payload body requires block/unit codec",
-        ));
-    }
-    Ok((item_rotation, None))
+    let item = read_empty_payload_ref(read)?;
+    Ok((item_rotation, item))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
