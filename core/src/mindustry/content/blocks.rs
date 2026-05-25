@@ -4560,6 +4560,51 @@ impl BlockDef {
         }
     }
 
+    pub fn can_overdrive(&self) -> bool {
+        match self {
+            Self::Plain(block) => block.has_building(),
+            Self::Floor(_)
+            | Self::StaticWall(_)
+            | Self::StaticTree(_)
+            | Self::TreeBlock(_)
+            | Self::TallBlock(_)
+            | Self::Prop(_)
+            | Self::Ore(_) => false,
+            Self::Production(_) => true,
+            Self::Storage(storage) => storage.can_overdrive,
+            Self::Turret(_) => true,
+            Self::Crafting(crafting) => !matches!(crafting.kind, CraftingBlockKind::HeatProducer),
+            Self::DefenseWall(_) => false,
+            Self::Effect(effect) => !matches!(effect.kind, EffectBlockKind::OverdriveProjector),
+            Self::Distribution(distribution) => distribution.can_overdrive,
+            Self::Liquid(liquid) => liquid.can_overdrive,
+            Self::Power(power) => {
+                power.can_overdrive
+                    && !matches!(
+                        power.kind,
+                        PowerBlockKind::PowerNode
+                            | PowerBlockKind::LongPowerNode
+                            | PowerBlockKind::Battery
+                            | PowerBlockKind::HeaterGenerator
+                    )
+            }
+            Self::UnitFactory(_) => true,
+            Self::UnitAssembler(_) => true,
+            Self::UnitAssemblerModule(_) => true,
+            Self::UnitRepairTower(_) => true,
+            Self::Payload(payload) => payload.can_overdrive,
+            Self::PayloadMassDriver(driver) => driver.can_overdrive,
+            Self::PayloadDeconstructor(deconstructor) => deconstructor.can_overdrive,
+            Self::PayloadConstructor(constructor) => constructor.can_overdrive,
+            Self::PayloadLoader(loader) => loader.can_overdrive,
+            Self::Sandbox(sandbox) => sandbox.can_overdrive,
+            Self::Light(_) => true,
+            Self::Legacy(_) => false,
+            Self::Campaign(campaign) => campaign.can_overdrive,
+            Self::Logic(logic) => logic.can_overdrive,
+        }
+    }
+
     pub fn as_floor(&self) -> Option<&FloorData> {
         match self {
             Self::Floor(floor) => Some(floor),
@@ -13075,6 +13120,30 @@ mod tests {
         assert_eq!(registry.get(0).unwrap().base().name, "air");
         assert!(registry.id_by_name("stone").is_some());
         assert!(registry.id_by_name("stone-wall").is_some());
+    }
+
+    #[test]
+    fn block_def_can_overdrive_matches_java_default_and_overrides() {
+        let (_, _, registry) = load_test_registry();
+
+        assert!(!registry.get_by_name("air").unwrap().can_overdrive());
+        assert!(!registry.get_by_name("copper-wall").unwrap().can_overdrive());
+        assert!(!registry
+            .get_by_name("overdrive-projector")
+            .unwrap()
+            .can_overdrive());
+        assert!(!registry.get_by_name("power-node").unwrap().can_overdrive());
+        assert!(!registry.get_by_name("conduit").unwrap().can_overdrive());
+        assert!(!registry.get_by_name("memory-cell").unwrap().can_overdrive());
+        assert!(registry
+            .get_by_name("mechanical-drill")
+            .unwrap()
+            .can_overdrive());
+        assert!(registry.get_by_name("duo").unwrap().can_overdrive());
+        assert!(registry
+            .get_by_name("mend-projector")
+            .unwrap()
+            .can_overdrive());
     }
 
     #[test]

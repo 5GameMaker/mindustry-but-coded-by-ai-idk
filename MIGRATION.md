@@ -943,7 +943,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `overdrive_projector_outputs_items(...)`
 - `overdrive_projector_range(...)`
 - `overdrive_projector_boost_plan(...)`
+- `overdrive_projector_can_overdrive_content(...)`
 - `overdrive_projector_apply_boost_to_buildings(...)`
+- `overdrive_projector_apply_boost_with_content(...)`
 - `overdrive_projector_bar_text_percent(...)`
 - `OverdriveProjectorState`
 - `overdrive_projector_update(...)`
@@ -958,7 +960,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 已对照 `OverdriveProjector.OverdriveBuild.updateTile()` 的 runtime boost 分支补充真实建筑组件接线：
   - `charge >= reload` 后由 `overdrive_projector_boost_plan(...)` 生成 `realRange / canOverdrive / realBoost / reload + 1`；
   - `overdrive_projector_apply_boost_to_buildings(...)` 对上层 range/indexer 已筛出的候选 `BuildingComp` 调用真实 `BuildingComp::apply_boost(...)`；
-  - 过滤条件由调用者按 content registry 的 `block.canOverdrive` 注入，避免在 helper 内伪造方块类型；
+  - `BlockDef::can_overdrive()` 汇总 Java `Block.canOverdrive` 默认值与各类 block overrides，`overdrive_projector_apply_boost_with_content(...)` 已能通过 `ContentLoader` 读取真实 content metadata 过滤目标；
   - 低于目标当前 `time_scale` 的 boost 不会降低已有更高加速，也不会延长较高加速持续时间，行为沿用 `Building.applyBoost(...)`。
 
 仍需：
@@ -967,7 +969,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `ForceProjector.setBars()/sense/setProp` 接入真实 building runtime；
 - `DirectionalForceProjector` 接入真实 Groups.bullet.intersect、absorb effect、shield break effect 与 renderer；
 - `MendProjector` 真实 range indexer 扫描、content suppressable 细节、heal effect/sound、drawPlace / drawSelect 接入；
-- `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描/content `canOverdrive` 查询、status/effect、draw/select 接入；
+- `OverdriveProjector` 与 `OverdriveDome` 的真实 building range 扫描、status/effect、draw/select 接入；
 - 上述 helper 继续接入真实 block runtime，避免停留在单测 helper。
 
 ### 7.9 Defense 当前迁移进度小结

@@ -996,6 +996,15 @@ pub fn overdrive_projector_boost_plan(
     })
 }
 
+pub fn overdrive_projector_can_overdrive_content(
+    content: &ContentLoader,
+    block_id: ContentId,
+) -> bool {
+    content
+        .block(block_id)
+        .is_some_and(|block| block.can_overdrive())
+}
+
 pub fn overdrive_projector_apply_boost_to_buildings(
     update: &OverdriveProjectorUpdate,
     reload: f32,
@@ -1014,6 +1023,17 @@ pub fn overdrive_projector_apply_boost_to_buildings(
         }
     }
     applied
+}
+
+pub fn overdrive_projector_apply_boost_with_content(
+    update: &OverdriveProjectorUpdate,
+    reload: f32,
+    content: &ContentLoader,
+    buildings: &mut [BuildingComp],
+) -> usize {
+    overdrive_projector_apply_boost_to_buildings(update, reload, buildings, |building| {
+        overdrive_projector_can_overdrive_content(content, building.block.id)
+    })
 }
 
 pub fn overdrive_projector_stats_plan(
@@ -4839,6 +4859,47 @@ mod tests {
             overdrive_projector_apply_boost_to_buildings(&idle, 60.0, &mut buildings, |_| true,),
             0
         );
+    }
+
+    #[test]
+    fn overdrive_projector_runtime_adapter_uses_content_can_overdrive_metadata() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let drill = content.block_by_name("mechanical-drill").unwrap();
+        let wall = content.block_by_name("copper-wall").unwrap();
+        let overdrive = content.block_by_name("overdrive-projector").unwrap();
+
+        assert!(overdrive_projector_can_overdrive_content(
+            &content,
+            drill.base().id
+        ));
+        assert!(!overdrive_projector_can_overdrive_content(
+            &content,
+            wall.base().id
+        ));
+        assert!(!overdrive_projector_can_overdrive_content(
+            &content,
+            overdrive.base().id
+        ));
+
+        let mut buildings = vec![
+            BuildingComp::new(point2_pack(40, 0), drill.base().clone(), TeamId(1)),
+            BuildingComp::new(point2_pack(41, 0), wall.base().clone(), TeamId(1)),
+            BuildingComp::new(point2_pack(42, 0), overdrive.base().clone(), TeamId(1)),
+        ];
+        let update = OverdriveProjectorUpdate {
+            applied_boost: true,
+            consumed: false,
+            real_range: 81.0,
+            real_boost: 1.5,
+        };
+
+        let applied =
+            overdrive_projector_apply_boost_with_content(&update, 60.0, &content, &mut buildings);
+
+        assert_eq!(applied, 1);
+        assert_eq!(buildings[0].time_scale, 1.5);
+        assert_eq!(buildings[1].time_scale, 1.0);
+        assert_eq!(buildings[2].time_scale, 1.0);
     }
 
     #[test]
