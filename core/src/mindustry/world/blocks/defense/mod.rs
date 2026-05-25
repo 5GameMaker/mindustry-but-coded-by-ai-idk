@@ -2223,6 +2223,48 @@ pub fn regen_projector_record_building_mend(
     amount > 0.0
 }
 
+pub fn regen_projector_target_in_square(
+    source: ProjectorRuntimeSource,
+    target: &BuildingComp,
+    range: i32,
+    tile_size: f32,
+) -> bool {
+    let half = regen_projector_square_size(range, tile_size) / 2.0;
+    (target.x - source.x).abs() <= half && (target.y - source.y).abs() <= half
+}
+
+pub fn regen_projector_record_mend_runtime(
+    plan: &RegenProjectorUpdatePlan,
+    source: ProjectorRuntimeSource,
+    range: i32,
+    tile_size: f32,
+    edelta: f32,
+    now: f32,
+    mend_map: &mut RegenProjectorMendMap,
+    buildings: &[BuildingComp],
+) -> usize {
+    if plan.suppressed || plan.heal_amount_percent <= 0.0 {
+        return 0;
+    }
+
+    let mut recorded = 0;
+    for building in buildings {
+        if building.team == source.team
+            && regen_projector_target_in_square(source, building, range, tile_size)
+            && regen_projector_record_building_mend(
+                mend_map,
+                building,
+                plan.heal_amount_percent,
+                edelta,
+                now,
+            )
+        {
+            recorded += 1;
+        }
+    }
+    recorded
+}
+
 pub fn regen_projector_apply_mend_map_to_buildings(
     mend_map: &mut RegenProjectorMendMap,
     buildings: &mut [BuildingComp],
@@ -6152,6 +6194,82 @@ mod tests {
         assert!(buildings[0].recently_healed(220.0));
         assert!(buildings[1].recently_healed(220.0));
         assert!(!buildings[2].recently_healed(220.0));
+    }
+
+    #[test]
+    fn regen_projector_runtime_adapter_records_same_team_square_targets() {
+        let source = ProjectorRuntimeSource {
+            x: 0.0,
+            y: 0.0,
+            team: TeamId(1),
+        };
+        let plan = RegenProjectorUpdatePlan {
+            suppressed: false,
+            any_targets: true,
+            consume_optional: false,
+            heal_amount_percent: 0.8,
+            warmup: 0.0,
+            total_time: 0.0,
+            optional_timer: 0.0,
+        };
+        let mut buildings = vec![
+            projector_runtime_building(34, "regen-in-square"),
+            projector_runtime_building(35, "regen-outside-square"),
+            projector_runtime_building(36, "regen-enemy"),
+            projector_runtime_building(37, "regen-suppressed"),
+        ];
+        buildings[0].set_pos(20.0, 20.0);
+        buildings[0].health = 70.0;
+        buildings[1].set_pos(40.0, 0.0);
+        buildings[1].health = 70.0;
+        buildings[2].set_pos(20.0, 20.0);
+        buildings[2].team = TeamId(2);
+        buildings[2].health = 70.0;
+        buildings[3].set_pos(-20.0, -20.0);
+        buildings[3].health = 70.0;
+        buildings[3].apply_heal_suppression(300.0, 20.0);
+
+        assert!(regen_projector_target_in_square(
+            source,
+            &buildings[0],
+            8,
+            8.0
+        ));
+        assert!(!regen_projector_target_in_square(
+            source,
+            &buildings[1],
+            8,
+            8.0
+        ));
+
+        let mut mend = RegenProjectorMendMap::default();
+        let recorded = regen_projector_record_mend_runtime(
+            &plan, source, 8, 8.0, 20.0, 310.0, &mut mend, &buildings,
+        );
+
+        assert_eq!(recorded, 1);
+        assert_eq!(mend.entries.get(&buildings[0].tile_pos), Some(&16.0));
+        assert!(!mend.entries.contains_key(&buildings[1].tile_pos));
+        assert!(!mend.entries.contains_key(&buildings[2].tile_pos));
+        assert!(!mend.entries.contains_key(&buildings[3].tile_pos));
+
+        let suppressed = RegenProjectorUpdatePlan {
+            suppressed: true,
+            ..plan
+        };
+        assert_eq!(
+            regen_projector_record_mend_runtime(
+                &suppressed,
+                source,
+                8,
+                8.0,
+                20.0,
+                310.0,
+                &mut mend,
+                &buildings,
+            ),
+            0
+        );
     }
 
     #[test]
