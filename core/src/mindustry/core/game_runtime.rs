@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 
 use crate::mindustry::{
     content::blocks::{
-        BlockDef, EffectBlockKind, PayloadBlockKind, PowerBlockKind, SandboxBlockKind,
+        BlockDef, DistributionBlockKind, EffectBlockKind, PayloadBlockKind, PowerBlockKind,
+        SandboxBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -28,6 +29,13 @@ use crate::mindustry::{
         read_overdrive_projector_state, read_radar_state, EffectBlockFrameBatchReport,
         EffectBlockFrameBatchResources, EffectBlockRuntimeState, EffectBlockRuntimeStateStore,
         EffectBlockTimerStateStore, EffectProjectorRuntimeState,
+    },
+    world::blocks::distribution::{
+        read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
+        read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
+        read_mass_driver_state, read_stack_conveyor_state, BufferedItemBridgeState, ConveyorState,
+        DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
+        MassDriverState, StackConveyorState,
     },
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
@@ -128,10 +136,24 @@ pub enum GameRuntimePowerBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeDistributionBlockState {
+    Conveyor(ConveyorState),
+    StackConveyor(StackConveyorState),
+    ItemBridge(ItemBridgeState),
+    BufferedItemBridge(BufferedItemBridgeState),
+    MassDriver(MassDriverState),
+    DirectionalUnloader(DirectionalUnloaderState),
+    Duct(DuctState),
+    DuctRouter(DuctRouterState),
+    DuctJunction(DuctJunctionState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Effect(EffectBlockRuntimeState),
     Payload(GameRuntimePayloadBlockState),
     Power(GameRuntimePowerBlockState),
+    Distribution(GameRuntimeDistributionBlockState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,6 +164,7 @@ pub struct GameRuntime {
     pub effect_timer_store: EffectBlockTimerStateStore,
     pub payload_runtime_states: BTreeMap<i32, GameRuntimePayloadBlockState>,
     pub power_runtime_states: BTreeMap<i32, GameRuntimePowerBlockState>,
+    pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
 }
 
 impl Default for GameRuntime {
@@ -159,6 +182,7 @@ impl GameRuntime {
             effect_timer_store: EffectBlockTimerStateStore::new(),
             payload_runtime_states: BTreeMap::new(),
             power_runtime_states: BTreeMap::new(),
+            distribution_runtime_states: BTreeMap::new(),
         }
     }
 
@@ -201,6 +225,7 @@ impl GameRuntime {
         self.effect_timer_store.remove(removed.tile_pos);
         self.payload_runtime_states.remove(&removed.tile_pos);
         self.power_runtime_states.remove(&removed.tile_pos);
+        self.distribution_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -327,6 +352,7 @@ impl GameRuntime {
 
             let block_state = match self.read_runtime_state_from_building_payload(
                 block,
+                &building,
                 revision,
                 &mut building_bytes,
             ) {
@@ -364,6 +390,11 @@ impl GameRuntime {
                         self.power_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Distribution(block_state) => {
+                        self.distribution_runtime_states
+                            .insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                 }
             }
             report.buildings_added += 1;
@@ -378,6 +409,7 @@ impl GameRuntime {
     fn read_runtime_state_from_building_payload(
         &self,
         block: &BlockDef,
+        building: &BuildingComp,
         revision: u8,
         building_payload: &mut &[u8],
     ) -> Result<Option<GameRuntimeLoadedBlockState>, GameRuntimeBlockStateReadError> {
@@ -407,7 +439,26 @@ impl GameRuntime {
                             revision,
                             building_payload,
                         )
-                        .map(|state| state.map(GameRuntimeLoadedBlockState::Power)),
+                        .and_then(|state| {
+                            if state.is_some() {
+                                Ok(state.map(GameRuntimeLoadedBlockState::Power))
+                            } else {
+                                Ok(None)
+                            }
+                        })
+                        .or_else(|err| match err {
+                            GameRuntimeBlockStateReadError::Unsupported => self
+                                .read_distribution_runtime_state_from_building_payload(
+                                    block,
+                                    building,
+                                    revision,
+                                    building_payload,
+                                )
+                                .map(|state| state.map(GameRuntimeLoadedBlockState::Distribution)),
+                            GameRuntimeBlockStateReadError::Parse => {
+                                Err(GameRuntimeBlockStateReadError::Parse)
+                            }
+                        }),
                     GameRuntimeBlockStateReadError::Parse => {
                         Err(GameRuntimeBlockStateReadError::Parse)
                     }
@@ -625,6 +676,75 @@ impl GameRuntime {
         }
     }
 
+    fn read_distribution_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        building: &BuildingComp,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeDistributionBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Distribution(distribution) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+        let current_item = building
+            .items
+            .as_ref()
+            .and_then(|items| items.each().next().map(|(item, _)| item));
+
+        match distribution.kind {
+            DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor => {
+                read_conveyor_state(building_payload, revision)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::Conveyor(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::StackConveyor => {
+                read_stack_conveyor_state(building_payload, current_item)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::StackConveyor(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::ItemBridge | DistributionBlockKind::DuctBridge => {
+                read_item_bridge_state(building_payload, revision)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::ItemBridge(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::BufferedItemBridge => {
+                read_buffered_bridge_state(building_payload, revision)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::BufferedItemBridge(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::MassDriver => read_mass_driver_state(building_payload)
+                .map(|state| Some(GameRuntimeDistributionBlockState::MassDriver(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            DistributionBlockKind::DirectionalUnloader => {
+                read_directional_unloader_state(building_payload)
+                    .map(|state| {
+                        Some(GameRuntimeDistributionBlockState::DirectionalUnloader(
+                            state,
+                        ))
+                    })
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::Duct => {
+                read_duct_state(building_payload, revision, current_item)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::Duct(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+                read_duct_router_state(building_payload, revision, current_item)
+                    .map(|state| Some(GameRuntimeDistributionBlockState::DuctRouter(state)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
+            DistributionBlockKind::Junction => read_duct_junction_state(building_payload)
+                .map(|state| Some(GameRuntimeDistributionBlockState::DuctJunction(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            _ => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
     pub fn clear_world_refs_for_building(&mut self, building: &BuildingComp) -> usize {
         let tile_pos = building.tile_pos;
         let mut cleared = 0;
@@ -672,6 +792,7 @@ impl GameRuntime {
         self.effect_timer_store.clear();
         self.payload_runtime_states.clear();
         self.power_runtime_states.clear();
+        self.distribution_runtime_states.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -807,6 +928,12 @@ mod tests {
             blocks::defense::{
                 write_base_shield_state, write_force_projector_state, write_radar_state,
                 BaseShieldState, EffectBlockRuntimeState, ForceProjectorState, RadarState,
+            },
+            blocks::distribution::{
+                write_conveyor_state, write_directional_unloader_state, write_duct_router_state,
+                write_item_bridge_state, write_mass_driver_state, ConveyorItemState, ConveyorState,
+                DirectionalUnloaderState, DuctRouterState, ItemBridgeState, MassDriverState,
+                MassDriverStateKind,
             },
             blocks::payloads::{
                 write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
@@ -2066,6 +2193,165 @@ mod tests {
         assert_eq!(
             runtime.power_runtime_states.get(&tile_pos),
             Some(&GameRuntimePowerBlockState::Light(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_conveyor_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let conveyor_def = content.block_by_name("conveyor").unwrap();
+        let tile_pos = point2_pack(1, 1);
+        let saved = BuildingComp::new(tile_pos, conveyor_def.base().clone(), TeamId(1));
+        let state = ConveyorState {
+            items: vec![ConveyorItemState {
+                item: 0,
+                x: 0.0,
+                y: 128.0 / 255.0,
+            }],
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_conveyor_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 7, conveyor_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::Conveyor(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_item_bridge_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let bridge_def = content.block_by_name("phase-conveyor").unwrap();
+        let tile_pos = point2_pack(2, 1);
+        let saved = BuildingComp::new(tile_pos, bridge_def.base().clone(), TeamId(1));
+        let state = ItemBridgeState {
+            link: point2_pack(4, 1),
+            warmup: 0.6,
+            incoming: vec![point2_pack(1, 1), point2_pack(3, 1)],
+            was_moved: true,
+            moved: true,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_item_bridge_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 8, bridge_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::ItemBridge(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_mass_driver_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("mass-driver").unwrap();
+        let tile_pos = point2_pack(3, 1);
+        let saved = BuildingComp::new(tile_pos, driver_def.base().clone(), TeamId(1));
+        let state = MassDriverState {
+            link: point2_pack(5, 1),
+            rotation: 135.0,
+            state: MassDriverStateKind::Shooting,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_mass_driver_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 9, driver_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::MassDriver(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_duct_router_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("duct-router").unwrap();
+        let tile_pos = point2_pack(4, 1);
+        let saved = BuildingComp::new(tile_pos, router_def.base().clone(), TeamId(1));
+        let state = DuctRouterState {
+            sort_item: Some(0),
+            current: None,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_duct_router_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 10, router_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::DuctRouter(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_directional_unloader_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("duct-unloader").unwrap();
+        let tile_pos = point2_pack(5, 1);
+        let saved = BuildingComp::new(tile_pos, unloader_def.base().clone(), TeamId(1));
+        let state = DirectionalUnloaderState {
+            unload_item: Some(0),
+            offset: 17,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_directional_unloader_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 11, unloader_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeDistributionBlockState::DirectionalUnloader(
+                state
+            ))
         );
     }
 
