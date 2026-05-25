@@ -28,7 +28,8 @@ use crate::mindustry::{
     r#type::PayloadSeq,
     vars::TILE_SIZE,
     world::blocks::campaign::{
-        read_accelerator_state, read_landing_pad_state, read_launch_pad_state, AcceleratorState,
+        read_accelerator_state, read_landing_pad_state, read_launch_pad_state,
+        write_accelerator_state, write_landing_pad_state, write_launch_pad_state, AcceleratorState,
         LandingPadState, LaunchPadState,
     },
     world::blocks::defense::turrets::{
@@ -412,6 +413,27 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Campaign(campaign), Some(state)) = (
+        block,
+        runtime.campaign_runtime_states.get(&building.tile_pos),
+    ) {
+        match (campaign.kind, state) {
+            (
+                CampaignBlockKind::LaunchPad | CampaignBlockKind::AdvancedLaunchPad,
+                GameRuntimeCampaignBlockState::LaunchPad(state),
+            ) => {
+                write_launch_pad_state(write, state)?;
+            }
+            (CampaignBlockKind::LandingPad, GameRuntimeCampaignBlockState::LandingPad(state)) => {
+                write_landing_pad_state(write, state)?;
+            }
+            (CampaignBlockKind::Accelerator, GameRuntimeCampaignBlockState::Accelerator(state)) => {
+                write_accelerator_state(write, state)?;
+            }
+            _ => {}
+        }
+    }
+
     if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(state))) =
         (block, runtime.liquid_runtime_states.get(&building.tile_pos))
     {
@@ -576,6 +598,23 @@ fn network_map_building_revision(
                 GameRuntimeLogicBlockState::Display(_),
             ) => return 1,
             (LogicBlockKind::Processor, GameRuntimeLogicBlockState::Processor(_)) => return 4,
+            _ => {}
+        }
+    }
+
+    if let (BlockDef::Campaign(campaign), Some(state)) = (
+        block,
+        runtime.campaign_runtime_states.get(&building.tile_pos),
+    ) {
+        match (campaign.kind, state) {
+            (
+                CampaignBlockKind::LaunchPad | CampaignBlockKind::AdvancedLaunchPad,
+                GameRuntimeCampaignBlockState::LaunchPad(_),
+            )
+            | (CampaignBlockKind::LandingPad, GameRuntimeCampaignBlockState::LandingPad(_))
+            | (CampaignBlockKind::Accelerator, GameRuntimeCampaignBlockState::Accelerator(_)) => {
+                return 1;
+            }
             _ => {}
         }
     }
@@ -4789,6 +4828,113 @@ mod tests {
                 GameRuntimeLogicBlockState::Processor(processor.clone()),
             ),
             Some(GameRuntimeLogicBlockState::Processor(processor))
+        );
+    }
+
+    fn roundtrip_exported_campaign_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeCampaignBlockState,
+    ) -> Option<GameRuntimeCampaignBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(14),
+        ));
+        runtime.campaign_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 32;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("campaign block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("campaign block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(1));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.campaign_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_campaign_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+
+        let launch = LaunchPadState {
+            launch_counter: 12.5,
+        };
+        assert_eq!(
+            roundtrip_exported_campaign_state(
+                &content,
+                "launch-pad",
+                1,
+                24,
+                GameRuntimeCampaignBlockState::LaunchPad(launch),
+            ),
+            Some(GameRuntimeCampaignBlockState::LaunchPad(launch))
+        );
+
+        let landing = LandingPadState {
+            config: Some(copper),
+            priority: 2,
+            cooldown: 0.5,
+            arriving: Some(lead),
+            arriving_timer: 0.25,
+            liquid_removed: 3.0,
+        };
+        assert_eq!(
+            roundtrip_exported_campaign_state(
+                &content,
+                "landing-pad",
+                6,
+                24,
+                GameRuntimeCampaignBlockState::LandingPad(landing.clone()),
+            ),
+            Some(GameRuntimeCampaignBlockState::LandingPad(landing))
+        );
+
+        let accelerator = AcceleratorState {
+            progress: 0.75,
+            launching: true,
+        };
+        assert_eq!(
+            roundtrip_exported_campaign_state(
+                &content,
+                "interplanetary-accelerator",
+                12,
+                24,
+                GameRuntimeCampaignBlockState::Accelerator(accelerator.clone()),
+            ),
+            Some(GameRuntimeCampaignBlockState::Accelerator(
+                AcceleratorState {
+                    launching: false,
+                    ..accelerator
+                }
+            ))
         );
     }
 
