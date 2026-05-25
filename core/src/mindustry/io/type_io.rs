@@ -15,7 +15,9 @@ use crate::mindustry::world::blocks::payloads::{
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
 
 pub const MAX_ARRAY_SIZE: usize = 1000;
+pub const MAX_OBJECT_READ_ARRAY_SIZE: usize = 200;
 pub const MAX_BYTE_ARRAY_SIZE: usize = 40_000;
+pub const MAX_SAFE_STRING_CHARS: usize = 1200;
 pub const MAX_NET_BUILD_PLANS: usize = 20;
 pub const MAX_NET_BUILD_PLAN_CONFIG_CHARS: usize = 500;
 pub const MAX_RULES_BYTES: usize = 100_000;
@@ -522,15 +524,15 @@ pub fn read_object<R: Read>(read: &mut R) -> io::Result<TypeValue> {
 /// them into live world references. This keeps processor save-load payloads
 /// relocatable until the caller can resolve them against the loaded world.
 pub fn read_object_boxed<R: Read>(read: &mut R) -> io::Result<TypeValue> {
-    read_object_inner_limited(read, true, 200, None)
+    read_object_inner_limited(read, true, MAX_OBJECT_READ_ARRAY_SIZE, None)
 }
 
 pub fn read_object_safe<R: Read>(read: &mut R) -> io::Result<TypeValue> {
-    read_object_inner_limited(read, true, MAX_ARRAY_SIZE, Some(1000))
+    read_object_inner_limited(read, true, MAX_ARRAY_SIZE, Some(MAX_SAFE_STRING_CHARS))
 }
 
 fn read_object_inner<R: Read>(read: &mut R, allow_arrays: bool) -> io::Result<TypeValue> {
-    read_object_inner_limited(read, allow_arrays, MAX_ARRAY_SIZE, None)
+    read_object_inner_limited(read, allow_arrays, MAX_OBJECT_READ_ARRAY_SIZE, None)
 }
 
 fn read_object_inner_limited<R: Read>(
@@ -2657,6 +2659,23 @@ mod tests {
         let mut too_many = vec![21];
         write_i16(&mut too_many, 201).unwrap();
         assert!(read_object_boxed(&mut too_many.as_slice()).is_err());
+    }
+
+    #[test]
+    fn object_reader_limits_match_java_safe_and_non_safe_modes() {
+        let safe_max = TypeValue::String("x".repeat(MAX_SAFE_STRING_CHARS));
+        let mut bytes = Vec::new();
+        write_object(&mut bytes, &safe_max).unwrap();
+        assert_eq!(read_object_safe(&mut bytes.as_slice()).unwrap(), safe_max);
+
+        let safe_too_long = TypeValue::String("x".repeat(MAX_SAFE_STRING_CHARS + 1));
+        bytes.clear();
+        write_object(&mut bytes, &safe_too_long).unwrap();
+        assert!(read_object_safe(&mut bytes.as_slice()).is_err());
+
+        let mut too_many = vec![21];
+        write_i16(&mut too_many, (MAX_OBJECT_READ_ARRAY_SIZE + 1) as i16).unwrap();
+        assert!(read_object(&mut too_many.as_slice()).is_err());
     }
 
     #[test]

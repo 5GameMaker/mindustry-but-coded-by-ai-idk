@@ -142,9 +142,11 @@ git -C 'D:/MDT/rust-mindustry' push origin main
    - 非 safe object/seq/array 上限按 Java `200` 项处理；
    - building/unit boxed 引用暂以 `TypeValue::Building(i32)` / `TypeValue::Unit(i32)` 保留稳定 wire id，等待真实 world/loadBlock 阶段解析。
 5. `LogicProcessor` 变量读取已改用 `read_object_boxed(...)`，补了长字符串变量与 boxed reader 边界测试。
-6. 已验证：
+6. `TypeIO.read_object(...)` 的非 safe 数组上限也已收紧为 Java `200` 项；`read_object_safe(...)` 的字符串上限收紧为 Java 的 `1200` chars。
+7. 已验证：
    - `cargo test -p mindustry-core logic_processor`
    - `cargo test -p mindustry-core boxed_object_reader_matches_java_processor_var_limits`
+   - `cargo test -p mindustry-core mindustry::io::type_io::tests`
    - `cargo test -p mindustry-core game_runtime_loads_processor_state_from_network_map_building_payload`
    - `cargo check -p mindustry-core`
 
