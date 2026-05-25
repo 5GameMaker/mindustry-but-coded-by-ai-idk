@@ -1373,6 +1373,15 @@ pub enum GameRuntimePayloadSourceConfigureResult {
     UnknownUnit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadSourceCommandResult {
+    Set,
+    Cleared,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotPayloadSource,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Construct(GameRuntimeConstructBlockState),
@@ -1594,6 +1603,40 @@ impl GameRuntime {
                 ));
                 GameRuntimePayloadSourceConfigureResult::ConfiguredUnit
             }
+        }
+    }
+
+    pub fn command_owned_payload_source(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        command_pos: Option<PayloadVec2>,
+    ) -> GameRuntimePayloadSourceCommandResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimePayloadSourceCommandResult::MissingBuilding;
+        };
+
+        match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::PayloadSource => {
+            }
+            Some(_) | None => return GameRuntimePayloadSourceCommandResult::NotPayloadSource,
+        }
+
+        let Some(GameRuntimePayloadBlockState::Source { source, .. }) =
+            self.payload_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimePayloadSourceCommandResult::MissingRuntimeState;
+        };
+
+        source.command_pos = command_pos;
+        if command_pos.is_some() {
+            GameRuntimePayloadSourceCommandResult::Set
+        } else {
+            GameRuntimePayloadSourceCommandResult::Cleared
         }
     }
 
@@ -7770,10 +7813,17 @@ mod tests {
                 common: PayloadBlockBuildState::default(),
                 source: PayloadSourceState {
                     unit: Some(flare),
-                    command_pos: Some(Vec2 { x: 12.0, y: 34.0 }),
                     ..PayloadSourceState::default()
                 },
             },
+        );
+        assert_eq!(
+            runtime.command_owned_payload_source(
+                &content,
+                tile_pos,
+                Some(Vec2 { x: 12.0, y: 34.0 })
+            ),
+            GameRuntimePayloadSourceCommandResult::Set
         );
 
         let report = runtime
