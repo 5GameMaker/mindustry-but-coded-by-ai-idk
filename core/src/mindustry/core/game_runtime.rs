@@ -80,10 +80,10 @@ use crate::mindustry::{
         read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
         read_payload_router_extra, read_payload_source_extra,
         read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
-        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
-        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
-        PayloadSortKey, PayloadSourceState, Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE,
-        PAYLOAD_UNIT_TYPE,
+        write_payload_block_build_common, BlockProducerState, PayloadBlockBuildState,
+        PayloadConveyorState, PayloadDeconstructorState, PayloadLoaderState,
+        PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
+        Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -111,9 +111,10 @@ use crate::mindustry::{
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        write_unit_cargo_loader_state, write_unit_cargo_unload_state, ReconstructorState,
-        RepairTurretState, UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState,
-        UnitFactoryState,
+        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
+        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
+        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{is_construct_block_name, read_construct_block_state, ConstructBlockState},
     world::{footprint_tiles, get_edges, Tile},
@@ -434,6 +435,42 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let Some(state) = runtime.unit_runtime_states.get(&building.tile_pos) {
+        match (block, state) {
+            (BlockDef::UnitFactory(_), GameRuntimeUnitBlockState::Factory { common, factory }) => {
+                write_payload_block_build_common(write, common)?;
+                write_unit_factory_state(write, factory)?;
+            }
+            (
+                BlockDef::UnitReconstructor(_),
+                GameRuntimeUnitBlockState::Reconstructor {
+                    common,
+                    reconstructor,
+                },
+            ) => {
+                write_payload_block_build_common(write, common)?;
+                write_reconstructor_state(write, reconstructor)?;
+            }
+            (BlockDef::UnitRepairTower(_), GameRuntimeUnitBlockState::RepairTower(state)) => {
+                write_repair_turret_state(write, state)?;
+            }
+            (
+                BlockDef::UnitAssembler(_),
+                GameRuntimeUnitBlockState::Assembler { common, assembler },
+            ) => {
+                write_payload_block_build_common(write, common)?;
+                write_unit_assembler_state(write, assembler)?;
+            }
+            (
+                BlockDef::UnitAssemblerModule(_),
+                GameRuntimeUnitBlockState::AssemblerModule(common),
+            ) => {
+                write_payload_block_build_common(write, common)?;
+            }
+            _ => {}
+        }
+    }
+
     if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(state))) =
         (block, runtime.liquid_runtime_states.get(&building.tile_pos))
     {
@@ -613,6 +650,20 @@ fn network_map_building_revision(
             )
             | (CampaignBlockKind::LandingPad, GameRuntimeCampaignBlockState::LandingPad(_))
             | (CampaignBlockKind::Accelerator, GameRuntimeCampaignBlockState::Accelerator(_)) => {
+                return 1;
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(state) = runtime.unit_runtime_states.get(&building.tile_pos) {
+        match (block, state) {
+            (BlockDef::UnitFactory(_), GameRuntimeUnitBlockState::Factory { .. })
+            | (BlockDef::UnitReconstructor(_), GameRuntimeUnitBlockState::Reconstructor { .. }) => {
+                return 3;
+            }
+            (BlockDef::UnitRepairTower(_), GameRuntimeUnitBlockState::RepairTower(_))
+            | (BlockDef::UnitAssembler(_), GameRuntimeUnitBlockState::Assembler { .. }) => {
                 return 1;
             }
             _ => {}
@@ -4935,6 +4986,185 @@ mod tests {
                     ..accelerator
                 }
             ))
+        );
+    }
+
+    fn exported_unit_state_revision(block_def: &BlockDef, state: &GameRuntimeUnitBlockState) -> u8 {
+        match (block_def, state) {
+            (BlockDef::UnitFactory(_), GameRuntimeUnitBlockState::Factory { .. })
+            | (BlockDef::UnitReconstructor(_), GameRuntimeUnitBlockState::Reconstructor { .. }) => {
+                3
+            }
+            (BlockDef::UnitRepairTower(_), GameRuntimeUnitBlockState::RepairTower(_))
+            | (BlockDef::UnitAssembler(_), GameRuntimeUnitBlockState::Assembler { .. }) => 1,
+            _ => 0,
+        }
+    }
+
+    fn roundtrip_exported_unit_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeUnitBlockState,
+    ) -> Option<GameRuntimeUnitBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_unit_state_revision(block_def, &state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(15),
+        ));
+        runtime.unit_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 32;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("unit block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("unit block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.unit_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_unit_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 1.0, y: -2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let factory = UnitFactoryState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 25.0,
+                ..Default::default()
+            },
+            current_plan: 1,
+            command_pos: Some(IoVec2 { x: 12.0, y: 34.0 }),
+            command_id: Some(2),
+        };
+        assert_eq!(
+            roundtrip_exported_unit_state(
+                &content,
+                "ground-factory",
+                2,
+                27,
+                GameRuntimeUnitBlockState::Factory {
+                    common: common.clone(),
+                    factory: factory.clone(),
+                },
+            ),
+            Some(GameRuntimeUnitBlockState::Factory {
+                common: common.clone(),
+                factory
+            })
+        );
+
+        let reconstructor = ReconstructorState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 11.0,
+                ..Default::default()
+            },
+            command_pos: Some(IoVec2 { x: 8.0, y: 16.0 }),
+            command_id: Some(3),
+            constructing: true,
+        };
+        assert_eq!(
+            roundtrip_exported_unit_state(
+                &content,
+                "additive-reconstructor",
+                6,
+                27,
+                GameRuntimeUnitBlockState::Reconstructor {
+                    common: common.clone(),
+                    reconstructor: reconstructor.clone(),
+                },
+            ),
+            Some(GameRuntimeUnitBlockState::Reconstructor {
+                common: common.clone(),
+                reconstructor: ReconstructorState {
+                    constructing: false,
+                    ..reconstructor
+                }
+            })
+        );
+
+        let repair = RepairTurretState {
+            target_present: true,
+            strength: 0.5,
+            rotation: 45.0,
+        };
+        assert_eq!(
+            roundtrip_exported_unit_state(
+                &content,
+                "unit-repair-tower",
+                10,
+                27,
+                GameRuntimeUnitBlockState::RepairTower(repair),
+            ),
+            Some(GameRuntimeUnitBlockState::RepairTower(RepairTurretState {
+                rotation: 45.0,
+                ..RepairTurretState::default()
+            }))
+        );
+
+        let assembler = UnitAssemblerState {
+            progress: 0.6,
+            read_unit_ids: vec![101, 102],
+            blocks: PayloadSeq::new(),
+            command_pos: Some(IoVec2 { x: 64.0, y: 96.0 }),
+            ..UnitAssemblerState::default()
+        };
+        assert_eq!(
+            roundtrip_exported_unit_state(
+                &content,
+                "tank-assembler",
+                14,
+                27,
+                GameRuntimeUnitBlockState::Assembler {
+                    common: common.clone(),
+                    assembler: assembler.clone(),
+                },
+            ),
+            Some(GameRuntimeUnitBlockState::Assembler {
+                common: common.clone(),
+                assembler
+            })
+        );
+
+        let module_common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: -0.25, y: 0.5 },
+            pay_rotation: 180.0,
+            carried: false,
+        };
+        assert_eq!(
+            roundtrip_exported_unit_state(
+                &content,
+                "basic-assembler-module",
+                18,
+                27,
+                GameRuntimeUnitBlockState::AssemblerModule(module_common.clone()),
+            ),
+            Some(GameRuntimeUnitBlockState::AssemblerModule(module_common))
         );
     }
 
