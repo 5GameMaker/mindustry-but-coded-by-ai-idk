@@ -873,6 +873,10 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `directional_force_projector_draw_plan(...)`
 - `directional_force_projector_absorb_bullet(...)`
 - `directional_force_projector_absorb_bullet_comp(...)`
+- `DirectionalForceProjectorAbsorbEvent`
+- `DirectionalForceProjectorBreakEvent`
+- `directional_force_projector_absorb_event(...)`
+- `directional_force_projector_break_event(...)`
 - 已对照 `ShieldWall.draw()` 锁定：
   - 总是先绘制 base region；
   - `shieldRadius <= 0` 时只输出 region；
@@ -892,6 +896,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - animated shield 走 rect、edge lines 与 caps，静态 shield 走 fill/stroke rect；
   - top additive alpha = `buildup / shieldHealth * 0.75`。
   - `directional_force_projector_absorb_bullet_comp(...)` 已把几何相交判定接到真实 `BulletComp::absorb()`，并使用 `BulletType::shield_damage(bullet.damage)` 写入 `buildup`。
+  - 吸收命中时现在会把 bullet 坐标移动到 shield segment 的真实交点，再执行 `BulletComp::absorb()`，对齐 Java `b.set(intersectOut); b.absorb(); paramEffect.at(b)` 的顺序。
+  - `directional_force_projector_absorb_event(...)` 与 `directional_force_projector_break_event(...)` 已将吸收 FX 与破盾 FX 收束为运行态事件计划，等待后续 renderer/effect dispatcher 执行。
 - `ForceProjectorState`
 - `force_projector_real_radius(...)`
 - `force_projector_shield(...)`

@@ -2858,6 +2858,22 @@ pub struct DirectionalForceProjectorDeflectPlan {
     pub bounds: DirectionalForceProjectorRect,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorAbsorbEvent {
+    pub x: f32,
+    pub y: f32,
+    pub play_absorb_effect: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectionalForceProjectorBreakEvent {
+    pub x: f32,
+    pub y: f32,
+    pub shield_radius: f32,
+    pub team: TeamId,
+    pub play_shield_break_effect: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectionalForceProjectorDrawCommand {
     SuperDraw,
@@ -3043,6 +3059,20 @@ pub fn directional_force_projector_update(
     broke_now
 }
 
+pub fn directional_force_projector_break_event(
+    broke_now: bool,
+    state: &DirectionalForceProjectorState,
+    building: &BuildingComp,
+) -> Option<DirectionalForceProjectorBreakEvent> {
+    broke_now.then_some(DirectionalForceProjectorBreakEvent {
+        x: building.x,
+        y: building.y,
+        shield_radius: state.shield_radius,
+        team: building.team,
+        play_shield_break_effect: true,
+    })
+}
+
 pub fn directional_force_projector_picked_up(state: &mut DirectionalForceProjectorState) {
     state.shield_radius = 0.0;
     state.warmup = 0.0;
@@ -3182,6 +3212,42 @@ pub fn directional_force_projector_draw_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn directional_force_projector_absorb_intersection(
+    state: &DirectionalForceProjectorState,
+    enemy_team: bool,
+    absorbable: bool,
+    bullet_x: f32,
+    bullet_y: f32,
+    bullet_vel_x: f32,
+    bullet_vel_y: f32,
+    delta: f32,
+    projector_x: f32,
+    projector_y: f32,
+    length: f32,
+    rotation_degrees: f32,
+) -> Option<(f32, f32)> {
+    if state.shield_radius <= 0.0 || state.broken || !enemy_team || !absorbable {
+        return None;
+    }
+    let ((x1, y1), (x2, y2)) = directional_force_projector_segment(
+        projector_x,
+        projector_y,
+        length,
+        state.shield_radius,
+        rotation_degrees,
+    );
+    segment_intersection_point(
+        (bullet_x, bullet_y),
+        (
+            bullet_x + bullet_vel_x * (delta + 1.1),
+            bullet_y + bullet_vel_y * (delta + 1.1),
+        ),
+        (x1, y1),
+        (x2, y2),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn directional_force_projector_absorb_bullet(
     state: &mut DirectionalForceProjectorState,
     enemy_team: bool,
@@ -3197,25 +3263,22 @@ pub fn directional_force_projector_absorb_bullet(
     length: f32,
     rotation_degrees: f32,
 ) -> bool {
-    if state.shield_radius <= 0.0 || state.broken || !enemy_team || !absorbable {
-        return false;
-    }
-    let ((x1, y1), (x2, y2)) = directional_force_projector_segment(
+    if directional_force_projector_absorb_intersection(
+        state,
+        enemy_team,
+        absorbable,
+        bullet_x,
+        bullet_y,
+        bullet_vel_x,
+        bullet_vel_y,
+        delta,
         projector_x,
         projector_y,
         length,
-        state.shield_radius,
         rotation_degrees,
-    );
-    if segments_intersect(
-        (bullet_x, bullet_y),
-        (
-            bullet_x + bullet_vel_x * (delta + 1.1),
-            bullet_y + bullet_vel_y * (delta + 1.1),
-        ),
-        (x1, y1),
-        (x2, y2),
-    ) {
+    )
+    .is_some()
+    {
         state.hit = 1.0;
         state.buildup += bullet_damage;
         true
@@ -3239,7 +3302,7 @@ pub fn directional_force_projector_absorb_bullet_comp(
     if bullet.absorbed {
         return false;
     }
-    let absorbed = directional_force_projector_absorb_bullet(
+    let intersection = directional_force_projector_absorb_intersection(
         state,
         enemy_team,
         bullet_type.absorbable,
@@ -3247,17 +3310,33 @@ pub fn directional_force_projector_absorb_bullet_comp(
         bullet.y,
         bullet.velocity.x,
         bullet.velocity.y,
-        bullet_type.shield_damage(bullet.damage),
         delta,
         projector_x,
         projector_y,
         length,
         rotation_degrees,
     );
-    if absorbed {
+    if let Some((x, y)) = intersection {
+        state.hit = 1.0;
+        state.buildup += bullet_type.shield_damage(bullet.damage);
+        bullet.x = x;
+        bullet.y = y;
         bullet.absorb();
+        true
+    } else {
+        false
     }
-    absorbed
+}
+
+pub fn directional_force_projector_absorb_event(
+    absorbed: bool,
+    bullet: &BulletComp,
+) -> Option<DirectionalForceProjectorAbsorbEvent> {
+    absorbed.then_some(DirectionalForceProjectorAbsorbEvent {
+        x: bullet.x,
+        y: bullet.y,
+        play_absorb_effect: true,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4540,15 +4619,30 @@ fn rotate_add(x: f32, y: f32, degrees: f32, add_x: f32, add_y: f32) -> (f32, f32
     (x * cos - y * sin + add_x, x * sin + y * cos + add_y)
 }
 
-fn segments_intersect(a1: (f32, f32), a2: (f32, f32), b1: (f32, f32), b2: (f32, f32)) -> bool {
-    fn cross(a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> f32 {
-        (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+fn segment_intersection_point(
+    a1: (f32, f32),
+    a2: (f32, f32),
+    b1: (f32, f32),
+    b2: (f32, f32),
+) -> Option<(f32, f32)> {
+    let a_dx = a2.0 - a1.0;
+    let a_dy = a2.1 - a1.1;
+    let b_dx = b2.0 - b1.0;
+    let b_dy = b2.1 - b1.1;
+    let denom = a_dx * b_dy - a_dy * b_dx;
+    if denom.abs() <= f32::EPSILON {
+        return None;
     }
-    let d1 = cross(a1, a2, b1);
-    let d2 = cross(a1, a2, b2);
-    let d3 = cross(b1, b2, a1);
-    let d4 = cross(b1, b2, a2);
-    d1.signum() != d2.signum() && d3.signum() != d4.signum()
+
+    let c_dx = b1.0 - a1.0;
+    let c_dy = b1.1 - a1.1;
+    let t = (c_dx * b_dy - c_dy * b_dx) / denom;
+    let u = (c_dx * a_dy - c_dy * a_dx) / denom;
+    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+        Some((a1.0 + t * a_dx, a1.1 + t * a_dy))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -6655,8 +6749,18 @@ mod tests {
         ));
         assert_eq!(directional_runtime.hit, 1.0);
         assert_eq!(directional_runtime.buildup, 30.0);
+        assert_eq!(typed_bullet.x, 40.0);
+        assert_eq!(typed_bullet.y, 0.0);
         assert!(typed_bullet.absorbed);
         assert!(typed_bullet.removed);
+        assert_eq!(
+            directional_force_projector_absorb_event(true, &typed_bullet),
+            Some(DirectionalForceProjectorAbsorbEvent {
+                x: 40.0,
+                y: 0.0,
+                play_absorb_effect: true,
+            })
+        );
         let after_absorb = directional_runtime;
         assert!(!directional_force_projector_absorb_bullet_comp(
             &mut directional_runtime,
@@ -6670,6 +6774,42 @@ mod tests {
             0.0
         ));
         assert_eq!(directional_runtime, after_absorb);
+        assert_eq!(
+            directional_force_projector_absorb_event(false, &typed_bullet),
+            None
+        );
+        let mut breaking_directional = DirectionalForceProjectorState {
+            broken: false,
+            buildup: 4000.0,
+            warmup: 1.0,
+            shield_radius: 30.0,
+            ..DirectionalForceProjectorState::default()
+        };
+        let mut directional_build = projector_runtime_building(33, "directional-force-projector");
+        directional_build.set_pos(10.0, 20.0);
+        let broke_directional =
+            directional_force_projector_update(&mut breaking_directional, 1.0, 0.0, 30.0, 3000.0);
+        assert!(broke_directional);
+        assert_eq!(
+            directional_force_projector_break_event(
+                broke_directional,
+                &breaking_directional,
+                &directional_build,
+            ),
+            Some(DirectionalForceProjectorBreakEvent {
+                x: 10.0,
+                y: 20.0,
+                shield_radius: 30.0,
+                team: TeamId(1),
+                play_shield_break_effect: true,
+            })
+        );
+        assert!(directional_force_projector_break_event(
+            false,
+            &breaking_directional,
+            &directional_build
+        )
+        .is_none());
         directional_force_projector_picked_up(&mut directional);
         assert_eq!(directional.shield_radius, 0.0);
         assert_eq!(directional.warmup, 0.0);
