@@ -251,8 +251,14 @@ pub enum GameRuntimeLegacyBlockState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeUnitBlockState {
-    Factory(UnitFactoryState),
-    Reconstructor(ReconstructorState),
+    Factory {
+        common: PayloadBlockBuildState,
+        factory: UnitFactoryState,
+    },
+    Reconstructor {
+        common: PayloadBlockBuildState,
+        reconstructor: ReconstructorState,
+    },
     RepairTower(RepairTurretState),
     Assembler {
         common: PayloadBlockBuildState,
@@ -1469,12 +1475,23 @@ impl GameRuntime {
         }
 
         match block {
-            BlockDef::UnitFactory(_) => read_unit_factory_state(building_payload, revision as i32)
-                .map(|state| Some(GameRuntimeUnitBlockState::Factory(state)))
-                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            BlockDef::UnitFactory(_) => {
+                let common = read_empty_payload_block_build_common(building_payload)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                read_unit_factory_state(building_payload, revision as i32)
+                    .map(|factory| Some(GameRuntimeUnitBlockState::Factory { common, factory }))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
             BlockDef::UnitReconstructor(_) => {
+                let common = read_empty_payload_block_build_common(building_payload)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 read_reconstructor_state(building_payload, revision as i32)
-                    .map(|state| Some(GameRuntimeUnitBlockState::Reconstructor(state)))
+                    .map(|reconstructor| {
+                        Some(GameRuntimeUnitBlockState::Reconstructor {
+                            common,
+                            reconstructor,
+                        })
+                    })
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
             BlockDef::UnitRepairTower(_) => {
@@ -4463,6 +4480,12 @@ mod tests {
         let factory_def = content.block_by_name("ground-factory").unwrap();
         let tile_pos = point2_pack(4, 0);
         let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 1.0, y: -2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
         let state = UnitFactoryState {
             base: crate::mindustry::world::blocks::units::UnitBlockState {
                 progress: 25.0,
@@ -4475,6 +4498,7 @@ mod tests {
         let mut building_bytes = Vec::new();
         building_bytes.push(3);
         saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
         write_unit_factory_state(&mut building_bytes, &state).unwrap();
 
         let mut runtime = GameRuntime::default();
@@ -4488,7 +4512,10 @@ mod tests {
         assert_eq!(report.block_state_parse_errors, 0);
         assert_eq!(
             runtime.unit_runtime_states.get(&tile_pos),
-            Some(&GameRuntimeUnitBlockState::Factory(state))
+            Some(&GameRuntimeUnitBlockState::Factory {
+                common,
+                factory: state
+            })
         );
     }
 
@@ -4498,6 +4525,12 @@ mod tests {
         let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
         let tile_pos = point2_pack(3, 0);
         let saved = BuildingComp::new(tile_pos, reconstructor_def.base().clone(), TeamId(1));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 2.0, y: -3.0 },
+            pay_rotation: 180.0,
+            carried: false,
+        };
         let state = ReconstructorState {
             base: crate::mindustry::world::blocks::units::UnitBlockState {
                 progress: 11.0,
@@ -4510,6 +4543,7 @@ mod tests {
         let mut building_bytes = Vec::new();
         building_bytes.push(3);
         saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
         write_reconstructor_state(&mut building_bytes, &state).unwrap();
 
         let mut runtime = GameRuntime::default();
@@ -4523,7 +4557,10 @@ mod tests {
         assert_eq!(report.block_state_parse_errors, 0);
         assert_eq!(
             runtime.unit_runtime_states.get(&tile_pos),
-            Some(&GameRuntimeUnitBlockState::Reconstructor(state))
+            Some(&GameRuntimeUnitBlockState::Reconstructor {
+                common,
+                reconstructor: state
+            })
         );
     }
 
