@@ -101,6 +101,53 @@ impl Default for TimerComp {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildingTimerState {
+    pub timer: Interval,
+}
+
+impl BuildingTimerState {
+    pub const DEFAULT_TIMERS: usize = TimerComp::DEFAULT_TIMERS;
+
+    pub fn new(timers: usize) -> Self {
+        Self {
+            timer: Interval::new(timers),
+        }
+    }
+
+    pub fn set_time(&mut self, now: f32) {
+        self.timer.set_time(now);
+    }
+
+    pub fn advance_time(&mut self, delta: f32) {
+        self.timer.advance(delta);
+    }
+
+    /// Java `TimerComp.timer(index, time)` semantics for building runtime
+    /// sidecars: infinite intervals never fire, finite intervals delegate to
+    /// the slot-based `Interval`.
+    pub fn timer(&mut self, index: usize, time: f32) -> bool {
+        if time.is_infinite() {
+            return false;
+        }
+        self.timer.get(index, time)
+    }
+
+    pub fn reset(&mut self, index: usize, time: f32) {
+        self.timer.reset(index, time);
+    }
+
+    pub fn clear(&mut self) {
+        self.timer.clear();
+    }
+}
+
+impl Default for BuildingTimerState {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_TIMERS)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +197,29 @@ mod tests {
         interval.clear();
         assert_eq!(interval.last_time(0), 0.0);
         assert_eq!(interval.last_time(1), 0.0);
+    }
+
+    #[test]
+    fn building_timer_state_matches_java_building_timer_sidecar_shape() {
+        let mut timer = BuildingTimerState::default();
+
+        assert_eq!(timer.timer.timers(), 6);
+        assert_eq!(timer.timer.now(), 0.0);
+        assert!(!timer.timer(0, f32::INFINITY));
+        assert!(!timer.timer(1, 8.0));
+
+        timer.advance_time(8.0);
+        assert!(timer.timer(1, 8.0));
+        assert_eq!(timer.timer.last_time(1), 8.0);
+
+        timer.reset(1, 4.0);
+        assert_eq!(timer.timer.last_time(1), 12.0);
+        timer.set_time(13.0);
+        assert!(!timer.timer(1, 4.0));
+        timer.set_time(3.0);
+        assert!(timer.timer(1, 4.0));
+
+        timer.clear();
+        assert_eq!(timer.timer.last_time(1), 0.0);
     }
 }
