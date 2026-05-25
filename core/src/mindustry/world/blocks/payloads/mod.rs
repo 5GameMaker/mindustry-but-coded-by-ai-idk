@@ -7,8 +7,8 @@ use crate::mindustry::{
 
 pub const DEFAULT_PAYLOAD_SPEED: f32 = 0.7;
 pub const DEFAULT_PAYLOAD_ROTATE_SPEED: f32 = 5.0;
-pub const PAYLOAD_BLOCK_TYPE: u8 = 0;
-pub const PAYLOAD_UNIT_TYPE: u8 = 1;
+pub const PAYLOAD_UNIT_TYPE: u8 = 0;
+pub const PAYLOAD_BLOCK_TYPE: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vec2 {
@@ -1316,6 +1316,10 @@ mod tests {
 
     #[test]
     fn payload_ref_presence_and_headers_match_java_payload_write() {
+        // Java Payload constants: payloadUnit = 0, payloadBlock = 1.
+        assert_eq!(PAYLOAD_UNIT_TYPE, 0);
+        assert_eq!(PAYLOAD_BLOCK_TYPE, 1);
+
         let mut bytes = Vec::new();
         write_payload_ref(&mut bytes, None).unwrap();
         assert_eq!(bytes, vec![0]);
@@ -1327,7 +1331,7 @@ mod tests {
         };
         let mut bytes = Vec::new();
         write_payload_ref(&mut bytes, Some(&block)).unwrap();
-        assert_eq!(bytes, vec![1, PAYLOAD_BLOCK_TYPE, 0, 12, 3, 0xaa, 0xbb]);
+        assert_eq!(bytes, vec![1, 1, 0, 12, 3, 0xaa, 0xbb]);
 
         let unit = PayloadRef::Unit {
             class_id: 9,
@@ -1335,7 +1339,7 @@ mod tests {
         };
         let mut bytes = Vec::new();
         write_payload_ref(&mut bytes, Some(&unit)).unwrap();
-        assert_eq!(bytes, vec![1, PAYLOAD_UNIT_TYPE, 9, 1, 2]);
+        assert_eq!(bytes, vec![1, 0, 9, 1, 2]);
     }
 
     #[test]
