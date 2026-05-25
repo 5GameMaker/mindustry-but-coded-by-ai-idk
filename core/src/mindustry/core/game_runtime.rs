@@ -78,10 +78,10 @@ use crate::mindustry::{
         MessageBlockState,
     },
     world::blocks::payloads::{
-        block_producer_update, constructor_clear, constructor_configure,
-        read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
-        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
-        read_payload_router_extra, read_payload_source_extra,
+        block_producer_update, constructor_clear, constructor_configure, payload_block_move_in,
+        payload_void_update, read_block_producer_progress, read_constructor_recipe,
+        read_deconstructor_extra, read_payload_loader_extra, read_payload_mass_driver_extra,
+        read_payload_ref_to_end, read_payload_router_extra, read_payload_source_extra,
         read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
         write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
         write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
@@ -1317,6 +1317,15 @@ pub struct GameRuntimePayloadConstructorFrameReport {
     pub produced_payloads: usize,
     pub missing_runtime_states: usize,
     pub missing_recipe_build_times: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimePayloadVoidFrameReport {
+    pub visited_buildings: usize,
+    pub void_candidates: usize,
+    pub updated_voids: usize,
+    pub incinerated_payloads: usize,
+    pub missing_runtime_states: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3260,6 +3269,82 @@ impl GameRuntime {
                         report.produced_payloads += 1;
                     }
                 }
+            }
+        }
+
+        Some(report)
+    }
+
+    pub fn advance_owned_payload_voids(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimePayloadVoidFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+
+        self.refresh_owned_building_update_permissions(content);
+
+        let frame_delta = advanced.delta_ticks as f32;
+        let mut report = GameRuntimePayloadVoidFrameReport::default();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, enabled, efficiency, time_scale, rotdeg) = {
+                let building = &mut self.buildings[index];
+                let can_overdrive = content
+                    .block(building.block.id)
+                    .map(BlockDef::can_overdrive)
+                    .unwrap_or(false);
+                building.advance_update_timing(frame_delta, can_overdrive);
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.enabled,
+                    building.efficiency,
+                    building.time_scale,
+                    building.rotdeg(),
+                )
+            };
+
+            if !enabled {
+                continue;
+            }
+
+            let Some(BlockDef::Sandbox(sandbox)) = content.block(block_id) else {
+                continue;
+            };
+            if sandbox.kind != SandboxBlockKind::PayloadVoid {
+                continue;
+            }
+            report.void_candidates += 1;
+
+            let Some(GameRuntimePayloadBlockState::Void(common)) =
+                self.payload_runtime_states.get_mut(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            let arrived = payload_block_move_in(
+                common,
+                false,
+                sandbox.rotate,
+                rotdeg,
+                sandbox.payload_speed,
+                sandbox.payload_rotate_speed,
+                frame_delta * time_scale,
+            );
+            report.updated_voids += 1;
+
+            if payload_void_update(arrived, efficiency, common.payload.is_some()) {
+                common.payload = None;
+                common.pay_vector = PayloadVec2::ZERO;
+                report.incinerated_payloads += 1;
             }
         }
 
@@ -7340,6 +7425,83 @@ mod tests {
         assert_eq!(report.buildings_added, 1);
         assert_eq!(report.block_states_added, 1);
         assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Void(common))
+        );
+    }
+
+    #[test]
+    fn game_runtime_advances_owned_payload_void_and_incinerates_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let tile_pos = point2_pack(0, 5);
+        let common = PayloadBlockBuildState {
+            payload: Some(base_only_build_payload_ref(&content, "router")),
+            pay_vector: Vec2 { x: 0.5, y: -0.5 },
+            pay_rotation: 270.0,
+            carried: false,
+        };
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime
+            .payload_runtime_states
+            .insert(tile_pos, GameRuntimePayloadBlockState::Void(common));
+
+        let report = runtime.advance_owned_payload_voids(&content, 1.0).unwrap();
+
+        assert_eq!(
+            report,
+            GameRuntimePayloadVoidFrameReport {
+                visited_buildings: 1,
+                void_candidates: 1,
+                updated_voids: 1,
+                incinerated_payloads: 1,
+                missing_runtime_states: 0,
+            }
+        );
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(common.pay_vector, Vec2::ZERO);
+    }
+
+    #[test]
+    fn game_runtime_payload_void_keeps_arrived_payload_without_efficiency() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let tile_pos = point2_pack(0, 5);
+        let payload = base_only_build_payload_ref(&content, "router");
+        let common = PayloadBlockBuildState {
+            payload: Some(payload.clone()),
+            pay_vector: Vec2::ZERO,
+            pay_rotation: 270.0,
+            carried: false,
+        };
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        let mut building = BuildingComp::new(tile_pos, void_def.base().clone(), TeamId(6));
+        building.efficiency = 0.0;
+        runtime.add_building(building);
+        runtime
+            .payload_runtime_states
+            .insert(tile_pos, GameRuntimePayloadBlockState::Void(common.clone()));
+
+        let report = runtime.advance_owned_payload_voids(&content, 1.0).unwrap();
+
+        assert_eq!(report.incinerated_payloads, 0);
         assert_eq!(
             runtime.payload_runtime_states.get(&tile_pos),
             Some(&GameRuntimePayloadBlockState::Void(common))
