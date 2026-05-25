@@ -136,6 +136,12 @@ enum GameRuntimeBlockStateReadError {
     Unsupported,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameRuntimePayloadReadMode {
+    TopLevel,
+    NestedExact,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimePayloadBlockState {
     MassDriver {
@@ -553,6 +559,7 @@ impl GameRuntime {
                 &building,
                 revision,
                 &mut building_bytes,
+                GameRuntimePayloadReadMode::TopLevel,
             ) {
                 Ok(state) => state,
                 Err(GameRuntimeBlockStateReadError::Parse) => {
@@ -663,6 +670,7 @@ impl GameRuntime {
         building: &BuildingComp,
         revision: u8,
         building_payload: &mut &[u8],
+        payload_read_mode: GameRuntimePayloadReadMode,
     ) -> Result<Option<GameRuntimeLoadedBlockState>, GameRuntimeBlockStateReadError> {
         match self.read_construct_runtime_state_from_building_payload(
             block,
@@ -696,6 +704,7 @@ impl GameRuntime {
             block,
             revision,
             building_payload,
+            payload_read_mode,
         ) {
             Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Payload(state))),
             Ok(None) => return Ok(None),
@@ -835,6 +844,7 @@ impl GameRuntime {
             block,
             revision,
             building_payload,
+            payload_read_mode,
         ) {
             Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Unit(state))),
             Ok(None) => return Ok(None),
@@ -1009,6 +1019,7 @@ impl GameRuntime {
                     &building,
                     version,
                     &mut state_bytes,
+                    GameRuntimePayloadReadMode::NestedExact,
                 ) {
                     Ok(_) => {}
                     Err(GameRuntimeBlockStateReadError::Unsupported) => {
@@ -1050,6 +1061,7 @@ impl GameRuntime {
         block: &BlockDef,
         revision: u8,
         building_payload: &mut &[u8],
+        payload_read_mode: GameRuntimePayloadReadMode,
     ) -> Result<Option<GameRuntimePayloadBlockState>, GameRuntimeBlockStateReadError> {
         if building_payload.is_empty() {
             return Ok(None);
@@ -1058,9 +1070,16 @@ impl GameRuntime {
         match block {
             BlockDef::Payload(payload) => match payload.kind {
                 PayloadBlockKind::PayloadConveyor => {
-                    let (_progress, item_rotation, item) =
-                        read_terminal_payload_conveyor_extra(building_payload)
-                            .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                    let (item_rotation, item) =
+                        if payload_read_mode == GameRuntimePayloadReadMode::TopLevel {
+                            let (_progress, item_rotation, item) =
+                                read_terminal_payload_conveyor_extra(building_payload)
+                                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                            (item_rotation, item)
+                        } else {
+                            self.read_exact_payload_conveyor_extra(content, building_payload)
+                                .map_err(|_| GameRuntimeBlockStateReadError::Parse)?
+                        };
                     let conveyor = PayloadConveyorState {
                         item,
                         item_rotation,
@@ -1119,8 +1138,13 @@ impl GameRuntime {
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let (progress, accum) = read_deconstructor_extra(building_payload)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
-                let deconstructing = read_payload_ref_to_end(building_payload)
-                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let deconstructing = if payload_read_mode == GameRuntimePayloadReadMode::TopLevel {
+                    read_payload_ref_to_end(building_payload)
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)?
+                } else {
+                    self.read_exact_payload_ref(content, building_payload)
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)?
+                };
                 let deconstructor = PayloadDeconstructorState {
                     progress,
                     accum,
@@ -1172,9 +1196,15 @@ impl GameRuntime {
                 }))
             }
             BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadVoid => {
-                read_terminal_payload_block_build_common(building_payload)
-                    .map(|common| Some(GameRuntimePayloadBlockState::Void(common)))
-                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                if payload_read_mode == GameRuntimePayloadReadMode::TopLevel {
+                    read_terminal_payload_block_build_common(building_payload)
+                        .map(|common| Some(GameRuntimePayloadBlockState::Void(common)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                } else {
+                    self.read_exact_payload_block_build_common(content, building_payload)
+                        .map(|common| Some(GameRuntimePayloadBlockState::Void(common)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                }
             }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
@@ -1601,6 +1631,7 @@ impl GameRuntime {
         block: &BlockDef,
         revision: u8,
         building_payload: &mut &[u8],
+        payload_read_mode: GameRuntimePayloadReadMode,
     ) -> Result<Option<GameRuntimeUnitBlockState>, GameRuntimeBlockStateReadError> {
         if building_payload.is_empty() {
             return Ok(None);
@@ -1644,9 +1675,15 @@ impl GameRuntime {
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
             BlockDef::UnitAssemblerModule(_) => {
-                read_terminal_payload_block_build_common(building_payload)
-                    .map(|common| Some(GameRuntimeUnitBlockState::AssemblerModule(common)))
-                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                if payload_read_mode == GameRuntimePayloadReadMode::TopLevel {
+                    read_terminal_payload_block_build_common(building_payload)
+                        .map(|common| Some(GameRuntimeUnitBlockState::AssemblerModule(common)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                } else {
+                    self.read_exact_payload_block_build_common(content, building_payload)
+                        .map(|common| Some(GameRuntimeUnitBlockState::AssemblerModule(common)))
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+                }
             }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
@@ -2111,6 +2148,22 @@ mod tests {
         write_door_state(&mut build_bytes, DoorState { open }).unwrap();
         PayloadRef::Block {
             block: door_def.base().id,
+            version: 0,
+            build_bytes,
+        }
+    }
+
+    fn payload_conveyor_build_payload_ref(
+        content: &ContentLoader,
+        item: &PayloadRef,
+    ) -> PayloadRef {
+        let conveyor_def = content.block_by_name("payload-conveyor").unwrap();
+        let conveyor = BuildingComp::new(point2_pack(0, 0), conveyor_def.base().clone(), TeamId(1));
+        let mut build_bytes = Vec::new();
+        conveyor.write_base(&mut build_bytes, false).unwrap();
+        write_payload_conveyor_extra(&mut build_bytes, 5.0, 45.0, Some(item)).unwrap();
+        PayloadRef::Block {
+            block: conveyor_def.base().id,
             version: 0,
             build_bytes,
         }
@@ -4819,6 +4872,54 @@ mod tests {
         let tile_pos = point2_pack(4, 0);
         let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
         let payload = door_build_payload_ref(&content, true);
+        let common = PayloadBlockBuildState {
+            payload: Some(payload),
+            pay_vector: Vec2 { x: 1.0, y: -2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let state = UnitFactoryState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 25.0,
+                ..Default::default()
+            },
+            current_plan: 1,
+            command_pos: Some(IoVec2 { x: 12.0, y: 34.0 }),
+            command_id: Some(2),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(3);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_unit_factory_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 4, factory_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Factory {
+                common,
+                factory: state
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_factory_common_nested_payload_conveyor_without_swallowing_factory_fields(
+    ) {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("ground-factory").unwrap();
+        let tile_pos = point2_pack(4, 0);
+        let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
+        let inner = door_build_payload_ref(&content, true);
+        let payload = payload_conveyor_build_payload_ref(&content, &inner);
         let common = PayloadBlockBuildState {
             payload: Some(payload),
             pay_vector: Vec2 { x: 1.0, y: -2.0 },
