@@ -7,6 +7,7 @@
 //! migrated separately.
 
 use crate::mindustry::{
+    core::content_loader::ContentLoader,
     io::LegacyShortChunkMap,
     vars::TILE_SIZE,
     world::{point2_x, point2_y, BlockId, BuildingRef, Tile, Tiles},
@@ -32,6 +33,16 @@ impl BlockSolidity {
     pub const fn new(solid: bool, fills_tile: bool) -> Self {
         Self { solid, fills_tile }
     }
+}
+
+pub fn block_solidity_from_content(
+    content: &ContentLoader,
+    block_id: BlockId,
+) -> Option<BlockSolidity> {
+    content.block(block_id).map(|block| {
+        let base = block.base();
+        BlockSolidity::new(base.solid, base.fills_tile)
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +118,12 @@ impl World {
             .unwrap_or(true)
     }
 
+    pub fn wall_solid_with_content(&self, x: i32, y: i32, content: &ContentLoader) -> bool {
+        self.wall_solid_with(x, y, |block_id| {
+            block_solidity_from_content(content, block_id)
+        })
+    }
+
     pub fn wall_solid_full_with<F>(&self, x: i32, y: i32, block: F) -> bool
     where
         F: Fn(BlockId) -> Option<BlockSolidity>,
@@ -118,6 +135,16 @@ impl World {
                     .unwrap_or(tile.block != Tile::AIR)
             })
             .unwrap_or(true)
+    }
+
+    pub fn wall_solid_full_with_content(&self, x: i32, y: i32, content: &ContentLoader) -> bool {
+        self.wall_solid_full_with(x, y, |block_id| {
+            block_solidity_from_content(content, block_id)
+        })
+    }
+
+    pub fn passable_with_content(&self, x: i32, y: i32, content: &ContentLoader) -> bool {
+        self.tile(x, y).is_some() && !self.wall_solid_with_content(x, y, content)
     }
 
     pub fn is_accessible(&self, x: i32, y: i32) -> bool {
@@ -377,6 +404,28 @@ mod tests {
         assert!(!world.wall_solid_with(0, 0, |_| Some(BlockSolidity::new(false, false))));
         assert!(!world.wall_solid_full_with(0, 0, |_| Some(BlockSolidity::new(true, false))));
         assert!(world.wall_solid_full_with(0, 0, |_| Some(BlockSolidity::new(true, true))));
+    }
+
+    #[test]
+    fn content_backed_solidity_uses_registered_block_metadata_for_runtime_world_queries() {
+        let content =
+            crate::mindustry::core::content_loader::ContentLoader::create_base_content_or_panic();
+        let conveyor = content.block_by_name("conveyor").unwrap().base().id;
+        let copper_wall = content.block_by_name("copper-wall").unwrap().base().id;
+
+        let mut world = World::new();
+        world.resize(2, 1);
+        world.tile_mut(0, 0).unwrap().block = conveyor;
+        world.tile_mut(1, 0).unwrap().block = copper_wall;
+
+        // The legacy fallback treats any non-air block as solid; the content
+        // backed path follows Java `tile.block().solid/fillsTile` metadata.
+        assert!(world.wall_solid(0, 0));
+        assert!(!world.wall_solid_with_content(0, 0, &content));
+        assert!(world.passable_with_content(0, 0, &content));
+        assert!(world.wall_solid_with_content(1, 0, &content));
+        assert!(world.wall_solid_full_with_content(1, 0, &content));
+        assert!(world.wall_solid_with_content(-1, 0, &content));
     }
 
     #[test]

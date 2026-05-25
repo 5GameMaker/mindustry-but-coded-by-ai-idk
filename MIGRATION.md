@@ -1031,6 +1031,11 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 7. `server`：独立服务端完整运行；
 8. `tools/android/ios/annotations/tests`：平台与工具链补齐。
 
+补充已接入的 world/content 运行态桥：
+
+- `World::wall_solid_with_content(...)` / `wall_solid_full_with_content(...)` / `passable_with_content(...)` 已通过 `ContentLoader` 查询真实 `BlockDef.base().solid/fills_tile`，不再只能用 “非 air 即 solid” 的临时 fallback；
+- 这一步让 pathfinder、建筑放置、单位通行等后续 runtime 可以直接复用 content registry 中的 Java block metadata。
+
 ## 10. 已知验证状态与风险
 
 曾稳定通过的定向验证：
