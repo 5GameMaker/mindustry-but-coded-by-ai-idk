@@ -96,6 +96,27 @@ pub fn read_switch_enabled<R: Read>(read: &mut R, revision: u8, current: bool) -
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageBlockState {
+    pub message: String,
+}
+
+impl MessageBlockState {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+pub fn write_message_state<W: Write>(write: &mut W, state: &MessageBlockState) -> io::Result<()> {
+    write_java_utf(write, &state.message)
+}
+
+pub fn read_message_state<R: Read>(read: &mut R) -> io::Result<MessageBlockState> {
+    read_java_utf(read).map(MessageBlockState::new)
+}
+
 pub fn write_logic_config<W: Write>(write: W, config: &LogicConfig) -> io::Result<()> {
     if config.code.len() > LOGIC_MAX_BYTE_LEN {
         return Err(invalid_input(
@@ -319,6 +340,14 @@ mod tests {
             read_switch_enabled(&mut [].as_slice(), 0, true).unwrap(),
             true
         );
+    }
+
+    #[test]
+    fn message_state_roundtrips_java_utf_payload() {
+        let state = MessageBlockState::new("alpha\nbeta");
+        let mut bytes = Vec::new();
+        write_message_state(&mut bytes, &state).unwrap();
+        assert_eq!(read_message_state(&mut bytes.as_slice()).unwrap(), state);
     }
 
     #[test]

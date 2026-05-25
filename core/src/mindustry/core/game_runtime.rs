@@ -12,8 +12,8 @@ use std::collections::BTreeMap;
 use crate::mindustry::{
     content::blocks::{
         BlockDef, CraftingBlockKind, DefenseWallKind, DistributionBlockKind, EffectBlockKind,
-        LiquidBlockKind, PayloadBlockKind, PowerBlockKind, ProductionBlockKind, SandboxBlockKind,
-        StorageBlockKind, TurretBlockKind,
+        LiquidBlockKind, LogicBlockKind, PayloadBlockKind, PowerBlockKind, ProductionBlockKind,
+        SandboxBlockKind, StorageBlockKind, TurretBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -47,6 +47,7 @@ use crate::mindustry::{
     },
     world::blocks::heat::{read_heat_producer_state, HeatProducerState},
     world::blocks::liquid::{read_liquid_bridge_state, LiquidBridgeState},
+    world::blocks::logic::{read_message_state, read_switch_enabled, MessageBlockState},
     world::blocks::payloads::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
         read_empty_payload_block_build_common, read_empty_payload_conveyor_extra,
@@ -202,6 +203,12 @@ pub enum GameRuntimeLiquidBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeLogicBlockState {
+    Message(MessageBlockState),
+    Switch { enabled: bool },
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeUnitBlockState {
     Factory(UnitFactoryState),
     Reconstructor(ReconstructorState),
@@ -244,6 +251,7 @@ enum GameRuntimeLoadedBlockState {
     Distribution(GameRuntimeDistributionBlockState),
     Storage(GameRuntimeStorageBlockState),
     Liquid(GameRuntimeLiquidBlockState),
+    Logic(GameRuntimeLogicBlockState),
     Unit(GameRuntimeUnitBlockState),
     DefenseWall(GameRuntimeDefenseWallState),
     Turret(GameRuntimeTurretBlockState),
@@ -262,6 +270,7 @@ pub struct GameRuntime {
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
+    pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
     pub turret_runtime_states: BTreeMap<i32, GameRuntimeTurretBlockState>,
@@ -287,6 +296,7 @@ impl GameRuntime {
             distribution_runtime_states: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
+            logic_runtime_states: BTreeMap::new(),
             unit_runtime_states: BTreeMap::new(),
             defense_wall_runtime_states: BTreeMap::new(),
             turret_runtime_states: BTreeMap::new(),
@@ -337,6 +347,7 @@ impl GameRuntime {
         self.distribution_runtime_states.remove(&removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
+        self.logic_runtime_states.remove(&removed.tile_pos);
         self.unit_runtime_states.remove(&removed.tile_pos);
         self.defense_wall_runtime_states.remove(&removed.tile_pos);
         self.turret_runtime_states.remove(&removed.tile_pos);
@@ -526,6 +537,10 @@ impl GameRuntime {
                         self.liquid_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Logic(block_state) => {
+                        self.logic_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                     GameRuntimeLoadedBlockState::Unit(block_state) => {
                         self.unit_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
@@ -654,6 +669,16 @@ impl GameRuntime {
             building_payload,
         ) {
             Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Liquid(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_logic_runtime_state_from_building_payload(block, revision, building_payload)
+        {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Logic(state))),
             Ok(None) => return Ok(None),
             Err(GameRuntimeBlockStateReadError::Parse) => {
                 return Err(GameRuntimeBlockStateReadError::Parse);
@@ -1122,6 +1147,35 @@ impl GameRuntime {
         }
     }
 
+    fn read_logic_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeLogicBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Logic(logic) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match logic.kind {
+            LogicBlockKind::Message => read_message_state(building_payload)
+                .map(|state| Some(GameRuntimeLogicBlockState::Message(state)))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            LogicBlockKind::Switch => read_switch_enabled(building_payload, revision, false)
+                .map(|enabled| Some(GameRuntimeLogicBlockState::Switch { enabled }))
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            LogicBlockKind::Processor
+            | LogicBlockKind::Memory
+            | LogicBlockKind::Display
+            | LogicBlockKind::TileDisplay
+            | LogicBlockKind::Canvas => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
     fn read_unit_runtime_state_from_building_payload(
         &self,
         block: &BlockDef,
@@ -1294,6 +1348,7 @@ impl GameRuntime {
         self.distribution_runtime_states.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
+        self.logic_runtime_states.clear();
         self.unit_runtime_states.clear();
         self.defense_wall_runtime_states.clear();
         self.turret_runtime_states.clear();
@@ -1453,6 +1508,7 @@ mod tests {
             },
             blocks::heat::write_heat_producer_state,
             blocks::liquid::{write_liquid_bridge_state, LiquidBridgeState},
+            blocks::logic::{write_message_state, write_switch_enabled},
             blocks::payloads::{
                 write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
                 write_payload_block_build_common, write_payload_conveyor_extra,
@@ -3487,6 +3543,59 @@ mod tests {
         assert_eq!(
             runtime.liquid_runtime_states.get(&tile_pos),
             Some(&GameRuntimeLiquidBlockState::Bridge(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_message_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let message_def = content.block_by_name("message").unwrap();
+        let tile_pos = point2_pack(0, 2);
+        let saved = BuildingComp::new(tile_pos, message_def.base().clone(), TeamId(1));
+        let state = MessageBlockState::new("alpha\nbeta");
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_message_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 12, message_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.logic_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLogicBlockState::Message(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_switch_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let switch_def = content.block_by_name("switch").unwrap();
+        let tile_pos = point2_pack(1, 2);
+        let saved = BuildingComp::new(tile_pos, switch_def.base().clone(), TeamId(1));
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_switch_enabled(&mut building_bytes, true).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 13, switch_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.logic_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLogicBlockState::Switch { enabled: true })
         );
     }
 
