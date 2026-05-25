@@ -77,22 +77,47 @@ impl GameRuntime {
     }
 
     pub fn add_building(&mut self, building: BuildingComp) -> usize {
-        if let Some(index) = self
+        for tile_pos in self.overlapping_building_positions(&building) {
+            let _ = self.remove_building_by_tile_pos(tile_pos);
+        }
+
+        let index = self.buildings.len();
+        self.buildings.push(building);
+        self.sync_world_footprint_refs(index);
+        index
+    }
+
+    pub fn remove_building_by_tile_pos(&mut self, tile_pos: i32) -> Option<BuildingComp> {
+        let index = self
             .buildings
             .iter()
-            .position(|existing| existing.tile_pos == building.tile_pos)
-        {
-            let previous = self.buildings[index].clone();
-            self.clear_world_refs_for_building(&previous);
-            self.buildings[index] = building;
-            self.sync_world_footprint_refs(index);
-            index
-        } else {
-            let index = self.buildings.len();
-            self.buildings.push(building);
-            self.sync_world_footprint_refs(index);
-            index
+            .position(|existing| existing.tile_pos == tile_pos)?;
+        self.remove_building_at_index(index)
+    }
+
+    pub fn remove_building_at_index(&mut self, index: usize) -> Option<BuildingComp> {
+        if index >= self.buildings.len() {
+            return None;
         }
+
+        let removed = self.buildings.remove(index);
+        self.clear_world_refs_for_building(&removed);
+        self.effect_runtime_store.remove(removed.tile_pos);
+        self.effect_timer_store.remove(removed.tile_pos);
+        Some(removed)
+    }
+
+    fn overlapping_building_positions(&self, building: &BuildingComp) -> Vec<i32> {
+        let mut positions = vec![building.tile_pos];
+        for (x, y) in footprint_tiles(building.tile_x(), building.tile_y(), building.block.size) {
+            let Some(existing) = self.state.world.tile(x, y).and_then(|tile| tile.build) else {
+                continue;
+            };
+            if !positions.contains(&existing.tile_pos) {
+                positions.push(existing.tile_pos);
+            }
+        }
+        positions
     }
 
     pub fn clear_buildings(&mut self) {
@@ -559,6 +584,74 @@ mod tests {
         let old_edge = runtime.state.world.tile(9, 9).unwrap();
         assert_eq!(old_edge.block, Tile::AIR);
         assert!(old_edge.build.is_none());
+    }
+
+    #[test]
+    fn game_runtime_add_building_removes_overlapping_multiblock_and_sidecars() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+
+        let center = point2_pack(10, 10);
+        runtime.add_building(BuildingComp::new(
+            center,
+            mend_def.base().clone(),
+            TeamId(1),
+        ));
+        let mend_snapshot = runtime.buildings()[0].clone();
+        runtime
+            .effect_runtime_store
+            .ensure_for_building(&content, &mend_snapshot, 0.0);
+        runtime
+            .effect_timer_store
+            .ensure_for_building(&content, &mend_snapshot);
+        assert!(runtime.effect_runtime_store.get(center).is_some());
+        assert!(runtime.effect_timer_store.get(center).is_some());
+
+        let mut large_block = Block::new(30_010, "test-large");
+        large_block.size = 3;
+        runtime.add_building(BuildingComp::new(center, large_block.clone(), TeamId(1)));
+        assert_eq!(runtime.buildings().len(), 1);
+        assert!(runtime.effect_runtime_store.get(center).is_none());
+        assert!(runtime.effect_timer_store.get(center).is_none());
+        assert_eq!(
+            runtime
+                .state
+                .world
+                .tile(9, 9)
+                .unwrap()
+                .build
+                .unwrap()
+                .tile_pos,
+            center
+        );
+
+        let mut small_block = Block::new(30_011, "test-small");
+        small_block.size = 1;
+        let overlap = point2_pack(9, 9);
+        runtime.add_building(BuildingComp::new(overlap, small_block.clone(), TeamId(2)));
+
+        assert_eq!(runtime.buildings().len(), 1);
+        assert_eq!(runtime.buildings()[0].tile_pos, overlap);
+        assert_eq!(
+            runtime.state.world.tile(9, 9).unwrap().block,
+            small_block.id
+        );
+        assert_eq!(
+            runtime
+                .state
+                .world
+                .tile(9, 9)
+                .unwrap()
+                .build
+                .unwrap()
+                .tile_pos,
+            overlap
+        );
+        let old_center = runtime.state.world.tile(10, 10).unwrap();
+        assert_eq!(old_center.block, Tile::AIR);
+        assert!(old_center.build.is_none());
     }
 
     #[test]
