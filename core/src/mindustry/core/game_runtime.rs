@@ -3470,6 +3470,47 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_loads_payload_mass_driver_revision_zero_without_tail_fields() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("payload-mass-driver").unwrap();
+        let tile_pos = point2_pack(2, 3);
+        let saved = BuildingComp::new(tile_pos, driver_def.base().clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 0.25, y: -0.5 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let driver = PayloadMassDriverState {
+            link: point2_pack(1, 3),
+            turret_rotation: 270.0,
+            state: PayloadDriverState::Accepting,
+            ..PayloadMassDriverState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        building_bytes.extend_from_slice(&driver.link.to_be_bytes());
+        building_bytes.extend_from_slice(&driver.turret_rotation.to_bits().to_be_bytes());
+        building_bytes.push(driver.state.ordinal());
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 20, driver_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::MassDriver { common, driver })
+        );
+    }
+
+    #[test]
     fn game_runtime_loads_payload_loader_state_from_network_map_building_payload() {
         let content = ContentLoader::create_base_content().unwrap();
         let loader_def = content.block_by_name("payload-loader").unwrap();

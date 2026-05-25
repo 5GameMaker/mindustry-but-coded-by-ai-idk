@@ -120,6 +120,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 ## 5. 最近一次完成的具体实现
 
+### 2026-05-26 续作：PayloadMassDriver revision 0 runtime 回归
+
+文件：
+
+- `core/src/mindustry/core/game_runtime.rs`
+- `MIGRATION.md`
+
+完成内容：
+
+1. 补 `game_runtime_loads_payload_mass_driver_revision_zero_without_tail_fields`，构造 Java 旧 revision 0 building payload：
+   - `PayloadBlockBuild` common 前缀；
+   - `link:int`；
+   - `turretRotation:float`；
+   - `state:byte`；
+   - 不写 revision 1 才有的 `reloadCounter/charge/loaded/charging`。
+2. 断言 `GameRuntime::load_network_map_with_buildings(...)` 能把旧 payload 加载成 `GameRuntimePayloadBlockState::MassDriver`，并保留 revision 1 尾字段默认值。
+3. 已验证：
+   - `cargo test -p mindustry-core game_runtime_loads_payload_mass_driver`
+   - `cargo check -p mindustry-core`
+
+### 2026-05-26 续作：TypeIO 对象读取限制对齐
+
+文件：
+
+- `core/src/mindustry/io/type_io.rs`
+- `MIGRATION.md`
+
+完成内容：
+
+1. `TypeIO.read_object(...)` 非 safe 数组上限收紧为 Java `readObject(... safe=false ...)` 的 200 项。
+2. `TypeIO.read_object_safe(...)` 字符串上限收紧为 Java 的 1200 chars。
+3. 补 `object_reader_limits_match_java_safe_and_non_safe_modes`。
+4. 已验证：
+   - `cargo test -p mindustry-core mindustry::io::type_io::tests`
+   - `cargo test -p mindustry-core logic_processor`
+   - `cargo check -p mindustry-core`
+
 ### 2026-05-26 续作：LogicProcessor Java wire parity 收紧
 
 文件：
