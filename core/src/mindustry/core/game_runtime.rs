@@ -7411,6 +7411,65 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_roundtrips_payload_constructor_block_payload_version() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let recipe = content.block_by_name("router").map(|block| block.base().id);
+        let tile_pos = point2_pack(5, 4);
+        let mut carried = base_only_build_payload_ref(&content, "router");
+        if let PayloadRef::Block { version, .. } = &mut carried {
+            *version = 7;
+        }
+        let common = PayloadBlockBuildState {
+            payload: Some(carried),
+            pay_vector: Vec2 { x: 1.0, y: 1.5 },
+            pay_rotation: 45.0,
+            carried: false,
+        };
+        let producer = BlockProducerState {
+            progress: 2.25,
+            has_payload: true,
+            ..BlockProducerState::default()
+        };
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            constructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Constructor {
+                common: common.clone(),
+                producer,
+                recipe,
+            },
+        );
+
+        let map = runtime.export_network_map_snapshot(&content);
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(&content, &map);
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        assert_eq!(
+            loaded.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Constructor {
+                common,
+                producer: BlockProducerState {
+                    progress: 2.25,
+                    has_payload: true,
+                    ..BlockProducerState::default()
+                },
+                recipe
+            })
+        );
+    }
+
+    #[test]
     fn game_runtime_loads_power_generator_state_from_network_map_building_payload() {
         let content = ContentLoader::create_base_content().unwrap();
         let generator_def = content.block_by_name("thermal-generator").unwrap();

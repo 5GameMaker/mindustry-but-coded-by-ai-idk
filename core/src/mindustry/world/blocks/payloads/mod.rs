@@ -1565,6 +1565,13 @@ mod tests {
         constructor_configure(&mut recipe, &mut progress, 2, true);
         assert_eq!(recipe, Some(2));
         assert_eq!(progress, 0.0);
+        constructor_configure(&mut recipe, &mut progress, 2, true);
+        assert_eq!(recipe, Some(2));
+        assert_eq!(progress, 0.0);
+        progress = 0.5;
+        constructor_configure(&mut recipe, &mut progress, 3, false);
+        assert_eq!(recipe, Some(2));
+        assert_eq!(progress, 0.0);
         constructor_clear(&mut recipe);
         assert_eq!(recipe, None);
 
@@ -1573,6 +1580,12 @@ mod tests {
         assert_eq!(
             read_constructor_recipe(&mut bytes.as_slice()).unwrap(),
             Some(2)
+        );
+        let mut bytes = Vec::new();
+        write_constructor_recipe(&mut bytes, None).unwrap();
+        assert_eq!(
+            read_constructor_recipe(&mut bytes.as_slice()).unwrap(),
+            None
         );
     }
 
@@ -1786,6 +1799,18 @@ mod tests {
         assert_eq!(state.progress, 0.0);
         assert_eq!(state.heat, 0.15);
         assert_eq!(state.time, 0.15);
+
+        let mut blocked = BlockProducerState {
+            progress: 4.0,
+            heat: 1.0,
+            has_payload: true,
+            ..BlockProducerState::default()
+        };
+        let step = block_producer_update(&mut blocked, Some(10.0), 1.0, 0.4, 25.0, 1.0);
+        assert!(!step.produced);
+        assert_eq!(blocked.progress, 4.0);
+        assert_eq!(blocked.heat, 0.85);
+        assert_eq!(blocked.time, 0.85);
 
         let mut bytes = Vec::new();
         write_block_producer_progress(&mut bytes, 3.5).unwrap();
