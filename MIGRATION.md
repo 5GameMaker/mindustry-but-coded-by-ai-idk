@@ -572,11 +572,16 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 已对照 `Door.getPlanRegion()`、`Door.draw()`、`AutoDoor.draw()` 锁定：
   - `config == Boolean.TRUE` 或 `open == true` 时选择 openRegion；
   - 否则选择默认 region。
+- 已将 `AutoDoor.autoDoorToggle(Tile, boolean)` 的联机同步接入 Rust 客户端轻量 runtime：
+  - `NetClient::apply_auto_door_toggle_packet(...)` 使用 `Tiles` 中的真实 center/proxy `BuildingRef`，只在回调确认 block 为 AutoDoor 时把 `open` 写入中心建筑的 `ClientTileStorageMirror.door_open`；
+  - `NetClient::apply_auto_door_toggle_mirror_packet(...)` 已接入 `PacketKind::AutoDoorToggleCallPacket` 收包分支，用现有 `auto_door_set_open_plan(...)` 归一化 Java `setOpen` 的 open 状态；
+  - 这把 content 注册的 `DefenseWallKind::AutoDoor`、world tile/build position、network `AutoDoorToggleCallPacket` 与客户端 mirror 连接起来，不再只是单测 helper。
 
 仍需：
 
 - `Door.updateChained()` 的真实 proximity flood-fill adapter；
-- 接入真实 Units/tree/pathfinder/Call runtime。
+- AutoDoor update 侧接入真实 Units/tree 扫描与服务端 `Call.autoDoorToggle(...)` 发送；
+- AutoDoor 客户端 mirror 继续下沉到真实 pathfinder tile 更新、effect/sound/renderer 调度。
 
 ### 7.6 RegenProjector
 

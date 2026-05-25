@@ -10,7 +10,7 @@ use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{
-    read_world_data, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
+    read_world_data, AutoDoorToggleCallPacket, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
     BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
     ClearLiquidsCallPacket, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
     ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
@@ -41,6 +41,9 @@ use crate::mindustry::net::{
     UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
+use crate::mindustry::world::blocks::defense::{
+    auto_door_remote_toggle_valid, auto_door_set_open_plan,
+};
 use crate::mindustry::world::{BlockId, BuildingRef as WorldBuildingRef, Tile, Tiles};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -94,6 +97,7 @@ pub struct ClientTileStorageMirror {
     pub liquids: BTreeMap<String, f32>,
     pub team: Option<i32>,
     pub health: Option<f32>,
+    pub door_open: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -1586,13 +1590,15 @@ impl NetClient {
         )
     }
 
+    fn tile_by_packed_pos(tiles: &Tiles, pos: i32) -> Option<&Tile> {
+        tiles.get(
+            crate::mindustry::world::point2_x(pos) as i32,
+            crate::mindustry::world::point2_y(pos) as i32,
+        )
+    }
+
     fn build_pos_by_packed_pos(tiles: &Tiles, pos: i32) -> Option<i32> {
-        tiles
-            .get(
-                crate::mindustry::world::point2_x(pos) as i32,
-                crate::mindustry::world::point2_y(pos) as i32,
-            )
-            .and_then(|tile| tile.build.map(|build| build.tile_pos))
+        Self::tile_by_packed_pos(tiles, pos).and_then(|tile| tile.build.map(|build| build.tile_pos))
     }
 
     fn apply_team_to_build_refs(tiles: &mut Tiles, build_pos: i32, team: i32) -> usize {
@@ -1892,6 +1898,52 @@ impl NetClient {
             return false;
         };
         storage.entry(build_pos).or_default().liquids.clear();
+        true
+    }
+
+    pub fn apply_auto_door_toggle_packet<F>(
+        tiles: &Tiles,
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &AutoDoorToggleCallPacket,
+        mut is_auto_door_block: F,
+    ) -> bool
+    where
+        F: FnMut(BlockId) -> bool,
+    {
+        let Some(pos) = packet.tile else {
+            return false;
+        };
+        let Some(build_pos) = Self::build_pos_by_packed_pos(tiles, pos) else {
+            return false;
+        };
+        let Some(center_tile) = Self::tile_by_packed_pos(tiles, build_pos) else {
+            return false;
+        };
+        let block_id = center_tile
+            .build
+            .map(|build| build.block)
+            .unwrap_or(center_tile.block);
+        if !auto_door_remote_toggle_valid(true, is_auto_door_block(block_id)) {
+            return false;
+        }
+
+        let plan = auto_door_set_open_plan(packet.open, false);
+        storage.entry(build_pos).or_default().door_open = Some(plan.open);
+        true
+    }
+
+    pub fn apply_auto_door_toggle_mirror_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &AutoDoorToggleCallPacket,
+    ) -> bool {
+        let Some(pos) = packet.tile else {
+            return false;
+        };
+        if !auto_door_remote_toggle_valid(true, true) {
+            return false;
+        }
+        let plan = auto_door_set_open_plan(packet.open, false);
+        storage.entry(pos).or_default().door_open = Some(plan.open);
         true
     }
 
@@ -2623,6 +2675,12 @@ impl NetClient {
                                     packet,
                                 );
                             }
+                            PacketKind::AutoDoorToggleCallPacket(packet) => {
+                                Self::apply_auto_door_toggle_mirror_packet(
+                                    &mut state.building_storage_mirrors,
+                                    packet,
+                                );
+                            }
                             PacketKind::LogicExplosionCallPacket(packet) => {
                                 Self::apply_logic_explosion_packet(&mut state, packet);
                             }
@@ -3164,14 +3222,14 @@ mod tests {
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::logic::LMarkerControl;
     use crate::mindustry::net::{
-        write_minimal_world_data, AnnounceCallPacket, BlockSnapshotCallPacket,
-        BuildDestroyedCallPacket, BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket,
-        ClearItemsCallPacket, ClearLiquidsCallPacket, ClearObjectivesCallPacket,
-        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        ClientSnapshotCallPacket, CommandBuildingCallPacket, CommandUnitsCallPacket,
-        CompleteObjectiveCallPacket, Connect, ConnectCallPacket, ConstructFinishCallPacket,
-        CopyToClipboardCallPacket, CreateBulletCallPacket, CreateMarkerCallPacket,
-        CreateWeatherCallPacket, DebugStatusClientCallPacket,
+        write_minimal_world_data, AnnounceCallPacket, AutoDoorToggleCallPacket,
+        BlockSnapshotCallPacket, BuildDestroyedCallPacket, BuildHealthUpdateCallPacket,
+        BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
+        ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
+        CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
+        ConstructFinishCallPacket, CopyToClipboardCallPacket, CreateBulletCallPacket,
+        CreateMarkerCallPacket, CreateWeatherCallPacket, DebugStatusClientCallPacket,
         DebugStatusClientUnreliableCallPacket, DeconstructFinishCallPacket, DeletePlansCallPacket,
         Disconnect, DoneCallback, EffectCallPacket, EffectCallPacket2, EffectReliableCallPacket,
         EntitySnapshotCallPacket, GameOverCallPacket, HiddenSnapshotCallPacket,
@@ -3701,6 +3759,10 @@ mod tests {
             build: BuildingRef::new(12),
             team: TeamId(3),
         };
+        let auto_door = AutoDoorToggleCallPacket {
+            tile: Some(12),
+            open: true,
+        };
         let remove_tile = RemoveTileCallPacket { tile: Some(12) };
         let unit_death = UnitDeathCallPacket { uid: 77 };
         let create_marker = CreateMarkerCallPacket {
@@ -3716,6 +3778,7 @@ mod tests {
             net.handle_client_received(PacketKind::SetTileCallPacket(set_tile));
             net.handle_client_received(PacketKind::BuildHealthUpdateCallPacket(build_health));
             net.handle_client_received(PacketKind::SetTeamCallPacket(set_team));
+            net.handle_client_received(PacketKind::AutoDoorToggleCallPacket(auto_door));
             net.handle_client_received(PacketKind::RemoveTileCallPacket(remove_tile));
             net.handle_client_received(PacketKind::UnitDeathCallPacket(unit_death));
             net.handle_client_received(PacketKind::CreateMarkerCallPacket(create_marker));
@@ -3727,7 +3790,7 @@ mod tests {
 
         let state = client.state();
         let state = state.lock().unwrap();
-        assert_eq!(state.world_update_packets_seen, 4);
+        assert_eq!(state.world_update_packets_seen, 5);
         assert!(matches!(
             state.last_world_update_packet.as_ref(),
             Some(PacketKind::RemoveTileCallPacket(_))
@@ -3736,6 +3799,7 @@ mod tests {
         let mirror = state.building_storage_mirrors.get(&12).unwrap();
         assert_eq!(mirror.health, Some(health));
         assert_eq!(mirror.team, Some(3));
+        assert_eq!(mirror.door_open, Some(true));
         assert_eq!(state.unit_lifecycle_packets_seen, 1);
         assert!(matches!(
             state.last_unit_lifecycle_packet.as_ref(),
@@ -4365,6 +4429,64 @@ mod tests {
             storage.get(&center).unwrap().liquids.get("water"),
             Some(&6.5)
         );
+    }
+
+    #[test]
+    fn apply_auto_door_toggle_packet_updates_center_building_mirror_only_for_auto_door() {
+        let mut tiles = Tiles::new(4, 4);
+        let center = point2_pack(1, 1);
+        let proxy = point2_pack(2, 1);
+        let empty = point2_pack(0, 0);
+
+        NetClient::apply_set_tile_packet(
+            &mut tiles,
+            &SetTileCallPacket {
+                tile: Some(center),
+                block: Some("blast-door".into()),
+                team: TeamId(2),
+                rotation: 0,
+            },
+            |name| match name {
+                "blast-door" => Some(77),
+                _ => None,
+            },
+        )
+        .unwrap();
+        let build = tiles.get(1, 1).unwrap().build.unwrap();
+        tiles.get_mut(2, 1).unwrap().build = Some(build);
+
+        let mut storage = BTreeMap::<i32, ClientTileStorageMirror>::new();
+        assert!(NetClient::apply_auto_door_toggle_packet(
+            &tiles,
+            &mut storage,
+            &AutoDoorToggleCallPacket {
+                tile: Some(proxy),
+                open: true,
+            },
+            |block| block == 77,
+        ));
+        assert_eq!(storage.get(&center).unwrap().door_open, Some(true));
+        assert!(!storage.contains_key(&proxy));
+
+        assert!(!NetClient::apply_auto_door_toggle_packet(
+            &tiles,
+            &mut storage,
+            &AutoDoorToggleCallPacket {
+                tile: Some(center),
+                open: false,
+            },
+            |_| false,
+        ));
+        assert_eq!(storage.get(&center).unwrap().door_open, Some(true));
+        assert!(!NetClient::apply_auto_door_toggle_packet(
+            &tiles,
+            &mut storage,
+            &AutoDoorToggleCallPacket {
+                tile: Some(empty),
+                open: false,
+            },
+            |_| true,
+        ));
     }
 
     #[test]
