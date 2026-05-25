@@ -1267,7 +1267,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/io/versions/SaveVersion.java
 - `mindustry_server::ServerLauncher` 的 pending world data 发送已不再直接调用 `write_minimal_world_data(...)`：现在先从 `runtime.state` 组装 `NetworkWorldData` 模板，并把 runtime `Teams.plans` 经 `GameState::export_legacy_team_blocks(...)` 写入 `team_blocks_snapshot` 后再 `write_world_data(...)` 发送；已用 server-level 测试反解捕获到的 world stream，锁定 sharded build plan 的 `team_id/block_id/config`。
 - `desktop::DesktopLauncher::sync_loaded_world_data(...)` 已在应用 `NetworkWorldData.map_snapshot` 后调用 `GameRuntime::load_network_map_with_buildings(...)`，使联机 world stream 中的 center building payload 开始进入真实客户端 runtime owned building 集合，而不再只停留在 `GameState.world` tile snapshot。
 - `GameState::apply_network_world_data(...)` 已把 `NetworkWorldData.team_blocks_snapshot` 接到 `apply_legacy_team_blocks(...)`：通过 `content_header_snapshot` 将 Java content id 映射回 block/item 等 content 名称，联机 world stream 的 `SaveVersion.readTeamBlocks(...)` 结果不再只停留在 `NetworkWorldData` sidecar，而会物化为 runtime `Teams` 的 build plans；缺少 team-blocks 时会清空旧 plans，避免换图后复用 stale plan。
-- marker/custom chunks 精确拆分；
+- marker/custom chunks 精确拆分：`NetworkWorldData.marker_custom_tail` 会保存 Java `readMarkers -> readCustomChunks` 后半段的完整原始尾部；当 UBJSON marker 与 custom chunks 边界无法精确拆分时，写回优先保留该 opaque tail，避免 split 失败后额外补空 custom chunk 或丢失未知尾部；
 - UBJSON/JsonIO bytes；
 - world stream 应用到 `World`；
 - player/groups/entity 生命周期。

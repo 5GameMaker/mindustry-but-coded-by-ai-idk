@@ -137,6 +137,7 @@ pub struct NetworkWorldData {
     pub markers_snapshot: Option<MapMarkers>,
     pub marker_summary: Option<MarkerRegionSummary>,
     pub custom_chunks_snapshot: Option<CustomChunkSet>,
+    pub marker_custom_tail: Vec<u8>,
     pub content_header: Vec<u8>,
     pub content_patches: Vec<u8>,
     pub map_bytes: Vec<u8>,
@@ -167,6 +168,7 @@ impl Default for NetworkWorldData {
             markers_snapshot: None,
             marker_summary: None,
             custom_chunks_snapshot: None,
+            marker_custom_tail: Vec::new(),
             content_header: Vec::new(),
             content_patches: Vec::new(),
             map_bytes: Vec::new(),
@@ -247,24 +249,33 @@ impl NetworkWorldData {
             None => self.team_blocks.clone(),
         };
 
-        let markers = match &self.markers_snapshot {
-            Some(snapshot) => marker_region_bytes_from_map_markers(snapshot)?,
-            None => self.markers.clone(),
-        };
+        let preserve_raw_marker_custom_tail = self.markers_snapshot.is_none()
+            && self.custom_chunks_snapshot.is_none()
+            && !self.marker_custom_tail.is_empty()
+            && self.custom_chunks.is_empty();
+        let (markers, custom_chunks) = if preserve_raw_marker_custom_tail {
+            (self.marker_custom_tail.clone(), Vec::new())
+        } else {
+            let markers = match &self.markers_snapshot {
+                Some(snapshot) => marker_region_bytes_from_map_markers(snapshot)?,
+                None => self.markers.clone(),
+            };
 
-        let custom_chunks = match &self.custom_chunks_snapshot {
-            Some(snapshot) => {
-                let mut bytes = Vec::new();
-                write_custom_chunks(&mut bytes, snapshot)?;
-                bytes
-            }
-            None if !self.custom_chunks.is_empty() => self.custom_chunks.clone(),
-            None => {
-                let empty = CustomChunkSet::default();
-                let mut bytes = Vec::new();
-                write_custom_chunks(&mut bytes, &empty)?;
-                bytes
-            }
+            let custom_chunks = match &self.custom_chunks_snapshot {
+                Some(snapshot) => {
+                    let mut bytes = Vec::new();
+                    write_custom_chunks(&mut bytes, snapshot)?;
+                    bytes
+                }
+                None if !self.custom_chunks.is_empty() => self.custom_chunks.clone(),
+                None => {
+                    let empty = CustomChunkSet::default();
+                    let mut bytes = Vec::new();
+                    write_custom_chunks(&mut bytes, &empty)?;
+                    bytes
+                }
+            };
+            (markers, custom_chunks)
         };
 
         Ok(NetworkWorldTailSections {
@@ -441,6 +452,7 @@ pub fn read_world_data_raw(bytes: &[u8]) -> Result<NetworkWorldData, NetworkIoEr
         markers_snapshot: tail.markers_snapshot,
         marker_summary: tail.marker_summary,
         custom_chunks_snapshot: tail.custom_chunks_snapshot,
+        marker_custom_tail: tail.marker_custom_tail,
         content_header: tail.content_header,
         content_patches: tail.content_patches,
         map_bytes: tail.map_bytes,
@@ -481,6 +493,7 @@ struct ParsedWorldTail {
     markers_snapshot: Option<MapMarkers>,
     marker_summary: Option<MarkerRegionSummary>,
     custom_chunks_snapshot: Option<CustomChunkSet>,
+    marker_custom_tail: Vec<u8>,
     content_header: Vec<u8>,
     content_patches: Vec<u8>,
     map_bytes: Vec<u8>,
@@ -517,6 +530,7 @@ fn parse_world_tail(bytes: &[u8]) -> ParsedWorldTail {
                     && out.custom_chunks.is_empty()
                 {
                     out.markers = remaining.to_vec();
+                    out.marker_custom_tail = remaining.to_vec();
                 }
             }
         }
@@ -569,6 +583,7 @@ fn parse_save_tail(remaining: &mut &[u8], out: &mut ParsedWorldTail) -> io::Resu
     // Prefer an exact split when the UBJSON payload is valid; otherwise keep
     // the whole tail opaque so legacy/bootstrap payloads continue to round-trip
     // unchanged.
+    out.marker_custom_tail = remaining.to_vec();
     if let Some((markers, custom_chunks)) = split_marker_region_and_custom_chunks(remaining) {
         out.markers_snapshot = parse_marker_region_bytes(&markers).ok();
         out.marker_summary = summarize_marker_region_bytes(&markers).ok();
@@ -1812,6 +1827,9 @@ mod tests {
         assert!(decoded.tail_parse_error.is_none());
         assert_eq!(decoded.markers, markers);
         assert_eq!(decoded.custom_chunks, custom_chunks);
+        let mut expected_tail = markers.clone();
+        expected_tail.extend_from_slice(&custom_chunks);
+        assert_eq!(decoded.marker_custom_tail, expected_tail);
     }
 
     #[test]
@@ -1963,14 +1981,17 @@ mod tests {
             ..NetworkWorldData::default()
         };
 
-        let decoded = read_world_data(&write_world_data(&data).unwrap()).unwrap();
+        let raw = write_world_data_raw(&data).unwrap();
+        let decoded = read_world_data(&deflate_world_data(&raw).unwrap()).unwrap();
 
         assert!(decoded.tail_parse_error.is_none());
         assert_eq!(decoded.player_bytes, player);
         let mut expected_markers = invalid_markers;
         write_custom_chunks(&mut expected_markers, &CustomChunkSet::default()).unwrap();
         assert_eq!(decoded.markers, expected_markers);
+        assert_eq!(decoded.marker_custom_tail, expected_markers);
         assert!(decoded.markers_snapshot.is_none());
         assert!(decoded.marker_summary.is_none());
+        assert_eq!(write_world_data_raw(&decoded).unwrap(), raw);
     }
 }
