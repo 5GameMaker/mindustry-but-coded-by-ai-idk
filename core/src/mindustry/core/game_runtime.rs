@@ -1336,9 +1336,11 @@ pub struct GameRuntimePayloadSourceFrameReport {
     pub source_candidates: usize,
     pub updated_sources: usize,
     pub spawned_block_payloads: usize,
+    pub spawned_unit_payloads: usize,
     pub skipped_unit_payloads: usize,
     pub missing_runtime_states: usize,
     pub unknown_config_blocks: usize,
+    pub unknown_config_units: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3405,7 +3407,7 @@ impl GameRuntime {
         let mut report = GameRuntimePayloadSourceFrameReport::default();
 
         for index in 0..self.buildings.len() {
-            let (tile_pos, block_id, team, enabled, rotdeg) = {
+            let (tile_pos, block_id, team, enabled, rotdeg, x, y) = {
                 let building = &mut self.buildings[index];
                 let can_overdrive = content
                     .block(building.block.id)
@@ -3419,6 +3421,8 @@ impl GameRuntime {
                     building.team,
                     building.enabled,
                     building.rotdeg(),
+                    building.x,
+                    building.y,
                 )
             };
 
@@ -3447,9 +3451,34 @@ impl GameRuntime {
 
             match spawn {
                 PayloadSourceSpawn::None => {}
-                PayloadSourceSpawn::Unit(_) => {
-                    source.has_payload = common.payload.is_some();
-                    report.skipped_unit_payloads += 1;
+                PayloadSourceSpawn::Unit(unit_id) => {
+                    let Some(unit) = content.unit(unit_id) else {
+                        source.has_payload = common.payload.is_some();
+                        report.unknown_config_units += 1;
+                        continue;
+                    };
+                    match Self::create_common_unit_payload_ref(
+                        content,
+                        unit,
+                        unit_id,
+                        team,
+                        x,
+                        y,
+                        rotdeg,
+                        source.command_pos,
+                    ) {
+                        Ok(payload) => {
+                            common.payload = Some(payload);
+                            common.pay_vector = PayloadVec2::ZERO;
+                            common.pay_rotation = rotdeg;
+                            source.has_payload = true;
+                            report.spawned_unit_payloads += 1;
+                        }
+                        Err(_) => {
+                            source.has_payload = common.payload.is_some();
+                            report.skipped_unit_payloads += 1;
+                        }
+                    }
                 }
                 PayloadSourceSpawn::Block(block_id) => {
                     let Some(block_def) = content.block(block_id) else {
@@ -3482,6 +3511,60 @@ impl GameRuntime {
         }
 
         Some(report)
+    }
+
+    fn create_common_unit_payload_ref(
+        content: &ContentLoader,
+        unit: &crate::mindustry::r#type::UnitType,
+        unit_id: ContentId,
+        team: crate::mindustry::io::TeamId,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        command_pos: Option<PayloadVec2>,
+    ) -> io::Result<PayloadRef> {
+        const UNIT_ENTITY_CLASS_ID: u8 = 3;
+        const UNIT_ENTITY_REVISION: i16 = 9;
+
+        let controller = match command_pos {
+            Some(pos) => type_io::ControllerWire::Command(type_io::CommandWire {
+                target_pos: Some(type_io::Vec2 { x: pos.x, y: pos.y }),
+                ..type_io::CommandWire::new()
+            }),
+            None => type_io::ControllerWire::Ground,
+        };
+        let mut unit_bytes = Vec::new();
+        type_io::write_i16(&mut unit_bytes, UNIT_ENTITY_REVISION)?;
+        type_io::write_abilities(&mut unit_bytes, &[])?;
+        type_io::write_f32(&mut unit_bytes, x)?;
+        type_io::write_f32(&mut unit_bytes, y)?;
+        type_io::write_controller(&mut unit_bytes, &controller)?;
+        type_io::write_f32(&mut unit_bytes, if unit.flying { 1.0 } else { 0.0 })?;
+        type_io::write_u64(&mut unit_bytes, 0.0f64.to_bits())?;
+        type_io::write_f32(&mut unit_bytes, unit.health)?;
+        type_io::write_bool(&mut unit_bytes, false)?;
+        type_io::write_tile_pos(&mut unit_bytes, None)?;
+        type_io::write_mounts(&mut unit_bytes, &[])?;
+        type_io::write_plans_queue_net(&mut unit_bytes, content, Some(&[]))?;
+        type_io::write_f32(&mut unit_bytes, rotation)?;
+        type_io::write_f32(&mut unit_bytes, 0.0)?;
+        type_io::write_bool(&mut unit_bytes, false)?;
+        type_io::write_items(
+            &mut unit_bytes,
+            content,
+            &crate::mindustry::r#type::ItemStack::new("", 0),
+        )?;
+        type_io::write_statuses(&mut unit_bytes, &[])?;
+        type_io::write_team(&mut unit_bytes, Some(team))?;
+        type_io::write_i16(&mut unit_bytes, unit_id)?;
+        type_io::write_bool(&mut unit_bytes, false)?;
+        type_io::write_vec2(&mut unit_bytes, type_io::Vec2 { x: 0.0, y: 0.0 })?;
+        type_io::write_f32(&mut unit_bytes, x)?;
+        type_io::write_f32(&mut unit_bytes, y)?;
+        Ok(PayloadRef::Unit {
+            class_id: UNIT_ENTITY_CLASS_ID,
+            unit_bytes,
+        })
     }
 
     pub fn advance_owned_payload_voids(
@@ -7638,9 +7721,11 @@ mod tests {
                 source_candidates: 1,
                 updated_sources: 1,
                 spawned_block_payloads: 1,
+                spawned_unit_payloads: 0,
                 skipped_unit_payloads: 0,
                 missing_runtime_states: 0,
                 unknown_config_blocks: 0,
+                unknown_config_units: 0,
             }
         );
         let Some(GameRuntimePayloadBlockState::Source { common, source }) =
@@ -7666,26 +7751,26 @@ mod tests {
     }
 
     #[test]
-    fn game_runtime_payload_source_defers_unit_payload_until_unit_runtime_codec() {
+    fn game_runtime_payload_source_spawns_common_unit_payload_with_command_pos() {
         let content = ContentLoader::create_base_content().unwrap();
         let source_def = content.block_by_name("payload-source").unwrap();
         let flare = content.unit_by_name("flare").unwrap().id();
         let tile_pos = point2_pack(0, 5);
+        let mut building = BuildingComp::new(tile_pos, source_def.base().clone(), TeamId(6));
+        building.set_rotation(2);
+        building.set_pos(40.0, 48.0);
 
         let mut runtime = GameRuntime::default();
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(8, 8);
-        runtime.add_building(BuildingComp::new(
-            tile_pos,
-            source_def.base().clone(),
-            TeamId(6),
-        ));
+        runtime.add_building(building);
         runtime.payload_runtime_states.insert(
             tile_pos,
             GameRuntimePayloadBlockState::Source {
                 common: PayloadBlockBuildState::default(),
                 source: PayloadSourceState {
                     unit: Some(flare),
+                    command_pos: Some(Vec2 { x: 12.0, y: 34.0 }),
                     ..PayloadSourceState::default()
                 },
             },
@@ -7696,15 +7781,44 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.spawned_block_payloads, 0);
-        assert_eq!(report.skipped_unit_payloads, 1);
+        assert_eq!(report.spawned_unit_payloads, 1);
+        assert_eq!(report.skipped_unit_payloads, 0);
         let Some(GameRuntimePayloadBlockState::Source { common, source }) =
             runtime.payload_runtime_states.get(&tile_pos)
         else {
             panic!("payload source sidecar should remain present");
         };
-        assert!(common.payload.is_none());
-        assert!(!source.has_payload);
+        assert!(source.has_payload);
         assert_eq!(source.unit, Some(flare));
+        assert_eq!(common.pay_vector, Vec2::ZERO);
+        assert_eq!(common.pay_rotation, 180.0);
+        let Some(PayloadRef::Unit {
+            class_id,
+            unit_bytes,
+        }) = common.payload.as_ref()
+        else {
+            panic!("payload source should create a unit payload");
+        };
+        assert_eq!(*class_id, 3);
+
+        let mut exact = unit_bytes.as_slice();
+        runtime
+            .read_exact_unit_payload_body(&content, *class_id, &mut exact)
+            .unwrap();
+        assert!(exact.is_empty());
+
+        let mut fields = unit_bytes.as_slice();
+        assert_eq!(type_io::read_i16(&mut fields).unwrap(), 9);
+        type_io::skip_abilities(&mut fields).unwrap();
+        assert_eq!(type_io::read_f32(&mut fields).unwrap(), 40.0);
+        assert_eq!(type_io::read_f32(&mut fields).unwrap(), 48.0);
+        assert_eq!(
+            type_io::read_controller(&mut fields).unwrap(),
+            type_io::ControllerWire::Command(type_io::CommandWire {
+                target_pos: Some(IoVec2 { x: 12.0, y: 34.0 }),
+                ..type_io::CommandWire::new()
+            })
+        );
     }
 
     #[test]
