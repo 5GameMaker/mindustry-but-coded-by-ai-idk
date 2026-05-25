@@ -4636,6 +4636,13 @@ impl BlockDef {
         }
     }
 
+    pub fn supports_env(&self, env: u32) -> bool {
+        let base = self.base();
+        (base.env_enabled & env) != 0
+            && (base.env_disabled & env) == 0
+            && (base.env_required == 0 || (base.env_required & env) == base.env_required)
+    }
+
     pub fn as_floor(&self) -> Option<&FloorData> {
         match self {
             Self::Floor(floor) => Some(floor),
@@ -13199,6 +13206,19 @@ mod tests {
             .get_by_name("item-source")
             .unwrap()
             .no_update_disabled());
+    }
+
+    #[test]
+    fn block_def_supports_env_matches_java_bitmask_formula() {
+        let mut block = Block::new(30_000, "env-test");
+        block.env_enabled = Env::TERRESTRIAL | Env::SPACE;
+        block.env_disabled = Env::SPACE;
+        block.env_required = Env::TERRESTRIAL;
+        let def = BlockDef::Plain(block);
+
+        assert!(def.supports_env(Env::TERRESTRIAL));
+        assert!(!def.supports_env(Env::SPACE));
+        assert!(!def.supports_env(Env::UNDERWATER));
     }
 
     #[test]

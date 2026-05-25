@@ -147,6 +147,25 @@ impl GameRuntime {
         self.effect_timer_store.clear();
     }
 
+    pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
+        let env = self.state.rules.env;
+        let mut disabled = 0;
+        for building in &mut self.buildings {
+            let was_enabled = building.enabled;
+            let supports_env = content
+                .block(building.block.id)
+                .is_some_and(|block| block.supports_env(env));
+            let in_bounds = self.state.world.tile_pos(building.tile_pos).is_some();
+            if !building.check_allow_update(supports_env, in_bounds) {
+                building.enabled = false;
+                if was_enabled {
+                    disabled += 1;
+                }
+            }
+        }
+        disabled
+    }
+
     /// Consumes pending world-load lifecycle markers and resets tile-position keyed
     /// sidecars once. This mirrors the Java requirement that a fresh world load
     /// cannot reuse stale `Building` runtime state from a previous map.
@@ -219,6 +238,8 @@ impl GameRuntime {
             self.state.rules.fog,
             self.state.rules.static_fog,
         )?;
+
+        self.refresh_owned_building_update_permissions(content);
 
         for building in self.buildings.iter_mut() {
             let can_overdrive = content
@@ -568,5 +589,30 @@ mod tests {
         assert!(runtime.buildings().is_empty());
         assert!(runtime.effect_runtime_store.is_empty());
         assert!(runtime.effect_timer_store.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_refresh_owned_building_permissions_disables_out_of_bounds_buildings() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            point2_pack(4, 4),
+            mend_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            point2_pack(40, 40),
+            mend_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.refresh_owned_building_update_permissions(&content),
+            1
+        );
+        assert!(runtime.buildings()[0].enabled);
+        assert!(!runtime.buildings()[1].enabled);
     }
 }
