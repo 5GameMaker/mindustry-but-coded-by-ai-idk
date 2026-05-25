@@ -1023,10 +1023,12 @@ impl GameRuntime {
                 ) {
                     Ok(_) => {}
                     Err(GameRuntimeBlockStateReadError::Unsupported) => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "block payload contains unsupported non-terminal state",
-                        ));
+                        if !Self::block_has_no_java_block_specific_payload(block_def) {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "block payload contains unsupported non-terminal state",
+                            ));
+                        }
                     }
                     Err(GameRuntimeBlockStateReadError::Parse) => {
                         return Err(io::Error::new(
@@ -1052,6 +1054,61 @@ impl GameRuntime {
                 io::ErrorKind::InvalidData,
                 "unknown payload type",
             )),
+        }
+    }
+
+    fn block_has_no_java_block_specific_payload(block: &BlockDef) -> bool {
+        match block {
+            BlockDef::Plain(block) => !is_construct_block_name(&block.name),
+            BlockDef::Production(production) => matches!(
+                production.kind,
+                ProductionBlockKind::SolidPump
+                    | ProductionBlockKind::Fracker
+                    | ProductionBlockKind::WallCrafter
+            ),
+            BlockDef::Storage(storage) => matches!(storage.kind, StorageBlockKind::Storage),
+            BlockDef::Crafting(crafting) => matches!(
+                crafting.kind,
+                CraftingBlockKind::HeatConductor
+                    | CraftingBlockKind::Incinerator
+                    | CraftingBlockKind::ItemIncinerator
+            ),
+            BlockDef::DefenseWall(wall) => {
+                matches!(wall.kind, DefenseWallKind::Wall | DefenseWallKind::Thruster)
+            }
+            BlockDef::Effect(effect) => matches!(
+                effect.kind,
+                EffectBlockKind::ShockMine
+                    | EffectBlockKind::RegenProjector
+                    | EffectBlockKind::ShockwaveTower
+            ),
+            BlockDef::Distribution(distribution) => {
+                matches!(distribution.kind, DistributionBlockKind::Router)
+            }
+            BlockDef::Liquid(liquid) => matches!(
+                liquid.kind,
+                LiquidBlockKind::Pump
+                    | LiquidBlockKind::Conduit
+                    | LiquidBlockKind::ArmoredConduit
+                    | LiquidBlockKind::LiquidRouter
+                    | LiquidBlockKind::LiquidJunction
+            ),
+            BlockDef::Power(power) => matches!(
+                power.kind,
+                PowerBlockKind::PowerNode
+                    | PowerBlockKind::PowerDiode
+                    | PowerBlockKind::Battery
+                    | PowerBlockKind::BeamNode
+                    | PowerBlockKind::LongPowerNode
+            ),
+            BlockDef::Sandbox(sandbox) => matches!(
+                sandbox.kind,
+                SandboxBlockKind::PowerSource
+                    | SandboxBlockKind::PowerVoid
+                    | SandboxBlockKind::ItemVoid
+                    | SandboxBlockKind::LiquidVoid
+            ),
+            _ => false,
         }
     }
 
@@ -2148,6 +2205,18 @@ mod tests {
         write_door_state(&mut build_bytes, DoorState { open }).unwrap();
         PayloadRef::Block {
             block: door_def.base().id,
+            version: 0,
+            build_bytes,
+        }
+    }
+
+    fn base_only_build_payload_ref(content: &ContentLoader, block_name: &str) -> PayloadRef {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let building = BuildingComp::new(point2_pack(0, 0), block_def.base().clone(), TeamId(1));
+        let mut build_bytes = Vec::new();
+        building.write_base(&mut build_bytes, false).unwrap();
+        PayloadRef::Block {
+            block: block_def.base().id,
             version: 0,
             build_bytes,
         }
@@ -4872,6 +4941,52 @@ mod tests {
         let tile_pos = point2_pack(4, 0);
         let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
         let payload = door_build_payload_ref(&content, true);
+        let common = PayloadBlockBuildState {
+            payload: Some(payload),
+            pay_vector: Vec2 { x: 1.0, y: -2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let state = UnitFactoryState {
+            base: crate::mindustry::world::blocks::units::UnitBlockState {
+                progress: 25.0,
+                ..Default::default()
+            },
+            current_plan: 1,
+            command_pos: Some(IoVec2 { x: 12.0, y: 34.0 }),
+            command_id: Some(2),
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(3);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+        write_unit_factory_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 4, factory_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.unit_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeUnitBlockState::Factory {
+                common,
+                factory: state
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_unit_factory_common_no_state_build_payload_before_factory_fields() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("ground-factory").unwrap();
+        let tile_pos = point2_pack(4, 0);
+        let saved = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(1));
+        let payload = base_only_build_payload_ref(&content, "router");
         let common = PayloadBlockBuildState {
             payload: Some(payload),
             pay_vector: Vec2 { x: 1.0, y: -2.0 },
