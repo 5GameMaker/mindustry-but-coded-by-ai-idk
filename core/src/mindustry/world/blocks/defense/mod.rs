@@ -2860,6 +2860,36 @@ pub enum EffectBlockRuntimeContext<'a, 'b> {
     },
 }
 
+pub enum EffectBlockRuntimeResources<'a, 'b> {
+    Projector {
+        input: EffectProjectorRuntimeInput,
+        content: &'a ContentLoader,
+        buildings: &'a mut [BuildingComp],
+    },
+    Radar {
+        fog_control: &'a mut FogControl,
+        input: EffectRadarRuntimeInput,
+    },
+    BaseShield {
+        shield: &'a BuildingComp,
+        efficiency: f32,
+        bullets: &'a mut [BulletComp],
+        bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+        units: &'a mut [UnitComp],
+        delta: f32,
+        spark_random: &'a mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
+    },
+    ShockwaveTower {
+        tower: &'a BuildingComp,
+        potential_efficiency: f32,
+        edelta: f32,
+        delta: f32,
+        bullets: &'a mut [BulletComp],
+        bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+        timer_ready: bool,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EffectBlockRuntimeReport {
     Projector(EffectProjectorRuntimeReport),
@@ -2928,6 +2958,91 @@ pub fn effect_block_update_runtime<'a, 'b>(
             timer_ready,
         )
         .map(EffectBlockRuntimeReport::ShockwaveTower),
+    }
+}
+
+pub fn effect_block_update_runtime_state<'a, 'b>(
+    block: &EffectBlockData,
+    state: &'a mut EffectBlockRuntimeState,
+    resources: EffectBlockRuntimeResources<'a, 'b>,
+) -> Option<EffectBlockRuntimeReport> {
+    match (state, resources) {
+        (
+            EffectBlockRuntimeState::Projector(state),
+            EffectBlockRuntimeResources::Projector {
+                input,
+                content,
+                buildings,
+            },
+        ) => effect_block_update_runtime(
+            block,
+            EffectBlockRuntimeContext::Projector {
+                state,
+                input,
+                content,
+                buildings,
+            },
+        ),
+        (
+            EffectBlockRuntimeState::Radar(state),
+            EffectBlockRuntimeResources::Radar { fog_control, input },
+        ) => effect_block_update_runtime(
+            block,
+            EffectBlockRuntimeContext::Radar {
+                state,
+                fog_control,
+                input,
+            },
+        ),
+        (
+            EffectBlockRuntimeState::BaseShield(state),
+            EffectBlockRuntimeResources::BaseShield {
+                shield,
+                efficiency,
+                bullets,
+                bullet_type,
+                units,
+                delta,
+                spark_random,
+            },
+        ) => effect_block_update_runtime(
+            block,
+            EffectBlockRuntimeContext::BaseShield {
+                state,
+                shield,
+                efficiency,
+                bullets,
+                bullet_type,
+                units,
+                delta,
+                spark_random,
+            },
+        ),
+        (
+            EffectBlockRuntimeState::ShockwaveTower(state),
+            EffectBlockRuntimeResources::ShockwaveTower {
+                tower,
+                potential_efficiency,
+                edelta,
+                delta,
+                bullets,
+                bullet_type,
+                timer_ready,
+            },
+        ) => effect_block_update_runtime(
+            block,
+            EffectBlockRuntimeContext::ShockwaveTower {
+                state,
+                tower,
+                potential_efficiency,
+                edelta,
+                delta,
+                bullets,
+                bullet_type,
+                timer_ready,
+            },
+        ),
+        _ => None,
     }
 }
 
@@ -6398,6 +6513,74 @@ mod tests {
 
         assert_eq!(
             effect_block_runtime_state_for(effect_block(&content, "shock-mine"), 0.0),
+            None
+        );
+    }
+
+    #[test]
+    fn effect_block_runtime_state_dispatch_updates_stored_radar_state() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let radar_block = effect_block(&content, "radar");
+        let shield_block = effect_block(&content, "shield-projector");
+        let mut state = effect_block_runtime_state_for(radar_block, 0.0).unwrap();
+        if let EffectBlockRuntimeState::Radar(radar) = &mut state {
+            radar.progress = 0.06;
+            radar.last_radius = 0.0;
+            radar.smooth_efficiency = 1.0;
+        }
+        let mut fog = FogControl::new(8, 8);
+        fog.ensure_data(2);
+
+        let report = effect_block_update_runtime_state(
+            radar_block,
+            &mut state,
+            EffectBlockRuntimeResources::Radar {
+                fog_control: &mut fog,
+                input: EffectRadarRuntimeInput {
+                    team: TeamId(2),
+                    tile_x: 3,
+                    tile_y: 4,
+                    efficiency: 1.0,
+                    edelta: 60.0,
+                    fog_enabled: true,
+                    static_fog: true,
+                },
+            },
+        );
+
+        assert_eq!(
+            report,
+            Some(EffectBlockRuntimeReport::Radar {
+                forced_update: true
+            })
+        );
+        match &state {
+            EffectBlockRuntimeState::Radar(radar) => {
+                assert!((radar.progress - 0.16).abs() < 0.00001);
+                assert!((radar.last_radius - 34.0 * 0.06).abs() < 0.00001);
+            }
+            other => panic!("unexpected runtime state: {other:?}"),
+        }
+
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let shield = projector_runtime_building(44, "shield-projector");
+        assert_eq!(
+            effect_block_update_runtime_state(
+                shield_block,
+                &mut state,
+                EffectBlockRuntimeResources::BaseShield {
+                    shield: &shield,
+                    efficiency: 1.0,
+                    bullets: &mut bullets,
+                    bullet_type: &mut bullet_type,
+                    units: &mut units,
+                    delta: 1.0,
+                    spark_random: &mut spark_random,
+                },
+            ),
             None
         );
     }

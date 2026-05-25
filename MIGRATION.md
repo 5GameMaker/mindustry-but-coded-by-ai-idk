@@ -1012,10 +1012,12 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `EffectProjectorRuntimeInput`
 - `EffectProjectorRuntimeReport`
 - `EffectBlockRuntimeContext`
+- `EffectBlockRuntimeResources`
 - `EffectBlockRuntimeReport`
 - `effect_block_runtime_state_for(...)`
 - `effect_projector_update_runtime(...)`
 - `effect_block_update_runtime(...)`
+- `effect_block_update_runtime_state(...)`
 - `projector_runtime_target_in_range(...)`
 - `projector_runtime_target_allowed(...)`
 - `mend_projector_outputs_items(...)`
@@ -1063,7 +1065,9 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - 已新增跨 effect block 的轻量统一 runtime dispatcher：
   - `EffectBlockRuntimeState` / `effect_block_runtime_state_for(...)` 为已迁移的 effect block 创建统一状态容器，覆盖 projector family、ForceProjector、Radar、BuildTurret、BaseShield、ShockwaveTower；`ShockMine` 当前无持久运行态 state；
   - `EffectBlockRuntimeContext` 目前支持 `Projector / Radar / BaseShield / ShockwaveTower` 四类上下文；
+  - `EffectBlockRuntimeResources` 将“已存储 state”之外的 FogControl、content、building/bullet/unit 候选等资源单独传入，方便后续 building store 只保存 `EffectBlockRuntimeState`；
   - `effect_block_update_runtime(...)` 按传入上下文复用 `effect_projector_update_runtime(...)`、`effect_radar_update_runtime(...)`、`effect_base_shield_apply_runtime(...)` 与 `effect_shockwave_tower_apply_runtime(...)`；
+  - `effect_block_update_runtime_state(...)` 已能从统一 `EffectBlockRuntimeState` 自动拆出具体 state 并调用对应 dispatcher，block/state/resource 不匹配时返回 `None`；
   - `EffectBlockRuntimeReport` 将 projector report、Radar fog force-update、BaseShield runtime report 与 ShockwaveTower fire report 收束到同一返回类型；
   - 该入口仍保持显式上下文传参，避免把 `FogControl`、建筑 slice、bullet/unit slice 与 content loader 强行揉成一个巨型可变借用。
 
