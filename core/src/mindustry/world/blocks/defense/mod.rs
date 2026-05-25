@@ -3,7 +3,7 @@ pub mod turrets;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Read, Write};
 
-use crate::mindustry::content::blocks::{EffectBlockData, EffectBlockKind};
+use crate::mindustry::content::blocks::{BlockDef, EffectBlockData, EffectBlockKind};
 use crate::mindustry::core::content_loader::ContentLoader;
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::bullet::{BulletCreatePlan, BulletType};
@@ -803,6 +803,25 @@ pub fn effect_block_runtime_state_for(
         )),
         EffectBlockKind::ShockMine => None,
     }
+}
+
+pub fn effect_block_data_for_building<'a>(
+    content: &'a ContentLoader,
+    building: &BuildingComp,
+) -> Option<&'a EffectBlockData> {
+    match content.block(building.block.id)? {
+        BlockDef::Effect(effect) => Some(effect),
+        _ => None,
+    }
+}
+
+pub fn effect_block_runtime_state_for_building(
+    content: &ContentLoader,
+    building: &BuildingComp,
+    initial_reload_counter: f32,
+) -> Option<EffectBlockRuntimeState> {
+    effect_block_data_for_building(content, building)
+        .and_then(|block| effect_block_runtime_state_for(block, initial_reload_counter))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -6515,6 +6534,28 @@ mod tests {
             effect_block_runtime_state_for(effect_block(&content, "shock-mine"), 0.0),
             None
         );
+    }
+
+    #[test]
+    fn effect_block_runtime_state_factory_resolves_building_content_id() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let radar_def = content.block_by_name("radar").unwrap();
+        let mut radar_building =
+            BuildingComp::new(point2_pack(45, 0), radar_def.base().clone(), TeamId(1));
+        radar_building.set_pos(24.0, 32.0);
+
+        let effect = effect_block_data_for_building(&content, &radar_building).unwrap();
+        assert_eq!(effect.kind, EffectBlockKind::Radar);
+        assert!(matches!(
+            effect_block_runtime_state_for_building(&content, &radar_building, 0.0),
+            Some(EffectBlockRuntimeState::Radar(_))
+        ));
+
+        let router_def = content.block_by_name("router").unwrap();
+        let router_building =
+            BuildingComp::new(point2_pack(46, 0), router_def.base().clone(), TeamId(1));
+        assert!(effect_block_data_for_building(&content, &router_building).is_none());
+        assert!(effect_block_runtime_state_for_building(&content, &router_building, 0.0).is_none());
     }
 
     #[test]
