@@ -2748,6 +2748,35 @@ pub fn base_shield_apply_runtime<'a>(
     report
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn effect_base_shield_apply_runtime<'a>(
+    block: &EffectBlockData,
+    state: &mut BaseShieldState,
+    shield: &BuildingComp,
+    efficiency: f32,
+    bullets: &mut [BulletComp],
+    bullet_type: impl FnMut(ContentId) -> Option<&'a BulletType>,
+    units: &mut [UnitComp],
+    delta: f32,
+    spark_random: impl FnMut(&UnitComp) -> f32,
+) -> Option<BaseShieldRuntimeReport> {
+    if block.kind != EffectBlockKind::BaseShield {
+        return None;
+    }
+
+    Some(base_shield_apply_runtime(
+        state,
+        shield,
+        block.radius,
+        efficiency,
+        bullets,
+        bullet_type,
+        units,
+        delta,
+        spark_random,
+    ))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseShieldDrawCommand {
     SetShieldLayer,
@@ -7047,6 +7076,84 @@ mod tests {
         assert_eq!(inactive.bullets_absorbed, 0);
         assert_eq!(inactive.units_repelled, 0);
         assert_eq!(inactive.units_killed, 0);
+    }
+
+    #[test]
+    fn effect_base_shield_runtime_dispatch_uses_content_radius() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let shield_block = effect_block(&content, "shield-projector");
+        let radar_block = effect_block(&content, "radar");
+        let mut shield = projector_runtime_building(41, "shield-projector");
+        shield.set_pos(0.0, 0.0);
+
+        let absorbable = BulletType {
+            absorbable: true,
+            ..BulletType::default()
+        };
+
+        let mut absorbed_bullet = BulletComp::default();
+        absorbed_bullet.bullet_type_id = 0;
+        absorbed_bullet.team = TeamId(2);
+        absorbed_bullet.x = 9.0;
+
+        let mut outside_bullet = BulletComp::default();
+        outside_bullet.bullet_type_id = 0;
+        outside_bullet.team = TeamId(2);
+        outside_bullet.x = 12.0;
+
+        let mut bullets = vec![absorbed_bullet, outside_bullet];
+
+        let mut unit_type = UnitType::new(2, "shield-dispatch-unit");
+        unit_type.hit_size = 10.0;
+        unit_type.health = 100.0;
+        let mut repel_unit = UnitComp::new(5, unit_type, TeamId(2));
+        repel_unit.set_pos(13.0, 0.0);
+        repel_unit.vel.vel.x = 3.0;
+        let mut units = vec![repel_unit];
+
+        let mut state = BaseShieldState::default();
+        let report = effect_base_shield_apply_runtime(
+            shield_block,
+            &mut state,
+            &shield,
+            1.0,
+            &mut bullets,
+            |id| (id == 0).then_some(&absorbable),
+            &mut units,
+            1.0,
+            |_| 1.0,
+        );
+
+        assert_eq!(
+            report,
+            Some(BaseShieldRuntimeReport {
+                active: true,
+                radius: 10.0,
+                bullets_absorbed: 1,
+                units_repelled: 1,
+                units_killed: 0,
+                unit_sparks: 0,
+            })
+        );
+        assert!(bullets[0].absorbed);
+        assert!(!bullets[1].absorbed);
+        assert!((units[0].x() - 15.01).abs() < 0.00001);
+        assert_eq!(units[0].vel.vel.x, 0.0);
+
+        assert_eq!(
+            effect_base_shield_apply_runtime(
+                radar_block,
+                &mut state,
+                &shield,
+                1.0,
+                &mut bullets,
+                |_| Some(&absorbable),
+                &mut units,
+                1.0,
+                |_| 0.0,
+            ),
+            None
+        );
     }
 
     #[test]

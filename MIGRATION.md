@@ -673,6 +673,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `base_shield_apply_absorb_to_bullet(...)`
 - `base_shield_within_radius(...)`
 - `base_shield_apply_runtime(...)`
+- `effect_base_shield_apply_runtime(...)`
 - `base_shield_tint_plan(...)`
 - `base_shield_place_plan(...)`
 - `base_shield_select_plan(...)`
@@ -706,10 +707,14 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - 对 bullet 侧跳过已移除/已吸收对象，经 `BulletType.absorbable`、敌队和半径内判定后调用真实 `BulletComp::absorb()`；
   - 对 unit 侧按 `rad + 10` 做敌方单位候选过滤，再用 `base_shield_unit_action(...)` 执行真实 `UnitComp` repel/kill，并保留 spark 事件计数给后续 FX dispatcher；
   - 这一步已把 BaseShield 的 bullet/unit 交互从单测直接调用 helper 提升为可挂接真实 `Groups.bullet.intersect(...)` / `Units.nearbyEnemies(...)` 或 world indexer 的统一入口。
+- 已新增 content-backed BaseShield runtime dispatcher：
+  - `effect_base_shield_apply_runtime(...)` 直接接收 `EffectBlockData`，仅在 `EffectBlockKind::BaseShield` 时执行；
+  - 分发时使用 content 中的 `radius`，覆盖 `shield-projector=200` 与 `large-shield-projector=400` 等 Java `Blocks.java` 参数；
+  - 调用方只需提供 shield building、bullet/unit 候选、`BulletType` resolver、delta 与 spark 随机源，后续可直接接入真实 building update loop。
 
 仍需：
 
-- 将 `base_shield_apply_runtime(...)` 挂到真实 building update dispatcher 与 Groups/world indexer；
+- 将 `effect_base_shield_apply_runtime(...)` 挂到真实 building update dispatcher 与 Groups/world indexer；
 - shieldColor/teamColor 到真实渲染颜色的 adapter；
 - drawPlace/drawSelect dash circle helper 接入真实 renderer。
 
@@ -1040,7 +1045,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_projector_update_runtime(...)` 直接接收 `EffectBlockData`，按 `EffectBlockKind::MendProjector / OverdriveProjector / RegenProjector` 分发到对应 state 与 runtime adapter；
   - 调用方只需传入 `ProjectorRuntimeSource`、`ContentLoader` 与候选 `BuildingComp` slice，避免同时持有 `&mut BuildingComp` 和 `&mut [BuildingComp]`；
   - Regen 分支已经在 dispatcher 内完成 `damaged_targets` 判定、mendMap 记录、`last_update_frame/update_id` 门控和真实 `BuildingComp::heal(...)` 应用；
-  - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口；`Radar` 因需要额外 `FogControl` 已拆到 `effect_radar_update_runtime(...)`，后续继续扩展 `BaseShield` 等需要 bullet/unit 输入的分支。
+  - 这是后续真实 building update loop 接入 `BlockDef::Effect(...)` 的最小入口；`Radar` 因需要额外 `FogControl` 已拆到 `effect_radar_update_runtime(...)`，`BaseShield` 因需要 bullet/unit 输入已拆到 `effect_base_shield_apply_runtime(...)`，后续继续收束成更统一的 effect-block runtime dispatcher。
 
 仍需：
 
