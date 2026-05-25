@@ -64,7 +64,8 @@ use crate::mindustry::{
         read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
         read_empty_payload_block_build_common, read_empty_payload_conveyor_extra,
         read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
-        read_payload_router_extra, read_payload_source_extra, read_terminal_payload_conveyor_extra,
+        read_payload_router_extra, read_payload_source_extra,
+        read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
         BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
         PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadSortKey,
         PayloadSourceState,
@@ -163,6 +164,7 @@ pub enum GameRuntimePayloadBlockState {
         producer: BlockProducerState,
         recipe: Option<i16>,
     },
+    Void(PayloadBlockBuildState),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1045,6 +1047,11 @@ impl GameRuntime {
                     source,
                 }))
             }
+            BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadVoid => {
+                read_terminal_payload_block_build_common(building_payload)
+                    .map(|common| Some(GameRuntimePayloadBlockState::Void(common)))
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)
+            }
             _ => Err(GameRuntimeBlockStateReadError::Unsupported),
         }
     }
@@ -1509,7 +1516,7 @@ impl GameRuntime {
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
             BlockDef::UnitAssemblerModule(_) => {
-                read_empty_payload_block_build_common(building_payload)
+                read_terminal_payload_block_build_common(building_payload)
                     .map(|common| Some(GameRuntimeUnitBlockState::AssemblerModule(common)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
@@ -2999,6 +3006,43 @@ mod tests {
         assert_eq!(
             runtime.payload_runtime_states.get(&tile_pos),
             Some(&GameRuntimePayloadBlockState::Source { common, source })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_payload_void_terminal_common_payload_state() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let router_id = content.block_by_name("router").unwrap().base().id;
+        let tile_pos = point2_pack(0, 5);
+        let saved = BuildingComp::new(tile_pos, void_def.base().clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: Some(PayloadRef::Block {
+                block: router_id,
+                version: 1,
+                build_bytes: vec![0x33, 0x44],
+            }),
+            pay_vector: Vec2 { x: 0.25, y: -0.75 },
+            pay_rotation: 270.0,
+            carried: false,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_payload_block_build_common(&mut building_bytes, &common).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 30, void_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Void(common))
         );
     }
 
@@ -4648,7 +4692,10 @@ mod tests {
         let tile_pos = point2_pack(1, 1);
         let saved = BuildingComp::new(tile_pos, module_def.base().clone(), TeamId(1));
         let common = PayloadBlockBuildState {
-            payload: None,
+            payload: Some(PayloadRef::Unit {
+                class_id: 7,
+                unit_bytes: vec![0x55, 0x66],
+            }),
             pay_vector: Vec2 { x: -0.25, y: 0.5 },
             pay_rotation: 180.0,
             carried: false,

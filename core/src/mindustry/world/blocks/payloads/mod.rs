@@ -213,6 +213,23 @@ pub fn read_empty_payload_block_build_common<R: Read>(
     })
 }
 
+pub fn read_terminal_payload_block_build_common<R: Read>(
+    read: &mut R,
+) -> io::Result<PayloadBlockBuildState> {
+    let pay_vector = Vec2 {
+        x: read_f32(read)?,
+        y: read_f32(read)?,
+    };
+    let pay_rotation = read_f32(read)?;
+    let payload = read_payload_ref_to_end(read)?;
+    Ok(PayloadBlockBuildState {
+        payload,
+        pay_vector,
+        pay_rotation,
+        carried: false,
+    })
+}
+
 pub fn write_payload_ref<W: Write>(write: &mut W, payload: Option<&PayloadRef>) -> io::Result<()> {
     write_bool(write, payload.is_some())?;
     match payload {
@@ -1463,6 +1480,19 @@ mod tests {
         assert_eq!(restored.pay_vector, Vec2 { x: 1.0, y: 2.0 });
         assert_eq!(restored.pay_rotation, 45.0);
         assert_eq!(restored.payload, None);
+
+        let terminal_payload = PayloadRef::Block {
+            block: 5,
+            version: 2,
+            build_bytes: vec![0xab, 0xcd],
+        };
+        state.payload = Some(terminal_payload.clone());
+        let mut bytes = Vec::new();
+        write_payload_block_build_common(&mut bytes, &state).unwrap();
+        let restored = read_terminal_payload_block_build_common(&mut bytes.as_slice()).unwrap();
+        assert_eq!(restored.pay_vector, Vec2 { x: 1.0, y: 2.0 });
+        assert_eq!(restored.pay_rotation, 45.0);
+        assert_eq!(restored.payload, Some(terminal_payload));
     }
 
     #[test]
