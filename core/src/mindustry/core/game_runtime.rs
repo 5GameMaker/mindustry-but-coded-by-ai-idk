@@ -58,7 +58,8 @@ use crate::mindustry::{
     world::blocks::heat::{read_heat_producer_state, write_heat_producer_state, HeatProducerState},
     world::blocks::legacy::{
         read_legacy_command_center_extra, read_legacy_mech_pad_extra,
-        read_legacy_unit_factory_extra, LegacyUnitFactoryExtra,
+        read_legacy_unit_factory_extra, write_legacy_command_center_extra,
+        write_legacy_mech_pad_extra, write_legacy_unit_factory_extra, LegacyUnitFactoryExtra,
     },
     world::blocks::liquid::{
         read_liquid_bridge_state, write_liquid_bridge_state, LiquidBridgeState,
@@ -94,7 +95,8 @@ use crate::mindustry::{
         SeparatorState,
     },
     world::blocks::sandbox::{
-        read_item_source_config, read_liquid_source_config, ItemSourceState, LiquidSourceState,
+        read_item_source_config, read_liquid_source_config, write_item_source_config,
+        write_liquid_source_config, ItemSourceState, LiquidSourceState,
     },
     world::blocks::storage::{
         read_core_state, read_unloader_sort_item, write_core_state, CoreBuildState,
@@ -299,6 +301,38 @@ fn write_network_map_block_state_tail<W: io::Write>(
         }
     }
 
+    if let (BlockDef::Sandbox(sandbox), Some(state)) = (
+        block,
+        runtime.sandbox_runtime_states.get(&building.tile_pos),
+    ) {
+        match (sandbox.kind, state) {
+            (SandboxBlockKind::ItemSource, GameRuntimeSandboxBlockState::ItemSource(state)) => {
+                write_item_source_config(write, state.output_item)?;
+            }
+            (SandboxBlockKind::LiquidSource, GameRuntimeSandboxBlockState::LiquidSource(state)) => {
+                write_liquid_source_config(write, state.source)?;
+            }
+            _ => {}
+        }
+    }
+
+    if let (BlockDef::Legacy(legacy), Some(state)) =
+        (block, runtime.legacy_runtime_states.get(&building.tile_pos))
+    {
+        match (legacy.kind, state) {
+            (LegacyBlockKind::CommandCenter, GameRuntimeLegacyBlockState::CommandCenter(_)) => {
+                write_legacy_command_center_extra(write)?;
+            }
+            (LegacyBlockKind::MechPad, GameRuntimeLegacyBlockState::MechPad(values)) => {
+                write_legacy_mech_pad_extra(write, *values)?;
+            }
+            (LegacyBlockKind::UnitFactory, GameRuntimeLegacyBlockState::UnitFactory(extra)) => {
+                write_legacy_unit_factory_extra(write, 0, extra)?;
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
 }
 
@@ -362,6 +396,15 @@ fn network_map_building_revision(
         runtime.storage_runtime_states.get(&building.tile_pos),
     ) {
         if storage.kind == StorageBlockKind::Core {
+            return 1;
+        }
+    }
+
+    if let (BlockDef::Sandbox(sandbox), Some(GameRuntimeSandboxBlockState::LiquidSource(_))) = (
+        block,
+        runtime.sandbox_runtime_states.get(&building.tile_pos),
+    ) {
+        if sandbox.kind == SandboxBlockKind::LiquidSource {
             return 1;
         }
     }
@@ -4192,6 +4235,191 @@ mod tests {
                 command_pos: Some(IoVec2 { x: 64.0, y: 128.0 }),
                 ..CoreBuildState::default()
             }))
+        );
+    }
+
+    fn exported_sandbox_state_revision(state: &GameRuntimeSandboxBlockState) -> u8 {
+        match state {
+            GameRuntimeSandboxBlockState::LiquidSource(_) => 1,
+            GameRuntimeSandboxBlockState::ItemSource(_) => 0,
+        }
+    }
+
+    fn roundtrip_exported_sandbox_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeSandboxBlockState,
+    ) -> Option<GameRuntimeSandboxBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let expected_revision = exported_sandbox_state_revision(&state);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(11),
+        ));
+        runtime.sandbox_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("sandbox block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("sandbox block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(expected_revision));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.sandbox_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_sandbox_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let water = content
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+
+        assert_eq!(
+            roundtrip_exported_sandbox_state(
+                &content,
+                "item-source",
+                1,
+                14,
+                GameRuntimeSandboxBlockState::ItemSource(ItemSourceState {
+                    counter: 42.0,
+                    output_item: Some(copper),
+                }),
+            ),
+            Some(GameRuntimeSandboxBlockState::ItemSource(ItemSourceState {
+                output_item: Some(copper),
+                ..ItemSourceState::default()
+            }))
+        );
+        assert_eq!(
+            roundtrip_exported_sandbox_state(
+                &content,
+                "liquid-source",
+                3,
+                14,
+                GameRuntimeSandboxBlockState::LiquidSource(LiquidSourceState {
+                    source: Some(water),
+                    stored_liquid: Some(water),
+                    amount: 9_999.0,
+                }),
+            ),
+            Some(GameRuntimeSandboxBlockState::LiquidSource(
+                LiquidSourceState {
+                    source: Some(water),
+                    ..LiquidSourceState::default()
+                }
+            ))
+        );
+    }
+
+    fn roundtrip_exported_legacy_state(
+        content: &ContentLoader,
+        block_name: &str,
+        x: i32,
+        y: i32,
+        state: GameRuntimeLegacyBlockState,
+    ) -> Option<GameRuntimeLegacyBlockState> {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let tile_pos = point2_pack(x, y);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            block_def.base().clone(),
+            TeamId(12),
+        ));
+        runtime.legacy_runtime_states.insert(tile_pos, state);
+
+        let map = runtime.export_network_map_snapshot(content);
+        let center_index = x as usize + y as usize * 16;
+        let center = map
+            .blocks
+            .iter()
+            .find(|record| record.index == center_index)
+            .expect("legacy block center should be exported explicitly");
+        let payload = center
+            .building
+            .as_ref()
+            .expect("legacy block center should carry building payload");
+        assert_eq!(payload.first().copied(), Some(0));
+        assert!(payload.len() > 1);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        loaded.legacy_runtime_states.get(&tile_pos).cloned()
+    }
+
+    #[test]
+    fn game_runtime_exports_legacy_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_extra = LegacyUnitFactoryExtra {
+            build_time: 120.0,
+            spawn_count: Some(3),
+        };
+
+        assert_eq!(
+            roundtrip_exported_legacy_state(
+                &content,
+                "command-center",
+                5,
+                14,
+                GameRuntimeLegacyBlockState::CommandCenter(7),
+            ),
+            Some(GameRuntimeLegacyBlockState::CommandCenter(0))
+        );
+        assert_eq!(
+            roundtrip_exported_legacy_state(
+                &content,
+                "legacy-mech-pad",
+                7,
+                14,
+                GameRuntimeLegacyBlockState::MechPad([1.0, 2.5, -3.0]),
+            ),
+            Some(GameRuntimeLegacyBlockState::MechPad([1.0, 2.5, -3.0]))
+        );
+        assert_eq!(
+            roundtrip_exported_legacy_state(
+                &content,
+                "legacy-unit-factory",
+                11,
+                14,
+                GameRuntimeLegacyBlockState::UnitFactory(factory_extra),
+            ),
+            Some(GameRuntimeLegacyBlockState::UnitFactory(factory_extra))
         );
     }
 
