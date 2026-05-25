@@ -3203,6 +3203,38 @@ pub fn effect_projector_update_building_frame(
     )
 }
 
+pub const MEND_PROJECTOR_TIMER_USE_SLOT: usize = 0;
+
+pub fn effect_projector_update_building_frame_with_timer(
+    store: &mut EffectBlockRuntimeStateStore,
+    timer: &mut BuildingTimerState,
+    content: &ContentLoader,
+    building: &BuildingComp,
+    buildings: &mut [BuildingComp],
+    frame: EffectBlockFrameInput,
+    suppressed: bool,
+) -> Option<EffectBlockRuntimeReport> {
+    let block = effect_block_data_for_building(content, building)?;
+    let timer_ready = if block.kind == EffectBlockKind::MendProjector {
+        timer.set_time(frame.now);
+        timer.timer(
+            MEND_PROJECTOR_TIMER_USE_SLOT,
+            block.use_time / building.time_scale,
+        )
+    } else {
+        true
+    };
+    effect_projector_update_building_frame(
+        store,
+        content,
+        building,
+        buildings,
+        frame,
+        timer_ready,
+        suppressed,
+    )
+}
+
 pub fn effect_base_shield_update_building_frame<'a, 'b>(
     store: &mut EffectBlockRuntimeStateStore,
     content: &ContentLoader,
@@ -7023,6 +7055,74 @@ mod tests {
             }
             other => panic!("unexpected regen stored state: {other:?}"),
         }
+    }
+
+    #[test]
+    fn effect_projector_building_frame_uses_mend_timer_sidecar_for_optional_consume() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mut mend_building =
+            BuildingComp::new(point2_pack(11, 9), mend_def.base().clone(), TeamId(1));
+        mend_building.efficiency = 1.0;
+        mend_building.optional_efficiency = 1.0;
+        mend_building.time_scale = 1.0;
+        let mut store = EffectBlockRuntimeStateStore::new();
+        let mut timer = BuildingTimerState::default();
+        let mut targets = Vec::new();
+
+        let before = effect_projector_update_building_frame_with_timer(
+            &mut store,
+            &mut timer,
+            &content,
+            &mend_building,
+            &mut targets,
+            EffectBlockFrameInput {
+                delta: 0.0,
+                edelta: 0.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: 399.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            false,
+        );
+        match before {
+            Some(EffectBlockRuntimeReport::Projector(EffectProjectorRuntimeReport::Mend {
+                update,
+                ..
+            })) => assert!(!update.should_consume_optional),
+            other => panic!("unexpected pre-timer mend report: {other:?}"),
+        }
+
+        let after = effect_projector_update_building_frame_with_timer(
+            &mut store,
+            &mut timer,
+            &content,
+            &mend_building,
+            &mut targets,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: 400.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            false,
+        );
+        match after {
+            Some(EffectBlockRuntimeReport::Projector(EffectProjectorRuntimeReport::Mend {
+                update,
+                ..
+            })) => assert!(update.should_consume_optional),
+            other => panic!("unexpected timer-ready mend report: {other:?}"),
+        }
+        assert_eq!(
+            timer.timer.last_time(MEND_PROJECTOR_TIMER_USE_SLOT),
+            effect_block(&content, "mend-projector").use_time
+        );
     }
 
     #[test]
