@@ -79,6 +79,9 @@ use crate::mindustry::{
         read_generic_crafter_state, read_separator_state, BeamDrillState, BurstDrillState,
         DrillState, GenericCrafterState, SeparatorState,
     },
+    world::blocks::sandbox::{
+        read_item_source_config, read_liquid_source_config, ItemSourceState, LiquidSourceState,
+    },
     world::blocks::storage::{read_core_state, read_unloader_sort_item, CoreBuildState},
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
@@ -232,6 +235,12 @@ pub enum GameRuntimeCampaignBlockState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GameRuntimeSandboxBlockState {
+    ItemSource(ItemSourceState),
+    LiquidSource(LiquidSourceState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeLegacyBlockState {
     CommandCenter(u8),
     MechPad([f32; 3]),
@@ -283,6 +292,7 @@ enum GameRuntimeLoadedBlockState {
     Liquid(GameRuntimeLiquidBlockState),
     Logic(GameRuntimeLogicBlockState),
     Campaign(GameRuntimeCampaignBlockState),
+    Sandbox(GameRuntimeSandboxBlockState),
     Legacy(GameRuntimeLegacyBlockState),
     Unit(GameRuntimeUnitBlockState),
     DefenseWall(GameRuntimeDefenseWallState),
@@ -304,6 +314,7 @@ pub struct GameRuntime {
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
     pub campaign_runtime_states: BTreeMap<i32, GameRuntimeCampaignBlockState>,
+    pub sandbox_runtime_states: BTreeMap<i32, GameRuntimeSandboxBlockState>,
     pub legacy_runtime_states: BTreeMap<i32, GameRuntimeLegacyBlockState>,
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
@@ -332,6 +343,7 @@ impl GameRuntime {
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
             campaign_runtime_states: BTreeMap::new(),
+            sandbox_runtime_states: BTreeMap::new(),
             legacy_runtime_states: BTreeMap::new(),
             unit_runtime_states: BTreeMap::new(),
             defense_wall_runtime_states: BTreeMap::new(),
@@ -385,6 +397,7 @@ impl GameRuntime {
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
         self.campaign_runtime_states.remove(&removed.tile_pos);
+        self.sandbox_runtime_states.remove(&removed.tile_pos);
         self.legacy_runtime_states.remove(&removed.tile_pos);
         self.unit_runtime_states.remove(&removed.tile_pos);
         self.defense_wall_runtime_states.remove(&removed.tile_pos);
@@ -583,6 +596,10 @@ impl GameRuntime {
                         self.campaign_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
                     }
+                    GameRuntimeLoadedBlockState::Sandbox(block_state) => {
+                        self.sandbox_runtime_states.insert(tile_pos, block_state);
+                        report.block_states_added += 1;
+                    }
                     GameRuntimeLoadedBlockState::Legacy(block_state) => {
                         self.legacy_runtime_states.insert(tile_pos, block_state);
                         report.block_states_added += 1;
@@ -738,6 +755,19 @@ impl GameRuntime {
             building_payload,
         ) {
             Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Campaign(state))),
+            Ok(None) => return Ok(None),
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                return Err(GameRuntimeBlockStateReadError::Parse);
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+
+        match self.read_sandbox_runtime_state_from_building_payload(
+            block,
+            revision,
+            building_payload,
+        ) {
+            Ok(Some(state)) => return Ok(Some(GameRuntimeLoadedBlockState::Sandbox(state))),
             Ok(None) => return Ok(None),
             Err(GameRuntimeBlockStateReadError::Parse) => {
                 return Err(GameRuntimeBlockStateReadError::Parse);
@@ -1295,6 +1325,48 @@ impl GameRuntime {
         }
     }
 
+    fn read_sandbox_runtime_state_from_building_payload(
+        &self,
+        block: &BlockDef,
+        revision: u8,
+        building_payload: &mut &[u8],
+    ) -> Result<Option<GameRuntimeSandboxBlockState>, GameRuntimeBlockStateReadError> {
+        if building_payload.is_empty() {
+            return Ok(None);
+        }
+
+        let BlockDef::Sandbox(sandbox) = block else {
+            return Err(GameRuntimeBlockStateReadError::Unsupported);
+        };
+
+        match sandbox.kind {
+            SandboxBlockKind::ItemSource => read_item_source_config(building_payload)
+                .map(|output_item| {
+                    Some(GameRuntimeSandboxBlockState::ItemSource(ItemSourceState {
+                        output_item,
+                        ..ItemSourceState::default()
+                    }))
+                })
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            SandboxBlockKind::LiquidSource => read_liquid_source_config(building_payload, revision)
+                .map(|source| {
+                    Some(GameRuntimeSandboxBlockState::LiquidSource(
+                        LiquidSourceState {
+                            source,
+                            ..LiquidSourceState::default()
+                        },
+                    ))
+                })
+                .map_err(|_| GameRuntimeBlockStateReadError::Parse),
+            SandboxBlockKind::PowerSource
+            | SandboxBlockKind::PowerVoid
+            | SandboxBlockKind::ItemVoid
+            | SandboxBlockKind::LiquidVoid
+            | SandboxBlockKind::PayloadSource
+            | SandboxBlockKind::PayloadVoid => Err(GameRuntimeBlockStateReadError::Unsupported),
+        }
+    }
+
     fn read_legacy_runtime_state_from_building_payload(
         &self,
         block: &BlockDef,
@@ -1498,6 +1570,7 @@ impl GameRuntime {
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
         self.campaign_runtime_states.clear();
+        self.sandbox_runtime_states.clear();
         self.legacy_runtime_states.clear();
         self.unit_runtime_states.clear();
         self.defense_wall_runtime_states.clear();
@@ -1690,6 +1763,7 @@ mod tests {
                 write_beam_drill_state, write_burst_drill_state, write_drill_state,
                 write_generic_crafter_state, write_separator_state,
             },
+            blocks::sandbox::{write_item_source_config, write_liquid_source_config},
             blocks::storage::{write_core_state, write_unloader_sort_item, CoreBuildState},
             blocks::units::{
                 write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
@@ -4105,6 +4179,80 @@ mod tests {
         assert_eq!(
             runtime.legacy_runtime_states.get(&tile_pos),
             Some(&GameRuntimeLegacyBlockState::UnitFactory(extra))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_item_source_config_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("item-source").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = point2_pack(6, 3);
+        let saved = BuildingComp::new(tile_pos, source_def.base().clone(), TeamId(1));
+        let state = ItemSourceState {
+            output_item: Some(copper),
+            ..ItemSourceState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(0);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_item_source_config(&mut building_bytes, state.output_item).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 30, source_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.sandbox_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeSandboxBlockState::ItemSource(state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_liquid_source_config_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("liquid-source").unwrap();
+        let water = content
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = point2_pack(7, 3);
+        let saved = BuildingComp::new(tile_pos, source_def.base().clone(), TeamId(1));
+        let state = LiquidSourceState {
+            source: Some(water),
+            ..LiquidSourceState::default()
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_liquid_source_config(&mut building_bytes, state.source).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(8, 8, 31, source_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.sandbox_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeSandboxBlockState::LiquidSource(state))
         );
     }
 
