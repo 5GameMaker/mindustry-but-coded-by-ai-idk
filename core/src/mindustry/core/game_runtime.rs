@@ -911,6 +911,46 @@ fn network_map_building_payload(
     bytes
 }
 
+fn scaled_block_requirements(
+    block: &BlockDef,
+    build_cost_multiplier: f32,
+) -> Vec<(ContentId, i32)> {
+    let multiplier = if build_cost_multiplier.is_finite() {
+        build_cost_multiplier.max(0.0)
+    } else {
+        0.0
+    };
+    block
+        .requirements()
+        .iter()
+        .filter_map(|stack| {
+            let amount = ((stack.amount as f32) * multiplier).ceil() as i32;
+            (amount > 0).then_some((stack.item, amount))
+        })
+        .collect()
+}
+
+fn building_has_items(building: &BuildingComp, requirements: &[(ContentId, i32)]) -> bool {
+    if requirements.is_empty() {
+        return true;
+    }
+    let Some(items) = building.items.as_ref() else {
+        return false;
+    };
+    requirements
+        .iter()
+        .all(|(item, amount)| items.get(*item) >= *amount)
+}
+
+fn consume_building_items(building: &mut BuildingComp, requirements: &[(ContentId, i32)]) {
+    let Some(items) = building.items.as_mut() else {
+        return;
+    };
+    for (item, amount) in requirements {
+        items.remove(*item, *amount);
+    }
+}
+
 fn network_map_entity_records(
     runtime: &GameRuntime,
     content: &ContentLoader,
@@ -3154,10 +3194,32 @@ impl GameRuntime {
             };
             report.constructor_candidates += 1;
 
+            let Some(GameRuntimePayloadBlockState::Constructor { recipe, .. }) =
+                self.payload_runtime_states.get(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+            let recipe = *recipe;
+
+            let recipe_def = recipe.and_then(|recipe_id| content.block(recipe_id));
+            let recipe_build_time = recipe_def.and_then(|block| {
+                recipe_build_time(block)
+                    .filter(|build_time| build_time.is_finite() && *build_time > 0.0)
+            });
+            let recipe_requirements = recipe_def
+                .map(|block| {
+                    scaled_block_requirements(block, self.state.rules.build_cost_multiplier)
+                })
+                .unwrap_or_default();
+            let has_recipe_items = building_has_items(&self.buildings[index], &recipe_requirements);
+
+            if recipe.is_some() && recipe_build_time.is_none() {
+                report.missing_recipe_build_times += 1;
+            }
+
             let Some(GameRuntimePayloadBlockState::Constructor {
-                common,
-                producer,
-                recipe,
+                common, producer, ..
             }) = self.payload_runtime_states.get_mut(&tile_pos)
             else {
                 report.missing_runtime_states += 1;
@@ -3165,29 +3227,21 @@ impl GameRuntime {
             };
 
             producer.has_payload = common.payload.is_some();
-            let recipe_def = recipe.and_then(|recipe_id| content.block(recipe_id));
-            let recipe_build_time = recipe_def.and_then(|block| {
-                recipe_build_time(block)
-                    .filter(|build_time| build_time.is_finite() && *build_time > 0.0)
-            });
-
-            if recipe.is_some() && recipe_build_time.is_none() {
-                report.missing_recipe_build_times += 1;
-            }
-
             let before_had_payload = producer.has_payload;
+            let effective_efficiency = if has_recipe_items { efficiency } else { 0.0 };
             let step = block_producer_update(
                 producer,
                 recipe_build_time,
-                efficiency,
+                effective_efficiency,
                 constructor.build_speed,
-                frame_delta * time_scale * efficiency,
+                frame_delta * time_scale * effective_efficiency,
                 frame_delta * time_scale,
             );
             report.updated_constructors += 1;
 
             if step.produced && !before_had_payload {
                 if let Some(recipe_def) = recipe_def {
+                    consume_building_items(&mut self.buildings[index], &recipe_requirements);
                     let payload_building = BuildingComp::new(
                         crate::mindustry::world::point2_pack(0, 0),
                         recipe_def.base().clone(),
@@ -7860,11 +7914,13 @@ mod tests {
         let mut runtime = GameRuntime::default();
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(8, 8);
-        runtime.add_building(BuildingComp::new(
-            tile_pos,
-            constructor_def.base().clone(),
-            TeamId(6),
-        ));
+        let mut building = BuildingComp::new(tile_pos, constructor_def.base().clone(), TeamId(6));
+        for (item, amount) in
+            scaled_block_requirements(router_def, runtime.state.rules.build_cost_multiplier)
+        {
+            building.items.as_mut().unwrap().set(item, amount);
+        }
+        runtime.add_building(building);
         runtime.payload_runtime_states.insert(
             tile_pos,
             GameRuntimePayloadBlockState::Constructor {
@@ -7911,6 +7967,102 @@ mod tests {
         assert_eq!(*block, router_def.base().id);
         assert_eq!(*version, 0);
         assert!(!build_bytes.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_payload_constructor_waits_for_recipe_items() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let tile_pos = point2_pack(6, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            constructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 9.5,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(router_def.base().id),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_constructors_with_recipe_build_time(&content, 1.0, |_| {
+                Some(10.0)
+            })
+            .unwrap();
+
+        assert_eq!(report.produced_payloads, 0);
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            common, producer, ..
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert_eq!(producer.progress, 9.5);
+        assert!(!producer.has_payload);
+        assert!(common.payload.is_none());
+    }
+
+    #[test]
+    fn game_runtime_payload_constructor_consumes_scaled_recipe_items_when_produced() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor_def = content.block_by_name("constructor").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let tile_pos = point2_pack(6, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.rules.build_cost_multiplier = 1.5;
+        runtime.state.world.resize(8, 8);
+        let required =
+            scaled_block_requirements(router_def, runtime.state.rules.build_cost_multiplier);
+        let mut building = BuildingComp::new(tile_pos, constructor_def.base().clone(), TeamId(6));
+        for (item, amount) in &required {
+            building.items.as_mut().unwrap().set(*item, *amount);
+        }
+        runtime.add_building(building);
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 9.5,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(router_def.base().id),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_constructors_with_recipe_build_time(&content, 1.0, |_| {
+                Some(10.0)
+            })
+            .unwrap();
+
+        assert_eq!(report.produced_payloads, 1);
+        let items = runtime.buildings()[0].items.as_ref().unwrap();
+        for (item, _) in &required {
+            assert_eq!(items.get(*item), 0);
+        }
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            common, producer, ..
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("constructor sidecar should remain present");
+        };
+        assert!(producer.has_payload);
+        assert!(matches!(common.payload, Some(PayloadRef::Block { .. })));
     }
 
     #[test]
