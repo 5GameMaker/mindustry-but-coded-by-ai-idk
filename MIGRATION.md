@@ -967,6 +967,8 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
 - `effect_shockwave_tower_update_building_frame_with_timer_store(...)`
 - `effect_build_turret_timer_target_ready_from_store(...)`
 - `effect_build_turret_timer_target2_ready_from_store(...)`
+- `EffectBlockFrameResources`
+- `effect_block_update_building_frame_with_stores(...)`
 - `write_force_projector_state(...)`
 - `read_force_projector_state(...)`
 - 已对照 `ForceProjector.updateTile()` 推进：
@@ -1111,6 +1113,7 @@ D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/defense/BuildTu
   - `effect_block_consume_source_items_from_report(...)` 已提供跨 `EffectBlockRuntimeReport` 的统一源建筑扣料入口，覆盖 projector family 与 ForceProjector；
   - `effect_projector_update_building_frame_with_timer_and_consume(...)` / `effect_force_projector_update_building_frame_with_timer_and_consume(...)` 已把 frame update 与源建筑扣料合并为可直接接入 building lifecycle 的入口，减少上层拿到 report 后漏调 consume helper 的风险；
   - `EffectBlockTimerStateStore` 已按 `BuildingComp.tile_pos` 管理 per-building `BuildingTimerState` 侧车，并以 `max(content.timer_slots, Java TimerComp 默认 6 槽)` 初始化；projector/Force 已有 `*_with_timer_store_and_consume` 入口，ShockwaveTower 与 BuildTurret 的 `timerCheck/timerTarget/timerTarget2` 也已有 store-backed wrapper，后续真实 world/building 遍历可同时持有 runtime store 与 timer store；
+  - `EffectBlockFrameResources` / `effect_block_update_building_frame_with_stores(...)` 已形成单栋 effect block 的最小帧级总调度入口：外部遍历提供 `BuildingComp`、frame、runtime store、timer store 与 family-specific 资源后，可按 `EffectBlockKind` 路由到 projector/Radar/Force/BaseShield/ShockwaveTower wrapper；
   - `effect_force_projector_update_building_frame(...)` / `effect_force_projector_update_building_frame_with_timer(...)` 已能从 `BuildingComp.efficiency/optional_efficiency/timeScale`、帧 delta 与 content `phaseUseTime/timerUse` 组装 ForceProjector runtime 输入；`FORCE_PROJECTOR_TIMER_USE_SLOT = 1` 作为 Java 对齐 fallback，且 broken/phase invalid/efficiency=0 时不触碰 timer slot；
   - `effect_base_shield_update_building_frame(...)` 已能从 `BuildingComp`、bullet/unit 候选与帧 delta 组装 BaseShield runtime 输入，写回 `BulletComp::absorb()` 与 `BaseShieldState.smooth_radius`；
   - `effect_shockwave_tower_update_building_frame(...)` 已能从 `BuildingComp.potential_efficiency`、building delta/edelta、bullet 候选与 timer gate 组装 ShockwaveTower runtime 输入，写回 bullet damage/remove 与 `ShockwaveTowerState`；

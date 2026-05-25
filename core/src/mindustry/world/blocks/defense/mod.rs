@@ -3102,6 +3102,30 @@ pub struct EffectBlockFrameInput {
     pub static_fog: bool,
 }
 
+pub enum EffectBlockFrameResources<'a, 'b> {
+    Projector {
+        buildings: &'a mut [BuildingComp],
+        suppressed: bool,
+    },
+    Radar {
+        fog_control: &'a mut FogControl,
+    },
+    ForceProjector {
+        coolant_efficiency: f32,
+        coolant_heat_capacity: f32,
+    },
+    BaseShield {
+        bullets: &'a mut [BulletComp],
+        bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+        units: &'a mut [UnitComp],
+        spark_random: &'a mut dyn for<'u> FnMut(&'u UnitComp) -> f32,
+    },
+    ShockwaveTower {
+        bullets: &'a mut [BulletComp],
+        bullet_type: &'a mut dyn FnMut(ContentId) -> Option<&'b BulletType>,
+    },
+}
+
 pub fn effect_block_building_delta(building: &BuildingComp, frame: EffectBlockFrameInput) -> f32 {
     frame.delta * building.time_scale
 }
@@ -3778,6 +3802,88 @@ pub fn effect_shockwave_tower_update_building_frame_with_timer_store<'a, 'b>(
         bullet_type,
         frame,
     )
+}
+
+pub fn effect_block_update_building_frame_with_stores<'a, 'b>(
+    runtime_store: &mut EffectBlockRuntimeStateStore,
+    timer_store: &mut EffectBlockTimerStateStore,
+    content: &ContentLoader,
+    building: &mut BuildingComp,
+    frame: EffectBlockFrameInput,
+    resources: EffectBlockFrameResources<'a, 'b>,
+) -> Option<EffectBlockRuntimeReport> {
+    let block = effect_block_data_for_building(content, building)?;
+    match (block.kind, resources) {
+        (
+            EffectBlockKind::MendProjector
+            | EffectBlockKind::OverdriveProjector
+            | EffectBlockKind::RegenProjector,
+            EffectBlockFrameResources::Projector {
+                buildings,
+                suppressed,
+            },
+        ) => effect_projector_update_building_frame_with_timer_store_and_consume(
+            runtime_store,
+            timer_store,
+            content,
+            building,
+            buildings,
+            frame,
+            suppressed,
+        ),
+        (EffectBlockKind::Radar, EffectBlockFrameResources::Radar { fog_control }) => {
+            effect_radar_update_building_frame(runtime_store, content, building, fog_control, frame)
+        }
+        (
+            EffectBlockKind::ForceProjector,
+            EffectBlockFrameResources::ForceProjector {
+                coolant_efficiency,
+                coolant_heat_capacity,
+            },
+        ) => effect_force_projector_update_building_frame_with_timer_store_and_consume(
+            runtime_store,
+            timer_store,
+            content,
+            building,
+            frame,
+            coolant_efficiency,
+            coolant_heat_capacity,
+        ),
+        (
+            EffectBlockKind::BaseShield,
+            EffectBlockFrameResources::BaseShield {
+                bullets,
+                bullet_type,
+                units,
+                spark_random,
+            },
+        ) => effect_base_shield_update_building_frame(
+            runtime_store,
+            content,
+            building,
+            bullets,
+            bullet_type,
+            units,
+            frame,
+            spark_random,
+        ),
+        (
+            EffectBlockKind::ShockwaveTower,
+            EffectBlockFrameResources::ShockwaveTower {
+                bullets,
+                bullet_type,
+            },
+        ) => effect_shockwave_tower_update_building_frame_with_timer_store(
+            runtime_store,
+            timer_store,
+            content,
+            building,
+            bullets,
+            bullet_type,
+            frame,
+        ),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7771,6 +7877,86 @@ mod tests {
             mend_block.use_time
         );
         assert_eq!(mend_building.items.as_ref().unwrap().get(silicon), 0);
+    }
+
+    #[test]
+    fn effect_block_frame_dispatch_routes_projector_and_radar_with_stores() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mend_def = content.block_by_name("mend-projector").unwrap();
+        let mend_block = effect_block(&content, "mend-projector");
+        let silicon = mend_block.boost_items[0].item;
+        let mut mend_building =
+            BuildingComp::new(point2_pack(21, 9), mend_def.base().clone(), TeamId(1));
+        mend_building.efficiency = 1.0;
+        mend_building.optional_efficiency = 1.0;
+        mend_building.items.as_mut().unwrap().set(silicon, 1);
+        let mut runtime_store = EffectBlockRuntimeStateStore::new();
+        let mut timer_store = EffectBlockTimerStateStore::new();
+        let mut targets = Vec::new();
+
+        let projector_report = effect_block_update_building_frame_with_stores(
+            &mut runtime_store,
+            &mut timer_store,
+            &content,
+            &mut mend_building,
+            EffectBlockFrameInput {
+                delta: 1.0,
+                edelta: 1.0,
+                update_id: 1,
+                tile_size: TILE_SIZE as f32,
+                now: mend_block.use_time,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            EffectBlockFrameResources::Projector {
+                buildings: &mut targets,
+                suppressed: false,
+            },
+        );
+        assert!(matches!(
+            projector_report,
+            Some(EffectBlockRuntimeReport::Projector(
+                EffectProjectorRuntimeReport::Mend { .. }
+            ))
+        ));
+        assert_eq!(mend_building.items.as_ref().unwrap().get(silicon), 0);
+        assert!(runtime_store.get(mend_building.tile_pos).is_some());
+        assert!(timer_store.get(mend_building.tile_pos).is_some());
+
+        let radar_def = content.block_by_name("radar").unwrap();
+        let mut radar_building =
+            BuildingComp::new(point2_pack(22, 9), radar_def.base().clone(), TeamId(2));
+        radar_building.efficiency = 1.0;
+        let mut fog = FogControl::new(32, 32);
+        fog.ensure_data(2);
+        let radar_report = effect_block_update_building_frame_with_stores(
+            &mut runtime_store,
+            &mut timer_store,
+            &content,
+            &mut radar_building,
+            EffectBlockFrameInput {
+                delta: 60.0,
+                edelta: 60.0,
+                update_id: 2,
+                tile_size: TILE_SIZE as f32,
+                now: 60.0,
+                fog_enabled: true,
+                static_fog: true,
+            },
+            EffectBlockFrameResources::Radar {
+                fog_control: &mut fog,
+            },
+        );
+        assert_eq!(
+            radar_report,
+            Some(EffectBlockRuntimeReport::Radar {
+                forced_update: false
+            })
+        );
+        assert!(matches!(
+            runtime_store.get(radar_building.tile_pos),
+            Some(EffectBlockRuntimeState::Radar(_))
+        ));
     }
 
     #[test]
