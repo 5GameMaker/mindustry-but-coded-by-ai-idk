@@ -593,6 +593,7 @@ pub fn read_deconstructor_extra<R: Read>(read: &mut R) -> io::Result<(f32, Optio
 pub struct PayloadLoaderState {
     pub has_payload: bool,
     pub exporting: bool,
+    pub last_output_power: f32,
     pub payload_has_items: bool,
     pub payload_items_total: i32,
     pub payload_item_capacity: i32,
@@ -609,6 +610,7 @@ impl Default for PayloadLoaderState {
         Self {
             has_payload: false,
             exporting: false,
+            last_output_power: 0.0,
             payload_has_items: false,
             payload_items_total: 0,
             payload_item_capacity: 0,

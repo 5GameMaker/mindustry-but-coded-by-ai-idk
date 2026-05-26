@@ -7,13 +7,17 @@
 //! it owns game-wide sidecar stores and dispatches externally supplied building
 //! slices from the real `GameState` frame source.
 
-use std::{collections::BTreeMap, io};
+use std::{
+    collections::BTreeMap,
+    io::{self, Cursor},
+};
 
 use crate::mindustry::{
     content::blocks::{
         BlockDef, CampaignBlockKind, CraftingBlockKind, DefenseWallKind, DistributionBlockKind,
         EffectBlockKind, LegacyBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind,
-        PowerBlockKind, ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
+        PayloadLoaderBlockData, PayloadLoaderBlockKind, PowerBlockKind, ProductionBlockKind,
+        SandboxBlockKind, StorageBlockKind, TurretBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -23,7 +27,8 @@ use crate::mindustry::{
         comp::{BuildingComp, BulletComp, UnitComp},
     },
     io::{
-        type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData, LegacyShortChunkMap,
+        type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
+        LegacyShortChunkMap, TeamId,
     },
     r#type::PayloadSeq,
     vars::TILE_SIZE,
@@ -82,9 +87,12 @@ use crate::mindustry::{
         payload_block_handle_payload, payload_block_move_in, payload_block_move_out_step,
         payload_conveyor_accept_payload, payload_conveyor_cur_step,
         payload_conveyor_handle_payload, payload_conveyor_should_attempt_move,
-        payload_conveyor_update_timing, payload_ref_sort_key, payload_router_check_match,
-        payload_source_clear_config, payload_source_configure_block, payload_source_configure_unit,
-        payload_source_update, payload_void_update, read_block_producer_progress,
+        payload_conveyor_update_timing, payload_loader_accept_payload,
+        payload_loader_charge_battery, payload_loader_liquid_flow, payload_loader_should_export,
+        payload_ref_sort_key, payload_router_check_match, payload_source_clear_config,
+        payload_source_configure_block, payload_source_configure_unit, payload_source_update,
+        payload_unloader_drain_battery, payload_unloader_full, payload_unloader_liquid_flow,
+        payload_unloader_should_export, payload_void_update, read_block_producer_progress,
         read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
         read_payload_mass_driver_extra, read_payload_ref_to_end, read_payload_router_extra,
         read_payload_source_extra, read_terminal_payload_block_build_common,
@@ -1367,6 +1375,26 @@ pub struct GameRuntimePayloadConveyorFrameReport {
     pub updated_conveyors: usize,
     pub attempted_moves: usize,
     pub transferred_payloads: usize,
+    pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimePayloadLoaderFrameReport {
+    pub visited_buildings: usize,
+    pub loader_candidates: usize,
+    pub updated_loaders: usize,
+    pub moved_in_payloads: usize,
+    pub moved_out_payloads: usize,
+    pub arrived_output_payloads: usize,
+    pub transferred_payloads: usize,
+    pub loaded_items: usize,
+    pub loaded_liquid_events: usize,
+    pub charged_batteries: usize,
+    pub unloaded_items: usize,
+    pub unloaded_liquid_events: usize,
+    pub drained_batteries: usize,
+    pub destroyed_instant_payloads: usize,
+    pub invalid_payloads: usize,
     pub missing_runtime_states: usize,
 }
 
@@ -3789,6 +3817,604 @@ impl GameRuntime {
         Some(report)
     }
 
+    pub fn advance_owned_payload_loaders(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimePayloadLoaderFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+
+        self.refresh_owned_building_update_permissions(content);
+
+        let frame_delta = advanced.delta_ticks as f32;
+        let mut report = GameRuntimePayloadLoaderFrameReport::default();
+        let mut pending_payload_moves = Vec::new();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, enabled, efficiency, rotation, rotdeg, time_scale) = {
+                let building = &mut self.buildings[index];
+                let can_overdrive = content
+                    .block(building.block.id)
+                    .map(BlockDef::can_overdrive)
+                    .unwrap_or(false);
+                building.advance_update_timing(frame_delta, can_overdrive);
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.enabled,
+                    building.efficiency,
+                    building.rotation,
+                    building.rotdeg(),
+                    building.time_scale,
+                )
+            };
+
+            if !enabled {
+                continue;
+            }
+
+            let Some(BlockDef::PayloadLoader(loader_def)) = content.block(block_id) else {
+                continue;
+            };
+            report.loader_candidates += 1;
+
+            let trns = loader_def.base.size / 2 + 1;
+            let (dx, dy) = autotiler_direction(rotation);
+            let target_tile_pos = self
+                .state
+                .world
+                .build(
+                    point2_x(tile_pos) as i32 + dx * trns,
+                    point2_y(tile_pos) as i32 + dy * trns,
+                )
+                .map(|target| target.tile_pos);
+
+            let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+                self.payload_runtime_states.get_mut(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            Self::refresh_payload_loader_state_from_common(
+                content,
+                &self.buildings[index],
+                common,
+                loader,
+            );
+
+            match loader_def.kind {
+                PayloadLoaderBlockKind::Loader => {
+                    if payload_loader_should_export(loader) {
+                        report.moved_out_payloads += 1;
+                        let arrived = payload_block_move_out_step(
+                            common,
+                            rotdeg,
+                            loader_def.base.size,
+                            TILE_SIZE as f32,
+                            loader_def.payload_speed,
+                            loader_def.payload_rotate_speed,
+                            frame_delta * time_scale,
+                        );
+                        if arrived {
+                            report.arrived_output_payloads += 1;
+                            if let Some(target_tile_pos) = target_tile_pos {
+                                pending_payload_moves.push((tile_pos, target_tile_pos));
+                            }
+                        }
+                    } else if payload_block_move_in(
+                        common,
+                        true,
+                        loader_def.rotate,
+                        rotdeg,
+                        loader_def.payload_speed,
+                        loader_def.payload_rotate_speed,
+                        frame_delta * time_scale,
+                    ) {
+                        report.moved_in_payloads += 1;
+                        Self::payload_loader_load_inner_building(
+                            content,
+                            loader_def,
+                            &mut self.buildings[index],
+                            common,
+                            loader,
+                            frame_delta * time_scale,
+                            efficiency,
+                            &mut report,
+                        );
+                    }
+                }
+                PayloadLoaderBlockKind::Unloader => {
+                    loader.last_output_power = 0.0;
+                    if payload_unloader_should_export(loader) {
+                        if Self::payload_ref_block_instant_deconstruct(
+                            content,
+                            common.payload.as_ref(),
+                        ) {
+                            common.payload = None;
+                            loader.has_payload = false;
+                            loader.exporting = false;
+                            report.destroyed_instant_payloads += 1;
+                        } else {
+                            report.moved_out_payloads += 1;
+                            let arrived = payload_block_move_out_step(
+                                common,
+                                rotdeg,
+                                loader_def.base.size,
+                                TILE_SIZE as f32,
+                                loader_def.payload_speed,
+                                loader_def.payload_rotate_speed,
+                                frame_delta * time_scale,
+                            );
+                            if arrived {
+                                report.arrived_output_payloads += 1;
+                                if let Some(target_tile_pos) = target_tile_pos {
+                                    pending_payload_moves.push((tile_pos, target_tile_pos));
+                                }
+                            }
+                        }
+                    } else if payload_block_move_in(
+                        common,
+                        true,
+                        loader_def.rotate,
+                        rotdeg,
+                        loader_def.payload_speed,
+                        loader_def.payload_rotate_speed,
+                        frame_delta * time_scale,
+                    ) {
+                        report.moved_in_payloads += 1;
+                        Self::payload_unloader_unload_inner_building(
+                            content,
+                            loader_def,
+                            &mut self.buildings[index],
+                            common,
+                            loader,
+                            frame_delta * time_scale,
+                            efficiency,
+                            &mut report,
+                        );
+                    }
+                }
+            }
+
+            report.updated_loaders += 1;
+        }
+
+        for (source_tile_pos, target_tile_pos) in pending_payload_moves {
+            if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
+                report.transferred_payloads += 1;
+            }
+        }
+
+        Some(report)
+    }
+
+    fn payload_loader_load_inner_building(
+        content: &ContentLoader,
+        loader_def: &PayloadLoaderBlockData,
+        outer: &mut BuildingComp,
+        common: &mut PayloadBlockBuildState,
+        loader: &mut PayloadLoaderState,
+        edelta: f32,
+        efficiency: f32,
+        report: &mut GameRuntimePayloadLoaderFrameReport,
+    ) {
+        let Some(payload) = common.payload.as_mut() else {
+            Self::refresh_payload_loader_state_from_common(content, outer, common, loader);
+            return;
+        };
+        let Some((mut payload_building, tail)) =
+            Self::payload_ref_building_with_tail(content, payload)
+        else {
+            report.invalid_payloads += 1;
+            Self::refresh_payload_loader_state_from_common(content, outer, common, loader);
+            return;
+        };
+
+        let mut changed = false;
+
+        if payload_building.block.has_items && outer.items.as_ref().is_some_and(|items| items.any())
+        {
+            if efficiency > 0.01 {
+                let before_loaded = report.loaded_items;
+                for _ in 0..loader_def.items_loaded.max(0) {
+                    let Some(item_id) = outer
+                        .items
+                        .as_ref()
+                        .and_then(|items| items.each().map(|(id, _)| id).next())
+                    else {
+                        break;
+                    };
+                    let Some(payload_items) = payload_building.items.as_mut() else {
+                        loader.exporting = true;
+                        break;
+                    };
+                    if payload_items.total() >= payload_building.block.item_capacity {
+                        loader.exporting = true;
+                        break;
+                    }
+                    payload_items.add(item_id, 1);
+                    if let Some(items) = outer.items.as_mut() {
+                        items.remove(item_id, 1);
+                    }
+                    report.loaded_items += 1;
+                    changed = true;
+                }
+                if report.loaded_items == before_loaded {
+                    loader.exporting = true;
+                }
+            }
+        }
+
+        if payload_building.block.has_liquids {
+            let liquid = outer
+                .liquids
+                .as_ref()
+                .and_then(|liquids| liquids.current())
+                .filter(|_| {
+                    outer
+                        .liquids
+                        .as_ref()
+                        .map(|liquids| liquids.current_amount() >= 0.001)
+                        .unwrap_or(false)
+                });
+            if let Some(liquid) = liquid {
+                let outer_amount = outer
+                    .liquids
+                    .as_ref()
+                    .map(|liquids| liquids.current_amount())
+                    .unwrap_or(0.0);
+                let Some(payload_liquids) = payload_building.liquids.as_mut() else {
+                    loader.exporting = true;
+                    Self::refresh_payload_loader_state_from_common(content, outer, common, loader);
+                    return;
+                };
+                let accepts_liquid = payload_liquids.current() == Some(liquid)
+                    || payload_liquids.current_amount() < 0.2;
+                if accepts_liquid {
+                    let flow = payload_loader_liquid_flow(
+                        loader_def.liquids_loaded,
+                        edelta,
+                        payload_building.block.liquid_capacity,
+                        payload_liquids.get(liquid),
+                        outer_amount,
+                    );
+                    if flow > 0.0 {
+                        payload_liquids.add(liquid, flow);
+                        if let Some(liquids) = outer.liquids.as_mut() {
+                            liquids.remove(liquid, flow);
+                        }
+                        report.loaded_liquid_events += 1;
+                        changed = true;
+                    }
+                } else {
+                    loader.exporting = true;
+                }
+            }
+        }
+
+        if let Some(capacity) =
+            Self::payload_block_buffered_power_capacity(content, payload_building.block.id)
+        {
+            if capacity > 0.0 {
+                if let (Some(outer_power), Some(payload_power)) =
+                    (outer.power.as_ref(), payload_building.power.as_mut())
+                {
+                    let base_power_use = if loader_def.base_power_use > 0.0 {
+                        loader_def.base_power_use
+                    } else {
+                        loader_def.consume_power
+                    };
+                    let step = payload_loader_charge_battery(
+                        payload_power.status,
+                        outer_power.status,
+                        base_power_use,
+                        loader_def.max_power_consumption,
+                        capacity,
+                        edelta,
+                    );
+                    payload_power.status = step.payload_power_status;
+                    if step.available_input > 0.0 {
+                        report.charged_batteries += 1;
+                        changed = true;
+                    }
+                    if step.exporting {
+                        loader.exporting = true;
+                    }
+                }
+            }
+        }
+
+        if changed {
+            Self::write_payload_ref_building_with_tail(payload, &payload_building, &tail);
+        }
+        Self::refresh_payload_loader_state_from_common(content, outer, common, loader);
+    }
+
+    fn payload_unloader_unload_inner_building(
+        content: &ContentLoader,
+        loader_def: &PayloadLoaderBlockData,
+        outer: &mut BuildingComp,
+        common: &mut PayloadBlockBuildState,
+        loader: &mut PayloadLoaderState,
+        edelta: f32,
+        efficiency: f32,
+        report: &mut GameRuntimePayloadLoaderFrameReport,
+    ) {
+        let Some(payload) = common.payload.as_mut() else {
+            Self::refresh_payload_loader_state_from_common(content, outer, common, loader);
+            return;
+        };
+        let Some((mut payload_building, tail)) =
+            Self::payload_ref_building_with_tail(content, payload)
+        else {
+            report.invalid_payloads += 1;
+            Self::refresh_payload_loader_state_from_common(content, outer, common, loader);
+            return;
+        };
+
+        let mut changed = false;
+
+        if payload_building.block.has_items
+            && !payload_unloader_full(
+                outer.items.as_ref().map(|items| items.total()).unwrap_or(0),
+                outer.block.item_capacity,
+            )
+            && efficiency > 0.01
+        {
+            for _ in 0..loader_def.items_loaded.max(0) {
+                if payload_unloader_full(
+                    outer.items.as_ref().map(|items| items.total()).unwrap_or(0),
+                    outer.block.item_capacity,
+                ) {
+                    break;
+                }
+                let Some(item_id) = payload_building
+                    .items
+                    .as_ref()
+                    .and_then(|items| items.each().map(|(id, _)| id).next())
+                else {
+                    break;
+                };
+                if let Some(payload_items) = payload_building.items.as_mut() {
+                    payload_items.remove(item_id, 1);
+                }
+                if let Some(items) = outer.items.as_mut() {
+                    items.add(item_id, 1);
+                }
+                report.unloaded_items += 1;
+                changed = true;
+            }
+        }
+
+        if payload_building.block.has_liquids {
+            let payload_current = payload_building
+                .liquids
+                .as_ref()
+                .and_then(|liquids| liquids.current());
+            let payload_amount = payload_building
+                .liquids
+                .as_ref()
+                .map(|liquids| liquids.current_amount())
+                .unwrap_or(0.0);
+            if let Some(liquid) = payload_current.filter(|_| payload_amount >= 0.01) {
+                let outer_current = outer.liquids.as_ref().and_then(|liquids| liquids.current());
+                let outer_amount = outer
+                    .liquids
+                    .as_ref()
+                    .map(|liquids| liquids.current_amount())
+                    .unwrap_or(0.0);
+                if outer_current == Some(liquid) || outer_amount <= 0.2 {
+                    let flow = payload_unloader_liquid_flow(
+                        loader_def.liquids_loaded,
+                        edelta,
+                        outer.block.liquid_capacity,
+                        outer_amount,
+                        payload_amount,
+                    );
+                    if flow > 0.0 {
+                        if let Some(liquids) = outer.liquids.as_mut() {
+                            liquids.add(liquid, flow);
+                        }
+                        if let Some(payload_liquids) = payload_building.liquids.as_mut() {
+                            payload_liquids.remove(liquid, flow);
+                        }
+                        report.unloaded_liquid_events += 1;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if let Some(capacity) =
+            Self::payload_block_buffered_power_capacity(content, payload_building.block.id)
+        {
+            if capacity > 0.0 {
+                if let Some(payload_power) = payload_building.power.as_mut() {
+                    let step = payload_unloader_drain_battery(
+                        payload_power.status,
+                        capacity,
+                        loader_def.max_power_unload,
+                        edelta,
+                    );
+                    payload_power.status = step.payload_power_status.max(0.0);
+                    loader.last_output_power = step.last_output_power;
+                    if step.last_output_power > 0.0 {
+                        report.drained_batteries += 1;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if changed {
+            Self::write_payload_ref_building_with_tail(payload, &payload_building, &tail);
+        }
+        Self::refresh_payload_loader_state_from_common(content, outer, common, loader);
+    }
+
+    fn refresh_payload_loader_state_from_common(
+        content: &ContentLoader,
+        outer: &BuildingComp,
+        common: &PayloadBlockBuildState,
+        loader: &mut PayloadLoaderState,
+    ) {
+        let exporting = common
+            .payload
+            .as_ref()
+            .map(|_| loader.exporting)
+            .unwrap_or(false);
+        let last_output_power = loader.last_output_power;
+        let mut next = PayloadLoaderState {
+            exporting,
+            last_output_power,
+            has_payload: common.payload.is_some(),
+            loader_liquid_amount: outer
+                .liquids
+                .as_ref()
+                .map(|liquids| liquids.current_amount())
+                .unwrap_or(0.0),
+            ..PayloadLoaderState::default()
+        };
+
+        if let Some(payload) = common.payload.as_ref() {
+            if let Some((payload_building, _tail)) =
+                Self::payload_ref_building_with_tail(content, payload)
+            {
+                next.payload_has_items = payload_building.block.has_items;
+                next.payload_items_total = payload_building
+                    .items
+                    .as_ref()
+                    .map(|items| items.total())
+                    .unwrap_or(0);
+                next.payload_item_capacity = payload_building.block.item_capacity;
+                next.payload_has_liquids = payload_building.block.has_liquids;
+                next.payload_liquid_amount = payload_building
+                    .liquids
+                    .as_ref()
+                    .map(|liquids| liquids.current_amount())
+                    .unwrap_or(0.0);
+                next.payload_liquid_capacity = payload_building.block.liquid_capacity;
+                next.has_battery =
+                    Self::payload_block_buffered_power_capacity(content, payload_building.block.id)
+                        .is_some();
+                next.payload_power_status = payload_building
+                    .power
+                    .as_ref()
+                    .map(|power| power.status)
+                    .unwrap_or(0.0);
+            }
+        }
+
+        *loader = next;
+    }
+
+    fn payload_ref_building_with_tail(
+        content: &ContentLoader,
+        payload: &PayloadRef,
+    ) -> Option<(BuildingComp, Vec<u8>)> {
+        let PayloadRef::Block {
+            block, build_bytes, ..
+        } = payload
+        else {
+            return None;
+        };
+        let block_def = content.block(*block)?;
+        let mut building = BuildingComp::new(
+            crate::mindustry::world::point2_pack(0, 0),
+            block_def.base().clone(),
+            TeamId(0),
+        );
+        let mut cursor = Cursor::new(build_bytes.as_slice());
+        building.read_base(&mut cursor).ok()?;
+        let consumed = cursor.position() as usize;
+        let tail = build_bytes.get(consumed..)?.to_vec();
+        Some((building, tail))
+    }
+
+    fn write_payload_ref_building_with_tail(
+        payload: &mut PayloadRef,
+        building: &BuildingComp,
+        tail: &[u8],
+    ) -> bool {
+        let PayloadRef::Block { build_bytes, .. } = payload else {
+            return false;
+        };
+        let mut next = Vec::new();
+        if building.write_base(&mut next, false).is_err() {
+            return false;
+        }
+        next.extend_from_slice(tail);
+        *build_bytes = next;
+        true
+    }
+
+    fn payload_block_unloadable(block: &BlockDef) -> bool {
+        match block {
+            BlockDef::Distribution(distribution) => distribution.unloadable,
+            _ => true,
+        }
+    }
+
+    fn payload_block_buffered_power_capacity(
+        content: &ContentLoader,
+        block_id: ContentId,
+    ) -> Option<f32> {
+        match content.block(block_id) {
+            Some(BlockDef::Power(power)) if power.buffered_power > 0.0 => {
+                Some(power.buffered_power)
+            }
+            _ => None,
+        }
+    }
+
+    fn payload_ref_block_instant_deconstruct(
+        content: &ContentLoader,
+        payload: Option<&PayloadRef>,
+    ) -> bool {
+        match payload {
+            Some(PayloadRef::Block { block, .. }) => content
+                .block(*block)
+                .map(|block| block.base().instant_deconstruct)
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    fn payload_loader_accepts_payload_ref(
+        content: &ContentLoader,
+        max_block_size: i32,
+        base_accepts: bool,
+        payload: &PayloadRef,
+    ) -> bool {
+        let PayloadRef::Block { block, .. } = payload else {
+            return false;
+        };
+        let Some(block_def) = content.block(*block) else {
+            return false;
+        };
+        let base = block_def.base();
+        payload_loader_accept_payload(
+            base_accepts,
+            base.size as f32 <= max_block_size as f32,
+            true,
+            base.has_items,
+            Self::payload_block_unloadable(block_def),
+            base.item_capacity,
+            base.size,
+            max_block_size,
+            base.has_liquids,
+            base.liquid_capacity,
+            Self::payload_block_buffered_power_capacity(content, base.id).is_some(),
+        )
+    }
+
     fn transfer_payload_output_to_front(
         &mut self,
         content: &ContentLoader,
@@ -3804,6 +4430,9 @@ impl GameRuntime {
                 target_enabled: bool,
                 target_rotdeg: f32,
                 invert: bool,
+            },
+            Loader {
+                max_block_size: i32,
             },
         }
 
@@ -3850,6 +4479,11 @@ impl GameRuntime {
                     invert: payload_block.invert,
                 }
             }
+            Some(BlockDef::PayloadLoader(loader_block)) if loader_block.accepts_payload => {
+                TargetKind::Loader {
+                    max_block_size: loader_block.max_block_size,
+                }
+            }
             _ => return false,
         };
 
@@ -3858,6 +4492,7 @@ impl GameRuntime {
             | Some(GameRuntimePayloadBlockState::Constructor { common, .. }) => {
                 common.payload.as_ref()
             }
+            Some(GameRuntimePayloadBlockState::Loader { common, .. }) => common.payload.as_ref(),
             Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) => conveyor.item.as_ref(),
             Some(GameRuntimePayloadBlockState::Router { conveyor, .. }) => conveyor.item.as_ref(),
             _ => None,
@@ -3901,6 +4536,15 @@ impl GameRuntime {
                 target_enabled,
                 conveyor.progress,
             ),
+            (
+                TargetKind::Loader { max_block_size },
+                Some(GameRuntimePayloadBlockState::Loader { common, .. }),
+            ) => Self::payload_loader_accepts_payload_ref(
+                content,
+                max_block_size,
+                common.payload.is_none(),
+                source_payload,
+            ),
             _ => false,
         };
         if !target_accepts {
@@ -3935,6 +4579,12 @@ impl GameRuntime {
                     producer.has_payload = false;
                     Some((payload, common.pay_rotation))
                 }
+                GameRuntimePayloadBlockState::Loader { common, loader } => {
+                    let payload = common.payload.take()?;
+                    loader.has_payload = false;
+                    loader.exporting = false;
+                    Some((payload, common.pay_rotation))
+                }
                 GameRuntimePayloadBlockState::Conveyor(conveyor) => {
                     let payload = conveyor.item.take()?;
                     Some((payload, source_rotdeg))
@@ -3966,6 +4616,35 @@ impl GameRuntime {
                     target_size,
                     TILE_SIZE as f32,
                 );
+                true
+            }
+            (
+                TargetKind::Loader { max_block_size },
+                Some(GameRuntimePayloadBlockState::Loader { common, loader }),
+            ) if common.payload.is_none()
+                && payload
+                    .as_ref()
+                    .map(|payload| {
+                        Self::payload_loader_accepts_payload_ref(
+                            content,
+                            max_block_size,
+                            true,
+                            payload,
+                        )
+                    })
+                    .unwrap_or(false) =>
+            {
+                payload_block_handle_payload(
+                    common,
+                    payload.take().expect("payload should be present"),
+                    target_pos,
+                    source_pos,
+                    payload_rotation,
+                    target_size,
+                    TILE_SIZE as f32,
+                );
+                loader.exporting = false;
+                loader.has_payload = true;
                 true
             }
             (
@@ -4091,7 +4770,18 @@ impl GameRuntime {
                             producer.has_payload = true;
                         }
                     }
+                    Some(GameRuntimePayloadBlockState::Loader { common, loader }) => {
+                        if common.payload.is_none() {
+                            common.payload = Some(payload);
+                            loader.has_payload = true;
+                        }
+                    }
                     Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) => {
+                        if conveyor.item.is_none() {
+                            conveyor.item = Some(payload);
+                        }
+                    }
+                    Some(GameRuntimePayloadBlockState::Router { conveyor, .. }) => {
                         if conveyor.item.is_none() {
                             conveyor.item = Some(payload);
                         }
@@ -4672,6 +5362,24 @@ mod tests {
     fn base_only_build_payload_ref(content: &ContentLoader, block_name: &str) -> PayloadRef {
         let block_def = content.block_by_name(block_name).unwrap();
         let building = BuildingComp::new(point2_pack(0, 0), block_def.base().clone(), TeamId(1));
+        let mut build_bytes = Vec::new();
+        building.write_base(&mut build_bytes, false).unwrap();
+        PayloadRef::Block {
+            block: block_def.base().id,
+            version: 0,
+            build_bytes,
+        }
+    }
+
+    fn build_payload_ref_with(
+        content: &ContentLoader,
+        block_name: &str,
+        mutate: impl FnOnce(&mut BuildingComp),
+    ) -> PayloadRef {
+        let block_def = content.block_by_name(block_name).unwrap();
+        let mut building =
+            BuildingComp::new(point2_pack(0, 0), block_def.base().clone(), TeamId(1));
+        mutate(&mut building);
         let mut build_bytes = Vec::new();
         building.write_base(&mut build_bytes, false).unwrap();
         PayloadRef::Block {
@@ -8849,6 +9557,186 @@ mod tests {
         };
         let Some(PayloadRef::Block { block, .. }) = common.payload.as_ref() else {
             panic!("payload void should receive the conveyor item");
+        };
+        assert_eq!(*block, content.block_by_name("router").unwrap().base().id);
+    }
+
+    #[test]
+    fn game_runtime_payload_loader_loads_items_into_payload_building() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("payload-loader").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let loader_tile = point2_pack(4, 4);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.items.as_mut().unwrap().add(copper, 5);
+        loader_building.power.as_mut().unwrap().status = 1.0;
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(loader_building);
+        runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |_| {})),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_loaders(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.loader_candidates, 1);
+        assert_eq!(report.updated_loaders, 1);
+        assert_eq!(report.moved_in_payloads, 1);
+        assert_eq!(report.loaded_items, 5);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().total(), 0);
+
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should remain present");
+        };
+        assert_eq!(loader.payload_items_total, 5);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 5);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_unloads_items_from_payload_building() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 6);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_loaders(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.loader_candidates, 1);
+        assert_eq!(report.updated_loaders, 1);
+        assert_eq!(report.moved_in_payloads, 1);
+        assert_eq!(report.unloaded_items, 6);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 6);
+
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&unloader_tile)
+        else {
+            panic!("payload unloader sidecar should remain present");
+        };
+        assert_eq!(loader.payload_items_total, 0);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        assert_eq!(payload_building.items.as_ref().unwrap().total(), 0);
+    }
+
+    #[test]
+    fn game_runtime_payload_loader_moves_exporting_payload_into_front_void() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("payload-loader").unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let loader_tile = point2_pack(4, 4);
+        let trns = loader_def.base().size / 2 + 1;
+        let void_center_x = 4 + trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(void_center_x, 4);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(12, 9);
+        runtime.add_building(loader_building);
+        runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(base_only_build_payload_ref(&content, "router")),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState {
+                    exporting: true,
+                    ..PayloadLoaderState::default()
+                },
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+
+        let report = runtime
+            .advance_owned_payload_loaders(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.moved_out_payloads, 1);
+        assert_eq!(report.arrived_output_payloads, 1);
+        assert_eq!(report.transferred_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!loader.has_payload);
+
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        let Some(PayloadRef::Block { block, .. }) = common.payload.as_ref() else {
+            panic!("payload void should receive loader output");
         };
         assert_eq!(*block, content.block_by_name("router").unwrap().base().id);
     }
