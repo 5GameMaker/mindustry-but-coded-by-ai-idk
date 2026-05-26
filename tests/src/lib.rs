@@ -508,7 +508,7 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
 #[test]
 fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
-    use mindustry_core::mindustry::entities::PLAYER_CLASS_ID;
+    use mindustry_core::mindustry::entities::{FIRE_CLASS_ID, PLAYER_CLASS_ID};
     use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
         EntitySnapshotCallPacket, HiddenSnapshotCallPacket, NetworkPlayerSyncData,
@@ -683,6 +683,15 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     };
     let mut player_bytes = Vec::new();
     player_sync.write_to(&mut player_bytes).unwrap();
+    let fire_sync = type_io::FireSyncWire {
+        lifetime: 150.0,
+        tile_pos: Some(mindustry_core::mindustry::world::point2_pack(2, 3)),
+        time: 45.0,
+        x: 16.0,
+        y: 24.0,
+    };
+    let mut fire_bytes = Vec::new();
+    type_io::write_fire_sync(&mut fire_bytes, &fire_sync).unwrap();
     let mut multi_first_bytes = Vec::new();
     type_io::write_unit_sync(
         &mut multi_first_bytes,
@@ -707,8 +716,11 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.extend_from_slice(&1005i32.to_be_bytes());
     multi_entity_data.push(2);
     multi_entity_data.extend_from_slice(&multi_second_bytes);
+    multi_entity_data.extend_from_slice(&1006i32.to_be_bytes());
+    multi_entity_data.push(FIRE_CLASS_ID);
+    multi_entity_data.extend_from_slice(&fire_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 3,
+        amount: 4,
         data: multi_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
@@ -759,6 +771,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .runtime
                 .client_player_snapshot_entities
                 .contains_key(&connection_id)
+            && desktop
+                .runtime
+                .client_fire_snapshot_entities
+                .contains_key(&1006)
         {
             break;
         }
@@ -887,6 +903,26 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             .map(|record| (record.type_id, record.sync_bytes.as_slice())),
         Some((PLAYER_CLASS_ID, player_bytes.as_slice()))
     );
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1006)
+            .map(|record| (record.type_id, record.sync_bytes.as_slice())),
+        Some((FIRE_CLASS_ID, fire_bytes.as_slice()))
+    );
+    let fire = desktop
+        .runtime
+        .client_fire_snapshot_entities
+        .get(&1006)
+        .expect("real mixed entity snapshot should materialize typed fire runtime");
+    assert_eq!(fire.lifetime, 150.0);
+    assert_eq!(fire.time, 45.0);
+    assert_eq!(fire.x, 16.0);
+    assert_eq!(fire.y, 24.0);
+    assert_eq!(fire.tile.unwrap().x, 2);
+    assert_eq!(fire.tile.unwrap().y, 3);
+    assert!(fire.registered);
     assert_eq!(
         desktop
             .runtime

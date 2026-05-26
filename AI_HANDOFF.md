@@ -2010,5 +2010,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
   1. 把 Fire typed sidecar 与 `Fires` tile-indexed collection 的注册/查询统一起来。
-  2. 给真实 server→desktop entity snapshot smoke 加 Fire record。
+  2. 继续给真实 server→desktop entity snapshot smoke 加其他 `Syncc` record。
   3. 继续迁移 `PuddleComp` 或 `WeatherStateComp` 的 sync wire。
+
+---
+
+## 59. 最新闭环记录：真实联机 Fire EntitySnapshot smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：验证 Fire typed snapshot 能走真实 `ServerLauncher -> DesktopLauncher` packet 链路。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为/覆盖变化：
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 的 mixed packet 从 `amount=3` 扩为 `amount=4`；
+  - 新增 `1006 + FIRE_CLASS_ID + FireSyncWire`；
+  - 测试断言 `runtime.client_fire_snapshot_entities[1006]`、raw sidecar、fire `lifetime/time/x/y/tile/registered`。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 继续迁移 `PuddleComp` 或 `WeatherStateComp` 的 sync wire。
+  2. 将 Fire typed sidecar 与 `Fires` 集合统一，避免长期双存储。
+  3. 后续把真实 smoke 扩展到更多 entity class-id。

@@ -2225,7 +2225,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
-- 仍未完成：Fire 目前落在 runtime typed sidecar，尚未与 `Fires` tile-indexed collection 完全统一；真实 server→desktop smoke 尚未携带 Fire record。
+- 仍未完成：Fire 目前落在 runtime typed sidecar，尚未与 `Fires` tile-indexed collection 完全统一；真实 server→desktop smoke 已由下一节补上。
+
+### 12.45 真实联机 Fire EntitySnapshot smoke
+
+- 2026-05-26：扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` mixed entity snapshot packet 现在包含 Fire record。
+- 第三个 entity snapshot packet 现在为 `amount=4`：
+  - 本地 player `NetworkPlayerSyncData`；
+  - `1004` dagger `UnitSyncWire`；
+  - `1005` flare `UnitSyncWire`；
+  - `1006` Fire `FireSyncWire`。
+- 测试断言：
+  - `NetClient` mirror 层仍保留多 record 变长 packet 的 parse error；
+  - `DesktopLauncher` mixed fallback 能在真实 packet data 中拆出 Fire；
+  - `runtime.client_fire_snapshot_entities[1006]` materialize typed fire；
+  - raw `client_entity_snapshot_records[1006]` 保留 `FIRE_CLASS_ID + fire_bytes`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：真实 smoke 还未覆盖 Puddle/Weather/Effect/Bullet 等其他 entity class-id。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
