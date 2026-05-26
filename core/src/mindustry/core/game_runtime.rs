@@ -56,15 +56,16 @@ use crate::mindustry::{
         EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
     world::blocks::distribution::{
-        read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
-        read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
-        read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
-        read_stack_conveyor_state, write_buffered_bridge_state, write_conveyor_state,
-        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
-        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
-        write_stack_conveyor_state, BufferedItemBridgeState, ConveyorState,
+        conveyor_accept_item, read_buffered_bridge_state, read_conveyor_state,
+        read_directional_unloader_state, read_duct_junction_state, read_duct_router_state,
+        read_duct_state, read_item_bridge_state, read_mass_driver_state,
+        read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
+        write_buffered_bridge_state, write_conveyor_state, write_directional_unloader_state,
+        write_duct_junction_state, write_duct_router_state, write_duct_state,
+        write_item_bridge_state, write_mass_driver_state, write_sorter_state,
+        write_stack_conveyor_state, BufferedItemBridgeState, ConveyorItemState, ConveyorState,
         DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
-        MassDriverState, SorterState, StackConveyorState,
+        MassDriverState, SorterState, StackConveyorState, CONVEYOR_CAPACITY,
     },
     world::blocks::heat::{read_heat_producer_state, write_heat_producer_state, HeatProducerState},
     world::blocks::legacy::{
@@ -4924,6 +4925,17 @@ impl GameRuntime {
             content.block(self.buildings[target_index].block.id),
             Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::ItemVoid
         );
+        let target_is_conveyor = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor
+                )
+        );
+        if target_is_conveyor {
+            return self.dump_item_to_conveyor(content, source_index, target_index, item_id);
+        }
 
         let (source, target) = if source_index < target_index {
             let (left, right) = self.buildings.split_at_mut(target_index);
@@ -4954,6 +4966,97 @@ impl GameRuntime {
         source_items.remove(item_id, 1);
         target_items.add(item_id, 1);
         true
+    }
+
+    fn dump_item_to_conveyor(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        if !self.dump_target_accepts_item(content, source_index, target_index, item_id) {
+            return false;
+        }
+
+        let Some((insert_x, insert_y, insert_at)) =
+            self.conveyor_dump_insert_plan(source_index, target_index)
+        else {
+            return false;
+        };
+        let target_tile_pos = self.buildings[target_index].tile_pos;
+
+        {
+            let (source, target) = if source_index < target_index {
+                let (left, right) = self.buildings.split_at_mut(target_index);
+                (&mut left[source_index], &mut right[0])
+            } else {
+                let (left, right) = self.buildings.split_at_mut(source_index);
+                (&mut right[0], &mut left[target_index])
+            };
+
+            let Some(source_items) = source.items.as_mut() else {
+                return false;
+            };
+            if source_items.get(item_id) <= 0 {
+                return false;
+            }
+
+            let Some(target_items) = target.items.as_mut() else {
+                return false;
+            };
+            if target_items.total() >= target.block.item_capacity {
+                return false;
+            }
+
+            source_items.remove(item_id, 1);
+            target_items.add(item_id, 1);
+        }
+
+        let entry = self
+            .distribution_runtime_states
+            .entry(target_tile_pos)
+            .or_insert_with(|| {
+                GameRuntimeDistributionBlockState::Conveyor(ConveyorState { items: Vec::new() })
+            });
+        let GameRuntimeDistributionBlockState::Conveyor(conveyor) = entry else {
+            return false;
+        };
+        if conveyor.items.len() >= CONVEYOR_CAPACITY {
+            return false;
+        }
+        let insert_at = insert_at.min(conveyor.items.len());
+        conveyor.items.insert(
+            insert_at,
+            ConveyorItemState {
+                item: item_id,
+                x: insert_x,
+                y: insert_y,
+            },
+        );
+        true
+    }
+
+    fn conveyor_dump_insert_plan(
+        &self,
+        source_index: usize,
+        target_index: usize,
+    ) -> Option<(f32, f32, usize)> {
+        let target = self.buildings.get(target_index)?;
+        let relative = self.relative_direction_between_buildings(source_index, target_index)?;
+        let angle = relative - target.rotation;
+        let x = if angle == -1 || angle == 3 {
+            1.0
+        } else if angle == 1 || angle == -3 {
+            -1.0
+        } else {
+            0.0
+        };
+        if (relative - target.rotation).abs() == 0 {
+            Some((x, 0.0, 0))
+        } else {
+            Some((x, 0.5, usize::MAX))
+        }
     }
 
     fn dump_liquid_to_target(
@@ -5119,6 +5222,41 @@ impl GameRuntime {
         match content.block(target.block.id) {
             Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::ItemVoid => {
                 item_void_accept_item(target.enabled)
+            }
+            Some(BlockDef::Distribution(distribution))
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor
+                ) =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                if items.total() >= target.block.item_capacity {
+                    return false;
+                }
+                let len = match self.distribution_runtime_states.get(&target.tile_pos) {
+                    Some(GameRuntimeDistributionBlockState::Conveyor(conveyor)) => {
+                        conveyor.items.len()
+                    }
+                    Some(_) => return false,
+                    None => 0,
+                };
+                conveyor_accept_item(
+                    len,
+                    1.0,
+                    self.relative_direction_between_buildings(source_index, target_index),
+                    target.rotation,
+                    false,
+                )
+            }
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::Router =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                items.total() == 0 && target.block.item_capacity > 0
             }
             Some(BlockDef::Storage(storage)) => {
                 let Some(items) = target.items.as_ref() else {
@@ -12060,6 +12198,122 @@ mod tests {
             GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
                 .unwrap();
         assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 2);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_to_adjacent_conveyor() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let conveyor_def = content.block_by_name("conveyor").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let conveyor_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let mut unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        unloader_building.set_rotation(0);
+        let mut conveyor_building =
+            BuildingComp::new(conveyor_tile, conveyor_def.base().clone(), TeamId(6));
+        conveyor_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(conveyor_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 3);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 5);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 3);
+        let Some(GameRuntimeDistributionBlockState::Conveyor(conveyor)) =
+            runtime.distribution_runtime_states.get(&conveyor_tile)
+        else {
+            panic!("conveyor sidecar should be created by dumpAccumulate");
+        };
+        assert_eq!(conveyor.items.len(), 3);
+        assert!(conveyor
+            .items
+            .iter()
+            .all(|item| item.item == copper && item.x.abs() < 0.001 && item.y.abs() < 0.001));
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_to_adjacent_router() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let router_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let router_building = BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(router_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 7);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 1);
     }
 
     #[test]
