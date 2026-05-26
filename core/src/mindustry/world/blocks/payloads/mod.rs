@@ -597,6 +597,7 @@ pub struct PayloadLoaderState {
     pub payload_has_items: bool,
     pub payload_items_total: i32,
     pub payload_item_capacity: i32,
+    pub payload_item_capacity_blocked: bool,
     pub payload_has_liquids: bool,
     pub loader_liquid_amount: f32,
     pub payload_liquid_amount: f32,
@@ -614,6 +615,7 @@ impl Default for PayloadLoaderState {
             payload_has_items: false,
             payload_items_total: 0,
             payload_item_capacity: 0,
+            payload_item_capacity_blocked: false,
             payload_has_liquids: false,
             loader_liquid_amount: 0.0,
             payload_liquid_amount: 0.0,
@@ -630,6 +632,7 @@ pub fn payload_loader_should_export(state: &PayloadLoaderState) -> bool {
             || (state.payload_has_liquids
                 && state.loader_liquid_amount >= 0.1
                 && state.payload_liquid_amount >= state.payload_liquid_capacity - 0.001)
+            || (state.payload_has_items && state.payload_item_capacity_blocked)
             || (state.has_battery && state.payload_power_status >= 0.999_999_999))
 }
 
@@ -1784,6 +1787,13 @@ mod tests {
             loader_liquid_amount: 0.2,
             payload_liquid_amount: 99.999,
             payload_liquid_capacity: 100.0,
+            ..Default::default()
+        };
+        assert!(payload_loader_should_export(&loader));
+        let loader = PayloadLoaderState {
+            has_payload: true,
+            payload_has_items: true,
+            payload_item_capacity_blocked: true,
             ..Default::default()
         };
         assert!(payload_loader_should_export(&loader));

@@ -4346,8 +4346,20 @@ impl GameRuntime {
                         loader.exporting = true;
                         break;
                     };
-                    if payload_items.total() >= payload_building.block.item_capacity {
-                        loader.exporting = true;
+                    let payload_block_def = content.block(payload_building.block.id);
+                    let separate_item_capacity =
+                        Self::payload_block_separate_item_capacity(payload_block_def);
+                    let item_capacity_reached = if separate_item_capacity {
+                        payload_items.get(item_id) >= payload_building.block.item_capacity
+                    } else {
+                        payload_items.total() >= payload_building.block.item_capacity
+                    };
+                    if item_capacity_reached {
+                        if separate_item_capacity
+                            || Self::payload_block_consumes_item(payload_block_def, item_id)
+                        {
+                            loader.exporting = true;
+                        }
                         break;
                     }
                     payload_items.add(item_id, 1);
@@ -4605,6 +4617,19 @@ impl GameRuntime {
                     .map(|items| items.total())
                     .unwrap_or(0);
                 next.payload_item_capacity = payload_building.block.item_capacity;
+                let payload_block_def = content.block(payload_building.block.id);
+                if Self::payload_block_separate_item_capacity(payload_block_def) {
+                    next.payload_item_capacity_blocked = outer
+                        .items
+                        .as_ref()
+                        .zip(payload_building.items.as_ref())
+                        .map(|(outer_items, payload_items)| {
+                            outer_items.each().any(|(item_id, _)| {
+                                payload_items.get(item_id) >= payload_building.block.item_capacity
+                            })
+                        })
+                        .unwrap_or(false);
+                }
                 next.payload_has_liquids = payload_building.block.has_liquids;
                 next.payload_liquid_amount = payload_building
                     .liquids
@@ -4742,6 +4767,29 @@ impl GameRuntime {
         match block {
             BlockDef::Distribution(distribution) => distribution.unloadable,
             _ => true,
+        }
+    }
+
+    fn payload_block_separate_item_capacity(block: Option<&BlockDef>) -> bool {
+        matches!(block, Some(BlockDef::Storage(storage)) if storage.separate_item_capacity)
+    }
+
+    fn payload_block_consumes_item(block: Option<&BlockDef>, item_id: ContentId) -> bool {
+        let consumes = |items: &[crate::mindustry::content::blocks::ItemAmount]| {
+            items.iter().any(|stack| stack.item == item_id)
+        };
+        match block {
+            Some(BlockDef::Production(production)) => consumes(&production.consume_items),
+            Some(BlockDef::Effect(effect)) => {
+                consumes(&effect.consume_items) || consumes(&effect.boost_items)
+            }
+            Some(BlockDef::Power(power)) => consumes(&power.consume_items),
+            Some(BlockDef::Crafting(crafting)) => consumes(&crafting.consume_items),
+            Some(BlockDef::UnitReconstructor(reconstructor)) => {
+                consumes(&reconstructor.consume_items)
+            }
+            Some(BlockDef::Campaign(campaign)) => consumes(&campaign.consume_items),
+            _ => false,
         }
     }
 
@@ -10613,6 +10661,71 @@ mod tests {
             GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
                 .unwrap();
         assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 5);
+    }
+
+    #[test]
+    fn game_runtime_payload_loader_respects_separate_item_capacity_per_item() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("payload-loader").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let loader_tile = point2_pack(4, 4);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.items.as_mut().unwrap().add(lead, 5);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(loader_building);
+        runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building
+                            .items
+                            .as_mut()
+                            .unwrap()
+                            .add(copper, container_def.base().item_capacity);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_loaders(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.loaded_items, 5);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(lead), 0);
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should remain present");
+        };
+        assert!(!loader.exporting);
+        assert!(!loader.payload_item_capacity_blocked);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        let payload_items = payload_building.items.as_ref().unwrap();
+        assert_eq!(
+            payload_items.get(copper),
+            container_def.base().item_capacity
+        );
+        assert_eq!(payload_items.get(lead), 5);
     }
 
     #[test]
