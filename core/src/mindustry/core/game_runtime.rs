@@ -10069,6 +10069,79 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_payload_router_matches_unit_payload_sort_key() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let router_tile = point2_pack(4, 4);
+        let trns = router_def.base().size / 2 + 1;
+        let void_center_x = 4 + trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(void_center_x, 4);
+        let mut router_building =
+            BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+        router_building.set_rotation(1);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(12, 10);
+        runtime.add_building(router_building);
+        runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            router_tile,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState {
+                    item: Some(flare_unit_payload_ref(&content)),
+                    step: 0,
+                    step_accepted: 0,
+                    ..PayloadConveyorState::default()
+                },
+                sorted: Some(PayloadSortKey {
+                    content_type: ContentType::Unit.ordinal() as i8,
+                    id: flare.id(),
+                }),
+                rec_dir: 0,
+                matches: false,
+                smooth_rot: 90.0,
+                control_time: -1.0,
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+
+        let report = runtime
+            .advance_owned_payload_conveyors(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.transferred_payloads, 1);
+        assert_eq!(runtime.buildings[0].rotation, 0);
+        let Some(GameRuntimePayloadBlockState::Router {
+            conveyor, matches, ..
+        }) = runtime.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert!(conveyor.item.is_none());
+        assert!(*matches);
+
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Unit { class_id: 3, .. })
+        ));
+    }
+
+    #[test]
     fn game_runtime_configures_owned_payload_source_block_and_clears_payload() {
         let content = ContentLoader::create_base_content().unwrap();
         let source_def = content.block_by_name("payload-source").unwrap();

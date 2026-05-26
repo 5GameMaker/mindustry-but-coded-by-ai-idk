@@ -989,7 +989,64 @@ pub fn payload_ref_sort_key(payload: &PayloadRef) -> Option<PayloadSortKey> {
             content_type: ContentType::Block.ordinal() as i8,
             id: *block,
         }),
-        PayloadRef::Unit { .. } => None,
+        PayloadRef::Unit {
+            class_id,
+            unit_bytes,
+        } => payload_unit_sort_key(*class_id, unit_bytes),
+    }
+}
+
+pub fn payload_unit_sort_key(class_id: u8, unit_bytes: &[u8]) -> Option<PayloadSortKey> {
+    if unit_bytes.len() < 2 {
+        return None;
+    }
+    let revision = i16::from_be_bytes([unit_bytes[0], unit_bytes[1]]);
+    let tail_after_type = payload_unit_tail_after_type(class_id, revision)?;
+    let offset = unit_bytes.len().checked_sub(tail_after_type + 2)?;
+    let id = i16::from_be_bytes([*unit_bytes.get(offset)?, *unit_bytes.get(offset + 1)?]);
+    (id >= 0).then_some(PayloadSortKey {
+        content_type: ContentType::Unit.ordinal() as i8,
+        id,
+    })
+}
+
+fn payload_unit_tail_after_type(class_id: u8, revision: i16) -> Option<usize> {
+    // Mirrors the v158 unit payload schemas consumed by GameRuntime's exact
+    // UnitPayload reader. All supported entities write UnitType immediately
+    // before `spawnedByCore`, command position and two last-position floats;
+    // missiles insert one extra lifetime float before those common tail fields.
+    match (class_id, revision) {
+        (39, 3) => Some(21),
+        (3, 9)
+        | (4, 6)
+        | (24, 4)
+        | (25, 4)
+        | (27, 4)
+        | (28, 4)
+        | (29, 4)
+        | (30, 4)
+        | (31, 4)
+        | (33, 4)
+        | (34, 4)
+        | (35, 4)
+        | (37, 4)
+        | (38, 4)
+        | (41, 4)
+        | (45, 4)
+        | (46, 2)
+        | (6, 6)
+        | (22, 6)
+        | (32, 5)
+        | (42, 6)
+        | (43, 6)
+        | (5, 7)
+        | (23, 8)
+        | (26, 7)
+        | (36, 3)
+        | (40, 1)
+        | (44, 0)
+        | (47, 1) => Some(17),
+        _ => None,
     }
 }
 
@@ -1917,6 +1974,23 @@ mod tests {
         assert_eq!(
             payload_router_pick_next_rotation(0, 1, false, false, [false, true, false, false]),
             1
+        );
+
+        let mut unit_bytes = vec![0, 9];
+        unit_bytes.resize(32, 0);
+        let unit_offset = unit_bytes.len() - 19;
+        unit_bytes[unit_offset..unit_offset + 2].copy_from_slice(&42i16.to_be_bytes());
+        let unit_key = Some(PayloadSortKey {
+            content_type: ContentType::Unit.ordinal() as i8,
+            id: 42,
+        });
+        assert_eq!(payload_unit_sort_key(3, &unit_bytes), unit_key);
+        assert_eq!(
+            payload_ref_sort_key(&PayloadRef::Unit {
+                class_id: 3,
+                unit_bytes
+            }),
+            unit_key
         );
 
         let mut bytes = Vec::new();
