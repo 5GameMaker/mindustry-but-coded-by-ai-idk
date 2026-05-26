@@ -2369,4 +2369,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core`
 - 下一步建议：
   1. 将 `BuildingComp` 的真实邻接查询接入 `remove_with_connections(...)`。
-  2. 继续推进 `BuildingComp.onProximityAdded/updatePowerGraph/powerGraphRemoved/afterPickedUp`，让 power graph lifecycle 从纯 runtime 进入 world/building 主链路。
+  2. `BuildingComp` power graph lifecycle 入口已由第 71 节补上；继续把这些入口串入 GameRuntime/world 主链路。
+
+---
+
+## 71. 最新闭环记录：BuildingComp power graph lifecycle 接入点
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 Java `BuildingComp.updatePowerGraph/powerGraphRemoved/afterPickedUp` 的关键入口落到 Rust `BuildingComp`，为 `PowerGraphRuntime` 接真实 building 做准备。
+- Java 依据：
+  - `updatePowerGraph()` 合并邻接 power graph；
+  - `powerGraphRemoved()` 调 `power.graph.remove(self())` 并清理 links；
+  - `afterPickedUp()` 换新 graph、清空 links，非 buffered consumer status 置 0。
+- Rust 主改动：
+  - `BuildingComp::power_graph_node(...)`；
+  - `BuildingComp::power_graph_removed_links(...)`；
+  - `BuildingComp::after_picked_up_power(...)`；
+  - 测试锁定 node 转换、links 清理、pickup 后 status 规则。
+- 已跑：
+  - `cargo test -p mindustry-core building_component_exposes_power_graph_node_and_lifecycle_helpers --lib`
+  - `cargo test -p mindustry-core building_component --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 在 `GameRuntime` 中维护真实 `PowerGraphRuntime` 集合/索引，把 building proximity 刷新、删除、pickup 与 graph lifecycle 串起来。
+  2. 继续减少 power graph helper 孤岛，把 runtime 接到 world/building 主调用链。

@@ -2592,6 +2592,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：分支拆图仍由 caller 提供连接/节点视图；下一步应把 `BuildingComp.getPowerConnections(...)`、proximity 与 pickup/remove 生命周期接到该方法。
 
+### 12.57 BuildingComp power graph lifecycle 接入点
+
+- 2026-05-27：把 Java `BuildingComp` 中与 power graph 相关的生命周期钩子先落到 Rust `BuildingComp`，为后续 GameRuntime/world 级接线准备稳定入口。
+- Java 依据：
+  - `BuildingComp.updatePowerGraph()`：遍历 `getPowerConnections(...)` 并合并 `other.power.graph.addGraph(power.graph)`；
+  - `BuildingComp.powerGraphRemoved()`：调用 `power.graph.remove(self())`，并从所有 linked building 反向移除自身 link，随后清空 `power.links`；
+  - `BuildingComp.afterPickedUp()`：为 power module 换新 graph，清空 links；非 buffered consumer 将 `power.status = 0f`。
+- Rust 新增/变化：
+  - `BuildingComp::power_graph_node(...)`：把 building/block/power module 状态转换为 `PowerGraphNode` 输入视图；
+  - `BuildingComp::power_graph_removed_links(...)`：清空自身 `PowerModule.links` 并返回旧 links，供 GameRuntime 反向解除；
+  - `BuildingComp::after_picked_up_power(...)`：清空 links、重置 init；非 buffered consumer 对齐 Java 将 status 置 0；
+  - 将 `point2_pack` 移入 test import，减少非测试编译警告。
+- 测试：
+  - `building_component_exposes_power_graph_node_and_lifecycle_helpers`
+- 已验证：
+  - `cargo test -p mindustry-core building_component_exposes_power_graph_node_and_lifecycle_helpers --lib`
+  - `cargo test -p mindustry-core building_component --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：GameRuntime 还未把 proximity 链、linked building 反向清理和 `PowerGraphRuntime::remove_with_connections(...)` 串成真实 world/building 主流程。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

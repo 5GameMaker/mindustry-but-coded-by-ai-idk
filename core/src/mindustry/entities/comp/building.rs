@@ -16,8 +16,9 @@ use crate::mindustry::io::{
 };
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::block::{Block, BlockId};
+use crate::mindustry::world::blocks::power::PowerGraphNode;
 use crate::mindustry::world::modules::{ItemModule, LiquidModule, PowerModule};
-use crate::mindustry::world::tile::{point2_pack, point2_x, point2_y, BuildingRef};
+use crate::mindustry::world::tile::{point2_x, point2_y, BuildingRef};
 
 const TIME_TO_SLEEP: f32 = 60.0;
 const RECENT_DAMAGE_TIME: f32 = 60.0 * 5.0;
@@ -591,6 +592,51 @@ impl BuildingComp {
     pub fn clear_proximity(&mut self) {
         self.proximity.clear();
     }
+
+    pub fn power_graph_node(
+        &self,
+        production: f32,
+        requested_power: f32,
+        usage: f32,
+        delta: f32,
+        capacity: f32,
+        buffered: bool,
+    ) -> Option<PowerGraphNode> {
+        let power = self.power.as_ref()?;
+        Some(PowerGraphNode {
+            id: self.tile_pos,
+            outputs_power: self.block.outputs_power,
+            consumes_power: self.block.consumes_power,
+            buffered,
+            should_consume_power: self.should_consume_power,
+            production,
+            requested_power,
+            usage,
+            delta,
+            battery_status: power.status,
+            battery_capacity: capacity,
+            enabled: self.enabled,
+            cheating: false,
+        })
+    }
+
+    pub fn power_graph_removed_links(&mut self) -> Option<Vec<i32>> {
+        let power = self.power.as_mut()?;
+        power.init = false;
+        Some(std::mem::take(&mut power.links))
+    }
+
+    pub fn after_picked_up_power(&mut self, buffered: bool) -> bool {
+        let Some(power) = self.power.as_mut() else {
+            return false;
+        };
+        power.init = false;
+        power.links.clear();
+        if self.block.consumes_power && !buffered {
+            power.status = 0.0;
+        }
+        true
+    }
 }
 
 fn clamp01(value: f32) -> f32 {
@@ -646,6 +692,7 @@ impl SizedEntity for BuildingComp {
 #[cfg(test)]
 mod tests {
     use crate::mindustry::io::{ContentRef, Point2};
+    use crate::mindustry::world::tile::point2_pack;
 
     use super::*;
 
@@ -672,6 +719,45 @@ mod tests {
             building.hit_size(),
             building.block.size as f32 * TILE_SIZE as f32
         );
+    }
+
+    #[test]
+    fn building_component_exposes_power_graph_node_and_lifecycle_helpers() {
+        let mut power_block = block();
+        power_block.outputs_power = true;
+        power_block.consumes_power = true;
+        let mut building = BuildingComp::new(point2_pack(3, 4), power_block, TeamId(2));
+        building.should_consume_power = true;
+        building.enabled = true;
+        building.power.as_mut().unwrap().status = 0.75;
+        building.power.as_mut().unwrap().links = vec![point2_pack(4, 4), point2_pack(5, 5)];
+
+        let node = building
+            .power_graph_node(6.0, 3.0, 3.0, 2.0, 40.0, true)
+            .expect("power building should expose graph node");
+        assert_eq!(node.id, point2_pack(3, 4));
+        assert!(node.outputs_power);
+        assert!(node.consumes_power);
+        assert!(node.buffered);
+        assert_eq!(node.production, 6.0);
+        assert_eq!(node.requested_power, 3.0);
+        assert_eq!(node.battery_status, 0.75);
+        assert_eq!(node.battery_capacity, 40.0);
+
+        let removed_links = building.power_graph_removed_links().unwrap();
+        assert_eq!(removed_links, vec![point2_pack(4, 4), point2_pack(5, 5)]);
+        assert!(building.power.as_ref().unwrap().links.is_empty());
+        assert!(!building.power.as_ref().unwrap().init);
+
+        building.power.as_mut().unwrap().links = vec![point2_pack(8, 8)];
+        building.power.as_mut().unwrap().status = 0.5;
+        assert!(building.after_picked_up_power(false));
+        assert!(building.power.as_ref().unwrap().links.is_empty());
+        assert_eq!(building.power.as_ref().unwrap().status, 0.0);
+
+        building.power.as_mut().unwrap().status = 0.6;
+        assert!(building.after_picked_up_power(true));
+        assert_eq!(building.power.as_ref().unwrap().status, 0.6);
     }
 
     #[test]
