@@ -387,3 +387,118 @@ fn real_server_desktop_world_stream_materializes_multiple_payload_sidecars() {
     desktop.net_client.net_mut().disconnect();
     server.close_network();
 }
+
+#[test]
+fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
+    use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::net::StateSnapshotCallPacket;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(8, 8);
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+    });
+
+    let connection_id = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        state
+            .last_connect_confirm_connection_id
+            .expect("server should receive connect confirm before state snapshot")
+    };
+    let snapshot = StateSnapshotCallPacket {
+        wave_time: 33.5,
+        wave: 12,
+        enemies: 4,
+        paused: true,
+        game_over: true,
+        time_data: 789,
+        tps: 58,
+        rand0: 1234,
+        rand1: 5678,
+        core_data: Vec::new(),
+    };
+
+    server
+        .net_server
+        .send_state_snapshot(connection_id, snapshot.clone())
+        .expect("real server should send state snapshot");
+
+    let mut applied = false;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        desktop.update();
+        server.update();
+        {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            applied = state.last_state_snapshot.as_ref() == Some(&snapshot);
+            last_client_status = format!(
+                "state_snapshots={} last_snapshot={} last_server_snapshot={:?} provider_events={:?}",
+                state.state_snapshot_packets_seen,
+                state.last_state_snapshot.is_some(),
+                state.last_server_snapshot_at,
+                state.last_provider_events,
+            );
+        }
+        if applied && desktop.game_state.wave == snapshot.wave {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        applied,
+        "desktop should receive real state snapshot after world stream; client: {last_client_status}"
+    );
+    {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_state_snapshot_connection_id, Some(connection_id));
+        assert_eq!(state.last_state_snapshot.as_ref(), Some(&snapshot));
+        assert_eq!(state.state_snapshot_packets_sent, 1);
+        assert!(state.last_state_snapshot_error.is_none());
+    }
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.state_snapshot_packets_seen, 1);
+        assert_eq!(state.last_state_snapshot.as_ref(), Some(&snapshot));
+        assert!(state.last_state_snapshot_mirror.is_some());
+    }
+    assert_eq!(desktop.game_state.wavetime, snapshot.wave_time);
+    assert_eq!(desktop.game_state.wave, snapshot.wave);
+    assert_eq!(desktop.game_state.enemies, snapshot.enemies);
+    assert_eq!(desktop.game_state.game_over, snapshot.game_over);
+    assert_eq!(desktop.game_state.server_tps, snapshot.tps as i32);
+    assert_eq!(desktop.runtime.state.server_tps, snapshot.tps as i32);
+    assert_eq!(desktop.game_state.rand_seed0, snapshot.rand0);
+    assert_eq!(desktop.game_state.rand_seed1, snapshot.rand1);
+    assert_eq!(
+        desktop.game_state.universe.seconds(true),
+        snapshot.time_data
+    );
+    assert!(desktop.game_state.is_paused());
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}

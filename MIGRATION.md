@@ -1702,3 +1702,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check tests/src/lib.rs`
   - `git diff --check`
 - 仍未完成：后续需要继续补 state snapshot/实时增量同步、更多 gameplay runtime 闭环、Java 客户端/服务端互通 smoke、renderer/UI/输入控制与可游玩路径。
+
+### 12.16 真实联机 StateSnapshot 增量同步 smoke
+
+- 2026-05-26：新增 `real_server_desktop_state_snapshot_updates_runtime_after_world_stream`，先通过真实 `ServerLauncher → DesktopLauncher` world stream 完成 join 与 `ConnectConfirmCallPacket`，再由 `NetServer::send_state_snapshot(...)` 通过真实 `ArcNetProvider` 向客户端发送 `StateSnapshotCallPacket`。
+- 测试验证客户端 `NetClient` 记录 `last_state_snapshot` / `last_state_snapshot_mirror`，`DesktopLauncher::sync_state_snapshot()` 随后把 wave、waveTime、enemy count、paused/gameOver、server TPS、rand seed、universe network seconds 应用到 `game_state` 与 `runtime.state`。
+- 该闭环把迁移范围从初始 world-data load 推进到 world-stream 之后的真实运行态增量同步，继续收紧“整体可游玩客户端/服务端”目标。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_state_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `rustfmt --check tests/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：仍需补 entity/block/hidden snapshot 的真实联机增量同步、客户端输入/构建/单位状态回传、Java↔Rust 联机 smoke、renderer/UI 与完整可游玩路径。

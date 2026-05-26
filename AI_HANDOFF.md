@@ -1114,3 +1114,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check tests/src/lib.rs`
   - `git diff --check`
 - 后续建议：继续推进 state snapshot/实时增量同步、Java 客户端/服务端互通 smoke，以及 renderer/UI/输入控制闭环，确保最终是完整可游玩的 Rust MDT 而不是 isolated modules。
+
+---
+
+## 30. 最新闭环记录：真实联机 StateSnapshot 增量同步 smoke
+
+- 目标：在真实 world stream join 之后，验证服务端运行态增量包 `StateSnapshotCallPacket` 能通过真实 `ArcNetProvider` 到达 desktop/client，并应用到 `game_state/runtime`。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_state_snapshot_updates_runtime_after_world_stream`。
+- 测试链路：
+  - 启动真实 `ServerLauncher` 与 `DesktopLauncher --connect 127.0.0.1:port`；
+  - 复用 `pump_real_server_desktop_until(...)` 等待 world stream 完成、客户端 `connect_confirm_sent=true`、服务端收到 confirm；
+  - 从 `NetServerState.last_connect_confirm_connection_id` 取真实 connection id；
+  - 调用 `server.net_server.send_state_snapshot(connection_id, snapshot)` 走真实 UDP/unreliable 发送；
+  - 循环 `desktop.update()` / `server.update()` 等待客户端收到；
+  - 断言 `NetClientState.last_state_snapshot`、`last_state_snapshot_mirror`、`state_snapshot_packets_seen` 更新；
+  - 断言 `DesktopLauncher::sync_state_snapshot()` 已把 `waveTime/wave/enemies/paused/gameOver/tps/rand/timeData` 应用到 `game_state` 与 `runtime.state`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_state_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `rustfmt --check tests/src/lib.rs`
+  - `git diff --check`
+- 后续建议：继续补 `EntitySnapshotCallPacket`、`BlockSnapshotCallPacket`、`HiddenSnapshotCallPacket` 的真实联机增量同步，再推进客户端输入/构建请求回传和 Java↔Rust 互通 smoke。
