@@ -2996,3 +2996,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_builds_remote_player_preview_overlay_from_snapshot_and_plan_packets`
   - `cargo test -p mindustry-core update_records_received_preview_plan_packets_and_applies_to_player`
 - 仍未完成：当前 cache 已可消费但还没有真实 renderer/UI 绘制；远端玩家生命周期仍依赖 snapshot/hidden sidecar 的后续完善，真实多人多 chunk plan 的端到端 server->desktop smoke 仍需继续补。
+
+### 12.76 Server 转发客户端 preview plan snapshot
+
+- 2026-05-27：把 Java `NetServer.clientPlanSnapshot(...)` / `clientPlanSnapshotSend(...)` 的联机转发语义接入 Rust server launcher，使客户端发来的 preview build plan chunk 不再只停留在 `NetServerState` 记录里，而是会转成 `ClientPlanSnapshotReceivedCallPacket` 发给其他连接。
+- Java 依据：
+  - `clientPlanSnapshot(Player player, int groupId, ClientBuildPlans plans)` 先调用 `player.handlePreviewPlans(groupId, plans)` 维护玩家预览组；
+  - `clientPlanSnapshotSend(...)` 遍历同队其他在线玩家，并向非本人、非 local、连接可用的目标发送 `Call.clientPlanSnapshotReceived(...)`；
+  - 该 remote call 为 low priority / unreliable，允许按 Java chunk 原样透传。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_new_network_server_events(...)` 新增 `ClientPlanSnapshotCallPacket` 分支；
+  - 当前以 source `connection_id` 作为临时 `player_id`，把 `group_id` 与 `plans` 原样封装为 `ClientPlanSnapshotReceivedCallPacket`；
+  - 目标连接来自 `NetServerState.connection_states`，先排除发送者、已踢出和已断开的连接，再复用 `NetServer::send_client_plan_snapshot_received_to_many(...)` 以非可靠方式发送；
+  - `plans: None` 也会转发，用于对齐 Java 空预览/清理语义；
+  - 转发错误会写入 `ServerLauncher.network_error`，便于后续端到端 smoke 定位。
+- 验证：
+  - `cargo test -p mindustry-server server_update_forwards_client_plan_snapshot_to_other_connections`
+  - `cargo test -p mindustry-server`
+- 仍未完成：当前最小闭环尚未按真实 `Player/team` 做同队过滤，也未把 `connection_id -> player entity id` 的绑定替换为真实 player id；下一步应补 server 侧玩家 preview 状态维护（`PlayerComp.handlePreviewPlans`/组延迟/周期广播）与 Rust server->desktop 多客户端 smoke。

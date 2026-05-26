@@ -13,8 +13,8 @@ use mindustry_core::mindustry::entities::{
 };
 use mindustry_core::mindustry::io::ContentPatchSet;
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, Net, NetworkPlayerData, NetworkWorldData, PacketKind,
-    ProviderEvent,
+    write_world_data, ArcNetProvider, ClientPlanSnapshotReceivedCallPacket, Net, NetworkPlayerData,
+    NetworkWorldData, PacketKind, ProviderEvent,
 };
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
@@ -131,25 +131,63 @@ impl ServerLauncher {
 
         let mut changed = 0;
         for event in events {
-            if let ProviderEvent::ServerPacket {
-                packet: PacketKind::TileConfigCallPacket(packet),
-                ..
-            } = event
-            {
-                let Some(source_tile_pos) = packet.build.tile_pos else {
-                    continue;
-                };
-                let result = self.runtime.configure_owned_power_node_value(
-                    &self.content_loader,
-                    source_tile_pos,
-                    &packet.value,
-                );
-                self.runtime_power_node_config_packets_seen += 1;
-                if result.changed() {
-                    changed += 1;
-                    self.runtime_power_node_config_packets_changed += 1;
+            match event {
+                ProviderEvent::ServerPacket {
+                    packet: PacketKind::TileConfigCallPacket(packet),
+                    ..
+                } => {
+                    let Some(source_tile_pos) = packet.build.tile_pos else {
+                        continue;
+                    };
+                    let result = self.runtime.configure_owned_power_node_value(
+                        &self.content_loader,
+                        source_tile_pos,
+                        &packet.value,
+                    );
+                    self.runtime_power_node_config_packets_seen += 1;
+                    if result.changed() {
+                        changed += 1;
+                        self.runtime_power_node_config_packets_changed += 1;
+                    }
+                    self.last_runtime_power_node_config_result = Some(result);
                 }
-                self.last_runtime_power_node_config_result = Some(result);
+                ProviderEvent::ServerPacket {
+                    connection_id,
+                    packet: PacketKind::ClientPlanSnapshotCallPacket(snapshot),
+                } => {
+                    if connection_id < 0 {
+                        continue;
+                    }
+                    let target_connection_ids = {
+                        let state = self.net_server.state();
+                        let state = state.lock().expect("NetServerState mutex poisoned");
+                        state
+                            .connection_states
+                            .iter()
+                            .filter_map(|(target_connection_id, connection)| {
+                                (*target_connection_id != connection_id
+                                    && !connection.kicked
+                                    && !connection.has_disconnected)
+                                    .then_some(*target_connection_id)
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    if target_connection_ids.is_empty() {
+                        continue;
+                    }
+                    match self.net_server.send_client_plan_snapshot_received_to_many(
+                        target_connection_ids,
+                        ClientPlanSnapshotReceivedCallPacket {
+                            player_id: connection_id,
+                            group_id: snapshot.group_id,
+                            plans: snapshot.plans.clone(),
+                        },
+                    ) {
+                        Ok(sent) => changed += sent,
+                        Err(error) => self.network_error = Some(error.to_string()),
+                    }
+                }
+                _ => {}
             }
         }
         changed
@@ -289,11 +327,11 @@ mod tests {
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::entities::comp::BuildingComp;
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
-    use mindustry_core::mindustry::io::{BuildingRef, Point2, TeamId, TypeValue};
+    use mindustry_core::mindustry::io::{BuildPlanWire, BuildingRef, Point2, TeamId, TypeValue};
     use mindustry_core::mindustry::net::{
-        packet_ids, read_world_data, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host,
-        HostCallback, Net, NetConnection, NetProvider, NetworkWorldData, PacketKind,
-        PacketSerializer, ProviderEvent, TileConfigCallPacket,
+        packet_ids, read_world_data, ClientPlanSnapshotCallPacket, Connect, ConnectFilter,
+        ConnectPacket, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
+        NetworkWorldData, PacketKind, PacketSerializer, ProviderEvent, TileConfigCallPacket,
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
@@ -712,6 +750,122 @@ mod tests {
             .find(|building| building.tile_pos == source_pos)
             .unwrap();
         assert_eq!(source.power.as_ref().unwrap().links, vec![array_target_pos]);
+    }
+
+    #[test]
+    fn server_update_forwards_client_plan_snapshot_to_other_connections() {
+        let sent_packets = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent_packets),
+        };
+        let mut launcher = ServerLauncher {
+            context: AppContext::server("config"),
+            args: Vec::new(),
+            control: super::ServerControl::new(Vec::new()),
+            runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            next_network_event_index: 0,
+            net_server: NetServer::new(Net::new(Box::new(provider))),
+            network_error: None,
+        };
+        let plans = vec![BuildPlanWire::new_place(5, 6, 1, "router")];
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            for connection_id in [11, 22, 33] {
+                net.handle_server_received_from_connection(
+                    Some(connection_id),
+                    true,
+                    PacketKind::Connect(Connect {
+                        address_tcp: format!("127.0.0.1:{connection_id}"),
+                    }),
+                );
+            }
+            net.handle_server_received_from_connection(
+                Some(11),
+                true,
+                PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+                    group_id: 7,
+                    plans: Some(plans.clone()),
+                }),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 2);
+        assert_eq!(launcher.network_error, None);
+
+        let sent = sent_packets.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        let mut target_ids = sent
+            .iter()
+            .map(|(connection_id, _, _)| *connection_id)
+            .collect::<Vec<_>>();
+        target_ids.sort_unstable();
+        assert_eq!(target_ids, vec![22, 33]);
+        assert!(sent.iter().all(|(_, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
+                        if packet.player_id == 11
+                            && packet.group_id == 7
+                            && packet.plans.as_ref() == Some(&plans)
+                )
+        }));
+        drop(sent);
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(11),
+                true,
+                PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+                    group_id: 8,
+                    plans: None,
+                }),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 2);
+        let sent = sent_packets.lock().unwrap();
+        assert_eq!(sent.len(), 4);
+        assert_eq!(
+            sent.iter()
+                .filter(|(_, packet, reliable)| {
+                    !*reliable
+                        && matches!(
+                            packet,
+                            PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
+                                if packet.player_id == 11
+                                    && packet.group_id == 8
+                                    && packet.plans.is_none()
+                        )
+                })
+                .count(),
+            2
+        );
+        drop(sent);
+
+        let state = launcher.net_server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.client_plan_snapshot_packets_seen, 2);
+        assert_eq!(state.client_plan_snapshots_forwarded, 4);
+        assert!(state.last_client_plan_snapshot_forwarded_error.is_none());
+        assert_eq!(
+            state
+                .connection_states
+                .get(&11)
+                .expect("source connection should stay registered")
+                .sent
+                .len(),
+            0
+        );
     }
 
     #[test]
