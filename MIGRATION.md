@@ -2876,3 +2876,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-tests`
   - `git diff --check`
 - 仍未完成：真实联机 child tail 目前只覆盖 conveyor；其他 distribution/payload/storage/turret family 仍需后续扩展。
+
+### 12.69 Core storage capacity 网络状态回归对齐
+
+- 2026-05-27：修正 core storage 网络状态 roundtrip 测试期望，明确 `storageCapacity` 是 Java `CoreBuild.onProximityUpdate()` 派生运行态容量，不是 `CoreBuild.write(...)` 持久化字段。
+- Java 依据：
+  - `CoreBuild.write(...)` 只在 `super.write(...)` 后写 `commandPos`；
+  - `CoreBuild.read(...)` 只恢复 `commandPos`；
+  - `CoreBuild.onProximityUpdate()` 中按自身 `itemCapacity`、邻接 linked storage 与同队其它 core 重新计算并同步 `storageCapacity`。
+- Rust 新增/变化：
+  - 保持 `write_core_state(...)` / `read_core_state(...)` 只序列化 `command_pos`；
+  - 保持 `GameRuntime::load_network_map_with_buildings(...)` 后刷新 owned storage core links/capacity；
+  - 更新 `game_runtime_exports_core_storage_state_tail_in_network_map_snapshot` 与 `game_runtime_loads_core_storage_state_from_network_map_building_payload`，期望加载后 core sidecar 中的 `storage_capacity` 已刷新为该 core block 的 `item_capacity`。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_exports_core_storage_state_tail_in_network_map_snapshot`
+  - `cargo test -p mindustry-core game_runtime_loads_core_storage_state_from_network_map_building_payload`
+  - `cargo test -p mindustry-core storage`
+- 仍未完成：多 core + linked storage 的 Java `onProximityUpdate()` 容量广播与 campaign delta 已有局部覆盖，后续仍需扩展到真实 world load/placement/removal 全链路 smoke。

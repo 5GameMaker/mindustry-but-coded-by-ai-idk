@@ -20854,6 +20854,11 @@ mod tests {
     #[test]
     fn game_runtime_exports_core_storage_state_tail_in_network_map_snapshot() {
         let content = ContentLoader::create_base_content().unwrap();
+        let core_capacity = content
+            .block_by_name("core-shard")
+            .unwrap()
+            .base()
+            .item_capacity;
         let state = CoreBuildState {
             storage_capacity: 100,
             no_effect: true,
@@ -20870,6 +20875,7 @@ mod tests {
                 GameRuntimeStorageBlockState::Core(state),
             ),
             Some(GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: core_capacity,
                 command_pos: Some(IoVec2 { x: 64.0, y: 128.0 }),
                 ..CoreBuildState::default()
             }))
@@ -28474,7 +28480,10 @@ mod tests {
         assert_eq!(report.block_state_parse_errors, 0);
         assert_eq!(
             runtime.storage_runtime_states.get(&tile_pos),
-            Some(&GameRuntimeStorageBlockState::Core(state))
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: core_def.base().item_capacity,
+                ..state
+            }))
         );
     }
 
