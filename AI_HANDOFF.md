@@ -1595,3 +1595,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 补真实联机 `PayloadConstructor` snapshot，覆盖 revision 0 `BlockProducerBuild.progress + Constructor.recipe`。
   2. 补真实联机 `PayloadVoid` snapshot，覆盖 terminal common tail。
   3. 转入 turret `readSync` override 与 entity snapshot typed runtime。
+
+---
+
+## 45. 最新闭环记录：真实联机 PayloadConstructor BlockSnapshot child tail smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：覆盖 payload constructor revision 0 child tail，验证 Java `BlockProducerBuild.progress` 与 `ConstructorBuild.recipe` 能通过真实 BlockSnapshot 同步到 desktop runtime。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_payload_constructor_block_snapshot_updates_runtime_after_world_stream`
+  - 服务端 world stream 先 materialize `constructor` building；
+  - 服务端随后发送 `BlockSnapshotCallPacket`，sync bytes 为 `BuildingComp::write_base(...) + write_payload_block_build_common(...) + write_block_producer_progress(...) + write_constructor_recipe(...)`；
+  - desktop 端等待 `NetClient.last_block_snapshot` 与 `runtime.payload_runtime_states[constructor_tile]` 同时更新。
+- 断言覆盖：
+  - mirror header 的 `tile_pos/block_id/sync_bytes`；
+  - runtime raw sidecar `client_block_snapshot_records`；
+  - building 基础 health/rotation；
+  - `GameRuntimePayloadBlockState::Constructor { common, producer, recipe }` 完整恢复。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_constructor_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 补真实联机 `PayloadVoid` snapshot，完成当前 payload family 的 BlockSnapshot smoke 覆盖。
+  2. 开始 turret `readSync` override：同步时应保留 Java turret rotation/reload 语义。
+  3. 继续 entity snapshot typed runtime，替换 raw entity sidecar。

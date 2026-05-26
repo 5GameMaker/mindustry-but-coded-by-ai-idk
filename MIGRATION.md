@@ -1956,7 +1956,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
-- 仍未完成：真实 payload snapshot 尚缺 `PayloadConstructor/Void`；entity snapshot typed runtime、turret `readSync` override 与 Java↔Rust 更完整互通仍需继续。
+- 仍未完成：真实 payload snapshot 尚缺 `PayloadVoid`；entity snapshot typed runtime、turret `readSync` override 与 Java↔Rust 更完整互通仍需继续。
+
+### 12.31 真实联机 PayloadConstructor BlockSnapshot child tail smoke
+
+- 2026-05-26：新增 `real_server_desktop_payload_constructor_block_snapshot_updates_runtime_after_world_stream`，在真实 server→desktop 联机链路中先通过 world stream materialize 一个 `constructor` building，再发送 `BuildingComp::write_base(...) + write_payload_block_build_common(...) + write_block_producer_progress(...) + write_constructor_recipe(...)` 组成的 `BlockSnapshotCallPacket`。
+- 测试覆盖 Java `BlockProducerBuild.write(...)` 的 `progress` 与 `ConstructorBuild.write(...)` 的 `recipe`，即 payload constructor revision 0 child tail。
+- 测试断言：
+  - `NetClient.last_block_snapshot_mirror` 正确解析 constructor snapshot header；
+  - `client_block_snapshot_records` 保留 raw sync bytes；
+  - 客户端 building 基础 health/rotation 被更新；
+  - `payload_runtime_states` 中恢复 `GameRuntimePayloadBlockState::Constructor { common, producer, recipe }`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_constructor_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：真实 payload snapshot 尚缺 `PayloadVoid`；之后可转入 turret `readSync` override 或 entity snapshot typed runtime。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
