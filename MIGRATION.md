@@ -2640,6 +2640,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 注意：本轮额外跑了 `cargo test -p mindustry-core`，当前仍有 2 个既有 core storage state 断言失败（`storage_capacity` 被 runtime refresh 为 `4000`，测试期望默认 `0`）：`game_runtime_exports_core_storage_state_tail_in_network_map_snapshot`、`game_runtime_loads_core_storage_state_from_network_map_building_payload`。该失败与本轮 power graph 接线无直接交叉，后续应单独确认 core storage load 后是否应保留 wire 默认值还是立即刷新真实容量。
 - 仍未完成：当前 `GameRuntime` 先采用粗粒度重建 graph，尚未把 Java 增量 `PowerGraph.addGraph/remove_with_connections` 的分支拆图作为默认路径；`PowerNode` autolink/UI config、diode 方向传输、动态 `ConsumePower.requestedPower(...)`、完整 generator 燃料/热/液体消耗与 `Groups.powerGraph` 实体调度仍需继续迁移。
 
+### 12.59 PowerNode 手动连线配置入口
+
+- 2026-05-27：继续迁移 Java `PowerNode.config(Integer.class, ...)` 的最小运行态入口，把“修改 `PowerModule.links`”从测试手写推进到 `GameRuntime` API。
+- Java 依据：
+  - 已有链接时：从双方 `power.links` 移除，并 reflow 两端图；
+  - 未有链接时：经 `linkValid(...)` 校验，源端未满 `maxNodes` 才写入双方 links，并合并 power graph；
+  - `linkValid(...)` 校验同队、目标有 power/connectedPower、`sameBlockConnection`、范围与目标 node `maxNodes`。
+- Rust 新增/变化：
+  - `GameRuntimePowerNodeLinkResult`；
+  - `GameRuntime::configure_owned_power_node_link(...)`：支持单条 link toggle（linked/unlinked），写入/删除双方 `PowerModule.links`，并重建 owned power graph；
+  - `owned_power_node_link_valid_between(...)` 复用 `power_node_link_valid(...)`，当前范围判定先用 tile-center 距离近似 Java hitbox/range；
+  - `two_buildings_mut(...)`、`add_owned_power_link_pair(...)`、`remove_owned_power_link_pair(...)` 作为双向 link 写回工具。
+- 测试：
+  - `game_runtime_configures_power_node_link_and_reflows_graphs`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_configures_power_node_link_and_reflows_graphs`
+  - `cargo test -p mindustry-core power_node`
+  - `cargo test -p mindustry-core power_graph`
+- 仍未完成：`PowerNode.placed()` 的 autolink 候选扫描、`config(Point2[].class)` 批量重配、insulated raycast、非 center hitbox overlap、`getNodeLinks(...)` 和 client/UI tap 入口仍待迁移；diode 方向传输仍保持下一切片。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

@@ -130,12 +130,13 @@ use crate::mindustry::{
         Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
-        read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
-        read_nuclear_reactor_state, read_power_generator_state, read_variable_reactor_state,
-        write_heater_generator_state, write_impact_reactor_state, write_light_block_state,
-        write_nuclear_reactor_state, write_power_generator_state, write_variable_reactor_state,
-        HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
-        PowerGeneratorState, PowerGraphNode, PowerGraphRuntime, VariableReactorState,
+        power_node_link_valid, read_heater_generator_state, read_impact_reactor_state,
+        read_light_block_state, read_nuclear_reactor_state, read_power_generator_state,
+        read_variable_reactor_state, write_heater_generator_state, write_impact_reactor_state,
+        write_light_block_state, write_nuclear_reactor_state, write_power_generator_state,
+        write_variable_reactor_state, HeaterGeneratorState, ImpactReactorState, LightBlockState,
+        NuclearReactorState, PowerGeneratorState, PowerGraphNode, PowerGraphRuntime,
+        VariableReactorState,
     },
     world::blocks::production::{
         item_incinerator_accept_item, read_beam_drill_state, read_burst_drill_state,
@@ -1976,6 +1977,40 @@ pub enum GameRuntimePayloadMassDriverConfigureResult {
     MissingBuilding,
     MissingRuntimeState,
     NotPayloadMassDriver,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePowerNodeLinkResult {
+    Linked,
+    Unlinked,
+    MissingSource,
+    MissingTarget,
+    NotPowerNode,
+    InvalidTarget,
+    SourceFull,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GameRuntimePowerNodeMetadata {
+    is_node: bool,
+    max_nodes: i32,
+    laser_range: f32,
+    same_block_connection: bool,
+}
+
+fn two_buildings_mut(
+    buildings: &mut [BuildingComp],
+    first: usize,
+    second: usize,
+) -> (&mut BuildingComp, &mut BuildingComp) {
+    assert_ne!(first, second);
+    if first < second {
+        let (left, right) = buildings.split_at_mut(second);
+        (&mut left[first], &mut right[0])
+    } else {
+        let (left, right) = buildings.split_at_mut(first);
+        (&mut right[0], &mut left[second])
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3832,6 +3867,81 @@ impl GameRuntime {
         true
     }
 
+    pub fn configure_owned_power_node_link(
+        &mut self,
+        content: &ContentLoader,
+        source_tile_pos: i32,
+        target_tile_pos: i32,
+    ) -> GameRuntimePowerNodeLinkResult {
+        let Some(source_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == source_tile_pos)
+        else {
+            return GameRuntimePowerNodeLinkResult::MissingSource;
+        };
+        let Some(target_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == target_tile_pos)
+        else {
+            return GameRuntimePowerNodeLinkResult::MissingTarget;
+        };
+        if !Self::owned_power_node_metadata(content, &self.buildings[source_index])
+            .is_some_and(|metadata| metadata.is_node)
+        {
+            return GameRuntimePowerNodeLinkResult::NotPowerNode;
+        }
+        if self.buildings[source_index].power.is_none()
+            || self.buildings[target_index].power.is_none()
+        {
+            return GameRuntimePowerNodeLinkResult::InvalidTarget;
+        }
+
+        let already_linked = self.buildings[source_index]
+            .power
+            .as_ref()
+            .is_some_and(|power| power.links.contains(&target_tile_pos));
+        if already_linked {
+            Self::remove_owned_power_link_pair(
+                &mut self.buildings,
+                source_index,
+                target_index,
+                source_tile_pos,
+                target_tile_pos,
+            );
+            self.refresh_owned_building_proximity();
+            self.refresh_owned_power_graphs_with_content(content);
+            return GameRuntimePowerNodeLinkResult::Unlinked;
+        }
+
+        let source_max_nodes =
+            Self::owned_power_node_metadata(content, &self.buildings[source_index])
+                .map(|metadata| metadata.max_nodes)
+                .unwrap_or(0);
+        if self.buildings[source_index]
+            .power
+            .as_ref()
+            .is_some_and(|power| power.links.len() as i32 >= source_max_nodes)
+        {
+            return GameRuntimePowerNodeLinkResult::SourceFull;
+        }
+        if !self.owned_power_node_link_valid_between(content, source_index, target_index, true) {
+            return GameRuntimePowerNodeLinkResult::InvalidTarget;
+        }
+
+        Self::add_owned_power_link_pair(
+            &mut self.buildings,
+            source_index,
+            target_index,
+            source_tile_pos,
+            target_tile_pos,
+        );
+        self.refresh_owned_building_proximity();
+        self.refresh_owned_power_graphs_with_content(content);
+        GameRuntimePowerNodeLinkResult::Linked
+    }
+
     fn rebuild_owned_power_graphs_from_proximity(
         &mut self,
         content: Option<&ContentLoader>,
@@ -3968,6 +4078,138 @@ impl GameRuntime {
             return false;
         };
         building.power.is_some() && other.power.is_some() && building.team == other.team
+    }
+
+    fn owned_power_node_link_valid_between(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        check_max_nodes: bool,
+    ) -> bool {
+        let Some(source) = self.buildings.get(source_index) else {
+            return false;
+        };
+        let Some(target) = self.buildings.get(target_index) else {
+            return false;
+        };
+        let Some(source_metadata) = Self::owned_power_node_metadata(content, source) else {
+            return false;
+        };
+        let target_metadata = Self::owned_power_node_metadata(content, target);
+        let target_links = target
+            .power
+            .as_ref()
+            .map(|power| power.links.len() as i32)
+            .unwrap_or(0);
+        let already_linked = target
+            .power
+            .as_ref()
+            .is_some_and(|power| power.links.contains(&source.tile_pos));
+        let overlaps_either_range = Self::owned_power_node_link_overlaps(
+            source,
+            source_metadata.laser_range,
+            target,
+            target_metadata.map(|metadata| metadata.laser_range),
+        );
+
+        power_node_link_valid(
+            source_index == target_index,
+            true,
+            target.block.has_power,
+            target.block.connected_power || target.block.has_power,
+            source.team == target.team,
+            source_metadata.same_block_connection,
+            source.block.id == target.block.id,
+            overlaps_either_range,
+            check_max_nodes,
+            target_metadata.is_some_and(|metadata| metadata.is_node),
+            target_links,
+            target_metadata
+                .map(|metadata| metadata.max_nodes)
+                .unwrap_or(0),
+            already_linked,
+        )
+    }
+
+    fn owned_power_node_link_overlaps(
+        source: &BuildingComp,
+        source_laser_range: f32,
+        target: &BuildingComp,
+        target_laser_range: Option<f32>,
+    ) -> bool {
+        let dx = (source.tile_x() - target.tile_x()) as f32;
+        let dy = (source.tile_y() - target.tile_y()) as f32;
+        let dist2 = dx * dx + dy * dy;
+        dist2 <= source_laser_range * source_laser_range
+            || target_laser_range.is_some_and(|range| dist2 <= range * range)
+    }
+
+    fn add_owned_power_link_pair(
+        buildings: &mut [BuildingComp],
+        source_index: usize,
+        target_index: usize,
+        source_tile_pos: i32,
+        target_tile_pos: i32,
+    ) {
+        if source_index == target_index {
+            return;
+        }
+        let (source, target) = two_buildings_mut(buildings, source_index, target_index);
+        if let Some(power) = source.power.as_mut() {
+            if !power.links.contains(&target_tile_pos) {
+                power.links.push(target_tile_pos);
+            }
+            power.init = false;
+        }
+        if source.team == target.team {
+            if let Some(power) = target.power.as_mut() {
+                if !power.links.contains(&source_tile_pos) {
+                    power.links.push(source_tile_pos);
+                }
+                power.init = false;
+            }
+        }
+    }
+
+    fn remove_owned_power_link_pair(
+        buildings: &mut [BuildingComp],
+        source_index: usize,
+        target_index: usize,
+        source_tile_pos: i32,
+        target_tile_pos: i32,
+    ) {
+        if source_index == target_index {
+            return;
+        }
+        let (source, target) = two_buildings_mut(buildings, source_index, target_index);
+        if let Some(power) = source.power.as_mut() {
+            power.links.retain(|link| *link != target_tile_pos);
+            power.init = false;
+        }
+        if let Some(power) = target.power.as_mut() {
+            power.links.retain(|link| *link != source_tile_pos);
+            power.init = false;
+        }
+    }
+
+    fn owned_power_node_metadata(
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> Option<GameRuntimePowerNodeMetadata> {
+        let Some(BlockDef::Power(power)) = content.block(building.block.id) else {
+            return None;
+        };
+        let is_node = matches!(
+            power.kind,
+            PowerBlockKind::PowerNode | PowerBlockKind::LongPowerNode
+        );
+        Some(GameRuntimePowerNodeMetadata {
+            is_node,
+            max_nodes: power.max_nodes,
+            laser_range: power.laser_range,
+            same_block_connection: power.same_block_connection,
+        })
     }
 
     fn owned_power_proximity_connection_valid(
@@ -16625,6 +16867,79 @@ mod tests {
         assert_eq!(runtime.power_graphs[0].all, vec![right_pos]);
         assert!(!runtime.power_graph_memberships.contains_key(&left_pos));
         assert_eq!(runtime.power_graph_memberships.get(&right_pos), Some(&0));
+    }
+
+    #[test]
+    fn game_runtime_configures_power_node_link_and_reflows_graphs() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let node_pos = point2_pack(10, 10);
+        let mender_pos = point2_pack(14, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            node_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            mender_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.refresh_owned_power_graphs_with_content(&content);
+        assert_eq!(runtime.power_graphs.len(), 2);
+
+        assert_eq!(
+            runtime.configure_owned_power_node_link(&content, node_pos, mender_pos),
+            GameRuntimePowerNodeLinkResult::Linked
+        );
+        let node = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == node_pos)
+            .unwrap();
+        let mender = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == mender_pos)
+            .unwrap();
+        assert_eq!(node.power.as_ref().unwrap().links, vec![mender_pos]);
+        assert_eq!(mender.power.as_ref().unwrap().links, vec![node_pos]);
+        assert_eq!(runtime.power_graphs.len(), 1);
+        assert_eq!(runtime.power_graphs[0].all.len(), 2);
+
+        assert_eq!(
+            runtime.configure_owned_power_node_link(&content, node_pos, mender_pos),
+            GameRuntimePowerNodeLinkResult::Unlinked
+        );
+        assert!(runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == node_pos)
+            .unwrap()
+            .power
+            .as_ref()
+            .unwrap()
+            .links
+            .is_empty());
+        assert!(runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == mender_pos)
+            .unwrap()
+            .power
+            .as_ref()
+            .unwrap()
+            .links
+            .is_empty());
+        assert_eq!(runtime.power_graphs.len(), 2);
+        assert_ne!(
+            runtime.power_graph_memberships.get(&node_pos),
+            runtime.power_graph_memberships.get(&mender_pos)
+        );
     }
 
     #[test]
