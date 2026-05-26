@@ -3263,3 +3263,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core request_drop_payload_`
   - `cargo check --workspace`
 - 仍未完成：drop 出来的 payload 还没有实体化进入完整 world/entity groups，也没有地面碰撞/落点占用判定；`server_units` 仍是 launcher mirror，admin action 仍是占位。下一步可继续 `RequestBuildPayload/PickedBuildPayload`，或把 `PayloadDroppedCallPacket` 客户端 mirror 从“只记录 packet”推进到真实 unit payload mirror mutation。
+
+### 12.91 Server RequestBuildPayload → PickedBuildPayload 权威 runtime 桥接
+
+- 2026-05-27：接入 payload 拾取建筑/建筑内 payload 的 server 权威窄闭环，把 `RequestBuildPayloadCallPacket` 从 server 事件流桥接到 `input_handler::request_build_payload(...)`、`server_units` 的 `PayloadComp::add_payload(...)`、`GameRuntime::payload_runtime_states` / `buildings` 状态变更和 `PickedBuildPayloadCallPacket` 出站广播。
+- Java 依据：
+  - `InputHandler.requestBuildPayload(Player player, Building build)` 先校验 player/unit payload/build、距离、admin action 与 team interact；然后优先 `build.getPayload()` + `pay.canPickupPayload(current)`，否则尝试 `build.block.buildVisibility != hidden && build.canPickup() && pay.canPickup(build)`；
+  - `InputHandler.pickedBuildPayload(Unit unit, Building build, boolean onGround)` 在 `onGround=false` 时 `build.takePayload()` 并 `pay.addPayload(taken)`；在 `onGround=true` 时成功则 `pay.pickup(build)`，二次校验失败也会播放 pickup effect 并 `build.tile.remove()`。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_new_network_server_events()` 新增 `PacketKind::RequestBuildPayloadCallPacket` 分支；
+  - 新增 request-build / picked-build 统计与 last-outcome 字段；
+  - `apply_server_request_build_payload_packet(...)` 复用连接状态和 `server_units` mirror，不信任 client payload 里的 `player` 字段；在 player/unit 位置同步未接通前沿用零位 bootstrap 距离 fallback；
+  - 新增 `runtime_payload_ref_for_tile(...)` / `take_runtime_payload_ref_for_tile(...)`，支持从 `PayloadBlockBuildState.common.payload`、`PayloadConveyorState.item`、`PayloadRouterState.conveyor.item` 抽取/移除建筑内 payload；
+  - 新增 `payload_ref_to_payload_state(...)`，把 `PayloadRef::Block` / `PayloadRef::Unit` 映射到当前 `PayloadComp` 可消费的 `PayloadState`；
+  - `apply_stored_build_payload_pickup_to_server_unit(...)` 会二次校验 live payload 与单位容量，然后从 runtime payload state 移除并加入 unit payload；
+  - `apply_whole_build_payload_pickup_to_server_unit(...)` 会按 Java 语义二次校验 `BuildVisibility`、`canPickup` 与 payload 容量；成功时移除 runtime building 并加入 unit payload，失败时仍移除 tile 以贴近 Java fallback；
+  - 成功后可靠广播 `PickedBuildPayloadCallPacket`，覆盖 `on_ground=false`（建筑内部 payload）和 `on_ground=true`（整栋建筑）两条路径。
+- 验证：
+  - `cargo test -p mindustry-server server_launcher_applies_request_build_payload_packet`
+- 仍未完成：整栋建筑 payload 目前只在 `PayloadComp` 中保存 `PayloadState { kind, size }`，尚未保留完整 `BuildPayload` 的 building bytes/runtime sidecars；`build.canPickup()` 只覆盖 core、linked storage、logic、radar 等已迁移的关键 override；admin action、严格 player/unit 位置同步、完整 entity group、客户端 mirror 对 `PickedBuildPayloadCallPacket` 的真实状态消费仍需后续继续。

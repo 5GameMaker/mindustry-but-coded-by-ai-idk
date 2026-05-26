@@ -1,6 +1,9 @@
 pub mod server_control;
 
-use mindustry_core::mindustry::core::game_runtime::GameRuntimePowerNodeConfigResult;
+use mindustry_core::mindustry::content::blocks::{BlockDef, EffectBlockKind, StorageBlockKind};
+use mindustry_core::mindustry::core::game_runtime::{
+    GameRuntimePayloadBlockState, GameRuntimePowerNodeConfigResult,
+};
 use mindustry_core::mindustry::core::net_server::{
     PlayerPreviewPlanSource, PLAN_PREVIEW_SYNC_INTERVAL_MS,
 };
@@ -10,27 +13,35 @@ use mindustry_core::mindustry::core::{
     GameRuntimeOwnedItemTransportFrameReport, GameRuntimeOwnedPayloadFrameReport, NetServer,
 };
 use mindustry_core::mindustry::ctype::ContentId;
+use mindustry_core::mindustry::ctype::ContentType;
 use mindustry_core::mindustry::entities::{
     bullet::BulletType,
-    comp::{BuildingComp, BulletComp, PlayerComp, PlayerUnitState, UnitComp},
+    comp::{
+        BuildingComp, BulletComp, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
+    },
 };
 use mindustry_core::mindustry::input::{
-    payload_dropped, request_drop_payload, request_item, take_items, transfer_inventory,
-    transfer_item_to, PayloadDroppedOutcome, RequestDropPayloadContext,
-    RequestDropPayloadOutcome, RequestItemContext, RequestItemOutcome, TakeItemsOutcome,
-    TransferInventoryContext, TransferInventoryOutcome, TransferItemToOutcome,
+    payload_dropped, picked_build_payload, request_build_payload, request_drop_payload,
+    request_item, take_items, transfer_inventory, transfer_item_to, BuildPayloadPickupKind,
+    PayloadDroppedOutcome, PickedBuildPayloadOutcome, RequestBuildPayloadContext,
+    RequestBuildPayloadOutcome, RequestDropPayloadContext, RequestDropPayloadOutcome,
+    RequestItemContext, RequestItemOutcome, TakeItemsOutcome, TransferInventoryContext,
+    TransferInventoryOutcome, TransferItemToOutcome,
 };
 use mindustry_core::mindustry::io::{BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef};
 use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, Net, NetConnection,
-    NetworkPlayerData, NetworkWorldData, PacketKind, ProviderEvent, RequestItemCallPacket,
-    RequestDropPayloadCallPacket, TransferInventoryCallPacket,
+    NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, ProviderEvent,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    TransferInventoryCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
-    AppContext, RuntimeMode, ITEM_TRANSFER_RANGE, MAX_PLAYER_PREVIEW_PLANS,
+    AppContext, RuntimeMode, ITEM_TRANSFER_RANGE, MAX_PLAYER_PREVIEW_PLANS, TILE_SIZE,
 };
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
+use mindustry_core::mindustry::world::blocks::payloads::{payload_ref_sort_key, PayloadRef};
+use mindustry_core::mindustry::world::meta::BuildVisibility;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
 use std::{
@@ -73,6 +84,12 @@ pub struct ServerLauncher {
     pub runtime_payload_dropped_packets_sent: usize,
     pub last_runtime_request_drop_payload_outcome: Option<RequestDropPayloadOutcome>,
     pub last_runtime_payload_dropped_outcome: Option<PayloadDroppedOutcome>,
+    pub runtime_request_build_payload_packets_seen: usize,
+    pub runtime_request_build_payload_packets_accepted: usize,
+    pub runtime_request_build_payload_packets_rejected: usize,
+    pub runtime_picked_build_payload_packets_sent: usize,
+    pub last_runtime_request_build_payload_outcome: Option<RequestBuildPayloadOutcome>,
+    pub last_runtime_picked_build_payload_outcome: Option<PickedBuildPayloadOutcome>,
     pub server_preview_plan_packets_applied: usize,
     pub next_server_preview_broadcast_at: Option<Instant>,
     pub server_preview_broadcasts_sent: usize,
@@ -123,6 +140,12 @@ impl ServerLauncher {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: Some(
                 Instant::now() + Duration::from_millis(PLAN_PREVIEW_SYNC_INTERVAL_MS as u64),
@@ -285,6 +308,26 @@ impl ServerLauncher {
                 }
                 ProviderEvent::ServerPacket {
                     connection_id,
+                    packet: PacketKind::RequestBuildPayloadCallPacket(packet),
+                } => {
+                    self.runtime_request_build_payload_packets_seen += 1;
+                    match self.apply_server_request_build_payload_packet(connection_id, &packet) {
+                        Ok(true) => {
+                            changed += 1;
+                            self.runtime_request_build_payload_packets_accepted += 1;
+                        }
+                        Ok(false) => {
+                            self.runtime_request_build_payload_packets_rejected += 1;
+                        }
+                        Err(error) => {
+                            self.network_error = Some(error.to_string());
+                            self.runtime_request_build_payload_packets_rejected += 1;
+                            continue;
+                        }
+                    }
+                }
+                ProviderEvent::ServerPacket {
+                    connection_id,
                     packet: PacketKind::ClientPlanSnapshotCallPacket(snapshot),
                 } => {
                     if connection_id < 0 {
@@ -369,7 +412,8 @@ impl ServerLauncher {
             .buildings()
             .get(building_index)
             .expect("building index resolved above");
-        let within_range = Self::player_within_item_transfer_range(&player_snapshot, build_snapshot);
+        let within_range =
+            Self::player_within_item_transfer_range(&player_snapshot, build_snapshot);
         let context = RequestItemContext {
             player: Some(EntityRef::new(connection_id)),
             local_player: false,
@@ -423,9 +467,10 @@ impl ServerLauncher {
                 self.runtime_take_items_packets_sent += 1;
             }
             for packet in &take_outcome.transfer_effects {
-                self.net_server
-                    .net_mut()
-                    .send(&PacketKind::TransferItemEffectCallPacket(packet.clone()), false)?;
+                self.net_server.net_mut().send(
+                    &PacketKind::TransferItemEffectCallPacket(packet.clone()),
+                    false,
+                )?;
                 self.runtime_transfer_item_effect_packets_sent += 1;
             }
         }
@@ -504,7 +549,8 @@ impl ServerLauncher {
             .buildings()
             .get(building_index)
             .expect("building index resolved above");
-        let within_range = Self::player_within_item_transfer_range(&player_snapshot, build_snapshot);
+        let within_range =
+            Self::player_within_item_transfer_range(&player_snapshot, build_snapshot);
         let context = TransferInventoryContext {
             player: Some(EntityRef::new(connection_id)),
             local_player: false,
@@ -654,8 +700,11 @@ impl ServerLauncher {
             self.last_runtime_payload_dropped_outcome = None;
             return Ok(false);
         }
-        let payload_dropped_outcome =
-            payload_dropped(Some(planned_packet.unit), planned_packet.x, planned_packet.y);
+        let payload_dropped_outcome = payload_dropped(
+            Some(planned_packet.unit),
+            planned_packet.x,
+            planned_packet.y,
+        );
         if let Some(packet) = payload_dropped_outcome.packet.as_ref() {
             self.net_server
                 .net_mut()
@@ -665,6 +714,130 @@ impl ServerLauncher {
         let accepted = payload_dropped_outcome.accepted;
         self.last_runtime_payload_dropped_outcome = Some(payload_dropped_outcome);
         Ok(accepted)
+    }
+
+    fn apply_server_request_build_payload_packet(
+        &mut self,
+        connection_id: i32,
+        packet: &RequestBuildPayloadCallPacket,
+    ) -> io::Result<bool> {
+        if connection_id < 0 {
+            return Ok(false);
+        }
+        self.sync_server_preview_players_from_connections();
+
+        let source_connection = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state.connection_states.get(&connection_id).cloned()
+        };
+        let Some(source_connection) = source_connection else {
+            return Ok(false);
+        };
+        if !Self::connection_can_receive_preview(&source_connection) {
+            return Ok(false);
+        }
+
+        let Some(tile_pos) = packet.build.tile_pos else {
+            return Ok(false);
+        };
+        let Some(building_index) = self
+            .runtime
+            .buildings()
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return Ok(false);
+        };
+
+        let Some(unit_type) = self.default_server_unit_type() else {
+            return Ok(false);
+        };
+        let player_snapshot = {
+            let player = self
+                .server_preview_players
+                .entry(connection_id)
+                .or_insert_with(|| PlayerComp::new(source_connection.team));
+            player.id = connection_id;
+            player.team = source_connection.team;
+            player.name = source_connection.name.clone();
+            player.color = source_connection.color as u32;
+            player.locale = source_connection.locale.clone();
+            player.con = Some(source_connection.clone());
+            player.set_unit_state(PlayerUnitState::unit(connection_id));
+            player.clone()
+        };
+        self.server_units
+            .entry(connection_id)
+            .or_insert_with(|| UnitComp::new(connection_id, unit_type, source_connection.team));
+
+        let build_snapshot = self.runtime.buildings()[building_index].clone();
+        let stored_payload_ref = self.runtime_payload_ref_for_tile(tile_pos).cloned();
+        let stored_payload_state = stored_payload_ref
+            .as_ref()
+            .and_then(|payload| self.payload_ref_to_payload_state(payload));
+        let build_can_pickup = self.server_build_can_pickup(&build_snapshot);
+        let context = RequestBuildPayloadContext {
+            player: Some(EntityRef::new(connection_id)),
+            local_player: false,
+            within_range: Self::player_within_payload_pickup_range(
+                &player_snapshot,
+                &build_snapshot,
+            ),
+            teams_can_interact: player_snapshot.team == build_snapshot.team,
+        };
+
+        let request_outcome = request_build_payload(
+            context,
+            Some(&player_snapshot),
+            self.server_units.get(&connection_id),
+            Some(&build_snapshot),
+            stored_payload_state.as_ref(),
+            build_can_pickup,
+            |_player, _build, _unit| true,
+        );
+        self.last_runtime_request_build_payload_outcome = Some(request_outcome.clone());
+        if !request_outcome.accepted {
+            self.last_runtime_picked_build_payload_outcome = None;
+            return Ok(false);
+        }
+
+        let Some(planned_packet) = request_outcome.packet.as_ref() else {
+            self.last_runtime_picked_build_payload_outcome = None;
+            return Ok(false);
+        };
+        let Some(pickup) = request_outcome.pickup else {
+            self.last_runtime_picked_build_payload_outcome = None;
+            return Ok(false);
+        };
+
+        let picked_outcome = picked_build_payload(
+            Some(planned_packet.unit),
+            Some(&build_snapshot),
+            planned_packet.on_ground,
+        );
+        if !picked_outcome.accepted {
+            self.last_runtime_picked_build_payload_outcome = Some(picked_outcome);
+            return Ok(false);
+        }
+        let Some(picked_packet) = picked_outcome.packet.as_ref() else {
+            self.last_runtime_picked_build_payload_outcome = Some(picked_outcome);
+            return Ok(false);
+        };
+        let picked_packet = *picked_packet;
+
+        if !self.apply_picked_build_payload_to_server_unit(&picked_packet, pickup) {
+            self.last_runtime_picked_build_payload_outcome = None;
+            return Ok(false);
+        }
+
+        self.net_server.net_mut().send(
+            &PacketKind::PickedBuildPayloadCallPacket(picked_packet),
+            true,
+        )?;
+        self.runtime_picked_build_payload_packets_sent += 1;
+        self.last_runtime_picked_build_payload_outcome = Some(picked_outcome);
+        Ok(true)
     }
 
     fn default_server_unit_type(&self) -> Option<UnitType> {
@@ -680,6 +853,21 @@ impl ServerLauncher {
             })
     }
 
+    fn player_within_payload_pickup_range(player: &PlayerComp, build: &BuildingComp) -> bool {
+        // The launcher mirror still bootstraps player/unit position from network
+        // identity, not the full synced entity stream. Match the item-transfer
+        // bridge behavior: keep Java's distance formula whenever coordinates are
+        // known, but do not reject zeroed bootstrap players before entity sync is
+        // fully authoritative.
+        if player.x.abs() <= f32::EPSILON && player.y.abs() <= f32::EPSILON {
+            return true;
+        }
+        let range = TILE_SIZE as f32 * build.block.size as f32 * 1.2 + TILE_SIZE as f32 * 5.0;
+        let dx = player.x - build.x;
+        let dy = player.y - build.y;
+        dx * dx + dy * dy <= range * range
+    }
+
     fn player_within_item_transfer_range(player: &PlayerComp, build: &BuildingComp) -> bool {
         // The current Rust server does not yet receive authoritative player/unit
         // position snapshots. Do not reject otherwise valid inventory requests
@@ -692,6 +880,187 @@ impl ServerLauncher {
         let dx = player.x - build.x;
         let dy = player.y - build.y;
         dx * dx + dy * dy <= ITEM_TRANSFER_RANGE * ITEM_TRANSFER_RANGE
+    }
+
+    fn server_build_can_pickup(&self, build: &BuildingComp) -> bool {
+        let Some(block_def) = self.content_loader.block(build.block.id) else {
+            return true;
+        };
+
+        match block_def {
+            BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core => false,
+            BlockDef::Storage(_) => !self
+                .runtime
+                .storage_linked_cores
+                .contains_key(&build.tile_pos),
+            BlockDef::Logic(logic) => logic.can_pickup,
+            BlockDef::Effect(effect) if effect.kind == EffectBlockKind::Radar => false,
+            _ => true,
+        }
+    }
+
+    fn runtime_payload_ref_for_tile(&self, tile_pos: i32) -> Option<&PayloadRef> {
+        match self.runtime.payload_runtime_states.get(&tile_pos)? {
+            GameRuntimePayloadBlockState::MassDriver { common, .. }
+            | GameRuntimePayloadBlockState::Loader { common, .. }
+            | GameRuntimePayloadBlockState::Source { common, .. }
+            | GameRuntimePayloadBlockState::Deconstructor { common, .. }
+            | GameRuntimePayloadBlockState::Constructor { common, .. }
+            | GameRuntimePayloadBlockState::Void(common) => common.payload.as_ref(),
+            GameRuntimePayloadBlockState::Conveyor(conveyor) => conveyor.item.as_ref(),
+            GameRuntimePayloadBlockState::Router { conveyor, .. } => conveyor.item.as_ref(),
+        }
+    }
+
+    fn take_runtime_payload_ref_for_tile(&mut self, tile_pos: i32) -> Option<PayloadRef> {
+        match self.runtime.payload_runtime_states.get_mut(&tile_pos)? {
+            GameRuntimePayloadBlockState::MassDriver { common, .. }
+            | GameRuntimePayloadBlockState::Loader { common, .. }
+            | GameRuntimePayloadBlockState::Source { common, .. }
+            | GameRuntimePayloadBlockState::Deconstructor { common, .. }
+            | GameRuntimePayloadBlockState::Constructor { common, .. }
+            | GameRuntimePayloadBlockState::Void(common) => common.payload.take(),
+            GameRuntimePayloadBlockState::Conveyor(conveyor) => conveyor.item.take(),
+            GameRuntimePayloadBlockState::Router { conveyor, .. } => conveyor.item.take(),
+        }
+    }
+
+    fn payload_ref_to_payload_state(&self, payload: &PayloadRef) -> Option<PayloadState> {
+        match payload {
+            PayloadRef::Block { block, .. } => {
+                let size = self.content_loader.block(*block)?.base().size as f32 * TILE_SIZE as f32;
+                Some(PayloadState {
+                    kind: PayloadKind::Build,
+                    size,
+                })
+            }
+            PayloadRef::Unit { .. } => {
+                let key = payload_ref_sort_key(payload)?;
+                if key.content_type != ContentType::Unit.ordinal() as i8 {
+                    return None;
+                }
+                let size = self.content_loader.unit(key.id)?.hit_size;
+                Some(PayloadState {
+                    kind: PayloadKind::Unit,
+                    size,
+                })
+            }
+        }
+    }
+
+    fn apply_picked_build_payload_to_server_unit(
+        &mut self,
+        packet: &PickedBuildPayloadCallPacket,
+        pickup: BuildPayloadPickupKind,
+    ) -> bool {
+        let UnitRef::Unit { id } = packet.unit else {
+            return false;
+        };
+        let Some(tile_pos) = packet.build_pos else {
+            return false;
+        };
+
+        match pickup {
+            BuildPayloadPickupKind::StoredPayload => {
+                self.apply_stored_build_payload_pickup_to_server_unit(id, tile_pos)
+            }
+            BuildPayloadPickupKind::WholeBuild => {
+                self.apply_whole_build_payload_pickup_to_server_unit(id, tile_pos)
+            }
+        }
+    }
+
+    fn apply_stored_build_payload_pickup_to_server_unit(
+        &mut self,
+        unit_id: i32,
+        tile_pos: i32,
+    ) -> bool {
+        let Some(stored_ref) = self.runtime_payload_ref_for_tile(tile_pos).cloned() else {
+            return false;
+        };
+        let Some(stored_state) = self.payload_ref_to_payload_state(&stored_ref) else {
+            return false;
+        };
+        let Some(unit) = self.server_units.get(&unit_id) else {
+            return false;
+        };
+        if !unit
+            .payload
+            .as_ref()
+            .is_some_and(|payload| payload.can_pickup_payload(&stored_state))
+        {
+            return false;
+        }
+
+        let Some(taken_ref) = self.take_runtime_payload_ref_for_tile(tile_pos) else {
+            return false;
+        };
+        let Some(taken_state) = self.payload_ref_to_payload_state(&taken_ref) else {
+            return false;
+        };
+        let Some(unit) = self.server_units.get_mut(&unit_id) else {
+            return false;
+        };
+        let Some(payload) = unit.payload.as_mut() else {
+            return false;
+        };
+        if !payload.can_pickup_payload(&taken_state) {
+            return false;
+        }
+        payload.add_payload(taken_state);
+        true
+    }
+
+    fn apply_whole_build_payload_pickup_to_server_unit(
+        &mut self,
+        unit_id: i32,
+        tile_pos: i32,
+    ) -> bool {
+        let Some(build_snapshot) = self
+            .runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .cloned()
+        else {
+            return false;
+        };
+        let can_pickup = build_snapshot.block.build_visibility != BuildVisibility::Hidden
+            && self.server_build_can_pickup(&build_snapshot)
+            && self
+                .server_units
+                .get(&unit_id)
+                .and_then(|unit| unit.payload.as_ref())
+                .is_some_and(|payload| {
+                    payload.can_pickup_build(
+                        build_snapshot.block.size as f32,
+                        build_snapshot.team,
+                        true,
+                    )
+                });
+
+        // Java `pickedBuildPayload(..., onGround=true)` removes the tile even if
+        // the second live-state validation fails after the request packet was
+        // accepted. When validation succeeds, the build becomes the carried
+        // payload; otherwise it is still removed after the pickup effect.
+        let Some(removed) = self.runtime.remove_building_by_tile_pos(tile_pos) else {
+            return false;
+        };
+        if !can_pickup {
+            return true;
+        }
+
+        let Some(unit) = self.server_units.get_mut(&unit_id) else {
+            return false;
+        };
+        let Some(payload) = unit.payload.as_mut() else {
+            return false;
+        };
+        payload.add_payload(PayloadState {
+            kind: PayloadKind::Build,
+            size: removed.block.size as f32 * TILE_SIZE as f32,
+        });
+        true
     }
 
     fn building_accept_stack_amount(build: &BuildingComp, _item_id: i16, amount: i32) -> i32 {
@@ -1015,11 +1384,11 @@ mod tests {
         packet_ids, read_world_data, ClientPlanSnapshotCallPacket, Connect, ConnectFilter,
         ConnectPacket, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
         NetworkWorldData, PacketKind, PacketSerializer, ProviderEvent,
-        RequestDropPayloadCallPacket, RequestItemCallPacket, TileConfigCallPacket,
-        TransferInventoryCallPacket,
+        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+        TileConfigCallPacket, TransferInventoryCallPacket,
     };
     use mindustry_core::mindustry::r#type::Sector;
-    use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
+    use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
     use mindustry_core::mindustry::world::blocks::payloads::{
         payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
         PayloadConveyorState, PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState,
@@ -1143,7 +1512,10 @@ mod tests {
         }
 
         fn send_server(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
-            self.sent.lock().unwrap().push((-1, object.clone(), reliable));
+            self.sent
+                .lock()
+                .unwrap()
+                .push((-1, object.clone(), reliable));
             Ok(())
         }
 
@@ -1257,8 +1629,7 @@ mod tests {
             .base
             .id;
         let core_tile = point2_pack(2, 2);
-        let mut core_building =
-            BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
         core_building.items.as_mut().unwrap().add(copper, 10);
         launcher.runtime.add_building(core_building);
 
@@ -1346,8 +1717,8 @@ mod tests {
     }
 
     #[test]
-    fn server_launcher_applies_transfer_inventory_packet_to_runtime_and_broadcasts_transfer_item_to()
-    {
+    fn server_launcher_applies_transfer_inventory_packet_to_runtime_and_broadcasts_transfer_item_to(
+    ) {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
@@ -1374,14 +1745,17 @@ mod tests {
             .base
             .id;
         let core_tile = point2_pack(2, 2);
-        let mut core_building =
-            BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
         core_building.items.as_mut().unwrap().add(copper, 4);
         launcher.runtime.add_building(core_building);
 
         let mut unit = UnitComp::new(
             7,
-            launcher.content_loader.unit_by_name("alpha").unwrap().clone(),
+            launcher
+                .content_loader
+                .unit_by_name("alpha")
+                .unwrap()
+                .clone(),
             default_team,
         );
         unit.set_pos(32.0, 40.0);
@@ -1475,7 +1849,11 @@ mod tests {
         launcher.net_server.open(6569).unwrap();
 
         let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
-        let mut unit_type = launcher.content_loader.unit_by_name("alpha").unwrap().clone();
+        let mut unit_type = launcher
+            .content_loader
+            .unit_by_name("alpha")
+            .unwrap()
+            .clone();
         unit_type.payload_capacity = 512.0;
         let mut unit = UnitComp::new(7, unit_type, default_team);
         unit.set_pos(0.0, 0.0);
@@ -1543,6 +1921,215 @@ mod tests {
     }
 
     #[test]
+    fn server_launcher_applies_request_build_payload_packet_to_stored_payload_and_broadcasts_pickup(
+    ) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6570).unwrap();
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let loader_block = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .unwrap()
+            .base()
+            .clone();
+        let router_block = launcher
+            .content_loader
+            .block_by_name("router")
+            .unwrap()
+            .base()
+            .clone();
+        let router_id = router_block.id;
+        let router_payload_size = router_block.size as f32 * TILE_SIZE as f32;
+        let loader_tile = point2_pack(3, 3);
+        let mut router_payload_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), router_block, default_team)
+            .write_base(&mut router_payload_bytes, false)
+            .unwrap();
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(loader_tile, loader_block, default_team));
+        launcher.runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(PayloadRef::Block {
+                        block: router_id,
+                        version: 1,
+                        build_bytes: router_payload_bytes,
+                    }),
+                    ..PayloadBlockBuildState::default()
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let mut unit_type = launcher
+            .content_loader
+            .unit_by_name("alpha")
+            .unwrap()
+            .clone();
+        unit_type.payload_capacity = 512.0;
+        let mut unit = UnitComp::new(7, unit_type, default_team);
+        unit.payload = Some(PayloadComp::new(default_team, 512.0));
+        launcher.server_units.insert(7, unit);
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("127.0.0.1:7010");
+            connection.has_connected = true;
+            connection.player_added = true;
+            connection.team = default_team;
+            connection.name = "rust-client".into();
+            state.connection_states.insert(7, connection);
+            state.events.push(ProviderEvent::ServerPacket {
+                connection_id: 7,
+                packet: PacketKind::RequestBuildPayloadCallPacket(RequestBuildPayloadCallPacket {
+                    player: EntityRef::null(),
+                    build: BuildingRef::new(loader_tile),
+                }),
+            });
+        }
+
+        let changed = launcher.apply_new_network_server_events();
+
+        assert_eq!(changed, 1);
+        assert_eq!(launcher.runtime_request_build_payload_packets_seen, 1);
+        assert_eq!(launcher.runtime_request_build_payload_packets_accepted, 1);
+        assert_eq!(launcher.runtime_request_build_payload_packets_rejected, 0);
+        assert_eq!(launcher.runtime_picked_build_payload_packets_sent, 1);
+        assert!(launcher
+            .last_runtime_request_build_payload_outcome
+            .as_ref()
+            .is_some_and(|outcome| {
+                outcome.accepted
+                    && outcome.pickup == Some(super::BuildPayloadPickupKind::StoredPayload)
+            }));
+        assert!(launcher
+            .last_runtime_picked_build_payload_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.accepted));
+        let Some(GameRuntimePayloadBlockState::Loader { common, .. }) =
+            launcher.runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("loader payload runtime state should remain");
+        };
+        assert!(common.payload.is_none());
+        let unit = launcher.server_units.get(&7).unwrap();
+        let payloads = &unit.payload.as_ref().unwrap().payloads;
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].kind, PayloadKind::Build);
+        assert_eq!(payloads[0].size, router_payload_size);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::PickedBuildPayloadCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 7 }
+                            && packet.build_pos == Some(loader_tile)
+                            && !packet.on_ground
+                )
+        }));
+    }
+
+    #[test]
+    fn server_launcher_applies_request_build_payload_packet_to_whole_build_and_broadcasts_pickup() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6571).unwrap();
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let router_block = launcher
+            .content_loader
+            .block_by_name("router")
+            .unwrap()
+            .base()
+            .clone();
+        let router_payload_size = router_block.size as f32 * TILE_SIZE as f32;
+        let router_tile = point2_pack(4, 4);
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(router_tile, router_block, default_team));
+
+        let mut unit_type = launcher
+            .content_loader
+            .unit_by_name("alpha")
+            .unwrap()
+            .clone();
+        unit_type.payload_capacity = 512.0;
+        let mut unit = UnitComp::new(7, unit_type, default_team);
+        unit.payload = Some(PayloadComp::new(default_team, 512.0));
+        launcher.server_units.insert(7, unit);
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("127.0.0.1:7011");
+            connection.has_connected = true;
+            connection.player_added = true;
+            connection.team = default_team;
+            connection.name = "rust-client".into();
+            state.connection_states.insert(7, connection);
+            state.events.push(ProviderEvent::ServerPacket {
+                connection_id: 7,
+                packet: PacketKind::RequestBuildPayloadCallPacket(RequestBuildPayloadCallPacket {
+                    player: EntityRef::null(),
+                    build: BuildingRef::new(router_tile),
+                }),
+            });
+        }
+
+        let changed = launcher.apply_new_network_server_events();
+
+        assert_eq!(changed, 1);
+        assert_eq!(launcher.runtime_request_build_payload_packets_seen, 1);
+        assert_eq!(launcher.runtime_request_build_payload_packets_accepted, 1);
+        assert_eq!(launcher.runtime_request_build_payload_packets_rejected, 0);
+        assert_eq!(launcher.runtime_picked_build_payload_packets_sent, 1);
+        assert!(launcher
+            .last_runtime_request_build_payload_outcome
+            .as_ref()
+            .is_some_and(|outcome| {
+                outcome.accepted
+                    && outcome.pickup == Some(super::BuildPayloadPickupKind::WholeBuild)
+            }));
+        assert!(!launcher
+            .runtime
+            .buildings()
+            .iter()
+            .any(|building| building.tile_pos == router_tile));
+        let unit = launcher.server_units.get(&7).unwrap();
+        let payloads = &unit.payload.as_ref().unwrap().payloads;
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].kind, PayloadKind::Build);
+        assert_eq!(payloads[0].size, router_payload_size);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::PickedBuildPayloadCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 7 }
+                            && packet.build_pos == Some(router_tile)
+                            && packet.on_ground
+                )
+        }));
+    }
+
+    #[test]
     fn server_update_flushes_pending_world_data_after_connect_packet() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
@@ -1581,6 +2168,12 @@ mod tests {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1671,6 +2264,12 @@ mod tests {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1844,6 +2443,12 @@ mod tests {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2007,6 +2612,12 @@ mod tests {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2107,6 +2718,12 @@ mod tests {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2219,6 +2836,12 @@ mod tests {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2350,6 +2973,12 @@ mod tests {
             runtime_payload_dropped_packets_sent: 0,
             last_runtime_request_drop_payload_outcome: None,
             last_runtime_payload_dropped_outcome: None,
+            runtime_request_build_payload_packets_seen: 0,
+            runtime_request_build_payload_packets_accepted: 0,
+            runtime_request_build_payload_packets_rejected: 0,
+            runtime_picked_build_payload_packets_sent: 0,
+            last_runtime_request_build_payload_outcome: None,
+            last_runtime_picked_build_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
