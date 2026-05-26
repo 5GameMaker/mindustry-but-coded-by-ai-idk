@@ -593,6 +593,7 @@ pub fn read_deconstructor_extra<R: Read>(read: &mut R) -> io::Result<(f32, Optio
 pub struct PayloadLoaderState {
     pub has_payload: bool,
     pub exporting: bool,
+    pub load_timer: f32,
     pub last_output_power: f32,
     pub payload_has_items: bool,
     pub payload_items_total: i32,
@@ -611,6 +612,7 @@ impl Default for PayloadLoaderState {
         Self {
             has_payload: false,
             exporting: false,
+            load_timer: 0.0,
             last_output_power: 0.0,
             payload_has_items: false,
             payload_items_total: 0,
@@ -655,6 +657,32 @@ pub fn payload_loader_accept_payload(
         && ((block_has_items && unloadable && item_capacity >= 10 && block_size <= max_block_size)
             || (block_has_liquids && liquid_capacity >= 10.0)
             || has_buffered_power)
+}
+
+pub fn payload_loader_timer_ready(
+    load_timer: &mut f32,
+    load_time: f32,
+    efficiency: f32,
+    delta: f32,
+) -> bool {
+    if efficiency <= 0.01 {
+        return false;
+    }
+    let interval = load_time / efficiency;
+    if interval.is_infinite() || interval.is_nan() {
+        return false;
+    }
+    if interval <= 0.0 {
+        *load_timer = 0.0;
+        return true;
+    }
+    *load_timer += delta.max(0.0);
+    if *load_timer >= interval {
+        *load_timer -= interval;
+        true
+    } else {
+        false
+    }
 }
 
 pub fn payload_loader_accept_item(
@@ -1804,6 +1832,13 @@ mod tests {
         assert!(payload_loader_accept_liquid(false, 0.1, false));
         assert!(!payload_loader_accept_liquid(false, 0.2, false));
         assert!(!payload_loader_accept_liquid(true, 0.0, true));
+        let mut load_timer = 0.0;
+        assert!(!payload_loader_timer_ready(&mut load_timer, 2.0, 1.0, 1.0));
+        assert_eq!(load_timer, 1.0);
+        assert!(payload_loader_timer_ready(&mut load_timer, 2.0, 1.0, 1.0));
+        assert_eq!(load_timer, 0.0);
+        assert!(!payload_loader_timer_ready(&mut load_timer, 2.0, 0.0, 10.0));
+        assert!(payload_loader_timer_ready(&mut load_timer, 0.0, 1.0, 0.0));
 
         let loader = PayloadLoaderState {
             has_payload: true,

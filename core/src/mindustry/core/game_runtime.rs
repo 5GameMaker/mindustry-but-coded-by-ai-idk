@@ -90,28 +90,28 @@ use crate::mindustry::{
         payload_conveyor_update_timing, payload_deconstructor_accept_payload,
         payload_deconstructor_update_progress, payload_loader_accept_payload,
         payload_loader_charge_battery, payload_loader_liquid_flow, payload_loader_should_export,
-        payload_mass_driver_accepting_should_idle, payload_mass_driver_charge_until_fire,
-        payload_mass_driver_config_from_relative, payload_mass_driver_config_relative,
-        payload_mass_driver_discharge, payload_mass_driver_idle_next,
-        payload_mass_driver_loaded_pay_length, payload_mass_driver_move_turret_toward,
-        payload_mass_driver_ready_to_fire, payload_mass_driver_reload_tick,
-        payload_mass_driver_reset_after_fire, payload_mass_driver_shooting_should_idle,
-        payload_ref_sort_key, payload_router_check_match, payload_router_logic_control,
-        payload_router_pick_next_rotation, payload_source_clear_config,
-        payload_source_configure_block, payload_source_configure_unit, payload_source_update,
-        payload_unloader_drain_battery, payload_unloader_full, payload_unloader_liquid_flow,
-        payload_unloader_should_export, payload_void_update, read_block_producer_progress,
-        read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
-        read_payload_mass_driver_extra, read_payload_ref_to_end, read_payload_router_extra,
-        read_payload_source_extra, read_terminal_payload_block_build_common,
-        read_terminal_payload_conveyor_extra, write_block_producer_progress,
-        write_constructor_recipe, write_deconstructor_extra, write_payload_block_build_common,
-        write_payload_conveyor_extra, write_payload_loader_extra, write_payload_mass_driver_extra,
-        write_payload_ref, write_payload_router_extra, write_payload_source_extra,
-        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
-        PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState, PayloadMassDriverState,
-        PayloadRef, PayloadSortKey, PayloadSourceSpawn, PayloadSourceState, Vec2 as PayloadVec2,
-        PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
+        payload_loader_timer_ready, payload_mass_driver_accepting_should_idle,
+        payload_mass_driver_charge_until_fire, payload_mass_driver_config_from_relative,
+        payload_mass_driver_config_relative, payload_mass_driver_discharge,
+        payload_mass_driver_idle_next, payload_mass_driver_loaded_pay_length,
+        payload_mass_driver_move_turret_toward, payload_mass_driver_ready_to_fire,
+        payload_mass_driver_reload_tick, payload_mass_driver_reset_after_fire,
+        payload_mass_driver_shooting_should_idle, payload_ref_sort_key, payload_router_check_match,
+        payload_router_logic_control, payload_router_pick_next_rotation,
+        payload_source_clear_config, payload_source_configure_block, payload_source_configure_unit,
+        payload_source_update, payload_unloader_drain_battery, payload_unloader_full,
+        payload_unloader_liquid_flow, payload_unloader_should_export, payload_void_update,
+        read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
+        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
+        read_payload_router_extra, read_payload_source_extra,
+        read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
+        write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
+        write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
+        write_payload_mass_driver_extra, write_payload_ref, write_payload_router_extra,
+        write_payload_source_extra, BlockProducerState, PayloadBlockBuildState,
+        PayloadConveyorState, PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState,
+        PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceSpawn, PayloadSourceState,
+        Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -4760,7 +4760,12 @@ impl GameRuntime {
 
         if payload_building.block.has_items && outer.items.as_ref().is_some_and(|items| items.any())
         {
-            if efficiency > 0.01 {
+            if payload_loader_timer_ready(
+                &mut loader.load_timer,
+                loader_def.load_time,
+                efficiency,
+                edelta,
+            ) {
                 let before_loaded = report.loaded_items;
                 for _ in 0..loader_def.items_loaded.max(0) {
                     let Some(item_id) = outer
@@ -4917,7 +4922,12 @@ impl GameRuntime {
                 outer.items.as_ref().map(|items| items.total()).unwrap_or(0),
                 outer.block.item_capacity,
             )
-            && efficiency > 0.01
+            && payload_loader_timer_ready(
+                &mut loader.load_timer,
+                loader_def.load_time,
+                efficiency,
+                edelta,
+            )
         {
             for _ in 0..loader_def.items_loaded.max(0) {
                 if payload_unloader_full(
@@ -5021,9 +5031,15 @@ impl GameRuntime {
             .as_ref()
             .map(|_| loader.exporting)
             .unwrap_or(false);
+        let load_timer = common
+            .payload
+            .as_ref()
+            .map(|_| loader.load_timer)
+            .unwrap_or(0.0);
         let last_output_power = loader.last_output_power;
         let mut next = PayloadLoaderState {
             exporting,
+            load_timer,
             last_output_power,
             has_payload: common.payload.is_some(),
             loader_liquid_amount: outer
@@ -11350,6 +11366,82 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_payload_loader_respects_timer_load_and_efficiency_gate() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("payload-loader").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let loader_tile = point2_pack(4, 4);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.items.as_mut().unwrap().add(copper, 10);
+        loader_building.efficiency = 0.0;
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(loader_building);
+        runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |_| {})),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let blocked_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(blocked_report.loaded_items, 0);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 10);
+        let Some(GameRuntimePayloadBlockState::Loader { loader, .. }) =
+            runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should remain present");
+        };
+        assert_eq!(loader.load_timer, 0.0);
+
+        runtime.buildings[0].efficiency = 1.0;
+        let waiting_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(waiting_report.loaded_items, 0);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 10);
+        let Some(GameRuntimePayloadBlockState::Loader { loader, .. }) =
+            runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should remain present");
+        };
+        assert!((loader.load_timer - 1.0).abs() < 0.001);
+
+        let loaded_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(loaded_report.loaded_items, 8);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 2);
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should remain present");
+        };
+        assert!(loader.load_timer.abs() < 0.001);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 8);
+    }
+
+    #[test]
     fn game_runtime_payload_unloader_unloads_items_from_payload_building() {
         let content = ContentLoader::create_base_content().unwrap();
         let unloader_def = content.block_by_name("payload-unloader").unwrap();
@@ -11403,6 +11495,73 @@ mod tests {
             GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
                 .unwrap();
         assert_eq!(payload_building.items.as_ref().unwrap().total(), 0);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_respects_timer_load_gate() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let waiting_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(waiting_report.unloaded_items, 0);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&unloader_tile)
+        else {
+            panic!("payload unloader sidecar should remain present");
+        };
+        assert!((loader.load_timer - 1.0).abs() < 0.001);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 10);
+
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 8);
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&unloader_tile)
+        else {
+            panic!("payload unloader sidecar should remain present");
+        };
+        assert!(loader.load_timer.abs() < 0.001);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 2);
     }
 
     #[test]
