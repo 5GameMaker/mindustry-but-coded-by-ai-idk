@@ -2660,6 +2660,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core power_graph`
 - 仍未完成：`PowerNode.placed()` 的 autolink 候选扫描、`config(Point2[].class)` 批量重配、insulated raycast、非 center hitbox overlap、`getNodeLinks(...)` 和 client/UI tap 入口仍待迁移；diode 方向传输仍保持下一切片。
 
+### 12.60 PowerNode autolink 候选扫描入口
+
+- 2026-05-27：迁移 Java `PowerNode.placed() -> getPotentialLinks(...) -> configureAny(...)` 的最小 owned runtime 入口。
+- Rust 新增/变化：
+  - `GameRuntime::autolink_owned_power_node(...)`：按 source `PowerNode/LongPowerNode` 的 `autolink/maxNodes/laserRange` 扫描候选，并复用 `configure_owned_power_node_link(...)` 写回 links；
+  - 候选过滤覆盖：同队、目标有 power、目标为 producer/consumer/node、非相邻、非同 graph、目标 node 未满、range 可达；
+  - 候选排序按 Java 优先级：PowerNode 优先，再按距离升序；
+  - `GameRuntimePowerNodeMetadata` 增加 `autolink` 字段。
+- 测试：
+  - `game_runtime_autolinks_power_node_candidates_like_java_priority`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_autolinks_power_node_candidates_like_java_priority`
+  - `cargo test -p mindustry-core power_node`
+- 仍未完成：候选扫描仍使用 center tile 距离近似 Java hitbox overlap，`PowerNode.insulated(...)` 的 world raycast 阻断、`config(Point2[].class)` 批量重配、真实 placement 调用点和 UI tap/client packet 接入仍待迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

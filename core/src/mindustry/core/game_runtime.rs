@@ -1995,6 +1995,7 @@ struct GameRuntimePowerNodeMetadata {
     is_node: bool,
     max_nodes: i32,
     laser_range: f32,
+    autolink: bool,
     same_block_connection: bool,
 }
 
@@ -3942,6 +3943,90 @@ impl GameRuntime {
         GameRuntimePowerNodeLinkResult::Linked
     }
 
+    pub fn autolink_owned_power_node(&mut self, content: &ContentLoader, tile_pos: i32) -> usize {
+        let Some(source_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return 0;
+        };
+        let Some(source_metadata) =
+            Self::owned_power_node_metadata(content, &self.buildings[source_index])
+        else {
+            return 0;
+        };
+        if !source_metadata.is_node || !source_metadata.autolink {
+            return 0;
+        }
+
+        self.refresh_owned_power_graphs_with_content(content);
+        let existing_links = self.buildings[source_index]
+            .power
+            .as_ref()
+            .map(|power| power.links.len() as i32)
+            .unwrap_or(0);
+        let remaining = (source_metadata.max_nodes - existing_links).max(0) as usize;
+        if remaining == 0 {
+            return 0;
+        }
+
+        let source_tile_pos = self.buildings[source_index].tile_pos;
+        let source_graph = self.power_graph_memberships.get(&source_tile_pos).copied();
+        let mut candidates = Vec::new();
+        for (target_index, target) in self.buildings.iter().enumerate() {
+            if target_index == source_index
+                || self.owned_power_node_adjacent(source_index, target_index)
+            {
+                continue;
+            }
+            if !Self::owned_power_node_autolink_candidate(content, target) {
+                continue;
+            }
+            if !self.owned_power_node_link_valid_between(content, source_index, target_index, true)
+            {
+                continue;
+            }
+            let target_graph = self.power_graph_memberships.get(&target.tile_pos).copied();
+            if target_graph.is_some() && target_graph == source_graph {
+                continue;
+            }
+            let target_metadata = Self::owned_power_node_metadata(content, target);
+            candidates.push((
+                target_metadata.is_some_and(|metadata| metadata.is_node),
+                self.owned_power_node_distance2(source_index, target_index),
+                target.tile_pos,
+                target_graph,
+            ));
+        }
+
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.total_cmp(&b.1)));
+
+        let mut linked = 0;
+        let mut used_graphs = BTreeSet::new();
+        if let Some(graph) = source_graph {
+            used_graphs.insert(graph);
+        }
+        for (_, _, target_tile_pos, target_graph) in candidates {
+            if linked >= remaining {
+                break;
+            }
+            if target_graph.is_some_and(|graph| used_graphs.contains(&graph)) {
+                continue;
+            }
+            if self.configure_owned_power_node_link(content, source_tile_pos, target_tile_pos)
+                == GameRuntimePowerNodeLinkResult::Linked
+            {
+                linked += 1;
+                if let Some(graph) = target_graph {
+                    used_graphs.insert(graph);
+                }
+            }
+        }
+
+        linked
+    }
+
     fn rebuild_owned_power_graphs_from_proximity(
         &mut self,
         content: Option<&ContentLoader>,
@@ -4208,8 +4293,38 @@ impl GameRuntime {
             is_node,
             max_nodes: power.max_nodes,
             laser_range: power.laser_range,
+            autolink: power.autolink,
             same_block_connection: power.same_block_connection,
         })
+    }
+
+    fn owned_power_node_autolink_candidate(
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> bool {
+        if building.power.is_none() || !building.block.has_power {
+            return false;
+        }
+        building.block.outputs_power
+            || building.block.consumes_power
+            || Self::owned_power_node_metadata(content, building)
+                .is_some_and(|metadata| metadata.is_node)
+    }
+
+    fn owned_power_node_adjacent(&self, source_index: usize, target_index: usize) -> bool {
+        let target_tile_pos = self.buildings[target_index].tile_pos;
+        self.buildings[source_index]
+            .proximity
+            .iter()
+            .any(|building_ref| building_ref.tile_pos == target_tile_pos)
+    }
+
+    fn owned_power_node_distance2(&self, source_index: usize, target_index: usize) -> f32 {
+        let source = &self.buildings[source_index];
+        let target = &self.buildings[target_index];
+        let dx = (source.tile_x() - target.tile_x()) as f32;
+        let dy = (source.tile_y() - target.tile_y()) as f32;
+        dx * dx + dy * dy
     }
 
     fn owned_power_proximity_connection_valid(
@@ -16939,6 +17054,75 @@ mod tests {
         assert_ne!(
             runtime.power_graph_memberships.get(&node_pos),
             runtime.power_graph_memberships.get(&mender_pos)
+        );
+    }
+
+    #[test]
+    fn game_runtime_autolinks_power_node_candidates_like_java_priority() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let source_pos = point2_pack(10, 10);
+        let target_node_pos = point2_pack(14, 10);
+        let mender_pos = point2_pack(10, 15);
+        let adjacent_pos = point2_pack(11, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            target_node_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            mender_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            adjacent_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(runtime.autolink_owned_power_node(&content, source_pos), 2);
+
+        let source = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == source_pos)
+            .unwrap();
+        assert_eq!(
+            source.power.as_ref().unwrap().links,
+            vec![target_node_pos, mender_pos]
+        );
+        assert!(runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == adjacent_pos)
+            .unwrap()
+            .power
+            .as_ref()
+            .unwrap()
+            .links
+            .is_empty());
+        assert_eq!(runtime.power_graphs.len(), 1);
+        assert_eq!(
+            runtime.power_graph_memberships.get(&source_pos),
+            runtime.power_graph_memberships.get(&target_node_pos)
+        );
+        assert_eq!(
+            runtime.power_graph_memberships.get(&source_pos),
+            runtime.power_graph_memberships.get(&mender_pos)
+        );
+        assert_eq!(
+            runtime.power_graph_memberships.get(&source_pos),
+            runtime.power_graph_memberships.get(&adjacent_pos)
         );
     }
 
