@@ -2925,3 +2925,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_beam_node_potential_links_match_block_draw_potential_links`
   - `game_runtime_beam_node_potential_links_stop_at_insulated_wall_like_java_could_connect`
 - 仍未完成：当前 API 只输出候选，不直接绘制；后续需要让 desktop/render placement preview 与 BeamNode laser draw 消费这些候选/`beam_node_links`。
+
+### 12.72 Desktop 本地 Player entity snapshot 计数去重
+
+- 2026-05-27：修正 `DesktopLauncher::sync_snapshot_mirrors(...)` 在 NetClient 已解析 player typed record 后，又把同一条本地 player snapshot 应用到本地 `PlayerComp` 时重复累计 `entity_typed_records_applied` 的问题。
+- Java/语义依据：
+  - 本地 `Player.readSync` 仍需消费 `@SyncLocal` 字段但不覆盖本地输入/位置；
+  - 同一条 entity snapshot record 应只作为一条 typed entity 记录计数，额外同步到本地 `PlayerComp` 是 desktop local mirror 的消费副作用，不应让 report 变成 2。
+- Rust 新增/变化：
+  - `sync_snapshot_mirrors(...)` 保留对 `GameRuntime::apply_client_entity_snapshot_record_with_content(...)` 的 typed runtime sidecar 应用；
+  - 对 `apply_client_player_entity_snapshot(...)` 的本地玩家应用增加 `!runtime_typed_applied` 计数门控，避免重复计数；
+  - 保持 mixed fallback 路径原语义不变：那里先只写 raw sidecar，再由 typed 分支累计 1。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_local_player_entity_snapshot_to_typed_player_runtime`
+  - `cargo test -p mindustry-desktop`
+  - `cargo test --workspace`
+  - `git diff --check`
+- 仍未完成：Desktop 快照路径仍需继续扩展到更多真实 Java entity 子类与本地/远端玩家切换 smoke。

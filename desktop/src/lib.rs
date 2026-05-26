@@ -224,6 +224,7 @@ impl DesktopLauncher {
                 if record.type_id == PLAYER_CLASS_ID
                     && self
                         .apply_client_player_entity_snapshot(record.entity_id, &record.sync_bytes)
+                    && !runtime_typed_applied
                 {
                     report.entity_typed_records_applied += 1;
                 }
