@@ -34,7 +34,7 @@ use crate::mindustry::{
     input::input_handler::ItemRemoveStackPlan,
     io::{
         type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
-        LegacyShortChunkMap, TeamId,
+        BuildingRef, LegacyShortChunkMap, TeamId,
     },
     net::NetworkPlayerSyncData,
     r#type::{PayloadSeq, WeatherState},
@@ -5707,6 +5707,29 @@ impl GameRuntime {
             .clone()
             .unwrap_or_else(|| Self::item_name_for_side_effect(content, item));
         self.note_campaign_core_item_delta(core_index, &item_name, -plan.amount_removed);
+        true
+    }
+
+    pub fn apply_item_handle_stack_side_effects(
+        &mut self,
+        content: &ContentLoader,
+        build: BuildingRef,
+        item: ContentId,
+        amount: i32,
+    ) -> bool {
+        if amount <= 0 {
+            return false;
+        }
+        let Some(tile_pos) = build.tile_pos else {
+            return false;
+        };
+        let Some(building_index) = self.building_index_by_tile_pos(tile_pos) else {
+            return false;
+        };
+        if !self.building_is_core(content, building_index) {
+            return false;
+        }
+        self.note_core_handle_item_side_effects(content, building_index, item, amount);
         true
     }
 

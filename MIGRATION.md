@@ -3225,3 +3225,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_item_remove_stack_plan_updates_campaign_core_delta_for_core_and_linked_storage`
   - `cargo check --workspace`
 - 仍未完成：server 端 player/unit 仍是 launcher 侧 mirror，尚未接入真实单位 entity snapshot/出生/死亡/切换流程；`Units.canInteract(...)` 和 admin action 目前用保守占位闭包通过，距离校验在缺少位置同步时有 bootstrap fallback，后续必须接入完整权限、严格距离、单位生命周期与 WithdrawEvent/统计广播。`TransferInventory` 是下一条最自然的对称闭环。
+
+### 12.89 Server TransferInventory → TransferItemTo 权威 runtime 桥接
+
+- 2026-05-27：补齐 `TransferInventoryCallPacket` 的 server 权威消费，把“单位携带物 → 建筑库存”的存货链路接到 `server_units` mirror、`GameRuntime` 建筑库存、core/campaign handleStack 副作用和 `TransferItemToCallPacket` 出站广播。
+- Java 依据：
+  - `InputHandler.transferInventory(Player player, Building build)` 校验距离、建筑 item module、玩家存活、`build.allowDeposit()`、unit stack、`Units.canInteract(...)`、deposit rate 与 admin action；
+  - 校验通过后计算 `accepted = build.acceptStack(item, unit.stack.amount, unit)`，再调用 `Call.transferItemTo(unit, item, accepted, unit.x, unit.y, build)`；
+  - `InputHandler.transferItemTo(...)` 会扣 unit stack、播放 item transfer effect，并在 `amount > 0` 时执行 `build.handleStack(item, amount, unit)`。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_new_network_server_events()` 新增 `PacketKind::TransferInventoryCallPacket` 分支；
+  - 新增 transfer-inventory / transfer-item-to 统计与 last-outcome 字段；
+  - `apply_server_transfer_inventory_packet(...)` 复用连接状态和 `server_units` mirror，先调用 `input_handler::transfer_inventory(...)` 计算 accepted amount，再调用 `input_handler::transfer_item_to(...)` 真正扣 unit stack、加 building items，并广播 `TransferItemToCallPacket`（unreliable）；
+  - `GameRuntime` 新增 `apply_item_handle_stack_side_effects(...)`，deposit 到 core 时复用既有 `note_core_handle_item_side_effects(...)`，把 campaign/core item delta 与 stats 接上；
+  - 当前 server `accept_stack` 先按 building item capacity 与当前 total 做通用容量裁剪，后续还需替换为完整 block-specific `acceptStack(...)`。
+- 验证：
+  - `cargo test -p mindustry-server`
+  - `cargo test -p mindustry-core transfer_inventory_`
+  - `cargo test -p mindustry-core transfer_item_to_`
+  - `cargo check --workspace`
+- 仍未完成：`build.allowDeposit()`、`build.acceptStack(...)`、deposit rate、admin action、`Units.canInteract(...)`、真实 player/unit 位置与生命周期仍未完全接入 Java 等价实现；当前 `server_units` 仍是 launcher mirror，不是完整实体组。下一步可继续 payload pickup/drop，或补全 `TransferItemToCallPacket` 客户端 mirror 对 building/unit 的实际状态应用。

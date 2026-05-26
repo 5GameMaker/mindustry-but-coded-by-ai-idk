@@ -15,12 +15,15 @@ use mindustry_core::mindustry::entities::{
     comp::{BuildingComp, BulletComp, PlayerComp, PlayerUnitState, UnitComp},
 };
 use mindustry_core::mindustry::input::{
-    request_item, take_items, RequestItemContext, RequestItemOutcome, TakeItemsOutcome,
+    request_item, take_items, transfer_inventory, transfer_item_to, RequestItemContext,
+    RequestItemOutcome, TakeItemsOutcome, TransferInventoryContext, TransferInventoryOutcome,
+    TransferItemToOutcome,
 };
 use mindustry_core::mindustry::io::{BuildPlanWire, ContentPatchSet, EntityRef, TeamId};
 use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, Net, NetConnection,
     NetworkPlayerData, NetworkWorldData, PacketKind, ProviderEvent, RequestItemCallPacket,
+    TransferInventoryCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -57,6 +60,12 @@ pub struct ServerLauncher {
     pub runtime_transfer_item_effect_packets_sent: usize,
     pub last_runtime_request_item_outcome: Option<RequestItemOutcome>,
     pub last_runtime_take_items_outcome: Option<TakeItemsOutcome>,
+    pub runtime_transfer_inventory_packets_seen: usize,
+    pub runtime_transfer_inventory_packets_accepted: usize,
+    pub runtime_transfer_inventory_packets_rejected: usize,
+    pub runtime_transfer_item_to_packets_sent: usize,
+    pub last_runtime_transfer_inventory_outcome: Option<TransferInventoryOutcome>,
+    pub last_runtime_transfer_item_to_outcome: Option<TransferItemToOutcome>,
     pub server_preview_plan_packets_applied: usize,
     pub next_server_preview_broadcast_at: Option<Instant>,
     pub server_preview_broadcasts_sent: usize,
@@ -95,6 +104,12 @@ impl ServerLauncher {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: Some(
                 Instant::now() + Duration::from_millis(PLAN_PREVIEW_SYNC_INTERVAL_MS as u64),
@@ -211,6 +226,26 @@ impl ServerLauncher {
                         Err(error) => {
                             self.network_error = Some(error.to_string());
                             self.runtime_request_item_packets_rejected += 1;
+                            continue;
+                        }
+                    }
+                }
+                ProviderEvent::ServerPacket {
+                    connection_id,
+                    packet: PacketKind::TransferInventoryCallPacket(packet),
+                } => {
+                    self.runtime_transfer_inventory_packets_seen += 1;
+                    match self.apply_server_transfer_inventory_packet(connection_id, &packet) {
+                        Ok(true) => {
+                            changed += 1;
+                            self.runtime_transfer_inventory_packets_accepted += 1;
+                        }
+                        Ok(false) => {
+                            self.runtime_transfer_inventory_packets_rejected += 1;
+                        }
+                        Err(error) => {
+                            self.network_error = Some(error.to_string());
+                            self.runtime_transfer_inventory_packets_rejected += 1;
                             continue;
                         }
                     }
@@ -366,6 +401,153 @@ impl ServerLauncher {
         Ok(accepted)
     }
 
+    fn apply_server_transfer_inventory_packet(
+        &mut self,
+        connection_id: i32,
+        packet: &TransferInventoryCallPacket,
+    ) -> io::Result<bool> {
+        if connection_id < 0 {
+            return Ok(false);
+        }
+        self.sync_server_preview_players_from_connections();
+
+        let source_connection = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state.connection_states.get(&connection_id).cloned()
+        };
+        let Some(source_connection) = source_connection else {
+            return Ok(false);
+        };
+        if !Self::connection_can_receive_preview(&source_connection) {
+            return Ok(false);
+        }
+
+        let Some(tile_pos) = packet.build.tile_pos else {
+            return Ok(false);
+        };
+        let Some(building_index) = self
+            .runtime
+            .buildings()
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return Ok(false);
+        };
+
+        let Some(unit_type) = self.default_server_unit_type() else {
+            return Ok(false);
+        };
+        let player_snapshot = {
+            let player = self
+                .server_preview_players
+                .entry(connection_id)
+                .or_insert_with(|| PlayerComp::new(source_connection.team));
+            player.id = connection_id;
+            player.team = source_connection.team;
+            player.name = source_connection.name.clone();
+            player.color = source_connection.color as u32;
+            player.locale = source_connection.locale.clone();
+            player.con = Some(source_connection.clone());
+            player.set_unit_state(PlayerUnitState::unit(connection_id));
+            player.clone()
+        };
+        self.server_units
+            .entry(connection_id)
+            .or_insert_with(|| UnitComp::new(connection_id, unit_type, source_connection.team));
+
+        let unit_item_name = self
+            .server_units
+            .get(&connection_id)
+            .and_then(|unit| unit.items.item().map(str::to_owned));
+        let unit_item_id = unit_item_name.as_deref().and_then(|name| {
+            self.content_loader
+                .item_by_name(name)
+                .map(|item| item.base.mappable.base.id as i16)
+        });
+
+        let build_snapshot = self
+            .runtime
+            .buildings()
+            .get(building_index)
+            .expect("building index resolved above");
+        let within_range = Self::player_within_item_transfer_range(&player_snapshot, build_snapshot);
+        let context = TransferInventoryContext {
+            player: Some(EntityRef::new(connection_id)),
+            local_player: false,
+            within_range,
+            deposit_rate_allowed: true,
+        };
+        let transfer_inventory_outcome = transfer_inventory(
+            context,
+            Some(&player_snapshot),
+            self.server_units.get(&connection_id),
+            Some(build_snapshot),
+            |build| build.items.is_some(),
+            |player, build| player.team == build.team,
+            |_player, _build, _item, _amount| true,
+            |build, _unit, item, amount| {
+                if unit_item_name.as_deref() != Some(item) {
+                    return 0;
+                }
+                let Some(item_id) = unit_item_id else {
+                    return 0;
+                };
+                Self::building_accept_stack_amount(build, item_id, amount)
+            },
+        );
+        self.last_runtime_transfer_inventory_outcome = Some(transfer_inventory_outcome.clone());
+        if !transfer_inventory_outcome.accepted {
+            self.last_runtime_transfer_item_to_outcome = None;
+            return Ok(false);
+        }
+
+        let Some(planned_packet) = transfer_inventory_outcome.packet.as_ref() else {
+            self.last_runtime_transfer_item_to_outcome = None;
+            return Ok(false);
+        };
+        let transfer_item_name = planned_packet.item.clone();
+        let transfer_item_id = transfer_item_name.as_deref().and_then(|name| {
+            self.content_loader
+                .item_by_name(name)
+                .map(|item| item.base.mappable.base.id as i16)
+        });
+        let transfer_item_to_outcome = transfer_item_to(
+            self.server_units.get_mut(&connection_id),
+            planned_packet.item.clone(),
+            planned_packet.amount,
+            planned_packet.x,
+            planned_packet.y,
+            self.runtime.buildings_mut().get_mut(building_index),
+            |name| {
+                if transfer_item_name.as_deref() == Some(name) {
+                    transfer_item_id
+                } else {
+                    None
+                }
+            },
+        );
+        if transfer_item_to_outcome.accepted {
+            if let (Some(packet), Some(item_id)) =
+                (transfer_item_to_outcome.packet.as_ref(), transfer_item_id)
+            {
+                self.runtime.apply_item_handle_stack_side_effects(
+                    &self.content_loader,
+                    packet.build,
+                    item_id as ContentId,
+                    packet.amount,
+                );
+                self.net_server
+                    .net_mut()
+                    .send(&PacketKind::TransferItemToCallPacket(packet.clone()), false)?;
+                self.runtime_transfer_item_to_packets_sent += 1;
+            }
+        }
+        let accepted = transfer_item_to_outcome.accepted;
+        self.last_runtime_transfer_item_to_outcome = Some(transfer_item_to_outcome);
+        Ok(accepted)
+    }
+
     fn default_server_unit_type(&self) -> Option<UnitType> {
         self.content_loader
             .unit_by_name("alpha")
@@ -391,6 +573,14 @@ impl ServerLauncher {
         let dx = player.x - build.x;
         let dy = player.y - build.y;
         dx * dx + dy * dy <= ITEM_TRANSFER_RANGE * ITEM_TRANSFER_RANGE
+    }
+
+    fn building_accept_stack_amount(build: &BuildingComp, _item_id: i16, amount: i32) -> i32 {
+        let Some(items) = build.items.as_ref() else {
+            return 0;
+        };
+        let remaining = build.block.item_capacity.max(0) - items.total();
+        amount.min(remaining).max(0)
     }
 
     fn apply_server_preview_plan_packet(
@@ -677,7 +867,7 @@ mod tests {
         NetServer,
     };
     use mindustry_core::mindustry::ctype::ContentType;
-    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::entities::comp::{BuildingComp, UnitComp};
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
     use mindustry_core::mindustry::io::{
         BuildPlanWire, BuildingRef, EntityRef, Point2, TeamId, TypeValue, UnitRef,
@@ -686,7 +876,7 @@ mod tests {
         packet_ids, read_world_data, ClientPlanSnapshotCallPacket, Connect, ConnectFilter,
         ConnectPacket, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
         NetworkWorldData, PacketKind, PacketSerializer, ProviderEvent, RequestItemCallPacket,
-        TileConfigCallPacket,
+        TileConfigCallPacket, TransferInventoryCallPacket,
     };
     use mindustry_core::mindustry::r#type::Sector;
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
@@ -1016,6 +1206,125 @@ mod tests {
     }
 
     #[test]
+    fn server_launcher_applies_transfer_inventory_packet_to_runtime_and_broadcasts_transfer_item_to()
+    {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6568).unwrap();
+        launcher.runtime = GameRuntime::default();
+        launcher
+            .runtime
+            .set_network_context(GameRuntimeNetworkContext::server());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.set_sector(Some(Sector::new(18)));
+        launcher.runtime.state.world.resize(8, 8);
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let core_def = launcher.content_loader.block_by_name("core-shard").unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let core_tile = point2_pack(2, 2);
+        let mut core_building =
+            BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+        core_building.items.as_mut().unwrap().add(copper, 4);
+        launcher.runtime.add_building(core_building);
+
+        let mut unit = UnitComp::new(
+            7,
+            launcher.content_loader.unit_by_name("alpha").unwrap().clone(),
+            default_team,
+        );
+        unit.set_pos(32.0, 40.0);
+        unit.items.add_item_amount("copper", 6);
+        launcher.server_units.insert(7, unit);
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("127.0.0.1:7008");
+            connection.has_connected = true;
+            connection.player_added = true;
+            connection.team = default_team;
+            connection.name = "rust-client".into();
+            state.connection_states.insert(7, connection);
+            state.events.push(ProviderEvent::ServerPacket {
+                connection_id: 7,
+                packet: PacketKind::TransferInventoryCallPacket(TransferInventoryCallPacket {
+                    player: EntityRef::null(),
+                    build: BuildingRef::new(core_tile),
+                }),
+            });
+        }
+
+        let changed = launcher.apply_new_network_server_events();
+
+        assert_eq!(changed, 1);
+        assert_eq!(launcher.runtime_transfer_inventory_packets_seen, 1);
+        assert_eq!(launcher.runtime_transfer_inventory_packets_accepted, 1);
+        assert_eq!(launcher.runtime_transfer_inventory_packets_rejected, 0);
+        assert_eq!(launcher.runtime_transfer_item_to_packets_sent, 1);
+        assert!(launcher
+            .last_runtime_transfer_inventory_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.accepted && outcome.accepted_amount == 6));
+        assert!(launcher
+            .last_runtime_transfer_item_to_outcome
+            .as_ref()
+            .is_some_and(|outcome| {
+                outcome.accepted
+                    && outcome.unit_previous_amount == Some(6)
+                    && outcome.unit_new_amount == Some(0)
+                    && outcome.building_previous_amount == 4
+                    && outcome.building_new_amount == 10
+            }));
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            10
+        );
+        assert_eq!(launcher.server_units.get(&7).unwrap().items.stack.amount, 0);
+        assert_eq!(
+            launcher
+                .runtime
+                .state
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&6)
+        );
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::TransferItemToCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 7 }
+                            && packet.item.as_deref() == Some("copper")
+                            && packet.amount == 6
+                            && (packet.x, packet.y) == (32.0, 40.0)
+                            && packet.build == BuildingRef::new(core_tile)
+                )
+        }));
+    }
+
+    #[test]
     fn server_update_flushes_pending_world_data_after_connect_packet() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
@@ -1042,6 +1351,12 @@ mod tests {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1120,6 +1435,12 @@ mod tests {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1281,6 +1602,12 @@ mod tests {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1432,6 +1759,12 @@ mod tests {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1520,6 +1853,12 @@ mod tests {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1620,6 +1959,12 @@ mod tests {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1739,6 +2084,12 @@ mod tests {
             runtime_transfer_item_effect_packets_sent: 0,
             last_runtime_request_item_outcome: None,
             last_runtime_take_items_outcome: None,
+            runtime_transfer_inventory_packets_seen: 0,
+            runtime_transfer_inventory_packets_accepted: 0,
+            runtime_transfer_inventory_packets_rejected: 0,
+            runtime_transfer_item_to_packets_sent: 0,
+            last_runtime_transfer_inventory_outcome: None,
+            last_runtime_transfer_item_to_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
