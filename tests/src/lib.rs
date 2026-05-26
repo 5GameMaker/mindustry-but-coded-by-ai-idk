@@ -508,6 +508,7 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
 #[test]
 fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::entities::PLAYER_CLASS_ID;
     use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
         EntitySnapshotCallPacket, HiddenSnapshotCallPacket, NetworkPlayerSyncData,
@@ -698,7 +699,7 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     .unwrap();
     let mut multi_entity_data = Vec::new();
     multi_entity_data.extend_from_slice(&connection_id.to_be_bytes());
-    multi_entity_data.push(12);
+    multi_entity_data.push(PLAYER_CLASS_ID);
     multi_entity_data.extend_from_slice(&player_bytes);
     multi_entity_data.extend_from_slice(&1004i32.to_be_bytes());
     multi_entity_data.push(2);
@@ -884,7 +885,7 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             .client_entity_snapshot_records
             .get(&connection_id)
             .map(|record| (record.type_id, record.sync_bytes.as_slice())),
-        Some((12, player_bytes.as_slice()))
+        Some((PLAYER_CLASS_ID, player_bytes.as_slice()))
     );
     assert_eq!(
         desktop

@@ -21,6 +21,230 @@ pub mod target_priority;
 pub mod unit_sorts;
 pub mod units;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntityClassIdEntry {
+    pub name: &'static str,
+    pub id: u8,
+}
+
+pub const PLAYER_CLASS_ID: u8 = 12;
+
+/// Java `annotations/src/main/resources/classids.properties` migrated into a
+/// Rust lookup table. This is the stable outer `entity.classId()` byte used by
+/// `NetServer.entitySnapshot(...)` and `NetClient.readSyncEntity(...)`.
+pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
+    EntityClassIdEntry {
+        name: "alpha",
+        id: 0,
+    },
+    EntityClassIdEntry {
+        name: "arkyid",
+        id: 29,
+    },
+    EntityClassIdEntry {
+        name: "atrax",
+        id: 1,
+    },
+    EntityClassIdEntry {
+        name: "beta",
+        id: 30,
+    },
+    EntityClassIdEntry {
+        name: "block",
+        id: 2,
+    },
+    EntityClassIdEntry {
+        name: "corvus",
+        id: 24,
+    },
+    EntityClassIdEntry {
+        name: "elude",
+        id: 45,
+    },
+    EntityClassIdEntry {
+        name: "flare",
+        id: 3,
+    },
+    EntityClassIdEntry {
+        name: "gamma",
+        id: 31,
+    },
+    EntityClassIdEntry {
+        name: "latum",
+        id: 46,
+    },
+    EntityClassIdEntry {
+        name: "mace",
+        id: 4,
+    },
+    EntityClassIdEntry {
+        name: "manifold",
+        id: 36,
+    },
+    EntityClassIdEntry {
+        name: "mega",
+        id: 5,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.BuildingComp",
+        id: 6,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.BulletComp",
+        id: 7,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.DecalComp",
+        id: 8,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.EffectStateComp",
+        id: 9,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.FireComp",
+        id: 10,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.LaunchCoreComp",
+        id: 11,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.LocationPingComp",
+        id: 48,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.PlayerComp",
+        id: PLAYER_CLASS_ID,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.PosTeam",
+        id: 27,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.PosTeamDef",
+        id: 28,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.PowerGraphComp",
+        id: 41,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.PowerGraphUpdaterComp",
+        id: 42,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.PuddleComp",
+        id: 13,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.entities.comp.WorldLabelComp",
+        id: 35,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.type.Weather.WeatherStateComp",
+        id: 14,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.world.blocks.campaign.LaunchPad.LaunchPayloadComp",
+        id: 15,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.world.blocks.campaign.PayloadLaunchPad.LargeLaunchPayloadComp",
+        id: 34,
+    },
+    EntityClassIdEntry {
+        name: "mindustry.world.blocks.defense.ForceProjector.ForceDrawComp",
+        id: 22,
+    },
+    EntityClassIdEntry {
+        name: "missile",
+        id: 39,
+    },
+    EntityClassIdEntry {
+        name: "mono",
+        id: 16,
+    },
+    EntityClassIdEntry {
+        name: "nova",
+        id: 17,
+    },
+    EntityClassIdEntry {
+        name: "oct",
+        id: 26,
+    },
+    EntityClassIdEntry {
+        name: "osc",
+        id: 44,
+    },
+    EntityClassIdEntry {
+        name: "poly",
+        id: 18,
+    },
+    EntityClassIdEntry {
+        name: "pulsar",
+        id: 19,
+    },
+    EntityClassIdEntry {
+        name: "quad",
+        id: 23,
+    },
+    EntityClassIdEntry {
+        name: "quasar",
+        id: 32,
+    },
+    EntityClassIdEntry {
+        name: "renale",
+        id: 47,
+    },
+    EntityClassIdEntry {
+        name: "risso",
+        id: 20,
+    },
+    EntityClassIdEntry {
+        name: "spiroct",
+        id: 21,
+    },
+    EntityClassIdEntry {
+        name: "stell",
+        id: 43,
+    },
+    EntityClassIdEntry {
+        name: "timed",
+        id: 38,
+    },
+    EntityClassIdEntry {
+        name: "timedDef",
+        id: 37,
+    },
+    EntityClassIdEntry {
+        name: "toxopid",
+        id: 33,
+    },
+    EntityClassIdEntry {
+        name: "vanquish",
+        id: 40,
+    },
+    EntityClassIdEntry {
+        name: "vela",
+        id: 25,
+    },
+];
+
+pub fn entity_class_id(name: &str) -> Option<u8> {
+    ENTITY_CLASS_IDS
+        .iter()
+        .find(|entry| entry.name == name)
+        .map(|entry| entry.id)
+}
+
+pub fn entity_class_name(id: u8) -> Option<&'static str> {
+    ENTITY_CLASS_IDS
+        .iter()
+        .find(|entry| entry.id == id)
+        .map(|entry| entry.name)
+}
+
 pub use abilities::{
     Ability, ArmorPlateAbility, ArmorPlateUpdate, BasicAbility, EnergyFieldAbility,
     EnergyFieldAction, EnergyFieldHit, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility,
@@ -162,5 +386,53 @@ pub use units::{
     UnitsTargetSnapshot, UnitsTeamPresence, WeaponMount, AI_ROTATE_BACK_TIMER, AI_TIMER_COUNT,
     AI_TIMER_TARGET, AI_TIMER_TARGET2, AI_TIMER_TARGET3, AI_TIMER_TARGET4, UNITS_CAP_INFINITY,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn entity_class_ids_match_upstream_classids_properties_baseline() {
+        assert_eq!(ENTITY_CLASS_IDS.len(), 49);
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.PlayerComp"),
+            Some(PLAYER_CLASS_ID)
+        );
+        assert_eq!(
+            entity_class_name(PLAYER_CLASS_ID),
+            Some("mindustry.entities.comp.PlayerComp")
+        );
+        assert_eq!(entity_class_id("alpha"), Some(0));
+        assert_eq!(entity_class_id("block"), Some(2));
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.BulletComp"),
+            Some(7)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.type.Weather.WeatherStateComp"),
+            Some(14)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.LocationPingComp"),
+            Some(48)
+        );
+
+        let mut names = BTreeSet::new();
+        let mut ids = BTreeSet::new();
+        for entry in ENTITY_CLASS_IDS {
+            assert!(
+                names.insert(entry.name),
+                "duplicate entity class name {}",
+                entry.name
+            );
+            assert!(
+                ids.insert(entry.id),
+                "duplicate entity class id {}",
+                entry.id
+            );
+        }
+    }
+}
 
 // Mirrors upstream core/src/mindustry/entities. Implemented incrementally from D:\MDT\mindustry-upstream-v157.4.

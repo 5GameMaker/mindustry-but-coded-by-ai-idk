@@ -2160,6 +2160,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：真实 smoke 仍只覆盖本地 player 与两种 vanilla unit；完整 Java `EntityMapping`、远端玩家实体组、其他 `Syncc` 仍待迁移。
 
+### 12.42 Entity class-id registry 基线迁移
+
+- 2026-05-26：将 Java `annotations/src/main/resources/classids.properties` 的 49 条实体 class-id 基线迁入 Rust。
+- Rust 新增于现有文件 `core/src/mindustry/entities/mod.rs`：
+  - `EntityClassIdEntry`
+  - `ENTITY_CLASS_IDS`
+  - `PLAYER_CLASS_ID`
+  - `entity_class_id(name)`
+  - `entity_class_name(id)`
+- 已接入：
+  - `DesktopLauncher` mixed fallback 对本地 player record 的解析现在要求 `type_id == PLAYER_CLASS_ID`；
+  - desktop/unit/real smoke 测试里的 PlayerComp type id 不再硬编码 `12`，统一引用 `PLAYER_CLASS_ID`。
+- 测试：
+  - `entity_class_ids_match_upstream_classids_properties_baseline`
+- 已验证：
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：registry 目前只是静态查询表；`GameRuntime`/`DesktopLauncher` 尚未全面按 class-id dispatcher 分发所有 `Syncc`。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

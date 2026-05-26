@@ -8,7 +8,7 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
-use mindustry_core::mindustry::entities::{PlayerComp, PlayerUnitSwitchContext};
+use mindustry_core::mindustry::entities::{PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID};
 use mindustry_core::mindustry::io::{
     read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
 };
@@ -216,7 +216,10 @@ impl DesktopLauncher {
                             record.sync_bytes.clone(),
                         ),
                 );
-                if self.apply_client_player_entity_snapshot(record.entity_id, &record.sync_bytes) {
+                if record.type_id == PLAYER_CLASS_ID
+                    && self
+                        .apply_client_player_entity_snapshot(record.entity_id, &record.sync_bytes)
+                {
                     report.entity_typed_records_applied += 1;
                 }
             }
@@ -313,7 +316,7 @@ impl DesktopLauncher {
 
             let sync_start = read;
             let before_len = sync_start.len();
-            if entity_id == self.player.id {
+            if entity_id == self.player.id && type_id == PLAYER_CLASS_ID {
                 let Ok(player_sync) = NetworkPlayerSyncData::read_from(&mut read) else {
                     report.entity_parse_errors += 1;
                     return report;
@@ -558,7 +561,7 @@ mod tests {
         NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket,
     };
     use mindustry_core::mindustry::{
-        entities::{comp::BuildingComp, PlayerComp},
+        entities::{comp::BuildingComp, PlayerComp, PLAYER_CLASS_ID},
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
         io::{
@@ -1416,7 +1419,7 @@ mod tests {
         sync.write_to(&mut sync_bytes).unwrap();
         let mut packet_data = Vec::new();
         packet_data.extend_from_slice(&launcher.player.id.to_be_bytes());
-        packet_data.push(12);
+        packet_data.push(PLAYER_CLASS_ID);
         packet_data.extend_from_slice(&sync_bytes);
 
         {
@@ -1429,7 +1432,7 @@ mod tests {
                     data: packet_data,
                     records: vec![ClientEntitySnapshotRecordMirror {
                         entity_id: launcher.player.id,
-                        type_id: 12,
+                        type_id: PLAYER_CLASS_ID,
                         sync_bytes: sync_bytes.clone(),
                     }],
                     parse_error: None,
@@ -1449,7 +1452,7 @@ mod tests {
             .client_entity_snapshot_records
             .get(&91)
             .expect("player entity snapshot should preserve raw sidecar");
-        assert_eq!(raw.type_id, 12);
+        assert_eq!(raw.type_id, PLAYER_CLASS_ID);
         assert_eq!(raw.sync_bytes, sync_bytes);
         assert_eq!(
             launcher.runtime.client_player_snapshot_entities.get(&91),
@@ -1526,7 +1529,7 @@ mod tests {
 
         let mut data = Vec::new();
         data.extend_from_slice(&launcher.player.id.to_be_bytes());
-        data.push(12);
+        data.push(PLAYER_CLASS_ID);
         data.extend_from_slice(&player_bytes);
         data.extend_from_slice(&8801i32.to_be_bytes());
         data.push(2);

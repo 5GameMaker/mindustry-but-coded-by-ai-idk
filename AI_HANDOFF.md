@@ -1918,6 +1918,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
-  1. 迁移 `annotations/src/main/resources/classids.properties` 到 Rust，建立最小 `EntityClassId` registry。
-  2. 用 class-id registry 替换 `DesktopLauncher` mixed fallback 里的 player-id 特判与 unit parse-shape 猜测。
+  1. 用 class-id registry 继续替换 `DesktopLauncher` mixed fallback 里的 unit parse-shape 猜测。
+  2. 继续把 registry 接到通用 entity snapshot dispatcher。
   3. 按 class-id 优先级继续迁移 Bullet/Fire/Weather/Effect 等 `Syncc` snapshot。
+
+---
+
+## 56. 最新闭环记录：Entity class-id registry 基线迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 Java `annotations/src/main/resources/classids.properties` 的稳定 `entity.classId()` 映射迁入 Rust，为后续通用 snapshot dispatcher 做基础。
+- Rust 主改动：
+  - `core/src/mindustry/entities/mod.rs`
+  - `desktop/src/lib.rs`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - 新增 `ENTITY_CLASS_IDS` 静态表，覆盖 49 条上游 class-id；
+  - 新增 `PLAYER_CLASS_ID = 12`；
+  - 新增 `entity_class_id(name)` / `entity_class_name(id)`；
+  - `DesktopLauncher` mixed fallback 处理本地 player record 时，现在同时要求 `entity_id == player.id` 且 `type_id == PLAYER_CLASS_ID`；
+  - 测试里不再硬编码 PlayerComp 的 `12`。
+- 已跑：
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 将 `ENTITY_CLASS_IDS` 升级为实际 dispatcher：`type_id -> Player/Unit/Bullet/Fire/...`。
+  2. 先把 unit class-id families 接到 dispatcher，替换“非 player 就尝试 UnitSyncWire”的临时逻辑。
+  3. 后续按 class-id 表继续迁移其他 `Syncc` 的 readSync/writeSync wire。
