@@ -142,7 +142,8 @@ use crate::mindustry::{
     },
     world::blocks::storage::{
         core_accept_item, read_core_state, read_unloader_sort_item, storage_accept_item,
-        write_core_state, write_unloader_sort_item, CoreBuildState,
+        unloader_possible_item, unloader_sort_key, unloader_update_timer, write_core_state,
+        write_unloader_sort_item, ContainerStat, CoreBuildState,
     },
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
@@ -1459,6 +1460,18 @@ pub struct GameRuntimeDirectionalUnloaderFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeItemUnloaderFrameReport {
+    pub visited_buildings: usize,
+    pub unloader_candidates: usize,
+    pub updated_unloaders: usize,
+    pub selected_items: usize,
+    pub attempted_trades: usize,
+    pub moved_items: usize,
+    pub missing_partners: usize,
+    pub blocked_trades: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeStackRouterFrameReport {
     pub visited_buildings: usize,
     pub router_candidates: usize,
@@ -1546,6 +1559,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub invalid_payloads: usize,
     pub missing_runtime_states: usize,
     pub router_forwarded_items: usize,
+    pub item_unloader_moved_items: usize,
     pub directional_unloader_moved_items: usize,
     pub duct_forwarded_items: usize,
     pub duct_bridge_forwarded_items: usize,
@@ -1701,6 +1715,9 @@ pub struct GameRuntime {
     pub item_router_runtime_states: BTreeMap<i32, GameRuntimeItemRouterState>,
     pub item_duct_progress_states: BTreeMap<i32, f32>,
     pub item_directional_unloader_timers: BTreeMap<i32, f32>,
+    pub item_unloader_timers: BTreeMap<i32, f32>,
+    pub item_unloader_rotations: BTreeMap<i32, ContentId>,
+    pub item_unloader_last_used: BTreeMap<(i32, i32), i32>,
     pub item_stack_router_unloading: BTreeMap<i32, bool>,
     pub item_bridge_transport_counters: BTreeMap<i32, f32>,
     pub item_junction_time_counters: BTreeMap<i32, f32>,
@@ -1738,6 +1755,9 @@ impl GameRuntime {
             item_router_runtime_states: BTreeMap::new(),
             item_duct_progress_states: BTreeMap::new(),
             item_directional_unloader_timers: BTreeMap::new(),
+            item_unloader_timers: BTreeMap::new(),
+            item_unloader_rotations: BTreeMap::new(),
+            item_unloader_last_used: BTreeMap::new(),
             item_stack_router_unloading: BTreeMap::new(),
             item_bridge_transport_counters: BTreeMap::new(),
             item_junction_time_counters: BTreeMap::new(),
@@ -2168,6 +2188,10 @@ impl GameRuntime {
         self.item_duct_progress_states.remove(&removed.tile_pos);
         self.item_directional_unloader_timers
             .remove(&removed.tile_pos);
+        self.item_unloader_timers.remove(&removed.tile_pos);
+        self.item_unloader_rotations.remove(&removed.tile_pos);
+        self.item_unloader_last_used
+            .retain(|(unloader_tile, _), _| *unloader_tile != removed.tile_pos);
         self.item_stack_router_unloading.remove(&removed.tile_pos);
         self.item_bridge_transport_counters
             .remove(&removed.tile_pos);
@@ -3770,6 +3794,9 @@ impl GameRuntime {
         self.item_router_runtime_states.clear();
         self.item_duct_progress_states.clear();
         self.item_directional_unloader_timers.clear();
+        self.item_unloader_timers.clear();
+        self.item_unloader_rotations.clear();
+        self.item_unloader_last_used.clear();
         self.item_stack_router_unloading.clear();
         self.item_bridge_transport_counters.clear();
         self.item_junction_time_counters.clear();
@@ -4915,6 +4942,9 @@ impl GameRuntime {
         }
         report.router_forwarded_items += self
             .advance_owned_item_routers_ticks(content, frame_delta)
+            .moved_items;
+        report.item_unloader_moved_items += self
+            .advance_owned_item_unloaders_ticks(content, frame_delta)
             .moved_items;
         report.directional_unloader_moved_items += self
             .advance_owned_directional_unloaders_ticks(content, frame_delta)
@@ -7374,6 +7404,404 @@ impl GameRuntime {
             target_items.add(*item_id, *amount);
         }
         total_used
+    }
+
+    pub fn advance_owned_item_unloaders(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeItemUnloaderFrameReport> {
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        Some(self.advance_owned_item_unloaders_ticks(content, advanced.delta_ticks as f32))
+    }
+
+    fn advance_owned_item_unloaders_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeItemUnloaderFrameReport {
+        let mut report = GameRuntimeItemUnloaderFrameReport::default();
+        let unloader_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                report.visited_buildings += 1;
+                match content.block(building.block.id) {
+                    Some(BlockDef::Distribution(distribution))
+                        if distribution.kind == DistributionBlockKind::Unloader =>
+                    {
+                        report.unloader_candidates += 1;
+                        Some(index)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for index in unloader_indices {
+            let Some(BlockDef::Distribution(unloader_block)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+            if !self.buildings[index].enabled {
+                continue;
+            }
+            let tile_pos = self.buildings[index].tile_pos;
+            let possible_neighbors =
+                self.item_unloader_possible_neighbor_indices(content, index, unloader_block);
+            let delta = frame_delta * self.buildings[index].time_scale.max(0.0);
+            let previous_timer = self
+                .item_unloader_timers
+                .get(&tile_pos)
+                .copied()
+                .unwrap_or(0.0);
+            let ready_timer = previous_timer + delta;
+            if ready_timer < unloader_block.speed || possible_neighbors.len() < 2 {
+                self.item_unloader_timers.insert(tile_pos, ready_timer);
+                report.updated_unloaders += 1;
+                continue;
+            }
+
+            let Some(item_id) =
+                self.item_unloader_select_item(content, index, unloader_block, &possible_neighbors)
+            else {
+                let update = unloader_update_timer(
+                    previous_timer,
+                    delta,
+                    unloader_block.speed,
+                    possible_neighbors.len(),
+                    false,
+                );
+                self.item_unloader_timers
+                    .insert(tile_pos, update.unload_timer);
+                report.missing_partners += 1;
+                report.updated_unloaders += 1;
+                continue;
+            };
+            report.selected_items += 1;
+            self.item_unloader_rotations.insert(tile_pos, item_id);
+
+            report.attempted_trades += 1;
+            let traded = self.item_unloader_trade_item(
+                content,
+                index,
+                unloader_block,
+                &possible_neighbors,
+                item_id,
+            );
+            if traded {
+                report.moved_items += 1;
+            } else {
+                report.blocked_trades += 1;
+            }
+            let update = unloader_update_timer(
+                previous_timer,
+                delta,
+                unloader_block.speed,
+                possible_neighbors.len(),
+                traded,
+            );
+            self.item_unloader_timers
+                .insert(tile_pos, update.unload_timer);
+            report.updated_unloaders += 1;
+        }
+
+        report
+    }
+
+    fn item_unloader_sort_item(&self, tile_pos: i32) -> Option<ContentId> {
+        match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::Unloader(sort_item)) => *sort_item,
+            _ => None,
+        }
+    }
+
+    fn item_unloader_possible_neighbor_indices(
+        &self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        unloader_block: &crate::mindustry::content::blocks::DistributionBlockData,
+    ) -> Vec<usize> {
+        let mut indices = Vec::new();
+        for other_ref in &self.buildings[unloader_index].proximity {
+            let Some(other_index) = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == other_ref.tile_pos)
+            else {
+                continue;
+            };
+            let other = &self.buildings[other_index];
+            if other.team != self.buildings[unloader_index].team {
+                continue;
+            }
+            let Some(other_block) = content.block(other.block.id) else {
+                continue;
+            };
+            let can_load = !matches!(other_block, BlockDef::Storage(_));
+            let can_unload =
+                self.item_unloader_can_unload_from(content, unloader_block, other_index, None);
+            if can_load || can_unload {
+                indices.push(other_index);
+            }
+        }
+        indices
+    }
+
+    fn item_unloader_can_unload_from(
+        &self,
+        content: &ContentLoader,
+        unloader_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        source_index: usize,
+        item_id: Option<ContentId>,
+    ) -> bool {
+        let Some(source) = self.buildings.get(source_index) else {
+            return false;
+        };
+        let Some(source_items) = source.items.as_ref() else {
+            return false;
+        };
+        if let Some(item_id) = item_id {
+            if source_items.get(item_id) <= 0 {
+                return false;
+            }
+        } else if source_items.empty() {
+            return false;
+        }
+        let Some(source_block) = content.block(source.block.id) else {
+            return false;
+        };
+        if !Self::payload_block_unloadable(source_block) {
+            return false;
+        }
+        match source_block {
+            BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core => {
+                unloader_block.allow_core_unload
+            }
+            BlockDef::Storage(_) => true,
+            _ => true,
+        }
+    }
+
+    fn item_unloader_select_item(
+        &self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        unloader_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        possible_neighbors: &[usize],
+    ) -> Option<ContentId> {
+        let tile_pos = self.buildings[unloader_index].tile_pos;
+        if let Some(sort_item) = self.item_unloader_sort_item(tile_pos) {
+            return self
+                .item_unloader_item_possible(
+                    content,
+                    unloader_index,
+                    unloader_block,
+                    possible_neighbors,
+                    sort_item,
+                )
+                .then_some(sort_item);
+        }
+
+        let items = content.items();
+        if items.is_empty() {
+            return None;
+        }
+        let rotations = self
+            .item_unloader_rotations
+            .get(&tile_pos)
+            .copied()
+            .unwrap_or(0) as i32;
+        for offset in 0..items.len() {
+            let index = (rotations + offset as i32 + 1).rem_euclid(items.len() as i32) as usize;
+            let item_id = items[index].base.mappable.base.id;
+            if self.item_unloader_item_possible(
+                content,
+                unloader_index,
+                unloader_block,
+                possible_neighbors,
+                item_id,
+            ) {
+                return Some(item_id);
+            }
+        }
+        None
+    }
+
+    fn item_unloader_item_possible(
+        &self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        unloader_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        possible_neighbors: &[usize],
+        item_id: ContentId,
+    ) -> bool {
+        let mut stats = Vec::new();
+        for &other_index in possible_neighbors {
+            stats.push(self.item_unloader_container_stat(
+                content,
+                unloader_index,
+                unloader_block,
+                other_index,
+                item_id,
+                0,
+            ));
+        }
+        unloader_possible_item(&mut stats)
+    }
+
+    fn item_unloader_container_stat(
+        &self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        unloader_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        other_index: usize,
+        item_id: ContentId,
+        last_used: i32,
+    ) -> ContainerStat {
+        let other = &self.buildings[other_index];
+        let other_block = content.block(other.block.id);
+        let not_storage = !matches!(other_block, Some(BlockDef::Storage(_)));
+        let can_load = not_storage
+            && self.dump_target_accepts_item(content, unloader_index, other_index, item_id);
+        let can_unload =
+            self.item_unloader_can_unload_from(content, unloader_block, other_index, Some(item_id));
+        let max_accepted = self.item_unloader_maximum_accepted(other_index);
+        let load_factor = if max_accepted == 0 {
+            0.0
+        } else {
+            other
+                .items
+                .as_ref()
+                .map(|items| items.get(item_id) as f32 / max_accepted as f32)
+                .unwrap_or(0.0)
+        };
+        ContainerStat {
+            can_load,
+            can_unload,
+            not_storage,
+            load_factor,
+            last_used,
+        }
+    }
+
+    fn item_unloader_maximum_accepted(&self, building_index: usize) -> i32 {
+        self.buildings
+            .get(building_index)
+            .map(|building| building.block.item_capacity)
+            .unwrap_or(0)
+    }
+
+    fn item_unloader_trade_item(
+        &mut self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        unloader_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        possible_neighbors: &[usize],
+        item_id: ContentId,
+    ) -> bool {
+        let unloader_tile = self.buildings[unloader_index].tile_pos;
+        let mut candidates: Vec<(usize, ContainerStat)> = possible_neighbors
+            .iter()
+            .copied()
+            .map(|other_index| {
+                let other_tile = self.buildings[other_index].tile_pos;
+                let next_last = self
+                    .item_unloader_last_used
+                    .get(&(unloader_tile, other_tile))
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                self.item_unloader_last_used
+                    .insert((unloader_tile, other_tile), next_last);
+                (
+                    other_index,
+                    self.item_unloader_container_stat(
+                        content,
+                        unloader_index,
+                        unloader_block,
+                        other_index,
+                        item_id,
+                        next_last,
+                    ),
+                )
+            })
+            .collect();
+        candidates.sort_by_key(|(_, stat)| unloader_sort_key(stat));
+
+        let dumping_to = candidates
+            .iter()
+            .find_map(|(index, stat)| stat.can_load.then_some((*index, *stat)));
+        let dumping_from = candidates
+            .iter()
+            .rev()
+            .find_map(|(index, stat)| stat.can_unload.then_some((*index, *stat)));
+        let (Some((to_index, to_stat)), Some((from_index, from_stat))) = (dumping_to, dumping_from)
+        else {
+            return false;
+        };
+        if from_index == to_index {
+            return false;
+        }
+        if (from_stat.load_factor - to_stat.load_factor).abs() <= f32::EPSILON && from_stat.can_load
+        {
+            return false;
+        }
+        if !self.item_unloader_transfer_item(content, unloader_index, from_index, to_index, item_id)
+        {
+            return false;
+        }
+
+        let to_tile = self.buildings[to_index].tile_pos;
+        let from_tile = self.buildings[from_index].tile_pos;
+        self.item_unloader_last_used
+            .insert((unloader_tile, to_tile), 0);
+        self.item_unloader_last_used
+            .insert((unloader_tile, from_tile), 0);
+        true
+    }
+
+    fn item_unloader_transfer_item(
+        &mut self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        from_index: usize,
+        to_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        if unloader_index >= self.buildings.len()
+            || from_index >= self.buildings.len()
+            || to_index >= self.buildings.len()
+            || !self.buildings[from_index]
+                .items
+                .as_ref()
+                .is_some_and(|items| items.get(item_id) > 0)
+            || !self.dump_target_accepts_item(content, unloader_index, to_index, item_id)
+        {
+            return false;
+        }
+
+        let Some(unloader_items) = self.buildings[unloader_index].items.as_mut() else {
+            return false;
+        };
+        unloader_items.add(item_id, 1);
+        if !self.dump_item_to_target(content, unloader_index, to_index, item_id) {
+            if let Some(unloader_items) = self.buildings[unloader_index].items.as_mut() {
+                if unloader_items.get(item_id) > 0 {
+                    unloader_items.remove(item_id, 1);
+                }
+            }
+            return false;
+        }
+        if let Some(source_items) = self.buildings[from_index].items.as_mut() {
+            source_items.remove(item_id, 1);
+        }
+        true
     }
 
     pub fn advance_owned_directional_unloaders(
@@ -16604,6 +17032,128 @@ mod tests {
         assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+    }
+
+    #[test]
+    fn game_runtime_item_unloader_moves_configured_item_from_storage_to_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("unloader").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let container_tile = point2_pack(3, 4);
+        let unloader_tile = point2_pack(5, 4);
+        let item_void_tile = point2_pack(6, 4);
+        let mut container_building =
+            BuildingComp::new(container_tile, container_def.base().clone(), TeamId(6));
+        container_building.items.as_mut().unwrap().add(copper, 3);
+        container_building.items.as_mut().unwrap().add(lead, 2);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(container_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(item_void_building);
+        runtime.distribution_runtime_states.insert(
+            unloader_tile,
+            GameRuntimeDistributionBlockState::Unloader(Some(copper)),
+        );
+
+        let report = runtime
+            .advance_owned_item_unloaders(&content, 6.0 / 60.0)
+            .unwrap();
+        assert_eq!(report.selected_items, 1);
+        assert_eq!(report.moved_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 2);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(lead), 2);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 0);
+        assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_item_unloader_round_robins_unconfigured_items() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("unloader").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let container_tile = point2_pack(3, 4);
+        let unloader_tile = point2_pack(5, 4);
+        let item_void_tile = point2_pack(6, 4);
+        let mut container_building =
+            BuildingComp::new(container_tile, container_def.base().clone(), TeamId(6));
+        container_building.items.as_mut().unwrap().add(copper, 1);
+        container_building.items.as_mut().unwrap().add(lead, 1);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(container_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(item_void_building);
+
+        let first = runtime
+            .advance_owned_item_unloaders(&content, 6.0 / 60.0)
+            .unwrap();
+        assert_eq!(first.moved_items, 1);
+        let first_item = *runtime
+            .item_unloader_rotations
+            .get(&unloader_tile)
+            .expect("unloader should record first rotated item");
+        assert!(first_item == copper || first_item == lead);
+        let second_item = if first_item == copper { lead } else { copper };
+        assert_eq!(
+            runtime.buildings[0].items.as_ref().unwrap().get(first_item),
+            0
+        );
+        assert_eq!(
+            runtime.buildings[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(second_item),
+            1
+        );
+
+        let second = runtime
+            .advance_owned_item_unloaders(&content, 6.0 / 60.0)
+            .unwrap();
+        assert_eq!(second.moved_items, 1);
+        assert_eq!(
+            runtime.item_unloader_rotations.get(&unloader_tile),
+            Some(&second_item)
+        );
+        assert_eq!(
+            runtime.buildings[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(second_item),
+            0
+        );
     }
 
     #[test]
