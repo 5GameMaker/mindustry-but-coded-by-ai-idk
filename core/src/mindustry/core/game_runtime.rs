@@ -1261,6 +1261,23 @@ pub enum GameRuntimeDistributionBlockState {
     Unloader(Option<ContentId>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GameRuntimeItemRouterState {
+    pub last_item: Option<ContentId>,
+    pub last_input: Option<i32>,
+    pub time: f32,
+}
+
+impl Default for GameRuntimeItemRouterState {
+    fn default() -> Self {
+        Self {
+            last_item: None,
+            last_input: None,
+            time: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeStorageBlockState {
     Core(CoreBuildState),
@@ -1399,6 +1416,16 @@ pub struct GameRuntimePayloadConveyorFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeItemRouterFrameReport {
+    pub visited_buildings: usize,
+    pub router_candidates: usize,
+    pub updated_routers: usize,
+    pub attempted_moves: usize,
+    pub moved_items: usize,
+    pub missing_targets: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimePayloadLoaderFrameReport {
     pub visited_buildings: usize,
     pub loader_candidates: usize,
@@ -1418,6 +1445,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub destroyed_instant_payloads: usize,
     pub invalid_payloads: usize,
     pub missing_runtime_states: usize,
+    pub router_forwarded_items: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1562,6 +1590,7 @@ pub struct GameRuntime {
     pub production_runtime_states: BTreeMap<i32, GameRuntimeProductionBlockState>,
     pub crafting_runtime_states: BTreeMap<i32, GameRuntimeCraftingBlockState>,
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
+    pub item_router_runtime_states: BTreeMap<i32, GameRuntimeItemRouterState>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
@@ -1592,6 +1621,7 @@ impl GameRuntime {
             production_runtime_states: BTreeMap::new(),
             crafting_runtime_states: BTreeMap::new(),
             distribution_runtime_states: BTreeMap::new(),
+            item_router_runtime_states: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
@@ -2014,6 +2044,7 @@ impl GameRuntime {
         self.production_runtime_states.remove(&removed.tile_pos);
         self.crafting_runtime_states.remove(&removed.tile_pos);
         self.distribution_runtime_states.remove(&removed.tile_pos);
+        self.item_router_runtime_states.remove(&removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -3609,6 +3640,7 @@ impl GameRuntime {
         self.production_runtime_states.clear();
         self.crafting_runtime_states.clear();
         self.distribution_runtime_states.clear();
+        self.item_router_runtime_states.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -4748,6 +4780,9 @@ impl GameRuntime {
             report.dumped_items +=
                 self.dump_accumulated_items_from_unloader(content, tile_pos, offload_speed, delta);
         }
+        report.router_forwarded_items += self
+            .advance_owned_item_routers_ticks(content, frame_delta)
+            .moved_items;
 
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
             if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
@@ -4972,6 +5007,13 @@ impl GameRuntime {
                 item_id,
             );
         }
+        let target_is_router = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::Router
+        );
+        let source_tile_pos = self.buildings[source_index].tile_pos;
+        let target_tile_pos = self.buildings[target_index].tile_pos;
 
         let (source, target) = if source_index < target_index {
             let (left, right) = self.buildings.split_at_mut(target_index);
@@ -5001,6 +5043,9 @@ impl GameRuntime {
         }
         source_items.remove(item_id, 1);
         target_items.add(item_id, 1);
+        if target_is_router {
+            self.note_item_router_received(target_tile_pos, item_id, source_tile_pos);
+        }
         true
     }
 
@@ -5045,6 +5090,13 @@ impl GameRuntime {
         if !target_accepts_simple_items {
             return false;
         }
+        let target_is_router = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::Router
+        );
+        let instant_tile_pos = self.buildings[instant_index].tile_pos;
+        let target_tile_pos = self.buildings[target_index].tile_pos;
 
         if source_index == target_index
             || source_index >= self.buildings.len()
@@ -5077,6 +5129,9 @@ impl GameRuntime {
                 return false;
             }
             target_items.add(item_id, 1);
+        }
+        if target_is_router {
+            self.note_item_router_received(target_tile_pos, item_id, instant_tile_pos);
         }
 
         if let Some(next_rotation_bits) = next_rotation_bits {
@@ -5243,6 +5298,21 @@ impl GameRuntime {
             })
     }
 
+    fn note_item_router_received(
+        &mut self,
+        router_tile_pos: i32,
+        item_id: ContentId,
+        source_tile_pos: i32,
+    ) {
+        let state = self
+            .item_router_runtime_states
+            .entry(router_tile_pos)
+            .or_default();
+        state.last_item = Some(item_id);
+        state.last_input = Some(source_tile_pos);
+        state.time = 0.0;
+    }
+
     fn neighbor_building_index(&self, center_index: usize, direction: i32) -> Option<usize> {
         let center = self.buildings.get(center_index)?;
         let (dx, dy) = autotiler_direction(direction);
@@ -5253,6 +5323,185 @@ impl GameRuntime {
         self.buildings
             .iter()
             .position(|building| building.tile_pos == target_ref.tile_pos)
+    }
+
+    pub fn advance_owned_item_routers(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeItemRouterFrameReport> {
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        let frame_delta = advanced.delta_ticks as f32;
+        Some(self.advance_owned_item_routers_ticks(content, frame_delta))
+    }
+
+    fn advance_owned_item_routers_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeItemRouterFrameReport {
+        let mut report = GameRuntimeItemRouterFrameReport::default();
+        let router_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                report.visited_buildings += 1;
+                match content.block(building.block.id) {
+                    Some(BlockDef::Distribution(distribution))
+                        if distribution.kind == DistributionBlockKind::Router =>
+                    {
+                        report.router_candidates += 1;
+                        Some(index)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for index in router_indices {
+            let Some(BlockDef::Distribution(router_block)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+            if !self.buildings[index].enabled {
+                continue;
+            }
+
+            let tile_pos = self.buildings[index].tile_pos;
+            let mut state = self
+                .item_router_runtime_states
+                .get(&tile_pos)
+                .copied()
+                .unwrap_or_default();
+            if state.last_item.is_none() {
+                state.last_item = self.buildings[index]
+                    .items
+                    .as_ref()
+                    .and_then(|items| items.each().map(|(item, _)| item).next());
+            }
+            let Some(item_id) = state.last_item else {
+                self.item_router_runtime_states.insert(tile_pos, state);
+                continue;
+            };
+            if !self.buildings[index]
+                .items
+                .as_ref()
+                .is_some_and(|items| items.get(item_id) > 0)
+            {
+                state.last_item = None;
+                state.time = 0.0;
+                self.item_router_runtime_states.insert(tile_pos, state);
+                continue;
+            }
+
+            state.time += if router_block.speed > 0.0 {
+                frame_delta / router_block.speed
+            } else {
+                frame_delta
+            };
+
+            let Some((target_index, _)) =
+                self.item_router_target(content, index, state.last_input, item_id, false)
+            else {
+                report.missing_targets += 1;
+                self.item_router_runtime_states.insert(tile_pos, state);
+                continue;
+            };
+
+            if state.time >= 1.0 || !self.item_router_target_delays(content, target_index) {
+                report.attempted_moves += 1;
+                let Some((target_index, next_rotation)) =
+                    self.item_router_target(content, index, state.last_input, item_id, true)
+                else {
+                    report.missing_targets += 1;
+                    self.item_router_runtime_states.insert(tile_pos, state);
+                    continue;
+                };
+                if self.dump_item_to_target(content, index, target_index, item_id) {
+                    if let Some(next_rotation) = next_rotation {
+                        self.buildings[index].rotation = next_rotation;
+                    }
+                    state.last_item = None;
+                    state.last_input = None;
+                    state.time = 0.0;
+                    report.moved_items += 1;
+                }
+            }
+
+            report.updated_routers += 1;
+            self.item_router_runtime_states.insert(tile_pos, state);
+        }
+
+        report
+    }
+
+    fn item_router_target(
+        &self,
+        content: &ContentLoader,
+        router_index: usize,
+        last_input: Option<i32>,
+        item_id: ContentId,
+        rotate: bool,
+    ) -> Option<(usize, Option<i32>)> {
+        let router = self.buildings.get(router_index)?;
+        let prox_len = router.proximity.len();
+        if prox_len == 0 {
+            return None;
+        }
+        let mut next_rotation = router.rotation.rem_euclid(prox_len as i32);
+        let start_rotation = next_rotation as usize;
+        let source_is_overflow_gate = last_input
+            .and_then(|tile_pos| {
+                self.buildings
+                    .iter()
+                    .find(|building| building.tile_pos == tile_pos)
+            })
+            .and_then(|building| content.block(building.block.id))
+            .is_some_and(|block| match block {
+                BlockDef::Distribution(distribution) => {
+                    distribution.kind == DistributionBlockKind::OverflowGate
+                }
+                _ => false,
+            });
+
+        for attempt in 0..prox_len {
+            let candidate_ref = router.proximity[(attempt + start_rotation) % prox_len];
+            if rotate {
+                next_rotation = (next_rotation + 1).rem_euclid(prox_len as i32);
+            }
+            if source_is_overflow_gate && Some(candidate_ref.tile_pos) == last_input {
+                continue;
+            }
+            let Some(candidate_index) = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == candidate_ref.tile_pos)
+            else {
+                continue;
+            };
+            if self.dump_target_accepts_item(content, router_index, candidate_index, item_id) {
+                return Some((
+                    candidate_index,
+                    (rotate && next_rotation != router.rotation).then_some(next_rotation),
+                ));
+            }
+        }
+
+        None
+    }
+
+    fn item_router_target_delays(&self, content: &ContentLoader, target_index: usize) -> bool {
+        self.building_instant_transfer(content, target_index)
+            || matches!(
+                content.block(self.buildings[target_index].block.id),
+                Some(BlockDef::Distribution(distribution))
+                    if distribution.kind == DistributionBlockKind::Router
+            )
     }
 
     fn dump_item_to_duct(
@@ -12762,6 +13011,65 @@ mod tests {
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 7);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 1);
+    }
+
+    #[test]
+    fn game_runtime_item_router_forwards_unloaded_item_to_real_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let router_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let item_void_tile = point2_pack(point2_x(router_tile) as i32 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let router_building = BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(router_building);
+        runtime.add_building(item_void_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(unload_report.dumped_items, 1);
+        assert_eq!(unload_report.router_forwarded_items, 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(
+            runtime.item_router_runtime_states.get(&router_tile),
+            Some(&GameRuntimeItemRouterState::default())
+        );
+        assert!(runtime.buildings[2].items.is_none());
     }
 
     #[test]
