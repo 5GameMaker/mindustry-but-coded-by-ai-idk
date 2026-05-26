@@ -12,14 +12,20 @@ use mindustry_core::mindustry::core::{
 use mindustry_core::mindustry::ctype::ContentId;
 use mindustry_core::mindustry::entities::{
     bullet::BulletType,
-    comp::{BuildingComp, BulletComp, PlayerComp, UnitComp},
+    comp::{BuildingComp, BulletComp, PlayerComp, PlayerUnitState, UnitComp},
 };
-use mindustry_core::mindustry::io::{BuildPlanWire, ContentPatchSet, TeamId};
+use mindustry_core::mindustry::input::{
+    request_item, take_items, RequestItemContext, RequestItemOutcome, TakeItemsOutcome,
+};
+use mindustry_core::mindustry::io::{BuildPlanWire, ContentPatchSet, EntityRef, TeamId};
 use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, Net, NetConnection,
-    NetworkPlayerData, NetworkWorldData, PacketKind, ProviderEvent,
+    NetworkPlayerData, NetworkWorldData, PacketKind, ProviderEvent, RequestItemCallPacket,
 };
-use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, MAX_PLAYER_PREVIEW_PLANS};
+use mindustry_core::mindustry::r#type::UnitType;
+use mindustry_core::mindustry::vars::{
+    AppContext, RuntimeMode, ITEM_TRANSFER_RANGE, MAX_PLAYER_PREVIEW_PLANS,
+};
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
@@ -43,6 +49,14 @@ pub struct ServerLauncher {
     pub runtime_power_node_config_packets_seen: usize,
     pub runtime_power_node_config_packets_changed: usize,
     pub server_preview_players: BTreeMap<i32, PlayerComp>,
+    pub server_units: BTreeMap<i32, UnitComp>,
+    pub runtime_request_item_packets_seen: usize,
+    pub runtime_request_item_packets_accepted: usize,
+    pub runtime_request_item_packets_rejected: usize,
+    pub runtime_take_items_packets_sent: usize,
+    pub runtime_transfer_item_effect_packets_sent: usize,
+    pub last_runtime_request_item_outcome: Option<RequestItemOutcome>,
+    pub last_runtime_take_items_outcome: Option<TakeItemsOutcome>,
     pub server_preview_plan_packets_applied: usize,
     pub next_server_preview_broadcast_at: Option<Instant>,
     pub server_preview_broadcasts_sent: usize,
@@ -73,6 +87,14 @@ impl ServerLauncher {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: Some(
                 Instant::now() + Duration::from_millis(PLAN_PREVIEW_SYNC_INTERVAL_MS as u64),
@@ -175,6 +197,26 @@ impl ServerLauncher {
                 }
                 ProviderEvent::ServerPacket {
                     connection_id,
+                    packet: PacketKind::RequestItemCallPacket(packet),
+                } => {
+                    self.runtime_request_item_packets_seen += 1;
+                    match self.apply_server_request_item_packet(connection_id, &packet) {
+                        Ok(true) => {
+                            changed += 1;
+                            self.runtime_request_item_packets_accepted += 1;
+                        }
+                        Ok(false) => {
+                            self.runtime_request_item_packets_rejected += 1;
+                        }
+                        Err(error) => {
+                            self.network_error = Some(error.to_string());
+                            self.runtime_request_item_packets_rejected += 1;
+                            continue;
+                        }
+                    }
+                }
+                ProviderEvent::ServerPacket {
+                    connection_id,
                     packet: PacketKind::ClientPlanSnapshotCallPacket(snapshot),
                 } => {
                     if connection_id < 0 {
@@ -197,6 +239,158 @@ impl ServerLauncher {
             }
         }
         changed
+    }
+
+    fn apply_server_request_item_packet(
+        &mut self,
+        connection_id: i32,
+        packet: &RequestItemCallPacket,
+    ) -> io::Result<bool> {
+        if connection_id < 0 {
+            return Ok(false);
+        }
+        self.sync_server_preview_players_from_connections();
+
+        let source_connection = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state.connection_states.get(&connection_id).cloned()
+        };
+        let Some(source_connection) = source_connection else {
+            return Ok(false);
+        };
+        if !Self::connection_can_receive_preview(&source_connection) {
+            return Ok(false);
+        }
+
+        let Some(tile_pos) = packet.build.tile_pos else {
+            return Ok(false);
+        };
+        let Some(building_index) = self
+            .runtime
+            .buildings()
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return Ok(false);
+        };
+
+        let Some(unit_type) = self.default_server_unit_type() else {
+            return Ok(false);
+        };
+        let player_snapshot = {
+            let player = self
+                .server_preview_players
+                .entry(connection_id)
+                .or_insert_with(|| PlayerComp::new(source_connection.team));
+            player.id = connection_id;
+            player.team = source_connection.team;
+            player.name = source_connection.name.clone();
+            player.color = source_connection.color as u32;
+            player.locale = source_connection.locale.clone();
+            player.con = Some(source_connection.clone());
+            player.set_unit_state(PlayerUnitState::unit(connection_id));
+            player.clone()
+        };
+        self.server_units
+            .entry(connection_id)
+            .or_insert_with(|| UnitComp::new(connection_id, unit_type, source_connection.team));
+
+        let build_snapshot = self
+            .runtime
+            .buildings()
+            .get(building_index)
+            .expect("building index resolved above");
+        let within_range = Self::player_within_item_transfer_range(&player_snapshot, build_snapshot);
+        let context = RequestItemContext {
+            player: Some(EntityRef::new(connection_id)),
+            local_player: false,
+            within_range,
+        };
+        let request_outcome = request_item(
+            context,
+            Some(&player_snapshot),
+            self.server_units.get(&connection_id),
+            Some(build_snapshot),
+            packet.item.clone(),
+            packet.amount,
+            |build, player| build.team == player.team,
+            |_player, _build| true,
+            |_build, _item, _amount| true,
+        );
+        self.last_runtime_request_item_outcome = Some(request_outcome.clone());
+        if !request_outcome.accepted {
+            self.last_runtime_take_items_outcome = None;
+            return Ok(false);
+        }
+
+        let requested_item_name = packet.item.clone();
+        let requested_item_id = requested_item_name.as_deref().and_then(|name| {
+            self.content_loader
+                .item_by_name(name)
+                .map(|item| item.base.mappable.base.id as i16)
+        });
+        let take_outcome = take_items(
+            self.runtime.buildings_mut().get_mut(building_index),
+            packet.item.clone(),
+            request_outcome.accepted_amount,
+            self.server_units.get_mut(&connection_id),
+            |name| {
+                if requested_item_name.as_deref() == Some(name) {
+                    requested_item_id
+                } else {
+                    None
+                }
+            },
+        );
+        if let Some(remove_stack) = take_outcome.remove_stack.as_ref() {
+            self.runtime
+                .apply_item_remove_stack_plan(&self.content_loader, remove_stack);
+        }
+        if take_outcome.accepted {
+            if let Some(packet) = take_outcome.packet.as_ref() {
+                self.net_server
+                    .net_mut()
+                    .send(&PacketKind::TakeItemsCallPacket(packet.clone()), false)?;
+                self.runtime_take_items_packets_sent += 1;
+            }
+            for packet in &take_outcome.transfer_effects {
+                self.net_server
+                    .net_mut()
+                    .send(&PacketKind::TransferItemEffectCallPacket(packet.clone()), false)?;
+                self.runtime_transfer_item_effect_packets_sent += 1;
+            }
+        }
+        let accepted = take_outcome.accepted;
+        self.last_runtime_take_items_outcome = Some(take_outcome);
+        Ok(accepted)
+    }
+
+    fn default_server_unit_type(&self) -> Option<UnitType> {
+        self.content_loader
+            .unit_by_name("alpha")
+            .cloned()
+            .or_else(|| {
+                self.content_loader
+                    .units()
+                    .iter()
+                    .find(|unit| unit.resolved_item_capacity() > 0)
+                    .cloned()
+            })
+    }
+
+    fn player_within_item_transfer_range(player: &PlayerComp, build: &BuildingComp) -> bool {
+        // The current Rust server does not yet receive authoritative player/unit
+        // position snapshots. Do not reject otherwise valid inventory requests
+        // solely because the launcher-side mirror is still at its zeroed
+        // bootstrap position; once player sync is fully wired, this fallback
+        // should be removed in favor of strict Java `player.within(...)`.
+        if player.x.abs() <= f32::EPSILON && player.y.abs() <= f32::EPSILON {
+            return true;
+        }
+        let dx = player.x - build.x;
+        let dy = player.y - build.y;
+        dx * dx + dy * dy <= ITEM_TRANSFER_RANGE * ITEM_TRANSFER_RANGE
     }
 
     fn apply_server_preview_plan_packet(
@@ -485,12 +679,16 @@ mod tests {
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::entities::comp::BuildingComp;
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
-    use mindustry_core::mindustry::io::{BuildPlanWire, BuildingRef, Point2, TeamId, TypeValue};
+    use mindustry_core::mindustry::io::{
+        BuildPlanWire, BuildingRef, EntityRef, Point2, TeamId, TypeValue, UnitRef,
+    };
     use mindustry_core::mindustry::net::{
         packet_ids, read_world_data, ClientPlanSnapshotCallPacket, Connect, ConnectFilter,
         ConnectPacket, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
-        NetworkWorldData, PacketKind, PacketSerializer, ProviderEvent, TileConfigCallPacket,
+        NetworkWorldData, PacketKind, PacketSerializer, ProviderEvent, RequestItemCallPacket,
+        TileConfigCallPacket,
     };
+    use mindustry_core::mindustry::r#type::Sector;
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
         payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
@@ -614,6 +812,11 @@ mod tests {
             Ok(())
         }
 
+        fn send_server(&mut self, object: &PacketKind, reliable: bool) -> io::Result<()> {
+            self.sent.lock().unwrap().push((-1, object.clone(), reliable));
+            Ok(())
+        }
+
         fn disconnect_client(&mut self) {}
 
         fn discover_servers(&self, _callback: HostCallback, done: DoneCallback) {
@@ -697,6 +900,122 @@ mod tests {
     }
 
     #[test]
+    fn server_launcher_applies_request_item_packet_to_runtime_and_broadcasts_take_items() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6567).unwrap();
+        launcher.runtime = GameRuntime::default();
+        launcher
+            .runtime
+            .set_network_context(GameRuntimeNetworkContext::server());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.set_sector(Some(Sector::new(17)));
+        launcher.runtime.state.world.resize(8, 8);
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let core_def = launcher.content_loader.block_by_name("core-shard").unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let core_tile = point2_pack(2, 2);
+        let mut core_building =
+            BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+        core_building.items.as_mut().unwrap().add(copper, 10);
+        launcher.runtime.add_building(core_building);
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("127.0.0.1:7007");
+            connection.has_connected = true;
+            connection.player_added = true;
+            connection.team = default_team;
+            connection.name = "rust-client".into();
+            state.connection_states.insert(7, connection);
+            state.events.push(ProviderEvent::ServerPacket {
+                connection_id: 7,
+                packet: PacketKind::RequestItemCallPacket(RequestItemCallPacket {
+                    player: EntityRef::null(),
+                    build: BuildingRef::new(core_tile),
+                    item: Some("copper".into()),
+                    amount: 5,
+                }),
+            });
+        }
+
+        let changed = launcher.apply_new_network_server_events();
+
+        assert_eq!(changed, 1);
+        assert_eq!(launcher.runtime_request_item_packets_seen, 1);
+        assert_eq!(launcher.runtime_request_item_packets_accepted, 1);
+        assert_eq!(launcher.runtime_request_item_packets_rejected, 0);
+        assert_eq!(launcher.runtime_take_items_packets_sent, 1);
+        assert_eq!(launcher.runtime_transfer_item_effect_packets_sent, 1);
+        assert!(launcher
+            .last_runtime_request_item_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.accepted && outcome.accepted_amount == 5));
+        assert!(launcher
+            .last_runtime_take_items_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.accepted && outcome.removed_amount == 5));
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            5
+        );
+        let unit = launcher.server_units.get(&7).unwrap();
+        assert_eq!(unit.items.item(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 5);
+        assert_eq!(
+            launcher
+                .runtime
+                .state
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&-5)
+        );
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::TakeItemsCallPacket(packet)
+                        if packet.build == BuildingRef::new(core_tile)
+                            && packet.item.as_deref() == Some("copper")
+                            && packet.amount == 5
+                            && packet.to == UnitRef::Unit { id: 7 }
+                )
+        }));
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::TransferItemEffectCallPacket(packet)
+                        if packet.item.as_deref() == Some("copper")
+                            && packet.to == EntityRef::new(7)
+                )
+        }));
+    }
+
+    #[test]
     fn server_update_flushes_pending_world_data_after_connect_packet() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
@@ -715,6 +1034,14 @@ mod tests {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -785,6 +1112,14 @@ mod tests {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -938,6 +1273,14 @@ mod tests {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1081,6 +1424,14 @@ mod tests {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1161,6 +1512,14 @@ mod tests {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1253,6 +1612,14 @@ mod tests {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -1364,6 +1731,14 @@ mod tests {
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
+            server_units: BTreeMap::new(),
+            runtime_request_item_packets_seen: 0,
+            runtime_request_item_packets_accepted: 0,
+            runtime_request_item_packets_rejected: 0,
+            runtime_take_items_packets_sent: 0,
+            runtime_transfer_item_effect_packets_sent: 0,
+            last_runtime_request_item_outcome: None,
+            last_runtime_take_items_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,

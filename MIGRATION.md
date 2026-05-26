@@ -3205,3 +3205,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unloader_and_mass_driver_keep_upstream_subset`
   - `cargo check --workspace`
 - 仍未完成：当前仍只是 runtime event sidecar，还没有在 desktop/server/client 真实播放 effect/sound/shake，也未把这些事件编码进联机协议或 ECS effect entity；后续应把侧车消费到渲染/音频/网络快照链路。
+
+### 12.88 Server RequestItem → TakeItems 权威 runtime 桥接
+
+- 2026-05-27：把客户端发来的 `RequestItemCallPacket` 接入 `ServerLauncher::apply_new_network_server_events()`，形成 `RequestItemCallPacket -> input_handler::request_item(...) -> input_handler::take_items(...) -> GameRuntime::apply_item_remove_stack_plan(...) -> TakeItems/TransferItemEffect outbound packet` 的 server 权威闭环。
+- Java 依据：
+  - `InputHandler.requestItem(Player player, Building build, Item item, int amount)` 校验可交互、距离、死亡、数量、`Units.canInteract(...)` 与 admin action 后调用 `Call.takeItems(...)`；
+  - `InputHandler.takeItems(Building build, Item item, int amount, Unit to)` 执行 `build.removeStack(...)`、`to.addItem(...)` 并按移除数量触发 `transferItemEffect(...)`；
+  - `TakeItemsCallPacket` 是 server→client 的 `@Remote(called = Loc.server, unreliable = true)` 出站效果，不应作为普通客户端权威请求直接信任。
+- Rust 新增/变化：
+  - `ServerLauncher` 新增 `server_units: BTreeMap<i32, UnitComp>`，按连接 id 保存 server-side player unit item mirror，避免 `take_items(...)` 的 `to.addItem(...)` 只作用在临时对象上；
+  - `ServerLauncher` 新增 RequestItem/TakeItems 统计与 last-outcome 字段，方便测试与后续调试；
+  - `apply_new_network_server_events()` 新增 `PacketKind::RequestItemCallPacket` 分支，使用连接状态而不是信任 client payload 里的 `player` 字段；
+  - 在 player/unit 位置同步尚未接通前，server-side player mirror 若仍处于零位 bootstrap，会暂时放行距离检查，避免所有远离地图原点的合法 inventory 请求被误拒；
+  - 成功取物后，建筑库存会在 `GameRuntime` 中扣减，unit mirror 会加物，`remove_stack` 计划会继续更新 campaign core item delta，并通过 `Net::send(..., false)` 广播 `TakeItemsCallPacket` 和 `TransferItemEffectCallPacket`。
+- 验证：
+  - `cargo test -p mindustry-server`
+  - `cargo test -p mindustry-core take_items_`
+  - `cargo test -p mindustry-core game_runtime_item_remove_stack_plan_updates_campaign_core_delta_for_core_and_linked_storage`
+  - `cargo check --workspace`
+- 仍未完成：server 端 player/unit 仍是 launcher 侧 mirror，尚未接入真实单位 entity snapshot/出生/死亡/切换流程；`Units.canInteract(...)` 和 admin action 目前用保守占位闭包通过，距离校验在缺少位置同步时有 bootstrap fallback，后续必须接入完整权限、严格距离、单位生命周期与 WithdrawEvent/统计广播。`TransferInventory` 是下一条最自然的对称闭环。
