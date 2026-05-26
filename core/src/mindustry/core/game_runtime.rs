@@ -2699,6 +2699,92 @@ impl GameRuntime {
             event_tile_pos,
             item,
         });
+        if let Some(core_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == event_tile_pos)
+        {
+            self.note_core_item_taken_side_effects(content, core_index, item, 1);
+        }
+    }
+
+    fn building_is_core(&self, content: &ContentLoader, building_index: usize) -> bool {
+        self.buildings.get(building_index).is_some_and(|building| {
+            matches!(
+                content.block(building.block.id),
+                Some(BlockDef::Storage(storage)) if storage.kind == StorageBlockKind::Core
+            )
+        })
+    }
+
+    fn item_name_for_side_effect(content: &ContentLoader, item: ContentId) -> String {
+        content
+            .item(item)
+            .map(|item| item.name().to_string())
+            .unwrap_or_else(|| item.to_string())
+    }
+
+    fn note_campaign_core_item_delta(&mut self, core_index: usize, item_name: &str, amount: i32) {
+        let Some(core) = self.buildings.get(core_index) else {
+            return;
+        };
+        if core.team.0 as i32 != self.state.rules.default_team || !self.state.is_campaign() {
+            return;
+        }
+        if let Some(sector) = self.state.rules.sector.as_mut() {
+            sector.info.handle_core_item(item_name.to_string(), amount);
+        }
+        if let Some(sector) = self.state.sector.as_mut() {
+            sector.info.handle_core_item(item_name.to_string(), amount);
+        }
+    }
+
+    fn note_core_handle_item_side_effects(
+        &mut self,
+        content: &ContentLoader,
+        core_index: usize,
+        item: ContentId,
+        amount: i32,
+    ) {
+        if !self.building_is_core(content, core_index) {
+            return;
+        }
+        let Some(core) = self.buildings.get(core_index) else {
+            return;
+        };
+        let item_name = Self::item_name_for_side_effect(content, item);
+        if core.team.0 as i32 == self.state.rules.default_team {
+            self.state.stats.add_core_item(item_name.clone(), amount);
+        }
+        self.note_campaign_core_item_delta(core_index, &item_name, amount);
+    }
+
+    fn note_core_item_taken_side_effects(
+        &mut self,
+        content: &ContentLoader,
+        core_index: usize,
+        item: ContentId,
+        amount: i32,
+    ) {
+        if !self.building_is_core(content, core_index) {
+            return;
+        }
+        let item_name = Self::item_name_for_side_effect(content, item);
+        self.note_campaign_core_item_delta(core_index, &item_name, -amount);
+    }
+
+    fn note_linked_storage_remove_stack_side_effects(
+        &mut self,
+        content: &ContentLoader,
+        storage_index: usize,
+        item: ContentId,
+        amount: i32,
+    ) {
+        let Some(core_index) = self.linked_core_index_for_storage(content, storage_index) else {
+            return;
+        };
+        let item_name = Self::item_name_for_side_effect(content, item);
+        self.note_campaign_core_item_delta(core_index, &item_name, -amount);
     }
 
     pub fn clear_buildings(&mut self) {
@@ -5686,6 +5772,7 @@ impl GameRuntime {
             return false;
         }
         let target_max_accepted = self.maximum_accepted_for_item_owner(target_item_owner_index);
+        let target_item_owner_is_core = self.building_is_core(content, target_item_owner_index);
 
         let (source, target) = if source_index < target_item_owner_index {
             let (left, right) = self.buildings.split_at_mut(target_item_owner_index);
@@ -5720,6 +5807,9 @@ impl GameRuntime {
         }
         source_items.remove(item_id, 1);
         target_items.add(item_id, 1);
+        if target_item_owner_is_core {
+            self.note_core_handle_item_side_effects(content, target_item_owner_index, item_id, 1);
+        }
         if target_is_router {
             self.note_item_router_received(target_tile_pos, item_id, source_tile_pos);
         }
@@ -8632,6 +8722,7 @@ impl GameRuntime {
         if let Some(source_items) = self.buildings[from_item_owner_index].items.as_mut() {
             source_items.remove(item_id, 1);
         }
+        self.note_linked_storage_remove_stack_side_effects(content, from_index, item_id, 1);
         true
     }
 
@@ -12003,7 +12094,7 @@ mod tests {
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
             Vec2 as IoVec2,
         },
-        r#type::{PayloadKey, PayloadSeq},
+        r#type::{PayloadKey, PayloadSeq, Sector},
         world::{
             blocks::campaign::{
                 write_accelerator_state, write_landing_pad_state, write_launch_pad_state,
@@ -18525,6 +18616,124 @@ mod tests {
             core_def.base().item_capacity + 1
         );
         assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 0);
+    }
+
+    #[test]
+    fn game_runtime_core_handle_item_updates_campaign_sector_delta() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let default_team = TeamId(GameState::default().rules.default_team as u8);
+        let source_tile = point2_pack(1, 1);
+        let core_tile = point2_pack(3, 6);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), default_team);
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set_sector(Some(Sector::new(7)));
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(source_building);
+        runtime.add_building(core_building);
+        runtime.refresh_owned_storage_core_links(&content);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+
+        assert_eq!(runtime.state.stats.get_core_item("copper"), 1);
+        assert_eq!(
+            runtime
+                .state
+                .rules
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&1)
+        );
+        assert_eq!(
+            runtime
+                .state
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn game_runtime_linked_storage_unloader_updates_campaign_core_delta() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("unloader").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let default_team = TeamId(GameState::default().rules.default_team as u8);
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let unloader_tile = point2_pack(7, 6);
+        let item_void_tile = point2_pack(8, 6);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+        core_building.items.as_mut().unwrap().add(copper, 1);
+        let linked_storage_building = BuildingComp::new(
+            linked_storage_tile,
+            container_def.base().clone(),
+            default_team,
+        );
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), default_team);
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), default_team);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.set_sector(Some(Sector::new(8)));
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(item_void_building);
+        runtime.distribution_runtime_states.insert(
+            unloader_tile,
+            GameRuntimeDistributionBlockState::Unloader(Some(copper)),
+        );
+
+        let report = runtime
+            .advance_owned_item_unloaders(&content, 6.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.moved_items, 1);
+        assert_eq!(
+            runtime
+                .state
+                .rules
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&-1)
+        );
     }
 
     #[test]
