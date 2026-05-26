@@ -129,12 +129,12 @@ use crate::mindustry::{
         SeparatorState,
     },
     world::blocks::sandbox::{
-        read_item_source_config, read_liquid_source_config, write_item_source_config,
-        write_liquid_source_config, ItemSourceState, LiquidSourceState,
+        item_void_accept_item, read_item_source_config, read_liquid_source_config,
+        write_item_source_config, write_liquid_source_config, ItemSourceState, LiquidSourceState,
     },
     world::blocks::storage::{
-        read_core_state, read_unloader_sort_item, write_core_state, write_unloader_sort_item,
-        CoreBuildState,
+        core_accept_item, read_core_state, read_unloader_sort_item, storage_accept_item,
+        write_core_state, write_unloader_sort_item, CoreBuildState,
     },
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
@@ -1407,6 +1407,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub loaded_liquid_events: usize,
     pub charged_batteries: usize,
     pub unloaded_items: usize,
+    pub dumped_items: usize,
     pub unloaded_liquid_events: usize,
     pub drained_batteries: usize,
     pub destroyed_instant_payloads: usize,
@@ -4573,6 +4574,7 @@ impl GameRuntime {
         let frame_delta = advanced.delta_ticks as f32;
         let mut report = GameRuntimePayloadLoaderFrameReport::default();
         let mut pending_payload_moves = Vec::new();
+        let mut pending_unloader_item_dumps = Vec::new();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, enabled, efficiency, rotation, rotdeg, time_scale) = {
@@ -4671,6 +4673,11 @@ impl GameRuntime {
                 }
                 PayloadLoaderBlockKind::Unloader => {
                     loader.last_output_power = 0.0;
+                    pending_unloader_item_dumps.push((
+                        tile_pos,
+                        loader_def.offload_speed,
+                        frame_delta * time_scale,
+                    ));
                     if payload_unloader_should_export(loader) {
                         if Self::payload_ref_block_instant_deconstruct(
                             content,
@@ -4725,6 +4732,11 @@ impl GameRuntime {
             report.updated_loaders += 1;
         }
 
+        for (tile_pos, offload_speed, delta) in pending_unloader_item_dumps {
+            report.dumped_items +=
+                self.dump_accumulated_items_from_unloader(content, tile_pos, offload_speed, delta);
+        }
+
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
             if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
                 report.transferred_payloads += 1;
@@ -4732,6 +4744,199 @@ impl GameRuntime {
         }
 
         Some(report)
+    }
+
+    fn dump_accumulated_items_from_unloader(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        offload_speed: i32,
+        delta: f32,
+    ) -> usize {
+        let Some(source_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return 0;
+        };
+        let repetitions = offload_speed.max(0) as usize;
+        if repetitions == 0 {
+            return 0;
+        }
+
+        let mut dumped = 0;
+        for _ in 0..repetitions {
+            let attempts = {
+                let Some(source) = self.buildings.get_mut(source_index) else {
+                    break;
+                };
+                source.dump_accum += delta.max(0.0);
+                let mut attempts = 0usize;
+                while source.dump_accum >= 1.0 {
+                    source.dump_accum -= 1.0;
+                    attempts += 1;
+                }
+                attempts
+            };
+
+            for _ in 0..attempts {
+                if self.dump_one_item_from_building(content, source_index) {
+                    dumped += 1;
+                }
+            }
+        }
+        dumped
+    }
+
+    fn dump_one_item_from_building(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+    ) -> bool {
+        if source_index >= self.buildings.len() {
+            return false;
+        }
+        let (proximity, start_dump, item_ids) = {
+            let source = &self.buildings[source_index];
+            let Some(items) = source.items.as_ref() else {
+                return false;
+            };
+            if !source.block.has_items || items.empty() || source.proximity.is_empty() {
+                return false;
+            }
+            let mut item_ids: Vec<_> = content
+                .items()
+                .iter()
+                .map(|item| item.base.mappable.base.id)
+                .filter(|item_id| items.get(*item_id) > 0)
+                .collect();
+            if item_ids.is_empty() {
+                item_ids.extend(items.each().map(|(item_id, _)| item_id));
+            }
+            (source.proximity.clone(), source.cdump, item_ids)
+        };
+        let prox_len = proximity.len();
+        if prox_len == 0 || item_ids.is_empty() {
+            return false;
+        }
+
+        for attempt in 0..prox_len {
+            let target_ref = proximity[(start_dump + attempt) % prox_len];
+            let target_index = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == target_ref.tile_pos);
+            if let Some(target_index) = target_index {
+                for item_id in &item_ids {
+                    if self.dump_item_to_target(content, source_index, target_index, *item_id) {
+                        self.increment_building_dump(source_index, prox_len);
+                        return true;
+                    }
+                }
+            }
+            self.increment_building_dump(source_index, prox_len);
+        }
+
+        false
+    }
+
+    fn increment_building_dump(&mut self, source_index: usize, prox_len: usize) {
+        if prox_len != 0 {
+            if let Some(source) = self.buildings.get_mut(source_index) {
+                source.cdump = (source.cdump + 1) % prox_len;
+            }
+        }
+    }
+
+    fn dump_item_to_target(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        if source_index == target_index
+            || source_index >= self.buildings.len()
+            || target_index >= self.buildings.len()
+            || !self.dump_target_accepts_item(content, source_index, target_index, item_id)
+        {
+            return false;
+        }
+
+        let target_is_item_void = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::ItemVoid
+        );
+
+        let (source, target) = if source_index < target_index {
+            let (left, right) = self.buildings.split_at_mut(target_index);
+            (&mut left[source_index], &mut right[0])
+        } else {
+            let (left, right) = self.buildings.split_at_mut(source_index);
+            (&mut right[0], &mut left[target_index])
+        };
+
+        let Some(source_items) = source.items.as_mut() else {
+            return false;
+        };
+        if source_items.get(item_id) <= 0 {
+            return false;
+        }
+
+        if target_is_item_void {
+            source_items.remove(item_id, 1);
+            return true;
+        }
+
+        let Some(target_items) = target.items.as_mut() else {
+            return false;
+        };
+        if target_items.get(item_id) >= target.block.item_capacity {
+            return false;
+        }
+        source_items.remove(item_id, 1);
+        target_items.add(item_id, 1);
+        true
+    }
+
+    fn dump_target_accepts_item(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        let (Some(source), Some(target)) = (
+            self.buildings.get(source_index),
+            self.buildings.get(target_index),
+        ) else {
+            return false;
+        };
+        if source.team != target.team {
+            return false;
+        }
+
+        match content.block(target.block.id) {
+            Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::ItemVoid => {
+                item_void_accept_item(target.enabled)
+            }
+            Some(BlockDef::Storage(storage)) => {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                let stored = items.get(item_id);
+                match storage.kind {
+                    StorageBlockKind::Storage => {
+                        storage_accept_item(false, false, stored, target.block.item_capacity)
+                    }
+                    StorageBlockKind::Core => {
+                        core_accept_item(false, stored, target.block.item_capacity)
+                    }
+                }
+            }
+            _ => false,
+        }
     }
 
     fn payload_loader_load_inner_building(
@@ -11558,6 +11763,73 @@ mod tests {
             panic!("payload unloader sidecar should remain present");
         };
         assert!(loader.load_timer.abs() < 0.001);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 2);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_to_adjacent_storage_with_offload_speed() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let container_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let container_building =
+            BuildingComp::new(container_tile, container_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(container_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let waiting_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(waiting_report.unloaded_items, 0);
+        assert_eq!(waiting_report.dumped_items, 0);
+
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 4);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 4);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 4);
+        assert!(runtime.buildings[0].dump_accum.abs() < 0.001);
+        assert_eq!(runtime.buildings[0].cdump, 0);
+
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&unloader_tile)
+        else {
+            panic!("payload unloader sidecar should remain present");
+        };
+        assert_eq!(loader.payload_items_total, 2);
         let (payload_building, _) =
             GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
                 .unwrap();

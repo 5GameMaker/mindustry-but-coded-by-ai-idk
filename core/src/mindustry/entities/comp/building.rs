@@ -142,6 +142,8 @@ pub struct BuildingComp {
     pub power: Option<PowerModule>,
     pub config: Option<TypeValue>,
     pub proximity: Vec<BuildingRef>,
+    pub cdump: usize,
+    pub dump_accum: f32,
 }
 
 impl BuildingComp {
@@ -187,6 +189,8 @@ impl BuildingComp {
             power: block.has_power.then(PowerModule::default),
             config: None,
             proximity: Vec::new(),
+            cdump: 0,
+            dump_accum: 0.0,
         }
     }
 
