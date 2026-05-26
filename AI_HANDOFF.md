@@ -1715,3 +1715,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 给 `Continuous/PayloadAmmo/Generic` turret 补 core/真实联机测试，继续扩大 `TurretBuild.readSync` 覆盖。
   2. 继续 entity snapshot typed runtime，把 raw entity sidecar 接入真实 entity pool/mirror。
+
+---
+
+## 49. 最新闭环记录：Generic/Continuous/PayloadAmmo Turret readSync 保留单测
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：继续扩大 Java `TurretBuild.readSync(...)` 的旧 `rotation/reloadCounter` 保留语义覆盖面，避免只验证 `ItemTurret`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：
+  - `game_runtime_applies_client_generic_turret_snapshot_preserving_rotation_reload_with_content`
+  - `game_runtime_applies_client_continuous_turret_snapshot_preserving_rotation_reload_with_content`
+  - `game_runtime_preserves_payload_ammo_turret_snapshot_rotation_reload_after_reading_payloads`
+- 覆盖说明：
+  - `arc`/Generic(PowerTurret)：真实 content + client BlockSnapshot child-tail dispatcher；
+  - `lustre`/ContinuousTurret：真实 content + `continuous_turret_write_child(...)` tail；
+  - `PayloadAmmoTurret`：当前基础 content 无正式 payload-ammo turret，因此使用自定义 block + payload reader + `preserve_client_turret_sync_fields(...)` 验证保留逻辑。
+- 已跑：
+  - `cargo test -p mindustry-core rotation_reload --lib`
+  - `cargo test -p mindustry-core game_runtime_exports_turret_state_tail_in_network_map_snapshot --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 继续给 `ContinuousLiquidTurret/LiquidTurret/LaserTurret` 补同类 content-level 单测。
+  2. 或转入 entity snapshot typed runtime，把 raw entity sidecar 接入真实 entity pool/mirror。

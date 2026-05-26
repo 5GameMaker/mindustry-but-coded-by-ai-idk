@@ -13885,6 +13885,204 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_applies_client_generic_turret_snapshot_preserving_rotation_reload_with_content()
+    {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret = content
+            .block_by_name("arc")
+            .expect("base content should include arc")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(3, 2);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, turret.clone(), TeamId(6)));
+        let existing_turret = TurretState {
+            reload_counter: 2.0,
+            rotation: 30.0,
+            ..TurretState::default()
+        };
+        runtime.turret_runtime_states.insert(
+            tile_pos,
+            GameRuntimeTurretBlockState::Generic(existing_turret.clone()),
+        );
+
+        let mut synced_building = BuildingComp::new(tile_pos, turret.clone(), TeamId(6));
+        synced_building.health = 27.0;
+        synced_building.set_rotation(2);
+        let incoming_turret = TurretState {
+            reload_counter: 10.0,
+            rotation: 120.0,
+            ..TurretState::default()
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        turret_write_child(&mut sync_bytes, &incoming_turret).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, turret.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        let building = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 27.0);
+        assert_eq!(building.rotation, 2);
+
+        let mut expected_turret = incoming_turret;
+        expected_turret.rotation = existing_turret.rotation;
+        expected_turret.reload_counter = existing_turret.reload_counter;
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::Generic(expected_turret))
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_continuous_turret_snapshot_preserving_rotation_reload_with_content(
+    ) {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret = content
+            .block_by_name("lustre")
+            .expect("base content should include lustre")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(4, 2);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, turret.clone(), TeamId(6)));
+        let existing_turret = TurretState {
+            reload_counter: 4.0,
+            rotation: 75.0,
+            ..TurretState::default()
+        };
+        runtime.turret_runtime_states.insert(
+            tile_pos,
+            GameRuntimeTurretBlockState::Continuous {
+                turret: existing_turret.clone(),
+                continuous: ContinuousTurretState {
+                    last_length: 12.0,
+                    bullets: 1,
+                },
+            },
+        );
+
+        let mut synced_building = BuildingComp::new(tile_pos, turret.clone(), TeamId(6));
+        synced_building.health = 29.0;
+        synced_building.set_rotation(3);
+        let incoming_turret = TurretState {
+            reload_counter: 11.0,
+            rotation: 150.0,
+            ..TurretState::default()
+        };
+        let incoming_continuous = ContinuousTurretState {
+            last_length: 38.0,
+            bullets: 2,
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        turret_write_child(&mut sync_bytes, &incoming_turret).unwrap();
+        continuous_turret_write_child(&mut sync_bytes, &incoming_continuous).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, turret.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        let building = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 29.0);
+        assert_eq!(building.rotation, 3);
+
+        let mut expected_turret = incoming_turret;
+        expected_turret.rotation = existing_turret.rotation;
+        expected_turret.reload_counter = existing_turret.reload_counter;
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::Continuous {
+                turret: expected_turret,
+                continuous: ContinuousTurretState {
+                    bullets: 0,
+                    ..incoming_continuous
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_preserves_payload_ammo_turret_snapshot_rotation_reload_after_reading_payloads()
+    {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router = content.block_by_name("router").unwrap();
+        let valid_key = PayloadKey::new(ContentType::Block, router.base().id);
+        let mut turret_block = TurretBlockData::new(
+            902,
+            "payload-ammo-client-test",
+            TurretBlockKind::PayloadAmmoTurret,
+        );
+        turret_block.payload_ammo.push(PayloadTurretAmmo {
+            content: valid_key,
+            bullet: BulletSpec::new(BulletKind::Basic, 1.0, 1.0),
+        });
+        let block = BlockDef::Turret(turret_block);
+        let tile_pos = point2_pack(5, 2);
+        let mut runtime = GameRuntime::default();
+        let existing_turret = TurretState {
+            reload_counter: 5.0,
+            rotation: 105.0,
+            ..TurretState::default()
+        };
+        runtime.turret_runtime_states.insert(
+            tile_pos,
+            GameRuntimeTurretBlockState::PayloadAmmo {
+                turret: existing_turret.clone(),
+                payloads: PayloadSeq::new(),
+            },
+        );
+
+        let incoming_turret = TurretState {
+            reload_counter: 12.0,
+            rotation: 180.0,
+            ..TurretState::default()
+        };
+        let mut incoming_payloads = PayloadSeq::new();
+        incoming_payloads.add(valid_key, 3);
+        let mut building_payload = Vec::new();
+        turret_write_child(&mut building_payload, &incoming_turret).unwrap();
+        payload_ammo_turret_write_payloads(&mut building_payload, &incoming_payloads).unwrap();
+
+        let mut payload_slice = building_payload.as_slice();
+        let mut state = runtime
+            .read_turret_runtime_state_from_building_payload(&block, 1, &mut payload_slice)
+            .unwrap()
+            .expect("payload ammo turret child tail should be readable");
+        assert!(payload_slice.is_empty());
+        runtime.preserve_client_turret_sync_fields(tile_pos, &mut state);
+
+        let mut expected_turret = incoming_turret;
+        expected_turret.rotation = existing_turret.rotation;
+        expected_turret.reload_counter = existing_turret.reload_counter;
+        expected_turret.total_ammo = 3;
+        assert_eq!(
+            state,
+            GameRuntimeTurretBlockState::PayloadAmmo {
+                turret: expected_turret,
+                payloads: incoming_payloads,
+            }
+        );
+    }
+
+    #[test]
     fn game_runtime_applies_client_entity_and_hidden_snapshot_sidecars() {
         let mut runtime = GameRuntime::default();
 

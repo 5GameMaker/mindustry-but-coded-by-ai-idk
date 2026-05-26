@@ -2022,6 +2022,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：`Continuous/PayloadAmmo/Generic` turret 的 rotation/reload 保留还需逐类补 core/真实联机测试；PointDefense/TractorBeam 不走 `TurretBuild.readSync` 的保留逻辑。
 
+### 12.35 Turret `readSync` 保留覆盖扩展到 Generic/Continuous/PayloadAmmo
+
+- 2026-05-26：在 core runtime 层把 Java `TurretBuild.readSync(...)` 的旧 `rotation/reloadCounter` 保留语义，从 `ItemTurret` 扩展覆盖到另外三个 Rust runtime 变体：
+  - `GameRuntimeTurretBlockState::Generic`：用 `arc`/PowerTurret 走真实 content + client BlockSnapshot reader；
+  - `GameRuntimeTurretBlockState::Continuous`：用 `lustre`/ContinuousTurret 走真实 content + `continuous_turret_write_child(...)` reader；
+  - `GameRuntimeTurretBlockState::PayloadAmmo`：用自定义 payload ammo turret block 走 payload reader + `preserve_client_turret_sync_fields(...)`，因为当前基础 content 尚未注册正式 `PayloadAmmoTurret`。
+- 新增测试：
+  - `game_runtime_applies_client_generic_turret_snapshot_preserving_rotation_reload_with_content`
+  - `game_runtime_applies_client_continuous_turret_snapshot_preserving_rotation_reload_with_content`
+  - `game_runtime_preserves_payload_ammo_turret_snapshot_rotation_reload_after_reading_payloads`
+- 已验证：
+  - `cargo test -p mindustry-core rotation_reload --lib`
+  - `cargo test -p mindustry-core game_runtime_exports_turret_state_tail_in_network_map_snapshot --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：`ContinuousLiquidTurret/LiquidTurret/LaserTurret` 可继续补同类 content-level 单测；真实联机 smoke 当前只覆盖 `ItemTurret`。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
