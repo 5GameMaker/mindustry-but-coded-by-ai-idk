@@ -929,6 +929,26 @@ fn network_map_building_revision(
     }
 }
 
+fn client_block_snapshot_revision(block: &BlockDef) -> u8 {
+    match block {
+        BlockDef::Distribution(distribution) => match distribution.kind {
+            DistributionBlockKind::Conveyor
+            | DistributionBlockKind::ArmoredConveyor
+            | DistributionBlockKind::ItemBridge
+            | DistributionBlockKind::BufferedItemBridge
+            | DistributionBlockKind::Duct
+            | DistributionBlockKind::DuctRouter
+            | DistributionBlockKind::OverflowDuct
+            | DistributionBlockKind::StackRouter
+            | DistributionBlockKind::Junction
+            | DistributionBlockKind::Unloader => 1,
+            DistributionBlockKind::Sorter => 2,
+            _ => 0,
+        },
+        _ => 0,
+    }
+}
+
 fn network_map_building_payload(
     runtime: &GameRuntime,
     content: &ContentLoader,
@@ -2086,6 +2106,7 @@ impl GameRuntime {
                 if let Some(content) = content {
                     let child_report = self.apply_client_block_snapshot_child_tail(
                         content,
+                        building_index,
                         build_ref.tile_pos,
                         block_id,
                         sync_read,
@@ -2115,6 +2136,7 @@ impl GameRuntime {
     fn apply_client_block_snapshot_child_tail(
         &mut self,
         content: &ContentLoader,
+        building_index: usize,
         building_tile_pos: i32,
         block_id: ContentId,
         tail: &[u8],
@@ -2127,24 +2149,24 @@ impl GameRuntime {
             return report;
         }
 
-        let Some(BlockDef::Distribution(distribution)) = content.block(block_id) else {
+        let Some(block) = content.block(block_id) else {
             return report;
         };
-        if !matches!(
-            distribution.kind,
-            DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor
-        ) {
-            return report;
-        }
 
         let mut read = tail;
-        match read_conveyor_state(&mut read, 1) {
-            Ok(state) => {
-                self.distribution_runtime_states.insert(
-                    building_tile_pos,
-                    GameRuntimeDistributionBlockState::Conveyor(state),
-                );
+        match self.read_distribution_runtime_state_from_building_payload(
+            block,
+            &self.buildings[building_index],
+            client_block_snapshot_revision(block),
+            &mut read,
+        ) {
+            Ok(Some(state)) => {
+                self.distribution_runtime_states
+                    .insert(building_tile_pos, state);
                 report.block_child_records_applied = 1;
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Ok(None) => {
                 report.block_remaining_sync_bytes = read.len();
             }
             Err(_) => {

@@ -1331,9 +1331,9 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `desktop/src/lib.rs`
   - `MIGRATION.md`
   - `AI_HANDOFF.md`
-- 新增 API：
+- 新增/扩展 API：
   - `GameRuntime::apply_client_block_snapshot_record_with_content(&ContentLoader, ...)`
-  - 内部复用原基础回放；当 tail 非空且 block 是 `Conveyor/ArmoredConveyor` 时，用 `read_conveyor_state(tail, 1)` 写入 `distribution_runtime_states`。
+  - 内部复用原基础回放；当 tail 非空且 block 属于 distribution family 时，用 `client_block_snapshot_revision(...)` 选择 Java revision，再复用 `read_distribution_runtime_state_from_building_payload(...)` 写入 `distribution_runtime_states`。
 - 报表新增：
   - `block_child_records_applied`
   - `block_child_read_errors`
@@ -1349,9 +1349,9 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
 - 下一步建议：
-  1. 继续接入 `Router` / `Junction` / `ItemBridge` / `Sorter` / `Unloader` 的 distribution tail。
-  2. 为真实联机 smoke 构造 conveyor snapshot，验证 server→desktop 后 `distribution_runtime_states` 被更新。
-  3. 继续保持未知 tail 只保留 remaining bytes，不误解析。
+  1. 给 `Router` / `Junction` / `ItemBridge` / `Sorter` / `Unloader` 等 distribution dispatcher 分支补字段级单测和真实联机 smoke。
+  2. 继续把 storage/payload/turret family 接入 child-tail dispatcher。
+  3. 继续保持未知 family tail 只保留 remaining bytes，不误解析。
 
 ---
 

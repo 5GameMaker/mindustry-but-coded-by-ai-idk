@@ -1820,7 +1820,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 ### 12.22 Conveyor BlockSnapshot child tail 回放
 
 - 2026-05-26：新增 `GameRuntime::apply_client_block_snapshot_record_with_content(...)`，`DesktopLauncher::sync_snapshot_mirrors()` 改用该入口，使 block snapshot 在基础 `read_base` 后可以借助 `ContentLoader` 识别 block family。
-- 当前首个 child tail 支持范围：`DistributionBlockKind::Conveyor | ArmoredConveyor`，按 Java `ConveyorBuild.version()==1` 使用既有 `read_conveyor_state(..., 1)` 解析 `write(Writes)` 尾部，并写入 `GameRuntime.distribution_runtime_states`。
+- 当前 child tail 入口已从 conveyor 专用解析推进为 distribution dispatcher：用 `client_block_snapshot_revision(...)` 选择 Java sync revision，再复用 `read_distribution_runtime_state_from_building_payload(...)` 写入 `GameRuntime.distribution_runtime_states`。已验证范围仍以 `Conveyor | ArmoredConveyor` 为主，其他 distribution 子类沿用既有 reader 但仍需补专门回归。
 - `GameRuntimeClientSnapshotApplyReport` 新增：
   - `block_child_records_applied`
   - `block_child_read_errors`
@@ -1830,7 +1830,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
-- 仍未完成：Router/Bridge/Duct/Sorter/Unloader 等 distribution 子类、storage/payload/turret 等 family 的 child tail 仍需逐类接入；当前不会把未知 tail 误消费。
+- 仍未完成：Router/Bridge/Duct/Sorter/Unloader 等 distribution 子类虽然进入 dispatcher，但仍需逐类真实联机/字段回归；storage/payload/turret 等 family 的 child tail 仍需接入；当前不会把未知 family tail 误消费。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
