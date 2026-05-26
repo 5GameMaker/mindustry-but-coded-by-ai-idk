@@ -3099,3 +3099,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_item_mass_driver_keeps_flight_after_target_removed_until_lifetime`
   - `cargo test -p mindustry-core mass_driver_bolt_intersection_drops_and_explosion_stats_are_pure`
 - 仍未完成：当前仍是 runtime-only 线性飞行侧车，还未生成真实 ECS bullet entity，也未完全接入 `MassDriverBolt::update_plan(...)` 的相交/越界命中判定、effects/sound/shake 和随机掉落。
+
+### 12.82 Storage linkedCore itemTaken 事件路由
+
+- 2026-05-27：补齐普通 `Unloader` 从 storage/core 取物时的 Java `removeStack(...) -> itemTaken(...)` 等价事件路由，和 `DirectionalUnloader` 的 linked storage core-unload 覆盖测试。
+- Java 依据：
+  - `storage/Unloader.updateTile()` 成功交易时执行 `dumpingTo.building.handleItem(...)` 后再 `dumpingFrom.building.removeStack(item, 1)`；
+  - `StorageBuild.itemTaken(item)` 在 `linkedCore != null` 时转发给 linked core；
+  - `DirectionalUnloader.updateTile()` 成功从 back 取物后调用 `back.itemTaken(item)`，linked storage 应把事件落到 core。
+- Rust 新增/变化：
+  - `GameRuntimeItemUnloaderFrameReport` 新增 `item_taken_events`；
+  - `advance_owned_item_unloaders_ticks(...)` 在普通 unloader 成功交易时累计 `item_taken_events`；
+  - `item_unloader_transfer_item(...)` 从 source owner 扣物后改为调用统一 `record_item_taken(content, from_index, item_id)`，让普通 storage 事件落在自身 tile，linked storage 事件落到 core tile，并复用 campaign core delta 处理；
+  - 移除旧的 `note_linked_storage_remove_stack_side_effects(...)` 专用旁路，避免 itemTaken 语义分散；
+  - 新增测试通过临时把 `duct-unloader.allow_core_unload = true`，验证 linked storage 可以被 directional unloader 卸出，且 `GameRuntimeItemTakenEvent { source_tile_pos: storage, event_tile_pos: core }`。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_directional_unloader_records_item_taken_for_linked_storage_when_core_unload_allowed`
+  - `cargo test -p mindustry-core game_runtime_directional_unloader_rejects_linked_storage_without_core_unload`
+  - `cargo test -p mindustry-core game_runtime_item_unloader_moves_configured_item_from_storage_to_receiver`
+  - `cargo test -p mindustry-core game_runtime_item_unloader_unloads_linked_storage_from_core_items_when_allowed`
+- 仍未完成：`linkedCore` 仍是 runtime 派生表 `storage_linked_cores`，不是 Building 持久字段；后续若更多路径直接“从 storage 取物”，必须继续统一调用 `record_item_taken(...)`，并补 save/load/网络 map 下 linked core 重建 smoke。

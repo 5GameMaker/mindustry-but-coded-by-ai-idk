@@ -1703,6 +1703,7 @@ pub struct GameRuntimeItemUnloaderFrameReport {
     pub moved_items: usize,
     pub missing_partners: usize,
     pub blocked_trades: usize,
+    pub item_taken_events: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -5729,20 +5730,6 @@ impl GameRuntime {
             .or_insert_with(|| GameRuntimeStorageBlockState::Core(CoreBuildState::default()));
         let GameRuntimeStorageBlockState::Core(state) = entry;
         state.no_effect = no_effect;
-    }
-
-    fn note_linked_storage_remove_stack_side_effects(
-        &mut self,
-        content: &ContentLoader,
-        storage_index: usize,
-        item: ContentId,
-        amount: i32,
-    ) {
-        let Some(core_index) = self.linked_core_index_for_storage(content, storage_index) else {
-            return;
-        };
-        let item_name = Self::item_name_for_side_effect(content, item);
-        self.note_campaign_core_item_delta(core_index, &item_name, -amount);
     }
 
     pub fn clear_buildings(&mut self) {
@@ -11543,6 +11530,7 @@ impl GameRuntime {
             );
             if traded {
                 report.moved_items += 1;
+                report.item_taken_events += 1;
             } else {
                 report.blocked_trades += 1;
             }
@@ -11873,7 +11861,7 @@ impl GameRuntime {
         if let Some(source_items) = self.buildings[from_item_owner_index].items.as_mut() {
             source_items.remove(item_id, 1);
         }
-        self.note_linked_storage_remove_stack_side_effects(content, from_index, item_id, 1);
+        self.record_item_taken(content, from_index, item_id);
         true
     }
 
@@ -24702,10 +24690,19 @@ mod tests {
             .unwrap();
         assert_eq!(report.selected_items, 1);
         assert_eq!(report.moved_items, 1);
+        assert_eq!(report.item_taken_events, 1);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 2);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(lead), 2);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 0);
         assert!(runtime.buildings[2].items.is_none());
+        assert_eq!(
+            runtime.item_taken_events,
+            vec![GameRuntimeItemTakenEvent {
+                source_tile_pos: container_tile,
+                event_tile_pos: container_tile,
+                item: copper,
+            }]
+        );
     }
 
     #[test]
@@ -24830,9 +24827,18 @@ mod tests {
         );
         assert_eq!(report.selected_items, 1);
         assert_eq!(report.moved_items, 1);
+        assert_eq!(report.item_taken_events, 1);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
         assert_eq!(runtime.buildings[3].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(
+            runtime.item_taken_events,
+            vec![GameRuntimeItemTakenEvent {
+                source_tile_pos: linked_storage_tile,
+                event_tile_pos: core_tile,
+                item: copper,
+            }]
+        );
     }
 
     #[test]
@@ -25389,6 +25395,81 @@ mod tests {
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 2);
         assert_eq!(runtime.buildings[3].items.as_ref().unwrap().get(copper), 0);
         assert!(runtime.item_taken_events.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_directional_unloader_records_item_taken_for_linked_storage_when_core_unload_allowed(
+    ) {
+        let mut content = ContentLoader::create_base_content().unwrap();
+        let unloader_id = content.block_by_name("duct-unloader").unwrap().base().id;
+        let Some(BlockDef::Distribution(unloader_content)) =
+            content.catalog_mut().blocks.get_mut(unloader_id)
+        else {
+            panic!("duct-unloader should be a distribution block");
+        };
+        unloader_content.allow_core_unload = true;
+
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("duct-unloader").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let unloader_tile = point2_pack(7, 6);
+        let router_tile = point2_pack(8, 6);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), TeamId(6));
+        core_building.items.as_mut().unwrap().add(copper, 2);
+        let linked_storage_building =
+            BuildingComp::new(linked_storage_tile, container_def.base().clone(), TeamId(6));
+        let mut unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        unloader_building.set_rotation(0);
+        let router_building = BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(router_building);
+        runtime.distribution_runtime_states.insert(
+            unloader_tile,
+            GameRuntimeDistributionBlockState::DirectionalUnloader(DirectionalUnloaderState {
+                unload_item: Some(copper),
+                offset: 0,
+            }),
+        );
+
+        let report = runtime
+            .advance_owned_directional_unloaders(&content, 4.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(
+            runtime.storage_linked_cores.get(&linked_storage_tile),
+            Some(&core_tile)
+        );
+        assert_eq!(report.attempted_moves, 1);
+        assert_eq!(report.moved_items, 1);
+        assert_eq!(report.item_taken_events, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[3].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(
+            runtime.item_taken_events,
+            vec![GameRuntimeItemTakenEvent {
+                source_tile_pos: linked_storage_tile,
+                event_tile_pos: core_tile,
+                item: copper,
+            }]
+        );
     }
 
     #[test]
