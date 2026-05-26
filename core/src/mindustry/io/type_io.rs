@@ -924,6 +924,18 @@ pub struct PuddleSyncWire {
     pub y: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WeatherStateSyncWire {
+    pub effect_timer: f32,
+    pub intensity: f32,
+    pub life: f32,
+    pub opacity: f32,
+    pub weather_id: Option<ContentId>,
+    pub wind_vector: Vec2,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitSyncWire {
     pub abilities: Vec<AbilityWire>,
@@ -1221,6 +1233,41 @@ pub fn read_puddle_sync<R: Read>(read: &mut R) -> io::Result<PuddleSyncWire> {
         amount,
         liquid_id,
         tile_pos,
+        x,
+        y,
+    })
+}
+
+pub fn write_weather_state_sync<W: Write>(
+    write: &mut W,
+    sync: &WeatherStateSyncWire,
+) -> io::Result<()> {
+    write_f32(write, sync.effect_timer)?;
+    write_f32(write, sync.intensity)?;
+    write_f32(write, sync.life)?;
+    write_f32(write, sync.opacity)?;
+    write_content_id(write, ContentType::Weather, sync.weather_id)?;
+    write_vec2(write, sync.wind_vector)?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)
+}
+
+pub fn read_weather_state_sync<R: Read>(read: &mut R) -> io::Result<WeatherStateSyncWire> {
+    let effect_timer = read_f32(read)?;
+    let intensity = read_f32(read)?;
+    let life = read_f32(read)?;
+    let opacity = read_f32(read)?;
+    let weather_id = read_content_id(read)?;
+    let wind_vector = read_vec2(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(WeatherStateSyncWire {
+        effect_timer,
+        intensity,
+        life,
+        opacity,
+        weather_id,
+        wind_vector,
         x,
         y,
     })
@@ -2969,6 +3016,50 @@ mod tests {
         assert_eq!(
             read_puddle_sync(&mut bytes.as_slice()).unwrap(),
             sync_without_refs
+        );
+    }
+
+    #[test]
+    fn weather_state_sync_wire_roundtrips_java_write_sync_shape() {
+        let sync = WeatherStateSyncWire {
+            effect_timer: 11.0,
+            intensity: 0.75,
+            life: 600.0,
+            opacity: 0.5,
+            weather_id: Some(1),
+            wind_vector: Vec2::new(0.25, -0.75),
+            x: 10.0,
+            y: 20.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_weather_state_sync(&mut bytes, &sync).unwrap();
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&sync.effect_timer.to_be_bytes());
+        expected.extend_from_slice(&sync.intensity.to_be_bytes());
+        expected.extend_from_slice(&sync.life.to_be_bytes());
+        expected.extend_from_slice(&sync.opacity.to_be_bytes());
+        expected.extend_from_slice(&1i16.to_be_bytes());
+        expected.extend_from_slice(&sync.wind_vector.x.to_be_bytes());
+        expected.extend_from_slice(&sync.wind_vector.y.to_be_bytes());
+        expected.extend_from_slice(&sync.x.to_be_bytes());
+        expected.extend_from_slice(&sync.y.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            read_weather_state_sync(&mut bytes.as_slice()).unwrap(),
+            sync
+        );
+
+        let sync_without_weather = WeatherStateSyncWire {
+            weather_id: None,
+            ..sync
+        };
+        bytes.clear();
+        write_weather_state_sync(&mut bytes, &sync_without_weather).unwrap();
+        assert_eq!(
+            read_weather_state_sync(&mut bytes.as_slice()).unwrap(),
+            sync_without_weather
         );
     }
 

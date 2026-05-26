@@ -2,6 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::mindustry::{
     ctype::{Content, ContentId, ContentType, UnlockableContentBase},
+    io::WeatherStateSyncWire,
     logic::{LogicWeatherEvent, LogicWeatherState, LOGIC_WEATHER_FADE_TIME},
 };
 
@@ -174,6 +175,8 @@ pub struct WeatherState {
     pub life: f32,
     pub effect_timer: f32,
     pub wind_vector: (f32, f32),
+    pub x: f32,
+    pub y: f32,
     pub added: bool,
 }
 
@@ -186,6 +189,8 @@ impl WeatherState {
             life,
             effect_timer: 0.0,
             wind_vector: (1.0, 0.0),
+            x: 0.0,
+            y: 0.0,
             added: true,
         }
     }
@@ -222,8 +227,26 @@ impl WeatherState {
             life: event.life,
             effect_timer: 0.0,
             wind_vector: (1.0, 0.0),
+            x: 0.0,
+            y: 0.0,
             added: event.active,
         }
+    }
+
+    pub fn apply_sync_wire(
+        &mut self,
+        weather_name: impl Into<String>,
+        sync: &WeatherStateSyncWire,
+    ) {
+        self.weather_name = weather_name.into();
+        self.effect_timer = sync.effect_timer;
+        self.intensity = sync.intensity;
+        self.life = sync.life;
+        self.opacity = sync.opacity;
+        self.wind_vector = (sync.wind_vector.x, sync.wind_vector.y);
+        self.x = sync.x;
+        self.y = sync.y;
+        self.added = true;
     }
 }
 
@@ -517,6 +540,34 @@ mod tests {
         assert_eq!(state.intensity, 0.75);
         assert_eq!(state.life, 300.0);
         assert_eq!(state.wind_vector, (-0.2, 1.3));
+    }
+
+    #[test]
+    fn weather_state_applies_sync_wire_and_restores_position_fields() {
+        let mut state = WeatherState::new("rain", 1.0, 10.0);
+        state.added = false;
+        let sync = WeatherStateSyncWire {
+            effect_timer: 12.0,
+            intensity: 0.75,
+            life: 600.0,
+            opacity: 0.5,
+            weather_id: Some(1),
+            wind_vector: crate::mindustry::io::Vec2::new(-0.25, 0.75),
+            x: 10.0,
+            y: 20.0,
+        };
+
+        state.apply_sync_wire("sandstorm", &sync);
+
+        assert_eq!(state.weather_name, "sandstorm");
+        assert_eq!(state.effect_timer, 12.0);
+        assert_eq!(state.intensity, 0.75);
+        assert_eq!(state.life, 600.0);
+        assert_eq!(state.opacity, 0.5);
+        assert_eq!(state.wind_vector, (-0.25, 0.75));
+        assert_eq!(state.x, 10.0);
+        assert_eq!(state.y, 20.0);
+        assert!(state.added);
     }
 
     #[test]

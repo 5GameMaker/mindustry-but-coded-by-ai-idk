@@ -33,7 +33,7 @@ use crate::mindustry::{
         LegacyShortChunkMap, TeamId,
     },
     net::NetworkPlayerSyncData,
-    r#type::PayloadSeq,
+    r#type::{PayloadSeq, WeatherState},
     vars::TILE_SIZE,
     world::blocks::campaign::{
         read_accelerator_state, read_landing_pad_state, read_launch_pad_state,
@@ -1546,6 +1546,17 @@ fn read_client_puddle_sync_exact(sync_bytes: &[u8]) -> Option<type_io::PuddleSyn
     read.is_empty().then_some(sync)
 }
 
+fn read_client_weather_state_sync_exact(
+    sync_bytes: &[u8],
+) -> Option<type_io::WeatherStateSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_weather_state_sync(&mut read).ok()?;
+    read.is_empty().then_some(sync)
+}
+
 fn read_client_player_sync_exact(sync_bytes: &[u8]) -> Option<NetworkPlayerSyncData> {
     NetworkPlayerSyncData::read_exact_from(sync_bytes).ok()
 }
@@ -2042,6 +2053,7 @@ pub struct GameRuntime {
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
     pub client_puddle_snapshot_entities: BTreeMap<i32, PuddleComp>,
     pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
+    pub client_weather_snapshot_entities: BTreeMap<i32, WeatherState>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
 }
 
@@ -2095,6 +2107,7 @@ impl GameRuntime {
             client_player_snapshot_entities: BTreeMap::new(),
             client_puddle_snapshot_entities: BTreeMap::new(),
             client_unit_snapshot_entities: BTreeMap::new(),
+            client_weather_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
         }
     }
@@ -2406,6 +2419,13 @@ impl GameRuntime {
                     }
                 }
             }
+            Some(EntityClassKind::Weather) => {
+                if let Some(sync) = read_client_weather_state_sync_exact(&sync_bytes) {
+                    if self.apply_client_weather_state_sync_wire(content, entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
             _ => {}
         }
         report
@@ -2484,6 +2504,18 @@ impl GameRuntime {
                     );
                     self.apply_client_puddle_sync_wire(content, entity_id, &sync)
                 }
+                Some(EntityClassKind::Weather) => {
+                    let Ok(sync) = type_io::read_weather_state_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_weather_state_sync_wire(content, entity_id, &sync)
+                }
                 _ => {
                     report.entity_parse_errors += 1;
                     return report;
@@ -2554,6 +2586,27 @@ impl GameRuntime {
         true
     }
 
+    pub fn apply_client_weather_state_sync_wire(
+        &mut self,
+        content: &ContentLoader,
+        entity_id: i32,
+        sync: &type_io::WeatherStateSyncWire,
+    ) -> bool {
+        let Some(weather_id) = sync.weather_id else {
+            return false;
+        };
+        let Some(weather) = content.weather(weather_id) else {
+            return false;
+        };
+        let weather_name = weather.name().to_string();
+        let state = self
+            .client_weather_snapshot_entities
+            .entry(entity_id)
+            .or_insert_with(|| WeatherState::new(weather_name.clone(), sync.intensity, sync.life));
+        state.apply_sync_wire(weather_name, sync);
+        true
+    }
+
     fn apply_client_unit_sync_wire(
         &mut self,
         content: &ContentLoader,
@@ -2612,6 +2665,9 @@ impl GameRuntime {
                 existing = true;
             }
             if self.client_puddle_snapshot_entities.contains_key(id) {
+                existing = true;
+            }
+            if self.client_weather_snapshot_entities.contains_key(id) {
                 existing = true;
             }
             if existing {
@@ -5412,6 +5468,7 @@ impl GameRuntime {
         self.client_player_snapshot_entities.clear();
         self.client_puddle_snapshot_entities.clear();
         self.client_unit_snapshot_entities.clear();
+        self.client_weather_snapshot_entities.clear();
         self.client_hidden_entity_ids.clear();
     }
 
@@ -13400,7 +13457,7 @@ mod tests {
         content::blocks::{BulletKind, BulletSpec, PayloadTurretAmmo, TurretBlockData},
         core::GameStateState,
         ctype::{Content, ContentType},
-        entities::{units::BuildPlan, FIRE_CLASS_ID, PUDDLE_CLASS_ID},
+        entities::{units::BuildPlan, FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID},
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
             Vec2 as IoVec2,
@@ -14659,6 +14716,105 @@ mod tests {
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7002]);
         assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_weather_entity_snapshot_to_typed_runtime() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let rain = content
+            .weather_by_name("rain")
+            .expect("base content should include rain");
+        let sync = type_io::WeatherStateSyncWire {
+            effect_timer: 12.0,
+            intensity: 0.75,
+            life: 600.0,
+            opacity: 0.5,
+            weather_id: Some(rain.id()),
+            wind_vector: IoVec2 { x: -0.25, y: 0.75 },
+            x: 10.0,
+            y: 20.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_weather_state_sync(&mut sync_bytes, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_record_with_content(
+            &content,
+            7003,
+            WEATHER_STATE_CLASS_ID,
+            sync_bytes.clone(),
+        );
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&7003)
+            .expect("weather snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, WEATHER_STATE_CLASS_ID);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+
+        let weather = runtime
+            .client_weather_snapshot_entities
+            .get(&7003)
+            .expect("weather sync should materialize typed runtime weather state");
+        assert_eq!(weather.weather_name, "rain");
+        assert_eq!(weather.effect_timer, 12.0);
+        assert_eq!(weather.intensity, 0.75);
+        assert_eq!(weather.life, 600.0);
+        assert_eq!(weather.opacity, 0.5);
+        assert_eq!(weather.wind_vector, (-0.25, 0.75));
+        assert_eq!(weather.x, 10.0);
+        assert_eq!(weather.y, 20.0);
+        assert!(weather.added);
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[7003]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_weather_entity_snapshot_packet_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let sandstorm = content
+            .weather_by_name("sandstorm")
+            .expect("base content should include sandstorm");
+        let sync = type_io::WeatherStateSyncWire {
+            effect_timer: 8.0,
+            intensity: 0.6,
+            life: 900.0,
+            opacity: 0.4,
+            weather_id: Some(sandstorm.id()),
+            wind_vector: IoVec2 { x: 0.5, y: 0.25 },
+            x: 30.0,
+            y: 40.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_weather_state_sync(&mut sync_bytes, &sync).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&7100i32.to_be_bytes());
+        data.push(WEATHER_STATE_CLASS_ID);
+        data.extend_from_slice(&sync_bytes);
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_packet_with_content(&content, 1, &data);
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        assert_eq!(report.entity_parse_errors, 0);
+        assert_eq!(
+            runtime
+                .client_entity_snapshot_records
+                .get(&7100)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(sync_bytes.as_slice())
+        );
+
+        let weather = runtime.client_weather_snapshot_entities.get(&7100).unwrap();
+        assert_eq!(weather.weather_name, "sandstorm");
+        assert_eq!(weather.wind_vector, (0.5, 0.25));
+        assert_eq!(weather.x, 30.0);
+        assert_eq!(weather.y, 40.0);
     }
 
     #[test]

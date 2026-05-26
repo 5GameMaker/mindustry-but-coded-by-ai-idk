@@ -126,21 +126,21 @@ git -C 'D:/MDT/rust-mindustry' status --short
 
 本轮开始前最近已推送到 `main` 的提交包括：
 
-1. `669806c 固定文档中的Rust工作路径`
-2. `58259bb 补充火焰实体快照联机验证`
-3. `b9c9231 接入火焰实体快照运行态`
-4. `696e903 按实体类型分类拆包`
-5. `5e48e9b 迁移实体类型编号基线`
-6. `8808169 补充玩家实体快照联机验证`
-7. `043424b 支持混合实体快照拆包`
-8. `685308e 接入玩家实体快照运行态`
-9. `f274ed8 固定上下文恢复路径常量`
-10. `eff4e53 支持实体快照多单位拆包`
+1. `9c52591 接入水洼实体快照运行态`
+2. `669806c 固定文档中的Rust工作路径`
+3. `58259bb 补充火焰实体快照联机验证`
+4. `b9c9231 接入火焰实体快照运行态`
+5. `696e903 按实体类型分类拆包`
+6. `5e48e9b 迁移实体类型编号基线`
+7. `8808169 补充玩家实体快照联机验证`
+8. `043424b 支持混合实体快照拆包`
+9. `685308e 接入玩家实体快照运行态`
+10. `f274ed8 固定上下文恢复路径常量`
 
 本轮开始前最后确认时：
 
 - 当前分支：`main`
-- 最新提交：`669806c 固定文档中的Rust工作路径`
+- 最新提交：`9c52591 接入水洼实体快照运行态`
 - `git status --short` 未显示已有未提交代码改动。
 
 ---
@@ -2070,5 +2070,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
   1. 把 Puddle typed sidecar 与 `Puddles` tile-indexed collection 统一，避免长期双存储。
-  2. 继续迁移 `WeatherStateComp` / `EffectStateComp` / `BulletComp` 等 entity sync wire。
+  2. `WeatherStateComp` 已由第 61 节补上；继续迁移 `EffectStateComp` / `BulletComp` 等 entity sync wire。
   3. 继续收敛 `GameRuntime` 与 `DesktopLauncher` 的 entity snapshot dispatcher，减少重复分发逻辑。
+
+---
+
+## 61. 最新闭环记录：WeatherStateComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 class-id `14` 的 Java `Weather.WeatherStateComp.writeSync/readSync` 从 opaque entity bytes 推进到 Rust typed runtime，并继续扩展真实 `ServerLauncher -> DesktopLauncher` mixed entity snapshot smoke。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.type.Weather.WeatherStateComp=14`；
+  - `annotations/src/main/resources/revisions/WeatherStateComp/2.json`：sync 字段顺序 `effectTimer, intensity, life, opacity, weather, windVector, x, y`；
+  - `TypeIO.writeWeather/readWeather` 是 nullable short content id，`TypeIO.writeVec2/readVec2` 是两个 `float`。
+- Rust 主改动：
+  - `type_io::WeatherStateSyncWire` 与 `read_weather_state_sync/write_weather_state_sync`；
+  - `EntityClassKind::Weather` 与 `WEATHER_STATE_CLASS_ID`；
+  - `WeatherState` 增加 `x/y` 并新增 `apply_sync_wire(...)`；
+  - `ContentLoader::weather/weather_by_name/weathers`；
+  - `GameRuntime.client_weather_snapshot_entities` 与 `apply_client_weather_state_sync_wire(...)`；
+  - `DesktopLauncher` mixed fallback 现在支持 Player + Unit + Fire + Puddle + Weather 分类拆包；
+  - 真实联机 smoke 的第三个 entity snapshot packet 现在为 `amount=6`，新增 `1008 + WEATHER_STATE_CLASS_ID + WeatherStateSyncWire`。
+- 已跑：
+  - `cargo test -p mindustry-core weather_state_sync --lib`
+  - `cargo test -p mindustry-core weather_state_applies_sync_wire_and_restores_position_fields --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_weather_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_weather_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 把 Weather typed sidecar 与未来完整 `Groups.weather`/renderer/weather update runtime 统一。
+  2. 继续迁移 `EffectStateComp` / `BulletComp` / `DecalComp` 等 entity snapshot wire。
+  3. 将 single-record 与 mixed fallback dispatcher 继续收敛，避免新增 entity 类型时双处修改。

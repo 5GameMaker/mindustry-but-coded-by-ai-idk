@@ -33,12 +33,14 @@ pub enum EntityClassKind {
     Unit,
     Fire,
     Puddle,
+    Weather,
     Other,
 }
 
 pub const PLAYER_CLASS_ID: u8 = 12;
 pub const FIRE_CLASS_ID: u8 = 10;
 pub const PUDDLE_CLASS_ID: u8 = 13;
+pub const WEATHER_STATE_CLASS_ID: u8 = 14;
 
 /// Java `annotations/src/main/resources/classids.properties` migrated into a
 /// Rust lookup table. This is the stable outer `entity.classId()` byte used by
@@ -154,7 +156,7 @@ pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
     },
     EntityClassIdEntry {
         name: "mindustry.type.Weather.WeatherStateComp",
-        id: 14,
+        id: WEATHER_STATE_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.world.blocks.campaign.LaunchPad.LaunchPayloadComp",
@@ -264,6 +266,8 @@ pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
         Some(EntityClassKind::Fire)
     } else if id == PUDDLE_CLASS_ID {
         Some(EntityClassKind::Puddle)
+    } else if id == WEATHER_STATE_CLASS_ID {
+        Some(EntityClassKind::Weather)
     } else if name.contains('.') {
         Some(EntityClassKind::Other)
     } else {
@@ -459,6 +463,14 @@ mod tests {
         assert_eq!(
             entity_class_kind(PUDDLE_CLASS_ID),
             Some(EntityClassKind::Puddle)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.type.Weather.WeatherStateComp"),
+            Some(WEATHER_STATE_CLASS_ID)
+        );
+        assert_eq!(
+            entity_class_kind(WEATHER_STATE_CLASS_ID),
+            Some(EntityClassKind::Weather)
         );
         assert_eq!(entity_class_kind(7), Some(EntityClassKind::Other));
         assert_eq!(entity_class_kind(255), None);

@@ -2278,6 +2278,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：Puddle 目前落在 runtime typed sidecar，尚未与 `Puddles` tile-indexed collection 完全统一；`WeatherStateComp`、`EffectStateComp`、`BulletComp` 等其他 entity snapshot wire 仍待迁移。
 
+### 12.47 WeatherStateComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 2026-05-26：迁移 Java `Weather.WeatherStateComp.writeSync/readSync` 的当前 wire 形状并接入 single-record / mixed entity snapshot dispatcher。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.type.Weather.WeatherStateComp=14`；
+  - `annotations/src/main/resources/revisions/WeatherStateComp/2.json`：字段顺序 `effectTimer, intensity, life, opacity, weather, windVector, x, y`；
+  - `TypeIO.writeWeather/readWeather` 写 nullable `short` weather id；`TypeIO.writeVec2/readVec2` 写两个 `float`。
+- Rust 新增/变化：
+  - `type_io::WeatherStateSyncWire`；
+  - `type_io::write_weather_state_sync(...)` / `read_weather_state_sync(...)`；
+  - `EntityClassKind::Weather` 与 `WEATHER_STATE_CLASS_ID = 14`；
+  - `WeatherState` 增加 sync 字段 `x/y` 并提供 `apply_sync_wire(...)`；
+  - `ContentLoader::weather(...)` / `weather_by_name(...)` / `weathers(...)`；
+  - `GameRuntime.client_weather_snapshot_entities`；
+  - `GameRuntime::apply_client_weather_state_sync_wire(...)`，通过 `ContentLoader::weather(...)` 把 wire weather id 映射为 weather name；
+  - hidden snapshot 对 typed weather 计为 existing；
+  - `DesktopLauncher` 正常 single-record 与 mixed fallback 都能在 `EntityClassKind::Weather` 下 materialize typed weather state。
+- 测试/真实 smoke：
+  - `weather_state_sync_wire_roundtrips_java_write_sync_shape`
+  - `weather_state_applies_sync_wire_and_restores_position_fields`
+  - `game_runtime_applies_client_weather_entity_snapshot_to_typed_runtime`
+  - `game_runtime_applies_weather_entity_snapshot_packet_with_content`
+  - 扩展 `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`，同 packet 现在覆盖 Player + Unit + Fire + Puddle + Weather；
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 mixed packet 现在为 `amount=6`，新增 `1008 + WEATHER_STATE_CLASS_ID + WeatherStateSyncWire`，断言 raw sidecar 与 `runtime.client_weather_snapshot_entities[1008]`。
+- 已验证：
+  - `cargo test -p mindustry-core weather_state_sync --lib`
+  - `cargo test -p mindustry-core weather_state_applies_sync_wire_and_restores_position_fields --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_weather_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_weather_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：Weather 目前落在 runtime typed sidecar，尚未接入完整 `Groups.weather`、renderer/weather update 与客户端真实 weather lifecycle；`EffectStateComp`、`BulletComp` 等其他 entity snapshot wire 仍待迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

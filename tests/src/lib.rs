@@ -508,7 +508,10 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
 #[test]
 fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
-    use mindustry_core::mindustry::entities::{FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID};
+    use mindustry_core::mindustry::ctype::Content;
+    use mindustry_core::mindustry::entities::{
+        FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+    };
     use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
         EntitySnapshotCallPacket, HiddenSnapshotCallPacket, NetworkPlayerSyncData,
@@ -709,6 +712,23 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     };
     let mut puddle_bytes = Vec::new();
     type_io::write_puddle_sync(&mut puddle_bytes, &puddle_sync).unwrap();
+    let rain_id = server
+        .content_loader
+        .weather_by_name("rain")
+        .expect("base content should include rain")
+        .id();
+    let weather_sync = type_io::WeatherStateSyncWire {
+        effect_timer: 12.0,
+        intensity: 0.75,
+        life: 600.0,
+        opacity: 0.5,
+        weather_id: Some(rain_id),
+        wind_vector: IoVec2 { x: -0.25, y: 0.75 },
+        x: 10.0,
+        y: 20.0,
+    };
+    let mut weather_bytes = Vec::new();
+    type_io::write_weather_state_sync(&mut weather_bytes, &weather_sync).unwrap();
     let mut multi_first_bytes = Vec::new();
     type_io::write_unit_sync(
         &mut multi_first_bytes,
@@ -739,8 +759,11 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.extend_from_slice(&1007i32.to_be_bytes());
     multi_entity_data.push(PUDDLE_CLASS_ID);
     multi_entity_data.extend_from_slice(&puddle_bytes);
+    multi_entity_data.extend_from_slice(&1008i32.to_be_bytes());
+    multi_entity_data.push(WEATHER_STATE_CLASS_ID);
+    multi_entity_data.extend_from_slice(&weather_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 5,
+        amount: 6,
         data: multi_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
@@ -799,6 +822,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .runtime
                 .client_puddle_snapshot_entities
                 .contains_key(&1007)
+            && desktop
+                .runtime
+                .client_weather_snapshot_entities
+                .contains_key(&1008)
         {
             break;
         }
@@ -943,6 +970,14 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             .map(|record| (record.type_id, record.sync_bytes.as_slice())),
         Some((PUDDLE_CLASS_ID, puddle_bytes.as_slice()))
     );
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1008)
+            .map(|record| (record.type_id, record.sync_bytes.as_slice())),
+        Some((WEATHER_STATE_CLASS_ID, weather_bytes.as_slice()))
+    );
     let fire = desktop
         .runtime
         .client_fire_snapshot_entities
@@ -967,6 +1002,20 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     assert_eq!(puddle.tile.unwrap().y, 5);
     assert_eq!(puddle.liquid.unwrap().flammability, 1.2);
     assert!(puddle.registered);
+    let weather = desktop
+        .runtime
+        .client_weather_snapshot_entities
+        .get(&1008)
+        .expect("real mixed entity snapshot should materialize typed weather runtime");
+    assert_eq!(weather.weather_name, "rain");
+    assert_eq!(weather.effect_timer, 12.0);
+    assert_eq!(weather.intensity, 0.75);
+    assert_eq!(weather.life, 600.0);
+    assert_eq!(weather.opacity, 0.5);
+    assert_eq!(weather.wind_vector, (-0.25, 0.75));
+    assert_eq!(weather.x, 10.0);
+    assert_eq!(weather.y, 20.0);
+    assert!(weather.added);
     assert_eq!(
         desktop
             .runtime

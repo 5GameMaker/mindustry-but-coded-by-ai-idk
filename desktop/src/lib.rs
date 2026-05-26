@@ -12,8 +12,8 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::io::{
-    read_fire_sync, read_puddle_sync, read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks,
-    TeamId,
+    read_fire_sync, read_puddle_sync, read_unit_sync, read_weather_state_sync,
+    ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
@@ -425,6 +425,25 @@ impl DesktopLauncher {
                         report.entity_typed_records_applied += 1;
                     }
                 }
+                Some(EntityClassKind::Weather) => {
+                    let Ok(weather_sync) = read_weather_state_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    if self.runtime.apply_client_weather_state_sync_wire(
+                        &self.content_loader,
+                        entity_id,
+                        &weather_sync,
+                    ) {
+                        report.entity_typed_records_applied += 1;
+                    }
+                }
                 _ => {
                     report.entity_parse_errors += 1;
                     return report;
@@ -645,6 +664,7 @@ mod tests {
     use mindustry_core::mindustry::{
         entities::{
             comp::BuildingComp, PlayerComp, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
+            WEATHER_STATE_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -1636,6 +1656,23 @@ mod tests {
         };
         let mut puddle_bytes = Vec::new();
         type_io::write_puddle_sync(&mut puddle_bytes, &puddle_sync).unwrap();
+        let rain_id = launcher
+            .content_loader
+            .weather_by_name("rain")
+            .expect("base content should include rain")
+            .id();
+        let weather_sync = type_io::WeatherStateSyncWire {
+            effect_timer: 12.0,
+            intensity: 0.75,
+            life: 600.0,
+            opacity: 0.5,
+            weather_id: Some(rain_id),
+            wind_vector: IoVec2 { x: -0.25, y: 0.75 },
+            x: 10.0,
+            y: 20.0,
+        };
+        let mut weather_bytes = Vec::new();
+        type_io::write_weather_state_sync(&mut weather_bytes, &weather_sync).unwrap();
 
         let mut data = Vec::new();
         data.extend_from_slice(&launcher.player.id.to_be_bytes());
@@ -1650,6 +1687,9 @@ mod tests {
         data.extend_from_slice(&9902i32.to_be_bytes());
         data.push(PUDDLE_CLASS_ID);
         data.extend_from_slice(&puddle_bytes);
+        data.extend_from_slice(&9903i32.to_be_bytes());
+        data.push(WEATHER_STATE_CLASS_ID);
+        data.extend_from_slice(&weather_bytes);
 
         {
             let state = launcher.net_client.state();
@@ -1657,7 +1697,7 @@ mod tests {
             state
                 .entity_snapshot_mirrors
                 .push(ClientEntitySnapshotMirror {
-                    amount: 4,
+                    amount: 5,
                     data,
                     records: Vec::new(),
                     parse_error: Some(
@@ -1671,9 +1711,9 @@ mod tests {
 
         let report = launcher
             .last_client_snapshot_apply_report
-            .expect("mixed fallback should apply player, unit, fire and puddle records");
-        assert_eq!(report.entity_records_applied, 4);
-        assert_eq!(report.entity_typed_records_applied, 4);
+            .expect("mixed fallback should apply player, unit, fire, puddle and weather records");
+        assert_eq!(report.entity_records_applied, 5);
+        assert_eq!(report.entity_typed_records_applied, 5);
         assert_eq!(report.entity_parse_errors, 0);
 
         assert_eq!(
@@ -1713,6 +1753,14 @@ mod tests {
                 .map(|record| record.sync_bytes.as_slice()),
             Some(puddle_bytes.as_slice())
         );
+        assert_eq!(
+            launcher
+                .runtime
+                .client_entity_snapshot_records
+                .get(&9903)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(weather_bytes.as_slice())
+        );
 
         let unit = launcher
             .runtime
@@ -1751,6 +1799,21 @@ mod tests {
         assert_eq!(puddle.tile.unwrap().y, 5);
         assert_eq!(puddle.liquid.unwrap().flammability, 1.2);
         assert!(puddle.registered);
+
+        let weather = launcher
+            .runtime
+            .client_weather_snapshot_entities
+            .get(&9903)
+            .expect("mixed fallback should materialize weather record");
+        assert_eq!(weather.weather_name, "rain");
+        assert_eq!(weather.effect_timer, 12.0);
+        assert_eq!(weather.intensity, 0.75);
+        assert_eq!(weather.life, 600.0);
+        assert_eq!(weather.opacity, 0.5);
+        assert_eq!(weather.wind_vector, (-0.25, 0.75));
+        assert_eq!(weather.x, 10.0);
+        assert_eq!(weather.y, 20.0);
+        assert!(weather.added);
     }
 
     #[test]

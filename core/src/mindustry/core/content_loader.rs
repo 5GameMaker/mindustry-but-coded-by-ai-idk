@@ -330,6 +330,24 @@ impl ContentLoader {
         &self.catalog.status_effects
     }
 
+    pub fn weather(
+        &self,
+        id: ContentId,
+    ) -> Option<&crate::mindustry::content::weathers::WeatherContent> {
+        self.catalog.weather_by_id(id)
+    }
+
+    pub fn weather_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&crate::mindustry::content::weathers::WeatherContent> {
+        self.catalog.weather_by_name(name)
+    }
+
+    pub fn weathers(&self) -> &[crate::mindustry::content::weathers::WeatherContent] {
+        &self.catalog.weathers
+    }
+
     pub fn unit(&self, id: ContentId) -> Option<&UnitType> {
         self.catalog.unit_by_id(id)
     }
