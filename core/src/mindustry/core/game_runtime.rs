@@ -1747,9 +1747,43 @@ enum GameRuntimeLoadedBlockState {
     Turret(GameRuntimeTurretBlockState),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeNetworkContext {
+    pub active: bool,
+    pub server: bool,
+}
+
+impl GameRuntimeNetworkContext {
+    pub const fn offline() -> Self {
+        Self {
+            active: false,
+            server: false,
+        }
+    }
+
+    pub const fn server() -> Self {
+        Self {
+            active: true,
+            server: true,
+        }
+    }
+
+    pub const fn client() -> Self {
+        Self {
+            active: true,
+            server: false,
+        }
+    }
+
+    fn core_handle_item_authoritative(self) -> bool {
+        self.server || !self.active
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntime {
     pub state: GameState,
+    pub network_context: GameRuntimeNetworkContext,
     pub buildings: Vec<BuildingComp>,
     pub effect_runtime_store: EffectBlockRuntimeStateStore,
     pub effect_timer_store: EffectBlockTimerStateStore,
@@ -1795,6 +1829,7 @@ impl GameRuntime {
     pub fn new(state: GameState) -> Self {
         Self {
             state,
+            network_context: GameRuntimeNetworkContext::offline(),
             buildings: Vec::new(),
             effect_runtime_store: EffectBlockRuntimeStateStore::new(),
             effect_timer_store: EffectBlockTimerStateStore::new(),
@@ -1837,6 +1872,10 @@ impl GameRuntime {
 
     pub fn buildings_mut(&mut self) -> &mut [BuildingComp] {
         &mut self.buildings
+    }
+
+    pub fn set_network_context(&mut self, network_context: GameRuntimeNetworkContext) {
+        self.network_context = network_context;
     }
 
     pub fn export_network_map_snapshot(&self, content: &ContentLoader) -> LegacyShortChunkMap {
@@ -2756,7 +2795,9 @@ impl GameRuntime {
         if core.team.0 as i32 == self.state.rules.default_team {
             self.state.stats.add_core_item(item_name.clone(), amount);
         }
-        if !self.core_incinerates_non_buildable_item(content, core_index, item) {
+        if self.network_context.core_handle_item_authoritative()
+            && !self.core_incinerates_non_buildable_item(content, core_index, item)
+        {
             self.note_campaign_core_item_delta(core_index, &item_name, amount);
         }
     }
@@ -5821,6 +5862,8 @@ impl GameRuntime {
         }
         let target_max_accepted = self.maximum_accepted_for_item_owner(target_item_owner_index);
         let target_item_owner_is_core = self.building_is_core(content, target_item_owner_index);
+        let target_core_authoritative =
+            !target_item_owner_is_core || self.network_context.core_handle_item_authoritative();
         let target_item_owner_stored = self
             .buildings
             .get(target_item_owner_index)
@@ -5870,12 +5913,14 @@ impl GameRuntime {
             return false;
         }
         source_items.remove(item_id, 1);
-        if !target_core_incinerates_item {
+        if target_core_authoritative && !target_core_incinerates_item {
             target_items.add(item_id, 1);
         }
         if target_item_owner_is_core {
             self.note_core_handle_item_side_effects(content, target_item_owner_index, item_id, 1);
-            self.set_core_no_effect(target_item_owner_index, !target_core_incinerates_item);
+            if target_core_authoritative || target_core_incinerates_item {
+                self.set_core_no_effect(target_item_owner_index, !target_core_incinerates_item);
+            }
         }
         if target_is_router {
             self.note_item_router_received(target_tile_pos, item_id, source_tile_pos);
@@ -18745,6 +18790,58 @@ mod tests {
                 .core_deltas
                 .get("copper"),
             Some(&1)
+        );
+    }
+
+    #[test]
+    fn game_runtime_core_handle_item_client_active_skips_authoritative_item_write() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let default_team = TeamId(GameState::default().rules.default_team as u8);
+        let source_tile = point2_pack(1, 1);
+        let core_tile = point2_pack(3, 6);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), default_team);
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+
+        let mut runtime = GameRuntime::default();
+        runtime.set_network_context(GameRuntimeNetworkContext::client());
+        runtime.state.set_sector(Some(Sector::new(11)));
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(source_building);
+        runtime.add_building(core_building);
+        runtime.refresh_owned_storage_core_links(&content);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.state.stats.get_core_item("copper"), 1);
+        assert!(!runtime
+            .state
+            .rules
+            .sector
+            .as_ref()
+            .unwrap()
+            .info
+            .core_deltas
+            .contains_key("copper"));
+        assert_eq!(
+            runtime.storage_runtime_states.get(&core_tile),
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: core_def.base().item_capacity,
+                no_effect: false,
+                ..CoreBuildState::default()
+            }))
         );
     }
 
