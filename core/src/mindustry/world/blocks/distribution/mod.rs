@@ -352,25 +352,31 @@ pub fn read_duct_router_state<R: Read>(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DuctJunctionState {
-    pub times: [f32; 4],
-    pub item_data: [Option<ContentId>; 4],
+    pub buffer: DirectionalItemBuffer,
+}
+
+impl DuctJunctionState {
+    pub const DEFAULT_CAPACITY: usize = 6;
+
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            buffer: DirectionalItemBuffer::new(capacity),
+        }
+    }
 }
 
 impl Default for DuctJunctionState {
     fn default() -> Self {
-        Self {
-            times: [0.0; 4],
-            item_data: [None; 4],
-        }
+        Self::new(Self::DEFAULT_CAPACITY)
     }
 }
 
 pub fn duct_junction_accept_item(
     relative: Option<usize>,
-    side_empty: bool,
+    side_accepts: bool,
     target_exists_and_same_team: bool,
 ) -> bool {
-    relative.is_some_and(|side| side < 4) && side_empty && target_exists_and_same_team
+    relative.is_some_and(|side| side < 4) && side_accepts && target_exists_and_same_team
 }
 
 pub fn duct_junction_ready(time: f32, edelta: f32, speed: f32) -> (f32, bool) {
@@ -382,20 +388,15 @@ pub fn write_duct_junction_state<W: Write>(
     write: &mut W,
     state: &DuctJunctionState,
 ) -> io::Result<()> {
-    for i in 0..4 {
-        write_f32(write, state.times[i])?;
-        write_i16(write, state.item_data[i].unwrap_or(-1))?;
-    }
-    Ok(())
+    state.buffer.write(write)
 }
 
-pub fn read_duct_junction_state<R: Read>(read: &mut R) -> io::Result<DuctJunctionState> {
+pub fn read_duct_junction_state<R: Read>(
+    read: &mut R,
+    revision: u8,
+) -> io::Result<DuctJunctionState> {
     let mut state = DuctJunctionState::default();
-    for i in 0..4 {
-        state.times[i] = read_f32(read)?;
-        let item = read_i16(read)?;
-        state.item_data[i] = (item >= 0).then_some(item);
-    }
+    state.buffer.read_with_legacy(read, revision == 0)?;
     Ok(state)
 }
 
@@ -1008,15 +1009,20 @@ mod tests {
         let (_, ready) = duct_junction_ready(0.5, 1.0, 4.0);
         assert!(ready);
 
-        let state = DuctJunctionState {
-            times: [0.1, 0.2, 0.3, 0.4],
-            item_data: [Some(1), None, Some(3), Some(4)],
-        };
+        let mut state = DuctJunctionState::default();
+        assert_eq!(state.buffer.capacity(), DuctJunctionState::DEFAULT_CAPACITY);
+        assert!(state.buffer.accept(0, 1, 0.1));
+        assert!(state.buffer.accept(0, 2, 0.2));
+        assert!(state.buffer.accept(2, 3, 0.3));
+        assert!(state.buffer.accept(3, 4, 0.4));
         let mut bytes = Vec::new();
         write_duct_junction_state(&mut bytes, &state).unwrap();
-        assert_eq!(bytes.len(), 24);
         assert_eq!(
-            read_duct_junction_state(&mut bytes.as_slice()).unwrap(),
+            bytes.len(),
+            4 * (2 + DuctJunctionState::DEFAULT_CAPACITY * 8)
+        );
+        assert_eq!(
+            read_duct_junction_state(&mut bytes.as_slice(), 1).unwrap(),
             state
         );
     }

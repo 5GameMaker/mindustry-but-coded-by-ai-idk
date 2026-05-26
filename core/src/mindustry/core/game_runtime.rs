@@ -59,15 +59,15 @@ use crate::mindustry::{
         choose_side_route, conveyor_accept_item, directional_unloader_can_unload,
         directional_unloader_next_offset, duct_accept_item, duct_junction_accept_item,
         duct_router_accept_item, item_bridge_transport_iterations, item_bridge_warmup_step,
-        junction_can_release, mass_driver_link_valid, overflow_gate_route,
-        read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
-        read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
-        read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
-        read_stack_conveyor_state, sorter_rejects_instant_three_chain, sorter_should_direct,
-        stack_conveyor_accept_item, stack_conveyor_cooldown_step, stack_router_accept_item,
-        stack_router_progress_step, write_buffered_bridge_state, write_conveyor_state,
-        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
-        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
+        mass_driver_link_valid, overflow_gate_route, read_buffered_bridge_state,
+        read_conveyor_state, read_directional_unloader_state, read_duct_junction_state,
+        read_duct_router_state, read_duct_state, read_item_bridge_state, read_mass_driver_state,
+        read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
+        sorter_rejects_instant_three_chain, sorter_should_direct, stack_conveyor_accept_item,
+        stack_conveyor_cooldown_step, stack_router_accept_item, stack_router_progress_step,
+        write_buffered_bridge_state, write_conveyor_state, write_directional_unloader_state,
+        write_duct_junction_state, write_duct_router_state, write_duct_state,
+        write_item_bridge_state, write_mass_driver_state, write_sorter_state,
         write_stack_conveyor_state, BufferedItemBridgeState, ConveyorItemState, ConveyorState,
         DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
         MassDriverState, MassDriverStateKind, OverflowRoute, SideRoute, SorterState,
@@ -3356,7 +3356,7 @@ impl GameRuntime {
                     .map(|state| Some(GameRuntimeDistributionBlockState::DuctRouter(state)))
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)
             }
-            DistributionBlockKind::Junction => read_duct_junction_state(building_payload)
+            DistributionBlockKind::Junction => read_duct_junction_state(building_payload, revision)
                 .map(|state| Some(GameRuntimeDistributionBlockState::DuctJunction(state)))
                 .map_err(|_| GameRuntimeBlockStateReadError::Parse),
             DistributionBlockKind::Sorter => read_sorter_state(building_payload, revision)
@@ -5915,12 +5915,13 @@ impl GameRuntime {
                 .unwrap_or_default();
 
             for side in 0..4 {
-                let Some(item_id) = state.item_data[side] else {
+                let Some(entry) = state
+                    .buffer
+                    .peek(side, junction_block.speed / time_scale, now)
+                else {
                     continue;
                 };
-                if !junction_can_release(state.times[side], now, junction_block.speed, time_scale) {
-                    continue;
-                }
+                let item_id = entry.item;
 
                 let Some(target_index) = self.neighbor_building_index(index, side as i32) else {
                     report.missing_targets += 1;
@@ -5929,8 +5930,7 @@ impl GameRuntime {
 
                 report.attempted_moves += 1;
                 if self.handle_buffered_item_to_target(content, index, target_index, item_id) {
-                    state.item_data[side] = None;
-                    state.times[side] = 0.0;
+                    state.buffer.remove(side);
                     report.moved_items += 1;
                 }
             }
@@ -6159,12 +6159,7 @@ impl GameRuntime {
             .copied()
             .unwrap_or(0.0);
         let state = self.ensure_duct_junction_state(target_tile_pos);
-        if state.item_data[side].is_some() {
-            return false;
-        }
-        state.item_data[side] = Some(item_id);
-        state.times[side] = now;
-        true
+        state.buffer.accept(side, item_id, now)
     }
 
     fn handle_buffered_item_to_target(
@@ -8678,12 +8673,7 @@ impl GameRuntime {
         }
 
         let state = self.ensure_duct_junction_state(target_tile_pos);
-        if state.item_data[side].is_some() {
-            return false;
-        }
-        state.item_data[side] = Some(item_id);
-        state.times[side] = now;
-        true
+        state.buffer.accept(side, item_id, now)
     }
 
     fn dump_item_to_duct_bridge(
@@ -9192,9 +9182,9 @@ impl GameRuntime {
                 if side >= 4 {
                     return false;
                 }
-                let side_empty = match self.distribution_runtime_states.get(&target.tile_pos) {
+                let side_accepts = match self.distribution_runtime_states.get(&target.tile_pos) {
                     Some(GameRuntimeDistributionBlockState::DuctJunction(state)) => {
-                        state.item_data[side].is_none()
+                        state.buffer.accepts(side)
                     }
                     Some(_) => return false,
                     None => true,
@@ -9203,7 +9193,7 @@ impl GameRuntime {
                     .neighbor_building_index(target_index, relative)
                     .and_then(|next_index| self.buildings.get(next_index))
                     .is_some_and(|next| next.team == target.team);
-                duct_junction_accept_item(Some(side), side_empty, target_exists_and_same_team)
+                duct_junction_accept_item(Some(side), side_accepts, target_exists_and_same_team)
             }
             Some(BlockDef::Distribution(distribution))
                 if distribution.kind == DistributionBlockKind::DuctBridge =>
@@ -12850,10 +12840,10 @@ mod tests {
             ))
         );
 
-        let junction = DuctJunctionState {
-            times: [1.0, 2.0, 3.0, 4.0],
-            item_data: [Some(copper), None, Some(lead), None],
-        };
+        let mut junction = DuctJunctionState::default();
+        assert!(junction.buffer.accept(0, copper, 1.0));
+        assert!(junction.buffer.accept(0, lead, 2.0));
+        assert!(junction.buffer.accept(2, lead, 3.0));
         assert_eq!(
             roundtrip_exported_distribution_state(
                 &content,
@@ -17538,8 +17528,8 @@ mod tests {
         else {
             panic!("junction sidecar should be created by handleItem");
         };
-        assert_eq!(state.item_data[0], Some(copper));
-        assert_eq!(state.times[0], 0.0);
+        assert_eq!(state.buffer.len(0), 1);
+        assert_eq!(state.buffer.poll(0, 0.0, 0.0), Some(copper));
 
         let early = runtime
             .advance_owned_item_junctions(&content, 25.0 / 60.0)
@@ -17550,7 +17540,8 @@ mod tests {
         else {
             panic!("junction sidecar should remain present");
         };
-        assert_eq!(state.item_data[0], Some(copper));
+        assert_eq!(state.buffer.len(0), 1);
+        assert_eq!(state.buffer.poll(0, 0.0, 0.0), Some(copper));
 
         let ready = runtime
             .advance_owned_item_junctions(&content, 1.0 / 60.0)
@@ -17561,8 +17552,52 @@ mod tests {
         else {
             panic!("junction sidecar should remain present");
         };
-        assert_eq!(state.item_data[0], None);
+        assert_eq!(state.buffer.len(0), 0);
         assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_junction_accepts_six_items_per_side_and_rejects_seventh() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let junction_def = content.block_by_name("junction").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(4, 4);
+        let junction_tile = point2_pack(5, 4);
+        let item_void_tile = point2_pack(6, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 7);
+        let junction_building =
+            BuildingComp::new(junction_tile, junction_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(junction_building);
+        runtime.add_building(item_void_building);
+
+        for _ in 0..DuctJunctionState::DEFAULT_CAPACITY {
+            assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+        }
+        assert!(!runtime.dump_item_to_target(&content, 0, 1, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
+        let Some(GameRuntimeDistributionBlockState::DuctJunction(state)) =
+            runtime.distribution_runtime_states.get(&junction_tile)
+        else {
+            panic!("junction sidecar should remain present");
+        };
+        assert_eq!(state.buffer.len(0), DuctJunctionState::DEFAULT_CAPACITY);
     }
 
     #[test]
@@ -17615,13 +17650,14 @@ mod tests {
         let unload_report = runtime
             .advance_owned_payload_loaders(&content, 1.0 / 60.0)
             .unwrap();
-        assert_eq!(unload_report.dumped_items, 1);
+        assert_eq!(unload_report.dumped_items, 4);
         let Some(GameRuntimeDistributionBlockState::DuctJunction(state)) =
             runtime.distribution_runtime_states.get(&junction_tile)
         else {
             panic!("junction sidecar should be created by payload-unloader dumpAccumulate");
         };
-        assert_eq!(state.item_data[0], Some(copper));
+        assert_eq!(state.buffer.len(0), 4);
+        assert_eq!(state.buffer.poll(0, 0.0, 0.0), Some(copper));
 
         let release_report = runtime
             .advance_owned_payload_loaders(&content, 26.0 / 60.0)
@@ -17632,7 +17668,7 @@ mod tests {
         else {
             panic!("junction sidecar should remain present");
         };
-        assert_eq!(state.item_data[0], None);
+        assert_eq!(state.buffer.len(0), DuctJunctionState::DEFAULT_CAPACITY - 1);
         assert!(runtime.buildings[2].items.is_none());
     }
 
