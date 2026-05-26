@@ -917,3 +917,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 后续建议：继续补 `loader → deconstructor`、`source/router` 与 linked `payload-mass-driver` 的 server-level 多帧 smoke；随后把 payload 状态同步到 network snapshot 的更细联机测试，避免服务端运行态与客户端可见状态脱节。
+
+---
+
+## 23. 最新闭环记录：服务端 PayloadLoader → PayloadDeconstructor 跨多帧 smoke
+
+- 目标：继续验证 payload 子模块接入真实整体 runtime，而不是单独 helper；本轮覆盖 loader 输出到 deconstructor 的跨多帧链路。
+- Rust 主改动：
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`server_update_drives_owned_payload_loader_deconstructor_chain`。
+- 测试链路：
+  - `payload-loader` 预装 `BuildPayload(router)`，`PayloadLoaderState.exporting = true`；
+  - loader 前方放置空 `small-deconstructor`；
+  - 连续调用 `launcher.update()`，每帧断言 `runtime.state.update_id == frame`；
+  - 累计 report，要求最终出现：
+    - `loader.transferred_payloads == 1`
+    - `deconstructor.moved_in_payloads == 1`
+    - `deconstructor.started_deconstructions == 1`
+  - 最终 deconstructor common payload 清空，`deconstructing` 中保留 router payload。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_loader_deconstructor_chain --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_conveyor_void_chain --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 后续建议：补 `PayloadSource/Router` 多帧选路 smoke、linked `PayloadMassDriver` 的多帧自然 charge/fire smoke，并继续把这些 runtime 状态与 world-data/network snapshot 测试绑定。

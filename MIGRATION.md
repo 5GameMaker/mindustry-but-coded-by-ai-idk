@@ -1603,3 +1603,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：还需要把 loader/deconstructor/mass-driver 也纳入更多跨多帧端到端 smoke，并继续补 UnitPayload 完整实体恢复、真实 renderer/UI、网络同步与 Java↔Rust 联机兼容验证。
+
+### 12.9 服务端 PayloadLoader → PayloadDeconstructor 跨多帧 smoke
+
+- 2026-05-26：新增 `server_update_drives_owned_payload_loader_deconstructor_chain`，在同一个 `ServerLauncher::update()` 主循环里构造 `payload-loader → small-deconstructor` 链路，loader 预装 `BuildPayload(router)` 并处于 exporting，连续推进多个 server frame 后验证 payload 被 loader 输出、deconstructor 接收并转入 deconstructing。
+- 该测试覆盖 loader/unloader aggregate 与 deconstructor aggregate 的真实串联顺序，继续收紧“不要让迁移模块独立存在”的要求；每帧仍断言 `runtime.state.update_id == frame`，防止 public wrapper 被误串导致 frame/timing 翻倍。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_loader_deconstructor_chain --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_conveyor_void_chain --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：仍需补 `source/router`、linked `payload-mass-driver` 与 network snapshot 同步的跨多帧/联机 smoke，并继续迁移完整 UnitPayload、renderer/UI 与 Java 客户端互通细节。

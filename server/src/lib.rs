@@ -1328,4 +1328,98 @@ mod tests {
         };
         assert!(common.payload.is_none());
     }
+
+    #[test]
+    fn server_update_drives_owned_payload_loader_deconstructor_chain() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .unwrap();
+        let deconstructor_def = launcher
+            .content_loader
+            .block_by_name("small-deconstructor")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let router_id = router_def.base().id;
+        let loader_tile = point2_pack(4, 4);
+        let loader_trns = loader_def.base().size / 2 + 1;
+        let deconstructor_x = 4 + loader_trns + (deconstructor_def.base().size - 1) / 2;
+        let deconstructor_tile = point2_pack(deconstructor_x, 4);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.set_rotation(0);
+        let mut build_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), router_def.base().clone(), TeamId(6))
+            .write_base(&mut build_bytes, false)
+            .unwrap();
+
+        launcher.runtime.state.world.resize(14, 10);
+        launcher.runtime.add_building(loader_building);
+        launcher.runtime.add_building(BuildingComp::new(
+            deconstructor_tile,
+            deconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(PayloadRef::Block {
+                        block: router_id,
+                        version: 0,
+                        build_bytes,
+                    }),
+                    ..PayloadBlockBuildState::default()
+                },
+                loader: PayloadLoaderState {
+                    exporting: true,
+                    ..PayloadLoaderState::default()
+                },
+            },
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            deconstructor_tile,
+            GameRuntimePayloadBlockState::Deconstructor {
+                common: PayloadBlockBuildState::default(),
+                deconstructor: PayloadDeconstructorState::default(),
+            },
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut loader_transfers = 0;
+        let mut deconstructor_moved_in = 0;
+        let mut started_deconstructions = 0;
+        for frame in 1..=240 {
+            launcher.update();
+            assert_eq!(launcher.runtime.state.update_id, frame);
+            if let Some(report) = launcher.last_runtime_payload_report {
+                loader_transfers += report.loader.transferred_payloads;
+                deconstructor_moved_in += report.deconstructor.moved_in_payloads;
+                started_deconstructions += report.deconstructor.started_deconstructions;
+            }
+            if started_deconstructions > 0 {
+                break;
+            }
+        }
+
+        assert_eq!(loader_transfers, 1);
+        assert_eq!(deconstructor_moved_in, 1);
+        assert_eq!(started_deconstructions, 1);
+        let Some(GameRuntimePayloadBlockState::Deconstructor {
+            common,
+            deconstructor,
+        }) = launcher
+            .runtime
+            .payload_runtime_states
+            .get(&deconstructor_tile)
+        else {
+            panic!("payload deconstructor sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(matches!(
+            deconstructor.deconstructing.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_id
+        ));
+    }
 }
