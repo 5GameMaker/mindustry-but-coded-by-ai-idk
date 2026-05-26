@@ -2675,6 +2675,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core power_node`
 - 仍未完成：候选扫描仍使用 center tile 距离近似 Java hitbox overlap，`PowerNode.insulated(...)` 的 world raycast 阻断、`config(Point2[].class)` 批量重配、真实 placement 调用点和 UI tap/client packet 接入仍待迁移。
 
+### 12.61 PowerDiode 图间方向传输
+
+- 2026-05-27：迁移 Java `PowerDiodeBuild.updateTile()` 的最小 runtime 行为，把 diode 从纯公式 helper 接入 `GameRuntime` power phase。
+- Java 依据：
+  - `front()` / `back()` 两侧都存在、同队且有 power；
+  - 两侧 power graph 不同时，按 back/front 电池存量比例计算 `amount`；
+  - `backGraph.transferPower(-amount)`，`frontGraph.transferPower(amount)`。
+- Rust 新增/变化：
+  - `GameRuntime::advance_owned_power_diodes(...)`：扫描 owned `PowerDiode` building，按 rotation 找 front/back 邻居，通过 `power_graph_memberships` 定位两侧 graph；
+  - 使用 `power_diode_transfer_amount(...)`、`PowerGraphRuntime::transfer_power(...)` 进行图间转移；
+  - 转移后把 graph battery status 重新回写到真实 `BuildingComp.power.status`；
+  - `advance_owned_power_graphs(...)` 在 graph update 后自动执行 diode phase。
+- 测试：
+  - `game_runtime_power_diode_transfers_between_front_and_back_graphs`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_power_diode_transfers_between_front_and_back_graphs`
+  - `cargo test -p mindustry-core power_diode`
+  - `cargo test -p mindustry-core power_graph`
+- 仍未完成：当前 diode 只覆盖相邻 front/back building 与 battery graph 转移；图内多建筑 battery 分配、`PowerDiode.bar(...)` UI、禁用/环境规则细节和与真实 `Groups.powerGraph` 调度顺序仍需继续对照。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

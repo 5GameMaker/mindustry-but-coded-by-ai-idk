@@ -130,13 +130,14 @@ use crate::mindustry::{
         Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
-        power_node_link_valid, read_heater_generator_state, read_impact_reactor_state,
-        read_light_block_state, read_nuclear_reactor_state, read_power_generator_state,
-        read_variable_reactor_state, write_heater_generator_state, write_impact_reactor_state,
-        write_light_block_state, write_nuclear_reactor_state, write_power_generator_state,
-        write_variable_reactor_state, HeaterGeneratorState, ImpactReactorState, LightBlockState,
-        NuclearReactorState, PowerGeneratorState, PowerGraphNode, PowerGraphRuntime,
-        VariableReactorState,
+        power_diode_transfer_amount, power_graph_battery_stored,
+        power_graph_total_battery_capacity, power_node_link_valid, read_heater_generator_state,
+        read_impact_reactor_state, read_light_block_state, read_nuclear_reactor_state,
+        read_power_generator_state, read_variable_reactor_state, write_heater_generator_state,
+        write_impact_reactor_state, write_light_block_state, write_nuclear_reactor_state,
+        write_power_generator_state, write_variable_reactor_state, HeaterGeneratorState,
+        ImpactReactorState, LightBlockState, NuclearReactorState, PowerGeneratorState,
+        PowerGraphNode, PowerGraphRuntime, VariableReactorState,
     },
     world::blocks::production::{
         item_incinerator_accept_item, read_beam_drill_state, read_burst_drill_state,
@@ -2014,6 +2015,26 @@ fn two_buildings_mut(
     }
 }
 
+fn transfer_between_power_graphs(
+    graphs: &mut [PowerGraphRuntime],
+    back_index: usize,
+    front_index: usize,
+    amount: f32,
+) {
+    if back_index == front_index || amount <= 0.0 {
+        return;
+    }
+    if back_index < front_index {
+        let (left, right) = graphs.split_at_mut(front_index);
+        left[back_index].transfer_power(-amount);
+        right[0].transfer_power(amount);
+    } else {
+        let (left, right) = graphs.split_at_mut(back_index);
+        right[0].transfer_power(-amount);
+        left[front_index].transfer_power(amount);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameRuntimeCoreUpgradeResult {
     Upgraded,
@@ -3823,28 +3844,63 @@ impl GameRuntime {
 
     pub fn advance_owned_power_graphs(&mut self, content: &ContentLoader, delta: f32) -> usize {
         let graph_count = self.rebuild_owned_power_graphs_from_proximity(Some(content), delta);
-        let mut status_updates = Vec::new();
 
         for graph in &mut self.power_graphs {
             graph.update_with_delta(delta);
-            status_updates.extend(
-                graph
-                    .consumer_nodes
-                    .iter()
-                    .zip(graph.consumers.iter())
-                    .map(|(node, consumer)| (*node, consumer.status)),
-            );
-            status_updates.extend(
-                graph
-                    .battery_nodes
-                    .iter()
-                    .zip(graph.batteries.iter())
-                    .map(|(node, battery)| (*node, battery.status)),
-            );
         }
 
+        let status_updates = self.collect_owned_power_graph_statuses();
         self.apply_owned_power_graph_statuses(status_updates);
+        self.advance_owned_power_diodes(content);
         graph_count
+    }
+
+    pub fn advance_owned_power_diodes(&mut self, content: &ContentLoader) -> usize {
+        let diode_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                matches!(
+                    content.block(building.block.id),
+                    Some(BlockDef::Power(power)) if power.kind == PowerBlockKind::PowerDiode
+                )
+                .then_some(index)
+            })
+            .collect();
+
+        let mut transferred = 0;
+        for diode_index in diode_indices {
+            let Some((back_graph_index, front_graph_index)) =
+                self.owned_power_diode_graphs(content, diode_index)
+            else {
+                continue;
+            };
+            let back = &self.power_graphs[back_graph_index];
+            let front = &self.power_graphs[front_graph_index];
+            let amount = power_diode_transfer_amount(
+                power_graph_battery_stored(&back.batteries),
+                power_graph_total_battery_capacity(&back.batteries),
+                power_graph_battery_stored(&front.batteries),
+                power_graph_total_battery_capacity(&front.batteries),
+            );
+            if amount <= 0.0 {
+                continue;
+            }
+            transfer_between_power_graphs(
+                &mut self.power_graphs,
+                back_graph_index,
+                front_graph_index,
+                amount,
+            );
+            transferred += 1;
+        }
+
+        if transferred > 0 {
+            let status_updates = self.collect_owned_power_graph_statuses();
+            self.apply_owned_power_graph_statuses(status_updates);
+        }
+        transferred
     }
 
     pub fn after_owned_building_picked_up_power(
@@ -4101,6 +4157,35 @@ impl GameRuntime {
             capacity,
             buffered,
         )
+    }
+
+    fn owned_power_diode_graphs(
+        &self,
+        content: &ContentLoader,
+        diode_index: usize,
+    ) -> Option<(usize, usize)> {
+        let diode = self.buildings.get(diode_index)?;
+        if !matches!(
+            content.block(diode.block.id),
+            Some(BlockDef::Power(power)) if power.kind == PowerBlockKind::PowerDiode
+        ) {
+            return None;
+        }
+        let front_index = self.neighbor_building_index(diode_index, diode.rotation)?;
+        let back_index =
+            self.neighbor_building_index(diode_index, (diode.rotation + 2).rem_euclid(4))?;
+        let front = self.buildings.get(front_index)?;
+        let back = self.buildings.get(back_index)?;
+        if front.team != diode.team
+            || back.team != diode.team
+            || !front.block.has_power
+            || !back.block.has_power
+        {
+            return None;
+        }
+        let front_graph = *self.power_graph_memberships.get(&front.tile_pos)?;
+        let back_graph = *self.power_graph_memberships.get(&back.tile_pos)?;
+        (front_graph != back_graph).then_some((back_graph, front_graph))
     }
 
     fn owned_power_connection_indices(
@@ -4489,6 +4574,27 @@ impl GameRuntime {
             updated += 1;
         }
         updated
+    }
+
+    fn collect_owned_power_graph_statuses(&self) -> Vec<(i32, f32)> {
+        let mut status_updates = Vec::new();
+        for graph in &self.power_graphs {
+            status_updates.extend(
+                graph
+                    .consumer_nodes
+                    .iter()
+                    .zip(graph.consumers.iter())
+                    .map(|(node, consumer)| (*node, consumer.status)),
+            );
+            status_updates.extend(
+                graph
+                    .battery_nodes
+                    .iter()
+                    .zip(graph.batteries.iter())
+                    .map(|(node, battery)| (*node, battery.status)),
+            );
+        }
+        status_updates
     }
 
     pub fn refresh_owned_storage_core_links(&mut self, content: &ContentLoader) -> usize {
@@ -17124,6 +17230,56 @@ mod tests {
             runtime.power_graph_memberships.get(&source_pos),
             runtime.power_graph_memberships.get(&adjacent_pos)
         );
+    }
+
+    #[test]
+    fn game_runtime_power_diode_transfers_between_front_and_back_graphs() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let battery_def = content.block_by_name("battery").unwrap();
+        let diode_def = content.block_by_name("diode").unwrap();
+        let back_pos = point2_pack(10, 10);
+        let diode_pos = point2_pack(11, 10);
+        let front_pos = point2_pack(12, 10);
+
+        let mut back = BuildingComp::new(back_pos, battery_def.base().clone(), TeamId(1));
+        back.power.as_mut().unwrap().status = 1.0;
+        let mut diode = BuildingComp::new(diode_pos, diode_def.base().clone(), TeamId(1));
+        diode.set_rotation(0);
+        let mut front = BuildingComp::new(front_pos, battery_def.base().clone(), TeamId(1));
+        front.power.as_mut().unwrap().status = 0.0;
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(back);
+        runtime.add_building(diode);
+        runtime.add_building(front);
+
+        assert_eq!(runtime.advance_owned_power_graphs(&content, 1.0), 2);
+        let back = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == back_pos)
+            .unwrap();
+        let front = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == front_pos)
+            .unwrap();
+        assert!((back.power.as_ref().unwrap().status - 0.75).abs() < 0.0001);
+        assert!((front.power.as_ref().unwrap().status - 0.25).abs() < 0.0001);
+        assert_eq!(runtime.advance_owned_power_diodes(&content), 1);
+        let back = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == back_pos)
+            .unwrap();
+        let front = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == front_pos)
+            .unwrap();
+        assert!((back.power.as_ref().unwrap().status - 0.625).abs() < 0.0001);
+        assert!((front.power.as_ref().unwrap().status - 0.375).abs() < 0.0001);
     }
 
     #[test]
