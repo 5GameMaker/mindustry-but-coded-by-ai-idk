@@ -1686,3 +1686,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core update_sends_configured_connect_packet_once_after_connect_event --lib`
   - `cargo check -p mindustry-tests`
 - 仍未完成：还需扩展到多 payload 类型的真实联机 world-stream smoke、state snapshot/实时增量同步、Java 客户端/服务端互通验证，以及 renderer/UI/输入控制闭环。
+
+### 12.15 真实联机 world-stream 多类 Payload sidecar materialize
+
+- 2026-05-26：新增 `real_server_desktop_world_stream_materializes_multiple_payload_sidecars`，复用真实 `ServerLauncher → ArcNetProvider → DesktopLauncher/NetClient → GameRuntime` 联机链路，在同一条 server world stream 中携带 `PayloadRouter`、`PayloadMassDriver`、`PayloadDeconstructor` 三类 sidecar，并在 desktop runtime 中验证全部 materialize。
+- 测试覆盖字段：
+  - `payload-router`：conveyor 中的 `BuildPayload(router)`、sorted block key、`recDir=2`、`matches=true`；
+  - `payload-mass-driver`：`turretRotation=45`、`state=Shooting`、`reloadCounter=0.25`、`charge=0.5`、`loaded/charging=true`；
+  - `small-deconstructor`：`progress=0.5`、`accum=[1,2]`、`deconstructing=BuildPayload(router)`。
+- 同步把 `tests/src/lib.rs` 中真实联机 pump 与本地 TCP/UDP 端口探测抽成测试 helper，并将端口探测尝试次数提高到 128，降低 Windows 环境下偶发端口占用造成的 flaky。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_world_stream_materializes_multiple_payload_sidecars --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `rustfmt --check tests/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：后续需要继续补 state snapshot/实时增量同步、更多 gameplay runtime 闭环、Java 客户端/服务端互通 smoke、renderer/UI/输入控制与可游玩路径。

@@ -1083,3 +1083,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-core update_sends_configured_connect_packet_once_after_connect_event --lib`
   - `cargo check -p mindustry-tests`
 - 后续建议：把真实联机 world-stream smoke 扩展到 `PayloadRouter/PayloadMassDriver/PayloadDeconstructor`，随后推进 state snapshot/实时增量同步与 Java 客户端/服务端互通 smoke。
+
+---
+
+## 29. 最新闭环记录：真实联机 world-stream 多类 Payload sidecar materialize
+
+- 目标：把真实 server/client world stream smoke 从单个 `payload-loader` 扩展到多类 payload sidecar，避免只验证单点字段。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_world_stream_materializes_multiple_payload_sidecars`。
+- 测试链路：
+  - 在真实 `ServerLauncher` runtime 中同时放置：
+    - `payload-router`，带 conveyor item、sorted block key、`recDir=2`、`matches=true`；
+    - `payload-mass-driver`，带 `state=Shooting`、`turretRotation=45`、`reloadCounter=0.25`、`charge=0.5`、`loaded/charging=true`；
+    - `small-deconstructor`，带 `progress=0.5`、`accum=[1,2]`、`deconstructing=BuildPayload(router)`；
+  - `server.init()` 打开真实本地 TCP/UDP；
+  - `mindustry_desktop::run --connect 127.0.0.1:port` 建立真实客户端；
+  - 复用 `pump_real_server_desktop_until(...)` 循环推进 `desktop.update()` / `server.update()`；
+  - 断言 desktop `NetClient` 已收到并确认 world stream，服务端已收到 confirm；
+  - 断言 desktop runtime 进入 `GameRuntimeNetworkContext::client()`，且三类 payload sidecar 关键字段全部恢复。
+- 结构调整：
+  - `tests/src/lib.rs` 提取 `free_local_port()` 与 `pump_real_server_desktop_until(...)` 测试 helper；
+  - 本地端口探测尝试次数调到 128，降低 Windows 环境端口占用导致的偶发失败。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_world_stream_materializes_multiple_payload_sidecars --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `rustfmt --check tests/src/lib.rs`
+  - `git diff --check`
+- 后续建议：继续推进 state snapshot/实时增量同步、Java 客户端/服务端互通 smoke，以及 renderer/UI/输入控制闭环，确保最终是完整可游玩的 Rust MDT 而不是 isolated modules。
