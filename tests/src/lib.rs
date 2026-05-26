@@ -502,3 +502,146 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
     desktop.net_client.net_mut().disconnect();
     server.close_network();
 }
+
+#[test]
+fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream() {
+    use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::net::{
+        EntitySnapshotCallPacket, HiddenSnapshotCallPacket, StateSnapshotCallPacket,
+    };
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(8, 8);
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+    });
+
+    let connection_id = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        state
+            .last_connect_confirm_connection_id
+            .expect("server should receive connect confirm before entity sync")
+    };
+    let state_snapshot = StateSnapshotCallPacket {
+        wave_time: 44.0,
+        wave: 21,
+        enemies: 8,
+        paused: false,
+        game_over: false,
+        time_data: 901,
+        tps: 60,
+        rand0: 101,
+        rand1: 202,
+        core_data: Vec::new(),
+    };
+    let first_entity = EntitySnapshotCallPacket {
+        amount: 1,
+        data: vec![7, 8],
+    };
+    let second_entity = EntitySnapshotCallPacket {
+        amount: 2,
+        data: vec![9, 10, 11],
+    };
+    let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
+
+    server
+        .net_server
+        .send_entity_sync_snapshot(
+            connection_id,
+            state_snapshot.clone(),
+            vec![first_entity.clone(), second_entity.clone()],
+            Some(hidden.clone()),
+        )
+        .expect("real server should send entity sync snapshot");
+
+    let mut applied = false;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        desktop.update();
+        server.update();
+        {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            applied = state.last_state_snapshot.as_ref() == Some(&state_snapshot)
+                && state.entity_snapshot_packets_seen == 2
+                && state.last_entity_snapshot.as_ref() == Some(&second_entity)
+                && state.last_hidden_snapshot.as_ref() == Some(&hidden);
+            last_client_status = format!(
+                "state={} entity={} hidden={} last_entity={:?} last_hidden={:?} provider_events={:?}",
+                state.state_snapshot_packets_seen,
+                state.entity_snapshot_packets_seen,
+                state.hidden_snapshot_packets_seen,
+                state.last_entity_snapshot,
+                state.last_hidden_snapshot,
+                state.last_provider_events,
+            );
+        }
+        if applied && desktop.game_state.wave == state_snapshot.wave {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        applied,
+        "desktop should receive real entity sync snapshot after world stream; client: {last_client_status}"
+    );
+    {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_state_snapshot_connection_id, Some(connection_id));
+        assert_eq!(state.last_state_snapshot.as_ref(), Some(&state_snapshot));
+        assert_eq!(state.state_snapshot_packets_sent, 1);
+        assert_eq!(
+            state.last_entity_snapshot_connection_id,
+            Some(connection_id)
+        );
+        assert_eq!(state.last_entity_snapshot.as_ref(), Some(&second_entity));
+        assert_eq!(state.entity_snapshot_packets_sent, 2);
+        assert_eq!(
+            state.last_hidden_snapshot_connection_id,
+            Some(connection_id)
+        );
+        assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden));
+        assert_eq!(state.hidden_snapshot_packets_sent, 1);
+        assert!(state.last_entity_snapshot_error.is_none());
+        assert!(state.last_hidden_snapshot_error.is_none());
+    }
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.state_snapshot_packets_seen, 1);
+        assert_eq!(state.last_state_snapshot.as_ref(), Some(&state_snapshot));
+        assert_eq!(state.entity_snapshot_packets_seen, 2);
+        assert_eq!(state.last_entity_snapshot.as_ref(), Some(&second_entity));
+        assert_eq!(state.hidden_snapshot_packets_seen, 1);
+        assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden));
+        assert!(state.last_server_snapshot_at.is_some());
+    }
+    assert_eq!(desktop.game_state.wave, state_snapshot.wave);
+    assert_eq!(desktop.game_state.server_tps, state_snapshot.tps as i32);
+    assert_eq!(desktop.runtime.state.server_tps, state_snapshot.tps as i32);
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}

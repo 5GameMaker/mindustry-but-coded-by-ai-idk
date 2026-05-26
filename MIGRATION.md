@@ -1715,3 +1715,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check tests/src/lib.rs`
   - `git diff --check`
 - 仍未完成：仍需补 entity/block/hidden snapshot 的真实联机增量同步、客户端输入/构建/单位状态回传、Java↔Rust 联机 smoke、renderer/UI 与完整可游玩路径。
+
+### 12.17 真实联机 Entity/Hidden snapshot 增量同步 smoke
+
+- 2026-05-26：新增 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，在真实 world-stream join 后调用 `NetServer::send_entity_sync_snapshot(...)`，按 Java-like 顺序通过真实 `ArcNetProvider` 发送 `StateSnapshotCallPacket`、两个 `EntitySnapshotCallPacket` 和一个 `HiddenSnapshotCallPacket`。
+- 测试验证：
+  - 服务端记录 `state_snapshot_packets_sent=1`、`entity_snapshot_packets_sent=2`、`hidden_snapshot_packets_sent=1`；
+  - 客户端 `NetClientState` 记录 `last_state_snapshot`、`entity_snapshot_packets_seen=2`、`last_entity_snapshot`、`hidden_snapshot_packets_seen=1`、`last_hidden_snapshot`；
+  - desktop `game_state/runtime.state` 仍同步 state snapshot 中的 wave 与 TPS，并保持 `GameRuntimeNetworkContext::client()`。
+- 该闭环进一步覆盖 world load 之后的低层 entity/visibility 增量包接收路径，为后续把 snapshot 数据真正落到 world/entity mirror 打基础。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `rustfmt --check tests/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`BlockSnapshotCallPacket` 真实联机 smoke、entity snapshot 数据 materialize 到真实 world/entity mirror、客户端输入/构建回传、Java↔Rust 互通、renderer/UI/可游玩闭环仍需继续。

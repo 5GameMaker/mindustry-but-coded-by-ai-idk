@@ -1140,3 +1140,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check tests/src/lib.rs`
   - `git diff --check`
 - 后续建议：继续补 `EntitySnapshotCallPacket`、`BlockSnapshotCallPacket`、`HiddenSnapshotCallPacket` 的真实联机增量同步，再推进客户端输入/构建请求回传和 Java↔Rust 互通 smoke。
+
+---
+
+## 31. 最新闭环记录：真实联机 Entity/Hidden snapshot 增量同步 smoke
+
+- 目标：继续扩展真实联机增量同步，验证 `NetServer::send_entity_sync_snapshot(...)` 发出的 state/entity/hidden snapshot 能经真实 `ArcNetProvider` 到达 desktop `NetClient`。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`。
+- 测试链路：
+  - 真实 `ServerLauncher` / `DesktopLauncher --connect` 完成 world stream join；
+  - 使用真实 `last_connect_confirm_connection_id`；
+  - 调用 `send_entity_sync_snapshot(connection_id, state_snapshot, [entity1, entity2], Some(hidden))`；
+  - 循环推进 `desktop.update()` / `server.update()`；
+  - 断言服务端记录 state/entity/hidden 三类包的发送统计；
+  - 断言客户端 `NetClientState` 记录 `last_state_snapshot`、`entity_snapshot_packets_seen=2`、`last_entity_snapshot=entity2`、`hidden_snapshot_packets_seen=1`、`last_hidden_snapshot=hidden`；
+  - 断言 desktop state snapshot 的 wave/TPS 已同步到 `game_state/runtime.state`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `rustfmt --check tests/src/lib.rs`
+  - `git diff --check`
+- 后续建议：继续补 `BlockSnapshotCallPacket` 真实联机 smoke，并把 entity/block snapshot bytes 进一步 materialize 到可查询的 world/entity mirror，而不是只停在 `NetClientState` 记录层。
