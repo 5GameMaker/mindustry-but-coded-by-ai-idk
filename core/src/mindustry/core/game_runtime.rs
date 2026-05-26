@@ -4467,7 +4467,7 @@ impl GameRuntime {
         let closest_y = circle_y.clamp(min_y, max_y);
         let dx = circle_x - closest_x;
         let dy = circle_y - closest_y;
-        dx * dx + dy * dy <= laser_range * laser_range
+        dx * dx + dy * dy < laser_range * laser_range
     }
 
     fn owned_building_center_tiles(building: &BuildingComp) -> (f32, f32) {
@@ -17556,6 +17556,19 @@ mod tests {
                 .links,
             vec![large_target_pos]
         );
+    }
+
+    #[test]
+    fn game_runtime_power_node_range_rejects_exact_circle_rect_tangent_like_java() {
+        let source = BuildingComp::new(point2_pack(0, 0), Block::new(9000, "source"), TeamId(1));
+        let target = BuildingComp::new(point2_pack(7, 0), Block::new(9001, "target"), TeamId(1));
+
+        assert!(!GameRuntime::owned_power_node_circle_overlaps_block(
+            &source, 6.5, &target
+        ));
+        assert!(GameRuntime::owned_power_node_circle_overlaps_block(
+            &source, 6.5001, &target
+        ));
     }
 
     #[test]

@@ -2745,15 +2745,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - Java 依据：
   - `PowerNode.overlaps(src, other, range)` 使用 source 建筑坐标作为圆心、`laserRange * tilesize` 作为半径；
   - target 使用 `other.tile.worldx()/worldy() + other.block.offset` 作为矩形中心、`other.block.size * tilesize` 作为矩形宽高；
-  - 因此大尺寸 target 即使中心点超过 `laserRange`，只要矩形 hitbox 与范围圆相交仍可连接。
+  - 因此大尺寸 target 即使中心点超过 `laserRange`，只要矩形 hitbox 与范围圆相交仍可连接；
+  - Arc/libGDX `Intersector.overlaps(Circle, Rect)` 对最近点距离使用严格 `< radius^2`，刚好相切不算 overlap。
 - Rust 新增/变化：
   - `owned_power_node_link_overlaps(...)` 改为双向调用 `owned_power_node_circle_overlaps_block(...)`；
   - 新增 `owned_building_center_tiles(...)` / `owned_building_rect_tiles(...)`，使用 `Block.offset` 和 `Block.size` 在 tile 单位下复刻 Java hitbox；
   - 保持目标也是 PowerNode 时的反向 range 判定。
 - 测试：
   - `game_runtime_power_node_range_uses_java_circle_rect_overlap_for_large_targets`
+  - `game_runtime_power_node_range_rejects_exact_circle_rect_tangent_like_java`
 - 已验证：
   - `cargo test -p mindustry-core game_runtime_power_node_range_uses_java_circle_rect_overlap_for_large_targets`
+  - `cargo test -p mindustry-core game_runtime_power_node_range_rejects_exact_circle_rect_tangent_like_java`
   - `cargo test -p mindustry-core power_node`
   - `cargo test -p mindustry-core game_runtime_power_line_insulated_matches_java_raycast_flags`
   - `cargo test -p mindustry-core game_runtime_autolink_skips_insulated_power_lines_but_manual_config_stays_java_like`
