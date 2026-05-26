@@ -59,10 +59,10 @@ use crate::mindustry::{
         choose_side_route, conveyor_accept_item, directional_unloader_can_unload,
         directional_unloader_next_offset, duct_accept_item, duct_junction_accept_item,
         duct_router_accept_item, item_bridge_transport_iterations, item_bridge_warmup_step,
-        mass_driver_link_valid, overflow_duct_next_cdump, overflow_duct_side_order,
-        overflow_gate_route, read_buffered_bridge_state, read_conveyor_state,
-        read_directional_unloader_state, read_duct_junction_state, read_duct_router_state,
-        read_duct_state, read_item_bridge_state, read_mass_driver_state,
+        mass_driver_link_valid, mass_driver_time_to_arrive, overflow_duct_next_cdump,
+        overflow_duct_side_order, overflow_gate_route, read_buffered_bridge_state,
+        read_conveyor_state, read_directional_unloader_state, read_duct_junction_state,
+        read_duct_router_state, read_duct_state, read_item_bridge_state, read_mass_driver_state,
         read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
         sorter_rejects_instant_three_chain, sorter_should_direct, stack_conveyor_accept_item,
         stack_conveyor_cooldown_step, stack_router_accept_item, stack_router_progress_step,
@@ -1518,6 +1518,16 @@ pub struct GameRuntimeItemMassDriverFrameReport {
     pub missing_targets: usize,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeItemMassDriverInFlight {
+    pub from_tile: i32,
+    pub to_tile: i32,
+    pub to_block_id: ContentId,
+    pub to_team: TeamId,
+    pub remaining_ticks: f32,
+    pub items: Vec<(ContentId, i32)>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeItemBridgeFrameReport {
     pub visited_buildings: usize,
@@ -1738,6 +1748,7 @@ pub struct GameRuntime {
     pub item_junction_time_counters: BTreeMap<i32, f32>,
     pub item_mass_driver_reload_counters: BTreeMap<i32, f32>,
     pub item_mass_driver_waiting_shooters: BTreeMap<i32, Vec<i32>>,
+    pub item_mass_driver_in_flight: Vec<GameRuntimeItemMassDriverInFlight>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
@@ -1779,6 +1790,7 @@ impl GameRuntime {
             item_junction_time_counters: BTreeMap::new(),
             item_mass_driver_reload_counters: BTreeMap::new(),
             item_mass_driver_waiting_shooters: BTreeMap::new(),
+            item_mass_driver_in_flight: Vec::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
@@ -2289,6 +2301,8 @@ impl GameRuntime {
         self.item_mass_driver_waiting_shooters
             .remove(&removed.tile_pos);
         self.remove_item_mass_driver_waiting_shooter_from_all(removed.tile_pos);
+        self.item_mass_driver_in_flight
+            .retain(|shot| shot.from_tile != removed.tile_pos && shot.to_tile != removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -3893,6 +3907,7 @@ impl GameRuntime {
         self.item_junction_time_counters.clear();
         self.item_mass_driver_reload_counters.clear();
         self.item_mass_driver_waiting_shooters.clear();
+        self.item_mass_driver_in_flight.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -7246,6 +7261,8 @@ impl GameRuntime {
         frame_delta: f32,
     ) -> GameRuntimeItemMassDriverFrameReport {
         let mut report = GameRuntimeItemMassDriverFrameReport::default();
+        report.transferred_items +=
+            self.advance_item_mass_driver_in_flight_ticks(content, frame_delta);
         let driver_indices: Vec<_> = self
             .buildings
             .iter()
@@ -7420,18 +7437,7 @@ impl GameRuntime {
                     };
                     if moved > 0 {
                         report.shots_fired += 1;
-                        report.transferred_items += moved as usize;
                         self.item_mass_driver_reload_counters.insert(tile_pos, 1.0);
-                        let target_tile_pos = self.buildings[link_index].tile_pos;
-                        self.item_mass_driver_reload_counters
-                            .insert(target_tile_pos, 1.0);
-                        let mut target_state = self.ensure_item_mass_driver_state(target_tile_pos);
-                        target_state.state = MassDriverStateKind::Idle;
-                        self.remove_item_mass_driver_waiting_shooter(target_tile_pos, tile_pos);
-                        self.distribution_runtime_states.insert(
-                            target_tile_pos,
-                            GameRuntimeDistributionBlockState::MassDriver(target_state),
-                        );
                         state.state = MassDriverStateKind::Idle;
                     }
                 }
@@ -7445,6 +7451,89 @@ impl GameRuntime {
         }
 
         report
+    }
+
+    fn advance_item_mass_driver_in_flight_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> usize {
+        if self.item_mass_driver_in_flight.is_empty() {
+            return 0;
+        }
+
+        let mut delivered = 0;
+        let mut pending = Vec::new();
+        for mut shot in std::mem::take(&mut self.item_mass_driver_in_flight) {
+            shot.remaining_ticks -= frame_delta.max(0.0);
+            if shot.remaining_ticks > 0.0 {
+                pending.push(shot);
+                continue;
+            }
+            delivered += self.resolve_item_mass_driver_in_flight_shot(content, &shot);
+        }
+        self.item_mass_driver_in_flight = pending;
+        delivered
+    }
+
+    fn resolve_item_mass_driver_in_flight_shot(
+        &mut self,
+        content: &ContentLoader,
+        shot: &GameRuntimeItemMassDriverInFlight,
+    ) -> usize {
+        let Some(target_index) = self.building_index_by_tile_pos(shot.to_tile) else {
+            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            return 0;
+        };
+        let target = &self.buildings[target_index];
+        if target.block.id != shot.to_block_id || target.team != shot.to_team {
+            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            return 0;
+        }
+        let Some(BlockDef::Distribution(distribution)) = content.block(target.block.id) else {
+            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            return 0;
+        };
+        if distribution.kind != DistributionBlockKind::MassDriver {
+            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            return 0;
+        }
+
+        let target_capacity = self.buildings[target_index].block.item_capacity * 2;
+        let target_total = self.buildings[target_index]
+            .items
+            .as_ref()
+            .map(|items| items.total())
+            .unwrap_or(0);
+        let mut remaining_space = (target_capacity - target_total).max(0);
+        let Some(target_items) = self.buildings[target_index].items.as_mut() else {
+            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            return 0;
+        };
+
+        let mut delivered = 0;
+        for (item_id, amount) in &shot.items {
+            if remaining_space <= 0 {
+                break;
+            }
+            let add = (*amount).min(remaining_space);
+            if add > 0 {
+                target_items.add(*item_id, add);
+                remaining_space -= add;
+                delivered += add as usize;
+            }
+        }
+
+        self.item_mass_driver_reload_counters
+            .insert(shot.to_tile, 1.0);
+        let mut target_state = self.ensure_item_mass_driver_state(shot.to_tile);
+        target_state.state = MassDriverStateKind::Idle;
+        self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+        self.distribution_runtime_states.insert(
+            shot.to_tile,
+            GameRuntimeDistributionBlockState::MassDriver(target_state),
+        );
+        delivered
     }
 
     fn ensure_item_mass_driver_state(&mut self, tile_pos: i32) -> MassDriverState {
@@ -7664,13 +7753,18 @@ impl GameRuntime {
             return 0;
         }
         let source_capacity = self.buildings[source_index].block.item_capacity;
-        let target_capacity = self.buildings[target_index].block.item_capacity * 2;
-        let target_total = self.buildings[target_index]
-            .items
-            .as_ref()
-            .map(|items| items.total())
-            .unwrap_or(0);
-        let mut remaining_target_space = (target_capacity - target_total).max(0);
+        let Some(BlockDef::Distribution(driver_block)) =
+            content.block(self.buildings[source_index].block.id)
+        else {
+            return 0;
+        };
+        let source_tile = self.buildings[source_index].tile_pos;
+        let target_tile = self.buildings[target_index].tile_pos;
+        let time_to_arrive = mass_driver_time_to_arrive(
+            self.distance_between_buildings(source_index, target_index),
+            driver_block.bullet_speed,
+            driver_block.bullet_lifetime,
+        );
         let mut total_used = 0;
         let mut entries = Vec::new();
         for item in content.items() {
@@ -7680,15 +7774,12 @@ impl GameRuntime {
                 .as_ref()
                 .map(|items| items.get(item_id))
                 .unwrap_or(0);
-            let move_amount = amount
-                .min(source_capacity - total_used)
-                .min(remaining_target_space);
+            let move_amount = amount.min(source_capacity - total_used);
             if move_amount > 0 {
                 entries.push((item_id, move_amount));
                 total_used += move_amount;
-                remaining_target_space -= move_amount;
             }
-            if total_used >= source_capacity || remaining_target_space <= 0 {
+            if total_used >= source_capacity {
                 break;
             }
         }
@@ -7696,23 +7787,21 @@ impl GameRuntime {
             return 0;
         }
 
-        let (source, target) = if source_index < target_index {
-            let (left, right) = self.buildings.split_at_mut(target_index);
-            (&mut left[source_index], &mut right[0])
-        } else {
-            let (left, right) = self.buildings.split_at_mut(source_index);
-            (&mut right[0], &mut left[target_index])
-        };
-        let Some(source_items) = source.items.as_mut() else {
-            return 0;
-        };
-        let Some(target_items) = target.items.as_mut() else {
+        let Some(source_items) = self.buildings[source_index].items.as_mut() else {
             return 0;
         };
         for (item_id, amount) in &entries {
             source_items.remove(*item_id, *amount);
-            target_items.add(*item_id, *amount);
         }
+        self.item_mass_driver_in_flight
+            .push(GameRuntimeItemMassDriverInFlight {
+                from_tile: source_tile,
+                to_tile: target_tile,
+                to_block_id: self.buildings[target_index].block.id,
+                to_team: self.buildings[target_index].team,
+                remaining_ticks: time_to_arrive,
+                items: entries,
+            });
         total_used
     }
 
@@ -17478,9 +17567,16 @@ mod tests {
 
         assert!(aggregate.attempted_shots > 0);
         assert_eq!(aggregate.shots_fired, 1);
-        assert_eq!(aggregate.transferred_items, 20);
+        assert_eq!(aggregate.transferred_items, 0);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
-        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 20);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.item_mass_driver_in_flight.len(), 1);
+        assert_eq!(runtime.item_mass_driver_in_flight[0].from_tile, source_tile);
+        assert_eq!(runtime.item_mass_driver_in_flight[0].to_tile, target_tile);
+        assert_eq!(
+            runtime.item_mass_driver_in_flight[0].items,
+            vec![(copper, 20)]
+        );
         assert_eq!(
             runtime
                 .item_mass_driver_reload_counters
@@ -17488,6 +17584,21 @@ mod tests {
                 .copied(),
             Some(1.0)
         );
+
+        let arrival_ticks = runtime.item_mass_driver_in_flight[0].remaining_ticks.ceil() as i32 + 1;
+        let mut delivered = 0;
+        for _ in 0..arrival_ticks {
+            let report = runtime
+                .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
+                .unwrap();
+            delivered += report.transferred_items;
+            if delivered > 0 {
+                break;
+            }
+        }
+        assert_eq!(delivered, 20);
+        assert!(runtime.item_mass_driver_in_flight.is_empty());
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 20);
         let target_reload = runtime
             .item_mass_driver_reload_counters
             .get(&target_tile)
@@ -17499,7 +17610,7 @@ mod tests {
         else {
             panic!("source mass driver sidecar should be kept");
         };
-        assert_eq!(source_state.state, MassDriverStateKind::Idle);
+        assert_eq!(source_state.state, MassDriverStateKind::Shooting);
         assert!((source_state.rotation - 0.0).abs() <= f32::EPSILON);
         assert!(runtime
             .item_mass_driver_waiting_shooters
