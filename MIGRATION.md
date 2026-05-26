@@ -3014,3 +3014,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_update_forwards_client_plan_snapshot_to_other_connections`
   - `cargo test -p mindustry-server`
 - 仍未完成：当前最小闭环尚未按真实 `Player/team` 做同队过滤，也未把 `connection_id -> player entity id` 的绑定替换为真实 player id；下一步应补 server 侧玩家 preview 状态维护（`PlayerComp.handlePreviewPlans`/组延迟/周期广播）与 Rust server->desktop 多客户端 smoke。
+
+### 12.77 Server preview 玩家状态与同队过滤
+
+- 2026-05-27：把 12.76 的无状态粗转发继续推进到 server launcher 的玩家 preview 状态维护与同队在线过滤，避免 preview snapshot 被广播给异队或半连接对象。
+- Java 依据：
+  - `NetServer.clientPlanSnapshot(...)` 会先让发送方 `Player` 调用 `handlePreviewPlans(groupId, plans)`；
+  - `clientPlanSnapshotSend(...)` 只向同队、非本人、非 local、连接可用的玩家发送 `clientPlanSnapshotReceived`；
+  - `PlayerComp.handlePreviewPlans(...)` 维护 group 单调递增、assembling/current 分离与延迟 commit。
+- Rust 新增/变化：
+  - `ServerLauncher` 新增 `server_preview_players: BTreeMap<i32, PlayerComp>`，按连接 id 维护 server 侧 preview player sidecar；
+  - `apply_server_preview_plan_packet(...)` 将 `BuildPlanWire` 转为 `BuildPlan`，调用既有 `PlayerComp::handle_preview_plans(...)`，并保留 connection/team/name/locale 到 `PlayerComp.con`/字段；
+  - `ClientPlanSnapshotCallPacket` 转发目标现在要求：目标不是发送者、team 与 source 一致、`has_connected && player_added && !kicked && !has_disconnected`；
+  - `plans: None` 仍进入玩家状态，用于开启新 group 并清空 assembling，保持 Java 空 preview 清理语义。
+- 验证：
+  - `cargo test -p mindustry-server server_update_forwards_client_plan_snapshot_to_other_connections`
+- 仍未完成：server preview sidecar 仍以 `connection_id` 作为临时 player id；还需要接入真实 player entity id、周期性 `planPreviewSyncTime` 广播、以及多客户端 server->desktop smoke。

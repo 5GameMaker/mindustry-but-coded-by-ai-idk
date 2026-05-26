@@ -9,18 +9,23 @@ use mindustry_core::mindustry::core::{
 use mindustry_core::mindustry::ctype::ContentId;
 use mindustry_core::mindustry::entities::{
     bullet::BulletType,
-    comp::{BuildingComp, BulletComp, UnitComp},
+    comp::{BuildingComp, BulletComp, PlayerComp, UnitComp},
 };
-use mindustry_core::mindustry::io::ContentPatchSet;
+use mindustry_core::mindustry::io::{ContentPatchSet, TeamId};
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, ClientPlanSnapshotReceivedCallPacket, Net, NetworkPlayerData,
-    NetworkWorldData, PacketKind, ProviderEvent,
+    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket,
+    ClientPlanSnapshotReceivedCallPacket, Net, NetConnection, NetworkPlayerData, NetworkWorldData,
+    PacketKind, ProviderEvent,
 };
-use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
+use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
-use std::io;
+use std::{
+    collections::BTreeMap,
+    io,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Debug, Clone)]
 pub struct ServerLauncher {
@@ -35,6 +40,8 @@ pub struct ServerLauncher {
     pub last_runtime_power_node_config_result: Option<GameRuntimePowerNodeConfigResult>,
     pub runtime_power_node_config_packets_seen: usize,
     pub runtime_power_node_config_packets_changed: usize,
+    pub server_preview_players: BTreeMap<i32, PlayerComp>,
+    pub server_preview_plan_packets_applied: usize,
     pub next_network_event_index: usize,
     pub net_server: NetServer,
     pub network_error: Option<String>,
@@ -61,6 +68,8 @@ impl ServerLauncher {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
@@ -158,6 +167,18 @@ impl ServerLauncher {
                     if connection_id < 0 {
                         continue;
                     }
+                    let source_team = match self.apply_server_preview_plan_packet(
+                        connection_id,
+                        &snapshot,
+                        Self::current_millis(),
+                    ) {
+                        Ok(Some(team)) => team,
+                        Ok(None) => continue,
+                        Err(error) => {
+                            self.network_error = Some(error.to_string());
+                            continue;
+                        }
+                    };
                     let target_connection_ids = {
                         let state = self.net_server.state();
                         let state = state.lock().expect("NetServerState mutex poisoned");
@@ -166,9 +187,10 @@ impl ServerLauncher {
                             .iter()
                             .filter_map(|(target_connection_id, connection)| {
                                 (*target_connection_id != connection_id
+                                    && connection.team == source_team
                                     && !connection.kicked
-                                    && !connection.has_disconnected)
-                                    .then_some(*target_connection_id)
+                                    && Self::connection_can_receive_preview(connection))
+                                .then_some(*target_connection_id)
                             })
                             .collect::<Vec<_>>()
                     };
@@ -191,6 +213,71 @@ impl ServerLauncher {
             }
         }
         changed
+    }
+
+    fn apply_server_preview_plan_packet(
+        &mut self,
+        connection_id: i32,
+        snapshot: &ClientPlanSnapshotCallPacket,
+        now_millis: i64,
+    ) -> io::Result<Option<TeamId>> {
+        let source_connection = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state.connection_states.get(&connection_id).cloned()
+        };
+        let Some(source_connection) = source_connection else {
+            return Ok(None);
+        };
+        if !Self::connection_can_receive_preview(&source_connection) {
+            return Ok(None);
+        }
+
+        let plans = snapshot
+            .plans
+            .as_ref()
+            .map(|plans| {
+                plans
+                    .iter()
+                    .map(|plan| plan.to_build_plan())
+                    .collect::<io::Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let source_team = source_connection.team;
+        let player = self
+            .server_preview_players
+            .entry(connection_id)
+            .or_insert_with(|| PlayerComp::new(source_team));
+        player.id = connection_id;
+        player.team = source_team;
+        player.name = source_connection.name.clone();
+        player.color = source_connection.color as u32;
+        player.locale = source_connection.locale.clone();
+        player.con = Some(source_connection);
+        player.handle_preview_plans(
+            snapshot.group_id,
+            &plans,
+            now_millis,
+            MAX_PLAYER_PREVIEW_PLANS,
+        );
+        self.server_preview_plan_packets_applied += 1;
+        Ok(Some(source_team))
+    }
+
+    fn connection_can_receive_preview(connection: &NetConnection) -> bool {
+        connection.has_connected
+            && connection.player_added
+            && !connection.kicked
+            && !connection.has_disconnected
+    }
+
+    fn current_millis() -> i64 {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        millis.min(i64::MAX as u128) as i64
     }
 
     pub fn network_world_data_template(&mut self) -> NetworkWorldData {
@@ -340,6 +427,7 @@ mod tests {
         PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::point2_pack;
+    use std::collections::BTreeMap;
     use std::io;
     use std::net::{TcpListener, UdpSocket};
     use std::sync::{Arc, Mutex};
@@ -555,6 +643,8 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -621,6 +711,8 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -770,6 +862,8 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -778,7 +872,7 @@ mod tests {
 
         {
             let mut net = launcher.net_server.net_mut();
-            for connection_id in [11, 22, 33] {
+            for connection_id in [11, 22, 33, 44] {
                 net.handle_server_received_from_connection(
                     Some(connection_id),
                     true,
@@ -787,6 +881,30 @@ mod tests {
                     }),
                 );
             }
+        }
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            for (connection_id, name, team) in [
+                (11, "source", TeamId(1)),
+                (22, "teammate", TeamId(1)),
+                (33, "enemy", TeamId(2)),
+                (44, "disconnected-teammate", TeamId(1)),
+            ] {
+                let connection = state.connection_states.get_mut(&connection_id).unwrap();
+                connection.name = name.into();
+                connection.team = team;
+                connection.has_connected = true;
+                connection.player_added = true;
+            }
+            state
+                .connection_states
+                .get_mut(&44)
+                .unwrap()
+                .has_disconnected = true;
+        }
+        {
+            let mut net = launcher.net_server.net_mut();
             net.handle_server_received_from_connection(
                 Some(11),
                 true,
@@ -797,17 +915,17 @@ mod tests {
             );
         }
 
-        assert_eq!(launcher.apply_new_network_server_events(), 2);
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
         assert_eq!(launcher.network_error, None);
 
         let sent = sent_packets.lock().unwrap();
-        assert_eq!(sent.len(), 2);
+        assert_eq!(sent.len(), 1);
         let mut target_ids = sent
             .iter()
             .map(|(connection_id, _, _)| *connection_id)
             .collect::<Vec<_>>();
         target_ids.sort_unstable();
-        assert_eq!(target_ids, vec![22, 33]);
+        assert_eq!(target_ids, vec![22]);
         assert!(sent.iter().all(|(_, packet, reliable)| {
             !*reliable
                 && matches!(
@@ -819,6 +937,16 @@ mod tests {
                 )
         }));
         drop(sent);
+        {
+            let player = launcher.server_preview_players.get(&11).unwrap();
+            assert_eq!(player.id, 11);
+            assert_eq!(player.name, "source");
+            assert_eq!(player.team, TeamId(1));
+            assert_eq!(player.last_preview_plan_group, 7);
+            assert_eq!(player.preview_plans_assembling.len(), 1);
+            assert!(player.preview_plans_current.is_empty());
+            assert!(player.con.is_some());
+        }
 
         {
             let mut net = launcher.net_server.net_mut();
@@ -832,9 +960,9 @@ mod tests {
             );
         }
 
-        assert_eq!(launcher.apply_new_network_server_events(), 2);
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
         let sent = sent_packets.lock().unwrap();
-        assert_eq!(sent.len(), 4);
+        assert_eq!(sent.len(), 2);
         assert_eq!(
             sent.iter()
                 .filter(|(_, packet, reliable)| {
@@ -848,14 +976,14 @@ mod tests {
                         )
                 })
                 .count(),
-            2
+            1
         );
         drop(sent);
 
         let state = launcher.net_server.state();
         let state = state.lock().unwrap();
         assert_eq!(state.client_plan_snapshot_packets_seen, 2);
-        assert_eq!(state.client_plan_snapshots_forwarded, 4);
+        assert_eq!(state.client_plan_snapshots_forwarded, 2);
         assert!(state.last_client_plan_snapshot_forwarded_error.is_none());
         assert_eq!(
             state
@@ -866,6 +994,11 @@ mod tests {
                 .len(),
             0
         );
+        drop(state);
+        assert_eq!(launcher.server_preview_plan_packets_applied, 2);
+        let player = launcher.server_preview_players.get(&11).unwrap();
+        assert_eq!(player.last_preview_plan_group, 8);
+        assert!(player.preview_plans_assembling.is_empty());
     }
 
     #[test]
@@ -886,6 +1019,8 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -974,6 +1109,8 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -1081,6 +1218,8 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
