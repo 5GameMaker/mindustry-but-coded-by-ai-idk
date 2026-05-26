@@ -31,6 +31,7 @@ fn pump_real_server_desktop_until(
 
     let mut loaded = false;
     let mut materialized = false;
+    let mut server_confirmed = false;
     let mut last_client_status = String::new();
     let mut last_server_status = String::new();
     for _ in 0..80 {
@@ -61,6 +62,7 @@ fn pump_real_server_desktop_until(
         {
             let state = server.net_server.state();
             let state = state.lock().unwrap();
+            server_confirmed = state.last_connect_confirm_connection_id.is_some();
             last_server_status = format!(
                 "accepted={} rejected={} pending={:?} streams={} last_world_conn={:?} confirm_conn={:?} network_error={:?}",
                 state.connect_packets_accepted,
@@ -74,15 +76,15 @@ fn pump_real_server_desktop_until(
         }
 
         materialized = ready(desktop);
-        if loaded && materialized {
+        if loaded && materialized && server_confirmed {
             break;
         }
         thread::sleep(Duration::from_millis(20));
     }
 
     assert!(
-        loaded && materialized,
-        "desktop should load, confirm and materialize real world stream; loaded={loaded} materialized={materialized}; client: {last_client_status}; server: {last_server_status}; connect_error: {:?}",
+        loaded && materialized && server_confirmed,
+        "desktop should load, confirm, server should receive confirm, and materialize real world stream; loaded={loaded} materialized={materialized} server_confirmed={server_confirmed}; client: {last_client_status}; server: {last_server_status}; connect_error: {:?}",
         desktop.connect_error
     );
     {
@@ -2000,6 +2002,166 @@ fn real_server_desktop_payload_constructor_block_snapshot_updates_runtime_after_
             producer,
             recipe,
         })
+    );
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}
+
+#[test]
+fn real_server_desktop_payload_void_block_snapshot_updates_runtime_after_world_stream() {
+    use mindustry_core::mindustry::core::{
+        game_runtime::GameRuntimePayloadBlockState, GameRuntimeNetworkContext,
+    };
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
+    use mindustry_core::mindustry::net::BlockSnapshotCallPacket;
+    use mindustry_core::mindustry::world::blocks::payloads::{
+        write_payload_block_build_common, PayloadBlockBuildState, Vec2,
+    };
+    use mindustry_core::mindustry::world::point2_pack;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(10, 10);
+    let void_base = server
+        .content_loader
+        .block_by_name("payload-void")
+        .expect("base content should include payload-void")
+        .base()
+        .clone();
+    let void_tile = point2_pack(4, 5);
+    let void_id = void_base.id;
+    server
+        .runtime
+        .add_building(BuildingComp::new(void_tile, void_base.clone(), TeamId(6)));
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+            && desktop
+                .runtime
+                .buildings()
+                .iter()
+                .any(|building| building.tile_pos == void_tile)
+    });
+
+    let connection_id = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        state
+            .last_connect_confirm_connection_id
+            .expect("server should receive connect confirm before payload void snapshot")
+    };
+    let mut synced_void = BuildingComp::new(void_tile, void_base, TeamId(6));
+    synced_void.health = 23.0;
+    let common = PayloadBlockBuildState {
+        payload: None,
+        pay_vector: Vec2 { x: 0.25, y: -0.75 },
+        pay_rotation: 270.0,
+        carried: false,
+    };
+    let mut block_sync_bytes = Vec::new();
+    synced_void
+        .write_base(&mut block_sync_bytes, false)
+        .unwrap();
+    write_payload_block_build_common(&mut block_sync_bytes, &common).unwrap();
+    let snapshot = BlockSnapshotCallPacket {
+        amount: 1,
+        data: {
+            let mut data = Vec::new();
+            data.extend_from_slice(&void_tile.to_be_bytes());
+            data.extend_from_slice(&void_id.to_be_bytes());
+            data.extend_from_slice(&block_sync_bytes);
+            data
+        },
+    };
+    server
+        .net_server
+        .send_block_snapshot(connection_id, snapshot.clone())
+        .expect("real server should send payload void snapshot");
+
+    let mut applied = false;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        desktop.update();
+        server.update();
+        let received = {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            last_client_status = format!(
+                "block_snapshots={} last_block={:?} last_server_snapshot={:?} provider_events={:?}",
+                state.block_snapshot_packets_seen,
+                state.last_block_snapshot,
+                state.last_server_snapshot_at,
+                state.last_provider_events,
+            );
+            state.last_block_snapshot.as_ref() == Some(&snapshot)
+        };
+        let materialized = matches!(
+            desktop.runtime.payload_runtime_states.get(&void_tile),
+            Some(GameRuntimePayloadBlockState::Void(applied_common))
+                if *applied_common == common
+        );
+        applied = received && materialized;
+        if applied {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        applied,
+        "desktop should receive and apply real payload void snapshot after world stream; client: {last_client_status}"
+    );
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.block_snapshot_packets_seen, 1);
+        assert_eq!(state.last_block_snapshot.as_ref(), Some(&snapshot));
+        let mirror = state
+            .last_block_snapshot_mirror
+            .as_ref()
+            .expect("payload void snapshot should materialize into lightweight mirror");
+        assert_eq!(mirror.records.len(), 1);
+        assert_eq!(mirror.records[0].tile_pos, void_tile);
+        assert_eq!(mirror.records[0].block_id, void_id);
+        assert_eq!(mirror.records[0].sync_bytes, block_sync_bytes);
+        assert!(mirror.parse_error.is_none());
+    }
+    let runtime_record = desktop
+        .runtime
+        .client_block_snapshot_records
+        .get(&void_tile)
+        .expect("real payload void snapshot should apply to client runtime sidecar");
+    assert_eq!(runtime_record.block_id, void_id);
+    assert_eq!(runtime_record.sync_bytes, block_sync_bytes);
+    let runtime_building = desktop
+        .runtime
+        .buildings()
+        .iter()
+        .find(|building| building.tile_pos == void_tile)
+        .expect("payload-void building should remain materialized");
+    assert_eq!(runtime_building.health, 23.0);
+    assert_eq!(
+        desktop.runtime.payload_runtime_states.get(&void_tile),
+        Some(&GameRuntimePayloadBlockState::Void(common))
     );
     assert_eq!(
         desktop.runtime.network_context,

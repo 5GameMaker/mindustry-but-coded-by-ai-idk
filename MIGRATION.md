@@ -1972,7 +1972,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
-- 仍未完成：真实 payload snapshot 尚缺 `PayloadVoid`；之后可转入 turret `readSync` override 或 entity snapshot typed runtime。
+- 仍未完成：payload family 的真实 BlockSnapshot smoke 当前已覆盖已迁移 reader 的主要类型；之后可转入 turret `readSync` override 或 entity snapshot typed runtime。
+
+### 12.32 真实联机 PayloadVoid BlockSnapshot child tail smoke 与确认包等待修复
+
+- 2026-05-26：新增 `real_server_desktop_payload_void_block_snapshot_updates_runtime_after_world_stream`，在真实 server→desktop 联机链路中先通过 world stream materialize 一个 `payload-void` building，再发送 `BuildingComp::write_base(...) + write_payload_block_build_common(...)` 组成的 `BlockSnapshotCallPacket`。
+- 测试覆盖 Java `PayloadVoidBuild` 默认 revision `0` 的 terminal common tail，验证 `PayloadBlockBuild` common state 能恢复为 `GameRuntimePayloadBlockState::Void(common)`。
+- 同时修复 `pump_real_server_desktop_until(...)` 的联机测试竞态：旧逻辑在客户端 `connect_confirm_sent` 且 world materialized 后就 break，服务端可能尚未处理 `ConnectConfirmCallPacket`；现在等待 `server.net_server.state().last_connect_confirm_connection_id.is_some()` 后才结束 pump，避免 tests crate 并发运行时偶发失败。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_void_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：下一步建议转入 turret `readSync` override 或 entity snapshot typed runtime；payload UnitPayload 完整实体恢复仍需后续继续。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

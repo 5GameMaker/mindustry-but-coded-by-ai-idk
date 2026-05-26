@@ -1624,3 +1624,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 补真实联机 `PayloadVoid` snapshot，完成当前 payload family 的 BlockSnapshot smoke 覆盖。
   2. 开始 turret `readSync` override：同步时应保留 Java turret rotation/reload 语义。
   3. 继续 entity snapshot typed runtime，替换 raw entity sidecar。
+
+---
+
+## 46. 最新闭环记录：真实联机 PayloadVoid BlockSnapshot child tail smoke + pump 竞态修复
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：补完当前 payload family 的真实 BlockSnapshot smoke 覆盖，并修复真实联机测试中客户端确认包与服务端处理之间的竞态。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_payload_void_block_snapshot_updates_runtime_after_world_stream`
+  - 服务端 world stream 先 materialize `payload-void` building；
+  - 服务端随后发送 `BlockSnapshotCallPacket`，sync bytes 为 `BuildingComp::write_base(...) + write_payload_block_build_common(...)`；
+  - desktop 端等待 `NetClient.last_block_snapshot` 与 `runtime.payload_runtime_states[void_tile]` 同时更新。
+- 断言覆盖：
+  - mirror header 的 `tile_pos/block_id/sync_bytes`；
+  - runtime raw sidecar `client_block_snapshot_records`；
+  - building 基础 health；
+  - `GameRuntimePayloadBlockState::Void(common)` 恢复。
+- 测试驱动修复：
+  - `pump_real_server_desktop_until(...)` 现在除客户端 `connect_confirm_sent` 和 runtime materialized 外，还等待服务端 `last_connect_confirm_connection_id.is_some()`；
+  - 这是为真实联机 smoke 消除并发测试中的 race，不改变生产网络协议。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_void_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 转入 turret `readSync` override：Java turret snapshot 需要保留 rotation/reload。
+  2. 或继续 entity snapshot typed runtime，把 raw entity sidecar 写入真实 entity pool/mirror。
+  3. payload UnitPayload 完整恢复仍未完成，后续需要接实体/单位内容 registry。
