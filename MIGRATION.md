@@ -3245,3 +3245,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core transfer_item_to_`
   - `cargo check --workspace`
 - 仍未完成：`build.allowDeposit()`、`build.acceptStack(...)`、deposit rate、admin action、`Units.canInteract(...)`、真实 player/unit 位置与生命周期仍未完全接入 Java 等价实现；当前 `server_units` 仍是 launcher mirror，不是完整实体组。下一步可继续 payload pickup/drop，或补全 `TransferItemToCallPacket` 客户端 mirror 对 building/unit 的实际状态应用。
+
+### 12.90 Server RequestDropPayload → PayloadDropped 权威 runtime 桥接
+
+- 2026-05-27：优先接入 payload 放下的窄闭环，把 `RequestDropPayloadCallPacket` 从 server 事件流接到 `input_handler::request_drop_payload(...)`、`server_units` 的 `PayloadComp::drop_last_payload(...)` 和 `PayloadDroppedCallPacket` 出站广播。
+- Java 依据：
+  - `InputHandler.requestDropPayload(Player player, float x, float y)` 检查非 client、玩家存活、单位 payload 非空、admin action，然后把目标坐标限制到单位周围 `tilesize * 4f` 范围；
+  - `InputHandler.payloadDropped(Unit unit, float x, float y)` 临时把 payload 单位位置设置为 drop 坐标，执行 `dropLastPayload()`，再还原位置。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_new_network_server_events()` 新增 `PacketKind::RequestDropPayloadCallPacket` 分支；
+  - 新增 request-drop / payload-dropped 统计与 last-outcome 字段；
+  - `apply_server_request_drop_payload_packet(...)` 复用连接状态与 `server_units` mirror，调用 `request_drop_payload(...)` 完成 Java margin clamp；
+  - `apply_payload_drop_to_server_unit(...)` 对 `UnitRef::Unit` 查找 server unit mirror，临时设置坐标、drop 最后一个 payload、再恢复单位位置；
+  - 成功后可靠广播 `PayloadDroppedCallPacket`，客户端可继续按现有 packet 记录/后续 mirror 消费。
+- 验证：
+  - `cargo test -p mindustry-server`
+  - `cargo test -p mindustry-core request_drop_payload_`
+  - `cargo check --workspace`
+- 仍未完成：drop 出来的 payload 还没有实体化进入完整 world/entity groups，也没有地面碰撞/落点占用判定；`server_units` 仍是 launcher mirror，admin action 仍是占位。下一步可继续 `RequestBuildPayload/PickedBuildPayload`，或把 `PayloadDroppedCallPacket` 客户端 mirror 从“只记录 packet”推进到真实 unit payload mirror mutation。
