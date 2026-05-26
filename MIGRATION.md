@@ -1655,3 +1655,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：下一步建议接入 desktop/client `apply_network_world_data` 对 payload map snapshot 的恢复 smoke，随后继续补 Java 客户端互通测试。
+
+### 12.13 Desktop/client world-data payload sidecar materialize
+
+- 2026-05-26：新增 `desktop_launcher_materializes_payload_state_from_network_world_data`，让 desktop launcher 从 `NetClientState.last_loaded_world_data` 应用携带 `payload-loader` sidecar 的 `NetworkWorldData.map_snapshot`，并在 `DesktopLauncher::sync_runtime_state_from_world_data(...)` 中把 payload sidecar materialize 到客户端 `GameRuntime`。
+- 该测试把上一轮 server world stream 回读继续推进到 desktop/client 应用路径，验证客户端 runtime 进入 `GameRuntimeNetworkContext::client()` 后能恢复 `PayloadBlockBuild` common payload 与 `PayloadLoaderState.exporting`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_payload_state_from_network_world_data --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_network_map_buildings_into_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `rustfmt --check desktop/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：还需从真实 server stream 到 desktop net-client 的联机 smoke、Java 客户端互通验证，以及更多 payload 类型在 desktop materialize 后的运行/渲染状态测试。

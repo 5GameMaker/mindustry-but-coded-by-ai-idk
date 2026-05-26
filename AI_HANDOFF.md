@@ -1030,3 +1030,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 后续建议：下一闭环优先接 desktop/client `apply_network_world_data` smoke，证明 desktop launcher 收到 server world-data 后也能把 payload sidecar  materialize 到 runtime/game state，而不只是在 server 测试里手动回读。
+
+---
+
+## 27. 最新闭环记录：Desktop/client world-data payload sidecar materialize
+
+- 目标：把 payload world-data 验证从 server 手动回读推进到 desktop/client 应用路径，证明客户端 launcher 收到 `NetworkWorldData.map_snapshot` 后会 materialize payload sidecar。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`desktop_launcher_materializes_payload_state_from_network_world_data`。
+- 测试链路：
+  - 构造含 `payload-loader` building 与 `GameRuntimePayloadBlockState::Loader` 的临时 runtime；
+  - 用 `export_network_map_snapshot(&ContentLoader)` 生成 `NetworkWorldData.map_snapshot`；
+  - 写入 desktop `NetClientState.last_loaded_world_data`；
+  - `launcher.update()` 触发 `sync_loaded_world_data()` / `sync_runtime_state_from_world_data()`；
+  - 断言 desktop runtime 进入 `GameRuntimeNetworkContext::client()`，`last_runtime_map_load_report` 成功，payload loader sidecar、common payload 与 `exporting=true` 恢复。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_payload_state_from_network_world_data --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_network_map_buildings_into_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `rustfmt --check desktop/src/lib.rs`
+  - `git diff --check`
+- 后续建议：补真实 server/client ArcNetProvider 联机 world stream smoke，让 `ServerLauncher` 发送出的 payload world-data 被 `DesktopLauncher` 的 `NetClient` 实际接收并 materialize；随后扩展到 Java 客户端兼容验证。

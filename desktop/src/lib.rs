@@ -298,7 +298,10 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 #[cfg(test)]
 mod tests {
     use super::{run, DesktopLauncher};
-    use mindustry_core::mindustry::core::{GameRuntimeNetworkContext, WorldLoadEventKind};
+    use mindustry_core::mindustry::core::game_runtime::GameRuntimePayloadBlockState;
+    use mindustry_core::mindustry::core::{
+        GameRuntime, GameRuntimeNetworkContext, WorldLoadEventKind,
+    };
     use mindustry_core::mindustry::ctype::ContentId;
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::io::{
@@ -318,6 +321,7 @@ mod tests {
         io::{
             LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue, UnitRef,
         },
+        world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
     };
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
@@ -1003,6 +1007,84 @@ mod tests {
                 .tile_pos,
             tile_pos
         );
+    }
+
+    #[test]
+    fn desktop_launcher_materializes_payload_state_from_network_world_data() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .unwrap();
+        let container_def = launcher.content_loader.block_by_name("container").unwrap();
+        let loader_tile = mindustry_core::mindustry::world::point2_pack(4, 4);
+        let container_id = container_def.base().id;
+        let mut payload_bytes = Vec::new();
+        BuildingComp::new(
+            mindustry_core::mindustry::world::point2_pack(0, 0),
+            container_def.base().clone(),
+            TeamId(6),
+        )
+        .write_base(&mut payload_bytes, false)
+        .unwrap();
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.set_rotation(2);
+
+        let mut source_runtime = GameRuntime::default();
+        source_runtime.state.world.resize(12, 12);
+        source_runtime.add_building(loader_building);
+        source_runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(PayloadRef::Block {
+                        block: container_id,
+                        version: 0,
+                        build_bytes: payload_bytes,
+                    }),
+                    ..PayloadBlockBuildState::default()
+                },
+                loader: PayloadLoaderState {
+                    exporting: true,
+                    ..PayloadLoaderState::default()
+                },
+            },
+        );
+
+        let mut world_data = sample_network_world_data(None);
+        world_data.map_snapshot =
+            Some(source_runtime.export_network_map_snapshot(&launcher.content_loader));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+
+        assert_eq!(
+            launcher.runtime.network_context,
+            GameRuntimeNetworkContext::client()
+        );
+        let report = launcher
+            .last_runtime_map_load_report
+            .as_ref()
+            .expect("network map snapshot should be materialized into runtime");
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.building_parse_errors, 0);
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            launcher.runtime.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should be materialized into desktop runtime");
+        };
+        assert!(loader.exporting);
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == container_id
+        ));
     }
 
     #[test]
