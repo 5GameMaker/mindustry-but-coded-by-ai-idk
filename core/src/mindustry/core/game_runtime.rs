@@ -2756,7 +2756,9 @@ impl GameRuntime {
         if core.team.0 as i32 == self.state.rules.default_team {
             self.state.stats.add_core_item(item_name.clone(), amount);
         }
-        self.note_campaign_core_item_delta(core_index, &item_name, amount);
+        if !self.core_incinerates_non_buildable_item(content, core_index, item) {
+            self.note_campaign_core_item_delta(core_index, &item_name, amount);
+        }
     }
 
     fn note_core_item_taken_side_effects(
@@ -2771,6 +2773,52 @@ impl GameRuntime {
         }
         let item_name = Self::item_name_for_side_effect(content, item);
         self.note_campaign_core_item_delta(core_index, &item_name, -amount);
+    }
+
+    fn core_incinerates_non_buildable_item(
+        &self,
+        content: &ContentLoader,
+        core_index: usize,
+        item: ContentId,
+    ) -> bool {
+        let incinerate_non_buildable = self
+            .buildings
+            .get(core_index)
+            .and_then(|core| content.block(core.block.id))
+            .is_some_and(|block| {
+                matches!(
+                    block,
+                    BlockDef::Storage(storage)
+                        if storage.kind == StorageBlockKind::Core
+                            && storage.incinerate_non_buildable
+                )
+            });
+        let item_buildable = content.item(item).is_none_or(|item| item.buildable);
+        incinerate_non_buildable && !item_buildable
+    }
+
+    fn core_should_incinerate_handled_item(
+        &self,
+        content: &ContentLoader,
+        core_index: usize,
+        item: ContentId,
+        stored: i32,
+        maximum_accepted: i32,
+    ) -> bool {
+        self.core_incinerates_non_buildable_item(content, core_index, item)
+            || stored >= maximum_accepted
+    }
+
+    fn set_core_no_effect(&mut self, core_index: usize, no_effect: bool) {
+        let Some(core) = self.buildings.get(core_index) else {
+            return;
+        };
+        let entry = self
+            .storage_runtime_states
+            .entry(core.tile_pos)
+            .or_insert_with(|| GameRuntimeStorageBlockState::Core(CoreBuildState::default()));
+        let GameRuntimeStorageBlockState::Core(state) = entry;
+        state.no_effect = no_effect;
     }
 
     fn note_linked_storage_remove_stack_side_effects(
@@ -5773,6 +5821,20 @@ impl GameRuntime {
         }
         let target_max_accepted = self.maximum_accepted_for_item_owner(target_item_owner_index);
         let target_item_owner_is_core = self.building_is_core(content, target_item_owner_index);
+        let target_item_owner_stored = self
+            .buildings
+            .get(target_item_owner_index)
+            .and_then(|building| building.items.as_ref())
+            .map(|items| items.get(item_id))
+            .unwrap_or(0);
+        let target_core_incinerates_item = target_item_owner_is_core
+            && self.core_should_incinerate_handled_item(
+                content,
+                target_item_owner_index,
+                item_id,
+                target_item_owner_stored,
+                target_max_accepted,
+            );
 
         let (source, target) = if source_index < target_item_owner_index {
             let (left, right) = self.buildings.split_at_mut(target_item_owner_index);
@@ -5799,6 +5861,8 @@ impl GameRuntime {
         };
         let target_full = if target_is_mass_driver {
             target_items.total() >= target.block.item_capacity
+        } else if target_item_owner_is_core {
+            false
         } else {
             target_items.get(item_id) >= target_max_accepted
         };
@@ -5806,9 +5870,12 @@ impl GameRuntime {
             return false;
         }
         source_items.remove(item_id, 1);
-        target_items.add(item_id, 1);
+        if !target_core_incinerates_item {
+            target_items.add(item_id, 1);
+        }
         if target_item_owner_is_core {
             self.note_core_handle_item_side_effects(content, target_item_owner_index, item_id, 1);
+            self.set_core_no_effect(target_item_owner_index, !target_core_incinerates_item);
         }
         if target_is_router {
             self.note_item_router_received(target_tile_pos, item_id, source_tile_pos);
@@ -10298,11 +10365,19 @@ impl GameRuntime {
                 match storage.kind {
                     StorageBlockKind::Storage => storage_accept_item(
                         target_owner_index != target_index,
-                        core_accept_item(false, stored, maximum_accepted),
+                        core_accept_item(
+                            self.state.rules.core_incinerates,
+                            stored,
+                            maximum_accepted,
+                        ),
                         stored,
                         target.block.item_capacity,
                     ),
-                    StorageBlockKind::Core => core_accept_item(false, stored, maximum_accepted),
+                    StorageBlockKind::Core => core_accept_item(
+                        self.state.rules.core_incinerates,
+                        stored,
+                        maximum_accepted,
+                    ),
                 }
             }
             _ => false,
@@ -18670,6 +18745,115 @@ mod tests {
                 .core_deltas
                 .get("copper"),
             Some(&1)
+        );
+    }
+
+    #[test]
+    fn game_runtime_core_incinerates_overflow_when_rules_allow() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let default_team = TeamId(GameState::default().rules.default_team as u8);
+        let source_tile = point2_pack(1, 1);
+        let core_tile = point2_pack(3, 6);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), default_team);
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+        let core_capacity = core_def.base().item_capacity;
+        core_building
+            .items
+            .as_mut()
+            .unwrap()
+            .set(copper, core_capacity);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.core_incinerates = true;
+        runtime.state.set_sector(Some(Sector::new(9)));
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(source_building);
+        runtime.add_building(core_building);
+        runtime.refresh_owned_storage_core_links(&content);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(
+            runtime.buildings[1].items.as_ref().unwrap().get(copper),
+            core_capacity
+        );
+        assert_eq!(runtime.state.stats.get_core_item("copper"), 1);
+        assert_eq!(
+            runtime
+                .state
+                .rules
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&1)
+        );
+        assert_eq!(
+            runtime.storage_runtime_states.get(&core_tile),
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: core_capacity,
+                no_effect: false,
+                ..CoreBuildState::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn game_runtime_core_incinerates_non_buildable_without_campaign_delta() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-bastion").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let sand = content.item_by_name("sand").unwrap().base.mappable.base.id;
+        let default_team = TeamId(GameState::default().rules.default_team as u8);
+        let source_tile = point2_pack(1, 1);
+        let core_tile = point2_pack(4, 6);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), default_team);
+        source_building.items.as_mut().unwrap().add(sand, 1);
+        let core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set_sector(Some(Sector::new(10)));
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(source_building);
+        runtime.add_building(core_building);
+        runtime.refresh_owned_storage_core_links(&content);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, sand));
+
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(sand), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(sand), 0);
+        assert_eq!(runtime.state.stats.get_core_item("sand"), 1);
+        assert!(!runtime
+            .state
+            .rules
+            .sector
+            .as_ref()
+            .unwrap()
+            .info
+            .core_deltas
+            .contains_key("sand"));
+        assert_eq!(
+            runtime.storage_runtime_states.get(&core_tile),
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: core_def.base().item_capacity,
+                no_effect: false,
+                ..CoreBuildState::default()
+            }))
         );
     }
 
