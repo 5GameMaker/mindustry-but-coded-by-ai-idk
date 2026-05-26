@@ -1537,3 +1537,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续真实联机 payload snapshot 到 `PayloadSource`，覆盖 sandbox payload source 的 revision 1 `unit/configBlock/commandPos`。
   2. 再补 `PayloadDeconstructor/Constructor/Void` 的真实 snapshot smoke。
   3. 转入 turret `readSync` override 与 entity snapshot typed runtime。
+
+---
+
+## 43. 最新闭环记录：真实联机 PayloadSource BlockSnapshot child tail smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：覆盖 sandbox/payload source 的真实 BlockSnapshot 同步，验证 Java `PayloadSourceBuild.version()==1` 的 `unit/configBlock/commandPos` 字段能进客户端 runtime。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_payload_source_block_snapshot_updates_runtime_after_world_stream`
+  - 服务端 world stream 先 materialize `payload-source` building；
+  - 服务端随后发送 `BlockSnapshotCallPacket`，sync bytes 为 `BuildingComp::write_base(...) + write_payload_block_build_common(...) + write_payload_source_extra(...)`；
+  - desktop 端等待 `NetClient.last_block_snapshot` 与 `runtime.payload_runtime_states[source_tile]` 同时更新。
+- 断言覆盖：
+  - mirror header 的 `tile_pos/block_id/sync_bytes`；
+  - runtime raw sidecar `client_block_snapshot_records`；
+  - building 基础 health/rotation；
+  - `GameRuntimePayloadBlockState::Source { common, source }` 完整恢复，其中 `source.unit/config_block/command_pos/has_payload` 均对齐。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_source_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 补真实联机 `PayloadDeconstructor/Constructor/Void` snapshot，覆盖 revision 0 terminal payload/ref 分支。
+  2. 或开始 turret `readSync` override：Java turret snapshot 需要保留 rotation/reload，不可直接套 save-map tail。
+  3. 继续推进 entity snapshot typed runtime，替代 raw entity sidecar。
