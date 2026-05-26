@@ -2459,6 +2459,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：WorldLabel 目前落在 runtime typed sidecar，尚未接入完整 label draw/lifecycle、父实体可见性过滤与服务端真实 entity group 枚举发包；后续继续迁移 `LaunchCoreComp` / `LocationPingComp` 等 entity snapshot wire，并收敛 dispatcher 重复 match。
 
+### 12.52 LaunchCoreComp revision 0 runtime 接入
+
+- 2026-05-27：迁移 Java `LaunchCoreComp` revision 0 字段形状，并把现有 Rust `LaunchCoreComp` helper 接入 `GameRuntime.launch_core_entities`。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.LaunchCoreComp=11`；
+  - `annotations/src/main/resources/revisions/LaunchCoreComp/0.json`：字段顺序 `block, lifetime, time, x, y`；
+  - `core/src/mindustry/entities/comp/LaunchCoreComp.java`：`@EntityDef(value = LaunchCorec.class, serialize = false)`，不是常规 `Syncc.writeSync/readSync` packet；仍需保留 revision 资源字段顺序供 runtime/import 兼容。
+  - `block` 是 `mindustry.world.Block` 内容引用，wire 使用 `short block id`，空为 `-1`；其余字段为 `float`。
+- Rust 新增/变化：
+  - `type_io::LaunchCoreRevisionWire`；
+  - `type_io::write_launch_core_revision(...)` / `read_launch_core_revision(...)`，写入 `short revision=0 + block id + lifetime/time/x/y`；
+  - `entities::LAUNCH_CORE_CLASS_ID = 11` 并锁定 class id baseline；
+  - `LaunchCoreComp` 新增 `block_id: Option<ContentId>`、`with_block_id(...)`、`apply_revision_wire(...)`、`to_revision_wire(...)`；
+  - `LaunchCoreBlock::from_block_def(...)` 可从 content registry 的 `BlockDef` 恢复 size 与 atlas 占位尺寸，避免只停在手写几何数据；
+  - `GameRuntime.launch_core_entities` 与 `GameRuntime::apply_launch_core_revision_wire(...)`，通过 `ContentLoader.block(id)` 将 revision 0 payload materialize 为 runtime entity。
+- 测试：
+  - `launch_core_revision_wire_roundtrips_java_revision_0_shape`
+  - `launch_core_applies_revision_zero_wire_fields_and_block_ref`
+  - `game_runtime_applies_launch_core_revision_zero_to_runtime_entity`
+  - `entity_class_ids_match_upstream_classids_properties_baseline`
+- 已验证：
+  - `cargo test -p mindustry-core launch_core --lib`
+  - `cargo test -p mindustry-core launch_core_revision --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_launch_core_revision_zero_to_runtime_entity --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：LaunchCore 仍需接入真实 launch lifecycle / draw system / effect group；当前 `LaunchCoreBlock::from_block_def(...)` 对 fullIcon atlas 尺寸采用 content size 的占位推导，待 renderer/atlas 完整迁移后替换为真实 `TextureRegion` 尺寸与 `scl()`。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

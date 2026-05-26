@@ -953,6 +953,21 @@ pub struct WorldLabelSyncWire {
     pub z: f32,
 }
 
+/// Java annotation revision payload for `LaunchCoreComp` revision 0.
+///
+/// Upstream `LaunchCoreComp` is declared with `serialize = false`, so this is
+/// not a normal entity snapshot sync wire. Keeping the generated revision shape
+/// here still lets runtime/import paths preserve the Java field order from
+/// `annotations/src/main/resources/revisions/LaunchCoreComp/0.json`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaunchCoreRevisionWire {
+    pub block_id: Option<ContentId>,
+    pub lifetime: f32,
+    pub time: f32,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PuddleSyncWire {
     pub amount: f32,
@@ -1376,6 +1391,37 @@ pub fn read_world_label_sync<R: Read>(read: &mut R) -> io::Result<WorldLabelSync
         x,
         y,
         z,
+    })
+}
+
+pub fn write_launch_core_revision<W: Write>(
+    write: &mut W,
+    revision: &LaunchCoreRevisionWire,
+) -> io::Result<()> {
+    write_i16(write, 0)?;
+    write_content_id(write, ContentType::Block, revision.block_id)?;
+    write_f32(write, revision.lifetime)?;
+    write_f32(write, revision.time)?;
+    write_f32(write, revision.x)?;
+    write_f32(write, revision.y)
+}
+
+pub fn read_launch_core_revision<R: Read>(read: &mut R) -> io::Result<LaunchCoreRevisionWire> {
+    let revision = read_i16(read)?;
+    if revision != 0 {
+        return Err(invalid_data("unsupported LaunchCoreComp revision"));
+    }
+    let block_id = read_content_id(read)?;
+    let lifetime = read_f32(read)?;
+    let time = read_f32(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(LaunchCoreRevisionWire {
+        block_id,
+        lifetime,
+        time,
+        x,
+        y,
     })
 }
 
@@ -3318,6 +3364,52 @@ mod tests {
             read_world_label_sync(&mut bytes.as_slice()).unwrap(),
             sync_without_refs
         );
+    }
+
+    #[test]
+    fn launch_core_revision_wire_roundtrips_java_revision_0_shape() {
+        let loader = ContentLoader::create_base_content().unwrap();
+        let router_id = loader.get_by_name(ContentType::Block, "router").unwrap().id;
+        let revision = LaunchCoreRevisionWire {
+            block_id: Some(router_id),
+            lifetime: 90.0,
+            time: 12.5,
+            x: 32.0,
+            y: -48.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_launch_core_revision(&mut bytes, &revision).unwrap();
+        let mut expected = vec![0, 0];
+        expected.extend_from_slice(&router_id.to_be_bytes());
+        expected.extend_from_slice(&90.0f32.to_be_bytes());
+        expected.extend_from_slice(&12.5f32.to_be_bytes());
+        expected.extend_from_slice(&32.0f32.to_be_bytes());
+        expected.extend_from_slice(&(-48.0f32).to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            read_launch_core_revision(&mut bytes.as_slice()).unwrap(),
+            revision
+        );
+
+        let null_revision = LaunchCoreRevisionWire {
+            block_id: None,
+            lifetime: 1.0,
+            time: 0.0,
+            x: 0.0,
+            y: 0.0,
+        };
+        bytes.clear();
+        write_launch_core_revision(&mut bytes, &null_revision).unwrap();
+        assert_eq!(&bytes[0..4], &[0, 0, 0xff, 0xff]);
+        assert_eq!(
+            read_launch_core_revision(&mut bytes.as_slice()).unwrap(),
+            null_revision
+        );
+
+        let mut unsupported_revision = vec![0, 1];
+        unsupported_revision.extend_from_slice(&bytes[2..]);
+        assert!(read_launch_core_revision(&mut unsupported_revision.as_slice()).is_err());
     }
 
     #[test]

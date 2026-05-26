@@ -1,6 +1,9 @@
 //! Launch core component mirroring upstream `mindustry.entities.comp.LaunchCoreComp`.
 
-use crate::mindustry::entities::comp::Interval;
+use crate::mindustry::{
+    content::blocks::BlockDef, ctype::ContentId, entities::comp::Interval,
+    io::LaunchCoreRevisionWire, vars::TILE_SIZE,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LaunchCoreBlock {
@@ -8,6 +11,19 @@ pub struct LaunchCoreBlock {
     pub icon_width: f32,
     pub icon_height: f32,
     pub icon_scl: f32,
+}
+
+impl LaunchCoreBlock {
+    pub fn from_block_def(block: &BlockDef) -> Self {
+        let base = block.base();
+        let icon_span = base.size as f32 * TILE_SIZE as f32;
+        Self {
+            size: base.size,
+            icon_width: icon_span,
+            icon_height: icon_span,
+            icon_scl: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,6 +55,7 @@ pub struct LaunchCoreComp {
     pub time: f32,
     pub lifetime: f32,
     pub interval: Interval,
+    pub block_id: Option<ContentId>,
     pub block: LaunchCoreBlock,
 }
 
@@ -53,8 +70,14 @@ impl LaunchCoreComp {
             time: 0.0,
             lifetime,
             interval: Interval::default(),
+            block_id: None,
             block,
         }
+    }
+
+    pub fn with_block_id(mut self, block_id: Option<ContentId>) -> Self {
+        self.block_id = block_id;
+        self
     }
 
     pub fn fin(&self) -> f32 {
@@ -118,6 +141,29 @@ impl LaunchCoreComp {
             })
         } else {
             None
+        }
+    }
+
+    pub fn apply_revision_wire(
+        &mut self,
+        revision: &LaunchCoreRevisionWire,
+        block: LaunchCoreBlock,
+    ) {
+        self.block_id = revision.block_id;
+        self.lifetime = revision.lifetime;
+        self.time = revision.time;
+        self.x = revision.x;
+        self.y = revision.y;
+        self.block = block;
+    }
+
+    pub fn to_revision_wire(&self) -> LaunchCoreRevisionWire {
+        LaunchCoreRevisionWire {
+            block_id: self.block_id,
+            lifetime: self.lifetime,
+            time: self.time,
+            x: self.x,
+            y: self.y,
         }
     }
 }
@@ -190,5 +236,32 @@ mod tests {
         assert_eq!(launch.update(0.0), None);
         let smoke = launch.update(2.0).unwrap();
         assert_eq!(smoke.fin, 0.5);
+    }
+
+    #[test]
+    fn launch_core_applies_revision_zero_wire_fields_and_block_ref() {
+        let mut launch = LaunchCoreComp::new(4, 1.0, 2.0, 10.0, block());
+        let resolved_block = LaunchCoreBlock {
+            size: 4,
+            icon_width: 32.0,
+            icon_height: 32.0,
+            icon_scl: 1.0,
+        };
+        let revision = LaunchCoreRevisionWire {
+            block_id: Some(9),
+            lifetime: 120.0,
+            time: 30.0,
+            x: -16.0,
+            y: 48.0,
+        };
+
+        launch.apply_revision_wire(&revision, resolved_block);
+
+        assert_eq!(launch.block_id, Some(9));
+        assert_eq!(launch.lifetime, 120.0);
+        assert_eq!(launch.time, 30.0);
+        assert_eq!((launch.x, launch.y), (-16.0, 48.0));
+        assert_eq!(launch.block, resolved_block);
+        assert_eq!(launch.to_revision_wire(), revision);
     }
 }

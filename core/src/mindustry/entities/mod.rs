@@ -46,6 +46,7 @@ pub const BULLET_CLASS_ID: u8 = 7;
 pub const DECAL_CLASS_ID: u8 = 8;
 pub const EFFECT_STATE_CLASS_ID: u8 = 9;
 pub const FIRE_CLASS_ID: u8 = 10;
+pub const LAUNCH_CORE_CLASS_ID: u8 = 11;
 pub const PUDDLE_CLASS_ID: u8 = 13;
 pub const WEATHER_STATE_CLASS_ID: u8 = 14;
 pub const WORLD_LABEL_CLASS_ID: u8 = 35;
@@ -128,7 +129,7 @@ pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.LaunchCoreComp",
-        id: 11,
+        id: LAUNCH_CORE_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.LocationPingComp",
@@ -462,6 +463,10 @@ mod tests {
         assert_eq!(
             entity_class_id("mindustry.entities.comp.LocationPingComp"),
             Some(48)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.LaunchCoreComp"),
+            Some(LAUNCH_CORE_CLASS_ID)
         );
         assert_eq!(
             entity_class_kind(PLAYER_CLASS_ID),

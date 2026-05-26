@@ -2239,6 +2239,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
-  1. 继续迁移 `LaunchCoreComp`：class-id `11`，revision 0 字段 `block, lifetime, time, x, y`，`block` 走 `TypeIO.writeBlock/readBlock` 的 short block id，空为 `-1`，其余为 `float`。
+  1. `LaunchCoreComp` 已由第 66 节补上；继续迁移 `LocationPingComp` 等剩余 entity/revision 形状。
   2. 将 WorldLabel typed sidecar 接入真实 label draw/lifecycle 与父实体可见性过滤；当前只保证 Java wire parity 与客户端 snapshot runtime mirror。
   3. 收敛 `GameRuntime` / `DesktopLauncher` entity snapshot dispatcher，减少每新增实体类型都双处修改。
+
+---
+
+## 66. 最新闭环记录：LaunchCoreComp revision 0 runtime 接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 class-id `11` 的 Java `LaunchCoreComp` revision 0 字段形状落入 Rust runtime，避免现有实现只停留在独立绘制/烟雾 helper。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.LaunchCoreComp=11`；
+  - `annotations/src/main/resources/revisions/LaunchCoreComp/0.json`：字段顺序 `block, lifetime, time, x, y`；
+  - `core/src/mindustry/entities/comp/LaunchCoreComp.java`：`@EntityDef(value = LaunchCorec.class, serialize = false)`，不是常规 `Syncc.writeSync/readSync` snapshot；
+  - `block` 是 `mindustry.world.Block` 内容引用，wire 使用 `short block id`，空为 `-1`；`lifetime/time/x/y` 均为 `float`。
+- Rust 主改动：
+  - `type_io::LaunchCoreRevisionWire` 与 `read_launch_core_revision/write_launch_core_revision`；
+  - `entities::LAUNCH_CORE_CLASS_ID = 11` 并在 class-id baseline 测试中锁定；
+  - `LaunchCoreComp` 新增 `block_id`、`with_block_id(...)`、`apply_revision_wire(...)`、`to_revision_wire(...)`；
+  - `LaunchCoreBlock::from_block_def(...)` 从 content registry 的 `BlockDef` 恢复 size 与临时 icon 占位尺寸；
+  - `GameRuntime.launch_core_entities` 与 `apply_launch_core_revision_wire(...)`，通过 `ContentLoader.block(id)` 将 revision 0 payload 接入整体 runtime。
+- 已跑：
+  - `cargo test -p mindustry-core launch_core --lib`
+  - `cargo test -p mindustry-core launch_core_revision --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_launch_core_revision_zero_to_runtime_entity --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 继续迁移 `LocationPingComp` 或下一个 class-id/revision 明确的实体形状，并优先接入 runtime 而不是只放 helper。
+  2. 后续渲染/atlas 迁移后，用真实 `TextureRegion.width/height/scl()` 替换 `LaunchCoreBlock::from_block_def(...)` 的占位 icon 尺寸。
+  3. 将 launch lifecycle 接入真实 effect/group/update 流程；当前已经有 runtime sidecar，但还不是完整 Java `Groups` 生命周期。

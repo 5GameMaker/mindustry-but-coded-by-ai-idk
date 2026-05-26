@@ -26,7 +26,7 @@ use crate::mindustry::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
             BuildingComp, BulletComp, DecalComp, DecalRegion, EffectStateComp, FireComp,
-            PuddleComp, PuddleTile, UnitComp, WorldLabelComp,
+            LaunchCoreBlock, LaunchCoreComp, PuddleComp, PuddleTile, UnitComp, WorldLabelComp,
         },
         entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
@@ -2086,6 +2086,7 @@ pub struct GameRuntime {
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
     pub turret_runtime_states: BTreeMap<i32, GameRuntimeTurretBlockState>,
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
+    pub launch_core_entities: BTreeMap<i32, LaunchCoreComp>,
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
     pub client_bullet_snapshot_entities: BTreeMap<i32, BulletComp>,
@@ -2144,6 +2145,7 @@ impl GameRuntime {
             defense_wall_runtime_states: BTreeMap::new(),
             turret_runtime_states: BTreeMap::new(),
             construct_runtime_states: BTreeMap::new(),
+            launch_core_entities: BTreeMap::new(),
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
             client_bullet_snapshot_entities: BTreeMap::new(),
@@ -2788,6 +2790,30 @@ impl GameRuntime {
             .entry(entity_id)
             .or_insert_with(|| WorldLabelComp::new(entity_id, sync.x, sync.y));
         label.apply_sync_wire(sync);
+        true
+    }
+
+    pub fn apply_launch_core_revision_wire(
+        &mut self,
+        content: &ContentLoader,
+        entity_id: i32,
+        revision: &type_io::LaunchCoreRevisionWire,
+    ) -> bool {
+        let Some(block_id) = revision.block_id else {
+            return false;
+        };
+        let Some(block_def) = content.block(block_id) else {
+            return false;
+        };
+        let block = LaunchCoreBlock::from_block_def(block_def);
+        let launch = self
+            .launch_core_entities
+            .entry(entity_id)
+            .or_insert_with(|| {
+                LaunchCoreComp::new(entity_id, revision.x, revision.y, revision.lifetime, block)
+                    .with_block_id(Some(block_id))
+            });
+        launch.apply_revision_wire(revision, block);
         true
     }
 
@@ -5658,6 +5684,7 @@ impl GameRuntime {
         self.defense_wall_runtime_states.clear();
         self.turret_runtime_states.clear();
         self.construct_runtime_states.clear();
+        self.launch_core_entities.clear();
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
         self.client_bullet_snapshot_entities.clear();
@@ -15384,6 +15411,44 @@ mod tests {
         assert_eq!(label.parent_id, None);
         assert_eq!(label.text, "defend");
         assert_eq!((label.x, label.y, label.z), (30.0, 40.0, 160.0));
+    }
+
+    #[test]
+    fn game_runtime_applies_launch_core_revision_zero_to_runtime_entity() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router = content
+            .get_by_name(ContentType::Block, "router")
+            .expect("base content should include router");
+        let revision = type_io::LaunchCoreRevisionWire {
+            block_id: Some(router.id),
+            lifetime: 90.0,
+            time: 22.5,
+            x: 128.0,
+            y: 256.0,
+        };
+
+        let mut runtime = GameRuntime::default();
+        assert!(runtime.apply_launch_core_revision_wire(&content, 8100, &revision));
+
+        let launch = runtime
+            .launch_core_entities
+            .get(&8100)
+            .expect("revision wire should materialize launch core runtime entity");
+        assert_eq!(launch.id, 8100);
+        assert_eq!(launch.block_id, Some(router.id));
+        assert_eq!(launch.to_revision_wire(), revision);
+        assert_eq!(
+            launch.block.size,
+            content.block(router.id).unwrap().base().size
+        );
+        assert!(launch.draw_plan().icon_width > 0.0);
+
+        let missing_block = type_io::LaunchCoreRevisionWire {
+            block_id: None,
+            ..revision
+        };
+        assert!(!runtime.apply_launch_core_revision_wire(&content, 8101, &missing_block));
+        assert!(!runtime.launch_core_entities.contains_key(&8101));
     }
 
     #[test]
