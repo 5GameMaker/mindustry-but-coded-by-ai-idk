@@ -2122,7 +2122,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core network_player_sync_data_round_trips_java_write_sync_shape --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_applies_local_player_entity_snapshot_to_typed_player_runtime --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
-- 仍未完成：多 record 混合实体 fallback 仍无法通用分发 `PlayerComp + UnitComp + 其他 Syncc`；后续应迁移 Java `EntityMapping` class-id registry，再将 player/unit/其他实体统一到同一变长拆包 dispatcher。
+- 仍未完成：完整 `EntityMapping` class-id registry 与其他 `Syncc` 仍未迁移；`PlayerComp + UnitComp` 混合多 record 已由下一节补上，但还不是通用实体 dispatcher。
+
+### 12.40 EntitySnapshot 混合 PlayerComp + UnitComp 多 record fallback
+
+- 2026-05-26：在 `ClientEntitySnapshotMirror` 因多 record 变长 `sync_bytes` 无法固定拆分而产生 `parse_error` 时，`DesktopLauncher` 现在先尝试 mixed fallback。
+- Java 依据补充：`annotations/src/main/resources/classids.properties` 中 `mindustry.entities.comp.PlayerComp=12`；当前 Rust 仍优先用 `entity_id == launcher.player.id` 落本地玩家副作用，后续 class-id registry 应把 `type_id == 12` 纳入通用分发。
+- 新 fallback 行为：
+  - 按 Java packet 顺序读取 `entity_id(i32) + type_id(u8)`；
+  - 如果 `entity_id == launcher.player.id`，按 `NetworkPlayerSyncData::read_from(...)` 消费一条 `Player.writeSync` body，写 raw sidecar，更新 typed player runtime；
+  - 其他 record 先按 `read_unit_sync(...)` 消费一条 `UnitSyncWire`，再复用 `GameRuntime::apply_client_entity_snapshot_record_with_content(...)` 写 raw sidecar 并 materialize typed `UnitComp`；
+  - mixed fallback 成功时不再把该 packet 降级成纯 parse error。
+- 测试：
+  - `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-desktop --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：该路径仍是 `PlayerComp` 特判 + “其他先尝试 UnitSyncWire”的过渡方案；后续要迁移 Java `EntityMapping` class-id registry，用 `type_id` 分发所有已迁移 `Syncc`，避免靠 parse-shape 猜测。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

@@ -9,7 +9,9 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{PlayerComp, PlayerUnitSwitchContext};
-use mindustry_core::mindustry::io::{ContentHeaderSnapshot, LegacyTeamBlocks, TeamId};
+use mindustry_core::mindustry::io::{
+    read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
+};
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
     StateSnapshotCallPacket,
@@ -180,18 +182,27 @@ impl DesktopLauncher {
             .skip(self.last_applied_entity_snapshot_mirror_count)
         {
             if mirror.parse_error.is_some() {
-                let fallback = self
-                    .runtime
-                    .apply_client_entity_snapshot_packet_with_content(
-                        &self.content_loader,
-                        mirror.amount,
-                        &mirror.data,
-                    );
-                if fallback.entity_records_applied > 0 || fallback.entity_typed_records_applied > 0
+                let mixed_fallback =
+                    self.apply_client_entity_snapshot_packet_mixed(mirror.amount, &mirror.data);
+                if mixed_fallback.entity_records_applied > 0
+                    || mixed_fallback.entity_typed_records_applied > 0
                 {
-                    report.merge(fallback);
+                    report.merge(mixed_fallback);
                 } else {
-                    report.merge(self.runtime.note_client_entity_snapshot_parse_error());
+                    let fallback = self
+                        .runtime
+                        .apply_client_entity_snapshot_packet_with_content(
+                            &self.content_loader,
+                            mirror.amount,
+                            &mirror.data,
+                        );
+                    if fallback.entity_records_applied > 0
+                        || fallback.entity_typed_records_applied > 0
+                    {
+                        report.merge(fallback);
+                    } else {
+                        report.merge(self.runtime.note_client_entity_snapshot_parse_error());
+                    }
                 }
                 continue;
             }
@@ -256,6 +267,18 @@ impl DesktopLauncher {
             return false;
         };
 
+        self.apply_client_player_sync_record(entity_id, player_sync)
+    }
+
+    fn apply_client_player_sync_record(
+        &mut self,
+        entity_id: i32,
+        player_sync: NetworkPlayerSyncData,
+    ) -> bool {
+        if entity_id != self.player.id {
+            return false;
+        }
+
         self.player
             .apply_network_player_sync_data(&player_sync, true);
         self.player.after_sync_unit_state(PlayerUnitSwitchContext {
@@ -266,6 +289,68 @@ impl DesktopLauncher {
         self.runtime
             .apply_client_player_snapshot_record(entity_id, player_sync);
         true
+    }
+
+    fn apply_client_entity_snapshot_packet_mixed(
+        &mut self,
+        amount: i16,
+        data: &[u8],
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        let Ok(amount) = usize::try_from(amount) else {
+            return self.runtime.note_client_entity_snapshot_parse_error();
+        };
+
+        let mut report = GameRuntimeClientSnapshotApplyReport::default();
+        let mut read = data;
+        for _ in 0..amount {
+            if read.len() < 5 {
+                report.entity_parse_errors += 1;
+                return report;
+            }
+            let entity_id = i32::from_be_bytes(read[0..4].try_into().unwrap());
+            let type_id = read[4];
+            read = &read[5..];
+
+            let sync_start = read;
+            let before_len = sync_start.len();
+            if entity_id == self.player.id {
+                let Ok(player_sync) = NetworkPlayerSyncData::read_from(&mut read) else {
+                    report.entity_parse_errors += 1;
+                    return report;
+                };
+                let consumed = before_len - read.len();
+                let sync_bytes = sync_start[..consumed].to_vec();
+                report.merge(
+                    self.runtime
+                        .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                );
+                if self.apply_client_player_sync_record(entity_id, player_sync) {
+                    report.entity_typed_records_applied += 1;
+                }
+                continue;
+            }
+
+            let Ok(_unit_sync) = read_unit_sync(&mut read, &self.content_loader) else {
+                report.entity_parse_errors += 1;
+                return report;
+            };
+            let consumed = before_len - read.len();
+            let sync_bytes = sync_start[..consumed].to_vec();
+            report.merge(
+                self.runtime
+                    .apply_client_entity_snapshot_record_with_content(
+                        &self.content_loader,
+                        entity_id,
+                        type_id,
+                        sync_bytes,
+                    ),
+            );
+        }
+
+        if !read.is_empty() {
+            report.entity_parse_errors += 1;
+        }
+        report
     }
 
     fn sync_state_snapshot(&mut self) {
@@ -459,8 +544,8 @@ mod tests {
     use mindustry_core::mindustry::core::{
         GameRuntime, GameRuntimeNetworkContext, WorldLoadEventKind,
     };
-    use mindustry_core::mindustry::ctype::ContentId;
     use mindustry_core::mindustry::ctype::ContentType;
+    use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
         LegacyShortChunkMap,
@@ -475,9 +560,12 @@ mod tests {
     use mindustry_core::mindustry::{
         entities::{comp::BuildingComp, PlayerComp},
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
+        io::type_io::ControllerWire,
         io::{
-            LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId, TypeValue, UnitRef,
+            type_io, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks, TeamId,
+            TypeValue, UnitRef, Vec2 as IoVec2,
         },
+        r#type::ItemStack,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
     };
     use std::collections::BTreeMap;
@@ -1384,6 +1472,124 @@ mod tests {
         assert!(!launcher.player.typing);
         assert_eq!(launcher.player.x, 10.0);
         assert_eq!(launcher.player.y, 20.0);
+    }
+
+    #[test]
+    fn desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(Some(sample_network_player_data(None, None)));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+        assert_eq!(launcher.player.id, 91);
+
+        let player_sync = sample_network_player_sync_data(None);
+        let mut player_bytes = Vec::new();
+        player_sync.write_to(&mut player_bytes).unwrap();
+
+        let dagger_id = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .id();
+        let unit_sync = type_io::UnitSyncWire {
+            abilities: Vec::new(),
+            ammo: 4.0,
+            controller: ControllerWire::Ground,
+            elevation: 0.25,
+            flag: 12.0,
+            health: 77.0,
+            is_shooting: true,
+            mine_tile: None,
+            mounts: Vec::new(),
+            plans: None,
+            rotation: 180.0,
+            shield: 3.0,
+            spawned_by_core: false,
+            stack: ItemStack::new("", 0),
+            statuses: Vec::new(),
+            team: TeamId(4),
+            type_id: dagger_id,
+            update_building: false,
+            vel: IoVec2 { x: 0.5, y: -0.25 },
+            x: 30.0,
+            y: 45.0,
+        };
+        let mut unit_bytes = Vec::new();
+        type_io::write_unit_sync(&mut unit_bytes, &launcher.content_loader, &unit_sync).unwrap();
+
+        let mut data = Vec::new();
+        data.extend_from_slice(&launcher.player.id.to_be_bytes());
+        data.push(12);
+        data.extend_from_slice(&player_bytes);
+        data.extend_from_slice(&8801i32.to_be_bytes());
+        data.push(2);
+        data.extend_from_slice(&unit_bytes);
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state
+                .entity_snapshot_mirrors
+                .push(ClientEntitySnapshotMirror {
+                    amount: 2,
+                    data,
+                    records: Vec::new(),
+                    parse_error: Some(
+                        "multi-record entity snapshot with opaque sync bytes is not splittable yet"
+                            .into(),
+                    ),
+                });
+        }
+
+        launcher.update();
+
+        let report = launcher
+            .last_client_snapshot_apply_report
+            .expect("mixed fallback should apply player and unit records");
+        assert_eq!(report.entity_records_applied, 2);
+        assert_eq!(report.entity_typed_records_applied, 2);
+        assert_eq!(report.entity_parse_errors, 0);
+
+        assert_eq!(
+            launcher.runtime.client_player_snapshot_entities.get(&91),
+            Some(&player_sync)
+        );
+        assert_eq!(launcher.player.name, "snapshot-pilot");
+        assert_eq!(
+            launcher
+                .runtime
+                .client_entity_snapshot_records
+                .get(&91)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(player_bytes.as_slice())
+        );
+        assert_eq!(
+            launcher
+                .runtime
+                .client_entity_snapshot_records
+                .get(&8801)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(unit_bytes.as_slice())
+        );
+
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&8801)
+            .expect("mixed fallback should materialize unit record");
+        assert_eq!(unit.type_info.id(), dagger_id);
+        assert_eq!(unit.team_id(), TeamId(4));
+        assert_eq!(unit.x(), 30.0);
+        assert_eq!(unit.y(), 45.0);
+        assert_eq!(unit.rotation(), 180.0);
+        assert!(unit.weapons.is_shooting);
     }
 
     #[test]

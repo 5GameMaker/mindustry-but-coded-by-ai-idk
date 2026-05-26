@@ -1866,5 +1866,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
   1. 迁移 Java `EntityMapping` class-id registry，建立 `type_id -> Player/Unit/其他 Syncc` dispatcher。
-  2. 把当前多 record fallback 从“全 UnitSyncWire”升级为混合实体变长拆包，覆盖 `PlayerComp + UnitComp` 同 packet。
+  2. 继续把当前 mixed fallback 从“PlayerComp 特判 + 其他 UnitSyncWire 尝试”升级为真正 class-id dispatcher。
   3. 给真实 server→desktop smoke 增加本地 player entity snapshot，验证 `NetworkPlayerSyncData` 走真实 packet 解码链。
+
+---
+
+## 54. 最新闭环记录：混合 PlayerComp + UnitComp 多 record fallback
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：继续收窄 Java `NetClient.entitySnapshot(...)` 与 Rust mirror 的差距，让同一个多 record packet 中的本地 PlayerComp 与 UnitComp 不再因为 opaque 变长 payload 无法固定拆分而整体丢失。
+- Java 依据补充：`annotations/src/main/resources/classids.properties` 可直接验证 `mindustry.entities.comp.PlayerComp=12`；`NetServer` 写 `entity.classId()`，`NetClient` 用 `EntityMapping.map(typeID & 0xFF)` 建实体。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - `DesktopLauncher::sync_snapshot_mirrors(...)` 遇到 `ClientEntitySnapshotMirror.parse_error` 时，先调用 mixed fallback；
+  - mixed fallback 逐条读 `entity_id + type_id`；
+  - `entity_id == launcher.player.id` 时按 `NetworkPlayerSyncData` 消费 Player sync body，落到 raw sidecar + typed player runtime；
+  - 其他 record 先按 `read_unit_sync(...)` 消费 Unit sync body，再复用 runtime 的 typed `UnitComp` materialization；
+  - 成功应用时不再只记录 parse error。
+- 新增测试：
+  - `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`
+- 已跑：
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-desktop --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 做真实 server→desktop 的 local player entity snapshot smoke。
+  2. 迁移 Java generated `EntityMapping` class-id registry，取代当前“本地 player 特判 + unit parse-shape 猜测”。
+  3. 继续补其他 `Syncc` typed snapshot（Bullet/Fire/Weather/Effect 等按 Java entity mapping 优先级推进）。
