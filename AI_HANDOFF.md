@@ -1656,3 +1656,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 转入 turret `readSync` override：Java turret snapshot 需要保留 rotation/reload。
   2. 或继续 entity snapshot typed runtime，把 raw entity sidecar 写入真实 entity pool/mirror。
   3. payload UnitPayload 完整恢复仍未完成，后续需要接实体/单位内容 registry。
+
+---
+
+## 47. 最新闭环记录：Turret BlockSnapshot `readSync` rotation/reload 保留
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- Java 依据：
+  - `BuildingComp.writeSync(...) -> writeAll(...)`
+  - `BuildingComp.readSync(...) -> readAll(...)`
+  - `TurretBuild.readSync(...)` 覆盖：先保存旧 `rotation/reloadCounter`，调用 `readAll(read, revision)`，再恢复旧值，防止客户端炮塔同步时 snapping。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - `client_block_snapshot_revision(...)` 新增 turret revision 映射：`ItemTurret=2`、`Continuous=3`、`PayloadAmmo/Liquid/Power/Laser=1`；
+  - `apply_client_block_snapshot_child_tail(...)` 在 distribution/storage/payload 后继续尝试 turret reader；
+  - 新增 `preserve_client_turret_sync_fields(...)`，当已有 turret runtime state 时，保留旧 `TurretState.rotation/reload_counter`，同时接受 snapshot 中的 ammo/其他 child state；
+  - 新增 `game_runtime_turret_state(...)` / `game_runtime_turret_state_mut(...)` helper，只对 Generic/Item/PayloadAmmo/Continuous 这类含 `TurretState` 的变体生效。
+- 新增测试：
+  - `game_runtime_applies_client_item_turret_snapshot_preserving_rotation_reload_with_content`
+  - 覆盖 `duo` item turret：snapshot 更新 ammo 与 building base，但 runtime turret 的旧 rotation/reload 被保留。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client_item_turret_snapshot_preserving_rotation_reload_with_content --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 补真实联机 item turret BlockSnapshot smoke，验证 server→desktop 链路也保留 rotation/reload 并更新 ammo。
+  2. 给 `Continuous/PayloadAmmo/Generic` turret 补 core 单测。
+  3. 继续 entity snapshot typed runtime。

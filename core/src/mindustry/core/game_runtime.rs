@@ -931,6 +931,15 @@ fn network_map_building_revision(
 
 fn client_block_snapshot_revision(block: &BlockDef) -> u8 {
     match block {
+        BlockDef::Turret(turret) => match turret.kind {
+            TurretBlockKind::ItemTurret => 2,
+            TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret => 3,
+            TurretBlockKind::PayloadAmmoTurret
+            | TurretBlockKind::LiquidTurret
+            | TurretBlockKind::PowerTurret
+            | TurretBlockKind::LaserTurret => 1,
+            _ => 0,
+        },
         BlockDef::Distribution(distribution) => match distribution.kind {
             DistributionBlockKind::Conveyor
             | DistributionBlockKind::ArmoredConveyor
@@ -1477,6 +1486,30 @@ pub enum GameRuntimeTurretBlockState {
     },
     PointDefense(PointDefenseState),
     TractorBeam(TractorBeamState),
+}
+
+fn game_runtime_turret_state(state: &GameRuntimeTurretBlockState) -> Option<&TurretState> {
+    match state {
+        GameRuntimeTurretBlockState::Generic(turret)
+        | GameRuntimeTurretBlockState::Item { turret, .. }
+        | GameRuntimeTurretBlockState::PayloadAmmo { turret, .. }
+        | GameRuntimeTurretBlockState::Continuous { turret, .. } => Some(turret),
+        GameRuntimeTurretBlockState::PointDefense(_)
+        | GameRuntimeTurretBlockState::TractorBeam(_) => None,
+    }
+}
+
+fn game_runtime_turret_state_mut(
+    state: &mut GameRuntimeTurretBlockState,
+) -> Option<&mut TurretState> {
+    match state {
+        GameRuntimeTurretBlockState::Generic(turret)
+        | GameRuntimeTurretBlockState::Item { turret, .. }
+        | GameRuntimeTurretBlockState::PayloadAmmo { turret, .. }
+        | GameRuntimeTurretBlockState::Continuous { turret, .. } => Some(turret),
+        GameRuntimeTurretBlockState::PointDefense(_)
+        | GameRuntimeTurretBlockState::TractorBeam(_) => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2221,7 +2254,44 @@ impl GameRuntime {
                 report.block_child_read_errors = 1;
             }
         }
+        if report.block_child_records_applied > 0 || report.block_child_read_errors > 0 {
+            return report;
+        }
+
+        read = tail;
+        match self.read_turret_runtime_state_from_building_payload(block, revision, &mut read) {
+            Ok(Some(mut state)) => {
+                self.preserve_client_turret_sync_fields(building_tile_pos, &mut state);
+                self.turret_runtime_states.insert(building_tile_pos, state);
+                report.block_child_records_applied = 1;
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Ok(None) | Err(GameRuntimeBlockStateReadError::Unsupported) => {
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                report.block_child_read_errors = 1;
+            }
+        }
         report
+    }
+
+    fn preserve_client_turret_sync_fields(
+        &self,
+        building_tile_pos: i32,
+        incoming: &mut GameRuntimeTurretBlockState,
+    ) {
+        let Some(existing) = self.turret_runtime_states.get(&building_tile_pos) else {
+            return;
+        };
+        let Some(existing_turret) = game_runtime_turret_state(existing) else {
+            return;
+        };
+        let Some(incoming_turret) = game_runtime_turret_state_mut(incoming) else {
+            return;
+        };
+        incoming_turret.rotation = existing_turret.rotation;
+        incoming_turret.reload_counter = existing_turret.reload_counter;
     }
 
     pub fn apply_client_entity_snapshot_record(
@@ -13734,6 +13804,83 @@ mod tests {
         assert_eq!(
             runtime.payload_runtime_states.get(&tile_pos),
             Some(&GameRuntimePayloadBlockState::Void(common))
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_item_turret_snapshot_preserving_rotation_reload_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret = content
+            .block_by_name("duo")
+            .expect("base content should include duo")
+            .base()
+            .clone();
+        let copper = content
+            .item_by_name("copper")
+            .expect("base content should include copper")
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = point2_pack(2, 2);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, turret.clone(), TeamId(6)));
+        let existing_turret = TurretState {
+            reload_counter: 1.25,
+            rotation: 12.0,
+            ..TurretState::default()
+        };
+        runtime.turret_runtime_states.insert(
+            tile_pos,
+            GameRuntimeTurretBlockState::Item {
+                turret: existing_turret.clone(),
+                ammo: vec![],
+            },
+        );
+
+        let mut synced_building = BuildingComp::new(tile_pos, turret.clone(), TeamId(6));
+        synced_building.health = 23.0;
+        synced_building.set_rotation(1);
+        let incoming_turret = TurretState {
+            reload_counter: 9.0,
+            rotation: 90.0,
+            ..TurretState::default()
+        };
+        let ammo = vec![ItemAmmoEntry {
+            item_id: copper,
+            amount: 7,
+        }];
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        turret_write_child(&mut sync_bytes, &incoming_turret).unwrap();
+        item_turret_write_ammo(&mut sync_bytes, &ammo).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, turret.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        let building = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 23.0);
+        assert_eq!(building.rotation, 1);
+
+        let mut expected_turret = incoming_turret;
+        expected_turret.rotation = existing_turret.rotation;
+        expected_turret.reload_counter = existing_turret.reload_counter;
+        expected_turret.total_ammo = 7;
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::Item {
+                turret: expected_turret,
+                ammo,
+            })
         );
     }
 

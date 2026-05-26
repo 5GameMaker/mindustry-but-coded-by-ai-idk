@@ -1986,6 +1986,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：下一步建议转入 turret `readSync` override 或 entity snapshot typed runtime；payload UnitPayload 完整实体恢复仍需后续继续。
 
+### 12.33 Turret BlockSnapshot `readSync` rotation/reload 保留
+
+- 2026-05-26：`client_block_snapshot_revision(...)` 新增 turret family revision 映射：
+  - `ItemTurret -> 2`
+  - `ContinuousTurret/ContinuousLiquidTurret -> 3`
+  - `PayloadAmmoTurret/LiquidTurret/PowerTurret/LaserTurret -> 1`
+- `apply_client_block_snapshot_child_tail(...)` 在 distribution/storage/payload dispatcher 未消费 tail 后，继续尝试 `read_turret_runtime_state_from_building_payload(...)`，并写入 `GameRuntime.turret_runtime_states`。
+- 对齐 Java `TurretBuild.readSync(...)` 特例：Java 会 `readAll(read, revision)` 后恢复旧 `rotation` 与 `reloadCounter`，避免客户端 turret snapping；Rust 现在在已有 turret runtime state 时，通过 `preserve_client_turret_sync_fields(...)` 保留旧 `TurretState.rotation/reload_counter`，同时更新 ammo/continuous 等其他 snapshot 字段。
+- 新增测试 `game_runtime_applies_client_item_turret_snapshot_preserving_rotation_reload_with_content`：
+  - 构造已有 `duo` turret runtime state，旧 `rotation/reload_counter`；
+  - 发送包含新 `rotation/reload_counter` 与 item ammo 的 client snapshot bytes；
+  - 断言 building base health/rotation 更新、ammo 更新，但 turret runtime 的 `rotation/reload_counter` 保留旧值。
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_item_turret_snapshot_preserving_rotation_reload_with_content --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：真实联机 turret BlockSnapshot smoke 尚未补；`Continuous/PayloadAmmo/Generic` turret 的 rotation/reload 保留还需逐类补测试；PointDefense/TractorBeam 不走 `TurretBuild.readSync` 的保留逻辑。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
