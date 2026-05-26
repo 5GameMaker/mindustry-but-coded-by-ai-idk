@@ -3282,3 +3282,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-server server_launcher_applies_request_build_payload_packet`
 - 仍未完成：整栋建筑 payload 目前只在 `PayloadComp` 中保存 `PayloadState { kind, size }`，尚未保留完整 `BuildPayload` 的 building bytes/runtime sidecars；`build.canPickup()` 只覆盖 core、linked storage、logic、radar 等已迁移的关键 override；admin action、严格 player/unit 位置同步、完整 entity group、客户端 mirror 对 `PickedBuildPayloadCallPacket` 的真实状态消费仍需后续继续。
+
+### 12.92 Client TransferItemTo 建筑库存 mirror 消费
+
+- 2026-05-27：把 `TransferItemToCallPacket` 从“只记录 last packet/计数”推进到客户端建筑库存 mirror mutation，补上 server `TransferInventory -> TransferItemTo` 权威链路在 client 侧的可观察状态同步。
+- Java 依据：
+  - `InputHandler.transferItemTo(Unit unit, Item item, int amount, float x, float y, Building build)` 在客户端/服务端都会体现“unit stack 转移到 build”的效果；
+  - server 已在 12.89 中把该 packet 作为存货转移成功后的出站包，客户端需要至少更新建筑 item mirror，避免 UI/调试镜像仍停留在旧库存。
+- Rust 新增/变化：
+  - `NetClient::apply_transfer_item_to_packet(...)` 新增通用 helper：解析 `packet.build.tile_pos` 与 `packet.item`，对 `ClientTileStorageMirror.items` 做 `previous + amount.max(0)`；
+  - `handle_client_received(PacketKind::TransferItemToCallPacket)` 调用该 helper 后再记录 last packet 与 timestamp；
+  - 既有 building storage mirror 测试扩展到 transfer-in，并更新 client packet 总记录测试，让 secondary build 在收到 `TransferItemToCallPacket(scrap, 9)` 后保留 `scrap=9`。
+- 验证：
+  - `cargo test -p mindustry-core apply_building_item_and_liquid_packets_updates_storage_mirror`
+  - `cargo test -p mindustry-core update_records_server_forwarded_inventory_payload_and_unit_packets`
+  - `cargo check --workspace`
+- 仍未完成：这里只更新 building storage mirror，尚未同步扣减 client-side unit item mirror，也没有播放 item transfer effect；`TransferItemToUnitCallPacket`、`PayloadDroppedCallPacket`、`PickedBuildPayloadCallPacket` 仍需继续从 last-packet 记录推进到真实 runtime/mirror mutation。
