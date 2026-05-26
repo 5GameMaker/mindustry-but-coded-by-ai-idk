@@ -168,7 +168,9 @@ use crate::mindustry::{
         ConstructBlockState,
     },
     world::meta::BlockFlag,
-    world::{footprint_tiles, get_edges, point2_pack, point2_x, point2_y, Tile, TimeItem},
+    world::{
+        footprint_tiles, get_edges, point2_pack, point2_x, point2_y, raycast_until, Tile, TimeItem,
+    },
 };
 
 pub struct GameRuntimeEffectResources<'a, 'b> {
@@ -4049,6 +4051,9 @@ impl GameRuntime {
             if !Self::owned_power_node_autolink_candidate(content, target) {
                 continue;
             }
+            if self.owned_power_line_insulated(content, source_index, target_index) {
+                continue;
+            }
             if !self.owned_power_node_link_valid_between(content, source_index, target_index, true)
             {
                 continue;
@@ -4402,6 +4407,41 @@ impl GameRuntime {
                 .unwrap_or(0),
             already_linked,
         )
+    }
+
+    fn owned_power_line_insulated(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+    ) -> bool {
+        let Some(source) = self.buildings.get(source_index) else {
+            return false;
+        };
+        let Some(target) = self.buildings.get(target_index) else {
+            return false;
+        };
+
+        raycast_until(
+            source.tile_x(),
+            source.tile_y(),
+            target.tile_x(),
+            target.tile_y(),
+            |x, y| {
+                self.building_index_at(point2_pack(x, y))
+                    .is_some_and(|index| {
+                        Self::owned_building_is_insulated(content, &self.buildings[index])
+                    })
+            },
+        )
+    }
+
+    fn owned_building_is_insulated(content: &ContentLoader, building: &BuildingComp) -> bool {
+        match content.block(building.block.id) {
+            Some(BlockDef::DefenseWall(wall)) => wall.insulated,
+            Some(BlockDef::Power(power)) => power.insulated,
+            _ => false,
+        }
     }
 
     fn owned_power_node_link_overlaps(
@@ -17331,6 +17371,119 @@ mod tests {
         assert_eq!(
             runtime.power_graph_memberships.get(&source_pos),
             runtime.power_graph_memberships.get(&adjacent_pos)
+        );
+    }
+
+    #[test]
+    fn game_runtime_power_line_insulated_matches_java_raycast_flags() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let wall_def = content.block_by_name("plastanium-wall").unwrap();
+        let diode_def = content.block_by_name("diode").unwrap();
+        let blocked_source_pos = point2_pack(10, 10);
+        let blocked_target_pos = point2_pack(14, 10);
+        let wall_pos = point2_pack(12, 10);
+        let endpoint_source_pos = point2_pack(10, 12);
+        let diode_pos = point2_pack(14, 12);
+        let clear_source_pos = point2_pack(10, 14);
+        let clear_target_pos = point2_pack(14, 14);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        for pos in [
+            blocked_source_pos,
+            blocked_target_pos,
+            endpoint_source_pos,
+            clear_source_pos,
+            clear_target_pos,
+        ] {
+            runtime.add_building(BuildingComp::new(pos, node_def.base().clone(), TeamId(1)));
+        }
+        runtime.add_building(BuildingComp::new(
+            wall_pos,
+            wall_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            diode_pos,
+            diode_def.base().clone(),
+            TeamId(1),
+        ));
+
+        let blocked_source_index = runtime.building_index_at(blocked_source_pos).unwrap();
+        let blocked_target_index = runtime.building_index_at(blocked_target_pos).unwrap();
+        let endpoint_source_index = runtime.building_index_at(endpoint_source_pos).unwrap();
+        let diode_index = runtime.building_index_at(diode_pos).unwrap();
+        let clear_source_index = runtime.building_index_at(clear_source_pos).unwrap();
+        let clear_target_index = runtime.building_index_at(clear_target_pos).unwrap();
+
+        assert!(runtime.owned_power_line_insulated(
+            &content,
+            blocked_source_index,
+            blocked_target_index
+        ));
+        assert!(runtime.owned_power_line_insulated(&content, endpoint_source_index, diode_index));
+        assert!(!runtime.owned_power_line_insulated(
+            &content,
+            clear_source_index,
+            clear_target_index
+        ));
+    }
+
+    #[test]
+    fn game_runtime_autolink_skips_insulated_power_lines_but_manual_config_stays_java_like() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let wall_def = content.block_by_name("plastanium-wall").unwrap();
+        let source_pos = point2_pack(10, 10);
+        let target_pos = point2_pack(14, 10);
+        let wall_pos = point2_pack(12, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            target_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            wall_pos,
+            wall_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(runtime.autolink_owned_power_node(&content, source_pos), 0);
+        assert!(runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == source_pos)
+            .unwrap()
+            .power
+            .as_ref()
+            .unwrap()
+            .links
+            .is_empty());
+
+        assert_eq!(
+            runtime.configure_owned_power_node_link(&content, source_pos, target_pos),
+            GameRuntimePowerNodeLinkResult::Linked
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == source_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![target_pos]
         );
     }
 

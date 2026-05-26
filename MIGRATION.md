@@ -2715,6 +2715,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core power_node`
 - 仍未完成：真实 placement 调用点仍需从 build/placement 流程接入 `placed_owned_power_node(...)`；UI tap/client packet 路径、`PowerNode.insulated(...)` raycast、`getNodeLinks(...)` 辅助扫描仍待迁移。
 
+### 12.63 PowerNode autolink 绝缘 raycast 阻断
+
+- 2026-05-27：继续迁移 Java `PowerNode.insulated(...)` 在自动连线候选扫描中的运行态语义，避免 `PowerNode.placed()/getPotentialLinks(...)` 自动跨越绝缘墙/绝缘块连线。
+- Java 依据：
+  - `PowerNode.getPotentialLinks(...)` 与 `PowerNode.getNodeLinks(...)` 通过 `!PowerNode.insulated(tile, other.tile)` 过滤候选；
+  - `PowerNode.insulated(int,int,int,int)` 直接调用 `World.raycast(...)`，上游 raycast 会访问起点、终点和中间点；
+  - `BuildingComp.isInsulated()` 返回 `block.insulated`；
+  - `PowerNode.config(Integer.class, ...)` / `linkValid(...)` 本身不调用 `insulated(...)`，所以 Rust 手动配置入口继续保持 Java-like 行为，不额外拒绝绝缘线段。
+- Rust 新增/变化：
+  - `GameRuntime::owned_power_line_insulated(...)`：复用已迁移的 `raycast_until(...)`，按 world footprint/build refs 从 source 到 target 扫描 tile；
+  - `GameRuntime::owned_building_is_insulated(...)`：content-aware 读取 `DefenseWallData.insulated` 与 `PowerBlockData.insulated`，覆盖 plastanium wall、diode 等当前已迁移绝缘来源；
+  - `autolink_owned_power_node(...)` 在候选排序和配置前过滤被绝缘建筑阻断的线段；
+  - 手动 `configure_owned_power_node_link(...)` 未接入该过滤，保持 Java `linkValid(...)` 对照语义。
+- 测试：
+  - `game_runtime_power_line_insulated_matches_java_raycast_flags`
+  - `game_runtime_autolink_skips_insulated_power_lines_but_manual_config_stays_java_like`
+- 已验证：
+  - `cargo test -p mindustry-core power_node`
+  - `cargo test -p mindustry-core game_runtime_power_line_insulated_matches_java_raycast_flags`
+  - `cargo test -p mindustry-core game_runtime_autolink_skips_insulated_power_lines_but_manual_config_stays_java_like`
+  - `cargo check --workspace`
+  - `git diff --check`
+- 仍未完成：`PowerNode.getNodeLinks(...)` 尚未作为独立 runtime helper 暴露给非 node block placement/preview；当前 range overlap 仍是 center tile 近似，后续需继续补 Java hitbox overlap 与 UI tap/client packet 接入。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
