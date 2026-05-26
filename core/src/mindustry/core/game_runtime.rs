@@ -56,13 +56,13 @@ use crate::mindustry::{
         EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
     world::blocks::distribution::{
-        conveyor_accept_item, read_buffered_bridge_state, read_conveyor_state,
-        read_directional_unloader_state, read_duct_junction_state, read_duct_router_state,
-        read_duct_state, read_item_bridge_state, read_mass_driver_state,
-        read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
-        write_buffered_bridge_state, write_conveyor_state, write_directional_unloader_state,
-        write_duct_junction_state, write_duct_router_state, write_duct_state,
-        write_item_bridge_state, write_mass_driver_state, write_sorter_state,
+        conveyor_accept_item, duct_accept_item, duct_router_accept_item,
+        read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
+        read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
+        read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
+        read_stack_conveyor_state, write_buffered_bridge_state, write_conveyor_state,
+        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
+        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
         write_stack_conveyor_state, BufferedItemBridgeState, ConveyorItemState, ConveyorState,
         DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
         MassDriverState, SorterState, StackConveyorState, CONVEYOR_CAPACITY,
@@ -4941,6 +4941,19 @@ impl GameRuntime {
         if target_is_conveyor {
             return self.dump_item_to_conveyor(content, source_index, target_index, item_id);
         }
+        let target_is_duct = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::Duct
+                        | DistributionBlockKind::DuctRouter
+                        | DistributionBlockKind::OverflowDuct
+                )
+        );
+        if target_is_duct {
+            return self.dump_item_to_duct(content, source_index, target_index, item_id);
+        }
 
         let (source, target) = if source_index < target_index {
             let (left, right) = self.buildings.split_at_mut(target_index);
@@ -4971,6 +4984,94 @@ impl GameRuntime {
         source_items.remove(item_id, 1);
         target_items.add(item_id, 1);
         true
+    }
+
+    fn dump_item_to_duct(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        if !self.dump_target_accepts_item(content, source_index, target_index, item_id) {
+            return false;
+        }
+
+        let Some(relative) = self.relative_direction_between_buildings(source_index, target_index)
+        else {
+            return false;
+        };
+        let target_tile_pos = self.buildings[target_index].tile_pos;
+        let Some(target_kind) = content
+            .block(self.buildings[target_index].block.id)
+            .and_then(|block| match block {
+                BlockDef::Distribution(distribution) => Some(distribution.kind),
+                _ => None,
+            })
+        else {
+            return false;
+        };
+
+        {
+            let (source, target) = if source_index < target_index {
+                let (left, right) = self.buildings.split_at_mut(target_index);
+                (&mut left[source_index], &mut right[0])
+            } else {
+                let (left, right) = self.buildings.split_at_mut(source_index);
+                (&mut right[0], &mut left[target_index])
+            };
+
+            let Some(source_items) = source.items.as_mut() else {
+                return false;
+            };
+            if source_items.get(item_id) <= 0 {
+                return false;
+            }
+
+            let Some(target_items) = target.items.as_mut() else {
+                return false;
+            };
+            if target_items.total() >= target.block.item_capacity {
+                return false;
+            }
+
+            source_items.remove(item_id, 1);
+            target_items.add(item_id, 1);
+        }
+
+        match target_kind {
+            DistributionBlockKind::Duct => {
+                let entry = self
+                    .distribution_runtime_states
+                    .entry(target_tile_pos)
+                    .or_insert_with(|| {
+                        GameRuntimeDistributionBlockState::Duct(DuctState::default())
+                    });
+                let GameRuntimeDistributionBlockState::Duct(state) = entry else {
+                    return false;
+                };
+                state.current = Some(item_id);
+                state.rec_dir = relative;
+                true
+            }
+            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+                let entry = self
+                    .distribution_runtime_states
+                    .entry(target_tile_pos)
+                    .or_insert_with(|| {
+                        GameRuntimeDistributionBlockState::DuctRouter(DuctRouterState {
+                            sort_item: None,
+                            current: None,
+                        })
+                    });
+                let GameRuntimeDistributionBlockState::DuctRouter(state) = entry else {
+                    return false;
+                };
+                state.current = Some(item_id);
+                true
+            }
+            _ => false,
+        }
     }
 
     fn dump_item_to_conveyor(
@@ -5267,6 +5368,59 @@ impl GameRuntime {
                     return false;
                 };
                 items.total() == 0 && target.block.item_capacity > 0
+            }
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::Duct =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                let current = match self.distribution_runtime_states.get(&target.tile_pos) {
+                    Some(GameRuntimeDistributionBlockState::Duct(state)) => state.current,
+                    Some(_) => return false,
+                    None => None,
+                };
+                let source_is_duct =
+                    content
+                        .block(source.block.id)
+                        .is_some_and(|block| match block {
+                            BlockDef::Distribution(distribution) => matches!(
+                                distribution.kind,
+                                DistributionBlockKind::Duct
+                                    | DistributionBlockKind::DuctRouter
+                                    | DistributionBlockKind::OverflowDuct
+                            ),
+                            _ => false,
+                        });
+                duct_accept_item(
+                    current.is_some(),
+                    items.total() == 0,
+                    self.relative_direction_between_buildings(source_index, target_index),
+                    target.rotation,
+                    distribution.armored,
+                    source_is_duct,
+                )
+            }
+            Some(BlockDef::Distribution(distribution))
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct
+                ) =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                let current = match self.distribution_runtime_states.get(&target.tile_pos) {
+                    Some(GameRuntimeDistributionBlockState::DuctRouter(state)) => state.current,
+                    Some(_) => return false,
+                    None => None,
+                };
+                duct_router_accept_item(
+                    current.is_some(),
+                    items.total() == 0,
+                    self.relative_direction_between_buildings(source_index, target_index),
+                    target.rotation,
+                )
             }
             Some(BlockDef::Storage(storage)) => {
                 let Some(items) = target.items.as_ref() else {
@@ -12377,6 +12531,125 @@ mod tests {
         assert_eq!(unload_report.dumped_items, 4);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 4);
         assert!(runtime.buildings[1].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_to_adjacent_duct() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let duct_def = content.block_by_name("duct").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let duct_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let mut duct_building = BuildingComp::new(duct_tile, duct_def.base().clone(), TeamId(6));
+        duct_building.set_rotation(1);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(duct_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 7);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        let Some(GameRuntimeDistributionBlockState::Duct(duct)) =
+            runtime.distribution_runtime_states.get(&duct_tile)
+        else {
+            panic!("duct sidecar should be created by dumpAccumulate");
+        };
+        assert_eq!(duct.current, Some(copper));
+        assert_eq!(duct.rec_dir, 0);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_to_adjacent_duct_router() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let duct_router_def = content.block_by_name("duct-router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let duct_router_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let mut duct_router_building =
+            BuildingComp::new(duct_router_tile, duct_router_def.base().clone(), TeamId(6));
+        duct_router_building.set_rotation(2);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(duct_router_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 7);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        let Some(GameRuntimeDistributionBlockState::DuctRouter(router)) =
+            runtime.distribution_runtime_states.get(&duct_router_tile)
+        else {
+            panic!("duct-router sidecar should be created by dumpAccumulate");
+        };
+        assert_eq!(router.current, Some(copper));
+        assert_eq!(router.sort_item, None);
     }
 
     #[test]
