@@ -255,12 +255,22 @@ pub fn duct_accept_item(
     rotation: i32,
     armored: bool,
     source_is_duct: bool,
+    source_front_points_to_target: bool,
 ) -> bool {
-    !has_current
-        && items_empty
-        && source_relative_to_edge
-            .map(|relative| armored || relative != rotation.rem_euclid(4) || source_is_duct)
-            .unwrap_or(false)
+    if has_current || !items_empty {
+        return false;
+    }
+
+    let Some(relative) = source_relative_to_edge else {
+        return false;
+    };
+    let rotation = rotation.rem_euclid(4);
+
+    if armored {
+        (source_is_duct && source_front_points_to_target) || relative == rotation
+    } else {
+        relative != rotation || source_is_duct
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -961,10 +971,52 @@ mod tests {
         assert!(!duct_ready_to_move(0.7, 4.0));
         assert!(duct_ready_to_move(0.75, 4.0));
 
-        assert!(duct_accept_item(false, true, Some(1), 0, false, false));
-        assert!(!duct_accept_item(false, true, Some(0), 0, false, false));
-        assert!(duct_accept_item(false, true, Some(0), 0, true, false));
-        assert!(!duct_accept_item(true, true, Some(1), 0, false, false));
+        assert!(duct_accept_item(
+            false,
+            true,
+            Some(1),
+            0,
+            false,
+            false,
+            false
+        ));
+        assert!(!duct_accept_item(
+            false,
+            true,
+            Some(0),
+            0,
+            false,
+            false,
+            false
+        ));
+        assert!(duct_accept_item(
+            false,
+            true,
+            Some(0),
+            0,
+            true,
+            false,
+            false
+        ));
+        assert!(!duct_accept_item(
+            false,
+            true,
+            Some(1),
+            0,
+            true,
+            false,
+            false
+        ));
+        assert!(duct_accept_item(false, true, Some(1), 0, true, true, true));
+        assert!(!duct_accept_item(
+            true,
+            true,
+            Some(1),
+            0,
+            false,
+            false,
+            false
+        ));
 
         assert!(duct_router_accept_item(false, true, Some(2), 0));
         assert!(!duct_router_accept_item(false, true, Some(1), 0));

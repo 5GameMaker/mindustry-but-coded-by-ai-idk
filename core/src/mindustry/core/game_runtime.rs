@@ -9256,13 +9256,21 @@ impl GameRuntime {
                     Some(_) => return false,
                     None => None,
                 };
-                let source_is_duct =
-                    content
-                        .block(source.block.id)
-                        .is_some_and(|block| match block {
-                            BlockDef::Distribution(distribution) => distribution.is_duct,
-                            _ => false,
-                        });
+                let (source_is_duct, source_front_points_to_target) = content
+                    .block(source.block.id)
+                    .map_or((false, false), |block| {
+                        let BlockDef::Distribution(distribution) = block else {
+                            return (false, false);
+                        };
+                        (
+                            distribution.is_duct,
+                            distribution.is_duct
+                                && distribution.rotate
+                                && distribution.base.has_items
+                                && self.neighbor_building_index(source_index, source.rotation)
+                                    == Some(target_index),
+                        )
+                    });
                 duct_accept_item(
                     current.is_some(),
                     items.total() == 0,
@@ -9270,6 +9278,7 @@ impl GameRuntime {
                     target.rotation,
                     distribution.armored,
                     source_is_duct,
+                    source_front_points_to_target,
                 )
             }
             Some(BlockDef::Distribution(distribution))
@@ -16627,6 +16636,81 @@ mod tests {
         };
         assert_eq!(duct.current, None);
         assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_armored_duct_rejects_unaligned_non_duct_input() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let armored_def = content.block_by_name("armored-duct").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(5, 4);
+        let armored_tile = point2_pack(5, 5);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let mut armored_building =
+            BuildingComp::new(armored_tile, armored_def.base().clone(), TeamId(6));
+        armored_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(armored_building);
+
+        assert!(!runtime.dump_item_to_target(&content, 0, 1, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        assert!(!runtime
+            .distribution_runtime_states
+            .contains_key(&armored_tile));
+    }
+
+    #[test]
+    fn game_runtime_armored_duct_accepts_front_facing_duct_input() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let duct_def = content.block_by_name("duct").unwrap();
+        let armored_def = content.block_by_name("armored-duct").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(4, 4);
+        let armored_tile = point2_pack(5, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, duct_def.base().clone(), TeamId(6));
+        source_building.set_rotation(0);
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let mut armored_building =
+            BuildingComp::new(armored_tile, armored_def.base().clone(), TeamId(6));
+        armored_building.set_rotation(1);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(armored_building);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        let Some(GameRuntimeDistributionBlockState::Duct(duct)) =
+            runtime.distribution_runtime_states.get(&armored_tile)
+        else {
+            panic!("armored duct sidecar should be created by dump");
+        };
+        assert_eq!(duct.current, Some(copper));
+        assert_eq!(duct.rec_dir, 0);
     }
 
     #[test]
