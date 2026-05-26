@@ -1834,5 +1834,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
   1. 迁移 Java `EntityMapping` class-id registry，避免“能按 UnitSyncWire 读通”这种临时判断。
-  2. 接入 `PlayerComp` typed snapshot，复用 `NetworkPlayerData` 与 `PlayerComp::apply_network_player_data(...)`。
+  2. 扩展 `PlayerComp` typed snapshot 的多 record 混合拆包；注意 entity snapshot 应使用 `NetworkPlayerSyncData`，不要误用 revisioned `NetworkPlayerData`。
   3. 支持混合实体类型的通用变长拆包。
+
+---
+
+## 53. 最新闭环记录：PlayerComp typed entity snapshot 接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：让 Java `NetClient.entitySnapshot(...) -> readSyncEntity(...)` 中本地玩家 `player.readSync(...)` 的一部分语义落到 Rust 真实 desktop/player runtime。
+- Java 依据：
+  - `core/src/mindustry/entities/comp/PlayerComp.java:39-50`：`@SyncLocal` / `@NoSync lastCommand` / 基础字段；
+  - `core/src/mindustry/entities/comp/PlayerComp.java:184-213`：`afterSync()` unit 纠偏与控制回放；
+  - `annotations/src/main/java/mindustry/annotations/entity/EntityIO.java:131-180`：`writeSync/readSync` 不写 revision，`@SyncLocal` 本地只消费不覆盖，读完调用 `afterSync()`；
+  - `core/src/mindustry/core/NetClient.java:452-486`：`id == player.id()` 时复用本地 player。
+- Rust 主改动：
+  - `core/src/mindustry/net/network_io.rs`
+  - `core/src/mindustry/entities/comp/player.rs`
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `desktop/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - 新增 `NetworkPlayerSyncData`，专门表示 Java `Player.writeSync(...)` wire body；它不带 `revision`，也不带 `lastCommand`；
+  - `PlayerComp::apply_network_player_sync_data(..., is_local=true)` 保留本地 `@SyncLocal` 状态，只更新 `admin/color/name/team/unit` 等非本地输入字段；
+  - `DesktopLauncher::sync_snapshot_mirrors(...)` 对 `entity_id == player.id` 的 record 解析 player sync，更新 `launcher.player`，调用 `after_sync_unit_state(...)`，并写入 `GameRuntime.client_player_snapshot_entities` typed sidecar；
+  - raw `client_entity_snapshot_records` 仍保留原始 `sync_bytes`。
+- 已跑：
+  - `cargo test -p mindustry-core network_player_sync_data_round_trips_java_write_sync_shape --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_local_player_entity_snapshot_to_typed_player_runtime --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 迁移 Java `EntityMapping` class-id registry，建立 `type_id -> Player/Unit/其他 Syncc` dispatcher。
+  2. 把当前多 record fallback 从“全 UnitSyncWire”升级为混合实体变长拆包，覆盖 `PlayerComp + UnitComp` 同 packet。
+  3. 给真实 server→desktop smoke 增加本地 player entity snapshot，验证 `NetworkPlayerSyncData` 走真实 packet 解码链。

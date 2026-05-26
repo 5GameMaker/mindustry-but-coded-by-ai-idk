@@ -2101,7 +2101,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
-- 仍未完成：fallback 当前只支持可按 `UnitSyncWire` 连续读通的 Unit records；完整 `EntityMapping` class-id registry、PlayerComp typed snapshot 与混合实体 record 仍需后续迁移。
+- 仍未完成：fallback 当前只支持可按 `UnitSyncWire` 连续读通的 Unit records；完整 `EntityMapping` class-id registry 与混合实体 record 仍需后续迁移。
+
+### 12.39 EntitySnapshot PlayerComp typed snapshot 初步接入
+
+- 2026-05-26：补上 Java `NetClient.readSyncEntity(...)` 遇到本地 `player.id()` 时将 entity snapshot 读入 `player.readSync(...)` 的 Rust typed 接入。
+- 关键纠偏：
+  - Java `Player.writeSync/readSync` 不是 revisioned `Player.write/read` body；
+  - sync payload 不带 `i16 revision`，也不包含 `@NoSync lastCommand`；
+  - `@SyncLocal` 字段对本地玩家只消费 wire bytes，不覆盖本地输入/位置状态。
+- Rust 新增：
+  - `NetworkPlayerSyncData`：按 Java `Player.writeSync(...)` 顺序读写 `admin/boosting/color/mouse/name/selectedBlock/selectedRotation/shooting/team/typing/unit/x/y`；
+  - `PlayerComp::apply_network_player_sync_data(...)`：支持本地玩家 `@SyncLocal` 保留语义，并把 incoming `unit` 交给后续 `after_sync_unit_state(...)`；
+  - `GameRuntime.client_player_snapshot_entities`：保留 typed player snapshot sidecar；
+  - `DesktopLauncher::sync_snapshot_mirrors(...)`：当 entity snapshot record 的 `entity_id == launcher.player.id` 时，解析 `NetworkPlayerSyncData`，更新真实 `launcher.player`，调用 `after_sync_unit_state(...)`，同时保留 raw sidecar。
+- 测试：
+  - `network_player_sync_data_round_trips_java_write_sync_shape`
+  - `desktop_launcher_applies_local_player_entity_snapshot_to_typed_player_runtime`
+- 已验证：
+  - `cargo test -p mindustry-core network_player_sync_data_round_trips_java_write_sync_shape --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_local_player_entity_snapshot_to_typed_player_runtime --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：多 record 混合实体 fallback 仍无法通用分发 `PlayerComp + UnitComp + 其他 Syncc`；后续应迁移 Java `EntityMapping` class-id registry，再将 player/unit/其他实体统一到同一变长拆包 dispatcher。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

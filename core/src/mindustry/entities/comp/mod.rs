@@ -82,7 +82,7 @@ pub use miner::{
 pub use owner::OwnerComp;
 pub use payload::{PayloadComp, PayloadKind, PayloadState};
 pub use physics::{PhysicRef, PhysicsComp};
-pub use player::{PlayerComp, PlayerUnitState};
+pub use player::{PlayerComp, PlayerUnitState, PlayerUnitSwitchContext};
 pub use pos::PosComp;
 pub use pos_team_def::PosTeamDef;
 pub use power_graph_updater::{PowerGraphUpdate, PowerGraphUpdaterComp};

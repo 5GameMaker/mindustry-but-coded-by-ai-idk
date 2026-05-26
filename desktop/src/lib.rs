@@ -8,10 +8,11 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
-use mindustry_core::mindustry::entities::PlayerComp;
+use mindustry_core::mindustry::entities::{PlayerComp, PlayerUnitSwitchContext};
 use mindustry_core::mindustry::io::{ContentHeaderSnapshot, LegacyTeamBlocks, TeamId};
 use mindustry_core::mindustry::net::{
-    ArcNetProvider, Net, NetworkPlayerData, NetworkWorldData, StateSnapshotCallPacket,
+    ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
+    StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::vars::AppContext;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -204,6 +205,9 @@ impl DesktopLauncher {
                             record.sync_bytes.clone(),
                         ),
                 );
+                if self.apply_client_player_entity_snapshot(record.entity_id, &record.sync_bytes) {
+                    report.entity_typed_records_applied += 1;
+                }
             }
         }
         self.last_applied_entity_snapshot_mirror_count = entity_mirrors.len();
@@ -241,6 +245,27 @@ impl DesktopLauncher {
         self.last_applied_entity_snapshot_mirror_count = 0;
         self.last_applied_hidden_snapshot_mirror = None;
         self.last_client_snapshot_apply_report = None;
+    }
+
+    fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
+        if entity_id != self.player.id {
+            return false;
+        }
+
+        let Ok(player_sync) = NetworkPlayerSyncData::read_exact_from(sync_bytes) else {
+            return false;
+        };
+
+        self.player
+            .apply_network_player_sync_data(&player_sync, true);
+        self.player.after_sync_unit_state(PlayerUnitSwitchContext {
+            is_local: true,
+            headless: false,
+            net_client: true,
+        });
+        self.runtime
+            .apply_client_player_snapshot_record(entity_id, player_sync);
+        true
     }
 
     fn sync_state_snapshot(&mut self) {
@@ -445,7 +470,7 @@ mod tests {
     };
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::net::{
-        NetworkPlayerData, NetworkWorldData, StateSnapshotCallPacket,
+        NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{comp::BuildingComp, PlayerComp},
@@ -490,6 +515,27 @@ mod tests {
             unit: UnitRef::Block { tile_pos: 42 },
             x: 100.0,
             y: 200.0,
+        }
+    }
+
+    fn sample_network_player_sync_data(
+        selected_block_id: Option<ContentId>,
+    ) -> NetworkPlayerSyncData {
+        NetworkPlayerSyncData {
+            admin: false,
+            boosting: true,
+            color: 0x55_66_77_88,
+            mouse_x: 320.0,
+            mouse_y: 640.0,
+            name: Some("snapshot-pilot".into()),
+            selected_block_id,
+            selected_rotation: 2,
+            shooting: true,
+            team: TeamId(3),
+            typing: true,
+            unit: UnitRef::Unit { id: 7701 },
+            x: 900.0,
+            y: 901.0,
         }
     }
 
@@ -1242,6 +1288,102 @@ mod tests {
         assert_eq!(entity_record.sync_bytes, vec![4, 5]);
         assert!(entity_record.hidden);
         assert!(launcher.runtime.client_hidden_entity_ids.contains(&1001));
+    }
+
+    #[test]
+    fn desktop_launcher_applies_local_player_entity_snapshot_to_typed_player_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let selected_block_id = launcher
+            .content_loader
+            .block(0)
+            .expect("base content should include block 0")
+            .base()
+            .id;
+        let world_data = sample_network_world_data(Some(sample_network_player_data(
+            Some(selected_block_id),
+            None,
+        )));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+        assert_eq!(launcher.player.id, 91);
+
+        launcher.player.boosting = false;
+        launcher.player.mouse_x = 1.25;
+        launcher.player.mouse_y = -1.5;
+        launcher.player.selected_rotation = 1;
+        launcher.player.shooting = false;
+        launcher.player.typing = false;
+        launcher.player.x = 10.0;
+        launcher.player.y = 20.0;
+
+        let sync = sample_network_player_sync_data(Some(selected_block_id));
+        let mut sync_bytes = Vec::new();
+        sync.write_to(&mut sync_bytes).unwrap();
+        let mut packet_data = Vec::new();
+        packet_data.extend_from_slice(&launcher.player.id.to_be_bytes());
+        packet_data.push(12);
+        packet_data.extend_from_slice(&sync_bytes);
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state
+                .entity_snapshot_mirrors
+                .push(ClientEntitySnapshotMirror {
+                    amount: 1,
+                    data: packet_data,
+                    records: vec![ClientEntitySnapshotRecordMirror {
+                        entity_id: launcher.player.id,
+                        type_id: 12,
+                        sync_bytes: sync_bytes.clone(),
+                    }],
+                    parse_error: None,
+                });
+        }
+
+        launcher.update();
+
+        let report = launcher
+            .last_client_snapshot_apply_report
+            .expect("player entity snapshot should apply to typed player runtime");
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+
+        let raw = launcher
+            .runtime
+            .client_entity_snapshot_records
+            .get(&91)
+            .expect("player entity snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, 12);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+        assert_eq!(
+            launcher.runtime.client_player_snapshot_entities.get(&91),
+            Some(&sync)
+        );
+
+        assert!(!launcher.player.admin);
+        assert_eq!(launcher.player.color, 0x55_66_77_88);
+        assert_eq!(launcher.player.name, "snapshot-pilot");
+        assert_eq!(launcher.player.team, TeamId(3));
+        assert_eq!(launcher.player.unit_ref(), Some(UnitRef::Unit { id: 7701 }));
+
+        // Java Player.readSync consumes @SyncLocal fields for the local player
+        // but does not overwrite local input/position state with them.
+        assert!(!launcher.player.boosting);
+        assert_eq!(launcher.player.mouse_x, 1.25);
+        assert_eq!(launcher.player.mouse_y, -1.5);
+        assert_eq!(launcher.player.selected_rotation, 1);
+        assert!(!launcher.player.shooting);
+        assert!(!launcher.player.typing);
+        assert_eq!(launcher.player.x, 10.0);
+        assert_eq!(launcher.player.y, 20.0);
     }
 
     #[test]

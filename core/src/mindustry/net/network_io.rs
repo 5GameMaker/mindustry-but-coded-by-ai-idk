@@ -108,6 +108,100 @@ impl NetworkPlayerData {
     }
 }
 
+/// Parsed wire image of generated Java `mindustry.gen.Player.writeSync(...)`.
+///
+/// This is intentionally separate from [`NetworkPlayerData`]: entity snapshots
+/// call Java `Player.readSync(...)`, which does not prefix a revision and skips
+/// `@NoSync` fields such as `lastCommand`. The non-sync world-data player body
+/// still uses [`NetworkPlayerData`] and carries the revisioned serialization
+/// shape from `Player.write(...)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NetworkPlayerSyncData {
+    pub admin: bool,
+    pub boosting: bool,
+    pub color: i32,
+    pub mouse_x: f32,
+    pub mouse_y: f32,
+    pub name: Option<String>,
+    pub selected_block_id: Option<ContentId>,
+    pub selected_rotation: i32,
+    pub shooting: bool,
+    pub team: TeamId,
+    pub typing: bool,
+    pub unit: UnitRef,
+    pub x: f32,
+    pub y: f32,
+}
+
+impl NetworkPlayerSyncData {
+    pub fn read_exact_from(bytes: &[u8]) -> io::Result<Self> {
+        let mut remaining = bytes;
+        let data = Self::read_from(&mut remaining)?;
+        if remaining.is_empty() {
+            Ok(data)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("player sync payload has {} trailing bytes", remaining.len()),
+            ))
+        }
+    }
+
+    pub fn read_from<R: Read>(read: &mut R) -> io::Result<Self> {
+        let admin = read_io_bool(read)?;
+        let boosting = read_io_bool(read)?;
+        let color = read_color(read)?.rgba();
+        let mouse_x = read_io_f32(read)?;
+        let mouse_y = read_io_f32(read)?;
+        let name = read_io_string(read)?;
+        let selected_block_id = match read_io_i16(read)? {
+            raw if raw < 0 => None,
+            raw => Some(raw),
+        };
+        let selected_rotation = read_io_i32(read)?;
+        let shooting = read_io_bool(read)?;
+        let team = read_team(read)?;
+        let typing = read_io_bool(read)?;
+        let unit = read_unit_ref(read)?;
+        let x = read_io_f32(read)?;
+        let y = read_io_f32(read)?;
+
+        Ok(Self {
+            admin,
+            boosting,
+            color,
+            mouse_x,
+            mouse_y,
+            name,
+            selected_block_id,
+            selected_rotation,
+            shooting,
+            team,
+            typing,
+            unit,
+            x,
+            y,
+        })
+    }
+
+    pub fn write_to<W: Write>(&self, write: &mut W) -> io::Result<()> {
+        write_io_bool(write, self.admin)?;
+        write_io_bool(write, self.boosting)?;
+        write_color(write, RgbaColor::new(self.color))?;
+        write_io_f32(write, self.mouse_x)?;
+        write_io_f32(write, self.mouse_y)?;
+        write_io_string(write, self.name.as_deref())?;
+        write_io_i16(write, self.selected_block_id.unwrap_or(-1))?;
+        write_io_i32(write, self.selected_rotation)?;
+        write_io_bool(write, self.shooting)?;
+        write_team(write, Some(self.team))?;
+        write_io_bool(write, self.typing)?;
+        write_unit_ref(write, self.unit)?;
+        write_io_f32(write, self.x)?;
+        write_io_f32(write, self.y)
+    }
+}
+
 /// Stage-1 Rust mirror of Java `NetworkIO.writeWorld(...)`.
 ///
 /// Upstream writes this body through `DataOutputStream`, then wraps it in a
@@ -1226,6 +1320,41 @@ mod tests {
     fn write_ubjson_string_value(write: &mut Vec<u8>, value: &str) {
         write.push(b'S');
         write_ubjson_key(write, value);
+    }
+
+    #[test]
+    fn network_player_sync_data_round_trips_java_write_sync_shape() {
+        let data = NetworkPlayerSyncData {
+            admin: true,
+            boosting: true,
+            color: 0x11_22_33_44,
+            mouse_x: 12.0,
+            mouse_y: -8.0,
+            name: Some("sync-player".into()),
+            selected_block_id: Some(3),
+            selected_rotation: 2,
+            shooting: true,
+            team: TeamId(6),
+            typing: false,
+            unit: UnitRef::Unit { id: 1234 },
+            x: 50.0,
+            y: 75.0,
+        };
+
+        let mut bytes = Vec::new();
+        data.write_to(&mut bytes).unwrap();
+
+        // Sync payloads are Player.writeSync/readSync bodies, not revisioned
+        // Player.write/read bodies: no leading i16 revision and no lastCommand.
+        assert_ne!(&bytes[..2], &2i16.to_be_bytes());
+        assert_eq!(
+            NetworkPlayerSyncData::read_exact_from(&bytes).unwrap(),
+            data
+        );
+
+        let mut with_tail = bytes.clone();
+        with_tail.push(0);
+        assert!(NetworkPlayerSyncData::read_exact_from(&with_tail).is_err());
     }
 
     #[test]

@@ -31,6 +31,7 @@ use crate::mindustry::{
         type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
         LegacyShortChunkMap, TeamId,
     },
+    net::NetworkPlayerSyncData,
     r#type::PayloadSeq,
     vars::TILE_SIZE,
     world::blocks::campaign::{
@@ -2014,6 +2015,7 @@ pub struct GameRuntime {
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
+    pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
     pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
 }
@@ -2064,6 +2066,7 @@ impl GameRuntime {
             construct_runtime_states: BTreeMap::new(),
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
+            client_player_snapshot_entities: BTreeMap::new(),
             client_unit_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
         }
@@ -2395,6 +2398,14 @@ impl GameRuntime {
             report.entity_parse_errors += 1;
         }
         report
+    }
+
+    pub fn apply_client_player_snapshot_record(
+        &mut self,
+        entity_id: i32,
+        sync: NetworkPlayerSyncData,
+    ) {
+        self.client_player_snapshot_entities.insert(entity_id, sync);
     }
 
     fn apply_client_unit_sync_wire(
@@ -5245,6 +5256,7 @@ impl GameRuntime {
         self.construct_runtime_states.clear();
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
+        self.client_player_snapshot_entities.clear();
         self.client_unit_snapshot_entities.clear();
         self.client_hidden_entity_ids.clear();
     }

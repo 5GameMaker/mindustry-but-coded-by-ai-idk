@@ -9,7 +9,7 @@ use crate::mindustry::ai::unit_command::UnitCommand;
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::{CoreInfo, TEAM_SHARDED};
 use crate::mindustry::io::{TeamId, UnitRef};
-use crate::mindustry::net::{NetConnection, NetworkPlayerData};
+use crate::mindustry::net::{NetConnection, NetworkPlayerData, NetworkPlayerSyncData};
 use crate::mindustry::world::block::Block;
 
 const PREVIEW_PLAN_COMMIT_DELAY_MS: i64 = 100;
@@ -221,6 +221,32 @@ impl PlayerComp {
 
         let _ = data.selected_block_id;
         let _ = data.last_command_id;
+    }
+
+    pub fn apply_network_player_sync_data(&mut self, data: &NetworkPlayerSyncData, is_local: bool) {
+        self.admin = data.admin;
+        self.color = data.color as u32;
+        if let Some(name) = &data.name {
+            self.name = name.clone();
+        }
+        self.team = data.team;
+
+        if !is_local {
+            self.boosting = data.boosting;
+            self.mouse_x = data.mouse_x;
+            self.mouse_y = data.mouse_y;
+            self.selected_rotation = data.selected_rotation;
+            self.shooting = data.shooting;
+            self.typing = data.typing;
+            self.x = data.x;
+            self.y = data.y;
+        }
+
+        self.unit = match data.unit {
+            UnitRef::Null => None,
+            UnitRef::Block { tile_pos } => Some(PlayerUnitState::block(tile_pos)),
+            UnitRef::Unit { id } => Some(PlayerUnitState::unit(id)),
+        };
     }
 
     pub fn set_unit_state(&mut self, unit: PlayerUnitState) {

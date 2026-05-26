@@ -73,7 +73,7 @@ pub use comp::{MechComp, MechStepPlan, MechType};
 pub use comp::{MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext, MinerUpdatePlan};
 pub use comp::{PayloadComp, PayloadKind, PayloadState};
 pub use comp::{PhysicRef, PhysicsComp};
-pub use comp::{PlayerComp, PlayerUnitState};
+pub use comp::{PlayerComp, PlayerUnitState, PlayerUnitSwitchContext};
 pub use comp::{PowerGraphUpdate, PowerGraphUpdaterComp};
 pub use comp::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, PuddleUpdatePlan};
 pub use comp::{SegmentComp, SegmentRef, SegmentType};
