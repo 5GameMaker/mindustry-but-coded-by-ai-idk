@@ -26,6 +26,7 @@ use crate::mindustry::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{BuildingComp, BulletComp, UnitComp},
     },
+    game::CoreInfo,
     io::{
         type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
         LegacyShortChunkMap, TeamId,
@@ -158,6 +159,7 @@ use crate::mindustry::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
         ConstructBlockState,
     },
+    world::meta::BlockFlag,
     world::{footprint_tiles, get_edges, point2_x, point2_y, Tile, TimeItem},
 };
 
@@ -2324,6 +2326,7 @@ impl GameRuntime {
         let index = self.buildings.len();
         self.buildings.push(building);
         self.sync_world_footprint_refs(index);
+        self.register_core_building(index);
         self.refresh_owned_building_proximity();
         index
     }
@@ -2342,6 +2345,7 @@ impl GameRuntime {
         }
 
         let removed = self.buildings.remove(index);
+        self.unregister_core_building(&removed);
         self.clear_world_refs_for_building(&removed);
         self.effect_runtime_store.remove(removed.tile_pos);
         self.effect_timer_store.remove(removed.tile_pos);
@@ -2383,6 +2387,36 @@ impl GameRuntime {
         self.construct_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
+    }
+
+    fn core_info_for_building(building: &BuildingComp) -> Option<CoreInfo> {
+        building
+            .block
+            .flags
+            .contains(&BlockFlag::Core)
+            .then(|| CoreInfo::new(building.tile_pos, building.team.0, building.x, building.y))
+    }
+
+    fn register_core_building(&mut self, index: usize) -> bool {
+        let Some(core) = self
+            .buildings
+            .get(index)
+            .and_then(Self::core_info_for_building)
+        else {
+            return false;
+        };
+        self.state.teams.register_core(core);
+        true
+    }
+
+    fn unregister_core_building(&mut self, building: &BuildingComp) -> bool {
+        let Some(core) = Self::core_info_for_building(building) else {
+            return false;
+        };
+        self.state
+            .teams
+            .unregister_core(core.team, core.id)
+            .is_some()
     }
 
     fn split_linked_storage_items_after_core_removed(&mut self, removed: &BuildingComp) -> usize {
@@ -2877,6 +2911,10 @@ impl GameRuntime {
     }
 
     pub fn clear_buildings(&mut self) {
+        let removed = std::mem::take(&mut self.buildings);
+        for building in &removed {
+            self.unregister_core_building(building);
+        }
         self.buildings.clear();
         self.state.world.clear_buildings();
         self.reset_effect_block_sidecars();
@@ -2887,8 +2925,7 @@ impl GameRuntime {
         content: &ContentLoader,
         map: &LegacyShortChunkMap,
     ) -> GameRuntimeMapLoadReport {
-        self.buildings.clear();
-        self.reset_effect_block_sidecars();
+        self.clear_buildings();
         self.state.world.load_network_map(map);
 
         let mut report = GameRuntimeMapLoadReport {
@@ -12897,6 +12934,45 @@ mod tests {
         assert!(runtime.state.world.build_pos(tile_pos).is_none());
         assert!(runtime.effect_runtime_store.is_empty());
         assert!(runtime.effect_timer_store.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_core_building_lifecycle_updates_team_registry() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let team = TeamId(6);
+        let tile_pos = point2_pack(8, 8);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(tile_pos, core_def.base().clone(), team));
+
+        let cores = runtime.state.teams.cores(team.0).to_vec();
+        assert_eq!(cores.len(), 1);
+        assert_eq!(
+            cores[0],
+            CoreInfo::new(
+                tile_pos,
+                team.0,
+                TILE_SIZE as f32 * 8.0,
+                TILE_SIZE as f32 * 8.0
+            )
+        );
+        assert_eq!(
+            runtime
+                .state
+                .teams
+                .closest_core(team.0, TILE_SIZE as f32 * 9.0, TILE_SIZE as f32 * 8.0)
+                .map(|core| core.id),
+            Some(tile_pos)
+        );
+
+        runtime.remove_building_by_tile_pos(tile_pos).unwrap();
+        assert!(runtime.state.teams.cores(team.0).is_empty());
+
+        runtime.add_building(BuildingComp::new(tile_pos, core_def.base().clone(), team));
+        runtime.clear_buildings();
+        assert!(runtime.state.teams.cores(team.0).is_empty());
     }
 
     #[test]
