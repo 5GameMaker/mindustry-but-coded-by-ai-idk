@@ -2017,6 +2017,29 @@ pub struct GameRuntimePowerNodeBatchLinkReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePowerNodeConfigResult {
+    Link(GameRuntimePowerNodeLinkResult),
+    Batch(GameRuntimePowerNodeBatchLinkReport),
+    MissingSource,
+    NotPowerNode,
+    UnsupportedValue,
+}
+
+impl GameRuntimePowerNodeConfigResult {
+    pub fn changed(self) -> bool {
+        match self {
+            Self::Link(
+                GameRuntimePowerNodeLinkResult::Linked | GameRuntimePowerNodeLinkResult::Unlinked,
+            ) => true,
+            Self::Batch(report) => report.linked > 0 || report.cleared > 0,
+            Self::Link(_) | Self::MissingSource | Self::NotPowerNode | Self::UnsupportedValue => {
+                false
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameRuntimePlacedBuildingReport {
     pub index: usize,
     pub power_node_links: usize,
@@ -4378,6 +4401,48 @@ impl GameRuntime {
         }
 
         report
+    }
+
+    pub fn configure_owned_power_node_value(
+        &mut self,
+        content: &ContentLoader,
+        source_tile_pos: i32,
+        value: &type_io::TypeValue,
+    ) -> GameRuntimePowerNodeConfigResult {
+        match value {
+            type_io::TypeValue::Int(target_tile_pos) => {
+                match self.configure_owned_power_node_link(
+                    content,
+                    source_tile_pos,
+                    *target_tile_pos,
+                ) {
+                    GameRuntimePowerNodeLinkResult::MissingSource => {
+                        GameRuntimePowerNodeConfigResult::MissingSource
+                    }
+                    GameRuntimePowerNodeLinkResult::NotPowerNode => {
+                        GameRuntimePowerNodeConfigResult::NotPowerNode
+                    }
+                    result => GameRuntimePowerNodeConfigResult::Link(result),
+                }
+            }
+            type_io::TypeValue::Point2Array(points) => {
+                let relative_links: Vec<(i32, i32)> =
+                    points.iter().map(|point| (point.x, point.y)).collect();
+                let report = self.configure_owned_power_node_relative_links(
+                    content,
+                    source_tile_pos,
+                    &relative_links,
+                );
+                if report.missing_source {
+                    GameRuntimePowerNodeConfigResult::MissingSource
+                } else if report.not_power_node {
+                    GameRuntimePowerNodeConfigResult::NotPowerNode
+                } else {
+                    GameRuntimePowerNodeConfigResult::Batch(report)
+                }
+            }
+            _ => GameRuntimePowerNodeConfigResult::UnsupportedValue,
+        }
     }
 
     pub fn configure_tapped_owned_power_node(
@@ -18148,6 +18213,62 @@ mod tests {
                 .unwrap()
                 .links,
             vec![source_pos]
+        );
+    }
+
+    #[test]
+    fn game_runtime_power_node_config_value_accepts_java_integer_and_point_array() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let source_pos = point2_pack(10, 10);
+        let int_target_pos = point2_pack(14, 10);
+        let array_target_pos = point2_pack(10, 15);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        for pos in [source_pos, int_target_pos, array_target_pos] {
+            runtime.add_building(BuildingComp::new(pos, node_def.base().clone(), TeamId(1)));
+        }
+
+        let int_result = runtime.configure_owned_power_node_value(
+            &content,
+            source_pos,
+            &type_io::TypeValue::Int(int_target_pos),
+        );
+        assert_eq!(
+            int_result,
+            GameRuntimePowerNodeConfigResult::Link(GameRuntimePowerNodeLinkResult::Linked)
+        );
+        assert!(int_result.changed());
+
+        let array_result = runtime.configure_owned_power_node_value(
+            &content,
+            source_pos,
+            &type_io::TypeValue::Point2Array(vec![type_io::Point2::new(0, 5)]),
+        );
+        assert_eq!(
+            array_result,
+            GameRuntimePowerNodeConfigResult::Batch(GameRuntimePowerNodeBatchLinkReport {
+                cleared: 1,
+                linked: 1,
+                ..GameRuntimePowerNodeBatchLinkReport::default()
+            })
+        );
+        assert!(array_result.changed());
+
+        let source = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == source_pos)
+            .unwrap();
+        assert_eq!(source.power.as_ref().unwrap().links, vec![array_target_pos]);
+        assert_eq!(
+            runtime.configure_owned_power_node_value(
+                &content,
+                source_pos,
+                &type_io::TypeValue::Null
+            ),
+            GameRuntimePowerNodeConfigResult::UnsupportedValue
         );
     }
 

@@ -2961,3 +2961,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core preview_overlay_plan_clears_local_or_enemy_preview_plans_like_java_draw_other_build_plans`
   - `cargo test -p mindustry-core input_handler`
 - 仍未完成：当前切片只生成 overlay plan，不执行真实 renderer 绘制；后续需要让 desktop/input 持有远端 `PlayerComp` 列表并由 content registry 驱动 `block_lookup`，再把 overlay entries 接入真实预览/hover UI。
+
+### 12.74 PowerNode TileConfig 网络入口接入 server runtime
+
+- 2026-05-27：把 Java `PowerNode` 的 `config(Integer.class)` / `config(Point2[].class)` 语义从纯 runtime helper 推进到 Rust server 网络事件消费链路，让客户端发来的 `TileConfigCallPacket` 能驱动服务端 owned `PowerModule.links`。
+- Java 依据：
+  - `PowerNodeBuild.onConfigureBuildTapped(...)` 对有效目标调用 `configure(other.pos())`，最终经 `TileConfigCallPacket` 发送绝对 packed tile pos；
+  - 双击自身时，空链接会生成 `Point2[]` 相对链接数组，已有链接则发送空 `Point2[]` 清空；
+  - `PowerNode` 的 `Integer` 配置负责 toggle 单条 link，`Point2[]` 配置负责先清旧链接再按相对坐标重建。
+- Rust 新增/变化：
+  - `GameRuntimePowerNodeConfigResult` 描述 `Int` 单 link、`Point2Array` 批量重建、缺失/非 PowerNode/不支持值等结果；
+  - `GameRuntime::configure_owned_power_node_value(...)` 将 `TypeValue::Int` 映射到 `configure_owned_power_node_link(...)`，将 `TypeValue::Point2Array` 映射到 `configure_owned_power_node_relative_links(...)`；
+  - `ServerLauncher::update()` 现在会消费新增 `NetServerState.events` 中的 `TileConfigCallPacket`，并把 PowerNode 配置应用到真实 server `GameRuntime`；
+  - `ServerLauncher` 保留最近一次 PowerNode config 结果与 seen/changed 计数，便于后续联机 smoke 与调试。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_power_node_config_value_accepts_java_integer_and_point_array`
+  - `cargo test -p mindustry-server server_update_applies_power_node_tile_config_packets_to_runtime`
+- 仍未完成：这里只接入了 `TileConfigCallPacket` 对 PowerNode link 的服务端状态变更；后续还需要把变更广播/rollback、desktop 侧配置 UI、以及 `TileTapCallPacket` 的通用 TapEvent/插件事件语义继续对照 Java。

@@ -1,5 +1,6 @@
 pub mod server_control;
 
+use mindustry_core::mindustry::core::game_runtime::GameRuntimePowerNodeConfigResult;
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext,
     GameRuntimeOwnedEffectResources, GameRuntimeOwnedFrameReport,
@@ -12,7 +13,8 @@ use mindustry_core::mindustry::entities::{
 };
 use mindustry_core::mindustry::io::ContentPatchSet;
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, Net, NetworkPlayerData, NetworkWorldData,
+    write_world_data, ArcNetProvider, Net, NetworkPlayerData, NetworkWorldData, PacketKind,
+    ProviderEvent,
 };
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
@@ -30,6 +32,10 @@ pub struct ServerLauncher {
     pub last_runtime_effect_report: Option<EffectBlockFrameBatchReport>,
     pub last_runtime_item_transport_report: Option<GameRuntimeOwnedItemTransportFrameReport>,
     pub last_runtime_payload_report: Option<GameRuntimeOwnedPayloadFrameReport>,
+    pub last_runtime_power_node_config_result: Option<GameRuntimePowerNodeConfigResult>,
+    pub runtime_power_node_config_packets_seen: usize,
+    pub runtime_power_node_config_packets_changed: usize,
+    pub next_network_event_index: usize,
     pub net_server: NetServer,
     pub network_error: Option<String>,
 }
@@ -52,6 +58,10 @@ impl ServerLauncher {
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
             args,
@@ -86,6 +96,7 @@ impl ServerLauncher {
 
     pub fn update(&mut self) {
         self.net_server.update();
+        self.apply_new_network_server_events();
         let _ = self.flush_pending_world_data();
         if let Some(report) = self.update_runtime_owned_blocks(1.0 / 60.0) {
             self.last_runtime_item_transport_report = Some(report.item_transport);
@@ -106,6 +117,42 @@ impl ServerLauncher {
             world_data.player = Some(NetworkPlayerData::bootstrap());
             write_world_data(&world_data).expect("runtime world data payload should be encodable")
         })
+    }
+
+    pub fn apply_new_network_server_events(&mut self) -> usize {
+        let events = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            let start = self.next_network_event_index.min(state.events.len());
+            let events = state.events[start..].to_vec();
+            self.next_network_event_index = state.events.len();
+            events
+        };
+
+        let mut changed = 0;
+        for event in events {
+            if let ProviderEvent::ServerPacket {
+                packet: PacketKind::TileConfigCallPacket(packet),
+                ..
+            } = event
+            {
+                let Some(source_tile_pos) = packet.build.tile_pos else {
+                    continue;
+                };
+                let result = self.runtime.configure_owned_power_node_value(
+                    &self.content_loader,
+                    source_tile_pos,
+                    &packet.value,
+                );
+                self.runtime_power_node_config_packets_seen += 1;
+                if result.changed() {
+                    changed += 1;
+                    self.runtime_power_node_config_packets_changed += 1;
+                }
+                self.last_runtime_power_node_config_result = Some(result);
+            }
+        }
+        changed
     }
 
     pub fn network_world_data_template(&mut self) -> NetworkWorldData {
@@ -231,7 +278,10 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 mod tests {
     use super::ServerLauncher;
     use mindustry_core::mindustry::content::blocks::BlockDef;
-    use mindustry_core::mindustry::core::game_runtime::GameRuntimePayloadBlockState;
+    use mindustry_core::mindustry::core::game_runtime::{
+        GameRuntimePayloadBlockState, GameRuntimePowerNodeBatchLinkReport,
+        GameRuntimePowerNodeConfigResult, GameRuntimePowerNodeLinkResult,
+    };
     use mindustry_core::mindustry::core::{
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
         NetServer,
@@ -239,11 +289,11 @@ mod tests {
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::entities::comp::BuildingComp;
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
-    use mindustry_core::mindustry::io::{TeamId, TypeValue};
+    use mindustry_core::mindustry::io::{BuildingRef, Point2, TeamId, TypeValue};
     use mindustry_core::mindustry::net::{
         packet_ids, read_world_data, Connect, ConnectFilter, ConnectPacket, DoneCallback, Host,
         HostCallback, Net, NetConnection, NetProvider, NetworkWorldData, PacketKind,
-        PacketSerializer, ProviderEvent,
+        PacketSerializer, ProviderEvent, TileConfigCallPacket,
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
@@ -464,6 +514,10 @@ mod tests {
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -526,6 +580,10 @@ mod tests {
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -580,6 +638,83 @@ mod tests {
     }
 
     #[test]
+    fn server_update_applies_power_node_tile_config_packets_to_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let node_def = launcher
+            .content_loader
+            .block_by_name("power-node")
+            .expect("base content should include power-node")
+            .base()
+            .clone();
+        let source_pos = point2_pack(10, 10);
+        let int_target_pos = point2_pack(14, 10);
+        let array_target_pos = point2_pack(10, 15);
+
+        launcher.runtime.state.world.resize(32, 32);
+        for pos in [source_pos, int_target_pos, array_target_pos] {
+            launcher
+                .runtime
+                .add_building(BuildingComp::new(pos, node_def.clone(), TeamId(1)));
+        }
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(91),
+                true,
+                PacketKind::TileConfigCallPacket(TileConfigCallPacket::client(
+                    BuildingRef::new(source_pos),
+                    TypeValue::Int(int_target_pos),
+                )),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        assert_eq!(
+            launcher.last_runtime_power_node_config_result,
+            Some(GameRuntimePowerNodeConfigResult::Link(
+                GameRuntimePowerNodeLinkResult::Linked
+            ))
+        );
+        assert_eq!(launcher.runtime_power_node_config_packets_seen, 1);
+        assert_eq!(launcher.runtime_power_node_config_packets_changed, 1);
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(91),
+                true,
+                PacketKind::TileConfigCallPacket(TileConfigCallPacket::client(
+                    BuildingRef::new(source_pos),
+                    TypeValue::Point2Array(vec![Point2::new(0, 5)]),
+                )),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        assert_eq!(
+            launcher.last_runtime_power_node_config_result,
+            Some(GameRuntimePowerNodeConfigResult::Batch(
+                GameRuntimePowerNodeBatchLinkReport {
+                    cleared: 1,
+                    linked: 1,
+                    ..GameRuntimePowerNodeBatchLinkReport::default()
+                }
+            ))
+        );
+        assert_eq!(launcher.runtime_power_node_config_packets_seen, 2);
+        assert_eq!(launcher.runtime_power_node_config_packets_changed, 2);
+
+        let source = launcher
+            .runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == source_pos)
+            .unwrap();
+        assert_eq!(source.power.as_ref().unwrap().links, vec![array_target_pos]);
+    }
+
+    #[test]
     fn server_world_data_exports_owned_building_chunks_for_runtime_loader() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
@@ -594,6 +729,10 @@ mod tests {
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -678,6 +817,10 @@ mod tests {
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -781,6 +924,10 @@ mod tests {
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
