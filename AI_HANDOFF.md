@@ -1448,3 +1448,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 扩展真实联机 `BlockSnapshotCallPacket` smoke 到 payload-router 或 payload-mass-driver，验证 server→desktop 真实链路 materialize 到 `payload_runtime_states`。
   2. 继续推进 turret `readSync` 特例与 entity snapshot typed materialize；不要把 payload state 留成孤立 helper。
+
+---
+
+## 40. 最新闭环记录：真实联机 PayloadRouter BlockSnapshot child tail smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 payload BlockSnapshot 回放从 core 单测推进到真实 server→desktop 联机链路，证明 payload-router child tail 能通过 `BlockSnapshotCallPacket` 更新客户端 runtime。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_payload_block_snapshot_updates_runtime_after_world_stream`
+  - 服务端 world stream 先 materialize `payload-router` building；
+  - 服务端随后发送 `BlockSnapshotCallPacket`，payload 为 `BuildingComp::write_base(...) + write_payload_conveyor_extra(...) + write_payload_router_extra(...)`；
+  - desktop 端等待 `NetClient.last_block_snapshot` 与 `runtime.payload_runtime_states[payload_router_tile]` 同时更新。
+- 断言覆盖：
+  - `NetClient.last_block_snapshot_mirror.records[0]` 的 `tile_pos/block_id/sync_bytes`；
+  - `GameRuntime.client_block_snapshot_records` 保留 raw bytes；
+  - payload-router building 的 health/rotation 被 `read_base` 更新；
+  - `GameRuntimePayloadBlockState::Router` 恢复 `item_rotation/sorted/rec_dir/matches`；
+  - `network_context == GameRuntimeNetworkContext::client()`。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 扩展真实 payload snapshot smoke 到 `PayloadMassDriver`，因为它有 revision 1 tail 与更多字段。
+  2. 再扩展 `PayloadLoader/Source/Deconstructor/Constructor/Void`，逐步覆盖所有 payload family。
+  3. 继续推进 turret `readSync` override 与 entity snapshot typed runtime，不要停留在 raw sidecar。

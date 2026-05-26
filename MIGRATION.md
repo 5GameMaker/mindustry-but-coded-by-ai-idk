@@ -1876,7 +1876,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `cargo check -p mindustry-core`
-- 仍未完成：payload BlockSnapshot 目前是 core 单测覆盖，真实联机 smoke 还未扩展到 payload；UnitPayload 完整实体恢复仍需后续继续。
+- 仍未完成：payload BlockSnapshot 的真实联机 smoke 已覆盖 `PayloadRouter`，但还需继续扩展到 `PayloadMassDriver/Loader/Source/Deconstructor/Constructor/Void`；UnitPayload 完整实体恢复仍需后续继续。
+
+### 12.26 真实联机 PayloadRouter BlockSnapshot child tail smoke
+
+- 2026-05-26：新增 `real_server_desktop_payload_block_snapshot_updates_runtime_after_world_stream`，在真实 `ServerLauncher -> ArcNetProvider -> DesktopLauncher/NetClient -> GameRuntime` 链路中先通过 world stream materialize 一个 `payload-router` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_payload_conveyor_extra(...) + write_payload_router_extra(...)` 的 `BlockSnapshotCallPacket`。
+- 测试断言：
+  - `NetClient.last_block_snapshot_mirror` 正确解析 Java-like `tile_pos/block_id/sync_bytes`；
+  - `desktop.runtime.client_block_snapshot_records` 保留完整 payload-router sync bytes；
+  - `desktop.runtime.buildings()` 中 payload-router 的 health/rotation 被 `read_base` 更新；
+  - `desktop.runtime.payload_runtime_states` 中生成 `GameRuntimePayloadBlockState::Router`，并恢复 `itemRotation/sorted/recDir/matches`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：真实联机 payload snapshot 目前只覆盖 `PayloadRouter`；还需补 `PayloadMassDriver/Loader/Source/Deconstructor/Constructor/Void` 的真实 snapshot smoke，并继续推进 entity snapshot typed materialize。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

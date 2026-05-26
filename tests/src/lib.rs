@@ -865,3 +865,207 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
     desktop.net_client.net_mut().disconnect();
     server.close_network();
 }
+
+#[test]
+fn real_server_desktop_payload_block_snapshot_updates_runtime_after_world_stream() {
+    use mindustry_core::mindustry::core::{
+        game_runtime::GameRuntimePayloadBlockState, GameRuntimeNetworkContext,
+    };
+    use mindustry_core::mindustry::ctype::ContentType;
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
+    use mindustry_core::mindustry::net::BlockSnapshotCallPacket;
+    use mindustry_core::mindustry::world::blocks::payloads::{
+        write_payload_conveyor_extra, write_payload_router_extra, PayloadConveyorState,
+        PayloadSortKey,
+    };
+    use mindustry_core::mindustry::world::point2_pack;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(10, 10);
+    let payload_router_base = server
+        .content_loader
+        .block_by_name("payload-router")
+        .expect("base content should include payload-router")
+        .base()
+        .clone();
+    let router_id = server
+        .content_loader
+        .block_by_name("router")
+        .expect("base content should include router")
+        .base()
+        .id;
+    let payload_router_tile = point2_pack(3, 3);
+    let payload_router_id = payload_router_base.id;
+    server.runtime.add_building(BuildingComp::new(
+        payload_router_tile,
+        payload_router_base.clone(),
+        TeamId(6),
+    ));
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+            && desktop
+                .runtime
+                .buildings()
+                .iter()
+                .any(|building| building.tile_pos == payload_router_tile)
+    });
+
+    let connection_id = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        state
+            .last_connect_confirm_connection_id
+            .expect("server should receive connect confirm before payload block snapshot")
+    };
+    let mut synced_router = BuildingComp::new(payload_router_tile, payload_router_base, TeamId(6));
+    synced_router.health = 23.0;
+    synced_router.set_rotation(2);
+    let conveyor_state = PayloadConveyorState {
+        item: None,
+        item_rotation: 90.0,
+        ..PayloadConveyorState::default()
+    };
+    let sorted_router = Some(PayloadSortKey {
+        content_type: ContentType::Block.ordinal() as i8,
+        id: router_id,
+    });
+    let rec_dir = 1;
+    let mut block_sync_bytes = Vec::new();
+    synced_router
+        .write_base(&mut block_sync_bytes, false)
+        .unwrap();
+    write_payload_conveyor_extra(
+        &mut block_sync_bytes,
+        6.0,
+        conveyor_state.item_rotation,
+        conveyor_state.item.as_ref(),
+    )
+    .unwrap();
+    write_payload_router_extra(&mut block_sync_bytes, sorted_router, rec_dir).unwrap();
+    let snapshot = BlockSnapshotCallPacket {
+        amount: 1,
+        data: {
+            let mut data = Vec::new();
+            data.extend_from_slice(&payload_router_tile.to_be_bytes());
+            data.extend_from_slice(&payload_router_id.to_be_bytes());
+            data.extend_from_slice(&block_sync_bytes);
+            data
+        },
+    };
+    server
+        .net_server
+        .send_block_snapshot(connection_id, snapshot.clone())
+        .expect("real server should send payload block snapshot");
+
+    let mut applied = false;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        desktop.update();
+        server.update();
+        let received = {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            last_client_status = format!(
+                "block_snapshots={} last_block={:?} last_server_snapshot={:?} provider_events={:?}",
+                state.block_snapshot_packets_seen,
+                state.last_block_snapshot,
+                state.last_server_snapshot_at,
+                state.last_provider_events,
+            );
+            state.last_block_snapshot.as_ref() == Some(&snapshot)
+        };
+        let materialized = matches!(
+            desktop.runtime.payload_runtime_states.get(&payload_router_tile),
+            Some(GameRuntimePayloadBlockState::Router {
+                conveyor,
+                sorted,
+                rec_dir: applied_rec_dir,
+                matches,
+                ..
+            }) if conveyor.item_rotation == conveyor_state.item_rotation
+                && *sorted == sorted_router
+                && *applied_rec_dir == rec_dir
+                && !*matches
+        );
+        applied = received && materialized;
+        if applied {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        applied,
+        "desktop should receive and apply real payload block snapshot after world stream; client: {last_client_status}"
+    );
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.block_snapshot_packets_seen, 1);
+        assert_eq!(state.last_block_snapshot.as_ref(), Some(&snapshot));
+        let mirror = state
+            .last_block_snapshot_mirror
+            .as_ref()
+            .expect("payload block snapshot should materialize into lightweight mirror");
+        assert_eq!(mirror.records.len(), 1);
+        assert_eq!(mirror.records[0].tile_pos, payload_router_tile);
+        assert_eq!(mirror.records[0].block_id, payload_router_id);
+        assert_eq!(mirror.records[0].sync_bytes, block_sync_bytes);
+        assert!(mirror.parse_error.is_none());
+    }
+    let runtime_record = desktop
+        .runtime
+        .client_block_snapshot_records
+        .get(&payload_router_tile)
+        .expect("real payload block snapshot should apply to client runtime sidecar");
+    assert_eq!(runtime_record.block_id, payload_router_id);
+    assert_eq!(runtime_record.sync_bytes, block_sync_bytes);
+    let runtime_building = desktop
+        .runtime
+        .buildings()
+        .iter()
+        .find(|building| building.tile_pos == payload_router_tile)
+        .expect("payload-router building should remain materialized");
+    assert_eq!(runtime_building.health, 23.0);
+    assert_eq!(runtime_building.rotation, 2);
+    let Some(GameRuntimePayloadBlockState::Router {
+        conveyor,
+        sorted,
+        rec_dir: applied_rec_dir,
+        matches,
+        ..
+    }) = desktop
+        .runtime
+        .payload_runtime_states
+        .get(&payload_router_tile)
+    else {
+        panic!("real block snapshot should apply payload-router child state to runtime");
+    };
+    assert_eq!(conveyor.item_rotation, conveyor_state.item_rotation);
+    assert_eq!(*sorted, sorted_router);
+    assert_eq!(*applied_rec_dir, rec_dir);
+    assert!(!matches);
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}
