@@ -508,9 +508,10 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
 #[test]
 fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
-    use mindustry_core::mindustry::io::{type_io, TeamId, Vec2 as IoVec2};
+    use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
-        EntitySnapshotCallPacket, HiddenSnapshotCallPacket, StateSnapshotCallPacket,
+        EntitySnapshotCallPacket, HiddenSnapshotCallPacket, NetworkPlayerSyncData,
+        StateSnapshotCallPacket,
     };
     use mindustry_core::mindustry::r#type::ItemStack;
     use mindustry_server::ServerLauncher;
@@ -663,6 +664,24 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         x: 80.0,
         y: 88.0,
     };
+    let player_sync = NetworkPlayerSyncData {
+        admin: true,
+        boosting: true,
+        color: 0x33_44_55_66,
+        mouse_x: 700.0,
+        mouse_y: 701.0,
+        name: Some("real-snapshot-player".into()),
+        selected_block_id: None,
+        selected_rotation: 1,
+        shooting: true,
+        team: TeamId(6),
+        typing: true,
+        unit: UnitRef::Unit { id: 1004 },
+        x: 123.0,
+        y: 456.0,
+    };
+    let mut player_bytes = Vec::new();
+    player_sync.write_to(&mut player_bytes).unwrap();
     let mut multi_first_bytes = Vec::new();
     type_io::write_unit_sync(
         &mut multi_first_bytes,
@@ -678,6 +697,9 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     )
     .unwrap();
     let mut multi_entity_data = Vec::new();
+    multi_entity_data.extend_from_slice(&connection_id.to_be_bytes());
+    multi_entity_data.push(12);
+    multi_entity_data.extend_from_slice(&player_bytes);
     multi_entity_data.extend_from_slice(&1004i32.to_be_bytes());
     multi_entity_data.push(2);
     multi_entity_data.extend_from_slice(&multi_first_bytes);
@@ -685,7 +707,7 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.push(2);
     multi_entity_data.extend_from_slice(&multi_second_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 2,
+        amount: 3,
         data: multi_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
@@ -732,6 +754,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .runtime
                 .client_unit_snapshot_entities
                 .contains_key(&1005)
+            && desktop
+                .runtime
+                .client_player_snapshot_entities
+                .contains_key(&connection_id)
         {
             break;
         }
@@ -840,6 +866,26 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     assert_eq!(multi_second.y(), 88.0);
     assert_eq!(multi_second.rotation(), 135.0);
     assert!(multi_second.weapons.is_shooting);
+    assert_eq!(
+        desktop
+            .runtime
+            .client_player_snapshot_entities
+            .get(&connection_id),
+        Some(&player_sync)
+    );
+    assert_eq!(desktop.player.name, "real-snapshot-player");
+    assert!(desktop.player.admin);
+    assert_eq!(desktop.player.color, 0x33_44_55_66);
+    assert_eq!(desktop.player.team, TeamId(6));
+    assert_eq!(desktop.player.unit_ref(), Some(UnitRef::Unit { id: 1004 }));
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&connection_id)
+            .map(|record| (record.type_id, record.sync_bytes.as_slice())),
+        Some((12, player_bytes.as_slice()))
+    );
     assert_eq!(
         desktop
             .runtime

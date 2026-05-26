@@ -2141,6 +2141,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：该路径仍是 `PlayerComp` 特判 + “其他先尝试 UnitSyncWire”的过渡方案；后续要迁移 Java `EntityMapping` class-id registry，用 `type_id` 分发所有已迁移 `Syncc`，避免靠 parse-shape 猜测。
 
+### 12.41 真实联机 PlayerComp + UnitComp 混合 EntitySnapshot smoke
+
+- 2026-05-26：扩展真实 `ServerLauncher -> DesktopLauncher` entity snapshot smoke，不再只验证 UnitSyncWire。
+- 测试 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 现在让服务端发送一个 `amount=3` 的变长 entity snapshot packet：
+  - `connection_id + type_id 12 + NetworkPlayerSyncData`；
+  - `1004 + type_id 2 + UnitSyncWire(dagger)`；
+  - `1005 + type_id 2 + UnitSyncWire(flare)`。
+- Rust 断言：
+  - `NetClient` 仍把该多 record 变长 packet 记录为 mirror parse_error；
+  - `DesktopLauncher` mixed fallback 能从真实 packet data 中拆出本地 player 与两个 unit；
+  - `runtime.client_player_snapshot_entities[connection_id]` 保留 typed player snapshot；
+  - `desktop.player` 更新 `name/admin/color/team/unit_ref`；
+  - `runtime.client_unit_snapshot_entities[1004/1005]` 仍 materialize typed units；
+  - raw `client_entity_snapshot_records` 同时保留 player 与 unit sync bytes。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：真实 smoke 仍只覆盖本地 player 与两种 vanilla unit；完整 Java `EntityMapping`、远端玩家实体组、其他 `Syncc` 仍待迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

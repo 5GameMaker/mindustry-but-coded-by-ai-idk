@@ -1893,6 +1893,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-desktop --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
-  1. 做真实 server→desktop 的 local player entity snapshot smoke。
+  1. 继续扩展真实 server→desktop snapshot smoke 到其他 `Syncc`。
   2. 迁移 Java generated `EntityMapping` class-id registry，取代当前“本地 player 特判 + unit parse-shape 猜测”。
   3. 继续补其他 `Syncc` typed snapshot（Bullet/Fire/Weather/Effect 等按 Java entity mapping 优先级推进）。
+
+---
+
+## 55. 最新闭环记录：真实联机 PlayerComp + UnitComp 混合 EntitySnapshot smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：验证 `NetworkPlayerSyncData` 与 mixed fallback 不只是手工构造 mirror，可通过真实 `ServerLauncher -> DesktopLauncher` packet 链路落地。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为/覆盖变化：
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 的第三个 entity snapshot packet 改成 `amount=3`：
+    - 本地 `connection_id` 的 `PlayerComp` sync body；
+    - `1004` 的 dagger `UnitSyncWire`；
+    - `1005` 的 flare `UnitSyncWire`；
+  - 该 packet 在 `NetClient` mirror 层仍是 parse_error，但 desktop mixed fallback 会拆包并落到 runtime/player；
+  - 测试断言 `desktop.player` 的 `name/admin/color/team/unit_ref`、`runtime.client_player_snapshot_entities`、两个 typed unit、raw sidecar 都正确。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 迁移 `annotations/src/main/resources/classids.properties` 到 Rust，建立最小 `EntityClassId` registry。
+  2. 用 class-id registry 替换 `DesktopLauncher` mixed fallback 里的 player-id 特判与 unit parse-shape 猜测。
+  3. 按 class-id 优先级继续迁移 Bullet/Fire/Weather/Effect 等 `Syncc` snapshot。
