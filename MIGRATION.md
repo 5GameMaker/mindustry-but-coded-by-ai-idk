@@ -2893,3 +2893,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_loads_core_storage_state_from_network_map_building_payload`
   - `cargo test -p mindustry-core storage`
 - 仍未完成：多 core + linked storage 的 Java `onProximityUpdate()` 容量广播与 campaign delta 已有局部覆盖，后续仍需扩展到真实 world load/placement/removal 全链路 smoke。
+
+### 12.70 BeamNode 生命周期重建接入
+
+- 2026-05-27：把 BeamNode 派生方向链接从“仅 power graph tick 时刷新”推进到放置/地图载入生命周期，避免新放置或网络地图读入后必须等下一帧才形成 `PowerModule.links`。
+- Java 依据：
+  - `BeamNodeBuild.updateTile()` 在 `lastChange != world.tileChanges` 时调用 `updateDirections()`；
+  - `updateDirections()` 派生 `links[]/dests[]`，不写入 block 自身序列化；
+  - `Block.drawPotentialLinks(...)` 会用 `BeamNode.getNodeLinks(...)` 做放置预览，说明 BeamNode 链路是运行时/渲染可见的派生状态。
+- Rust 新增/变化：
+  - `GameRuntimePlacedBuildingReport` 新增 `beam_node_links`；
+  - `GameRuntimeMapLoadReport` 新增 `beam_node_links`；
+  - `add_placed_building(...)` 在 PowerNode placed hooks 之后调用 `refresh_owned_beam_node_links(...)`；
+  - `load_network_map_with_buildings(...)` 在 proximity 刷新后、最终 power graph/storage 刷新前重建 BeamNode links。
+- 测试：
+  - `game_runtime_add_placed_building_refreshes_beam_node_links_like_java_update_directions`
+  - `game_runtime_load_network_map_rebuilds_beam_node_links_before_first_frame`
+- 仍未完成：BeamNode `drawPlace/getNodeLinks` 的纯预览 API、真实绘制层消费 `beam_node_links`、以及 `world.tileChanges` dirty-bit 跳过重复刷新仍待继续迁移。

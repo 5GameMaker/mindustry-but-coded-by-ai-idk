@@ -1209,6 +1209,7 @@ pub struct GameRuntimeMapLoadReport {
     pub block_state_bytes_ignored: usize,
     pub disabled_buildings: usize,
     pub proximity_links: usize,
+    pub beam_node_links: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2019,6 +2020,7 @@ pub struct GameRuntimePlacedBuildingReport {
     pub index: usize,
     pub power_node_links: usize,
     pub power_building_links: usize,
+    pub beam_node_links: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3618,10 +3620,12 @@ impl GameRuntime {
         let index = self.add_building(building);
         let power_node_links = self.placed_owned_power_node(content, tile_pos, client);
         let power_building_links = self.placed_owned_power_building(content, tile_pos, client);
+        let beam_node_links = self.refresh_owned_beam_node_links(content);
         GameRuntimePlacedBuildingReport {
             index,
             power_node_links,
             power_building_links,
+            beam_node_links,
         }
     }
 
@@ -5730,6 +5734,7 @@ impl GameRuntime {
 
         report.disabled_buildings = self.refresh_owned_building_update_permissions(content);
         report.proximity_links = self.refresh_owned_building_proximity();
+        report.beam_node_links = self.refresh_owned_beam_node_links(content);
         self.refresh_owned_power_graphs_with_content(content);
         self.refresh_owned_storage_core_links(content);
         self.state.world.clear_load_events();
@@ -18260,6 +18265,7 @@ mod tests {
                 index: 1,
                 power_node_links: 0,
                 power_building_links: 1,
+                beam_node_links: 0,
             }
         );
         assert_eq!(
@@ -18273,6 +18279,110 @@ mod tests {
                 .unwrap()
                 .links,
             vec![mender_pos]
+        );
+    }
+
+    #[test]
+    fn game_runtime_add_placed_building_refreshes_beam_node_links_like_java_update_directions() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let beam_def = content.block_by_name("beam-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let beam_pos = point2_pack(10, 10);
+        let mender_pos = point2_pack(15, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            beam_pos,
+            beam_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.add_placed_building(
+                &content,
+                BuildingComp::new(mender_pos, mender_def.base().clone(), TeamId(1)),
+                false,
+            ),
+            GameRuntimePlacedBuildingReport {
+                index: 1,
+                power_node_links: 0,
+                power_building_links: 0,
+                beam_node_links: 1,
+            }
+        );
+        assert_eq!(
+            runtime.beam_node_links.get(&beam_pos),
+            Some(&[Some(mender_pos), None, None, None])
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == beam_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![mender_pos]
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == mender_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![beam_pos]
+        );
+    }
+
+    #[test]
+    fn game_runtime_load_network_map_rebuilds_beam_node_links_before_first_frame() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let beam_def = content.block_by_name("beam-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let beam_pos = point2_pack(10, 10);
+        let mender_pos = point2_pack(15, 10);
+
+        let mut saved = GameRuntime::default();
+        saved.state.world.resize(32, 32);
+        saved.add_building(BuildingComp::new(
+            beam_pos,
+            beam_def.base().clone(),
+            TeamId(1),
+        ));
+        saved.add_building(BuildingComp::new(
+            mender_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+        let map = saved.export_network_map_snapshot(&content);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(&content, &map);
+
+        assert_eq!(report.buildings_added, 2);
+        assert_eq!(report.beam_node_links, 1);
+        assert_eq!(
+            loaded.beam_node_links.get(&beam_pos),
+            Some(&[Some(mender_pos), None, None, None])
+        );
+        assert_eq!(
+            loaded
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == mender_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![beam_pos]
         );
     }
 
