@@ -2569,6 +2569,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：`PowerGraph.remove(Building)` 的分支拆图和 `BuildingComp` proximity/pickup/remove/load 钩子尚未接入真实 world building；当前 `reflow_from(...)` 先提供可测试的 BFS membership 核心。
 
+### 12.56 PowerGraph remove 分支拆图核心
+
+- 2026-05-27：迁移 Java `PowerGraph.remove(Building)` 的核心分支拆图语义到纯 runtime。
+- Java 依据：
+  - `PowerGraph.remove(Building tile)` 遍历被移除 tile 的 power connections；
+  - 对每个仍属于旧 graph 的邻接 building 新建 `PowerGraph`；
+  - BFS 跳过被移除 tile，并把同一分支中的 connected building 加入新 graph；
+  - 每个新 graph 创建后立即 `update()`，旧 graph updater entity 被移除。
+- Rust 新增/变化：
+  - `PowerGraphRuntime::remove_with_connections(...)`；
+  - caller 提供 `connections(node_id) -> Vec<i32>` 与 `lookup(node_id) -> PowerGraphNode`，runtime 负责：
+    - 按旧 graph membership 过滤；
+    - 分支 BFS 去重；
+    - 为每个分支创建新 `PowerGraphRuntime`；
+    - 对新分支执行一次 `update_with_delta(1.0)`；
+    - 清空旧 graph，表示旧 graph 已失效。
+- 测试：
+  - `power_graph_runtime_remove_with_connections_splits_branches_and_invalidates_old_graph`
+- 已验证：
+  - `cargo test -p mindustry-core power_graph_runtime --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：分支拆图仍由 caller 提供连接/节点视图；下一步应把 `BuildingComp.getPowerConnections(...)`、proximity 与 pickup/remove 生命周期接到该方法。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

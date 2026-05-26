@@ -832,6 +832,59 @@ impl PowerGraphRuntime {
         }
     }
 
+    pub fn remove_with_connections<C, L>(
+        &mut self,
+        removed_id: i32,
+        mut connections: C,
+        mut lookup: L,
+    ) -> Vec<PowerGraphRuntime>
+    where
+        C: FnMut(i32) -> Vec<i32>,
+        L: FnMut(i32) -> Option<PowerGraphNode>,
+    {
+        let original_members = self.all.iter().copied().collect::<BTreeSet<_>>();
+        let mut assigned = BTreeSet::new();
+        let mut branches = Vec::new();
+
+        for start_id in connections(removed_id) {
+            if start_id == removed_id
+                || !original_members.contains(&start_id)
+                || !assigned.insert(start_id)
+            {
+                continue;
+            }
+
+            let Some(start_node) = lookup(start_id) else {
+                continue;
+            };
+            let mut branch = PowerGraphRuntime::new();
+            let mut queue = VecDeque::new();
+            queue.push_back(start_node);
+
+            while let Some(node) = queue.pop_front() {
+                let id = node.id;
+                branch.add_node(node);
+                for next_id in connections(id) {
+                    if next_id == removed_id
+                        || !original_members.contains(&next_id)
+                        || !assigned.insert(next_id)
+                    {
+                        continue;
+                    }
+                    if let Some(next_node) = lookup(next_id) {
+                        queue.push_back(next_node);
+                    }
+                }
+            }
+
+            branch.update_with_delta(1.0);
+            branches.push(branch);
+        }
+
+        self.clear();
+        branches
+    }
+
     pub fn transfer_power(&mut self, amount: f32) {
         if amount > 0.0 {
             power_graph_charge_batteries(&mut self.batteries, amount);
@@ -1653,5 +1706,81 @@ mod tests {
         assert_eq!(graph.all, vec![1, 2, 3, 4]);
         assert!(other.all.is_empty());
         assert_eq!(graph.producer_nodes, vec![1, 4]);
+    }
+
+    #[test]
+    fn power_graph_runtime_remove_with_connections_splits_branches_and_invalidates_old_graph() {
+        let mut graph = PowerGraphRuntime::new();
+        for node in [
+            PowerGraphNode {
+                outputs_power: true,
+                production: 4.0,
+                ..graph_node(1)
+            },
+            PowerGraphNode {
+                consumes_power: true,
+                requested_power: 2.0,
+                usage: 2.0,
+                ..graph_node(2)
+            },
+            PowerGraphNode {
+                consumes_power: true,
+                requested_power: 3.0,
+                usage: 3.0,
+                ..graph_node(3)
+            },
+            PowerGraphNode {
+                outputs_power: true,
+                production: 2.0,
+                ..graph_node(4)
+            },
+        ] {
+            graph.add_node(node);
+        }
+
+        let branches = graph.remove_with_connections(
+            1,
+            |id| match id {
+                1 => vec![2, 3],
+                2 => vec![1, 4],
+                3 => vec![1],
+                4 => vec![2],
+                _ => Vec::new(),
+            },
+            |id| {
+                Some(match id {
+                    2 => PowerGraphNode {
+                        consumes_power: true,
+                        requested_power: 2.0,
+                        usage: 2.0,
+                        ..graph_node(2)
+                    },
+                    3 => PowerGraphNode {
+                        consumes_power: true,
+                        requested_power: 3.0,
+                        usage: 3.0,
+                        ..graph_node(3)
+                    },
+                    4 => PowerGraphNode {
+                        outputs_power: true,
+                        production: 2.0,
+                        ..graph_node(4)
+                    },
+                    _ => return None,
+                })
+            },
+        );
+
+        assert!(graph.all.is_empty());
+        assert_eq!(branches.len(), 2);
+        assert_eq!(branches[0].all, vec![2, 4]);
+        assert_eq!(branches[0].consumer_nodes, vec![2]);
+        assert_eq!(branches[0].producer_nodes, vec![4]);
+        assert_eq!(branches[0].last_power_needed, 2.0);
+        assert_eq!(branches[0].last_power_produced, 2.0);
+        assert_eq!(branches[1].all, vec![3]);
+        assert_eq!(branches[1].consumer_nodes, vec![3]);
+        assert_eq!(branches[1].last_power_needed, 3.0);
+        assert_eq!(branches[1].last_power_produced, 0.0);
     }
 }

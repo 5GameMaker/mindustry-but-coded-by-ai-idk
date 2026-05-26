@@ -2345,6 +2345,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-core power_graph_updater --lib`
   - `cargo check -p mindustry-core`
 - 下一步建议：
-  1. 继续实现 `PowerGraph.remove(Building)` 的分支拆图和新 graph update。
+  1. `PowerGraph.remove(Building)` 的分支拆图核心已由第 70 节补上；继续把真实 `BuildingComp` 连接/生命周期接进来。
   2. 把 `BuildingComp` 的 proximity / pickup / remove / load 生命周期接到 `PowerGraphRuntime::add_node/reflow_from/remove_list`。
   3. 保持 power graph runtime 直接服务 world/building，而不是回退成孤立 helper。
+
+---
+
+## 70. 最新闭环记录：PowerGraph remove 分支拆图核心
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：迁移 Java `PowerGraph.remove(Building)` 的核心分支拆图逻辑。
+- Java 依据：
+  - `PowerGraph.remove(Building tile)` 遍历被移除 tile 的连接；
+  - 对每个仍属于旧 graph 的邻接 building 新建分支 graph；
+  - BFS 跳过被移除 tile，避免重复分配；
+  - 每个新 graph 结束后立即 `update()`，旧 graph 失效。
+- Rust 主改动：
+  - `PowerGraphRuntime::remove_with_connections(...)`；
+  - 由 caller 提供 connections 与 node lookup；
+  - runtime 负责旧 membership 过滤、分支 BFS、新 graph 创建、新 graph update、旧 graph clear。
+- 已跑：
+  - `cargo test -p mindustry-core power_graph_runtime --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 将 `BuildingComp` 的真实邻接查询接入 `remove_with_connections(...)`。
+  2. 继续推进 `BuildingComp.onProximityAdded/updatePowerGraph/powerGraphRemoved/afterPickedUp`，让 power graph lifecycle 从纯 runtime 进入 world/building 主链路。
