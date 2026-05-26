@@ -90,6 +90,7 @@ use crate::mindustry::{
         payload_conveyor_update_timing, payload_deconstructor_accept_payload,
         payload_deconstructor_update_progress, payload_loader_accept_payload,
         payload_loader_charge_battery, payload_loader_liquid_flow, payload_loader_should_export,
+        payload_mass_driver_config_from_relative, payload_mass_driver_config_relative,
         payload_ref_sort_key, payload_router_check_match, payload_router_logic_control,
         payload_router_pick_next_rotation, payload_source_clear_config,
         payload_source_configure_block, payload_source_configure_unit, payload_source_update,
@@ -1488,6 +1489,21 @@ pub enum GameRuntimePayloadRouterControlResult {
     NotPayloadRouter,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadMassDriverConfig {
+    Packed(i32),
+    Relative { dx: i32, dy: i32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadMassDriverConfigureResult {
+    Linked,
+    Cleared,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotPayloadMassDriver,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Construct(GameRuntimeConstructBlockState),
@@ -1839,6 +1855,68 @@ impl GameRuntime {
         *control_time =
             payload_router_logic_control(&mut self.buildings[index].rotation, requested_rotation);
         GameRuntimePayloadRouterControlResult::Controlled
+    }
+
+    pub fn configure_owned_payload_mass_driver(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        config: Option<GameRuntimePayloadMassDriverConfig>,
+    ) -> GameRuntimePayloadMassDriverConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimePayloadMassDriverConfigureResult::MissingBuilding;
+        };
+
+        match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::PayloadMassDriver(_)) => {}
+            Some(_) | None => {
+                return GameRuntimePayloadMassDriverConfigureResult::NotPayloadMassDriver;
+            }
+        }
+
+        let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+            self.payload_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimePayloadMassDriverConfigureResult::MissingRuntimeState;
+        };
+
+        let Some(config) = config else {
+            driver.link = -1;
+            self.buildings[index].config = None;
+            return GameRuntimePayloadMassDriverConfigureResult::Cleared;
+        };
+
+        let link = match config {
+            GameRuntimePayloadMassDriverConfig::Packed(link) => link,
+            GameRuntimePayloadMassDriverConfig::Relative { dx, dy } => {
+                payload_mass_driver_config_from_relative(
+                    self.buildings[index].tile_x(),
+                    self.buildings[index].tile_y(),
+                    dx,
+                    dy,
+                )
+            }
+        };
+
+        if link == -1 {
+            driver.link = -1;
+            self.buildings[index].config = None;
+            return GameRuntimePayloadMassDriverConfigureResult::Cleared;
+        }
+
+        driver.link = link;
+        let (dx, dy) = payload_mass_driver_config_relative(
+            link,
+            self.buildings[index].tile_x(),
+            self.buildings[index].tile_y(),
+        );
+        self.buildings[index].config =
+            Some(type_io::TypeValue::Point2(type_io::Point2::new(dx, dy)));
+        GameRuntimePayloadMassDriverConfigureResult::Linked
     }
 
     pub fn command_owned_payload_source(
@@ -9671,6 +9749,72 @@ mod tests {
             runtime.payload_runtime_states.get(&tile_pos),
             Some(&GameRuntimePayloadBlockState::MassDriver { common, driver })
         );
+    }
+
+    #[test]
+    fn game_runtime_configures_owned_payload_mass_driver_relative_link() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("payload-mass-driver").unwrap();
+        let source_tile = point2_pack(4, 4);
+        let target_tile = point2_pack(8, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 10);
+        runtime.add_building(BuildingComp::new(
+            source_tile,
+            driver_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.add_building(BuildingComp::new(
+            target_tile,
+            driver_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState::default(),
+                driver: PayloadMassDriverState::default(),
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            target_tile,
+            GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState::default(),
+                driver: PayloadMassDriverState::default(),
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_mass_driver(
+                &content,
+                source_tile,
+                Some(GameRuntimePayloadMassDriverConfig::Relative { dx: 4, dy: 0 }),
+            ),
+            GameRuntimePayloadMassDriverConfigureResult::Linked
+        );
+        let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+            runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("payload mass driver sidecar should remain present");
+        };
+        assert_eq!(driver.link, target_tile);
+        assert_eq!(
+            runtime.buildings[0].config,
+            Some(TypeValue::Point2(type_io::Point2::new(4, 0)))
+        );
+
+        assert_eq!(
+            runtime.configure_owned_payload_mass_driver(&content, source_tile, None),
+            GameRuntimePayloadMassDriverConfigureResult::Cleared
+        );
+        let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+            runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("payload mass driver sidecar should remain present");
+        };
+        assert_eq!(driver.link, -1);
+        assert_eq!(runtime.buildings[0].config, None);
     }
 
     #[test]
