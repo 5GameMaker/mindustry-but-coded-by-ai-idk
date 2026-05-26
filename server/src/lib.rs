@@ -245,7 +245,9 @@ mod tests {
         PacketSerializer, ProviderEvent,
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
-    use mindustry_core::mindustry::world::blocks::payloads::{PayloadBlockBuildState, PayloadRef};
+    use mindustry_core::mindustry::world::blocks::payloads::{
+        PayloadBlockBuildState, PayloadRef, PayloadSourceState,
+    };
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
     use std::net::{TcpListener, UdpSocket};
@@ -805,6 +807,54 @@ mod tests {
             panic!("payload void sidecar should remain present");
         };
         assert!(common.payload.is_none());
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_source_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let source_def = launcher
+            .content_loader
+            .block_by_name("payload-source")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let router_id = router_def.base().id;
+        let source_tile = point2_pack(4, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, source_def.base().clone(), TeamId(6));
+        source_building.set_rotation(1);
+
+        launcher.runtime.state.world.resize(10, 10);
+        launcher.runtime.add_building(source_building);
+        launcher.runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState {
+                    config_block: Some(router_id),
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_payload_report
+            .expect("server update should cache the latest payload batch");
+        assert_eq!(report.source.spawned_block_payloads, 1);
+        assert_eq!(report.source.moved_out_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            launcher.runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(source.has_payload);
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_id
+        ));
         assert_eq!(launcher.runtime.state.update_id, 1);
     }
 }

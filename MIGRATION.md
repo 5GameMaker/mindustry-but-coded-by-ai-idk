@@ -1486,3 +1486,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：payload source / constructor / conveyor / loader / deconstructor / payload mass driver 还没进入 `advance_owned_runtime_blocks(...)`；后续继续接入时应同样拆 ticks/helper，不能直接串 public advance。
+
+### 12.2 服务端 PayloadSource 主循环接入
+
+- 2026-05-26：`GameRuntimeOwnedPayloadFrameReport` 追加 `source: GameRuntimePayloadSourceFrameReport`，`advance_owned_runtime_blocks(...)` 现在在同一 frame 内先推进 `PayloadSource`，再推进 `PayloadVoid`。
+- `advance_owned_payload_sources(...)` 已拆出内部 `advance_owned_payload_sources_ticks(...)`：public 入口保持原有独立推进语义；服务端聚合路径复用 ticks 入口，避免 source 接入时重复推进 `advance_game_update_frame(...)` 或 building timing。
+- 新增测试 `server_update_drives_owned_payload_source_from_launcher_runtime`：构造 `payload-source` 配置为生产 `router`，通过 `launcher.update()` 验证服务端主循环生成 `BuildPayload(router)`，并保持 `runtime.state.update_id == 1`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_source_spawns_configured_block_payload --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_effect_building_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：PayloadSource 进入主循环后，`PayloadConveyor/Router/Constructor/Loader/Deconstructor/PayloadMassDriver` 仍需按同样方式拆 ticks 并接入；当前 source 生成后能移动自身 payload，但完整 source→conveyor→void 服务端链路还需 conveyor 接入后再验证。

@@ -1588,6 +1588,7 @@ pub struct GameRuntimeOwnedItemTransportFrameReport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeOwnedPayloadFrameReport {
+    pub source: GameRuntimePayloadSourceFrameReport,
     pub void: GameRuntimePayloadVoidFrameReport,
 }
 
@@ -4926,17 +4927,28 @@ impl GameRuntime {
         self.refresh_owned_building_update_permissions(content);
 
         let frame_delta = advanced.delta_ticks as f32;
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame_delta, can_overdrive);
+        }
+
+        Some(self.advance_owned_payload_sources_ticks(content, frame_delta))
+    }
+
+    fn advance_owned_payload_sources_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimePayloadSourceFrameReport {
         let mut report = GameRuntimePayloadSourceFrameReport::default();
         let mut pending_payload_moves = Vec::new();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, team, enabled, rotdeg, rotation, time_scale, x, y) = {
-                let building = &mut self.buildings[index];
-                let can_overdrive = content
-                    .block(building.block.id)
-                    .map(BlockDef::can_overdrive)
-                    .unwrap_or(false);
-                building.advance_update_timing(frame_delta, can_overdrive);
+                let building = &self.buildings[index];
                 report.visited_buildings += 1;
                 (
                     building.tile_pos,
@@ -5071,7 +5083,7 @@ impl GameRuntime {
             }
         }
 
-        Some(report)
+        report
     }
 
     pub fn advance_owned_payload_deconstructors(
@@ -12571,6 +12583,7 @@ impl GameRuntime {
 
         let item_transport = self.advance_owned_item_transport_blocks_ticks(content, frame.delta);
         let payload = GameRuntimeOwnedPayloadFrameReport {
+            source: self.advance_owned_payload_sources_ticks(content, frame.delta),
             void: self.advance_owned_payload_voids_ticks(content, frame.delta),
         };
 
