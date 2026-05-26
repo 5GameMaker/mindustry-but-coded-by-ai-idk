@@ -3168,3 +3168,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core net_client::tests::apply_building_item_and_liquid_packets_updates_storage_mirror`
   - `cargo test -p mindustry-core net_client::tests::update_records_server_forwarded_inventory_payload_and_unit_packets`
 - 仍未完成：客户端还没有独立 unit item mirror，因此 `to.addItem(...)` 只在 packet/mirror 层留下建筑扣减；后续应把 unit/entity snapshot 或 typed unit runtime 与 `TakeItemsCallPacket.to` 接起来。
+
+### 12.86 GameRuntime removeStack 计划消费
+
+- 2026-05-27：把 12.84 的 `ItemRemoveStackPlan` 接入 `GameRuntime`，形成 `InputHandler.takeItems(...) -> removeStack plan -> campaign core-item delta` 的 runtime 消费点。
+- Java 依据：
+  - `InputHandler.takeItems(...)` 的核心副作用是 `build.removeStack(...)`；
+  - `CoreBuild.removeStack(...)` 在 campaign default team 下 `handleCoreItem(item, -result)`；
+  - `StorageBuild.removeStack(...)` 只有 linkedCore 存在时才对 campaign core item 做 `-result`。
+- Rust 新增/变化：
+  - `GameRuntime::apply_item_remove_stack_plan(content, plan)` 根据 `plan.build.tile_pos` 定位建筑，并刷新 `storage_linked_cores`；
+  - 若 source 是 core，则直接对该 core 执行 `note_campaign_core_item_delta(..., -amount_removed)`；
+  - 若 source 是 linked storage，则通过 `linked_core_index_for_storage(...)` 路由到 core 后执行同样 delta；
+  - 不重复扣 `items`，因为 `take_items(...)` 已经完成内存移除，runtime helper 只消费 Java `removeStack` 的账本副作用。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_item_remove_stack_plan_updates_campaign_core_delta_for_core_and_linked_storage`
+  - `cargo test -p mindustry-core game_runtime_core_handle_item`
+  - `cargo test -p mindustry-core game_runtime_linked_storage_unloader_updates_campaign_core_delta`
+- 仍未完成：`RequestItemCallPacket`/`TakeItemsCallPacket` 在 server 权威事件循环中仍未自动调用 `input_handler::take_items(...)` 与 `GameRuntime::apply_item_remove_stack_plan(...)`；下一步可继续把 server packet 消费桥接到该 helper。

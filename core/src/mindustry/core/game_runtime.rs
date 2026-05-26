@@ -31,6 +31,7 @@ use crate::mindustry::{
         entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
     game::CoreInfo,
+    input::input_handler::ItemRemoveStackPlan,
     io::{
         type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
         LegacyShortChunkMap, TeamId,
@@ -5646,6 +5647,38 @@ impl GameRuntime {
         if let Some(sector) = self.state.sector.as_mut() {
             sector.info.handle_core_item(item_name.to_string(), amount);
         }
+    }
+
+    pub fn apply_item_remove_stack_plan(
+        &mut self,
+        content: &ContentLoader,
+        plan: &ItemRemoveStackPlan,
+    ) -> bool {
+        if plan.amount_removed <= 0 {
+            return false;
+        }
+        let Some(tile_pos) = plan.build.tile_pos else {
+            return false;
+        };
+        let Some(building_index) = self.building_index_by_tile_pos(tile_pos) else {
+            return false;
+        };
+        self.refresh_owned_storage_core_links(content);
+        let core_index = if self.building_is_core(content, building_index) {
+            Some(building_index)
+        } else {
+            self.linked_core_index_for_storage(content, building_index)
+        };
+        let Some(core_index) = core_index else {
+            return false;
+        };
+        let item = plan.item_id as ContentId;
+        let item_name = plan
+            .item
+            .clone()
+            .unwrap_or_else(|| Self::item_name_for_side_effect(content, item));
+        self.note_campaign_core_item_delta(core_index, &item_name, -plan.amount_removed);
+        true
     }
 
     fn note_core_handle_item_side_effects(
@@ -15347,8 +15380,8 @@ mod tests {
             FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
         io::{
-            LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
-            Vec2 as IoVec2,
+            BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId,
+            TypeValue, Vec2 as IoVec2,
         },
         r#type::{ItemStack, PayloadKey, PayloadSeq, Sector},
         world::{
@@ -25355,6 +25388,87 @@ mod tests {
                 .core_deltas
                 .get("copper"),
             Some(&-1)
+        );
+    }
+
+    #[test]
+    fn game_runtime_item_remove_stack_plan_updates_campaign_core_delta_for_core_and_linked_storage()
+    {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let default_team = TeamId(GameState::default().rules.default_team as u8);
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let core_building = BuildingComp::new(core_tile, core_def.base().clone(), default_team);
+        let linked_storage_building = BuildingComp::new(
+            linked_storage_tile,
+            container_def.base().clone(),
+            default_team,
+        );
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set_sector(Some(Sector::new(12)));
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+
+        assert!(runtime.apply_item_remove_stack_plan(
+            &content,
+            &ItemRemoveStackPlan {
+                build: BuildingRef::new(core_tile),
+                item: Some("copper".into()),
+                item_id: copper as i16,
+                amount_removed: 2,
+                source_is_core: true,
+                source_is_storage: false,
+            },
+        ));
+        assert!(runtime.apply_item_remove_stack_plan(
+            &content,
+            &ItemRemoveStackPlan {
+                build: BuildingRef::new(linked_storage_tile),
+                item: Some("copper".into()),
+                item_id: copper as i16,
+                amount_removed: 3,
+                source_is_core: false,
+                source_is_storage: true,
+            },
+        ));
+
+        assert_eq!(
+            runtime.storage_linked_cores.get(&linked_storage_tile),
+            Some(&core_tile)
+        );
+        assert_eq!(
+            runtime
+                .state
+                .rules
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&-5)
+        );
+        assert_eq!(
+            runtime
+                .state
+                .sector
+                .as_ref()
+                .unwrap()
+                .info
+                .core_deltas
+                .get("copper"),
+            Some(&-5)
         );
     }
 
