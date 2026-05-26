@@ -3,7 +3,7 @@ pub mod server_control;
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext,
     GameRuntimeOwnedEffectResources, GameRuntimeOwnedFrameReport,
-    GameRuntimeOwnedItemTransportFrameReport, NetServer,
+    GameRuntimeOwnedItemTransportFrameReport, GameRuntimeOwnedPayloadFrameReport, NetServer,
 };
 use mindustry_core::mindustry::ctype::ContentId;
 use mindustry_core::mindustry::entities::{
@@ -29,6 +29,7 @@ pub struct ServerLauncher {
     pub content_loader: ContentLoader,
     pub last_runtime_effect_report: Option<EffectBlockFrameBatchReport>,
     pub last_runtime_item_transport_report: Option<GameRuntimeOwnedItemTransportFrameReport>,
+    pub last_runtime_payload_report: Option<GameRuntimeOwnedPayloadFrameReport>,
     pub net_server: NetServer,
     pub network_error: Option<String>,
 }
@@ -50,6 +51,7 @@ impl ServerLauncher {
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
             args,
@@ -87,9 +89,11 @@ impl ServerLauncher {
         let _ = self.flush_pending_world_data();
         if let Some(report) = self.update_runtime_owned_blocks(1.0 / 60.0) {
             self.last_runtime_item_transport_report = Some(report.item_transport);
+            self.last_runtime_payload_report = Some(report.payload);
             self.last_runtime_effect_report = Some(report.effect);
         } else {
             self.last_runtime_item_transport_report = None;
+            self.last_runtime_payload_report = None;
             self.last_runtime_effect_report = None;
         }
     }
@@ -227,6 +231,7 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 mod tests {
     use super::ServerLauncher;
     use mindustry_core::mindustry::content::blocks::BlockDef;
+    use mindustry_core::mindustry::core::game_runtime::GameRuntimePayloadBlockState;
     use mindustry_core::mindustry::core::{
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
         NetServer,
@@ -240,6 +245,7 @@ mod tests {
         PacketSerializer, ProviderEvent,
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
+    use mindustry_core::mindustry::world::blocks::payloads::{PayloadBlockBuildState, PayloadRef};
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
     use std::net::{TcpListener, UdpSocket};
@@ -452,6 +458,7 @@ mod tests {
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -513,6 +520,7 @@ mod tests {
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -580,6 +588,7 @@ mod tests {
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -748,6 +757,54 @@ mod tests {
                 .get(copper),
             0
         );
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_void_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let void_def = launcher
+            .content_loader
+            .block_by_name("payload-void")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let void_tile = point2_pack(4, 4);
+        let mut build_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), router_def.base().clone(), TeamId(6))
+            .write_base(&mut build_bytes, false)
+            .unwrap();
+
+        launcher.runtime.state.world.resize(10, 10);
+        launcher.runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState {
+                payload: Some(PayloadRef::Block {
+                    block: router_def.base().id,
+                    version: 0,
+                    build_bytes,
+                }),
+                ..PayloadBlockBuildState::default()
+            }),
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_payload_report
+            .expect("server update should cache the latest payload batch");
+        assert_eq!(report.void.incinerated_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            launcher.runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
         assert_eq!(launcher.runtime.state.update_id, 1);
     }
 }

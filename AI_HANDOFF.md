@@ -677,3 +677,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `git diff --check`
 - 当前重要限制：payload source/constructor/conveyor/loader/void 等 payload runtime 还没有纳入 `advance_owned_runtime_blocks(...)` / `ServerLauncher::update(...)` 的统一 single-frame 聚合；后续继续接入时必须复用私有 ticks/内部 frame 输入，禁止简单串多个 public advance 入口导致 update_id/timing 翻倍。
 - 子代理提示：本轮尝试拉起 `explorer` 做下一闭环只读扫描时遇到 agent thread limit；如果后续线程可用，优先派 `explorer` 扫描 `game_runtime.rs` 里剩余 `advance_owned_*` public 入口与 `server/src/lib.rs` 的主循环缺口。
+
+---
+
+## 15. 最新闭环记录：服务端 PayloadVoid 主循环接入
+
+- 目标：payload 族不能只停留在 `advance_owned_payload_*` 单测入口里；本闭环先把最小终端 `PayloadVoid` 接入服务端 `ServerLauncher::update()` 的 single-frame aggregate。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `core/src/mindustry/core/mod.rs`
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 已接入：`GameRuntimeOwnedPayloadFrameReport`，当前包含 `void: GameRuntimePayloadVoidFrameReport`；`GameRuntimeOwnedFrameReport` 新增 `payload` 字段。
+- 已接入：`advance_owned_payload_voids(...)` 拆出 `advance_owned_payload_voids_ticks(...)`。public wrapper 继续独立推进 frame/timing；`advance_owned_runtime_blocks(...)` 在同一帧已推进过 `advance_game_update_frame(...)` 与 building timing 后调用 ticks 入口，避免重复 tick。
+- 已接入：`ServerLauncher` 新增 `last_runtime_payload_report`，`update()` 会和 item/effect 一样缓存 payload batch。
+- 新增测试：`server_update_drives_owned_payload_void_from_launcher_runtime`。该测试在服务端 runtime 中放置 `payload-void`，手动塞入 `BuildPayload(router)`，调用 `launcher.update()` 后断言：
+  - `last_runtime_payload_report.unwrap().void.incinerated_payloads == 1`
+  - payload void sidecar 仍存在但 payload 被清空
+  - `runtime.state.update_id == 1`
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_effect_building_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_advances_owned_payload_void_and_incinerates_payload --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_void --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`advance_owned_payload_sources/conveyors/constructors/loaders/deconstructors/payload_mass_drivers` 还没有进入 `advance_owned_runtime_blocks(...)`。下一步建议按子代理 Russell 的只读结论，继续拆 ticks 并接入 payload source + conveyor + constructor，形成服务端 payload 生成/搬运/消纳闭环；不要把多个 public advance 直接串起来。

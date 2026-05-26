@@ -1586,9 +1586,15 @@ pub struct GameRuntimeOwnedItemTransportFrameReport {
     pub junction_forwarded_items: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeOwnedPayloadFrameReport {
+    pub void: GameRuntimePayloadVoidFrameReport,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GameRuntimeOwnedFrameReport {
     pub item_transport: GameRuntimeOwnedItemTransportFrameReport,
+    pub payload: GameRuntimeOwnedPayloadFrameReport,
     pub effect: EffectBlockFrameBatchReport,
 }
 
@@ -12374,16 +12380,27 @@ impl GameRuntime {
         self.refresh_owned_building_update_permissions(content);
 
         let frame_delta = advanced.delta_ticks as f32;
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame_delta, can_overdrive);
+        }
+
+        Some(self.advance_owned_payload_voids_ticks(content, frame_delta))
+    }
+
+    fn advance_owned_payload_voids_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimePayloadVoidFrameReport {
         let mut report = GameRuntimePayloadVoidFrameReport::default();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, enabled, efficiency, time_scale, rotdeg) = {
-                let building = &mut self.buildings[index];
-                let can_overdrive = content
-                    .block(building.block.id)
-                    .map(BlockDef::can_overdrive)
-                    .unwrap_or(false);
-                building.advance_update_timing(frame_delta, can_overdrive);
+                let building = &self.buildings[index];
                 report.visited_buildings += 1;
                 (
                     building.tile_pos,
@@ -12432,7 +12449,7 @@ impl GameRuntime {
             }
         }
 
-        Some(report)
+        report
     }
 
     pub fn advance_and_dispatch_effect_blocks<'a, 'b>(
@@ -12553,6 +12570,9 @@ impl GameRuntime {
         }
 
         let item_transport = self.advance_owned_item_transport_blocks_ticks(content, frame.delta);
+        let payload = GameRuntimeOwnedPayloadFrameReport {
+            void: self.advance_owned_payload_voids_ticks(content, frame.delta),
+        };
 
         let mut batch_resources = EffectBlockFrameBatchResources {
             fog_control: Some(&mut self.state.fog_control),
@@ -12575,6 +12595,7 @@ impl GameRuntime {
 
         Some(GameRuntimeOwnedFrameReport {
             item_transport,
+            payload,
             effect,
         })
     }

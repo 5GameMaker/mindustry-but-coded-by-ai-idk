@@ -1469,3 +1469,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：payload source/constructor/conveyor/loader/void 等 payload runtime 还没有统一纳入 `ServerLauncher::update(...)` 的 single-frame aggregate；后续应继续把更多 owned runtime tick 接入同一个 `advance_owned_runtime_blocks(...)`，不能回退为多个 public advance 串行调用。
+
+### 12.1 服务端 PayloadVoid 主循环接入
+
+- 2026-05-26：`GameRuntimeOwnedFrameReport` 新增 `payload: GameRuntimeOwnedPayloadFrameReport`，当前先接入 `PayloadVoid` 子报告，作为 payload 族进入服务端主循环的第一步。
+- `advance_owned_payload_voids(...)` 已拆出内部 `advance_owned_payload_voids_ticks(...)`：public 入口仍保持单独 frame 推进能力；`advance_owned_runtime_blocks(...)` 在已经推进过本帧 `advance_game_update_frame(...)` 与 building timing 后复用 ticks 入口，避免 `PayloadVoid` 接入 server update 时重复增加 `update_id`。
+- `server::ServerLauncher` 新增 `last_runtime_payload_report`，`update()` 会缓存同一帧的 payload batch；新增测试 `server_update_drives_owned_payload_void_from_launcher_runtime`，构造带 `BuildPayload(router)` 的 `payload-void`，通过 `launcher.update()` 验证 payload 被清空且 `runtime.state.update_id == 1`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_effect_building_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_advances_owned_payload_void_and_incinerates_payload --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_void --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：payload source / constructor / conveyor / loader / deconstructor / payload mass driver 还没进入 `advance_owned_runtime_blocks(...)`；后续继续接入时应同样拆 ticks/helper，不能直接串 public advance。
