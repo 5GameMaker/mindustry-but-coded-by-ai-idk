@@ -1,4 +1,7 @@
-use std::io::{self, Read, Write};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    io::{self, Read, Write},
+};
 
 pub mod power_block;
 pub mod power_distributor;
@@ -644,11 +647,32 @@ pub struct PowerConsumer {
     pub cheating: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PowerGraphNode {
+    pub id: i32,
+    pub outputs_power: bool,
+    pub consumes_power: bool,
+    pub buffered: bool,
+    pub should_consume_power: bool,
+    pub production: f32,
+    pub requested_power: f32,
+    pub usage: f32,
+    pub delta: f32,
+    pub battery_status: f32,
+    pub battery_capacity: f32,
+    pub enabled: bool,
+    pub cheating: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PowerGraphRuntime {
+    pub all: Vec<i32>,
     pub producers: Vec<PowerProducer>,
+    pub producer_nodes: Vec<i32>,
     pub consumers: Vec<PowerConsumer>,
+    pub consumer_nodes: Vec<i32>,
     pub batteries: Vec<PowerBattery>,
+    pub battery_nodes: Vec<i32>,
     pub last_power_produced: f32,
     pub last_power_needed: f32,
     pub last_power_stored: f32,
@@ -669,9 +693,13 @@ impl Default for PowerGraphRuntime {
 impl PowerGraphRuntime {
     pub fn new() -> Self {
         Self {
+            all: Vec::new(),
             producers: Vec::new(),
+            producer_nodes: Vec::new(),
             consumers: Vec::new(),
+            consumer_nodes: Vec::new(),
             batteries: Vec::new(),
+            battery_nodes: Vec::new(),
             last_power_produced: 0.0,
             last_power_needed: 0.0,
             last_power_stored: 0.0,
@@ -681,6 +709,126 @@ impl PowerGraphRuntime {
             energy_delta: 0.0,
             power_balance_samples: Vec::new(),
             power_balance_window: 60,
+        }
+    }
+
+    pub fn add_node(&mut self, node: PowerGraphNode) -> bool {
+        if self.all.contains(&node.id) {
+            return false;
+        }
+        self.all.push(node.id);
+        if node.outputs_power && node.consumes_power && !node.buffered {
+            self.producer_nodes.push(node.id);
+            self.producers.push(PowerProducer {
+                production: node.production,
+                delta: node.delta,
+            });
+            self.consumer_nodes.push(node.id);
+            self.consumers.push(PowerConsumer {
+                should_consume_power: node.should_consume_power,
+                requested_power: node.requested_power,
+                usage: node.usage,
+                delta: node.delta,
+                buffered: node.buffered,
+                capacity: node.battery_capacity,
+                status: node.battery_status,
+                cheating: node.cheating,
+            });
+        } else if node.outputs_power && node.consumes_power {
+            self.battery_nodes.push(node.id);
+            self.batteries.push(PowerBattery {
+                status: node.battery_status,
+                capacity: node.battery_capacity,
+                enabled: node.enabled,
+            });
+        } else if node.outputs_power {
+            self.producer_nodes.push(node.id);
+            self.producers.push(PowerProducer {
+                production: node.production,
+                delta: node.delta,
+            });
+        } else if node.consumes_power {
+            self.consumer_nodes.push(node.id);
+            self.consumers.push(PowerConsumer {
+                should_consume_power: node.should_consume_power,
+                requested_power: node.requested_power,
+                usage: node.usage,
+                delta: node.delta,
+                buffered: node.buffered,
+                capacity: node.battery_capacity,
+                status: node.battery_status,
+                cheating: node.cheating,
+            });
+        }
+        true
+    }
+
+    pub fn remove_list(&mut self, node_id: i32) -> bool {
+        let mut removed = remove_first_value(&mut self.all, node_id);
+        removed |= remove_indexed(&mut self.producer_nodes, &mut self.producers, node_id);
+        removed |= remove_indexed(&mut self.consumer_nodes, &mut self.consumers, node_id);
+        removed |= remove_indexed(&mut self.battery_nodes, &mut self.batteries, node_id);
+        removed
+    }
+
+    pub fn clear(&mut self) {
+        self.all.clear();
+        self.producers.clear();
+        self.producer_nodes.clear();
+        self.consumers.clear();
+        self.consumer_nodes.clear();
+        self.batteries.clear();
+        self.battery_nodes.clear();
+    }
+
+    pub fn add_graph(&mut self, other: &mut Self) {
+        let other_ids = other.all.clone();
+        for id in other_ids {
+            if let Some(index) = other.producer_nodes.iter().position(|node| *node == id) {
+                if !self.all.contains(&id) {
+                    self.all.push(id);
+                    self.producer_nodes.push(id);
+                    self.producers.push(other.producers[index]);
+                }
+            }
+            if let Some(index) = other.consumer_nodes.iter().position(|node| *node == id) {
+                if !self.consumer_nodes.contains(&id) {
+                    if !self.all.contains(&id) {
+                        self.all.push(id);
+                    }
+                    self.consumer_nodes.push(id);
+                    self.consumers.push(other.consumers[index]);
+                }
+            }
+            if let Some(index) = other.battery_nodes.iter().position(|node| *node == id) {
+                if !self.battery_nodes.contains(&id) {
+                    if !self.all.contains(&id) {
+                        self.all.push(id);
+                    }
+                    self.battery_nodes.push(id);
+                    self.batteries.push(other.batteries[index]);
+                }
+            }
+        }
+        other.clear();
+    }
+
+    pub fn reflow_from<F>(&mut self, start: PowerGraphNode, mut connections: F)
+    where
+        F: FnMut(i32) -> Vec<PowerGraphNode>,
+    {
+        let mut queue = VecDeque::new();
+        let mut closed = BTreeSet::new();
+        closed.insert(start.id);
+        queue.push_back(start);
+        while let Some(node) = queue.pop_front() {
+            let id = node.id;
+            self.add_node(node);
+            for next in connections(id) {
+                if closed.insert(next.id) {
+                    queue.push_back(next);
+                }
+            }
         }
     }
 
@@ -810,6 +958,25 @@ impl PowerGraphRuntime {
         if self.power_balance_samples.len() > self.power_balance_window {
             self.power_balance_samples.remove(0);
         }
+    }
+}
+
+fn remove_first_value(values: &mut Vec<i32>, target: i32) -> bool {
+    if let Some(index) = values.iter().position(|value| *value == target) {
+        values.remove(index);
+        true
+    } else {
+        false
+    }
+}
+
+fn remove_indexed<T>(ids: &mut Vec<i32>, values: &mut Vec<T>, target: i32) -> bool {
+    if let Some(index) = ids.iter().position(|value| *value == target) {
+        ids.remove(index);
+        values.remove(index);
+        true
+    } else {
+        false
     }
 }
 
@@ -1364,5 +1531,127 @@ mod tests {
         assert_eq!(graph.consumers[0].status, 1.0);
         assert_eq!(graph.last_power_needed, 1.0);
         assert_eq!(graph.last_power_produced, 1.0);
+    }
+
+    fn graph_node(id: i32) -> PowerGraphNode {
+        PowerGraphNode {
+            id,
+            outputs_power: false,
+            consumes_power: false,
+            buffered: false,
+            should_consume_power: true,
+            production: 0.0,
+            requested_power: 0.0,
+            usage: 0.0,
+            delta: 1.0,
+            battery_status: 0.0,
+            battery_capacity: 0.0,
+            enabled: true,
+            cheating: false,
+        }
+    }
+
+    #[test]
+    fn power_graph_runtime_add_node_classifies_and_clear_matches_java_lists() {
+        let mut graph = PowerGraphRuntime::new();
+        assert!(graph.add_node(PowerGraphNode {
+            outputs_power: true,
+            production: 3.0,
+            ..graph_node(1)
+        }));
+        assert!(graph.add_node(PowerGraphNode {
+            consumes_power: true,
+            requested_power: 4.0,
+            usage: 4.0,
+            ..graph_node(2)
+        }));
+        assert!(graph.add_node(PowerGraphNode {
+            outputs_power: true,
+            consumes_power: true,
+            buffered: true,
+            battery_status: 0.25,
+            battery_capacity: 20.0,
+            ..graph_node(3)
+        }));
+        assert!(graph.add_node(PowerGraphNode {
+            outputs_power: true,
+            consumes_power: true,
+            buffered: false,
+            production: 2.0,
+            requested_power: 1.0,
+            usage: 1.0,
+            ..graph_node(4)
+        }));
+        assert!(!graph.add_node(graph_node(4)));
+
+        assert_eq!(graph.all, vec![1, 2, 3, 4]);
+        assert_eq!(graph.producer_nodes, vec![1, 4]);
+        assert_eq!(graph.consumer_nodes, vec![2, 4]);
+        assert_eq!(graph.battery_nodes, vec![3]);
+
+        assert!(graph.remove_list(4));
+        assert_eq!(graph.all, vec![1, 2, 3]);
+        assert_eq!(graph.producer_nodes, vec![1]);
+        assert_eq!(graph.consumer_nodes, vec![2]);
+        assert!(!graph.remove_list(99));
+
+        graph.clear();
+        assert!(graph.all.is_empty());
+        assert!(graph.producers.is_empty());
+        assert!(graph.consumers.is_empty());
+        assert!(graph.batteries.is_empty());
+    }
+
+    #[test]
+    fn power_graph_runtime_reflow_and_add_graph_follow_bfs_membership() {
+        let mut graph = PowerGraphRuntime::new();
+        graph.reflow_from(
+            PowerGraphNode {
+                outputs_power: true,
+                ..graph_node(1)
+            },
+            |id| match id {
+                1 => vec![
+                    PowerGraphNode {
+                        consumes_power: true,
+                        requested_power: 2.0,
+                        usage: 2.0,
+                        ..graph_node(2)
+                    },
+                    PowerGraphNode {
+                        outputs_power: true,
+                        consumes_power: true,
+                        buffered: true,
+                        battery_capacity: 10.0,
+                        ..graph_node(3)
+                    },
+                ],
+                2 => vec![PowerGraphNode {
+                    outputs_power: true,
+                    consumes_power: true,
+                    buffered: true,
+                    battery_capacity: 10.0,
+                    ..graph_node(3)
+                }],
+                _ => Vec::new(),
+            },
+        );
+
+        assert_eq!(graph.all, vec![1, 2, 3]);
+        assert_eq!(graph.producer_nodes, vec![1]);
+        assert_eq!(graph.consumer_nodes, vec![2]);
+        assert_eq!(graph.battery_nodes, vec![3]);
+
+        let mut other = PowerGraphRuntime::new();
+        other.add_node(PowerGraphNode {
+            outputs_power: true,
+            production: 5.0,
+            ..graph_node(4)
+        });
+        graph.add_graph(&mut other);
+
+        assert_eq!(graph.all, vec![1, 2, 3, 4]);
+        assert!(other.all.is_empty());
+        assert_eq!(graph.producer_nodes, vec![1, 4]);
     }
 }

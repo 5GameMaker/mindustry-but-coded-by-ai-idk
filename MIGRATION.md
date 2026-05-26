@@ -2546,6 +2546,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：尚未迁移 Java `PowerGraph.addGraph/add/reflow/remove/clear` 的完整建图/并图/拆图流程，也未把 `BuildingComp.onProximityAdded/updatePowerGraph/powerGraphRemoved/afterPickedUp` 全量接入；当前闭环先覆盖 updater 实体驱动真实 runtime update。
 
+### 12.55 PowerGraph membership/reflow 生命周期
+
+- 2026-05-27：在上一节 `PowerGraphRuntime.update_with_delta(...)` 基础上继续迁移 Java `PowerGraph` 的 membership 管理行为。
+- Java 依据：
+  - `PowerGraph.add(Building)`：按 `outputsPower/consumesPower/consPower.buffered` 将 building 加入 `producers/consumers/batteries/all`；
+  - `PowerGraph.clear()`：清空 `all/producers/consumers/batteries` 并移除 updater entity；
+  - `PowerGraph.reflow(Building)`：从起点 BFS 遍历 `getPowerConnections(...)`，避免重复节点；
+  - `PowerGraph.removeList(Building)`：测试用，分别从各列表移除 building。
+- Rust 新增/变化：
+  - `PowerGraphNode`：抽象 Java `Building + Block.consPower` 对 power graph 的输入视图；
+  - `PowerGraphRuntime.all`、`producer_nodes`、`consumer_nodes`、`battery_nodes`；
+  - `PowerGraphRuntime::add_node(...)`：按 Java 分类规则写入 producer/consumer/battery 列表；
+  - `PowerGraphRuntime::remove_list(...)`、`clear(...)`、`add_graph(...)`；
+  - `PowerGraphRuntime::reflow_from(...)`：以 caller 提供的 connection callback 执行 BFS membership 重建。
+- 测试：
+  - `power_graph_runtime_add_node_classifies_and_clear_matches_java_lists`
+  - `power_graph_runtime_reflow_and_add_graph_follow_bfs_membership`
+- 已验证：
+  - `cargo test -p mindustry-core power_graph_runtime --lib`
+  - `cargo test -p mindustry-core power_graph_updater --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：`PowerGraph.remove(Building)` 的分支拆图和 `BuildingComp` proximity/pickup/remove/load 钩子尚未接入真实 world building；当前 `reflow_from(...)` 先提供可测试的 BFS membership 核心。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

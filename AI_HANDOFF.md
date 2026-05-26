@@ -2320,6 +2320,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
   - `cargo check -p mindustry-core`
 - 下一步建议：
-  1. 继续迁移 Java `PowerGraph.addGraph/add/reflow/remove/clear`，补建图/并图/拆图行为。
+  1. `PowerGraph.addGraph/add/reflow/removeList/clear` 的最小 membership 行为已由第 69 节补上；继续迁移 Java `PowerGraph.remove(Building)` 的分支拆图。
   2. 将 `BuildingComp.onProximityAdded/updatePowerGraph/powerGraphRemoved/afterPickedUp` 接入 `PowerGraphRuntime`。
   3. 后续再考虑 `PowerGraphComp` 若生成产物恢复，应补实体壳/映射而不是只保留 class-id。
+
+---
+
+## 69. 最新闭环记录：PowerGraph membership/reflow 生命周期
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：在 `PowerGraphRuntime.update_with_delta(...)` 后继续补 Java `PowerGraph.add/addGraph/reflow/removeList/clear` 的 membership 管理。
+- Java 依据：
+  - `PowerGraph.add(Building)` 按 `outputsPower/consumesPower/buffered` 分类到 `producers/consumers/batteries/all`；
+  - `PowerGraph.clear()` 清空四个列表；
+  - `PowerGraph.reflow(Building)` 从起点经 `getPowerConnections(...)` BFS，closed set 去重；
+  - `PowerGraph.removeList(Building)` 是 Java 测试 helper。
+- Rust 主改动：
+  - `PowerGraphNode` 作为 building/block power 输入视图；
+  - `PowerGraphRuntime.all` 与 producer/consumer/battery 对应 node id 列表；
+  - `add_node(...)`、`remove_list(...)`、`clear(...)`、`add_graph(...)`、`reflow_from(...)`；
+  - `reflow_from(...)` 由 caller 提供 connections callback，先把 BFS 核心闭环，后续再接真实 `BuildingComp.getPowerConnections(...)`。
+- 已跑：
+  - `cargo test -p mindustry-core power_graph_runtime --lib`
+  - `cargo test -p mindustry-core power_graph_updater --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 继续实现 `PowerGraph.remove(Building)` 的分支拆图和新 graph update。
+  2. 把 `BuildingComp` 的 proximity / pickup / remove / load 生命周期接到 `PowerGraphRuntime::add_node/reflow_from/remove_list`。
+  3. 保持 power graph runtime 直接服务 world/building，而不是回退成孤立 helper。
