@@ -89,21 +89,21 @@ use crate::mindustry::{
         payload_conveyor_handle_payload, payload_conveyor_should_attempt_move,
         payload_conveyor_update_timing, payload_loader_accept_payload,
         payload_loader_charge_battery, payload_loader_liquid_flow, payload_loader_should_export,
-        payload_ref_sort_key, payload_router_check_match, payload_source_clear_config,
-        payload_source_configure_block, payload_source_configure_unit, payload_source_update,
-        payload_unloader_drain_battery, payload_unloader_full, payload_unloader_liquid_flow,
-        payload_unloader_should_export, payload_void_update, read_block_producer_progress,
-        read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
-        read_payload_mass_driver_extra, read_payload_ref_to_end, read_payload_router_extra,
-        read_payload_source_extra, read_terminal_payload_block_build_common,
-        read_terminal_payload_conveyor_extra, write_block_producer_progress,
-        write_constructor_recipe, write_deconstructor_extra, write_payload_block_build_common,
-        write_payload_conveyor_extra, write_payload_loader_extra, write_payload_mass_driver_extra,
-        write_payload_ref, write_payload_router_extra, write_payload_source_extra,
-        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
-        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
-        PayloadSortKey, PayloadSourceSpawn, PayloadSourceState, Vec2 as PayloadVec2,
-        PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
+        payload_ref_sort_key, payload_router_check_match, payload_router_pick_next_rotation,
+        payload_source_clear_config, payload_source_configure_block, payload_source_configure_unit,
+        payload_source_update, payload_unloader_drain_battery, payload_unloader_full,
+        payload_unloader_liquid_flow, payload_unloader_should_export, payload_void_update,
+        read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
+        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
+        read_payload_router_extra, read_payload_source_extra,
+        read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
+        write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
+        write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
+        write_payload_mass_driver_extra, write_payload_ref, write_payload_router_extra,
+        write_payload_source_extra, BlockProducerState, PayloadBlockBuildState,
+        PayloadConveyorState, PayloadDeconstructorState, PayloadLoaderState,
+        PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceSpawn, PayloadSourceState,
+        Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -4415,6 +4415,164 @@ impl GameRuntime {
         )
     }
 
+    fn payload_router_candidate_accepts(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        payload_block: &crate::mindustry::content::blocks::PayloadBlockData,
+        payload: &PayloadRef,
+        rotation: i32,
+    ) -> bool {
+        let source = &self.buildings[source_index];
+        let trns = payload_block.base.size / 2 + 1;
+        let (dx, dy) = autotiler_direction(rotation);
+        let Some(target_tile_pos) = self
+            .state
+            .world
+            .build(source.tile_x() + dx * trns, source.tile_y() + dy * trns)
+            .map(|target| target.tile_pos)
+        else {
+            return false;
+        };
+        if target_tile_pos == source.tile_pos {
+            return false;
+        }
+        let Some(target_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == target_tile_pos)
+        else {
+            return false;
+        };
+        let target = &self.buildings[target_index];
+        if source.team != target.team {
+            return false;
+        }
+
+        match (
+            content.block(target.block.id),
+            self.payload_runtime_states.get(&target_tile_pos),
+        ) {
+            (
+                Some(BlockDef::Sandbox(target_sandbox)),
+                Some(GameRuntimePayloadBlockState::Void(common)),
+            ) if target_sandbox.kind == SandboxBlockKind::PayloadVoid => common.payload.is_none(),
+            (
+                Some(BlockDef::Payload(target_payload)),
+                Some(GameRuntimePayloadBlockState::Conveyor(conveyor)),
+            ) if matches!(
+                target_payload.kind,
+                PayloadBlockKind::PayloadConveyor | PayloadBlockKind::PayloadRouter
+            ) =>
+            {
+                payload_conveyor_accept_payload(
+                    conveyor.item.is_some(),
+                    Self::payload_ref_fits_payload_limit(
+                        content,
+                        payload,
+                        target_payload.payload_limit,
+                    ),
+                    true,
+                    target.enabled,
+                    conveyor.progress,
+                )
+            }
+            (
+                Some(BlockDef::Payload(target_payload)),
+                Some(GameRuntimePayloadBlockState::Router { conveyor, .. }),
+            ) if matches!(
+                target_payload.kind,
+                PayloadBlockKind::PayloadConveyor | PayloadBlockKind::PayloadRouter
+            ) =>
+            {
+                payload_conveyor_accept_payload(
+                    conveyor.item.is_some(),
+                    Self::payload_ref_fits_payload_limit(
+                        content,
+                        payload,
+                        target_payload.payload_limit,
+                    ),
+                    true,
+                    target.enabled,
+                    conveyor.progress,
+                )
+            }
+            (
+                Some(BlockDef::PayloadLoader(loader_block)),
+                Some(GameRuntimePayloadBlockState::Loader { common, .. }),
+            ) if loader_block.accepts_payload => Self::payload_loader_accepts_payload_ref(
+                content,
+                loader_block.max_block_size,
+                common.payload.is_none(),
+                payload,
+            ),
+            _ => false,
+        }
+    }
+
+    fn pick_owned_payload_router_next_rotation(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        payload_block: &crate::mindustry::content::blocks::PayloadBlockData,
+    ) -> bool {
+        let tile_pos = self.buildings[source_index].tile_pos;
+        let Some(GameRuntimePayloadBlockState::Router {
+            conveyor,
+            sorted,
+            rec_dir,
+            control_time,
+            ..
+        }) = self.payload_runtime_states.get(&tile_pos)
+        else {
+            return false;
+        };
+        if *control_time > 0.0 {
+            return false;
+        }
+        let Some(payload) = conveyor.item.clone() else {
+            return false;
+        };
+        let payload_key = payload_ref_sort_key(&payload);
+        let matches = payload_router_check_match(*sorted, payload_key, payload_block.invert);
+        let rec_dir = rec_dir.rem_euclid(4);
+        let current_rotation = self.buildings[source_index].rotation.rem_euclid(4);
+        let mut candidate_accepts = [false; 4];
+        if !matches {
+            for rotation in 0..4 {
+                candidate_accepts[rotation as usize] = self.payload_router_candidate_accepts(
+                    content,
+                    source_index,
+                    payload_block,
+                    &payload,
+                    rotation,
+                );
+            }
+        }
+        let next_rotation = payload_router_pick_next_rotation(
+            current_rotation,
+            rec_dir,
+            matches,
+            sorted.is_some(),
+            candidate_accepts,
+        );
+
+        if let Some(GameRuntimePayloadBlockState::Router {
+            matches: state_matches,
+            ..
+        }) = self.payload_runtime_states.get_mut(&tile_pos)
+        {
+            *state_matches = matches;
+        }
+
+        if next_rotation != current_rotation {
+            self.buildings[source_index].set_rotation(next_rotation);
+            true
+        } else {
+            false
+        }
+    }
+
     fn transfer_payload_output_to_front(
         &mut self,
         content: &ContentLoader,
@@ -4836,7 +4994,7 @@ impl GameRuntime {
         let mut pending_payload_moves = Vec::new();
 
         for index in 0..self.buildings.len() {
-            let (tile_pos, block_id, enabled, rotation) = {
+            let (tile_pos, block_id, enabled) = {
                 let building = &mut self.buildings[index];
                 let can_overdrive = content
                     .block(building.block.id)
@@ -4844,12 +5002,7 @@ impl GameRuntime {
                     .unwrap_or(false);
                 building.advance_update_timing(frame_delta, can_overdrive);
                 report.visited_buildings += 1;
-                (
-                    building.tile_pos,
-                    building.block.id,
-                    building.enabled,
-                    building.rotation,
-                )
+                (building.tile_pos, building.block.id, building.enabled)
             };
 
             if !enabled {
@@ -4859,11 +5012,19 @@ impl GameRuntime {
             let Some(BlockDef::Payload(payload_block)) = content.block(block_id) else {
                 continue;
             };
-            if payload_block.kind != PayloadBlockKind::PayloadConveyor {
+            if !matches!(
+                payload_block.kind,
+                PayloadBlockKind::PayloadConveyor | PayloadBlockKind::PayloadRouter
+            ) {
                 continue;
             }
             report.conveyor_candidates += 1;
 
+            if payload_block.kind == PayloadBlockKind::PayloadRouter {
+                self.pick_owned_payload_router_next_rotation(content, index, payload_block);
+            }
+
+            let rotation = self.buildings[index].rotation;
             let trns = payload_block.base.size / 2 + 1;
             let (dx, dy) = autotiler_direction(rotation);
             let target_tile_pos = self
@@ -4924,6 +5085,8 @@ impl GameRuntime {
                 report.attempted_moves += 1;
                 if let Some(target_tile_pos) = target_tile_pos {
                     pending_payload_moves.push((tile_pos, target_tile_pos));
+                } else if payload_block.kind == PayloadBlockKind::PayloadRouter {
+                    self.pick_owned_payload_router_next_rotation(content, index, payload_block);
                 }
             }
         }
@@ -4931,6 +5094,22 @@ impl GameRuntime {
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
             if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
                 report.transferred_payloads += 1;
+            } else if let Some(source_index) = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == source_tile_pos)
+            {
+                if let Some(BlockDef::Payload(payload_block)) =
+                    content.block(self.buildings[source_index].block.id)
+                {
+                    if payload_block.kind == PayloadBlockKind::PayloadRouter {
+                        self.pick_owned_payload_router_next_rotation(
+                            content,
+                            source_index,
+                            payload_block,
+                        );
+                    }
+                }
             }
         }
 
@@ -9739,6 +9918,154 @@ mod tests {
             panic!("payload void should receive loader output");
         };
         assert_eq!(*block, content.block_by_name("router").unwrap().base().id);
+    }
+
+    #[test]
+    fn game_runtime_payload_router_sends_matching_payload_to_recorded_direction() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let carried_block = content.block_by_name("router").unwrap();
+        let router_tile = point2_pack(4, 4);
+        let trns = router_def.base().size / 2 + 1;
+        let void_center_x = 4 + trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(void_center_x, 4);
+        let mut router_building =
+            BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+        router_building.set_rotation(1);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(12, 10);
+        runtime.add_building(router_building);
+        runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            router_tile,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState {
+                    item: Some(base_only_build_payload_ref(&content, "router")),
+                    step: 0,
+                    step_accepted: 0,
+                    ..PayloadConveyorState::default()
+                },
+                sorted: Some(PayloadSortKey {
+                    content_type: ContentType::Block.ordinal() as i8,
+                    id: carried_block.base().id,
+                }),
+                rec_dir: 0,
+                matches: false,
+                smooth_rot: 90.0,
+                control_time: -1.0,
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+
+        let report = runtime
+            .advance_owned_payload_conveyors(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.conveyor_candidates, 1);
+        assert_eq!(report.attempted_moves, 1);
+        assert_eq!(report.transferred_payloads, 1);
+        assert_eq!(runtime.buildings[0].rotation, 0);
+        let Some(GameRuntimePayloadBlockState::Router {
+            conveyor, matches, ..
+        }) = runtime.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert!(conveyor.item.is_none());
+        assert!(*matches);
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == carried_block.base().id
+        ));
+    }
+
+    #[test]
+    fn game_runtime_payload_router_skips_recorded_direction_for_unmatched_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let carried_block = content.block_by_name("router").unwrap();
+        let sorted_block = content.block_by_name("door").unwrap();
+        let router_tile = point2_pack(4, 4);
+        let trns = router_def.base().size / 2 + 1;
+        let void_center_y = 4 + trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(4, void_center_y);
+        let mut router_building =
+            BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+        router_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 12);
+        runtime.add_building(router_building);
+        runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            router_tile,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState {
+                    item: Some(base_only_build_payload_ref(&content, "router")),
+                    step: 0,
+                    step_accepted: 0,
+                    ..PayloadConveyorState::default()
+                },
+                sorted: Some(PayloadSortKey {
+                    content_type: ContentType::Block.ordinal() as i8,
+                    id: sorted_block.base().id,
+                }),
+                rec_dir: 0,
+                matches: true,
+                smooth_rot: 0.0,
+                control_time: -1.0,
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+
+        let report = runtime
+            .advance_owned_payload_conveyors(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.conveyor_candidates, 1);
+        assert_eq!(report.transferred_payloads, 1);
+        assert_eq!(runtime.buildings[0].rotation, 1);
+        let Some(GameRuntimePayloadBlockState::Router {
+            conveyor, matches, ..
+        }) = runtime.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert!(conveyor.item.is_none());
+        assert!(!*matches);
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == carried_block.base().id
+        ));
     }
 
     #[test]
