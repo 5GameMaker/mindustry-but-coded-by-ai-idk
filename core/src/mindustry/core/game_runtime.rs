@@ -38,6 +38,7 @@ use crate::mindustry::{
     net::NetworkPlayerSyncData,
     r#type::{PayloadSeq, WeatherState},
     vars::TILE_SIZE,
+    world::block::Block,
     world::blocks::campaign::{
         read_accelerator_state, read_landing_pad_state, read_launch_pad_state,
         write_accelerator_state, write_landing_pad_state, write_launch_pad_state, AcceleratorState,
@@ -134,7 +135,7 @@ use crate::mindustry::{
         write_heater_generator_state, write_impact_reactor_state, write_light_block_state,
         write_nuclear_reactor_state, write_power_generator_state, write_variable_reactor_state,
         HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
-        PowerGeneratorState, VariableReactorState,
+        PowerGeneratorState, PowerGraphNode, PowerGraphRuntime, VariableReactorState,
     },
     world::blocks::production::{
         item_incinerator_accept_item, read_beam_drill_state, read_burst_drill_state,
@@ -2058,6 +2059,8 @@ pub struct GameRuntime {
     pub effect_timer_store: EffectBlockTimerStateStore,
     pub payload_runtime_states: BTreeMap<i32, GameRuntimePayloadBlockState>,
     pub power_runtime_states: BTreeMap<i32, GameRuntimePowerBlockState>,
+    pub power_graphs: Vec<PowerGraphRuntime>,
+    pub power_graph_memberships: BTreeMap<i32, usize>,
     pub production_runtime_states: BTreeMap<i32, GameRuntimeProductionBlockState>,
     pub crafting_runtime_states: BTreeMap<i32, GameRuntimeCraftingBlockState>,
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
@@ -2117,6 +2120,8 @@ impl GameRuntime {
             effect_timer_store: EffectBlockTimerStateStore::new(),
             payload_runtime_states: BTreeMap::new(),
             power_runtime_states: BTreeMap::new(),
+            power_graphs: Vec::new(),
+            power_graph_memberships: BTreeMap::new(),
             production_runtime_states: BTreeMap::new(),
             crafting_runtime_states: BTreeMap::new(),
             distribution_runtime_states: BTreeMap::new(),
@@ -3522,7 +3527,21 @@ impl GameRuntime {
             return None;
         }
 
-        let removed = self.buildings.remove(index);
+        let mut removed = self.buildings.remove(index);
+        if let Some(removed_links) = removed.power_graph_removed_links() {
+            for link in removed_links {
+                if let Some(other) = self
+                    .buildings
+                    .iter_mut()
+                    .find(|building| building.tile_pos == link)
+                {
+                    if let Some(power) = other.power.as_mut() {
+                        power.links.retain(|linked| *linked != removed.tile_pos);
+                        power.init = false;
+                    }
+                }
+            }
+        }
         self.unregister_core_building(&removed);
         self.clear_world_refs_for_building(&removed);
         self.effect_runtime_store.remove(removed.tile_pos);
@@ -3754,7 +3773,365 @@ impl GameRuntime {
             total += proximity.len();
             building.proximity = proximity;
         }
+        self.refresh_owned_power_graphs();
         total
+    }
+
+    pub fn refresh_owned_power_graphs(&mut self) -> usize {
+        self.rebuild_owned_power_graphs_from_proximity(None, 1.0)
+    }
+
+    pub fn refresh_owned_power_graphs_with_content(&mut self, content: &ContentLoader) -> usize {
+        self.rebuild_owned_power_graphs_from_proximity(Some(content), 1.0)
+    }
+
+    pub fn advance_owned_power_graphs(&mut self, content: &ContentLoader, delta: f32) -> usize {
+        let graph_count = self.rebuild_owned_power_graphs_from_proximity(Some(content), delta);
+        let mut status_updates = Vec::new();
+
+        for graph in &mut self.power_graphs {
+            graph.update_with_delta(delta);
+            status_updates.extend(
+                graph
+                    .consumer_nodes
+                    .iter()
+                    .zip(graph.consumers.iter())
+                    .map(|(node, consumer)| (*node, consumer.status)),
+            );
+            status_updates.extend(
+                graph
+                    .battery_nodes
+                    .iter()
+                    .zip(graph.batteries.iter())
+                    .map(|(node, battery)| (*node, battery.status)),
+            );
+        }
+
+        self.apply_owned_power_graph_statuses(status_updates);
+        graph_count
+    }
+
+    pub fn after_owned_building_picked_up_power(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+    ) -> bool {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return false;
+        };
+        let buffered = self.owned_power_node_buffered(Some(content), index);
+        if !self.buildings[index].after_picked_up_power(buffered) {
+            return false;
+        }
+        self.refresh_owned_building_proximity();
+        self.refresh_owned_power_graphs_with_content(content);
+        true
+    }
+
+    fn rebuild_owned_power_graphs_from_proximity(
+        &mut self,
+        content: Option<&ContentLoader>,
+        delta: f32,
+    ) -> usize {
+        let nodes: Vec<_> = (0..self.buildings.len())
+            .map(|index| self.owned_power_graph_node(content, index, delta))
+            .collect();
+        let connections: Vec<_> = (0..self.buildings.len())
+            .map(|index| self.owned_power_connection_indices(content, index))
+            .collect();
+
+        self.power_graphs.clear();
+        self.power_graph_memberships.clear();
+        for building in &mut self.buildings {
+            if let Some(power) = building.power.as_mut() {
+                power.init = false;
+            }
+        }
+
+        let mut visited = vec![false; self.buildings.len()];
+        for start in 0..self.buildings.len() {
+            if nodes[start].is_none() || visited[start] {
+                continue;
+            }
+
+            let graph_index = self.power_graphs.len();
+            let mut graph = PowerGraphRuntime::new();
+            let mut stack = vec![start];
+            visited[start] = true;
+
+            while let Some(index) = stack.pop() {
+                let Some(node) = nodes[index] else {
+                    continue;
+                };
+                graph.add_node(node);
+                self.power_graph_memberships.insert(node.id, graph_index);
+                if let Some(power) = self.buildings[index].power.as_mut() {
+                    power.init = true;
+                }
+
+                for next in &connections[index] {
+                    if nodes[*next].is_some() && !visited[*next] {
+                        visited[*next] = true;
+                        stack.push(*next);
+                    }
+                }
+            }
+
+            self.power_graphs.push(graph);
+        }
+
+        self.power_graphs.len()
+    }
+
+    fn owned_power_graph_node(
+        &self,
+        content: Option<&ContentLoader>,
+        index: usize,
+        delta: f32,
+    ) -> Option<PowerGraphNode> {
+        let building = self.buildings.get(index)?;
+        let block = content.and_then(|content| content.block(building.block.id));
+        let production = self.owned_power_node_production(block, building);
+        let (requested_power, usage, capacity, buffered) =
+            Self::owned_power_node_consumption(block, &building.block);
+        building.power_graph_node(
+            production,
+            requested_power,
+            usage,
+            delta.max(0.0),
+            capacity,
+            buffered,
+        )
+    }
+
+    fn owned_power_connection_indices(
+        &self,
+        content: Option<&ContentLoader>,
+        index: usize,
+    ) -> Vec<usize> {
+        let Some(building) = self.buildings.get(index) else {
+            return Vec::new();
+        };
+        let Some(power) = building.power.as_ref() else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::new();
+        for other_ref in &building.proximity {
+            if power.links.contains(&other_ref.tile_pos) {
+                continue;
+            }
+            let Some(other_index) = self
+                .buildings
+                .iter()
+                .position(|other| other.tile_pos == other_ref.tile_pos)
+            else {
+                continue;
+            };
+            if self.owned_power_proximity_connection_valid(content, index, other_index)
+                && !out.contains(&other_index)
+            {
+                out.push(other_index);
+            }
+        }
+
+        for link in &power.links {
+            let Some(other_index) = self
+                .buildings
+                .iter()
+                .position(|other| other.tile_pos == *link)
+            else {
+                continue;
+            };
+            if self.owned_power_link_connection_valid(index, other_index)
+                && !out.contains(&other_index)
+            {
+                out.push(other_index);
+            }
+        }
+
+        out
+    }
+
+    fn owned_power_link_connection_valid(&self, index: usize, other_index: usize) -> bool {
+        if index == other_index {
+            return false;
+        }
+        let Some(building) = self.buildings.get(index) else {
+            return false;
+        };
+        let Some(other) = self.buildings.get(other_index) else {
+            return false;
+        };
+        building.power.is_some() && other.power.is_some() && building.team == other.team
+    }
+
+    fn owned_power_proximity_connection_valid(
+        &self,
+        content: Option<&ContentLoader>,
+        index: usize,
+        other_index: usize,
+    ) -> bool {
+        if !self.owned_power_link_connection_valid(index, other_index) {
+            return false;
+        }
+        let building = &self.buildings[index];
+        let other = &self.buildings[other_index];
+        let both_unpowered_consumers = building.block.consumes_power
+            && other.block.consumes_power
+            && !building.block.outputs_power
+            && !other.block.outputs_power
+            && !building.block.conductive_power
+            && !other.block.conductive_power;
+        if both_unpowered_consumers {
+            return false;
+        }
+        Self::owned_building_conducts_power_to(content, building)
+            && Self::owned_building_conducts_power_to(content, other)
+    }
+
+    fn owned_building_conducts_power_to(
+        content: Option<&ContentLoader>,
+        building: &BuildingComp,
+    ) -> bool {
+        !matches!(
+            content.and_then(|content| content.block(building.block.id)),
+            Some(BlockDef::Power(power)) if power.insulated
+        )
+    }
+
+    fn owned_power_node_buffered(&self, content: Option<&ContentLoader>, index: usize) -> bool {
+        let Some(building) = self.buildings.get(index) else {
+            return false;
+        };
+        let block = content.and_then(|content| content.block(building.block.id));
+        let (_, _, capacity, buffered) = Self::owned_power_node_consumption(block, &building.block);
+        buffered || capacity > 0.0
+    }
+
+    fn owned_power_node_production(
+        &self,
+        block: Option<&BlockDef>,
+        building: &BuildingComp,
+    ) -> f32 {
+        let production = match block {
+            Some(BlockDef::Power(power)) => {
+                power.power_production * self.owned_power_generation_efficiency(building)
+            }
+            Some(BlockDef::Sandbox(sandbox))
+                if sandbox.kind == SandboxBlockKind::PowerSource
+                    && building.block.outputs_power =>
+            {
+                sandbox.power_production
+            }
+            _ => 0.0,
+        };
+        if production.is_finite() {
+            production.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    fn owned_power_generation_efficiency(&self, building: &BuildingComp) -> f32 {
+        let efficiency = match self.power_runtime_states.get(&building.tile_pos) {
+            Some(GameRuntimePowerBlockState::Generator(state)) => state.production_efficiency,
+            Some(GameRuntimePowerBlockState::NuclearReactor(state)) => {
+                state.generator.production_efficiency
+            }
+            Some(GameRuntimePowerBlockState::ImpactReactor(state)) => {
+                if state.warmup > 0.0 {
+                    state.warmup.powf(5.0)
+                } else {
+                    state.generator.production_efficiency
+                }
+            }
+            Some(GameRuntimePowerBlockState::VariableReactor(state)) => {
+                if state.warmup > 0.0 {
+                    state.warmup
+                } else {
+                    state.generator.production_efficiency
+                }
+            }
+            Some(GameRuntimePowerBlockState::HeaterGenerator(state)) => {
+                state.generator.production_efficiency
+            }
+            Some(GameRuntimePowerBlockState::Light(_)) | None => building.efficiency,
+        };
+        if efficiency.is_finite() {
+            efficiency.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    fn owned_power_node_consumption(
+        block: Option<&BlockDef>,
+        base: &Block,
+    ) -> (f32, f32, f32, bool) {
+        let (consume_power, capacity) = match block {
+            Some(BlockDef::Production(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Turret(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Crafting(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::DefenseWall(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Effect(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Distribution(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Liquid(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Power(block)) => (block.consume_power, block.buffered_power),
+            Some(BlockDef::UnitFactory(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::UnitReconstructor(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::UnitAssembler(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::UnitAssemblerModule(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::UnitRepairTower(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::PayloadMassDriver(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::PayloadDeconstructor(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::PayloadConstructor(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::PayloadLoader(block)) => {
+                (block.consume_power.max(block.base_power_use), 0.0)
+            }
+            Some(BlockDef::Sandbox(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Light(block)) => (block.consume_power, 0.0),
+            Some(BlockDef::Campaign(block)) => (block.consume_power, 0.0),
+            _ => (0.0, 0.0),
+        };
+        let requested = if base.consumes_power && consume_power.is_finite() {
+            consume_power.max(0.0)
+        } else {
+            0.0
+        };
+        let capacity = if capacity.is_finite() {
+            capacity.max(0.0)
+        } else {
+            0.0
+        };
+        (requested, requested, capacity, capacity > 0.0)
+    }
+
+    fn apply_owned_power_graph_statuses(&mut self, status_updates: Vec<(i32, f32)>) -> usize {
+        let mut updated = 0;
+        for (tile_pos, status) in status_updates {
+            let Some(building) = self
+                .buildings
+                .iter_mut()
+                .find(|building| building.tile_pos == tile_pos)
+            else {
+                continue;
+            };
+            let Some(power) = building.power.as_mut() else {
+                continue;
+            };
+            power.status = if status.is_finite() {
+                status.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            updated += 1;
+        }
+        updated
     }
 
     pub fn refresh_owned_storage_core_links(&mut self, content: &ContentLoader) -> usize {
@@ -4305,6 +4682,7 @@ impl GameRuntime {
 
         report.disabled_buildings = self.refresh_owned_building_update_permissions(content);
         report.proximity_links = self.refresh_owned_building_proximity();
+        self.refresh_owned_power_graphs_with_content(content);
         self.refresh_owned_storage_core_links(content);
         self.state.world.clear_load_events();
         report
@@ -5656,6 +6034,8 @@ impl GameRuntime {
         self.effect_timer_store.clear();
         self.payload_runtime_states.clear();
         self.power_runtime_states.clear();
+        self.power_graphs.clear();
+        self.power_graph_memberships.clear();
         self.production_runtime_states.clear();
         self.crafting_runtime_states.clear();
         self.distribution_runtime_states.clear();
@@ -13575,6 +13955,7 @@ impl GameRuntime {
         )?;
 
         self.refresh_owned_building_update_permissions(content);
+        self.advance_owned_power_graphs(content, frame.delta);
 
         for building in self.buildings.iter_mut() {
             let can_overdrive = content
@@ -13622,6 +14003,7 @@ impl GameRuntime {
 
         self.refresh_owned_building_update_permissions(content);
         self.refresh_owned_storage_core_links(content);
+        self.advance_owned_power_graphs(content, frame.delta);
 
         for building in self.buildings.iter_mut() {
             let can_overdrive = content
@@ -16172,6 +16554,77 @@ mod tests {
             .find(|building| building.tile_pos == large_pos)
             .unwrap();
         assert!(large.proximity.is_empty());
+    }
+
+    #[test]
+    fn game_runtime_rebuilds_power_graphs_from_owned_building_proximity() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let solar_def = content.block_by_name("solar-panel").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let solar_pos = point2_pack(10, 10);
+        let mender_pos = point2_pack(11, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            solar_pos,
+            solar_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            mender_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(runtime.power_graphs.len(), 1);
+        assert_eq!(runtime.power_graph_memberships.get(&solar_pos), Some(&0));
+        assert_eq!(runtime.power_graph_memberships.get(&mender_pos), Some(&0));
+        assert_eq!(runtime.power_graphs[0].all.len(), 2);
+
+        assert_eq!(runtime.advance_owned_power_graphs(&content, 1.0), 1);
+        assert_eq!(runtime.power_graphs[0].producer_nodes, vec![solar_pos]);
+        assert_eq!(runtime.power_graphs[0].consumer_nodes, vec![mender_pos]);
+
+        let mender = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == mender_pos)
+            .unwrap();
+        let status = mender.power.as_ref().unwrap().status;
+        assert!((status - 0.4).abs() < 0.0001);
+    }
+
+    #[test]
+    fn game_runtime_power_remove_clears_links_and_rebuilds_graph_membership() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let left_pos = point2_pack(4, 4);
+        let right_pos = point2_pack(20, 20);
+
+        let mut left = BuildingComp::new(left_pos, node_def.base().clone(), TeamId(1));
+        left.power.as_mut().unwrap().links.push(right_pos);
+        let mut right = BuildingComp::new(right_pos, node_def.base().clone(), TeamId(1));
+        right.power.as_mut().unwrap().links.push(left_pos);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(left);
+        runtime.add_building(right);
+        runtime.refresh_owned_power_graphs_with_content(&content);
+
+        assert_eq!(runtime.power_graphs.len(), 1);
+        assert_eq!(runtime.power_graphs[0].all.len(), 2);
+
+        let removed = runtime.remove_building_by_tile_pos(left_pos).unwrap();
+        assert!(removed.power.as_ref().unwrap().links.is_empty());
+        let remaining = runtime.buildings().first().unwrap();
+        assert_eq!(remaining.tile_pos, right_pos);
+        assert!(remaining.power.as_ref().unwrap().links.is_empty());
+        assert_eq!(runtime.power_graphs.len(), 1);
+        assert_eq!(runtime.power_graphs[0].all, vec![right_pos]);
+        assert!(!runtime.power_graph_memberships.contains_key(&left_pos));
+        assert_eq!(runtime.power_graph_memberships.get(&right_pos), Some(&0));
     }
 
     #[test]

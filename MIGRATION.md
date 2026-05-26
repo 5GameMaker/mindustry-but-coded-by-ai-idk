@@ -2612,6 +2612,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：GameRuntime 还未把 proximity 链、linked building 反向清理和 `PowerGraphRuntime::remove_with_connections(...)` 串成真实 world/building 主流程。
 
+### 12.58 GameRuntime power graph owner 与 building/proximity 主链路
+
+- 2026-05-27：把上一节 `BuildingComp` power lifecycle helper 接入 `GameRuntime` 的真实 owned building/proximity/tick 主链路，避免 power graph 继续作为孤立算法模块存在。
+- Java 依据：
+  - `BuildingComp.onProximityAdded()` 调 `updatePowerGraph()`；
+  - `BuildingComp.powerGraphRemoved()` 在移除前清 graph，并从 linked building 反向删 link；
+  - `BuildingComp.getPowerConnections(...)` 合并同队 proximity power building 与 `PowerModule.links`；
+  - `PowerGraph.update()` 每帧更新 consumer/battery `power.status`。
+- Rust 新增/变化：
+  - `GameRuntime` 新增 `power_graphs: Vec<PowerGraphRuntime>` 与 `power_graph_memberships: BTreeMap<i32, usize>`，作为 runtime 级 power graph owner；
+  - `refresh_owned_building_proximity()` 收尾自动重建 owned power graph membership；
+  - `remove_building_at_index(...)` 先调用 `BuildingComp::power_graph_removed_links()`，并从 linked building 反向移除被删 building 的 link；
+  - 新增 `refresh_owned_power_graphs_with_content(...)` / `advance_owned_power_graphs(...)`，按 `BuildingComp::power_graph_node(...)` 物化 node，并把 `PowerGraphRuntime::update_with_delta(...)` 后的 consumer/battery status 回写到真实 `BuildingComp.power.status`；
+  - `advance_owned_effect_blocks(...)` 与 `advance_owned_runtime_blocks(...)` 在 update permission 后进入 power graph update phase；
+  - `load_network_map_with_buildings(...)` 在 proximity 刷新后用 content-aware power spec 重新 materialize graph；
+  - `after_owned_building_picked_up_power(...)` 为后续真实 pickup 流程提供 GameRuntime 级入口。
+- 测试：
+  - `game_runtime_rebuilds_power_graphs_from_owned_building_proximity`
+  - `game_runtime_power_remove_clears_links_and_rebuilds_graph_membership`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_rebuilds_power_graphs_from_owned_building_proximity`
+  - `cargo test -p mindustry-core game_runtime_power_remove_clears_links_and_rebuilds_graph_membership`
+  - `cargo test -p mindustry-core power_graph`
+  - `cargo test -p mindustry-core game_runtime_refreshes_owned_building_proximity_like_java_edges`
+  - `cargo check --workspace`
+- 注意：本轮额外跑了 `cargo test -p mindustry-core`，当前仍有 2 个既有 core storage state 断言失败（`storage_capacity` 被 runtime refresh 为 `4000`，测试期望默认 `0`）：`game_runtime_exports_core_storage_state_tail_in_network_map_snapshot`、`game_runtime_loads_core_storage_state_from_network_map_building_payload`。该失败与本轮 power graph 接线无直接交叉，后续应单独确认 core storage load 后是否应保留 wire 默认值还是立即刷新真实容量。
+- 仍未完成：当前 `GameRuntime` 先采用粗粒度重建 graph，尚未把 Java 增量 `PowerGraph.addGraph/remove_with_connections` 的分支拆图作为默认路径；`PowerNode` autolink/UI config、diode 方向传输、动态 `ConsumePower.requestedPower(...)`、完整 generator 燃料/热/液体消耗与 `Groups.powerGraph` 实体调度仍需继续迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
