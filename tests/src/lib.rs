@@ -690,10 +690,15 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
 
 #[test]
 fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
-    use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::core::{
+        game_runtime::GameRuntimeDistributionBlockState, GameRuntimeNetworkContext,
+    };
     use mindustry_core::mindustry::entities::comp::BuildingComp;
     use mindustry_core::mindustry::io::TeamId;
     use mindustry_core::mindustry::net::BlockSnapshotCallPacket;
+    use mindustry_core::mindustry::world::blocks::distribution::{
+        write_conveyor_state, ConveyorItemState, ConveyorState,
+    };
     use mindustry_core::mindustry::world::point2_pack;
     use mindustry_server::ServerLauncher;
     use std::thread;
@@ -706,17 +711,25 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
         port.to_string(),
     ]);
     server.runtime.state.world.resize(8, 8);
-    let router_base = server
+    let conveyor_base = server
         .content_loader
-        .block_by_name("router")
-        .expect("base content should include router")
+        .block_by_name("conveyor")
+        .expect("base content should include conveyor")
         .base()
         .clone();
-    let router_tile = point2_pack(2, 2);
-    let router_id = router_base.id;
+    let conveyor_tile = point2_pack(2, 2);
+    let conveyor_id = conveyor_base.id;
+    let copper_id = server
+        .content_loader
+        .item_by_name("copper")
+        .expect("base content should include copper")
+        .base
+        .mappable
+        .base
+        .id;
     server.runtime.add_building(BuildingComp::new(
-        router_tile,
-        router_base.clone(),
+        conveyor_tile,
+        conveyor_base.clone(),
         TeamId(6),
     ));
     server.init();
@@ -737,19 +750,27 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
             .last_connect_confirm_connection_id
             .expect("server should receive connect confirm before block snapshot")
     };
-    let mut synced_router = BuildingComp::new(router_tile, router_base, TeamId(6));
-    synced_router.health = 31.0;
-    synced_router.set_rotation(3);
+    let mut synced_conveyor = BuildingComp::new(conveyor_tile, conveyor_base, TeamId(6));
+    synced_conveyor.health = 31.0;
+    synced_conveyor.set_rotation(3);
+    let conveyor_state = ConveyorState {
+        items: vec![ConveyorItemState {
+            item: copper_id,
+            x: 0.25,
+            y: 0.5,
+        }],
+    };
     let mut block_sync_bytes = Vec::new();
-    synced_router
+    synced_conveyor
         .write_base(&mut block_sync_bytes, false)
         .unwrap();
+    write_conveyor_state(&mut block_sync_bytes, &conveyor_state).unwrap();
     let snapshot = BlockSnapshotCallPacket {
         amount: 1,
         data: {
             let mut data = Vec::new();
-            data.extend_from_slice(&router_tile.to_be_bytes());
-            data.extend_from_slice(&router_id.to_be_bytes());
+            data.extend_from_slice(&conveyor_tile.to_be_bytes());
+            data.extend_from_slice(&conveyor_id.to_be_bytes());
             data.extend_from_slice(&block_sync_bytes);
             data
         },
@@ -806,8 +827,8 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
             .as_ref()
             .expect("block snapshot should materialize into lightweight mirror");
         assert_eq!(mirror.records.len(), 1);
-        assert_eq!(mirror.records[0].tile_pos, router_tile);
-        assert_eq!(mirror.records[0].block_id, router_id);
+        assert_eq!(mirror.records[0].tile_pos, conveyor_tile);
+        assert_eq!(mirror.records[0].block_id, conveyor_id);
         assert_eq!(mirror.records[0].sync_bytes, block_sync_bytes);
         assert!(mirror.parse_error.is_none());
         assert!(state.last_server_snapshot_at.is_some());
@@ -815,18 +836,27 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
     let runtime_record = desktop
         .runtime
         .client_block_snapshot_records
-        .get(&router_tile)
+        .get(&conveyor_tile)
         .expect("real block snapshot should apply to client runtime sidecar");
-    assert_eq!(runtime_record.block_id, router_id);
+    assert_eq!(runtime_record.block_id, conveyor_id);
     assert_eq!(runtime_record.sync_bytes, block_sync_bytes);
     let runtime_building = desktop
         .runtime
         .buildings()
         .iter()
-        .find(|building| building.tile_pos == router_tile)
-        .expect("router building should remain materialized");
+        .find(|building| building.tile_pos == conveyor_tile)
+        .expect("conveyor building should remain materialized");
     assert_eq!(runtime_building.health, 31.0);
     assert_eq!(runtime_building.rotation, 3);
+    let Some(GameRuntimeDistributionBlockState::Conveyor(applied_conveyor)) = desktop
+        .runtime
+        .distribution_runtime_states
+        .get(&conveyor_tile)
+    else {
+        panic!("real block snapshot should apply conveyor child state to runtime");
+    };
+    assert_eq!(applied_conveyor.items.len(), 1);
+    assert_eq!(applied_conveyor.items[0].item, copper_id);
     assert_eq!(
         desktop.runtime.network_context,
         GameRuntimeNetworkContext::client()

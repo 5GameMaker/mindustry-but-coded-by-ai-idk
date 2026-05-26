@@ -1352,3 +1352,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续接入 `Router` / `Junction` / `ItemBridge` / `Sorter` / `Unloader` 的 distribution tail。
   2. 为真实联机 smoke 构造 conveyor snapshot，验证 server→desktop 后 `distribution_runtime_states` 被更新。
   3. 继续保持未知 tail 只保留 remaining bytes，不误解析。
+
+---
+
+## 37. 最新闭环记录：真实联机 Conveyor BlockSnapshot child tail smoke
+
+- 目标：把 conveyor child-tail 回放从 core 单测提升到真实 `ServerLauncher -> ArcNetProvider -> DesktopLauncher` 联机链路。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 测试变化：
+  - `real_server_desktop_block_snapshot_updates_net_client_after_world_stream` 从 router base-only snapshot 改为 conveyor snapshot；
+  - server world stream 先携带真实 conveyor building；
+  - snapshot bytes 由 `BuildingComp::write_base(...) + write_conveyor_state(...)` 构造；
+  - desktop 端断言：
+    - `NetClient.last_block_snapshot_mirror` header 与 sync bytes 正确；
+    - `GameRuntime.client_block_snapshot_records` 保存 raw bytes；
+    - `GameRuntime.buildings()` 中 building health/rotation 被更新；
+    - `GameRuntime.distribution_runtime_states` 中 materialize 出 `ConveyorState`，包含 copper item。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续给更多 distribution child tail 做真实联机 smoke。
+  2. 把 `apply_client_block_snapshot_child_tail(...)` 从 conveyor 专用扩展到可复用 dispatcher。
+  3. 后续接 Java `TurretBuild.readSync` 时注意保留 rotation/reload 的 override 语义。

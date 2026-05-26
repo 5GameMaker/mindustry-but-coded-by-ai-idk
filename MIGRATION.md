@@ -1831,3 +1831,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
 - 仍未完成：Router/Bridge/Duct/Sorter/Unloader 等 distribution 子类、storage/payload/turret 等 family 的 child tail 仍需逐类接入；当前不会把未知 tail 误消费。
+
+### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
+
+- 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
+- 测试现在断言：
+  - `NetClient` 仍能解析 Java-like `tile_pos/block_id/sync_bytes`；
+  - `desktop.runtime.client_block_snapshot_records` 保留完整 sync bytes；
+  - `desktop.runtime.buildings()` 中对应 conveyor 的 health/rotation 被 `read_base` 更新；
+  - `desktop.runtime.distribution_runtime_states` 中对应 tile 生成 `GameRuntimeDistributionBlockState::Conveyor`，并恢复 conveyor item。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：真实联机 child tail 目前只覆盖 conveyor；其他 distribution/payload/storage/turret family 仍需后续扩展。
