@@ -87,7 +87,8 @@ use crate::mindustry::{
         payload_block_handle_payload, payload_block_move_in, payload_block_move_out_step,
         payload_conveyor_accept_payload, payload_conveyor_cur_step,
         payload_conveyor_handle_payload, payload_conveyor_should_attempt_move,
-        payload_conveyor_update_timing, payload_loader_accept_payload,
+        payload_conveyor_update_timing, payload_deconstructor_accept_payload,
+        payload_deconstructor_update_progress, payload_loader_accept_payload,
         payload_loader_charge_battery, payload_loader_liquid_flow, payload_loader_should_export,
         payload_ref_sort_key, payload_router_check_match, payload_router_logic_control,
         payload_router_pick_next_rotation, payload_source_clear_config,
@@ -949,6 +950,14 @@ fn scaled_block_requirements(
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct GameRuntimePayloadDeconstructionPlan {
+    item_ids: Vec<ContentId>,
+    amounts: Vec<i32>,
+    payload_size: f32,
+    build_time: f32,
+}
+
 fn building_has_items(building: &BuildingComp, requirements: &[(ContentId, i32)]) -> bool {
     if requirements.is_empty() {
         return true;
@@ -1395,6 +1404,20 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub unloaded_liquid_events: usize,
     pub drained_batteries: usize,
     pub destroyed_instant_payloads: usize,
+    pub invalid_payloads: usize,
+    pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimePayloadDeconstructorFrameReport {
+    pub visited_buildings: usize,
+    pub deconstructor_candidates: usize,
+    pub updated_deconstructors: usize,
+    pub moved_in_payloads: usize,
+    pub started_deconstructions: usize,
+    pub progressed_deconstructions: usize,
+    pub finished_deconstructions: usize,
+    pub produced_items: usize,
     pub invalid_payloads: usize,
     pub missing_runtime_states: usize,
 }
@@ -3857,6 +3880,176 @@ impl GameRuntime {
         Some(report)
     }
 
+    pub fn advance_owned_payload_deconstructors(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimePayloadDeconstructorFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+
+        self.refresh_owned_building_update_permissions(content);
+
+        let frame_delta = advanced.delta_ticks as f32;
+        let mut report = GameRuntimePayloadDeconstructorFrameReport::default();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, enabled, efficiency, rotdeg, time_scale) = {
+                let building = &mut self.buildings[index];
+                let can_overdrive = content
+                    .block(building.block.id)
+                    .map(BlockDef::can_overdrive)
+                    .unwrap_or(false);
+                building.advance_update_timing(frame_delta, can_overdrive);
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.enabled,
+                    building.efficiency,
+                    building.rotdeg(),
+                    building.time_scale,
+                )
+            };
+
+            if !enabled {
+                continue;
+            }
+
+            let Some(BlockDef::PayloadDeconstructor(deconstructor_def)) = content.block(block_id)
+            else {
+                continue;
+            };
+            report.deconstructor_candidates += 1;
+
+            let Some(GameRuntimePayloadBlockState::Deconstructor {
+                common,
+                deconstructor,
+            }) = self.payload_runtime_states.get_mut(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            deconstructor.has_payload = common.payload.is_some();
+            deconstructor.has_deconstructing = deconstructor.deconstructing.is_some();
+            if deconstructor.deconstructing.is_none() {
+                deconstructor.progress = 0.0;
+            }
+            common.pay_rotation = Self::payload_deconstructor_pay_rotation_step(
+                common.pay_rotation,
+                deconstructor_def.payload_rotate_speed * frame_delta * time_scale,
+            );
+
+            if let Some(payload) = deconstructor.deconstructing.as_ref() {
+                let Some(plan) = Self::payload_ref_deconstruction_plan(content, payload) else {
+                    report.invalid_payloads += 1;
+                    report.updated_deconstructors += 1;
+                    continue;
+                };
+                if plan.payload_size > deconstructor_def.max_payload_size {
+                    report.invalid_payloads += 1;
+                    report.updated_deconstructors += 1;
+                    continue;
+                }
+
+                if deconstructor
+                    .accum
+                    .as_ref()
+                    .map(|accum| accum.len() != plan.amounts.len())
+                    .unwrap_or(true)
+                {
+                    deconstructor.accum = Some(vec![0.0; plan.amounts.len()]);
+                }
+
+                let item_capacity = self.buildings[index].block.item_capacity;
+                let Some(items) = self.buildings[index].items.as_mut() else {
+                    report.invalid_payloads += 1;
+                    report.updated_deconstructors += 1;
+                    continue;
+                };
+                let mut items_total = items.total();
+                let mut draw_time = 0.0;
+                let before_progress = deconstructor.progress;
+                let step = payload_deconstructor_update_progress(
+                    &mut deconstructor.progress,
+                    &mut draw_time,
+                    deconstructor
+                        .accum
+                        .as_mut()
+                        .expect("deconstructor accum should be initialized"),
+                    &plan.amounts,
+                    &mut items_total,
+                    item_capacity,
+                    frame_delta * time_scale * efficiency,
+                    deconstructor_def.deconstruct_speed,
+                    plan.build_time,
+                    self.state.rules.build_cost_multiplier,
+                );
+
+                for (item_id, amount) in plan.item_ids.iter().zip(step.items_added.iter()) {
+                    if *amount > 0 {
+                        items.add(*item_id, *amount);
+                        report.produced_items += *amount as usize;
+                    }
+                }
+
+                if step.can_progress && (deconstructor.progress - before_progress).abs() > 0.0001 {
+                    report.progressed_deconstructions += 1;
+                }
+                if step.finished {
+                    deconstructor.deconstructing = None;
+                    deconstructor.accum = None;
+                    deconstructor.has_deconstructing = false;
+                    report.finished_deconstructions += 1;
+                }
+            } else if common.payload.is_some() {
+                let arrived = payload_block_move_in(
+                    common,
+                    false,
+                    deconstructor_def.rotate,
+                    rotdeg,
+                    deconstructor_def.payload_speed,
+                    deconstructor_def.payload_rotate_speed,
+                    frame_delta * time_scale,
+                );
+
+                if arrived {
+                    let Some(payload) = common.payload.as_ref() else {
+                        report.updated_deconstructors += 1;
+                        continue;
+                    };
+                    let Some(plan) = Self::payload_ref_deconstruction_plan(content, payload) else {
+                        report.invalid_payloads += 1;
+                        report.updated_deconstructors += 1;
+                        continue;
+                    };
+                    if plan.payload_size <= deconstructor_def.max_payload_size {
+                        deconstructor.accum = Some(vec![0.0; plan.amounts.len()]);
+                        deconstructor.deconstructing = common.payload.take();
+                        deconstructor.progress = 0.0;
+                        deconstructor.has_payload = false;
+                        deconstructor.has_deconstructing = true;
+                        report.moved_in_payloads += 1;
+                        report.started_deconstructions += 1;
+                    } else {
+                        report.invalid_payloads += 1;
+                    }
+                }
+            }
+
+            deconstructor.has_payload = common.payload.is_some();
+            deconstructor.has_deconstructing = deconstructor.deconstructing.is_some();
+            report.updated_deconstructors += 1;
+        }
+
+        Some(report)
+    }
+
     pub fn advance_owned_payload_loaders(
         &mut self,
         content: &ContentLoader,
@@ -4395,6 +4588,78 @@ impl GameRuntime {
         true
     }
 
+    fn payload_ref_deconstruction_plan(
+        content: &ContentLoader,
+        payload: &PayloadRef,
+    ) -> Option<GameRuntimePayloadDeconstructionPlan> {
+        match payload {
+            PayloadRef::Block { block, .. } => {
+                let block_def = content.block(*block)?;
+                let requirements: Vec<_> = block_def
+                    .requirements()
+                    .iter()
+                    .filter(|requirement| requirement.amount > 0)
+                    .collect();
+                if requirements.is_empty() {
+                    return None;
+                }
+                let build_time = block_def.effective_build_time(content.items());
+                if !build_time.is_finite() || build_time <= 0.0 {
+                    return None;
+                }
+                Some(GameRuntimePayloadDeconstructionPlan {
+                    item_ids: requirements
+                        .iter()
+                        .map(|requirement| requirement.item)
+                        .collect(),
+                    amounts: requirements
+                        .iter()
+                        .map(|requirement| requirement.amount)
+                        .collect(),
+                    payload_size: block_def.base().size as f32,
+                    build_time,
+                })
+            }
+            PayloadRef::Unit { .. } => None,
+        }
+    }
+
+    fn payload_deconstructor_accepts_payload_ref(
+        content: &ContentLoader,
+        max_payload_size: f32,
+        common: &PayloadBlockBuildState,
+        deconstructor: &PayloadDeconstructorState,
+        payload: &PayloadRef,
+    ) -> bool {
+        let Some(plan) = Self::payload_ref_deconstruction_plan(content, payload) else {
+            return false;
+        };
+        let state = PayloadDeconstructorState {
+            has_payload: common.payload.is_some(),
+            has_deconstructing: deconstructor.deconstructing.is_some(),
+            ..PayloadDeconstructorState::default()
+        };
+        payload_deconstructor_accept_payload(
+            &state,
+            plan.amounts.len(),
+            plan.payload_size,
+            max_payload_size,
+        )
+    }
+
+    fn payload_deconstructor_pay_rotation_step(current: f32, delta: f32) -> f32 {
+        let target = 90.0_f32;
+        let mut angle_delta = (target - current).rem_euclid(360.0);
+        if angle_delta > 180.0 {
+            angle_delta -= 360.0;
+        }
+        if angle_delta.abs() <= delta {
+            target.rem_euclid(360.0)
+        } else {
+            (current + angle_delta.signum() * delta).rem_euclid(360.0)
+        }
+    }
+
     fn payload_block_unloadable(block: &BlockDef) -> bool {
         match block {
             BlockDef::Distribution(distribution) => distribution.unloadable,
@@ -4557,6 +4822,21 @@ impl GameRuntime {
                 common.payload.is_none(),
                 payload,
             ),
+            (
+                Some(BlockDef::PayloadDeconstructor(deconstructor_block)),
+                Some(GameRuntimePayloadBlockState::Deconstructor {
+                    common,
+                    deconstructor,
+                }),
+            ) if deconstructor_block.accepts_payload => {
+                Self::payload_deconstructor_accepts_payload_ref(
+                    content,
+                    deconstructor_block.max_payload_size,
+                    common,
+                    deconstructor,
+                    payload,
+                )
+            }
             _ => false,
         }
     }
@@ -4648,6 +4928,9 @@ impl GameRuntime {
             Loader {
                 max_block_size: i32,
             },
+            Deconstructor {
+                max_payload_size: f32,
+            },
         }
 
         if source_tile_pos == target_tile_pos {
@@ -4696,6 +4979,13 @@ impl GameRuntime {
             Some(BlockDef::PayloadLoader(loader_block)) if loader_block.accepts_payload => {
                 TargetKind::Loader {
                     max_block_size: loader_block.max_block_size,
+                }
+            }
+            Some(BlockDef::PayloadDeconstructor(deconstructor_block))
+                if deconstructor_block.accepts_payload =>
+            {
+                TargetKind::Deconstructor {
+                    max_payload_size: deconstructor_block.max_payload_size,
                 }
             }
             _ => return false,
@@ -4757,6 +5047,19 @@ impl GameRuntime {
                 content,
                 max_block_size,
                 common.payload.is_none(),
+                source_payload,
+            ),
+            (
+                TargetKind::Deconstructor { max_payload_size },
+                Some(GameRuntimePayloadBlockState::Deconstructor {
+                    common,
+                    deconstructor,
+                }),
+            ) => Self::payload_deconstructor_accepts_payload_ref(
+                content,
+                max_payload_size,
+                common,
+                deconstructor,
                 source_payload,
             ),
             _ => false,
@@ -4859,6 +5162,40 @@ impl GameRuntime {
                 );
                 loader.exporting = false;
                 loader.has_payload = true;
+                true
+            }
+            (
+                TargetKind::Deconstructor { max_payload_size },
+                Some(GameRuntimePayloadBlockState::Deconstructor {
+                    common,
+                    deconstructor,
+                }),
+            ) if common.payload.is_none()
+                && payload
+                    .as_ref()
+                    .map(|payload| {
+                        Self::payload_deconstructor_accepts_payload_ref(
+                            content,
+                            max_payload_size,
+                            common,
+                            deconstructor,
+                            payload,
+                        )
+                    })
+                    .unwrap_or(false) =>
+            {
+                payload_block_handle_payload(
+                    common,
+                    payload.take().expect("payload should be present"),
+                    target_pos,
+                    source_pos,
+                    payload_rotation,
+                    target_size,
+                    TILE_SIZE as f32,
+                );
+                deconstructor.accum = None;
+                deconstructor.has_payload = true;
+                deconstructor.has_deconstructing = deconstructor.deconstructing.is_some();
                 true
             }
             (
@@ -4988,6 +5325,15 @@ impl GameRuntime {
                         if common.payload.is_none() {
                             common.payload = Some(payload);
                             loader.has_payload = true;
+                        }
+                    }
+                    Some(GameRuntimePayloadBlockState::Deconstructor {
+                        common,
+                        deconstructor,
+                    }) => {
+                        if common.payload.is_none() {
+                            common.payload = Some(payload);
+                            deconstructor.has_payload = true;
                         }
                     }
                     Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) => {
@@ -11270,6 +11616,198 @@ mod tests {
                 deconstructor
             })
         );
+    }
+
+    #[test]
+    fn game_runtime_payload_deconstructor_moves_in_payload_and_starts_deconstruction() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let deconstructor_def = content.block_by_name("small-deconstructor").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let tile_pos = point2_pack(3, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            deconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Deconstructor {
+                common: PayloadBlockBuildState {
+                    payload: Some(base_only_build_payload_ref(&content, "router")),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                deconstructor: PayloadDeconstructorState::default(),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_deconstructors(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.deconstructor_candidates, 1);
+        assert_eq!(report.updated_deconstructors, 1);
+        assert_eq!(report.moved_in_payloads, 1);
+        assert_eq!(report.started_deconstructions, 1);
+        assert_eq!(report.invalid_payloads, 0);
+
+        let Some(GameRuntimePayloadBlockState::Deconstructor {
+            common,
+            deconstructor,
+        }) = runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload deconstructor sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(matches!(
+            deconstructor.deconstructing.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_def.base().id
+        ));
+        assert_eq!(
+            deconstructor.accum.as_ref().map(Vec::len),
+            Some(router_def.requirements().len())
+        );
+        assert_eq!(deconstructor.progress, 0.0);
+        assert!(!deconstructor.has_payload);
+        assert!(deconstructor.has_deconstructing);
+    }
+
+    #[test]
+    fn game_runtime_payload_deconstructor_accepts_front_block_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let deconstructor_def = content.block_by_name("small-deconstructor").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let source_tile = point2_pack(3, 4);
+        let trns = source_def.base().size / 2 + 1;
+        let deconstructor_center_x = 3 + trns + (deconstructor_def.base().size - 1) / 2;
+        let deconstructor_tile = point2_pack(deconstructor_center_x, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, source_def.base().clone(), TeamId(6));
+        source_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 8);
+        runtime.add_building(source_building);
+        runtime.add_building(BuildingComp::new(
+            deconstructor_tile,
+            deconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState {
+                    payload: Some(base_only_build_payload_ref(&content, "router")),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                source: PayloadSourceState {
+                    has_payload: true,
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            deconstructor_tile,
+            GameRuntimePayloadBlockState::Deconstructor {
+                common: PayloadBlockBuildState::default(),
+                deconstructor: PayloadDeconstructorState::default(),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_sources(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.transferred_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!source.has_payload);
+
+        let Some(GameRuntimePayloadBlockState::Deconstructor {
+            common,
+            deconstructor,
+        }) = runtime.payload_runtime_states.get(&deconstructor_tile)
+        else {
+            panic!("payload deconstructor sidecar should remain present");
+        };
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_def.base().id
+        ));
+        assert!(deconstructor.has_payload);
+        assert!(deconstructor.deconstructing.is_none());
+        assert!(deconstructor.accum.is_none());
+    }
+
+    #[test]
+    fn game_runtime_payload_deconstructor_progresses_and_outputs_items() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let deconstructor_def = content.block_by_name("small-deconstructor").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let tile_pos = point2_pack(3, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            deconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            tile_pos,
+            GameRuntimePayloadBlockState::Deconstructor {
+                common: PayloadBlockBuildState::default(),
+                deconstructor: PayloadDeconstructorState {
+                    accum: Some(vec![0.0; router_def.requirements().len()]),
+                    has_deconstructing: true,
+                    deconstructing: Some(base_only_build_payload_ref(&content, "router")),
+                    ..PayloadDeconstructorState::default()
+                },
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_deconstructors(&content, 10.0)
+            .unwrap();
+
+        assert_eq!(report.deconstructor_candidates, 1);
+        assert_eq!(report.progressed_deconstructions, 1);
+        assert_eq!(report.finished_deconstructions, 1);
+        assert!(report.produced_items > 0);
+        assert_eq!(report.invalid_payloads, 0);
+
+        for requirement in router_def.requirements() {
+            assert_eq!(
+                runtime.buildings[0]
+                    .items
+                    .as_ref()
+                    .unwrap()
+                    .get(requirement.item),
+                requirement.amount
+            );
+        }
+        let Some(GameRuntimePayloadBlockState::Deconstructor { deconstructor, .. }) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload deconstructor sidecar should remain present");
+        };
+        assert!(deconstructor.deconstructing.is_none());
+        assert!(deconstructor.accum.is_none());
+        assert!(!deconstructor.has_deconstructing);
     }
 
     #[test]
