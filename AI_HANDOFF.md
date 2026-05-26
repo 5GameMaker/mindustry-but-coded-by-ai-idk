@@ -1380,3 +1380,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续给更多 distribution child tail 做真实联机 smoke。
   2. 把 `apply_client_block_snapshot_child_tail(...)` 从 conveyor 专用扩展到可复用 dispatcher。
   3. 后续接 Java `TurretBuild.readSync` 时注意保留 rotation/reload 的 override 语义。
+
+---
+
+## 38. 最新闭环记录：Core BlockSnapshot child tail 回放
+
+- 目标：在 block snapshot child-tail dispatcher 中接入 storage/core family 的首个 Java tail：`CoreBuild.commandPos`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - `client_block_snapshot_revision(...)` 现在为 `StorageBlockKind::Core` 返回 revision `1`；
+  - `apply_client_block_snapshot_child_tail(...)` 先尝试 distribution dispatcher，若 unsupported 再尝试 storage dispatcher；
+  - core tail 通过既有 `read_storage_runtime_state_from_building_payload(...)` / `read_core_state(...)` 写入 `storage_runtime_states`。
+- 验证：
+  - `game_runtime_applies_client_core_snapshot_child_tail_with_content` 用 `write_base + write_core_state(command_pos)` 构造真实 sync bytes；
+  - 断言 `GameRuntimeStorageBlockState::Core.command_pos` 被恢复。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续把 payload/turret/logic family 接入 child-tail dispatcher。
+  2. 对 storage/core 做真实联机 smoke，验证 commandPos 通过 `BlockSnapshotCallPacket` 到 desktop runtime。
+  3. 后续不要把 core linked storage/shared item module 简化为单独普通 storage。

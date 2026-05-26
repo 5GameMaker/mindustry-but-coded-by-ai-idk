@@ -1832,6 +1832,17 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：Router/Bridge/Duct/Sorter/Unloader 等 distribution 子类虽然进入 dispatcher，但仍需逐类真实联机/字段回归；storage/payload/turret 等 family 的 child tail 仍需接入；当前不会把未知 family tail 误消费。
 
+### 12.24 Core BlockSnapshot child tail 回放
+
+- 2026-05-26：`client_block_snapshot_revision(...)` 新增 `StorageBlockKind::Core -> revision 1`，`apply_client_block_snapshot_child_tail(...)` 在 distribution dispatcher 未匹配时继续尝试 `read_storage_runtime_state_from_building_payload(...)`。
+- 当前 core snapshot child tail 可按 Java `CoreBuild.version()==1` 消费 `CoreBlock.write(...)` 的 `commandPos`，写入 `GameRuntime.storage_runtime_states`。
+- 新增 `game_runtime_applies_client_core_snapshot_child_tail_with_content`，用 `BuildingComp::write_base(...) + write_core_state(...)` 构造 snapshot bytes，断言 `GameRuntimeStorageBlockState::Core.command_pos` 恢复。
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：StorageBlock 普通 storage 无 child tail；core 的 shared item module / linked storage 语义仍依赖后续更完整 world/team runtime 同步。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

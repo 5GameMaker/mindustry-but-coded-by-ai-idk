@@ -945,6 +945,7 @@ fn client_block_snapshot_revision(block: &BlockDef) -> u8 {
             DistributionBlockKind::Sorter => 2,
             _ => 0,
         },
+        BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core => 1,
         _ => 0,
     }
 }
@@ -2153,11 +2154,12 @@ impl GameRuntime {
             return report;
         };
 
+        let revision = client_block_snapshot_revision(block);
         let mut read = tail;
         match self.read_distribution_runtime_state_from_building_payload(
             block,
             &self.buildings[building_index],
-            client_block_snapshot_revision(block),
+            revision,
             &mut read,
         ) {
             Ok(Some(state)) => {
@@ -2169,7 +2171,26 @@ impl GameRuntime {
             Ok(None) => {
                 report.block_remaining_sync_bytes = read.len();
             }
-            Err(_) => {
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                report.block_child_read_errors = 1;
+            }
+            Err(GameRuntimeBlockStateReadError::Unsupported) => {}
+        }
+        if report.block_child_records_applied > 0 || report.block_child_read_errors > 0 {
+            return report;
+        }
+
+        read = tail;
+        match self.read_storage_runtime_state_from_building_payload(block, revision, &mut read) {
+            Ok(Some(state)) => {
+                self.storage_runtime_states.insert(building_tile_pos, state);
+                report.block_child_records_applied = 1;
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Ok(None) | Err(GameRuntimeBlockStateReadError::Unsupported) => {
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Err(GameRuntimeBlockStateReadError::Parse) => {
                 report.block_child_read_errors = 1;
             }
         }
@@ -13232,6 +13253,44 @@ mod tests {
         };
         assert_eq!(applied.items.len(), 1);
         assert_eq!(applied.items[0].item, copper);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_core_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core = content
+            .block_by_name("core-shard")
+            .expect("base content should include core-shard")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(3, 3);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, core.clone(), TeamId(1)));
+
+        let mut synced_building = BuildingComp::new(tile_pos, core.clone(), TeamId(1));
+        synced_building.health = 55.0;
+        let core_state = CoreBuildState {
+            command_pos: Some(IoVec2::new(11.0, 22.0)),
+            ..CoreBuildState::default()
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_core_state(&mut sync_bytes, &core_state).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, core.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        let Some(GameRuntimeStorageBlockState::Core(applied)) =
+            runtime.storage_runtime_states.get(&tile_pos)
+        else {
+            panic!("core child tail should materialize into storage runtime state");
+        };
+        assert_eq!(applied.command_pos, core_state.command_pos);
     }
 
     #[test]
