@@ -334,6 +334,23 @@ pub fn overflow_duct_prefer_front(invert: bool) -> bool {
     !invert
 }
 
+pub fn overflow_duct_next_cdump(cdump: usize) -> usize {
+    if cdump == 0 {
+        2
+    } else {
+        0
+    }
+}
+
+pub fn overflow_duct_side_order(rotation: i32, cdump: usize) -> [i32; 2] {
+    let rotation = rotation.rem_euclid(4);
+    if cdump == 0 {
+        [(rotation - 1).rem_euclid(4), (rotation + 1).rem_euclid(4)]
+    } else {
+        [(rotation + 1).rem_euclid(4), (rotation - 1).rem_euclid(4)]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DuctRouterState {
     pub sort_item: Option<ContentId>,
@@ -1026,6 +1043,10 @@ mod tests {
         assert!(!duct_router_candidate_allowed(None, 4, 2, 0));
         assert!(overflow_duct_prefer_front(false));
         assert!(!overflow_duct_prefer_front(true));
+        assert_eq!(overflow_duct_next_cdump(0), 2);
+        assert_eq!(overflow_duct_next_cdump(2), 0);
+        assert_eq!(overflow_duct_side_order(0, 0), [3, 1]);
+        assert_eq!(overflow_duct_side_order(0, 2), [1, 3]);
 
         let state = DuctState {
             rec_dir: 3,

@@ -59,9 +59,10 @@ use crate::mindustry::{
         choose_side_route, conveyor_accept_item, directional_unloader_can_unload,
         directional_unloader_next_offset, duct_accept_item, duct_junction_accept_item,
         duct_router_accept_item, item_bridge_transport_iterations, item_bridge_warmup_step,
-        mass_driver_link_valid, overflow_gate_route, read_buffered_bridge_state,
-        read_conveyor_state, read_directional_unloader_state, read_duct_junction_state,
-        read_duct_router_state, read_duct_state, read_item_bridge_state, read_mass_driver_state,
+        mass_driver_link_valid, overflow_duct_next_cdump, overflow_duct_side_order,
+        overflow_gate_route, read_buffered_bridge_state, read_conveyor_state,
+        read_directional_unloader_state, read_duct_junction_state, read_duct_router_state,
+        read_duct_state, read_item_bridge_state, read_mass_driver_state,
         read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
         sorter_rejects_instant_three_chain, sorter_should_direct, stack_conveyor_accept_item,
         stack_conveyor_cooldown_step, stack_router_accept_item, stack_router_progress_step,
@@ -8399,6 +8400,10 @@ impl GameRuntime {
             };
             report.attempted_moves += 1;
             if self.dump_item_to_target(content, index, target_index, item_id) {
+                if duct_block.kind == DistributionBlockKind::OverflowDuct {
+                    self.buildings[index].cdump =
+                        overflow_duct_next_cdump(self.buildings[index].cdump);
+                }
                 self.clear_item_duct_current(tile_pos, duct_block.kind);
                 let threshold = 1.0 - 1.0 / speed;
                 let progress = self
@@ -8559,8 +8564,9 @@ impl GameRuntime {
         item_id: ContentId,
     ) -> Option<usize> {
         let rotation = self.buildings[duct_index].rotation;
+        let side_order = overflow_duct_side_order(rotation, self.buildings[duct_index].cdump);
         if duct_block.invert {
-            for dir in [(rotation - 1).rem_euclid(4), (rotation + 1).rem_euclid(4)] {
+            for dir in side_order {
                 if let Some(target_index) = self.neighbor_building_index(duct_index, dir) {
                     if self.dump_target_accepts_item(content, duct_index, target_index, item_id) {
                         return Some(target_index);
@@ -8577,7 +8583,7 @@ impl GameRuntime {
         if duct_block.invert {
             return None;
         }
-        for dir in [(rotation - 1).rem_euclid(4), (rotation + 1).rem_euclid(4)] {
+        for dir in side_order {
             if let Some(target_index) = self.neighbor_building_index(duct_index, dir) {
                 if self.dump_target_accepts_item(content, duct_index, target_index, item_id) {
                     return Some(target_index);
@@ -17957,6 +17963,57 @@ mod tests {
         };
         assert_eq!(router.current, None);
         assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_underflow_duct_alternates_side_outputs_with_cdump() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let underflow_def = content.block_by_name("underflow-duct").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let underflow_tile = point2_pack(5, 5);
+        let left_tile = point2_pack(5, 4);
+        let right_tile = point2_pack(5, 6);
+        let mut underflow_building =
+            BuildingComp::new(underflow_tile, underflow_def.base().clone(), TeamId(6));
+        underflow_building.set_rotation(0);
+        underflow_building.items.as_mut().unwrap().add(copper, 2);
+        let left_building = BuildingComp::new(left_tile, router_def.base().clone(), TeamId(6));
+        let right_building = BuildingComp::new(right_tile, router_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(12, 12);
+        runtime.add_building(underflow_building);
+        runtime.add_building(left_building);
+        runtime.add_building(right_building);
+        runtime.distribution_runtime_states.insert(
+            underflow_tile,
+            GameRuntimeDistributionBlockState::DuctRouter(DuctRouterState {
+                sort_item: None,
+                current: Some(copper),
+            }),
+        );
+
+        let first = runtime.advance_owned_item_ducts(&content, 1.0).unwrap();
+        assert_eq!(first.moved_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[0].cdump, 2);
+
+        let second = runtime.advance_owned_item_ducts(&content, 1.0).unwrap();
+        assert_eq!(second.moved_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[0].cdump, 0);
     }
 
     #[test]
