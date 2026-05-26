@@ -13612,6 +13612,149 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_item_duct_router_forwards_unloaded_item_to_real_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let duct_router_def = content.block_by_name("duct-router").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let duct_router_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let item_void_tile = point2_pack(
+            point2_x(duct_router_tile) as i32,
+            point2_y(duct_router_tile) as i32 + 1,
+        );
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let mut duct_router_building =
+            BuildingComp::new(duct_router_tile, duct_router_def.base().clone(), TeamId(6));
+        duct_router_building.set_rotation(2);
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(duct_router_building);
+        runtime.add_building(item_void_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert!(unload_report.dumped_items >= 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+
+        let duct_report = runtime.advance_owned_item_ducts(&content, 1.0).unwrap();
+        assert_eq!(duct_report.moved_items, 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        let Some(GameRuntimeDistributionBlockState::DuctRouter(router)) =
+            runtime.distribution_runtime_states.get(&duct_router_tile)
+        else {
+            panic!("duct-router sidecar should remain present");
+        };
+        assert_eq!(router.current, None);
+        assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_overflow_duct_forwards_unloaded_item_to_real_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let overflow_duct_def = content.block_by_name("overflow-duct").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let overflow_duct_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let item_void_tile = point2_pack(
+            point2_x(overflow_duct_tile) as i32,
+            point2_y(overflow_duct_tile) as i32 + 1,
+        );
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let mut overflow_duct_building = BuildingComp::new(
+            overflow_duct_tile,
+            overflow_duct_def.base().clone(),
+            TeamId(6),
+        );
+        overflow_duct_building.set_rotation(2);
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(overflow_duct_building);
+        runtime.add_building(item_void_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert!(unload_report.dumped_items >= 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+
+        let duct_report = runtime.advance_owned_item_ducts(&content, 1.0).unwrap();
+        assert_eq!(duct_report.moved_items, 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        let Some(GameRuntimeDistributionBlockState::DuctRouter(router)) =
+            runtime.distribution_runtime_states.get(&overflow_duct_tile)
+        else {
+            panic!("overflow-duct sidecar should remain present");
+        };
+        assert_eq!(router.current, None);
+        assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
     fn game_runtime_payload_unloader_offloads_items_through_sorter_to_item_void() {
         let content = ContentLoader::create_base_content().unwrap();
         let unloader_def = content.block_by_name("payload-unloader").unwrap();
