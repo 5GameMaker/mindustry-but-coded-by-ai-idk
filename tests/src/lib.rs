@@ -508,7 +508,7 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
 #[test]
 fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
-    use mindustry_core::mindustry::entities::{FIRE_CLASS_ID, PLAYER_CLASS_ID};
+    use mindustry_core::mindustry::entities::{FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID};
     use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
         EntitySnapshotCallPacket, HiddenSnapshotCallPacket, NetworkPlayerSyncData,
@@ -692,6 +692,23 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     };
     let mut fire_bytes = Vec::new();
     type_io::write_fire_sync(&mut fire_bytes, &fire_sync).unwrap();
+    let oil_id = server
+        .content_loader
+        .liquid_by_name("oil")
+        .expect("base content should include oil")
+        .base
+        .mappable
+        .base
+        .id;
+    let puddle_sync = type_io::PuddleSyncWire {
+        amount: 36.5,
+        liquid_id: Some(oil_id),
+        tile_pos: Some(mindustry_core::mindustry::world::point2_pack(4, 5)),
+        x: 32.0,
+        y: 40.0,
+    };
+    let mut puddle_bytes = Vec::new();
+    type_io::write_puddle_sync(&mut puddle_bytes, &puddle_sync).unwrap();
     let mut multi_first_bytes = Vec::new();
     type_io::write_unit_sync(
         &mut multi_first_bytes,
@@ -719,8 +736,11 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.extend_from_slice(&1006i32.to_be_bytes());
     multi_entity_data.push(FIRE_CLASS_ID);
     multi_entity_data.extend_from_slice(&fire_bytes);
+    multi_entity_data.extend_from_slice(&1007i32.to_be_bytes());
+    multi_entity_data.push(PUDDLE_CLASS_ID);
+    multi_entity_data.extend_from_slice(&puddle_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 4,
+        amount: 5,
         data: multi_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
@@ -775,6 +795,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .runtime
                 .client_fire_snapshot_entities
                 .contains_key(&1006)
+            && desktop
+                .runtime
+                .client_puddle_snapshot_entities
+                .contains_key(&1007)
         {
             break;
         }
@@ -911,6 +935,14 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             .map(|record| (record.type_id, record.sync_bytes.as_slice())),
         Some((FIRE_CLASS_ID, fire_bytes.as_slice()))
     );
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1007)
+            .map(|record| (record.type_id, record.sync_bytes.as_slice())),
+        Some((PUDDLE_CLASS_ID, puddle_bytes.as_slice()))
+    );
     let fire = desktop
         .runtime
         .client_fire_snapshot_entities
@@ -923,6 +955,18 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     assert_eq!(fire.tile.unwrap().x, 2);
     assert_eq!(fire.tile.unwrap().y, 3);
     assert!(fire.registered);
+    let puddle = desktop
+        .runtime
+        .client_puddle_snapshot_entities
+        .get(&1007)
+        .expect("real mixed entity snapshot should materialize typed puddle runtime");
+    assert_eq!(puddle.amount, 36.5);
+    assert_eq!(puddle.x, 32.0);
+    assert_eq!(puddle.y, 40.0);
+    assert_eq!(puddle.tile.unwrap().x, 4);
+    assert_eq!(puddle.tile.unwrap().y, 5);
+    assert_eq!(puddle.liquid.unwrap().flammability, 1.2);
+    assert!(puddle.registered);
     assert_eq!(
         desktop
             .runtime

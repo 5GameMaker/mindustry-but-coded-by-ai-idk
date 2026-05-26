@@ -32,11 +32,13 @@ pub enum EntityClassKind {
     Player,
     Unit,
     Fire,
+    Puddle,
     Other,
 }
 
 pub const PLAYER_CLASS_ID: u8 = 12;
 pub const FIRE_CLASS_ID: u8 = 10;
+pub const PUDDLE_CLASS_ID: u8 = 13;
 
 /// Java `annotations/src/main/resources/classids.properties` migrated into a
 /// Rust lookup table. This is the stable outer `entity.classId()` byte used by
@@ -144,7 +146,7 @@ pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.PuddleComp",
-        id: 13,
+        id: PUDDLE_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.WorldLabelComp",
@@ -260,6 +262,8 @@ pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
         Some(EntityClassKind::Player)
     } else if id == FIRE_CLASS_ID {
         Some(EntityClassKind::Fire)
+    } else if id == PUDDLE_CLASS_ID {
+        Some(EntityClassKind::Puddle)
     } else if name.contains('.') {
         Some(EntityClassKind::Other)
     } else {
@@ -447,6 +451,14 @@ mod tests {
         assert_eq!(
             entity_class_kind(FIRE_CLASS_ID),
             Some(EntityClassKind::Fire)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.PuddleComp"),
+            Some(PUDDLE_CLASS_ID)
+        );
+        assert_eq!(
+            entity_class_kind(PUDDLE_CLASS_ID),
+            Some(EntityClassKind::Puddle)
         );
         assert_eq!(entity_class_kind(7), Some(EntityClassKind::Other));
         assert_eq!(entity_class_kind(255), None);

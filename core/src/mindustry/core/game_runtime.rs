@@ -24,7 +24,8 @@ use crate::mindustry::{
     ctype::{ContentId, ContentType},
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
-        comp::{BuildingComp, BulletComp, FireComp, UnitComp},
+        comp::{BuildingComp, BulletComp, FireComp, PuddleComp, PuddleTile, UnitComp},
+        entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
     game::CoreInfo,
     io::{
@@ -1527,6 +1528,28 @@ fn read_client_unit_sync_exact(
     read.is_empty().then_some(sync)
 }
 
+fn read_client_fire_sync_exact(sync_bytes: &[u8]) -> Option<type_io::FireSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_fire_sync(&mut read).ok()?;
+    read.is_empty().then_some(sync)
+}
+
+fn read_client_puddle_sync_exact(sync_bytes: &[u8]) -> Option<type_io::PuddleSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_puddle_sync(&mut read).ok()?;
+    read.is_empty().then_some(sync)
+}
+
+fn read_client_player_sync_exact(sync_bytes: &[u8]) -> Option<NetworkPlayerSyncData> {
+    NetworkPlayerSyncData::read_exact_from(sync_bytes).ok()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntimeConstructBlockState {
     pub size: i32,
@@ -2017,6 +2040,7 @@ pub struct GameRuntime {
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
     pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
+    pub client_puddle_snapshot_entities: BTreeMap<i32, PuddleComp>,
     pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
 }
@@ -2069,6 +2093,7 @@ impl GameRuntime {
             client_entity_snapshot_records: BTreeMap::new(),
             client_fire_snapshot_entities: BTreeMap::new(),
             client_player_snapshot_entities: BTreeMap::new(),
+            client_puddle_snapshot_entities: BTreeMap::new(),
             client_unit_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
         }
@@ -2353,10 +2378,35 @@ impl GameRuntime {
     ) -> GameRuntimeClientSnapshotApplyReport {
         let mut report =
             self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes.clone());
-        if let Some(sync) = read_client_unit_sync_exact(content, &sync_bytes) {
-            if self.apply_client_unit_sync_wire(content, entity_id, &sync) {
-                report.entity_typed_records_applied = 1;
+        match entity_class_kind(type_id) {
+            Some(EntityClassKind::Player) => {
+                if let Some(sync) = read_client_player_sync_exact(&sync_bytes) {
+                    self.apply_client_player_snapshot_record(entity_id, sync);
+                    report.entity_typed_records_applied = 1;
+                }
             }
+            Some(EntityClassKind::Unit) => {
+                if let Some(sync) = read_client_unit_sync_exact(content, &sync_bytes) {
+                    if self.apply_client_unit_sync_wire(content, entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
+            Some(EntityClassKind::Fire) => {
+                if let Some(sync) = read_client_fire_sync_exact(&sync_bytes) {
+                    if self.apply_client_fire_sync_wire(entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
+            Some(EntityClassKind::Puddle) => {
+                if let Some(sync) = read_client_puddle_sync_exact(&sync_bytes) {
+                    if self.apply_client_puddle_sync_wire(content, entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
+            _ => {}
         }
         report
     }
@@ -2384,14 +2434,62 @@ impl GameRuntime {
 
             let sync_start = read;
             let before_len = sync_start.len();
-            let Ok(sync) = type_io::read_unit_sync(&mut read, content) else {
-                report.entity_parse_errors += 1;
-                return report;
+            let typed_applied = match entity_class_kind(type_id) {
+                Some(EntityClassKind::Player) => {
+                    let Ok(player_sync) = NetworkPlayerSyncData::read_from(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_player_snapshot_record(entity_id, player_sync);
+                    true
+                }
+                Some(EntityClassKind::Unit) => {
+                    let Ok(sync) = type_io::read_unit_sync(&mut read, content) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_unit_sync_wire(content, entity_id, &sync)
+                }
+                Some(EntityClassKind::Fire) => {
+                    let Ok(sync) = type_io::read_fire_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_fire_sync_wire(entity_id, &sync)
+                }
+                Some(EntityClassKind::Puddle) => {
+                    let Ok(sync) = type_io::read_puddle_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_puddle_sync_wire(content, entity_id, &sync)
+                }
+                _ => {
+                    report.entity_parse_errors += 1;
+                    return report;
+                }
             };
-            let consumed = before_len - read.len();
-            let sync_bytes = sync_start[..consumed].to_vec();
-            report.merge(self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes));
-            if self.apply_client_unit_sync_wire(content, entity_id, &sync) {
+            if typed_applied {
                 report.entity_typed_records_applied += 1;
             }
         }
@@ -2420,6 +2518,39 @@ impl GameRuntime {
             .entry(entity_id)
             .or_insert_with(|| FireComp::new(sync.x, sync.y, sync.lifetime));
         fire.apply_sync_wire(sync);
+        true
+    }
+
+    pub fn apply_client_puddle_sync_wire(
+        &mut self,
+        content: &ContentLoader,
+        entity_id: i32,
+        sync: &type_io::PuddleSyncWire,
+    ) -> bool {
+        let liquid = match sync.liquid_id {
+            Some(liquid_id) => {
+                let Some(liquid) = content.liquid(liquid_id) else {
+                    return false;
+                };
+                Some(PuddleLiquidInfo::from(liquid).to_component_liquid())
+            }
+            None => None,
+        };
+        let tile = sync.tile_pos.map(|tile_pos| PuddleTile {
+            x: point2_x(tile_pos) as i32,
+            y: point2_y(tile_pos) as i32,
+            build_present: self
+                .state
+                .world
+                .tile_pos(tile_pos)
+                .and_then(|tile| tile.build)
+                .is_some(),
+        });
+        let puddle = self
+            .client_puddle_snapshot_entities
+            .entry(entity_id)
+            .or_insert_with(|| PuddleComp::new(entity_id, sync.x, sync.y));
+        puddle.apply_sync_wire(sync, liquid, tile);
         true
     }
 
@@ -2478,6 +2609,9 @@ impl GameRuntime {
                 existing = true;
             }
             if self.client_fire_snapshot_entities.contains_key(id) {
+                existing = true;
+            }
+            if self.client_puddle_snapshot_entities.contains_key(id) {
                 existing = true;
             }
             if existing {
@@ -5276,6 +5410,7 @@ impl GameRuntime {
         self.client_entity_snapshot_records.clear();
         self.client_fire_snapshot_entities.clear();
         self.client_player_snapshot_entities.clear();
+        self.client_puddle_snapshot_entities.clear();
         self.client_unit_snapshot_entities.clear();
         self.client_hidden_entity_ids.clear();
     }
@@ -13265,7 +13400,7 @@ mod tests {
         content::blocks::{BulletKind, BulletSpec, PayloadTurretAmmo, TurretBlockData},
         core::GameStateState,
         ctype::{Content, ContentType},
-        entities::{units::BuildPlan, FIRE_CLASS_ID},
+        entities::{units::BuildPlan, FIRE_CLASS_ID, PUDDLE_CLASS_ID},
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
             Vec2 as IoVec2,
@@ -14470,6 +14605,59 @@ mod tests {
         assert!(fire.registered);
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7001]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let oil = content
+            .liquid_by_name("oil")
+            .expect("base content should include oil");
+        let sync = type_io::PuddleSyncWire {
+            amount: 36.5,
+            liquid_id: Some(oil.base.mappable.base.id),
+            tile_pos: Some(point2_pack(4, 5)),
+            x: 32.0,
+            y: 40.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_puddle_sync(&mut sync_bytes, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_record_with_content(
+            &content,
+            7002,
+            PUDDLE_CLASS_ID,
+            sync_bytes.clone(),
+        );
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&7002)
+            .expect("puddle snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, PUDDLE_CLASS_ID);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+
+        let puddle = runtime
+            .client_puddle_snapshot_entities
+            .get(&7002)
+            .expect("puddle sync should materialize typed runtime puddle");
+        assert_eq!(puddle.id, 7002);
+        assert_eq!(puddle.amount, 36.5);
+        assert_eq!(puddle.x, 32.0);
+        assert_eq!(puddle.y, 40.0);
+        assert_eq!(puddle.tile.unwrap().x, 4);
+        assert_eq!(puddle.tile.unwrap().y, 5);
+        assert!(!puddle.tile.unwrap().build_present);
+        assert_eq!(puddle.liquid.unwrap().flammability, oil.flammability);
+        assert_eq!(puddle.liquid.unwrap().viscosity, oil.viscosity);
+        assert!(puddle.registered);
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[7002]);
         assert_eq!(hidden.hidden_existing_entities, 1);
     }
 

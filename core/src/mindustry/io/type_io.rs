@@ -915,6 +915,15 @@ pub struct FireSyncWire {
     pub y: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PuddleSyncWire {
+    pub amount: f32,
+    pub liquid_id: Option<ContentId>,
+    pub tile_pos: Option<i32>,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitSyncWire {
     pub abilities: Vec<AbilityWire>,
@@ -1189,6 +1198,29 @@ pub fn read_fire_sync<R: Read>(read: &mut R) -> io::Result<FireSyncWire> {
         lifetime,
         tile_pos,
         time,
+        x,
+        y,
+    })
+}
+
+pub fn write_puddle_sync<W: Write>(write: &mut W, sync: &PuddleSyncWire) -> io::Result<()> {
+    write_f32(write, sync.amount)?;
+    write_content_id(write, ContentType::Liquid, sync.liquid_id)?;
+    write_tile_pos(write, sync.tile_pos)?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)
+}
+
+pub fn read_puddle_sync<R: Read>(read: &mut R) -> io::Result<PuddleSyncWire> {
+    let amount = read_f32(read)?;
+    let liquid_id = read_content_id(read)?;
+    let tile_pos = read_tile_pos(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(PuddleSyncWire {
+        amount,
+        liquid_id,
+        tile_pos,
         x,
         y,
     })
@@ -2902,6 +2934,41 @@ mod tests {
         assert_eq!(
             read_fire_sync(&mut bytes.as_slice()).unwrap(),
             sync_without_tile
+        );
+    }
+
+    #[test]
+    fn puddle_sync_wire_roundtrips_java_write_sync_shape() {
+        let sync = PuddleSyncWire {
+            amount: 42.5,
+            liquid_id: Some(2),
+            tile_pos: Some(point2_pack(7, 8)),
+            x: 56.0,
+            y: 64.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_puddle_sync(&mut bytes, &sync).unwrap();
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&sync.amount.to_be_bytes());
+        expected.extend_from_slice(&2i16.to_be_bytes());
+        expected.extend_from_slice(&point2_pack(7, 8).to_be_bytes());
+        expected.extend_from_slice(&sync.x.to_be_bytes());
+        expected.extend_from_slice(&sync.y.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(read_puddle_sync(&mut bytes.as_slice()).unwrap(), sync);
+
+        let sync_without_refs = PuddleSyncWire {
+            liquid_id: None,
+            tile_pos: None,
+            ..sync
+        };
+        bytes.clear();
+        write_puddle_sync(&mut bytes, &sync_without_refs).unwrap();
+        assert_eq!(
+            read_puddle_sync(&mut bytes.as_slice()).unwrap(),
+            sync_without_refs
         );
     }
 

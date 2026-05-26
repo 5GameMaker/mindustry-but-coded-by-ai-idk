@@ -117,23 +117,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 ## 4. 最近已完成并推送的提交
 
-最近已推送到 `main` 的提交包括：
+压缩上下文后不要依赖记忆里的旧提交号，优先在固定 Rust 工作路径执行：
 
-1. `b51d8af 保留联机地图尾部原始数据`
-2. `fc7798f 服务端发送运行时队伍计划`
-3. `6f94257 接入联机队伍建造计划`
-4. `1226e49 兼容载荷炮塔旧式弹药`
-5. `a115351 锁定逻辑处理器旧版读取`
-6. `bd17931 补齐载荷弹药炮塔状态读取`
-7. `9cceec3 接入单位载荷精确读取`
-8. `5d50757 支持无状态构造载荷读取`
-9. `1ac3c6e 区分嵌套载荷读取模式`
-10. `a309790 统计方块状态剩余字节`
+```powershell
+git -C 'D:/MDT/rust-mindustry' log -10 --oneline
+git -C 'D:/MDT/rust-mindustry' status --short
+```
+
+本轮开始前最近已推送到 `main` 的提交包括：
+
+1. `669806c 固定文档中的Rust工作路径`
+2. `58259bb 补充火焰实体快照联机验证`
+3. `b9c9231 接入火焰实体快照运行态`
+4. `696e903 按实体类型分类拆包`
+5. `5e48e9b 迁移实体类型编号基线`
+6. `8808169 补充玩家实体快照联机验证`
+7. `043424b 支持混合实体快照拆包`
+8. `685308e 接入玩家实体快照运行态`
+9. `f274ed8 固定上下文恢复路径常量`
+10. `eff4e53 支持实体快照多单位拆包`
 
 本轮开始前最后确认时：
 
 - 当前分支：`main`
-- 最新提交：`b51d8af 保留联机地图尾部原始数据`
+- 最新提交：`669806c 固定文档中的Rust工作路径`
 - `git status --short` 未显示已有未提交代码改动。
 
 ---
@@ -2033,6 +2040,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
-  1. 继续迁移 `PuddleComp` 或 `WeatherStateComp` 的 sync wire。
+  1. `PuddleComp` 已由第 60 节补上；继续迁移 `WeatherStateComp` 或 `EffectStateComp` 的 sync wire。
   2. 将 Fire typed sidecar 与 `Fires` 集合统一，避免长期双存储。
   3. 后续把真实 smoke 扩展到更多 entity class-id。
+
+---
+
+## 60. 最新闭环记录：PuddleComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 class-id `13` 的 Java `PuddleComp.writeSync/readSync` 从 opaque entity bytes 推进到 Rust typed runtime，并纳入真实 `ServerLauncher -> DesktopLauncher` mixed entity snapshot smoke。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.PuddleComp=13`；
+  - `annotations/src/main/resources/revisions/PuddleComp/1.json`：sync 字段顺序 `amount, liquid, tile, x, y`；
+  - `PuddleComp.afterSync()` 仅在 `liquid != null` 时注册到 `Puddles`。
+- Rust 主改动：
+  - `type_io::PuddleSyncWire` 与 `read_puddle_sync/write_puddle_sync`；
+  - `EntityClassKind::Puddle` 与 `PUDDLE_CLASS_ID`；
+  - `PuddleComp::apply_sync_wire(...)`；
+  - `GameRuntime.client_puddle_snapshot_entities` 与 `apply_client_puddle_sync_wire(...)`；
+  - `DesktopLauncher` mixed fallback 现在支持 Player + Unit + Fire + Puddle 分类拆包；
+  - 真实联机 smoke 的第三个 entity snapshot packet 现在为 `amount=5`，新增 `1007 + PUDDLE_CLASS_ID + PuddleSyncWire`。
+- 已跑：
+  - `cargo test -p mindustry-core puddle_sync --lib`
+  - `cargo test -p mindustry-core puddle_component_applies_sync_wire_and_registers_when_liquid_present --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 把 Puddle typed sidecar 与 `Puddles` tile-indexed collection 统一，避免长期双存储。
+  2. 继续迁移 `WeatherStateComp` / `EffectStateComp` / `BulletComp` 等 entity sync wire。
+  3. 继续收敛 `GameRuntime` 与 `DesktopLauncher` 的 entity snapshot dispatcher，减少重复分发逻辑。

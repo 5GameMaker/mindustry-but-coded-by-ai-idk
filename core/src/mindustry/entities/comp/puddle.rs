@@ -1,5 +1,10 @@
 //! Puddle component mirroring upstream `mindustry.entities.comp.PuddleComp`.
 
+use crate::mindustry::{
+    io::PuddleSyncWire,
+    world::{point2_x, point2_y},
+};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PuddleTile {
     pub x: i32,
@@ -166,6 +171,26 @@ impl PuddleComp {
             self.registered = true;
         }
     }
+
+    pub fn apply_sync_wire(
+        &mut self,
+        sync: &PuddleSyncWire,
+        liquid: Option<PuddleLiquid>,
+        tile: Option<PuddleTile>,
+    ) {
+        self.amount = sync.amount;
+        self.liquid = liquid;
+        self.tile = tile.or_else(|| {
+            sync.tile_pos.map(|tile_pos| PuddleTile {
+                x: point2_x(tile_pos) as i32,
+                y: point2_y(tile_pos) as i32,
+                build_present: false,
+            })
+        });
+        self.x = sync.x;
+        self.y = sync.y;
+        self.after_sync();
+    }
 }
 
 #[cfg(test)]
@@ -295,5 +320,50 @@ mod tests {
         assert!(!puddle.registered);
         puddle.after_sync();
         assert!(puddle.registered);
+    }
+
+    #[test]
+    fn puddle_component_applies_sync_wire_and_registers_when_liquid_present() {
+        let mut puddle = PuddleComp::new(9, 0.0, 0.0);
+        let sync = PuddleSyncWire {
+            amount: 24.0,
+            liquid_id: Some(2),
+            tile_pos: Some(crate::mindustry::world::point2_pack(5, 6)),
+            x: 40.0,
+            y: 48.0,
+        };
+        let tile = PuddleTile {
+            x: 5,
+            y: 6,
+            build_present: true,
+        };
+
+        puddle.apply_sync_wire(&sync, Some(liquid()), Some(tile));
+
+        assert_eq!(puddle.amount, 24.0);
+        assert_eq!(puddle.x, 40.0);
+        assert_eq!(puddle.y, 48.0);
+        assert_eq!(puddle.tile, Some(tile));
+        assert_eq!(puddle.liquid, Some(liquid()));
+        assert!(puddle.registered);
+
+        let mut null_liquid = PuddleComp::new(10, 0.0, 0.0);
+        null_liquid.apply_sync_wire(
+            &PuddleSyncWire {
+                liquid_id: None,
+                ..sync
+            },
+            None,
+            None,
+        );
+        assert_eq!(
+            null_liquid.tile,
+            Some(PuddleTile {
+                x: 5,
+                y: 6,
+                build_present: false,
+            })
+        );
+        assert!(!null_liquid.registered);
     }
 }

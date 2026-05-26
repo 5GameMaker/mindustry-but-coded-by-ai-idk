@@ -2232,7 +2232,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 ### 12.45 真实联机 Fire EntitySnapshot smoke
 
 - 2026-05-26：扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` mixed entity snapshot packet 现在包含 Fire record。
-- 第三个 entity snapshot packet 现在为 `amount=4`：
+- 第三个 entity snapshot packet 当时为 `amount=4`：
   - 本地 player `NetworkPlayerSyncData`；
   - `1004` dagger `UnitSyncWire`；
   - `1005` flare `UnitSyncWire`；
@@ -2245,7 +2245,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 已验证：
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
-- 仍未完成：真实 smoke 还未覆盖 Puddle/Weather/Effect/Bullet 等其他 entity class-id。
+- 仍未完成：Fire typed sidecar 尚未与 `Fires` 集合统一；Puddle 已由下一节继续补上，Weather/Effect/Bullet 等其他 entity class-id 仍待迁移。
+
+### 12.46 PuddleComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 2026-05-26：迁移 Java `PuddleComp.writeSync/readSync` 的当前 wire 形状并接入 single-record / mixed entity snapshot dispatcher。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.PuddleComp=13`；
+  - `annotations/src/main/resources/revisions/PuddleComp/1.json`：字段顺序 `amount, liquid, tile, x, y`；
+  - 生成的 `writeSync/readSync` 不写 revision；`afterSync()` 只有 `liquid != null` 时调用 `Puddles.register(self())`。
+- Rust 新增/变化：
+  - `type_io::PuddleSyncWire`；
+  - `type_io::write_puddle_sync(...)` / `read_puddle_sync(...)`；
+  - `EntityClassKind::Puddle` 与 `PUDDLE_CLASS_ID = 13`；
+  - `PuddleComp::apply_sync_wire(...)`：恢复 `amount/liquid/tile/x/y` 并保持 Java 的非空 liquid 注册语义；
+  - `GameRuntime.client_puddle_snapshot_entities`；
+  - `GameRuntime::apply_client_puddle_sync_wire(...)`，通过 `ContentLoader::liquid(...)` 把 wire liquid id 映射为 `PuddleLiquidInfo`/`PuddleLiquid`；
+  - hidden snapshot 对 typed puddle 计为 existing；
+  - `DesktopLauncher` 正常 single-record 与 mixed fallback 都能在 `EntityClassKind::Puddle` 下 materialize typed puddle。
+- 测试/真实 smoke：
+  - `puddle_sync_wire_roundtrips_java_write_sync_shape`
+  - `puddle_component_applies_sync_wire_and_registers_when_liquid_present`
+  - `game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime`
+  - 扩展 `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`，同 packet 现在覆盖 Player + Unit + Fire + Puddle；
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 mixed packet 现在为 `amount=5`，新增 `1007 + PUDDLE_CLASS_ID + PuddleSyncWire`，断言 raw sidecar 与 `runtime.client_puddle_snapshot_entities[1007]`。
+- 已验证：
+  - `cargo test -p mindustry-core puddle_sync --lib`
+  - `cargo test -p mindustry-core puddle_component_applies_sync_wire_and_registers_when_liquid_present --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：Puddle 目前落在 runtime typed sidecar，尚未与 `Puddles` tile-indexed collection 完全统一；`WeatherStateComp`、`EffectStateComp`、`BulletComp` 等其他 entity snapshot wire 仍待迁移。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

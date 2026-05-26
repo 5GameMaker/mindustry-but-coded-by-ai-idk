@@ -12,7 +12,8 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::io::{
-    read_fire_sync, read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
+    read_fire_sync, read_puddle_sync, read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks,
+    TeamId,
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
@@ -209,22 +210,24 @@ impl DesktopLauncher {
                 continue;
             }
             for record in &mirror.records {
-                report.merge(
-                    self.runtime
-                        .apply_client_entity_snapshot_record_with_content(
-                            &self.content_loader,
-                            record.entity_id,
-                            record.type_id,
-                            record.sync_bytes.clone(),
-                        ),
-                );
+                let record_report = self
+                    .runtime
+                    .apply_client_entity_snapshot_record_with_content(
+                        &self.content_loader,
+                        record.entity_id,
+                        record.type_id,
+                        record.sync_bytes.clone(),
+                    );
+                let runtime_typed_applied = record_report.entity_typed_records_applied > 0;
+                report.merge(record_report);
                 if record.type_id == PLAYER_CLASS_ID
                     && self
                         .apply_client_player_entity_snapshot(record.entity_id, &record.sync_bytes)
                 {
                     report.entity_typed_records_applied += 1;
                 }
-                if entity_class_kind(record.type_id) == Some(EntityClassKind::Fire)
+                if !runtime_typed_applied
+                    && entity_class_kind(record.type_id) == Some(EntityClassKind::Fire)
                     && self.apply_client_fire_entity_snapshot(record.entity_id, &record.sync_bytes)
                 {
                     report.entity_typed_records_applied += 1;
@@ -353,6 +356,21 @@ impl DesktopLauncher {
             }
 
             match entity_class_kind(type_id) {
+                Some(EntityClassKind::Player) => {
+                    let Ok(player_sync) = NetworkPlayerSyncData::read_from(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.runtime
+                        .apply_client_player_snapshot_record(entity_id, player_sync);
+                    report.entity_typed_records_applied += 1;
+                }
                 Some(EntityClassKind::Unit) => {
                     let Ok(_unit_sync) = read_unit_sync(&mut read, &self.content_loader) else {
                         report.entity_parse_errors += 1;
@@ -385,6 +403,25 @@ impl DesktopLauncher {
                         .runtime
                         .apply_client_fire_sync_wire(entity_id, &fire_sync)
                     {
+                        report.entity_typed_records_applied += 1;
+                    }
+                }
+                Some(EntityClassKind::Puddle) => {
+                    let Ok(puddle_sync) = read_puddle_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    if self.runtime.apply_client_puddle_sync_wire(
+                        &self.content_loader,
+                        entity_id,
+                        &puddle_sync,
+                    ) {
                         report.entity_typed_records_applied += 1;
                     }
                 }
@@ -606,7 +643,9 @@ mod tests {
         NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket,
     };
     use mindustry_core::mindustry::{
-        entities::{comp::BuildingComp, PlayerComp, FIRE_CLASS_ID, PLAYER_CLASS_ID},
+        entities::{
+            comp::BuildingComp, PlayerComp, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
+        },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
         io::{
@@ -1580,6 +1619,23 @@ mod tests {
         };
         let mut fire_bytes = Vec::new();
         type_io::write_fire_sync(&mut fire_bytes, &fire_sync).unwrap();
+        let oil_id = launcher
+            .content_loader
+            .liquid_by_name("oil")
+            .expect("base content should include oil")
+            .base
+            .mappable
+            .base
+            .id;
+        let puddle_sync = type_io::PuddleSyncWire {
+            amount: 36.5,
+            liquid_id: Some(oil_id),
+            tile_pos: Some(mindustry_core::mindustry::world::point2_pack(4, 5)),
+            x: 32.0,
+            y: 40.0,
+        };
+        let mut puddle_bytes = Vec::new();
+        type_io::write_puddle_sync(&mut puddle_bytes, &puddle_sync).unwrap();
 
         let mut data = Vec::new();
         data.extend_from_slice(&launcher.player.id.to_be_bytes());
@@ -1591,6 +1647,9 @@ mod tests {
         data.extend_from_slice(&9901i32.to_be_bytes());
         data.push(FIRE_CLASS_ID);
         data.extend_from_slice(&fire_bytes);
+        data.extend_from_slice(&9902i32.to_be_bytes());
+        data.push(PUDDLE_CLASS_ID);
+        data.extend_from_slice(&puddle_bytes);
 
         {
             let state = launcher.net_client.state();
@@ -1598,7 +1657,7 @@ mod tests {
             state
                 .entity_snapshot_mirrors
                 .push(ClientEntitySnapshotMirror {
-                    amount: 3,
+                    amount: 4,
                     data,
                     records: Vec::new(),
                     parse_error: Some(
@@ -1612,9 +1671,9 @@ mod tests {
 
         let report = launcher
             .last_client_snapshot_apply_report
-            .expect("mixed fallback should apply player, unit and fire records");
-        assert_eq!(report.entity_records_applied, 3);
-        assert_eq!(report.entity_typed_records_applied, 3);
+            .expect("mixed fallback should apply player, unit, fire and puddle records");
+        assert_eq!(report.entity_records_applied, 4);
+        assert_eq!(report.entity_typed_records_applied, 4);
         assert_eq!(report.entity_parse_errors, 0);
 
         assert_eq!(
@@ -1646,6 +1705,14 @@ mod tests {
                 .map(|record| record.sync_bytes.as_slice()),
             Some(fire_bytes.as_slice())
         );
+        assert_eq!(
+            launcher
+                .runtime
+                .client_entity_snapshot_records
+                .get(&9902)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(puddle_bytes.as_slice())
+        );
 
         let unit = launcher
             .runtime
@@ -1671,6 +1738,19 @@ mod tests {
         assert_eq!(fire.tile.unwrap().x, 2);
         assert_eq!(fire.tile.unwrap().y, 3);
         assert!(fire.registered);
+
+        let puddle = launcher
+            .runtime
+            .client_puddle_snapshot_entities
+            .get(&9902)
+            .expect("mixed fallback should materialize puddle record");
+        assert_eq!(puddle.amount, 36.5);
+        assert_eq!(puddle.x, 32.0);
+        assert_eq!(puddle.y, 40.0);
+        assert_eq!(puddle.tile.unwrap().x, 4);
+        assert_eq!(puddle.tile.unwrap().y, 5);
+        assert_eq!(puddle.liquid.unwrap().flammability, 1.2);
+        assert!(puddle.registered);
     }
 
     #[test]
