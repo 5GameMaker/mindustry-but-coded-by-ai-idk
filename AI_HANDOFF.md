@@ -1238,3 +1238,49 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 把 `ClientEntitySnapshotMirror` 按 `entity_id/type_id` 应用到 entity mirror collection。
   3. 按 Java 参考逐类补 `readSync/writeSync` 字段解析，而不是停留在 opaque bytes。
   4. 继续推进客户端输入、构建请求、单位控制回传与 Java↔Rust 联机 smoke。
+
+---
+
+## 34. 最新闭环记录：客户端 snapshot mirror 接入 GameRuntime sidecar
+
+- 目标：把 `NetClient` 已解析出的 block/entity/hidden snapshot mirror 接入真实 `DesktopLauncher -> GameRuntime` 客户端 runtime 链路，避免停留在网络记录层。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `desktop/src/lib.rs`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增 runtime sidecar：
+  - `GameRuntimeClientBlockSnapshotRecord { tile_pos, building_tile_pos, block_id, sync_bytes }`
+  - `GameRuntimeClientEntitySnapshotRecord { entity_id, type_id, sync_bytes, hidden }`
+  - `GameRuntimeClientSnapshotApplyReport`
+  - `GameRuntime.client_block_snapshot_records`
+  - `GameRuntime.client_entity_snapshot_records`
+  - `GameRuntime.client_hidden_entity_ids`
+- 新增 runtime API：
+  - `apply_client_block_snapshot_record(...)`
+  - `apply_client_entity_snapshot_record(...)`
+  - `apply_client_hidden_snapshot_ids(...)`
+  - `note_client_block_snapshot_parse_error()`
+  - `note_client_entity_snapshot_parse_error()`
+- Desktop 接入：
+  - `DesktopLauncher::update()` 现在调用 `sync_snapshot_mirrors()`；
+  - 使用 cursor 避免重复应用 `entity_snapshot_mirrors`；
+  - world data 变化时把 cursor 重置到当前 net state，避免旧 snapshot 套到新地图；
+  - world data 清空时清理 cursor/report；
+  - `sync_runtime_state_from_game_state()` 在 clone `game_state` 后重新 `sync_world_footprint_refs(...)`，修复 connect confirm 进入 Playing 时丢失 runtime world `BuildingRef` 的问题。
+- 已验证真实联机：
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 现在断言 entity mirror 进入 `desktop.runtime.client_entity_snapshot_records`，hidden ids 进入 `client_hidden_entity_ids`；
+  - `real_server_desktop_block_snapshot_updates_net_client_after_world_stream` 现在先让 server world stream 携带真实 router building，再发送 matching `BlockSnapshotCallPacket`，并断言 snapshot 落入 `desktop.runtime.client_block_snapshot_records`。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 选择一类简单 building（例如 router/conveyor/storage 中已有 typed state 的部分）实现 `sync_bytes -> typed readSync` 回放。
+  2. 设计真实 client entity pool，逐步替代 `client_entity_snapshot_records` 的 raw sidecar。
+  3. 继续推进客户端输入/构建/单位控制回传，保证 runtime 是整体联机闭环。

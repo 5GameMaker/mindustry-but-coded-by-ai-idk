@@ -1,4 +1,8 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
+use mindustry_core::mindustry::core::game_runtime::GameRuntimeClientSnapshotApplyReport;
+use mindustry_core::mindustry::core::net_client::{
+    ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror,
+};
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
@@ -32,7 +36,11 @@ pub struct DesktopLauncher {
     content_loader: ContentLoader,
     last_applied_world_data: Option<mindustry_core::mindustry::net::NetworkWorldData>,
     last_applied_state_snapshot: Option<StateSnapshotCallPacket>,
+    last_applied_block_snapshot_mirror: Option<ClientBlockSnapshotMirror>,
+    last_applied_entity_snapshot_mirror_count: usize,
+    last_applied_hidden_snapshot_mirror: Option<ClientHiddenSnapshotMirror>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
+    last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
 }
 
 impl DesktopLauncher {
@@ -50,7 +58,11 @@ impl DesktopLauncher {
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_applied_world_data: None,
             last_applied_state_snapshot: None,
+            last_applied_block_snapshot_mirror: None,
+            last_applied_entity_snapshot_mirror_count: 0,
+            last_applied_hidden_snapshot_mirror: None,
             last_runtime_map_load_report: None,
+            last_client_snapshot_apply_report: None,
         }
     }
 
@@ -60,6 +72,7 @@ impl DesktopLauncher {
         self.sync_loaded_world_data();
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
+        self.sync_snapshot_mirrors();
     }
 
     pub fn connect_from_args(&mut self) {
@@ -102,6 +115,7 @@ impl DesktopLauncher {
                 self.apply_network_team_blocks(world_data.team_blocks_snapshot.as_ref());
                 self.sync_runtime_state_from_world_data(world_data);
                 self.last_applied_state_snapshot = None;
+                self.reset_snapshot_apply_cursors_to_current_net_state();
             }
             None => {
                 if self.last_applied_world_data.is_some() {
@@ -113,10 +127,99 @@ impl DesktopLauncher {
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
                     self.last_runtime_map_load_report = None;
+                    self.clear_snapshot_apply_cursors();
                 }
             }
         }
         self.last_applied_world_data = loaded_world_data;
+    }
+
+    fn sync_snapshot_mirrors(&mut self) {
+        if self.last_applied_world_data.is_none() {
+            return;
+        }
+
+        let (block_mirror, entity_mirrors, hidden_mirror) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (
+                state.last_block_snapshot_mirror.clone(),
+                state.entity_snapshot_mirrors.clone(),
+                state.last_hidden_snapshot_mirror.clone(),
+            )
+        };
+
+        let mut report = GameRuntimeClientSnapshotApplyReport::default();
+
+        if block_mirror != self.last_applied_block_snapshot_mirror {
+            if let Some(mirror) = block_mirror.as_ref() {
+                if mirror.parse_error.is_some() {
+                    report.merge(self.runtime.note_client_block_snapshot_parse_error());
+                }
+                for record in &mirror.records {
+                    report.merge(self.runtime.apply_client_block_snapshot_record(
+                        record.tile_pos,
+                        record.block_id,
+                        record.sync_bytes.clone(),
+                    ));
+                }
+            }
+            self.last_applied_block_snapshot_mirror = block_mirror;
+        }
+
+        if entity_mirrors.len() < self.last_applied_entity_snapshot_mirror_count {
+            self.last_applied_entity_snapshot_mirror_count = 0;
+        }
+        for mirror in entity_mirrors
+            .iter()
+            .skip(self.last_applied_entity_snapshot_mirror_count)
+        {
+            if mirror.parse_error.is_some() {
+                report.merge(self.runtime.note_client_entity_snapshot_parse_error());
+            }
+            for record in &mirror.records {
+                report.merge(self.runtime.apply_client_entity_snapshot_record(
+                    record.entity_id,
+                    record.type_id,
+                    record.sync_bytes.clone(),
+                ));
+            }
+        }
+        self.last_applied_entity_snapshot_mirror_count = entity_mirrors.len();
+
+        if hidden_mirror != self.last_applied_hidden_snapshot_mirror {
+            if let Some(mirror) = hidden_mirror.as_ref() {
+                report.merge(self.runtime.apply_client_hidden_snapshot_ids(&mirror.ids));
+            }
+            self.last_applied_hidden_snapshot_mirror = hidden_mirror;
+        }
+
+        if report.has_activity() {
+            self.last_client_snapshot_apply_report = Some(report);
+        }
+    }
+
+    fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
+        let (block_mirror, entity_count, hidden_mirror) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (
+                state.last_block_snapshot_mirror.clone(),
+                state.entity_snapshot_mirrors.len(),
+                state.last_hidden_snapshot_mirror.clone(),
+            )
+        };
+        self.last_applied_block_snapshot_mirror = block_mirror;
+        self.last_applied_entity_snapshot_mirror_count = entity_count;
+        self.last_applied_hidden_snapshot_mirror = hidden_mirror;
+        self.last_client_snapshot_apply_report = None;
+    }
+
+    fn clear_snapshot_apply_cursors(&mut self) {
+        self.last_applied_block_snapshot_mirror = None;
+        self.last_applied_entity_snapshot_mirror_count = 0;
+        self.last_applied_hidden_snapshot_mirror = None;
+        self.last_client_snapshot_apply_report = None;
     }
 
     fn sync_state_snapshot(&mut self) {
@@ -162,6 +265,10 @@ impl DesktopLauncher {
 
     fn sync_runtime_state_from_game_state(&mut self) {
         self.runtime.state = self.game_state.clone();
+        let building_count = self.runtime.buildings().len();
+        for index in 0..building_count {
+            self.runtime.sync_world_footprint_refs(index);
+        }
         let network_context = if self.last_applied_world_data.is_some() {
             GameRuntimeNetworkContext::client()
         } else {
@@ -299,6 +406,10 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{run, DesktopLauncher};
     use mindustry_core::mindustry::core::game_runtime::GameRuntimePayloadBlockState;
+    use mindustry_core::mindustry::core::net_client::{
+        ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
+        ClientEntitySnapshotRecordMirror, ClientHiddenSnapshotMirror,
+    };
     use mindustry_core::mindustry::core::{
         GameRuntime, GameRuntimeNetworkContext, WorldLoadEventKind,
     };
@@ -1007,6 +1118,92 @@ mod tests {
                 .tile_pos,
             tile_pos
         );
+    }
+
+    #[test]
+    fn desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let router_base = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router")
+            .base()
+            .clone();
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(2, 2);
+
+        let mut source_runtime = GameRuntime::default();
+        source_runtime.state.world.resize(6, 6);
+        source_runtime.add_building(BuildingComp::new(tile_pos, router_base.clone(), TeamId(6)));
+
+        let mut world_data = sample_network_world_data(None);
+        world_data.map_snapshot =
+            Some(source_runtime.export_network_map_snapshot(&launcher.content_loader));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+        assert!(launcher.last_client_snapshot_apply_report.is_none());
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_block_snapshot_mirror = Some(ClientBlockSnapshotMirror {
+                amount: 1,
+                data: Vec::new(),
+                records: vec![ClientBlockSnapshotRecordMirror {
+                    tile_pos,
+                    block_id: router_base.id,
+                    sync_bytes: vec![1, 2, 3],
+                }],
+                parse_error: None,
+            });
+            state
+                .entity_snapshot_mirrors
+                .push(ClientEntitySnapshotMirror {
+                    amount: 1,
+                    data: Vec::new(),
+                    records: vec![ClientEntitySnapshotRecordMirror {
+                        entity_id: 1001,
+                        type_id: 2,
+                        sync_bytes: vec![4, 5],
+                    }],
+                    parse_error: None,
+                });
+            state.last_hidden_snapshot_mirror =
+                Some(ClientHiddenSnapshotMirror { ids: vec![1001] });
+        }
+
+        launcher.update();
+
+        let report = launcher
+            .last_client_snapshot_apply_report
+            .expect("snapshot mirrors should apply to runtime sidecars");
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.hidden_existing_entities, 1);
+
+        let block_record = launcher
+            .runtime
+            .client_block_snapshot_records
+            .get(&tile_pos)
+            .expect("block snapshot should land on runtime sidecar");
+        assert_eq!(block_record.block_id, router_base.id);
+        assert_eq!(block_record.sync_bytes, vec![1, 2, 3]);
+
+        let entity_record = launcher
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1001)
+            .expect("entity snapshot should land on runtime sidecar");
+        assert_eq!(entity_record.type_id, 2);
+        assert_eq!(entity_record.sync_bytes, vec![4, 5]);
+        assert!(entity_record.hidden);
+        assert!(launcher.runtime.client_hidden_entity_ids.contains(&1001));
     }
 
     #[test]

@@ -662,6 +662,24 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     assert_eq!(desktop.game_state.server_tps, state_snapshot.tps as i32);
     assert_eq!(desktop.runtime.state.server_tps, state_snapshot.tps as i32);
     assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1001)
+            .map(|record| record.type_id),
+        Some(2)
+    );
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1003)
+            .map(|record| record.type_id),
+        Some(4)
+    );
+    assert!(desktop.runtime.client_hidden_entity_ids.contains(&4));
+    assert!(desktop.runtime.client_hidden_entity_ids.contains(&5));
+    assert_eq!(
         desktop.runtime.network_context,
         GameRuntimeNetworkContext::client()
     );
@@ -673,7 +691,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
 #[test]
 fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
     use mindustry_core::mindustry::net::BlockSnapshotCallPacket;
+    use mindustry_core::mindustry::world::point2_pack;
     use mindustry_server::ServerLauncher;
     use std::thread;
     use std::time::Duration;
@@ -685,6 +706,17 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
         port.to_string(),
     ]);
     server.runtime.state.world.resize(8, 8);
+    let router_def = server
+        .content_loader
+        .block_by_name("router")
+        .expect("base content should include router");
+    let router_tile = point2_pack(2, 2);
+    let router_id = router_def.base().id;
+    server.runtime.add_building(BuildingComp::new(
+        router_tile,
+        router_def.base().clone(),
+        TeamId(6),
+    ));
     server.init();
 
     let mut desktop = mindustry_desktop::run(vec![
@@ -707,8 +739,8 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
         amount: 1,
         data: {
             let mut data = Vec::new();
-            data.extend_from_slice(&42i32.to_be_bytes());
-            data.extend_from_slice(&7i16.to_be_bytes());
+            data.extend_from_slice(&router_tile.to_be_bytes());
+            data.extend_from_slice(&router_id.to_be_bytes());
             data.extend_from_slice(&[1, 2, 3]);
             data
         },
@@ -765,12 +797,19 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
             .as_ref()
             .expect("block snapshot should materialize into lightweight mirror");
         assert_eq!(mirror.records.len(), 1);
-        assert_eq!(mirror.records[0].tile_pos, 42);
-        assert_eq!(mirror.records[0].block_id, 7);
+        assert_eq!(mirror.records[0].tile_pos, router_tile);
+        assert_eq!(mirror.records[0].block_id, router_id);
         assert_eq!(mirror.records[0].sync_bytes, vec![1, 2, 3]);
         assert!(mirror.parse_error.is_none());
         assert!(state.last_server_snapshot_at.is_some());
     }
+    let runtime_record = desktop
+        .runtime
+        .client_block_snapshot_records
+        .get(&router_tile)
+        .expect("real block snapshot should apply to client runtime sidecar");
+    assert_eq!(runtime_record.block_id, router_id);
+    assert_eq!(runtime_record.sync_bytes, vec![1, 2, 3]);
     assert_eq!(
         desktop.runtime.network_context,
         GameRuntimeNetworkContext::client()

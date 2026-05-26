@@ -8,7 +8,7 @@
 //! slices from the real `GameState` frame source.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{self, Cursor},
 };
 
@@ -1168,6 +1168,67 @@ pub struct GameRuntimeMapLoadReport {
     pub proximity_links: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeClientBlockSnapshotRecord {
+    pub tile_pos: i32,
+    pub building_tile_pos: i32,
+    pub block_id: ContentId,
+    pub sync_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeClientEntitySnapshotRecord {
+    pub entity_id: i32,
+    pub type_id: u8,
+    pub sync_bytes: Vec<u8>,
+    pub hidden: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeClientSnapshotApplyReport {
+    pub block_records_seen: usize,
+    pub block_records_applied: usize,
+    pub block_parse_errors: usize,
+    pub block_missing_tiles: usize,
+    pub block_missing_buildings: usize,
+    pub block_id_mismatches: usize,
+    pub block_opaque_bytes: usize,
+    pub entity_records_seen: usize,
+    pub entity_records_applied: usize,
+    pub entity_parse_errors: usize,
+    pub entity_opaque_bytes: usize,
+    pub hidden_ids_seen: usize,
+    pub hidden_existing_entities: usize,
+    pub hidden_missing_entities: usize,
+}
+
+impl GameRuntimeClientSnapshotApplyReport {
+    pub fn merge(&mut self, other: Self) {
+        self.block_records_seen += other.block_records_seen;
+        self.block_records_applied += other.block_records_applied;
+        self.block_parse_errors += other.block_parse_errors;
+        self.block_missing_tiles += other.block_missing_tiles;
+        self.block_missing_buildings += other.block_missing_buildings;
+        self.block_id_mismatches += other.block_id_mismatches;
+        self.block_opaque_bytes += other.block_opaque_bytes;
+        self.entity_records_seen += other.entity_records_seen;
+        self.entity_records_applied += other.entity_records_applied;
+        self.entity_parse_errors += other.entity_parse_errors;
+        self.entity_opaque_bytes += other.entity_opaque_bytes;
+        self.hidden_ids_seen += other.hidden_ids_seen;
+        self.hidden_existing_entities += other.hidden_existing_entities;
+        self.hidden_missing_entities += other.hidden_missing_entities;
+    }
+
+    pub fn has_activity(self) -> bool {
+        self.block_records_seen > 0
+            || self.block_parse_errors > 0
+            || self.entity_records_seen > 0
+            || self.entity_parse_errors > 0
+            || self.hidden_ids_seen > 0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GameRuntimeBlockStateReadError {
     Parse,
@@ -1870,6 +1931,9 @@ pub struct GameRuntime {
     pub defense_wall_runtime_states: BTreeMap<i32, GameRuntimeDefenseWallState>,
     pub turret_runtime_states: BTreeMap<i32, GameRuntimeTurretBlockState>,
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
+    pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
+    pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
+    pub client_hidden_entity_ids: BTreeSet<i32>,
 }
 
 impl Default for GameRuntime {
@@ -1916,6 +1980,9 @@ impl GameRuntime {
             defense_wall_runtime_states: BTreeMap::new(),
             turret_runtime_states: BTreeMap::new(),
             construct_runtime_states: BTreeMap::new(),
+            client_block_snapshot_records: BTreeMap::new(),
+            client_entity_snapshot_records: BTreeMap::new(),
+            client_hidden_entity_ids: BTreeSet::new(),
         }
     }
 
@@ -1929,6 +1996,118 @@ impl GameRuntime {
 
     pub fn set_network_context(&mut self, network_context: GameRuntimeNetworkContext) {
         self.network_context = network_context;
+    }
+
+    pub fn note_client_block_snapshot_parse_error(
+        &mut self,
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        GameRuntimeClientSnapshotApplyReport {
+            block_parse_errors: 1,
+            ..GameRuntimeClientSnapshotApplyReport::default()
+        }
+    }
+
+    pub fn note_client_entity_snapshot_parse_error(
+        &mut self,
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        GameRuntimeClientSnapshotApplyReport {
+            entity_parse_errors: 1,
+            ..GameRuntimeClientSnapshotApplyReport::default()
+        }
+    }
+
+    pub fn apply_client_block_snapshot_record(
+        &mut self,
+        tile_pos: i32,
+        block_id: ContentId,
+        sync_bytes: Vec<u8>,
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        let mut report = GameRuntimeClientSnapshotApplyReport {
+            block_records_seen: 1,
+            block_opaque_bytes: sync_bytes.len(),
+            ..GameRuntimeClientSnapshotApplyReport::default()
+        };
+
+        let Some(tile) = self.state.world.tile_pos(tile_pos) else {
+            report.block_missing_tiles = 1;
+            return report;
+        };
+        let Some(build_ref) = tile.build else {
+            report.block_missing_buildings = 1;
+            return report;
+        };
+        if build_ref.block != block_id {
+            report.block_id_mismatches = 1;
+            return report;
+        }
+        if self
+            .building_index_by_tile_pos(build_ref.tile_pos)
+            .is_none()
+        {
+            report.block_missing_buildings = 1;
+            return report;
+        }
+
+        self.client_block_snapshot_records.insert(
+            build_ref.tile_pos,
+            GameRuntimeClientBlockSnapshotRecord {
+                tile_pos,
+                building_tile_pos: build_ref.tile_pos,
+                block_id,
+                sync_bytes,
+            },
+        );
+        report.block_records_applied = 1;
+        report
+    }
+
+    pub fn apply_client_entity_snapshot_record(
+        &mut self,
+        entity_id: i32,
+        type_id: u8,
+        sync_bytes: Vec<u8>,
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        let entity_opaque_bytes = sync_bytes.len();
+        let hidden = self
+            .client_entity_snapshot_records
+            .get(&entity_id)
+            .map(|record| record.hidden)
+            .unwrap_or(false);
+        self.client_entity_snapshot_records.insert(
+            entity_id,
+            GameRuntimeClientEntitySnapshotRecord {
+                entity_id,
+                type_id,
+                sync_bytes,
+                hidden,
+            },
+        );
+        GameRuntimeClientSnapshotApplyReport {
+            entity_records_seen: 1,
+            entity_records_applied: 1,
+            entity_opaque_bytes,
+            ..GameRuntimeClientSnapshotApplyReport::default()
+        }
+    }
+
+    pub fn apply_client_hidden_snapshot_ids(
+        &mut self,
+        ids: &[i32],
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        let mut report = GameRuntimeClientSnapshotApplyReport {
+            hidden_ids_seen: ids.len(),
+            ..GameRuntimeClientSnapshotApplyReport::default()
+        };
+        for id in ids {
+            self.client_hidden_entity_ids.insert(*id);
+            if let Some(record) = self.client_entity_snapshot_records.get_mut(id) {
+                record.hidden = true;
+                report.hidden_existing_entities += 1;
+            } else {
+                report.hidden_missing_entities += 1;
+            }
+        }
+        report
     }
 
     pub fn export_network_map_snapshot(&self, content: &ContentLoader) -> LegacyShortChunkMap {
@@ -2593,6 +2772,7 @@ impl GameRuntime {
         self.defense_wall_runtime_states.remove(&removed.tile_pos);
         self.turret_runtime_states.remove(&removed.tile_pos);
         self.construct_runtime_states.remove(&removed.tile_pos);
+        self.client_block_snapshot_records.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
     }
@@ -4713,6 +4893,9 @@ impl GameRuntime {
         self.defense_wall_runtime_states.clear();
         self.turret_runtime_states.clear();
         self.construct_runtime_states.clear();
+        self.client_block_snapshot_records.clear();
+        self.client_entity_snapshot_records.clear();
+        self.client_hidden_entity_ids.clear();
     }
 
     pub fn refresh_owned_building_update_permissions(&mut self, content: &ContentLoader) -> usize {
@@ -12810,6 +12993,86 @@ mod tests {
             force_coolant,
             spark_random,
         }
+    }
+
+    #[test]
+    fn game_runtime_applies_client_block_snapshot_only_to_matching_loaded_building() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router = content
+            .block_by_name("router")
+            .expect("base content should include router")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(2, 2);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(6, 6);
+        runtime.add_building(BuildingComp::new(tile_pos, router.clone(), TeamId(6)));
+
+        let report = runtime.apply_client_block_snapshot_record(tile_pos, router.id, vec![1, 2]);
+        assert_eq!(report.block_records_seen, 1);
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_opaque_bytes, 2);
+        let record = runtime
+            .client_block_snapshot_records
+            .get(&tile_pos)
+            .expect("matching snapshot should be stored by building tile");
+        assert_eq!(record.tile_pos, tile_pos);
+        assert_eq!(record.building_tile_pos, tile_pos);
+        assert_eq!(record.block_id, router.id);
+        assert_eq!(record.sync_bytes, vec![1, 2]);
+
+        let mismatch = runtime.apply_client_block_snapshot_record(
+            tile_pos,
+            router.id.saturating_add(1),
+            vec![9],
+        );
+        assert_eq!(mismatch.block_records_seen, 1);
+        assert_eq!(mismatch.block_records_applied, 0);
+        assert_eq!(mismatch.block_id_mismatches, 1);
+        assert_eq!(
+            runtime
+                .client_block_snapshot_records
+                .get(&tile_pos)
+                .unwrap()
+                .sync_bytes,
+            vec![1, 2]
+        );
+
+        let missing =
+            runtime.apply_client_block_snapshot_record(point2_pack(9, 9), router.id, vec![]);
+        assert_eq!(missing.block_missing_tiles, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_entity_and_hidden_snapshot_sidecars() {
+        let mut runtime = GameRuntime::default();
+
+        let report = runtime.apply_client_entity_snapshot_record(1001, 2, vec![4, 5, 6]);
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_opaque_bytes, 3);
+        let entity = runtime
+            .client_entity_snapshot_records
+            .get(&1001)
+            .expect("entity snapshot should create a runtime mirror record");
+        assert_eq!(entity.entity_id, 1001);
+        assert_eq!(entity.type_id, 2);
+        assert_eq!(entity.sync_bytes, vec![4, 5, 6]);
+        assert!(!entity.hidden);
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[1001, 2002]);
+        assert_eq!(hidden.hidden_ids_seen, 2);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+        assert_eq!(hidden.hidden_missing_entities, 1);
+        assert!(
+            runtime
+                .client_entity_snapshot_records
+                .get(&1001)
+                .unwrap()
+                .hidden
+        );
+        assert!(runtime.client_hidden_entity_ids.contains(&1001));
+        assert!(runtime.client_hidden_entity_ids.contains(&2002));
     }
 
     fn single_building_network_map(

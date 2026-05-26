@@ -1771,3 +1771,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests --lib`
   - `cargo check -p mindustry-core -p mindustry-tests`
 - 仍未完成：需要继续把轻量镜像接入真实 client world/entity runtime，按具体 block/entity 类型补 Java `readSync/writeSync` 字段级解析与回放，并推进客户端输入、构建、单位控制回传和 Java↔Rust 互通 smoke。
+
+### 12.20 客户端 snapshot mirror 接入 GameRuntime sidecar
+
+- 2026-05-26：新增 `GameRuntimeClientBlockSnapshotRecord`、`GameRuntimeClientEntitySnapshotRecord` 与 `GameRuntimeClientSnapshotApplyReport`，并在 `GameRuntime` 中加入：
+  - `client_block_snapshot_records`
+  - `client_entity_snapshot_records`
+  - `client_hidden_entity_ids`
+- `DesktopLauncher::update()` 新增 `sync_snapshot_mirrors()`，在 world data / state snapshot 同步后，把 `NetClientState.last_block_snapshot_mirror`、`entity_snapshot_mirrors`、`last_hidden_snapshot_mirror` 应用到 `GameRuntime`。这样真实联机收到的 block/entity/hidden snapshot 不再只停留在 `NetClientState`，而是接入 client runtime sidecar。
+- Block snapshot 应用按 Java `NetClient.blockSnapshot(...)` 的约束执行：
+  - 只在 world 已加载且 `tile.build` 存在时应用；
+  - 校验 `tile.build.block.id == block_id`；
+  - 不把 snapshot 当成地图拓扑变更，不创建新建筑；
+  - 暂存 `sync_bytes`，后续逐类实现 `Building.readSync(...)` 字段级回放。
+- Entity/hidden snapshot 应用按 Java `Groups.sync` 语义的最小安全前置落地：
+  - 先以 `entity_id -> { type_id, sync_bytes, hidden }` 形式进入 runtime sidecar；
+  - hidden ids 会标记已有 entity mirror，并保留缺失 id 集合；
+  - 目前不硬造真实 `UnitComp/Player/Bullet` 池，避免在 `EntityMapping` / `Groups.sync` 尚未完整迁移前伪装成已完成实体系统。
+- 同步修复 `DesktopLauncher::sync_runtime_state_from_game_state()`：在把 `game_state` 克隆回 `runtime.state` 后，会重新 `sync_world_footprint_refs(...)`，避免 connect confirm 进入 Playing 时抹掉 runtime world 的 `BuildingRef`，导致后续 block snapshot 找不到 `tile.build`。
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：block/entity 的 `sync_bytes` 仍是 opaque；下一步需要按具体 block `readSync(version)` 与 entity `readSync` 逐类解析，并接入真实 client entity pool / world building typed state。
