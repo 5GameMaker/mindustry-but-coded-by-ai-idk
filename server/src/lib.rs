@@ -1231,4 +1231,101 @@ mod tests {
         assert!(target_driver.effect_delay_timer > 0.0);
         assert_eq!(launcher.runtime.state.update_id, 1);
     }
+
+    #[test]
+    fn server_update_drives_owned_payload_constructor_conveyor_void_chain() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let constructor_def = launcher
+            .content_loader
+            .block_by_name("constructor")
+            .unwrap();
+        let conveyor_def = launcher
+            .content_loader
+            .block_by_name("payload-conveyor")
+            .unwrap();
+        let void_def = launcher
+            .content_loader
+            .block_by_name("payload-void")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let router_id = router_def.base().id;
+        let constructor_tile = point2_pack(4, 4);
+        let constructor_trns = constructor_def.base().size / 2 + 1;
+        let conveyor_x = 4 + constructor_trns + (conveyor_def.base().size - 1) / 2;
+        let conveyor_tile = point2_pack(conveyor_x, 4);
+        let conveyor_trns = conveyor_def.base().size / 2 + 1;
+        let void_x = conveyor_x + conveyor_trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(void_x, 4);
+        let mut constructor_building =
+            BuildingComp::new(constructor_tile, constructor_def.base().clone(), TeamId(6));
+        constructor_building.set_rotation(0);
+        for requirement in router_def.requirements() {
+            constructor_building
+                .items
+                .as_mut()
+                .unwrap()
+                .set(requirement.item, requirement.amount);
+        }
+        let mut conveyor_building =
+            BuildingComp::new(conveyor_tile, conveyor_def.base().clone(), TeamId(6));
+        conveyor_building.set_rotation(0);
+
+        launcher.runtime.state.world.resize(20, 10);
+        launcher.runtime.add_building(constructor_building);
+        launcher.runtime.add_building(conveyor_building);
+        launcher.runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.payload_runtime_states.insert(
+            constructor_tile,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 9.5,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(router_id),
+            },
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            conveyor_tile,
+            GameRuntimePayloadBlockState::Conveyor(PayloadConveyorState::default()),
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut produced_payloads = 0;
+        let mut constructor_transfers = 0;
+        let mut conveyor_transfers = 0;
+        let mut void_incinerations = 0;
+        for frame in 1..=240 {
+            launcher.update();
+            assert_eq!(launcher.runtime.state.update_id, frame);
+            if let Some(report) = launcher.last_runtime_payload_report {
+                produced_payloads += report.constructor.produced_payloads;
+                constructor_transfers += report.constructor.transferred_payloads;
+                conveyor_transfers += report.conveyor.transferred_payloads;
+                void_incinerations += report.void.incinerated_payloads;
+            }
+            if void_incinerations > 0 {
+                break;
+            }
+        }
+
+        assert_eq!(produced_payloads, 1);
+        assert_eq!(constructor_transfers, 1);
+        assert_eq!(conveyor_transfers, 1);
+        assert_eq!(void_incinerations, 1);
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            launcher.runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+    }
 }

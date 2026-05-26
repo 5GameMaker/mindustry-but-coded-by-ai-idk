@@ -1590,3 +1590,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：payload family 已全部进入当前 server aggregate 的最小主循环，但还缺跨多帧 end-to-end smoke（constructor/source → conveyor/router/loader/mass-driver/deconstructor/void）、UnitPayload 完整实体恢复、完整 renderer/UI 和更细的 Java 联机兼容验证。
+
+### 12.8 服务端 payload aggregate 跨多帧整体 smoke
+
+- 2026-05-26：新增 `server_update_drives_owned_payload_constructor_conveyor_void_chain`，在同一个 `ServerLauncher::update()` 主循环里构造 `constructor → payload-conveyor → payload-void` 链路，连续推进多个 server frame，验证 constructor 生产 `BuildPayload(router)`、输出到 conveyor、conveyor 再转交到 void 并被 void incinerate。
+- 该测试专门锁定“已迁移模块必须接入整体 runtime 而不是孤立 helper”：每帧都断言 `runtime.state.update_id` 只增加 1，并跨帧累计 `constructor.produced_payloads / constructor.transferred_payloads / conveyor.transferred_payloads / void.incinerated_payloads`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_conveyor_void_chain --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_mass_driver_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：还需要把 loader/deconstructor/mass-driver 也纳入更多跨多帧端到端 smoke，并继续补 UnitPayload 完整实体恢复、真实 renderer/UI、网络同步与 Java↔Rust 联机兼容验证。

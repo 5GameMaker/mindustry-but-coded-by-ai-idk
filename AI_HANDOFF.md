@@ -887,3 +887,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 当前状态：payload constructor/source/conveyor-router/loader-unloader/mass-driver/deconstructor/void 都已进入 `advance_owned_runtime_blocks(...)` 的 single-frame aggregate。后续优先做跨多帧整体 smoke，证明这些节点在同一个 server `update()` 链里组成真实可游玩 runtime，而不是只各自有独立单测。
+
+---
+
+## 22. 最新闭环记录：服务端 payload aggregate 跨多帧整体 smoke
+
+- 目标：回应“不要让模块独立存在”的总要求，新增一个 server-level 多帧 smoke，证明已迁移 payload 节点能在同一个 `ServerLauncher::update()` / `advance_owned_runtime_blocks(...)` 主循环中串成真实链路。
+- Rust 主改动：
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`server_update_drives_owned_payload_constructor_conveyor_void_chain`。
+- 测试链路：
+  - `constructor` 预装 router 材料与 recipe；
+  - constructor 前方放置空 `payload-conveyor`；
+  - conveyor 前方放置空 `payload-void`；
+  - 连续调用 `launcher.update()`，每帧断言 `runtime.state.update_id == frame`；
+  - 累计 report，要求最终出现：
+    - `constructor.produced_payloads == 1`
+    - `constructor.transferred_payloads == 1`
+    - `conveyor.transferred_payloads == 1`
+    - `void.incinerated_payloads == 1`
+  - 最终 void sidecar payload 为空，说明 payload 已真正走完 constructor→conveyor→void runtime 链。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_conveyor_void_chain --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_mass_driver_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 后续建议：继续补 `loader → deconstructor`、`source/router` 与 linked `payload-mass-driver` 的 server-level 多帧 smoke；随后把 payload 状态同步到 network snapshot 的更细联机测试，避免服务端运行态与客户端可见状态脱节。
