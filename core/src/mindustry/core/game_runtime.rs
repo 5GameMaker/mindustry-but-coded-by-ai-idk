@@ -1723,6 +1723,7 @@ pub struct GameRuntime {
     pub item_bridge_transport_counters: BTreeMap<i32, f32>,
     pub item_junction_time_counters: BTreeMap<i32, f32>,
     pub item_mass_driver_reload_counters: BTreeMap<i32, f32>,
+    pub item_mass_driver_waiting_shooters: BTreeMap<i32, Vec<i32>>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
@@ -1763,6 +1764,7 @@ impl GameRuntime {
             item_bridge_transport_counters: BTreeMap::new(),
             item_junction_time_counters: BTreeMap::new(),
             item_mass_driver_reload_counters: BTreeMap::new(),
+            item_mass_driver_waiting_shooters: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
@@ -2199,6 +2201,11 @@ impl GameRuntime {
         self.item_junction_time_counters.remove(&removed.tile_pos);
         self.item_mass_driver_reload_counters
             .remove(&removed.tile_pos);
+        self.item_mass_driver_waiting_shooters
+            .remove(&removed.tile_pos);
+        for waiting in self.item_mass_driver_waiting_shooters.values_mut() {
+            waiting.retain(|shooter| *shooter != removed.tile_pos);
+        }
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -3802,6 +3809,7 @@ impl GameRuntime {
         self.item_bridge_transport_counters.clear();
         self.item_junction_time_counters.clear();
         self.item_mass_driver_reload_counters.clear();
+        self.item_mass_driver_waiting_shooters.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -5559,6 +5567,12 @@ impl GameRuntime {
             .position(|building| building.tile_pos == target_ref.tile_pos)
     }
 
+    fn building_index_by_tile_pos(&self, tile_pos: i32) -> Option<usize> {
+        self.buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+    }
+
     pub fn advance_owned_item_routers(
         &mut self,
         content: &ContentLoader,
@@ -7189,14 +7203,42 @@ impl GameRuntime {
 
             let mut state = self.ensure_item_mass_driver_state(tile_pos);
             let link_index = self.item_mass_driver_link_target_index(content, index, state.link);
+            let waiting_shooters = self.prune_item_mass_driver_waiting_shooters(content, tile_pos);
+            let current_shooter_index = waiting_shooters
+                .first()
+                .and_then(|shooter_tile| self.building_index_by_tile_pos(*shooter_tile));
+            let waiting_shooters_empty = waiting_shooters.is_empty();
+            let mut available_space = self.buildings[index].block.item_capacity
+                - self
+                    .buildings
+                    .get(index)
+                    .and_then(|building| building.items.as_ref())
+                    .map(|items| items.total())
+                    .unwrap_or(0);
             if link_index.is_some() && state.state == MassDriverStateKind::Idle {
-                state.state = MassDriverStateKind::Shooting;
+                if !waiting_shooters_empty && available_space >= driver_block.min_distribute {
+                    state.state = MassDriverStateKind::Accepting;
+                } else {
+                    state.state = MassDriverStateKind::Shooting;
+                }
+            } else if state.state == MassDriverStateKind::Idle
+                && !waiting_shooters_empty
+                && available_space >= driver_block.min_distribute
+            {
+                state.state = MassDriverStateKind::Accepting;
             }
             if (state.state == MassDriverStateKind::Idle
                 || state.state == MassDriverStateKind::Accepting)
                 && self.dump_one_item_from_building(content, index)
             {
                 report.dumped_items += 1;
+                available_space = self.buildings[index].block.item_capacity
+                    - self
+                        .buildings
+                        .get(index)
+                        .and_then(|building| building.items.as_ref())
+                        .map(|items| items.total())
+                        .unwrap_or(0);
             }
             if efficiency <= 0.0 {
                 self.distribution_runtime_states.insert(
@@ -7205,6 +7247,26 @@ impl GameRuntime {
                 );
                 report.updated_drivers += 1;
                 continue;
+            }
+
+            if state.state == MassDriverStateKind::Accepting {
+                if current_shooter_index.is_none() || available_space < driver_block.min_distribute
+                {
+                    state.state = MassDriverStateKind::Idle;
+                    self.distribution_runtime_states.insert(
+                        tile_pos,
+                        GameRuntimeDistributionBlockState::MassDriver(state),
+                    );
+                    report.updated_drivers += 1;
+                    continue;
+                }
+
+                let shooter_index = current_shooter_index.expect("checked above");
+                state.rotation = Self::move_toward_angle(
+                    state.rotation,
+                    self.angle_between_buildings(index, shooter_index),
+                    driver_block.rotate_speed * efficiency.max(0.0) * frame_delta.max(0.0),
+                );
             }
 
             if state.state == MassDriverStateKind::Shooting {
@@ -7218,6 +7280,15 @@ impl GameRuntime {
                     report.updated_drivers += 1;
                     continue;
                 };
+                if !waiting_shooters_empty && available_space >= driver_block.min_distribute {
+                    state.state = MassDriverStateKind::Idle;
+                    self.distribution_runtime_states.insert(
+                        tile_pos,
+                        GameRuntimeDistributionBlockState::MassDriver(state),
+                    );
+                    report.updated_drivers += 1;
+                    continue;
+                }
                 let target_capacity = self.buildings[link_index].block.item_capacity;
                 let source_total = self.buildings[index]
                     .items
@@ -7239,8 +7310,31 @@ impl GameRuntime {
                         <= 0.0001
                 {
                     report.attempted_shots += 1;
-                    state.rotation = self.angle_between_buildings(index, link_index);
-                    let moved = self.item_mass_driver_fire_to_link(content, index, link_index);
+                    self.add_item_mass_driver_waiting_shooter(
+                        self.buildings[link_index].tile_pos,
+                        tile_pos,
+                    );
+                    let target_rotation = self.angle_between_buildings(index, link_index);
+                    state.rotation = Self::move_toward_angle(
+                        state.rotation,
+                        target_rotation,
+                        driver_block.rotate_speed * efficiency.max(0.0) * frame_delta.max(0.0),
+                    );
+                    let target_waiting = self.prune_item_mass_driver_waiting_shooters(
+                        content,
+                        self.buildings[link_index].tile_pos,
+                    );
+                    let target_state =
+                        self.ensure_item_mass_driver_state(self.buildings[link_index].tile_pos);
+                    let target_ready = target_waiting.first().copied() == Some(tile_pos)
+                        && target_state.state == MassDriverStateKind::Accepting
+                        && Self::angle_near(state.rotation, target_rotation, 2.0)
+                        && Self::angle_near(target_state.rotation, target_rotation + 180.0, 2.0);
+                    let moved = if target_ready {
+                        self.item_mass_driver_fire_to_link(content, index, link_index)
+                    } else {
+                        0
+                    };
                     if moved > 0 {
                         report.shots_fired += 1;
                         report.transferred_items += moved as usize;
@@ -7250,6 +7344,7 @@ impl GameRuntime {
                             .insert(target_tile_pos, 1.0);
                         let mut target_state = self.ensure_item_mass_driver_state(target_tile_pos);
                         target_state.state = MassDriverStateKind::Idle;
+                        self.remove_item_mass_driver_waiting_shooter(target_tile_pos, tile_pos);
                         self.distribution_runtime_states.insert(
                             target_tile_pos,
                             GameRuntimeDistributionBlockState::MassDriver(target_state),
@@ -7315,6 +7410,103 @@ impl GameRuntime {
         .then_some(target_index)
     }
 
+    fn prune_item_mass_driver_waiting_shooters(
+        &mut self,
+        content: &ContentLoader,
+        receiver_tile_pos: i32,
+    ) -> Vec<i32> {
+        let Some(waiting) = self
+            .item_mass_driver_waiting_shooters
+            .get(&receiver_tile_pos)
+            .cloned()
+        else {
+            return Vec::new();
+        };
+
+        let mut cleaned = Vec::new();
+        for shooter_tile_pos in waiting {
+            if !cleaned.contains(&shooter_tile_pos)
+                && self.item_mass_driver_shooter_valid(content, receiver_tile_pos, shooter_tile_pos)
+            {
+                cleaned.push(shooter_tile_pos);
+            }
+        }
+
+        if cleaned.is_empty() {
+            self.item_mass_driver_waiting_shooters
+                .remove(&receiver_tile_pos);
+        } else {
+            self.item_mass_driver_waiting_shooters
+                .insert(receiver_tile_pos, cleaned.clone());
+        }
+        cleaned
+    }
+
+    fn item_mass_driver_shooter_valid(
+        &self,
+        content: &ContentLoader,
+        receiver_tile_pos: i32,
+        shooter_tile_pos: i32,
+    ) -> bool {
+        let Some(receiver_index) = self.building_index_by_tile_pos(receiver_tile_pos) else {
+            return false;
+        };
+        let Some(shooter_index) = self.building_index_by_tile_pos(shooter_tile_pos) else {
+            return false;
+        };
+        let receiver = &self.buildings[receiver_index];
+        let shooter = &self.buildings[shooter_index];
+        if shooter.efficiency <= 0.0
+            || shooter.block.id != receiver.block.id
+            || shooter.team != receiver.team
+        {
+            return false;
+        }
+        let Some(GameRuntimeDistributionBlockState::MassDriver(shooter_state)) =
+            self.distribution_runtime_states.get(&shooter_tile_pos)
+        else {
+            return false;
+        };
+        if shooter_state.link != receiver_tile_pos {
+            return false;
+        }
+        let Some(BlockDef::Distribution(driver_block)) = content.block(receiver.block.id) else {
+            return false;
+        };
+        self.distance_between_buildings(receiver_index, shooter_index) <= driver_block.range
+    }
+
+    fn add_item_mass_driver_waiting_shooter(
+        &mut self,
+        receiver_tile_pos: i32,
+        shooter_tile_pos: i32,
+    ) {
+        let waiting = self
+            .item_mass_driver_waiting_shooters
+            .entry(receiver_tile_pos)
+            .or_default();
+        if !waiting.contains(&shooter_tile_pos) {
+            waiting.push(shooter_tile_pos);
+        }
+    }
+
+    fn remove_item_mass_driver_waiting_shooter(
+        &mut self,
+        receiver_tile_pos: i32,
+        shooter_tile_pos: i32,
+    ) {
+        if let Some(waiting) = self
+            .item_mass_driver_waiting_shooters
+            .get_mut(&receiver_tile_pos)
+        {
+            waiting.retain(|queued| *queued != shooter_tile_pos);
+            if waiting.is_empty() {
+                self.item_mass_driver_waiting_shooters
+                    .remove(&receiver_tile_pos);
+            }
+        }
+    }
+
     fn distance_between_buildings(&self, from_index: usize, to_index: usize) -> f32 {
         let (Some(from), Some(to)) = (self.buildings.get(from_index), self.buildings.get(to_index))
         else {
@@ -7331,6 +7523,38 @@ impl GameRuntime {
             return 90.0;
         };
         let mut angle = (to.y - from.y).atan2(to.x - from.x).to_degrees();
+        if angle < 0.0 {
+            angle += 360.0;
+        }
+        angle
+    }
+
+    fn move_toward_angle(from: f32, to: f32, amount: f32) -> f32 {
+        let delta = Self::angle_delta(from, to);
+        if delta.abs() <= amount {
+            Self::normalize_angle(to)
+        } else {
+            Self::normalize_angle(from + delta.signum() * amount)
+        }
+    }
+
+    fn angle_near(a: f32, b: f32, margin: f32) -> bool {
+        Self::angle_delta(a, b).abs() <= margin
+    }
+
+    fn angle_delta(from: f32, to: f32) -> f32 {
+        let mut delta = (to - from) % 360.0;
+        if delta > 180.0 {
+            delta -= 360.0;
+        }
+        if delta < -180.0 {
+            delta += 360.0;
+        }
+        delta
+    }
+
+    fn normalize_angle(value: f32) -> f32 {
+        let mut angle = value % 360.0;
         if angle < 0.0 {
             angle += 360.0;
         }
@@ -17035,14 +17259,39 @@ mod tests {
             }),
         );
 
-        let report = runtime
+        let first_report = runtime
             .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
             .unwrap();
 
-        assert_eq!(report.driver_candidates, 2);
-        assert_eq!(report.attempted_shots, 1);
-        assert_eq!(report.shots_fired, 1);
-        assert_eq!(report.transferred_items, 20);
+        assert_eq!(first_report.driver_candidates, 2);
+        assert_eq!(first_report.attempted_shots, 1);
+        assert_eq!(first_report.shots_fired, 0);
+        assert_eq!(
+            runtime
+                .item_mass_driver_waiting_shooters
+                .get(&target_tile)
+                .cloned(),
+            Some(vec![source_tile])
+        );
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 20);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+
+        let mut aggregate = GameRuntimeItemMassDriverFrameReport::default();
+        for _ in 0..24 {
+            let report = runtime
+                .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
+                .unwrap();
+            aggregate.attempted_shots += report.attempted_shots;
+            aggregate.shots_fired += report.shots_fired;
+            aggregate.transferred_items += report.transferred_items;
+            if report.shots_fired > 0 {
+                break;
+            }
+        }
+
+        assert!(aggregate.attempted_shots > 0);
+        assert_eq!(aggregate.shots_fired, 1);
+        assert_eq!(aggregate.transferred_items, 20);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 20);
         assert_eq!(
@@ -17065,6 +17314,10 @@ mod tests {
         };
         assert_eq!(source_state.state, MassDriverStateKind::Idle);
         assert!((source_state.rotation - 0.0).abs() <= f32::EPSILON);
+        assert!(runtime
+            .item_mass_driver_waiting_shooters
+            .get(&target_tile)
+            .is_none());
     }
 
     #[test]

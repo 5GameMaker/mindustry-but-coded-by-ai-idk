@@ -608,3 +608,14 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 4. 迁移时要优先对照本地 Java 参考仓库，而不是凭记忆重写。
 5. 如果遇到网络、GitHub、Cargo 依赖等问题，要先给出可复现命令和失败信息，再说明替代方案。
 6. 当前最有价值的下一步不是继续铺空模块，而是打通连接后 world/map/save 数据流，让客户端进入世界成为可能。
+
+---
+
+## 12. 最新闭环记录：普通 item MassDriver
+
+- 参考：`D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/blocks/distribution/MassDriver.java`
+- Rust 主改动：`D:/MDT/rust-mindustry/core/src/mindustry/core/game_runtime.rs`
+- 已接入：`item_mass_driver_waiting_shooters` runtime-only sidecar，按 Java `waitingShooters`/`shooterValid()` 思路清理队列；`advance_owned_item_mass_drivers_ticks(...)` 现在需要目标处于 accepting、源/目标旋转角进入 2° 误差并且 reload 就绪才发射。
+- 已验证：`cargo test -p mindustry-core mass_driver --lib` 通过 13/13。
+- 仍未完成：真实 `MassDriverBolt` bullet entity、飞行延迟到达、`Time.run(timeToArrive)` 延迟清理、effects/sound/shake；当前 fire tick 仍会立即把 items 写入目标。
+- 注意：`MassDriverState { link, rotation, state }` 是 Java-compatible 存档尾字段；`reloadCounter` 与 `waitingShooters` 都是 runtime-only sidecar，不要写入 building payload。
