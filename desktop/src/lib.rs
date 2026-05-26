@@ -157,11 +157,15 @@ impl DesktopLauncher {
                     report.merge(self.runtime.note_client_block_snapshot_parse_error());
                 }
                 for record in &mirror.records {
-                    report.merge(self.runtime.apply_client_block_snapshot_record(
-                        record.tile_pos,
-                        record.block_id,
-                        record.sync_bytes.clone(),
-                    ));
+                    report.merge(
+                        self.runtime
+                            .apply_client_block_snapshot_record_with_content(
+                                &self.content_loader,
+                                record.tile_pos,
+                                record.block_id,
+                                record.sync_bytes.clone(),
+                            ),
+                    );
                 }
             }
             self.last_applied_block_snapshot_mirror = block_mirror;

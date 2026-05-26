@@ -1816,3 +1816,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
 - 仍未完成：block-specific tail 仍未按具体类型和 revision 消费；turret 等 override `readSync(...)` 还需保持 Java 的“同步时保留 rotation/reload”特殊语义。
+
+### 12.22 Conveyor BlockSnapshot child tail 回放
+
+- 2026-05-26：新增 `GameRuntime::apply_client_block_snapshot_record_with_content(...)`，`DesktopLauncher::sync_snapshot_mirrors()` 改用该入口，使 block snapshot 在基础 `read_base` 后可以借助 `ContentLoader` 识别 block family。
+- 当前首个 child tail 支持范围：`DistributionBlockKind::Conveyor | ArmoredConveyor`，按 Java `ConveyorBuild.version()==1` 使用既有 `read_conveyor_state(..., 1)` 解析 `write(Writes)` 尾部，并写入 `GameRuntime.distribution_runtime_states`。
+- `GameRuntimeClientSnapshotApplyReport` 新增：
+  - `block_child_records_applied`
+  - `block_child_read_errors`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：Router/Bridge/Duct/Sorter/Unloader 等 distribution 子类、storage/payload/turret 等 family 的 child tail 仍需逐类接入；当前不会把未知 tail 误消费。

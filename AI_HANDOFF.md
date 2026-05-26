@@ -1320,3 +1320,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 给无 child tail 的简单 block 锁定 `block_remaining_sync_bytes == 0`。
   2. 按 block family 接入 child `read(...)` tail，例如 storage/distribution，再到 turret/payload。
   3. 实现 turret override `readSync(...)` 的 Java 特例：同步时保留 rotation/reload。
+
+---
+
+## 36. 最新闭环记录：Conveyor BlockSnapshot child tail 回放
+
+- 目标：在基础 `Building.readBase` 之后，首个 block-specific tail 选择 Java `ConveyorBuild.write/read(version=1)` 接入 typed runtime state。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `desktop/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增 API：
+  - `GameRuntime::apply_client_block_snapshot_record_with_content(&ContentLoader, ...)`
+  - 内部复用原基础回放；当 tail 非空且 block 是 `Conveyor/ArmoredConveyor` 时，用 `read_conveyor_state(tail, 1)` 写入 `distribution_runtime_states`。
+- 报表新增：
+  - `block_child_records_applied`
+  - `block_child_read_errors`
+- Desktop 接入：
+  - `DesktopLauncher::sync_snapshot_mirrors()` 改为传入 `content_loader`，因此真实联机客户端可以从 block id 映射到 block family，再消费 child tail。
+- 验证：
+  - 新增/扩展 `game_runtime_applies_client_conveyor_snapshot_child_tail_with_content`，用 `write_base + write_conveyor_state` 构造真实 sync bytes，断言 health 与 conveyor item state 同步到 runtime。
+  - 继续保留真实 server→desktop block snapshot smoke，确保基础回放链路未断。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续接入 `Router` / `Junction` / `ItemBridge` / `Sorter` / `Unloader` 的 distribution tail。
+  2. 为真实联机 smoke 构造 conveyor snapshot，验证 server→desktop 后 `distribution_runtime_states` 被更新。
+  3. 继续保持未知 tail 只保留 remaining bytes，不误解析。

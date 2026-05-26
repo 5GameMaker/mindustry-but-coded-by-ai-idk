@@ -1190,6 +1190,8 @@ pub struct GameRuntimeClientSnapshotApplyReport {
     pub block_records_applied: usize,
     pub block_base_records_applied: usize,
     pub block_base_read_errors: usize,
+    pub block_child_records_applied: usize,
+    pub block_child_read_errors: usize,
     pub block_parse_errors: usize,
     pub block_missing_tiles: usize,
     pub block_missing_buildings: usize,
@@ -1211,6 +1213,8 @@ impl GameRuntimeClientSnapshotApplyReport {
         self.block_records_applied += other.block_records_applied;
         self.block_base_records_applied += other.block_base_records_applied;
         self.block_base_read_errors += other.block_base_read_errors;
+        self.block_child_records_applied += other.block_child_records_applied;
+        self.block_child_read_errors += other.block_child_read_errors;
         self.block_parse_errors += other.block_parse_errors;
         self.block_missing_tiles += other.block_missing_tiles;
         self.block_missing_buildings += other.block_missing_buildings;
@@ -2028,6 +2032,26 @@ impl GameRuntime {
         block_id: ContentId,
         sync_bytes: Vec<u8>,
     ) -> GameRuntimeClientSnapshotApplyReport {
+        self.apply_client_block_snapshot_record_inner(None, tile_pos, block_id, sync_bytes)
+    }
+
+    pub fn apply_client_block_snapshot_record_with_content(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        block_id: ContentId,
+        sync_bytes: Vec<u8>,
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        self.apply_client_block_snapshot_record_inner(Some(content), tile_pos, block_id, sync_bytes)
+    }
+
+    fn apply_client_block_snapshot_record_inner(
+        &mut self,
+        content: Option<&ContentLoader>,
+        tile_pos: i32,
+        block_id: ContentId,
+        sync_bytes: Vec<u8>,
+    ) -> GameRuntimeClientSnapshotApplyReport {
         let mut report = GameRuntimeClientSnapshotApplyReport {
             block_records_seen: 1,
             block_opaque_bytes: sync_bytes.len(),
@@ -2059,6 +2083,16 @@ impl GameRuntime {
                 report.block_remaining_sync_bytes = sync_read.len();
                 self.buildings[building_index] = synced_building;
                 self.sync_world_footprint_refs(building_index);
+                if let Some(content) = content {
+                    let child_report = self.apply_client_block_snapshot_child_tail(
+                        content,
+                        build_ref.tile_pos,
+                        block_id,
+                        sync_read,
+                    );
+                    report.block_remaining_sync_bytes = 0;
+                    report.merge(child_report);
+                }
             }
             Err(_) => {
                 report.block_base_read_errors = 1;
@@ -2075,6 +2109,48 @@ impl GameRuntime {
             },
         );
         report.block_records_applied = 1;
+        report
+    }
+
+    fn apply_client_block_snapshot_child_tail(
+        &mut self,
+        content: &ContentLoader,
+        building_tile_pos: i32,
+        block_id: ContentId,
+        tail: &[u8],
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        let mut report = GameRuntimeClientSnapshotApplyReport {
+            block_remaining_sync_bytes: tail.len(),
+            ..GameRuntimeClientSnapshotApplyReport::default()
+        };
+        if tail.is_empty() {
+            return report;
+        }
+
+        let Some(BlockDef::Distribution(distribution)) = content.block(block_id) else {
+            return report;
+        };
+        if !matches!(
+            distribution.kind,
+            DistributionBlockKind::Conveyor | DistributionBlockKind::ArmoredConveyor
+        ) {
+            return report;
+        }
+
+        let mut read = tail;
+        match read_conveyor_state(&mut read, 1) {
+            Ok(state) => {
+                self.distribution_runtime_states.insert(
+                    building_tile_pos,
+                    GameRuntimeDistributionBlockState::Conveyor(state),
+                );
+                report.block_child_records_applied = 1;
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Err(_) => {
+                report.block_child_read_errors = 1;
+            }
+        }
         report
     }
 
@@ -13076,6 +13152,64 @@ mod tests {
         let missing =
             runtime.apply_client_block_snapshot_record(point2_pack(9, 9), router.id, vec![]);
         assert_eq!(missing.block_missing_tiles, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_conveyor_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let conveyor = content
+            .block_by_name("conveyor")
+            .expect("base content should include conveyor")
+            .base()
+            .clone();
+        let copper = content
+            .item_by_name("copper")
+            .expect("base content should include copper")
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = point2_pack(2, 2);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(6, 6);
+        runtime.add_building(BuildingComp::new(tile_pos, conveyor.clone(), TeamId(6)));
+
+        let mut synced_building = BuildingComp::new(tile_pos, conveyor.clone(), TeamId(6));
+        synced_building.health = 19.0;
+        let conveyor_state = ConveyorState {
+            items: vec![ConveyorItemState {
+                item: copper,
+                x: 0.25,
+                y: 0.5,
+            }],
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_conveyor_state(&mut sync_bytes, &conveyor_state).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content,
+            tile_pos,
+            conveyor.id,
+            sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        let building = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 19.0);
+        let Some(GameRuntimeDistributionBlockState::Conveyor(applied)) =
+            runtime.distribution_runtime_states.get(&tile_pos)
+        else {
+            panic!("conveyor child tail should materialize into distribution runtime state");
+        };
+        assert_eq!(applied.items.len(), 1);
+        assert_eq!(applied.items[0].item, copper);
     }
 
     #[test]
