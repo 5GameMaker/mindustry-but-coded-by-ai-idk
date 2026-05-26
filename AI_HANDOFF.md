@@ -126,21 +126,21 @@ git -C 'D:/MDT/rust-mindustry' status --short
 
 本轮开始前最近已推送到 `main` 的提交包括：
 
-1. `9c52591 接入水洼实体快照运行态`
-2. `669806c 固定文档中的Rust工作路径`
-3. `58259bb 补充火焰实体快照联机验证`
-4. `b9c9231 接入火焰实体快照运行态`
-5. `696e903 按实体类型分类拆包`
-6. `5e48e9b 迁移实体类型编号基线`
-7. `8808169 补充玩家实体快照联机验证`
-8. `043424b 支持混合实体快照拆包`
-9. `685308e 接入玩家实体快照运行态`
-10. `f274ed8 固定上下文恢复路径常量`
+1. `b5c318a 接入天气实体快照运行态`
+2. `9c52591 接入水洼实体快照运行态`
+3. `669806c 固定文档中的Rust工作路径`
+4. `58259bb 补充火焰实体快照联机验证`
+5. `b9c9231 接入火焰实体快照运行态`
+6. `696e903 按实体类型分类拆包`
+7. `5e48e9b 迁移实体类型编号基线`
+8. `8808169 补充玩家实体快照联机验证`
+9. `043424b 支持混合实体快照拆包`
+10. `685308e 接入玩家实体快照运行态`
 
 本轮开始前最后确认时：
 
 - 当前分支：`main`
-- 最新提交：`9c52591 接入水洼实体快照运行态`
+- 最新提交：`b5c318a 接入天气实体快照运行态`
 - `git status --short` 未显示已有未提交代码改动。
 
 ---
@@ -2102,5 +2102,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
   1. 把 Weather typed sidecar 与未来完整 `Groups.weather`/renderer/weather update runtime 统一。
-  2. 继续迁移 `EffectStateComp` / `BulletComp` / `DecalComp` 等 entity snapshot wire。
+  2. `EffectStateComp` 已由第 62 节补上；继续迁移 `BulletComp` / `DecalComp` 等 entity snapshot wire。
   3. 将 single-record 与 mixed fallback dispatcher 继续收敛，避免新增 entity 类型时双处修改。
+
+---
+
+## 62. 最新闭环记录：EffectStateComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 class-id `9` 的 Java `EffectStateComp` 最新 revision wire 从 opaque entity bytes 推进到 Rust typed sidecar，并继续扩展真实 `ServerLauncher -> DesktopLauncher` mixed entity snapshot smoke。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.EffectStateComp=9`；
+  - `annotations/src/main/resources/revisions/EffectStateComp/6.json`：字段顺序 `color, data, effect, lifetime, offsetPos, offsetRot, offsetX, offsetY, parent, rotWithParent, rotation, time, x, y`；
+  - `TypeIO.writeColor/readColor` 写 `int rgba`；`TypeIO.writeObject/readObject` 写动态 object；`TypeIO.writeEffect/readEffect` 写 effect short id；`TypeIO.writePosEntity/readPosEntity` 写 parent entity id。
+- Rust 主改动：
+  - `type_io::EffectStateSyncWire` 与 `read_effect_state_sync/write_effect_state_sync`；
+  - `EntityClassKind::Effect` 与 `EFFECT_STATE_CLASS_ID`；
+  - `EffectStateComp` 扩展 `data/effect_id/offset*/parent_id/rot_with_parent` 并新增 `apply_sync_wire(...)`；
+  - `GameRuntime.client_effect_snapshot_entities` 与 `apply_client_effect_state_sync_wire(...)`；
+  - `DesktopLauncher` mixed fallback 现在支持 Player + Unit + Effect + Fire + Puddle + Weather 分类拆包；
+  - 真实联机 smoke 的第三个 entity snapshot packet 现在为 `amount=7`，新增 `1009 + EFFECT_STATE_CLASS_ID + EffectStateSyncWire`。
+- 已跑：
+  - `cargo test -p mindustry-core effect_state_sync --lib`
+  - `cargo test -p mindustry-core effect_state_applies_sync_wire_fields_and_preserves_effect_clip --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_effect_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_effect_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 将 Effect typed sidecar 与完整 `EffectRegistry`/renderer/effect lifecycle 统一，避免长期只停留在 snapshot mirror。
+  2. 继续迁移 `BulletComp` / `DecalComp` / `LaunchCoreComp` 等 entity snapshot wire。
+  3. 后续补服务端从真实 entity groups 枚举 EffectState 的发包路径，而不只是 smoke 中人工构造 packet。

@@ -510,7 +510,8 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
     use mindustry_core::mindustry::ctype::Content;
     use mindustry_core::mindustry::entities::{
-        FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+        EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
+        WEATHER_STATE_CLASS_ID,
     };
     use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
@@ -686,6 +687,24 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     };
     let mut player_bytes = Vec::new();
     player_sync.write_to(&mut player_bytes).unwrap();
+    let effect_sync = type_io::EffectStateSyncWire {
+        color: type_io::RgbaColor::new(0x336699cc),
+        data: type_io::TypeValue::String("spark".into()),
+        effect_id: 7,
+        lifetime: 50.0,
+        offset_pos: 1.25,
+        offset_rot: -2.5,
+        offset_x: 3.0,
+        offset_y: 4.0,
+        parent_id: Some(1234),
+        rot_with_parent: true,
+        rotation: 90.0,
+        time: 12.0,
+        x: 100.0,
+        y: 200.0,
+    };
+    let mut effect_bytes = Vec::new();
+    type_io::write_effect_state_sync(&mut effect_bytes, &effect_sync).unwrap();
     let fire_sync = type_io::FireSyncWire {
         lifetime: 150.0,
         tile_pos: Some(mindustry_core::mindustry::world::point2_pack(2, 3)),
@@ -747,6 +766,9 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.extend_from_slice(&connection_id.to_be_bytes());
     multi_entity_data.push(PLAYER_CLASS_ID);
     multi_entity_data.extend_from_slice(&player_bytes);
+    multi_entity_data.extend_from_slice(&1009i32.to_be_bytes());
+    multi_entity_data.push(EFFECT_STATE_CLASS_ID);
+    multi_entity_data.extend_from_slice(&effect_bytes);
     multi_entity_data.extend_from_slice(&1004i32.to_be_bytes());
     multi_entity_data.push(2);
     multi_entity_data.extend_from_slice(&multi_first_bytes);
@@ -763,7 +785,7 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.push(WEATHER_STATE_CLASS_ID);
     multi_entity_data.extend_from_slice(&weather_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 6,
+        amount: 7,
         data: multi_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
@@ -814,6 +836,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .runtime
                 .client_player_snapshot_entities
                 .contains_key(&connection_id)
+            && desktop
+                .runtime
+                .client_effect_snapshot_entities
+                .contains_key(&1009)
             && desktop
                 .runtime
                 .client_fire_snapshot_entities
@@ -958,10 +984,32 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         desktop
             .runtime
             .client_entity_snapshot_records
+            .get(&1009)
+            .map(|record| (record.type_id, record.sync_bytes.as_slice())),
+        Some((EFFECT_STATE_CLASS_ID, effect_bytes.as_slice()))
+    );
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
             .get(&1006)
             .map(|record| (record.type_id, record.sync_bytes.as_slice())),
         Some((FIRE_CLASS_ID, fire_bytes.as_slice()))
     );
+    let effect = desktop
+        .runtime
+        .client_effect_snapshot_entities
+        .get(&1009)
+        .expect("real mixed entity snapshot should materialize typed effect runtime");
+    assert_eq!(effect.effect_id, Some(7));
+    assert_eq!(effect.data, type_io::TypeValue::String("spark".into()));
+    assert_eq!(effect.lifetime, 50.0);
+    assert_eq!(effect.parent_id, Some(1234));
+    assert!(effect.rot_with_parent);
+    assert_eq!(effect.rotation, 90.0);
+    assert_eq!(effect.time, 12.0);
+    assert_eq!(effect.x, 100.0);
+    assert_eq!(effect.y, 200.0);
     assert_eq!(
         desktop
             .runtime

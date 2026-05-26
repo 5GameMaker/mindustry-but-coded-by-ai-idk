@@ -12,8 +12,8 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::io::{
-    read_fire_sync, read_puddle_sync, read_unit_sync, read_weather_state_sync,
-    ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
+    read_effect_state_sync, read_fire_sync, read_puddle_sync, read_unit_sync,
+    read_weather_state_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
@@ -371,6 +371,24 @@ impl DesktopLauncher {
                         .apply_client_player_snapshot_record(entity_id, player_sync);
                     report.entity_typed_records_applied += 1;
                 }
+                Some(EntityClassKind::Effect) => {
+                    let Ok(effect_sync) = read_effect_state_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    if self
+                        .runtime
+                        .apply_client_effect_state_sync_wire(entity_id, &effect_sync)
+                    {
+                        report.entity_typed_records_applied += 1;
+                    }
+                }
                 Some(EntityClassKind::Unit) => {
                     let Ok(_unit_sync) = read_unit_sync(&mut read, &self.content_loader) else {
                         report.entity_parse_errors += 1;
@@ -663,8 +681,8 @@ mod tests {
     };
     use mindustry_core::mindustry::{
         entities::{
-            comp::BuildingComp, PlayerComp, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
-            WEATHER_STATE_CLASS_ID,
+            comp::BuildingComp, PlayerComp, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID,
+            PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -1630,6 +1648,24 @@ mod tests {
         };
         let mut unit_bytes = Vec::new();
         type_io::write_unit_sync(&mut unit_bytes, &launcher.content_loader, &unit_sync).unwrap();
+        let effect_sync = type_io::EffectStateSyncWire {
+            color: type_io::RgbaColor::new(0x336699cc),
+            data: TypeValue::String("spark".into()),
+            effect_id: 7,
+            lifetime: 50.0,
+            offset_pos: 1.25,
+            offset_rot: -2.5,
+            offset_x: 3.0,
+            offset_y: 4.0,
+            parent_id: Some(1234),
+            rot_with_parent: true,
+            rotation: 90.0,
+            time: 12.0,
+            x: 100.0,
+            y: 200.0,
+        };
+        let mut effect_bytes = Vec::new();
+        type_io::write_effect_state_sync(&mut effect_bytes, &effect_sync).unwrap();
         let fire_sync = type_io::FireSyncWire {
             lifetime: 120.0,
             tile_pos: Some(mindustry_core::mindustry::world::point2_pack(2, 3)),
@@ -1681,6 +1717,9 @@ mod tests {
         data.extend_from_slice(&8801i32.to_be_bytes());
         data.push(2);
         data.extend_from_slice(&unit_bytes);
+        data.extend_from_slice(&9801i32.to_be_bytes());
+        data.push(EFFECT_STATE_CLASS_ID);
+        data.extend_from_slice(&effect_bytes);
         data.extend_from_slice(&9901i32.to_be_bytes());
         data.push(FIRE_CLASS_ID);
         data.extend_from_slice(&fire_bytes);
@@ -1697,7 +1736,7 @@ mod tests {
             state
                 .entity_snapshot_mirrors
                 .push(ClientEntitySnapshotMirror {
-                    amount: 5,
+                    amount: 6,
                     data,
                     records: Vec::new(),
                     parse_error: Some(
@@ -1709,11 +1748,11 @@ mod tests {
 
         launcher.update();
 
-        let report = launcher
-            .last_client_snapshot_apply_report
-            .expect("mixed fallback should apply player, unit, fire, puddle and weather records");
-        assert_eq!(report.entity_records_applied, 5);
-        assert_eq!(report.entity_typed_records_applied, 5);
+        let report = launcher.last_client_snapshot_apply_report.expect(
+            "mixed fallback should apply player, unit, effect, fire, puddle and weather records",
+        );
+        assert_eq!(report.entity_records_applied, 6);
+        assert_eq!(report.entity_typed_records_applied, 6);
         assert_eq!(report.entity_parse_errors, 0);
 
         assert_eq!(
@@ -1736,6 +1775,14 @@ mod tests {
                 .get(&8801)
                 .map(|record| record.sync_bytes.as_slice()),
             Some(unit_bytes.as_slice())
+        );
+        assert_eq!(
+            launcher
+                .runtime
+                .client_entity_snapshot_records
+                .get(&9801)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(effect_bytes.as_slice())
         );
         assert_eq!(
             launcher
@@ -1773,6 +1820,21 @@ mod tests {
         assert_eq!(unit.y(), 45.0);
         assert_eq!(unit.rotation(), 180.0);
         assert!(unit.weapons.is_shooting);
+
+        let effect = launcher
+            .runtime
+            .client_effect_snapshot_entities
+            .get(&9801)
+            .expect("mixed fallback should materialize effect record");
+        assert_eq!(effect.effect_id, Some(7));
+        assert_eq!(effect.data, TypeValue::String("spark".into()));
+        assert_eq!(effect.lifetime, 50.0);
+        assert_eq!(effect.parent_id, Some(1234));
+        assert!(effect.rot_with_parent);
+        assert_eq!(effect.rotation, 90.0);
+        assert_eq!(effect.time, 12.0);
+        assert_eq!(effect.x, 100.0);
+        assert_eq!(effect.y, 200.0);
 
         let fire = launcher
             .runtime

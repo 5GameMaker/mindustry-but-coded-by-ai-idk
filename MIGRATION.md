@@ -2311,7 +2311,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
-- 仍未完成：Weather 目前落在 runtime typed sidecar，尚未接入完整 `Groups.weather`、renderer/weather update 与客户端真实 weather lifecycle；`EffectStateComp`、`BulletComp` 等其他 entity snapshot wire 仍待迁移。
+- 仍未完成：Weather 目前落在 runtime typed sidecar，尚未接入完整 `Groups.weather`、renderer/weather update 与客户端真实 weather lifecycle；`EffectStateComp` 已由下一节补上，`BulletComp` 等其他 entity snapshot wire 仍待迁移。
+
+### 12.48 EffectStateComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 2026-05-27：迁移 Java `EffectStateComp` 最新 revision 6 的 wire 形状并接入 single-record / mixed entity snapshot dispatcher。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.EffectStateComp=9`；
+  - `annotations/src/main/resources/revisions/EffectStateComp/6.json`：字段顺序 `color, data, effect, lifetime, offsetPos, offsetRot, offsetX, offsetY, parent, rotWithParent, rotation, time, x, y`；
+  - `TypeIO.writeColor/readColor` 写 `int rgba`；`TypeIO.writeObject/readObject` 写动态 object；`TypeIO.writeEffect/readEffect` 写 effect short id；`TypeIO.writePosEntity/readPosEntity` 写 parent entity id。
+- Rust 新增/变化：
+  - `type_io::EffectStateSyncWire`；
+  - `type_io::write_effect_state_sync(...)` / `read_effect_state_sync(...)`；
+  - `EntityClassKind::Effect` 与 `EFFECT_STATE_CLASS_ID = 9`；
+  - `EffectStateComp` 扩展 `TypeValue data`、`effect_id`、`offset_pos/offset_rot/offset_x/offset_y`、`parent_id`、`rot_with_parent`；
+  - `EffectStateComp::apply_sync_wire(...)` 按 Java sync 字段恢复状态；
+  - `GameRuntime.client_effect_snapshot_entities`；
+  - `GameRuntime::apply_client_effect_state_sync_wire(...)`；
+  - hidden snapshot 对 typed effect 计为 existing；
+  - `DesktopLauncher` 正常 single-record 与 mixed fallback 都能在 `EntityClassKind::Effect` 下 materialize typed effect state。
+- 测试/真实 smoke：
+  - `effect_state_sync_wire_roundtrips_java_write_sync_shape`
+  - `effect_state_applies_sync_wire_fields_and_preserves_effect_clip`
+  - `game_runtime_applies_client_effect_entity_snapshot_to_typed_runtime`
+  - `game_runtime_applies_effect_entity_snapshot_packet_with_content`
+  - 扩展 `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`，同 packet 现在覆盖 Player + Unit + Effect + Fire + Puddle + Weather；
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 mixed packet 现在为 `amount=7`，新增 `1009 + EFFECT_STATE_CLASS_ID + EffectStateSyncWire`，断言 raw sidecar 与 `runtime.client_effect_snapshot_entities[1009]`。
+- 已验证：
+  - `cargo test -p mindustry-core effect_state_sync --lib`
+  - `cargo test -p mindustry-core effect_state_applies_sync_wire_fields_and_preserves_effect_clip --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_effect_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_effect_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：Effect 目前落在 runtime typed sidecar，尚未接入完整 `EffectRegistry`、renderer/effect lifecycle 与服务端真实 entity group 枚举发包；`BulletComp` 等其他 entity snapshot wire 仍待迁移。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

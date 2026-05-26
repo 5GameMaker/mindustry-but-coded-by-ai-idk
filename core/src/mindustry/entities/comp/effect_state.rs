@@ -1,7 +1,10 @@
 //! Effect state component mirroring upstream
 //! `mindustry.entities.comp.EffectStateComp`.
 
-use crate::mindustry::entities::comp::DecalColor;
+use crate::mindustry::{
+    entities::{comp::DecalColor, Effect},
+    io::{EffectStateSyncWire, TypeValue},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectRenderInput<'a> {
@@ -12,7 +15,7 @@ pub struct EffectRenderInput<'a> {
     pub rotation: f32,
     pub x: f32,
     pub y: f32,
-    pub data: Option<&'a str>,
+    pub data: &'a TypeValue,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +28,14 @@ pub struct EffectStateComp {
     pub lifetime: f32,
     pub color: DecalColor,
     pub effect_clip: f32,
-    pub data: Option<String>,
+    pub data: TypeValue,
+    pub effect_id: Option<u16>,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub offset_pos: f32,
+    pub offset_rot: f32,
+    pub parent_id: Option<i32>,
+    pub rot_with_parent: bool,
 }
 
 impl EffectStateComp {
@@ -39,7 +49,14 @@ impl EffectStateComp {
             lifetime: 0.0,
             color: DecalColor::WHITE,
             effect_clip: 0.0,
-            data: None,
+            data: TypeValue::Null,
+            effect_id: None,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            offset_pos: 0.0,
+            offset_rot: 0.0,
+            parent_id: None,
+            rot_with_parent: false,
         }
     }
 
@@ -56,12 +73,39 @@ impl EffectStateComp {
             rotation: self.rotation,
             x: self.x,
             y: self.y,
-            data: self.data.as_deref(),
+            data: &self.data,
         });
     }
 
     pub fn clip_size(&self) -> f32 {
         self.effect_clip
+    }
+
+    pub fn apply_sync_wire(&mut self, sync: &EffectStateSyncWire, effect: Option<&Effect>) {
+        self.color = decal_color_from_rgba(sync.color.rgba() as u32);
+        self.data = sync.data.clone();
+        self.effect_id = Some(sync.effect_id);
+        self.lifetime = sync.lifetime;
+        self.effect_clip = effect.map(|effect| effect.clip).unwrap_or(self.effect_clip);
+        self.offset_pos = sync.offset_pos;
+        self.offset_rot = sync.offset_rot;
+        self.offset_x = sync.offset_x;
+        self.offset_y = sync.offset_y;
+        self.parent_id = sync.parent_id;
+        self.rot_with_parent = sync.rot_with_parent;
+        self.rotation = sync.rotation;
+        self.time = sync.time;
+        self.x = sync.x;
+        self.y = sync.y;
+    }
+}
+
+fn decal_color_from_rgba(rgba: u32) -> DecalColor {
+    DecalColor {
+        r: ((rgba >> 24) & 0xff) as f32 / 255.0,
+        g: ((rgba >> 16) & 0xff) as f32 / 255.0,
+        b: ((rgba >> 8) & 0xff) as f32 / 255.0,
+        a: (rgba & 0xff) as f32 / 255.0,
     }
 }
 
@@ -77,13 +121,13 @@ mod tests {
         state.rotation = 45.0;
         state.time = 3.0;
         state.lifetime = 4.0;
-        state.data = Some("payload".into());
+        state.data = TypeValue::String("payload".into());
 
         state.draw_with(|input| {
             assert_eq!(input.id, 9);
             assert_eq!((input.x, input.y, input.rotation), (1.0, 2.0, 45.0));
             assert_eq!((input.time, input.lifetime), (3.0, 4.0));
-            assert_eq!(input.data, Some("payload"));
+            assert_eq!(input.data, &TypeValue::String("payload".into()));
             8.0
         });
 
@@ -96,5 +140,48 @@ mod tests {
         state.effect_clip = 32.0;
 
         assert_eq!(state.clip_size(), 32.0);
+    }
+
+    #[test]
+    fn effect_state_applies_sync_wire_fields_and_preserves_effect_clip() {
+        let mut state = EffectStateComp::new(10);
+        let effect = Effect::with_lifetime(7, 50.0, 32.0);
+        let sync = EffectStateSyncWire {
+            color: crate::mindustry::io::type_io::RgbaColor::new(0x336699cc),
+            data: TypeValue::String("spark".into()),
+            effect_id: 7,
+            lifetime: 50.0,
+            offset_pos: 1.25,
+            offset_rot: -2.5,
+            offset_x: 3.0,
+            offset_y: 4.0,
+            parent_id: Some(1234),
+            rot_with_parent: true,
+            rotation: 90.0,
+            time: 12.0,
+            x: 100.0,
+            y: 200.0,
+        };
+
+        state.apply_sync_wire(&sync, Some(&effect));
+
+        assert_eq!(state.effect_id, Some(7));
+        assert_eq!(state.data, TypeValue::String("spark".into()));
+        assert_eq!(state.lifetime, 50.0);
+        assert_eq!(state.effect_clip, 32.0);
+        assert!((state.color.r - 0x33 as f32 / 255.0).abs() < 0.0001);
+        assert!((state.color.g - 0x66 as f32 / 255.0).abs() < 0.0001);
+        assert!((state.color.b - 0x99 as f32 / 255.0).abs() < 0.0001);
+        assert!((state.color.a - 0xcc as f32 / 255.0).abs() < 0.0001);
+        assert_eq!(state.offset_pos, 1.25);
+        assert_eq!(state.offset_rot, -2.5);
+        assert_eq!(state.offset_x, 3.0);
+        assert_eq!(state.offset_y, 4.0);
+        assert_eq!(state.parent_id, Some(1234));
+        assert!(state.rot_with_parent);
+        assert_eq!(state.rotation, 90.0);
+        assert_eq!(state.time, 12.0);
+        assert_eq!(state.x, 100.0);
+        assert_eq!(state.y, 200.0);
     }
 }

@@ -24,7 +24,9 @@ use crate::mindustry::{
     ctype::{ContentId, ContentType},
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
-        comp::{BuildingComp, BulletComp, FireComp, PuddleComp, PuddleTile, UnitComp},
+        comp::{
+            BuildingComp, BulletComp, EffectStateComp, FireComp, PuddleComp, PuddleTile, UnitComp,
+        },
         entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
     game::CoreInfo,
@@ -1561,6 +1563,15 @@ fn read_client_player_sync_exact(sync_bytes: &[u8]) -> Option<NetworkPlayerSyncD
     NetworkPlayerSyncData::read_exact_from(sync_bytes).ok()
 }
 
+fn read_client_effect_state_sync_exact(sync_bytes: &[u8]) -> Option<type_io::EffectStateSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_effect_state_sync(&mut read).ok()?;
+    read.is_empty().then_some(sync)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntimeConstructBlockState {
     pub size: i32,
@@ -2049,6 +2060,7 @@ pub struct GameRuntime {
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
+    pub client_effect_snapshot_entities: BTreeMap<i32, EffectStateComp>,
     pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
     pub client_puddle_snapshot_entities: BTreeMap<i32, PuddleComp>,
@@ -2103,6 +2115,7 @@ impl GameRuntime {
             construct_runtime_states: BTreeMap::new(),
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
+            client_effect_snapshot_entities: BTreeMap::new(),
             client_fire_snapshot_entities: BTreeMap::new(),
             client_player_snapshot_entities: BTreeMap::new(),
             client_puddle_snapshot_entities: BTreeMap::new(),
@@ -2398,6 +2411,13 @@ impl GameRuntime {
                     report.entity_typed_records_applied = 1;
                 }
             }
+            Some(EntityClassKind::Effect) => {
+                if let Some(sync) = read_client_effect_state_sync_exact(&sync_bytes) {
+                    if self.apply_client_effect_state_sync_wire(entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
             Some(EntityClassKind::Unit) => {
                 if let Some(sync) = read_client_unit_sync_exact(content, &sync_bytes) {
                     if self.apply_client_unit_sync_wire(content, entity_id, &sync) {
@@ -2480,6 +2500,18 @@ impl GameRuntime {
                     );
                     self.apply_client_unit_sync_wire(content, entity_id, &sync)
                 }
+                Some(EntityClassKind::Effect) => {
+                    let Ok(sync) = type_io::read_effect_state_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_effect_state_sync_wire(entity_id, &sync)
+                }
                 Some(EntityClassKind::Fire) => {
                     let Ok(sync) = type_io::read_fire_sync(&mut read) else {
                         report.entity_parse_errors += 1;
@@ -2550,6 +2582,19 @@ impl GameRuntime {
             .entry(entity_id)
             .or_insert_with(|| FireComp::new(sync.x, sync.y, sync.lifetime));
         fire.apply_sync_wire(sync);
+        true
+    }
+
+    pub fn apply_client_effect_state_sync_wire(
+        &mut self,
+        entity_id: i32,
+        sync: &type_io::EffectStateSyncWire,
+    ) -> bool {
+        let effect = self
+            .client_effect_snapshot_entities
+            .entry(entity_id)
+            .or_insert_with(|| EffectStateComp::new(entity_id));
+        effect.apply_sync_wire(sync, None);
         true
     }
 
@@ -2655,6 +2700,9 @@ impl GameRuntime {
             let mut existing = false;
             if let Some(record) = self.client_entity_snapshot_records.get_mut(id) {
                 record.hidden = true;
+                existing = true;
+            }
+            if self.client_effect_snapshot_entities.contains_key(id) {
                 existing = true;
             }
             if let Some(unit) = self.client_unit_snapshot_entities.get_mut(id) {
@@ -5464,6 +5512,7 @@ impl GameRuntime {
         self.construct_runtime_states.clear();
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
+        self.client_effect_snapshot_entities.clear();
         self.client_fire_snapshot_entities.clear();
         self.client_player_snapshot_entities.clear();
         self.client_puddle_snapshot_entities.clear();
@@ -13457,7 +13506,10 @@ mod tests {
         content::blocks::{BulletKind, BulletSpec, PayloadTurretAmmo, TurretBlockData},
         core::GameStateState,
         ctype::{Content, ContentType},
-        entities::{units::BuildPlan, FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID},
+        entities::{
+            units::BuildPlan, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
+            WEATHER_STATE_CLASS_ID,
+        },
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
             Vec2 as IoVec2,
@@ -14663,6 +14715,109 @@ mod tests {
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7001]);
         assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_effect_entity_snapshot_to_typed_runtime() {
+        let sync = type_io::EffectStateSyncWire {
+            color: type_io::RgbaColor::new(0x336699cc),
+            data: TypeValue::String("spark".into()),
+            effect_id: 7,
+            lifetime: 50.0,
+            offset_pos: 1.25,
+            offset_rot: -2.5,
+            offset_x: 3.0,
+            offset_y: 4.0,
+            parent_id: Some(1234),
+            rot_with_parent: true,
+            rotation: 90.0,
+            time: 12.0,
+            x: 100.0,
+            y: 200.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_effect_state_sync(&mut sync_bytes, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_record_with_content(
+            &ContentLoader::create_base_content().unwrap(),
+            7004,
+            EFFECT_STATE_CLASS_ID,
+            sync_bytes.clone(),
+        );
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&7004)
+            .expect("effect snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, EFFECT_STATE_CLASS_ID);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+
+        let effect = runtime
+            .client_effect_snapshot_entities
+            .get(&7004)
+            .expect("effect sync should materialize typed runtime effect state");
+        assert_eq!(effect.id, 7004);
+        assert_eq!(effect.effect_id, Some(7));
+        assert_eq!(effect.data, TypeValue::String("spark".into()));
+        assert_eq!(effect.lifetime, 50.0);
+        assert_eq!(effect.offset_pos, 1.25);
+        assert_eq!(effect.offset_rot, -2.5);
+        assert_eq!(effect.offset_x, 3.0);
+        assert_eq!(effect.offset_y, 4.0);
+        assert_eq!(effect.parent_id, Some(1234));
+        assert!(effect.rot_with_parent);
+        assert_eq!(effect.rotation, 90.0);
+        assert_eq!(effect.time, 12.0);
+        assert_eq!(effect.x, 100.0);
+        assert_eq!(effect.y, 200.0);
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[7004]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_effect_entity_snapshot_packet_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let sync = type_io::EffectStateSyncWire {
+            color: type_io::RgbaColor::new(0x336699cc),
+            data: TypeValue::Null,
+            effect_id: 8,
+            lifetime: 30.0,
+            offset_pos: 0.0,
+            offset_rot: 0.0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            parent_id: None,
+            rot_with_parent: false,
+            rotation: 15.0,
+            time: 2.0,
+            x: 12.0,
+            y: 24.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_effect_state_sync(&mut sync_bytes, &sync).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&7101i32.to_be_bytes());
+        data.push(EFFECT_STATE_CLASS_ID);
+        data.extend_from_slice(&sync_bytes);
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_packet_with_content(&content, 1, &data);
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        assert_eq!(report.entity_parse_errors, 0);
+
+        let effect = runtime.client_effect_snapshot_entities.get(&7101).unwrap();
+        assert_eq!(effect.effect_id, Some(8));
+        assert_eq!(effect.rotation, 15.0);
+        assert_eq!(effect.time, 2.0);
+        assert_eq!(effect.x, 12.0);
+        assert_eq!(effect.y, 24.0);
     }
 
     #[test]

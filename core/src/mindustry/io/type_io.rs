@@ -937,6 +937,24 @@ pub struct WeatherStateSyncWire {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EffectStateSyncWire {
+    pub color: RgbaColor,
+    pub data: TypeValue,
+    pub effect_id: u16,
+    pub lifetime: f32,
+    pub offset_pos: f32,
+    pub offset_rot: f32,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub parent_id: Option<i32>,
+    pub rot_with_parent: bool,
+    pub rotation: f32,
+    pub time: f32,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnitSyncWire {
     pub abilities: Vec<AbilityWire>,
     pub ammo: f32,
@@ -1268,6 +1286,59 @@ pub fn read_weather_state_sync<R: Read>(read: &mut R) -> io::Result<WeatherState
         opacity,
         weather_id,
         wind_vector,
+        x,
+        y,
+    })
+}
+
+pub fn write_effect_state_sync<W: Write>(
+    write: &mut W,
+    sync: &EffectStateSyncWire,
+) -> io::Result<()> {
+    write_color(write, sync.color)?;
+    write_object(write, &sync.data)?;
+    write_u16(write, sync.effect_id)?;
+    write_f32(write, sync.lifetime)?;
+    write_f32(write, sync.offset_pos)?;
+    write_f32(write, sync.offset_rot)?;
+    write_f32(write, sync.offset_x)?;
+    write_f32(write, sync.offset_y)?;
+    write_entity_ref(write, EntityRef { id: sync.parent_id })?;
+    write_bool(write, sync.rot_with_parent)?;
+    write_f32(write, sync.rotation)?;
+    write_f32(write, sync.time)?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)
+}
+
+pub fn read_effect_state_sync<R: Read>(read: &mut R) -> io::Result<EffectStateSyncWire> {
+    let color = read_color(read)?;
+    let data = read_object(read)?;
+    let effect_id = read_effect_id(read)?;
+    let lifetime = read_f32(read)?;
+    let offset_pos = read_f32(read)?;
+    let offset_rot = read_f32(read)?;
+    let offset_x = read_f32(read)?;
+    let offset_y = read_f32(read)?;
+    let parent_id = read_entity_ref(read)?.id;
+    let rot_with_parent = read_bool(read)?;
+    let rotation = read_f32(read)?;
+    let time = read_f32(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(EffectStateSyncWire {
+        color,
+        data,
+        effect_id,
+        lifetime,
+        offset_pos,
+        offset_rot,
+        offset_x,
+        offset_y,
+        parent_id,
+        rot_with_parent,
+        rotation,
+        time,
         x,
         y,
     })
@@ -3060,6 +3131,60 @@ mod tests {
         assert_eq!(
             read_weather_state_sync(&mut bytes.as_slice()).unwrap(),
             sync_without_weather
+        );
+    }
+
+    #[test]
+    fn effect_state_sync_wire_roundtrips_java_write_sync_shape() {
+        let sync = EffectStateSyncWire {
+            color: RgbaColor::new(0x336699cc),
+            data: TypeValue::String("spark".into()),
+            effect_id: 7,
+            lifetime: 50.0,
+            offset_pos: 1.25,
+            offset_rot: -2.5,
+            offset_x: 3.0,
+            offset_y: 4.0,
+            parent_id: Some(1234),
+            rot_with_parent: true,
+            rotation: 90.0,
+            time: 12.0,
+            x: 100.0,
+            y: 200.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_effect_state_sync(&mut bytes, &sync).unwrap();
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&0x336699cci32.to_be_bytes());
+        write_object(&mut expected, &TypeValue::String("spark".into())).unwrap();
+        expected.extend_from_slice(&7u16.to_be_bytes());
+        expected.extend_from_slice(&sync.lifetime.to_be_bytes());
+        expected.extend_from_slice(&sync.offset_pos.to_be_bytes());
+        expected.extend_from_slice(&sync.offset_rot.to_be_bytes());
+        expected.extend_from_slice(&sync.offset_x.to_be_bytes());
+        expected.extend_from_slice(&sync.offset_y.to_be_bytes());
+        expected.extend_from_slice(&1234i32.to_be_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&sync.rotation.to_be_bytes());
+        expected.extend_from_slice(&sync.time.to_be_bytes());
+        expected.extend_from_slice(&sync.x.to_be_bytes());
+        expected.extend_from_slice(&sync.y.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(read_effect_state_sync(&mut bytes.as_slice()).unwrap(), sync);
+
+        let sync_without_parent = EffectStateSyncWire {
+            parent_id: None,
+            rot_with_parent: false,
+            data: TypeValue::Null,
+            ..sync
+        };
+        bytes.clear();
+        write_effect_state_sync(&mut bytes, &sync_without_parent).unwrap();
+        assert_eq!(
+            read_effect_state_sync(&mut bytes.as_slice()).unwrap(),
+            sync_without_parent
         );
     }
 

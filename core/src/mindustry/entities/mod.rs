@@ -31,6 +31,7 @@ pub struct EntityClassIdEntry {
 pub enum EntityClassKind {
     Player,
     Unit,
+    Effect,
     Fire,
     Puddle,
     Weather,
@@ -38,6 +39,7 @@ pub enum EntityClassKind {
 }
 
 pub const PLAYER_CLASS_ID: u8 = 12;
+pub const EFFECT_STATE_CLASS_ID: u8 = 9;
 pub const FIRE_CLASS_ID: u8 = 10;
 pub const PUDDLE_CLASS_ID: u8 = 13;
 pub const WEATHER_STATE_CLASS_ID: u8 = 14;
@@ -112,7 +114,7 @@ pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.EffectStateComp",
-        id: 9,
+        id: EFFECT_STATE_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.FireComp",
@@ -262,6 +264,8 @@ pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
     let name = entity_class_name(id)?;
     if id == PLAYER_CLASS_ID {
         Some(EntityClassKind::Player)
+    } else if id == EFFECT_STATE_CLASS_ID {
+        Some(EntityClassKind::Effect)
     } else if id == FIRE_CLASS_ID {
         Some(EntityClassKind::Fire)
     } else if id == PUDDLE_CLASS_ID {
@@ -450,6 +454,14 @@ mod tests {
         assert_eq!(
             entity_class_kind(PLAYER_CLASS_ID),
             Some(EntityClassKind::Player)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.EffectStateComp"),
+            Some(EFFECT_STATE_CLASS_ID)
+        );
+        assert_eq!(
+            entity_class_kind(EFFECT_STATE_CLASS_ID),
+            Some(EntityClassKind::Effect)
         );
         assert_eq!(entity_class_kind(2), Some(EntityClassKind::Unit));
         assert_eq!(
