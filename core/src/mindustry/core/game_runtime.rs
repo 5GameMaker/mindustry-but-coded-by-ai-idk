@@ -124,8 +124,8 @@ use crate::mindustry::{
         PowerGeneratorState, VariableReactorState,
     },
     world::blocks::production::{
-        read_beam_drill_state, read_burst_drill_state, read_drill_state,
-        read_generic_crafter_state, read_separator_state, write_beam_drill_state,
+        item_incinerator_accept_item, read_beam_drill_state, read_burst_drill_state,
+        read_drill_state, read_generic_crafter_state, read_separator_state, write_beam_drill_state,
         write_burst_drill_state, write_drill_state, write_generic_crafter_state,
         write_separator_state, BeamDrillState, BurstDrillState, DrillState, GenericCrafterState,
         SeparatorState,
@@ -4925,6 +4925,11 @@ impl GameRuntime {
             content.block(self.buildings[target_index].block.id),
             Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::ItemVoid
         );
+        let target_is_item_incinerator = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Crafting(crafting))
+                if crafting.kind == CraftingBlockKind::ItemIncinerator
+        );
         let target_is_conveyor = matches!(
             content.block(self.buildings[target_index].block.id),
             Some(BlockDef::Distribution(distribution))
@@ -4952,7 +4957,7 @@ impl GameRuntime {
             return false;
         }
 
-        if target_is_item_void {
+        if target_is_item_void || target_is_item_incinerator {
             source_items.remove(item_id, 1);
             return true;
         }
@@ -5222,6 +5227,11 @@ impl GameRuntime {
         match content.block(target.block.id) {
             Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::ItemVoid => {
                 item_void_accept_item(target.enabled)
+            }
+            Some(BlockDef::Crafting(crafting))
+                if crafting.kind == CraftingBlockKind::ItemIncinerator =>
+            {
+                target.enabled && item_incinerator_accept_item(target.efficiency)
             }
             Some(BlockDef::Distribution(distribution))
                 if matches!(
@@ -12314,6 +12324,59 @@ mod tests {
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 7);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 1);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_to_adjacent_item_incinerator() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let incinerator_def = content.block_by_name("slag-incinerator").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let incinerator_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let mut incinerator_building =
+            BuildingComp::new(incinerator_tile, incinerator_def.base().clone(), TeamId(6));
+        incinerator_building.efficiency = 1.0;
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(incinerator_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 4);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 4);
+        assert!(runtime.buildings[1].items.is_none());
     }
 
     #[test]
