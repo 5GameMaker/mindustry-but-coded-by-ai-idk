@@ -946,6 +946,9 @@ fn client_block_snapshot_revision(block: &BlockDef) -> u8 {
             _ => 0,
         },
         BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core => 1,
+        BlockDef::Payload(payload) if payload.kind == PayloadBlockKind::PayloadRouter => 1,
+        BlockDef::PayloadMassDriver(_) | BlockDef::PayloadLoader(_) => 1,
+        BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadSource => 1,
         _ => 0,
     }
 }
@@ -2184,6 +2187,30 @@ impl GameRuntime {
         match self.read_storage_runtime_state_from_building_payload(block, revision, &mut read) {
             Ok(Some(state)) => {
                 self.storage_runtime_states.insert(building_tile_pos, state);
+                report.block_child_records_applied = 1;
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Ok(None) | Err(GameRuntimeBlockStateReadError::Unsupported) => {
+                report.block_remaining_sync_bytes = read.len();
+            }
+            Err(GameRuntimeBlockStateReadError::Parse) => {
+                report.block_child_read_errors = 1;
+            }
+        }
+        if report.block_child_records_applied > 0 || report.block_child_read_errors > 0 {
+            return report;
+        }
+
+        read = tail;
+        match self.read_payload_runtime_state_from_building_payload(
+            content,
+            block,
+            revision,
+            &mut read,
+            GameRuntimePayloadReadMode::TopLevel,
+        ) {
+            Ok(Some(state)) => {
+                self.payload_runtime_states.insert(building_tile_pos, state);
                 report.block_child_records_applied = 1;
                 report.block_remaining_sync_bytes = read.len();
             }
@@ -13291,6 +13318,270 @@ mod tests {
             panic!("core child tail should materialize into storage runtime state");
         };
         assert_eq!(applied.command_pos, core_state.command_pos);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_payload_conveyor_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let conveyor = content
+            .block_by_name("payload-conveyor")
+            .expect("base content should include payload-conveyor")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(3, 3);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, conveyor.clone(), TeamId(1)));
+
+        let mut synced_building = BuildingComp::new(tile_pos, conveyor.clone(), TeamId(1));
+        synced_building.health = 23.0;
+        synced_building.set_rotation(2);
+        let conveyor_state = PayloadConveyorState {
+            item: None,
+            item_rotation: 33.0,
+            ..PayloadConveyorState::default()
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_conveyor_extra(
+            &mut sync_bytes,
+            12.0,
+            conveyor_state.item_rotation,
+            conveyor_state.item.as_ref(),
+        )
+        .unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content,
+            tile_pos,
+            conveyor.id,
+            sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        let building = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 23.0);
+        assert_eq!(building.rotation, 2);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Conveyor(conveyor_state))
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_payload_router_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router = content
+            .block_by_name("payload-router")
+            .expect("base content should include payload-router")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(4, 3);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, router.clone(), TeamId(1)));
+
+        let mut synced_building = BuildingComp::new(tile_pos, router.clone(), TeamId(1));
+        synced_building.health = 37.0;
+        synced_building.set_rotation(1);
+        let conveyor_state = PayloadConveyorState {
+            item: None,
+            item_rotation: 90.0,
+            ..PayloadConveyorState::default()
+        };
+        let sorted = Some(PayloadSortKey {
+            content_type: ContentType::Block.ordinal() as i8,
+            id: router.id,
+        });
+        let rec_dir = 2;
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_conveyor_extra(
+            &mut sync_bytes,
+            6.0,
+            conveyor_state.item_rotation,
+            conveyor_state.item.as_ref(),
+        )
+        .unwrap();
+        write_payload_router_extra(&mut sync_bytes, sorted, rec_dir).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, router.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Router {
+                conveyor: conveyor_state,
+                sorted,
+                rec_dir,
+                matches: false,
+                smooth_rot: 0.0,
+                control_time: -1.0,
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_payload_mass_driver_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content
+            .block_by_name("payload-mass-driver")
+            .expect("base content should include payload-mass-driver")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(2, 4);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, driver_def.clone(), TeamId(6)));
+
+        let mut synced_building = BuildingComp::new(tile_pos, driver_def.clone(), TeamId(6));
+        synced_building.set_rotation(1);
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 1.5, y: -2.25 },
+            pay_rotation: 45.0,
+            carried: false,
+        };
+        let driver = PayloadMassDriverState {
+            link: point2_pack(4, 4),
+            turret_rotation: 135.0,
+            state: PayloadDriverState::Shooting,
+            reload_counter: 0.5,
+            charge: 12.0,
+            loaded: true,
+            charging: true,
+            ..PayloadMassDriverState::default()
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_block_build_common(&mut sync_bytes, &common).unwrap();
+        write_payload_mass_driver_extra(&mut sync_bytes, &driver).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content,
+            tile_pos,
+            driver_def.id,
+            sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::MassDriver { common, driver })
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_payload_loader_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader = content
+            .block_by_name("payload-loader")
+            .expect("base content should include payload-loader")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(5, 3);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, loader.clone(), TeamId(6)));
+
+        let mut synced_building = BuildingComp::new(tile_pos, loader.clone(), TeamId(6));
+        synced_building.set_rotation(3);
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: -1.0, y: 2.0 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let loader_state = PayloadLoaderState {
+            has_payload: false,
+            exporting: true,
+            ..PayloadLoaderState::default()
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_block_build_common(&mut sync_bytes, &common).unwrap();
+        write_payload_loader_extra(&mut sync_bytes, loader_state.exporting).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, loader.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Loader {
+                common,
+                loader: loader_state,
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_payload_source_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source = content
+            .block_by_name("payload-source")
+            .expect("base content should include payload-source")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(2, 5);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, source.clone(), TeamId(6)));
+
+        let synced_building = BuildingComp::new(tile_pos, source.clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 0.25, y: 0.5 },
+            pay_rotation: 90.0,
+            carried: false,
+        };
+        let source_state = PayloadSourceState {
+            unit: Some(0),
+            config_block: None,
+            command_pos: Some(Vec2 { x: 8.0, y: 16.0 }),
+            has_payload: false,
+            ..PayloadSourceState::default()
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_block_build_common(&mut sync_bytes, &common).unwrap();
+        write_payload_source_extra(
+            &mut sync_bytes,
+            source_state.unit,
+            source_state.config_block,
+            source_state.command_pos,
+        )
+        .unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, source.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Source {
+                common,
+                source: source_state,
+            })
+        );
     }
 
     #[test]

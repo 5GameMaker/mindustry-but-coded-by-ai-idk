@@ -1,5 +1,14 @@
 # AI 交接文档：Mindustry Java → Rust 迁移
 
+## 0. 固定路径速记（上下文压缩后优先看）
+
+- Rust 工作仓库：`D:\MDT\rust-mindustry`（命令中可写作 `D:/MDT/rust-mindustry`）
+- Java 参考仓库：`D:\MDT\mindustry-upstream-v157.4`（命令中可写作 `D:/MDT/mindustry-upstream-v157.4`）
+- 废案目录，禁止参考/写入：`D:\MDT\mindustry-rust`
+- Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
+- 只推送分支：`main`
+- Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
+
 ## 1. 最终目标（不得偏移）
 
 把 Java 参考仓库：
@@ -1405,3 +1414,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 payload/turret/logic family 接入 child-tail dispatcher。
   2. 对 storage/core 做真实联机 smoke，验证 commandPos 通过 `BlockSnapshotCallPacket` 到 desktop runtime。
   3. 后续不要把 core linked storage/shared item module 简化为单独普通 storage。
+
+---
+
+## 39. 最新闭环记录：Payload BlockSnapshot child tail 回放
+
+- 固定工作路径再次强调：Rust 仓库是 `D:\MDT\rust-mindustry`，Java 参考是 `D:\MDT\mindustry-upstream-v157.4`，不要去 `D:\MDT\mindustry-rust`。
+- 目标：把 client `BlockSnapshotCallPacket` 中 Java `Building.writeSync()` 的 payload block child-tail 回放到 `GameRuntime.payload_runtime_states`，避免 payload 状态只停留在 raw bytes。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - `client_block_snapshot_revision(...)` 为 `PayloadRouter`、`PayloadMassDriver`、`PayloadLoader/PayloadUnloader`、`PayloadSource` 返回 Java sync revision `1`；
+  - `PayloadConveyor`、`PayloadDeconstructor`、`PayloadConstructor`、`PayloadVoid` 继续使用 Java 默认 revision `0`；
+  - `apply_client_block_snapshot_child_tail(...)` 在 distribution/storage 未消费 tail 后，调用 `read_payload_runtime_state_from_building_payload(..., GameRuntimePayloadReadMode::TopLevel)`；
+  - 成功解析时写入 `payload_runtime_states`，并记录 `block_child_records_applied == 1` / `block_remaining_sync_bytes == 0`；unsupported 不误消费，parse error 只记 `block_child_read_errors`。
+- 新增测试：
+  - `game_runtime_applies_client_payload_conveyor_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_router_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_mass_driver_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_loader_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_source_snapshot_child_tail_with_content`
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 给 `PayloadDeconstructor/Constructor/Void` 补同类 client snapshot 单测，确认 revision 0 top-level terminal payload/ref 解析。
+  2. 扩展真实联机 `BlockSnapshotCallPacket` smoke 到 payload-router 或 payload-mass-driver，验证 server→desktop 真实链路 materialize 到 `payload_runtime_states`。
+  3. 继续推进 turret `readSync` 特例与 entity snapshot typed materialize；不要把 payload state 留成孤立 helper。

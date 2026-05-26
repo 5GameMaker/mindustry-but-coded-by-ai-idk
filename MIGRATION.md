@@ -2,6 +2,14 @@
 
 本文档用于约束后续 AI/开发者持续迁移，目标是防止漏迁移、跑偏目录、把工程做成孤立模块，或忘记最终要交付的是可整合、可联机、可游玩的 Rust 版 Mindustry/MDT。
 
+## 0. 固定路径速记（上下文压缩后优先看）
+
+- Rust 工作仓库：`D:\MDT\rust-mindustry`（命令中可写作 `D:/MDT/rust-mindustry`）
+- Java 参考仓库：`D:\MDT\mindustry-upstream-v157.4`（命令中可写作 `D:/MDT/mindustry-upstream-v157.4`）
+- 废案目录，禁止参考/写入：`D:\MDT\mindustry-rust`
+- Git 远端：`https://github.com/Anon-deisu/mindustry-rust`
+- 只推送分支：`main`
+
 ## 1. 最终目标（必须保持）
 
 把 Java 参考仓库：
@@ -1842,6 +1850,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
   - `git diff --check`
 - 仍未完成：StorageBlock 普通 storage 无 child tail；core 的 shared item module / linked storage 语义仍依赖后续更完整 world/team runtime 同步。
+
+### 12.25 Payload BlockSnapshot child tail 回放
+
+- 2026-05-26：`apply_client_block_snapshot_child_tail(...)` 在 distribution 与 storage dispatcher 未消费 tail 后，继续尝试 payload dispatcher：`read_payload_runtime_state_from_building_payload(content, block, revision, ..., TopLevel)`。
+- `client_block_snapshot_revision(...)` 现在为 Java `version()==1` 的 payload snapshot 类型返回 revision `1`：
+  - `PayloadRouter`
+  - `PayloadMassDriver`
+  - `PayloadLoader/PayloadUnloader`
+  - `PayloadSource`
+  - `PayloadConveyor`、`PayloadDeconstructor`、`PayloadConstructor`、`PayloadVoid` 仍沿用 Java 默认 revision `0`。
+- 成功解析时写入 `GameRuntime.payload_runtime_states`，保留完整 raw `sync_bytes` 到 `client_block_snapshot_records`；失败时只记 `block_child_read_errors`，未知类型不误消费 tail。
+- 新增 client snapshot 端到端单测：
+  - `game_runtime_applies_client_payload_conveyor_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_router_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_mass_driver_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_loader_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_source_snapshot_child_tail_with_content`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：payload BlockSnapshot 目前是 core 单测覆盖，真实联机 smoke 还未扩展到 payload；`PayloadDeconstructor/Constructor/Void` 虽可通过 revision 0 dispatcher 读取，但还缺对应 client snapshot 单测与真实联机 smoke；UnitPayload 完整实体恢复仍需后续继续。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
