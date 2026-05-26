@@ -1002,3 +1002,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 后续建议：把同类 world-data roundtrip 扩展到 `PayloadMassDriver`（link/reload/charge/loaded/charging）、`PayloadRouter`（sorted/recDir/matches）、`PayloadDeconstructor`（progress/deconstructing），再接 desktop/client `apply_network_world_data` smoke。
+
+---
+
+## 26. 最新闭环记录：服务端 world-data 多类 Payload sidecar 回读
+
+- 目标：把 server world-data payload sidecar roundtrip 从单个 `payload-loader` 扩展到多类 payload building，降低客户端 world stream 丢运行态字段的风险。
+- Rust 主改动：
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`server_world_data_roundtrips_payload_router_mass_driver_and_deconstructor_states`。
+- 测试链路：
+  - 同一个 `ServerLauncher` runtime 中放置：
+    - `payload-router`，带 conveyor item、sorted block key、`recDir=2`；
+    - `payload-mass-driver`，带 `state=Shooting`、`turretRotation=45`、`reloadCounter=0.25`、`charge=0.5`、`loaded/charging=true`；
+    - `small-deconstructor`，带 `progress=0.5`、`accum=[1,2]`、`deconstructing=BuildPayload(router)`；
+  - 通过 connect handshake 触发 `WORLD_STREAM`；
+  - `decode_captured_world_data(...)` → `NetworkWorldData.map_snapshot`；
+  - 新 `GameRuntime::load_network_map_with_buildings(...)` 回读；
+  - 断言三类 payload sidecar 关键字段全部恢复。
+- 已验证：
+  - `cargo test -p mindustry-server server_world_data_roundtrips_payload_router_mass_driver_and_deconstructor_states --lib`
+  - `cargo test -p mindustry-server server_world_data_roundtrips_payload_loader_state_through_runtime_loader --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 后续建议：下一闭环优先接 desktop/client `apply_network_world_data` smoke，证明 desktop launcher 收到 server world-data 后也能把 payload sidecar  materialize 到 runtime/game state，而不只是在 server 测试里手动回读。

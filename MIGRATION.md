@@ -1642,3 +1642,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：还需扩展到 payload mass-driver/router/deconstructor 的 world-data roundtrip、真实 desktop client 接收应用 smoke，以及 Java↔Rust 联机兼容验证。
+
+### 12.12 服务端 world-data 多类 Payload sidecar 回读
+
+- 2026-05-26：新增 `server_world_data_roundtrips_payload_router_mass_driver_and_deconstructor_states`，在同一条 server `WORLD_STREAM` 中同时携带 `PayloadRouter`、`PayloadMassDriver`、`PayloadDeconstructor` 三类 sidecar，并用新 `GameRuntime::load_network_map_with_buildings(...)` 回读验证。
+- 该测试覆盖：router 的 conveyor item、sorted key 与 `recDir`；mass-driver 的 `turretRotation/state/reloadCounter/charge/loaded/charging`；deconstructor 的 `progress/accum/deconstructing`。这把 payload 网络可见状态从 loader 单点推进到多类 payload building 组合。
+- 已验证：
+  - `cargo test -p mindustry-server server_world_data_roundtrips_payload_router_mass_driver_and_deconstructor_states --lib`
+  - `cargo test -p mindustry-server server_world_data_roundtrips_payload_loader_state_through_runtime_loader --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：下一步建议接入 desktop/client `apply_network_world_data` 对 payload map snapshot 的恢复 smoke，随后继续补 Java 客户端互通测试。

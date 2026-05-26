@@ -767,6 +767,193 @@ mod tests {
     }
 
     #[test]
+    fn server_world_data_roundtrips_payload_router_mass_driver_and_deconstructor_states() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher {
+            context: AppContext::server("config"),
+            args: Vec::new(),
+            control: super::ServerControl::new(Vec::new()),
+            runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
+            net_server: NetServer::new(Net::new(Box::new(provider))),
+            network_error: None,
+        };
+
+        let payload_router_def = launcher
+            .content_loader
+            .block_by_name("payload-router")
+            .expect("base content should include payload-router");
+        let mass_driver_def = launcher
+            .content_loader
+            .block_by_name("payload-mass-driver")
+            .expect("base content should include payload-mass-driver");
+        let deconstructor_def = launcher
+            .content_loader
+            .block_by_name("small-deconstructor")
+            .expect("base content should include small-deconstructor");
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let router_id = router_def.base().id;
+        let router_tile = point2_pack(4, 4);
+        let mass_driver_tile = point2_pack(9, 4);
+        let deconstructor_tile = point2_pack(14, 4);
+        let mut payload_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), router_def.base().clone(), TeamId(6))
+            .write_base(&mut payload_bytes, false)
+            .unwrap();
+        let router_payload = PayloadRef::Block {
+            block: router_id,
+            version: 0,
+            build_bytes: payload_bytes,
+        };
+
+        launcher.runtime.state.world.resize(24, 10);
+        launcher.runtime.add_building(BuildingComp::new(
+            router_tile,
+            payload_router_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.add_building(BuildingComp::new(
+            mass_driver_tile,
+            mass_driver_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.add_building(BuildingComp::new(
+            deconstructor_tile,
+            deconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.payload_runtime_states.insert(
+            router_tile,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState {
+                    item: Some(router_payload.clone()),
+                    step: 1,
+                    step_accepted: 0,
+                    item_rotation: 45.0,
+                    ..PayloadConveyorState::default()
+                },
+                sorted: Some(PayloadSortKey {
+                    content_type: ContentType::Block.ordinal() as i8,
+                    id: router_id,
+                }),
+                rec_dir: 2,
+                matches: true,
+                smooth_rot: 180.0,
+                control_time: -1.0,
+            },
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            mass_driver_tile,
+            GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState::default(),
+                driver: PayloadMassDriverState {
+                    link: -1,
+                    turret_rotation: 45.0,
+                    state: PayloadDriverState::Shooting,
+                    reload_counter: 0.25,
+                    charge: 0.5,
+                    loaded: true,
+                    charging: true,
+                    ..PayloadMassDriverState::default()
+                },
+            },
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            deconstructor_tile,
+            GameRuntimePayloadBlockState::Deconstructor {
+                common: PayloadBlockBuildState::default(),
+                deconstructor: PayloadDeconstructorState {
+                    progress: 0.5,
+                    has_deconstructing: true,
+                    deconstructing: Some(router_payload),
+                    accum: Some(vec![1.0, 2.0]),
+                    ..PayloadDeconstructorState::default()
+                },
+            },
+        );
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(75),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "127.0.0.1:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(75),
+                false,
+                PacketKind::ConnectPacket(connect_packet("rust-payload-state")),
+            );
+        }
+
+        launcher.update();
+
+        let sent = sent.lock().unwrap();
+        let world_data = decode_captured_world_data(&sent, 75);
+        let map = world_data
+            .map_snapshot
+            .expect("runtime map snapshot should be sent in world data");
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(&launcher.content_loader, &map);
+        assert_eq!(report.buildings_added, 3);
+        assert_eq!(report.building_parse_errors, 0);
+
+        let Some(GameRuntimePayloadBlockState::Router {
+            conveyor,
+            sorted,
+            rec_dir,
+            ..
+        }) = loaded.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should roundtrip through server world data");
+        };
+        assert!(matches!(
+            conveyor.item.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_id
+        ));
+        assert_eq!(
+            *sorted,
+            Some(PayloadSortKey {
+                content_type: ContentType::Block.ordinal() as i8,
+                id: router_id,
+            })
+        );
+        assert_eq!(*rec_dir, 2);
+
+        let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+            loaded.payload_runtime_states.get(&mass_driver_tile)
+        else {
+            panic!("payload mass driver sidecar should roundtrip through server world data");
+        };
+        assert_eq!(driver.turret_rotation, 45.0);
+        assert_eq!(driver.state, PayloadDriverState::Shooting);
+        assert_eq!(driver.reload_counter, 0.25);
+        assert_eq!(driver.charge, 0.5);
+        assert!(driver.loaded);
+        assert!(driver.charging);
+
+        let Some(GameRuntimePayloadBlockState::Deconstructor { deconstructor, .. }) =
+            loaded.payload_runtime_states.get(&deconstructor_tile)
+        else {
+            panic!("payload deconstructor sidecar should roundtrip through server world data");
+        };
+        assert_eq!(deconstructor.progress, 0.5);
+        assert_eq!(deconstructor.accum.as_deref(), Some(&[1.0, 2.0][..]));
+        assert!(matches!(
+            deconstructor.deconstructing.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_id
+        ));
+    }
+
+    #[test]
     fn server_runtime_effect_update_is_wired_to_launcher_runtime() {
         let mut launcher = ServerLauncher::new(Vec::new());
         assert!(launcher.update_runtime_effect_blocks(1.0 / 60.0).is_none());
