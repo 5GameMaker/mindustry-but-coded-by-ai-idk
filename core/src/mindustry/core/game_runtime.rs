@@ -4963,6 +4963,12 @@ impl GameRuntime {
         target_index: usize,
         liquid_id: ContentId,
     ) -> bool {
+        let Some(target_index) =
+            self.liquid_destination_index(content, source_index, target_index, liquid_id)
+        else {
+            return false;
+        };
+
         if source_index == target_index
             || source_index >= self.buildings.len()
             || target_index >= self.buildings.len()
@@ -5009,6 +5015,88 @@ impl GameRuntime {
         target_liquids.add(liquid_id, flow);
         source_liquids.remove(liquid_id, flow);
         true
+    }
+
+    fn liquid_destination_index(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        liquid_id: ContentId,
+    ) -> Option<usize> {
+        if source_index >= self.buildings.len() || target_index >= self.buildings.len() {
+            return None;
+        }
+
+        let mut from_index = source_index;
+        let mut current_index = target_index;
+        for _ in 0..=self.buildings.len() {
+            if !matches!(
+                content.block(self.buildings[current_index].block.id),
+                Some(BlockDef::Liquid(liquid)) if liquid.kind == LiquidBlockKind::LiquidJunction
+            ) {
+                return Some(current_index);
+            }
+
+            if !self.buildings[current_index].enabled {
+                return None;
+            }
+
+            let dir = self.relative_direction_between_buildings(from_index, current_index)?;
+            let (dx, dy) = autotiler_direction(dir);
+            let next_tile_pos = self
+                .state
+                .world
+                .build(
+                    self.buildings[current_index].tile_x() + dx,
+                    self.buildings[current_index].tile_y() + dy,
+                )
+                .map(|target| target.tile_pos)?;
+            let next_index = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == next_tile_pos)?;
+
+            if !matches!(
+                content.block(self.buildings[next_index].block.id),
+                Some(BlockDef::Liquid(liquid)) if liquid.kind == LiquidBlockKind::LiquidJunction
+            ) && !self.dump_liquid_target_accepts(content, source_index, next_index, liquid_id)
+            {
+                return None;
+            }
+
+            from_index = current_index;
+            current_index = next_index;
+        }
+
+        None
+    }
+
+    fn relative_direction_between_buildings(
+        &self,
+        from_index: usize,
+        to_index: usize,
+    ) -> Option<i32> {
+        let (Some(from), Some(to)) = (self.buildings.get(from_index), self.buildings.get(to_index))
+        else {
+            return None;
+        };
+
+        if (from.x - to.x).abs() > (from.y - to.y).abs() {
+            if from.x <= to.x - 1.0 {
+                Some(0)
+            } else if from.x >= to.x + 1.0 {
+                Some(2)
+            } else {
+                None
+            }
+        } else if from.y <= to.y - 1.0 {
+            Some(1)
+        } else if from.y >= to.y + 1.0 {
+            Some(3)
+        } else {
+            None
+        }
     }
 
     fn dump_target_accepts_item(
@@ -12039,6 +12127,68 @@ mod tests {
             GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
                 .unwrap();
         assert!((payload_building.liquids.as_ref().unwrap().get(water) - 40.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_dumps_liquid_through_liquid_junction() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let liquid_junction_def = content.block_by_name("liquid-junction").unwrap();
+        let liquid_container_def = content.block_by_name("liquid-container").unwrap();
+        let water = content
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let junction_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let liquid_container_tile = point2_pack(point2_x(junction_tile) as i32 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let junction_building =
+            BuildingComp::new(junction_tile, liquid_junction_def.base().clone(), TeamId(6));
+        let liquid_container_building = BuildingComp::new(
+            liquid_container_tile,
+            liquid_container_def.base().clone(),
+            TeamId(6),
+        );
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(12, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(junction_building);
+        runtime.add_building(liquid_container_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(
+                        &content,
+                        "liquid-container",
+                        |building| {
+                            building.liquids.as_mut().unwrap().add(water, 80.0);
+                        },
+                    )),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.unloaded_liquid_events, 1);
+        assert_eq!(report.dumped_liquid_events, 1);
+        assert!((runtime.buildings[0].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
+        assert!((runtime.buildings[1].liquids.as_ref().unwrap().get(water)).abs() < 0.001);
+        assert!((runtime.buildings[2].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
     }
 
     #[test]
