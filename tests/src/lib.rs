@@ -645,3 +645,98 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     desktop.net_client.net_mut().disconnect();
     server.close_network();
 }
+
+#[test]
+fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
+    use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::net::BlockSnapshotCallPacket;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(8, 8);
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+    });
+
+    let connection_id = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        state
+            .last_connect_confirm_connection_id
+            .expect("server should receive connect confirm before block snapshot")
+    };
+    let snapshot = BlockSnapshotCallPacket {
+        amount: 2,
+        data: vec![1, 2, 3, 4, 5, 6],
+    };
+    server
+        .net_server
+        .send_block_snapshot(connection_id, snapshot.clone())
+        .expect("real server should send block snapshot");
+
+    let mut applied = false;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        desktop.update();
+        server.update();
+        {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            applied = state.last_block_snapshot.as_ref() == Some(&snapshot);
+            last_client_status = format!(
+                "block_snapshots={} last_block={:?} last_server_snapshot={:?} provider_events={:?}",
+                state.block_snapshot_packets_seen,
+                state.last_block_snapshot,
+                state.last_server_snapshot_at,
+                state.last_provider_events,
+            );
+        }
+        if applied {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        applied,
+        "desktop should receive real block snapshot after world stream; client: {last_client_status}"
+    );
+    {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.last_block_snapshot_connection_id, Some(connection_id));
+        assert_eq!(state.last_block_snapshot.as_ref(), Some(&snapshot));
+        assert_eq!(state.block_snapshot_packets_sent, 1);
+        assert!(state.last_block_snapshot_sent_at.is_some());
+        assert!(state.last_block_snapshot_error.is_none());
+    }
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.block_snapshot_packets_seen, 1);
+        assert_eq!(state.last_block_snapshot.as_ref(), Some(&snapshot));
+        assert!(state.last_block_snapshot_at.is_some());
+        assert!(state.last_server_snapshot_at.is_some());
+    }
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}

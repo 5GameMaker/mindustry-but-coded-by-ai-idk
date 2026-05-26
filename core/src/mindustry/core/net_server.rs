@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::mindustry::entities::comp::building::{BuildingComp, BuildingConfigChange};
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
-    packet_ids, ActionType, Administration, ClientPlanSnapshotCallPacket,
+    packet_ids, ActionType, Administration, BlockSnapshotCallPacket, ClientPlanSnapshotCallPacket,
     ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, ConnectFilter,
     ConnectPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, Disconnect,
     EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2,
@@ -359,6 +359,11 @@ pub struct NetServerState {
     pub last_hidden_snapshot_sent_at: Option<Instant>,
     pub hidden_snapshot_packets_sent: u64,
     pub last_hidden_snapshot_error: Option<String>,
+    pub last_block_snapshot_connection_id: Option<i32>,
+    pub last_block_snapshot: Option<BlockSnapshotCallPacket>,
+    pub last_block_snapshot_sent_at: Option<Instant>,
+    pub block_snapshot_packets_sent: u64,
+    pub last_block_snapshot_error: Option<String>,
     pub last_disconnect: Option<Disconnect>,
     pub last_disconnect_reason: Option<String>,
     pub events: Vec<ProviderEvent>,
@@ -1119,6 +1124,41 @@ impl NetServer {
             }
             Err(error) => {
                 state.last_hidden_snapshot_error = Some(error.to_string());
+            }
+        }
+        result
+    }
+
+    pub fn send_block_snapshot(
+        &self,
+        connection_id: i32,
+        packet: BlockSnapshotCallPacket,
+    ) -> io::Result<()> {
+        let packet_kind = PacketKind::BlockSnapshotCallPacket(packet.clone());
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet_kind, false)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let now = Instant::now();
+        state.last_block_snapshot_connection_id = Some(connection_id);
+        state.last_block_snapshot = Some(packet);
+        state.last_block_snapshot_sent_at = Some(now);
+        state.last_updated_at = Some(now);
+        match &result {
+            Ok(()) => {
+                state.block_snapshot_packets_sent += 1;
+                state.last_block_snapshot_error = None;
+                Self::record_connection_sent(
+                    &mut state,
+                    connection_id,
+                    "BlockSnapshotCallPacket",
+                    false,
+                );
+            }
+            Err(error) => {
+                state.last_block_snapshot_error = Some(error.to_string());
             }
         }
         result

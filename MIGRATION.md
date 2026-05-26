@@ -1731,3 +1731,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check tests/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`BlockSnapshotCallPacket` 真实联机 smoke、entity snapshot 数据 materialize 到真实 world/entity mirror、客户端输入/构建回传、Java↔Rust 互通、renderer/UI/可游玩闭环仍需继续。
+
+### 12.18 真实联机 BlockSnapshot 增量同步 smoke
+
+- 2026-05-26：新增 `NetServer::send_block_snapshot(...)`，与 state/entity/hidden snapshot 发送 API 对齐，内部通过 `Net::send_to(..., PacketKind::BlockSnapshotCallPacket, false)` 走 Java-like unreliable snapshot 通道，并记录 `NetServerState.last_block_snapshot*` / `block_snapshot_packets_sent`。
+- 新增 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`：先完成真实 world stream join，再由服务端发送 `BlockSnapshotCallPacket { amount, data }`，客户端 `NetClient` 记录 `last_block_snapshot`、`last_block_snapshot_at`、`block_snapshot_packets_seen` 与 `last_server_snapshot_at`。
+- 该闭环补齐 state/entity/hidden 之后的 block snapshot 真实联机接收路径，后续可以继续把 block snapshot bytes materialize 到客户端 world/block mirror。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-server -p mindustry-tests`
+  - `rustfmt --check core/src/mindustry/core/net_server.rs tests/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：block/entity snapshot bytes 的实际 world/entity mirror 应用、客户端输入/构建回传、Java↔Rust 互通、renderer/UI/完整可游玩闭环仍需继续。

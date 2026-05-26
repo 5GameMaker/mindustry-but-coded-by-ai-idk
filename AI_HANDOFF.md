@@ -1166,3 +1166,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check tests/src/lib.rs`
   - `git diff --check`
 - 后续建议：继续补 `BlockSnapshotCallPacket` 真实联机 smoke，并把 entity/block snapshot bytes 进一步 materialize 到可查询的 world/entity mirror，而不是只停在 `NetClientState` 记录层。
+
+---
+
+## 32. 最新闭环记录：真实联机 BlockSnapshot 增量同步 smoke
+
+- 目标：补齐 world stream join 后的 `BlockSnapshotCallPacket` 真实联机接收路径，并让服务端有对称的发送/记录 API。
+- Rust 主改动：
+  - `core/src/mindustry/core/net_server.rs`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增 API：`NetServer::send_block_snapshot(connection_id, BlockSnapshotCallPacket)`。
+  - 走 `PacketKind::BlockSnapshotCallPacket`；
+  - unreliable 发送；
+  - 更新 `NetServerState.last_block_snapshot_connection_id`、`last_block_snapshot`、`last_block_snapshot_sent_at`、`block_snapshot_packets_sent`、`last_block_snapshot_error`；
+  - 记录 connection sent metadata。
+- 新增测试：`real_server_desktop_block_snapshot_updates_net_client_after_world_stream`。
+- 测试链路：
+  - 真实 server/desktop 完成 world stream join；
+  - 取真实 `last_connect_confirm_connection_id`；
+  - 服务端调用 `send_block_snapshot(...)`；
+  - 循环 `desktop.update()` / `server.update()`；
+  - 断言服务端发送记录；
+  - 断言客户端 `NetClientState.block_snapshot_packets_seen=1`、`last_block_snapshot`、`last_block_snapshot_at`、`last_server_snapshot_at`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-server -p mindustry-tests`
+  - `rustfmt --check core/src/mindustry/core/net_server.rs tests/src/lib.rs`
+  - `git diff --check`
+- 后续建议：下一步把 block/entity snapshot bytes materialize 到客户端 world/entity mirror；然后推进客户端输入、构建请求、单位控制回传与 Java↔Rust 互通 smoke。
