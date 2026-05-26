@@ -945,3 +945,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 后续建议：补 `PayloadSource/Router` 多帧选路 smoke、linked `PayloadMassDriver` 的多帧自然 charge/fire smoke，并继续把这些 runtime 状态与 world-data/network snapshot 测试绑定。
+
+---
+
+## 24. 最新闭环记录：服务端 PayloadSource → PayloadRouter → PayloadVoid 跨多帧 smoke
+
+- 目标：补齐 source/router 的 server-level 多帧链路验证，让 sandbox payload source、payload router sort 选择、payload void 消纳都在同一个 server aggregate 中被证明能串联运行。
+- Rust 主改动：
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`server_update_drives_owned_payload_source_router_void_chain`。
+- 测试链路：
+  - `payload-source` 配置为持续生成 `router` block payload；
+  - source 前方放置 `payload-router`，router 配置同 block sort key；
+  - router 记录方向前方放置 `payload-void`；
+  - 连续调用 `launcher.update()`，每帧断言 `runtime.state.update_id == frame`；
+  - 累计 report，要求至少出现一次：
+    - `source.spawned_block_payloads >= 1`
+    - `source.transferred_payloads >= 1`
+    - `conveyor.transferred_payloads >= 1`
+    - `void.incinerated_payloads >= 1`
+  - 由于 payload-source 会持续生产，该 smoke 不要求最终所有中间 slot 清空，只锁定至少一次完整 source→router→void 流转。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_router_void_chain --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_conveyor_void_chain --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- Rawls the 2nd 只读结论：payload 低层 codec 与 runtime export/load roundtrip 已较完整，最明显缺口是 server runtime payload sidecar 经 `network_world_data_template()` / world stream / `read_world_data()` / 新 `GameRuntime::load_network_map_with_buildings(...)` 的端到端 smoke。下一闭环建议优先补 server world-data payload state roundtrip。

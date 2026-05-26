@@ -236,6 +236,7 @@ mod tests {
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
         NetServer,
     };
+    use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::entities::comp::BuildingComp;
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
     use mindustry_core::mindustry::io::{TeamId, TypeValue};
@@ -248,7 +249,7 @@ mod tests {
     use mindustry_core::mindustry::world::blocks::payloads::{
         payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
         PayloadConveyorState, PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState,
-        PayloadMassDriverState, PayloadRef, PayloadSourceState,
+        PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
@@ -1421,5 +1422,109 @@ mod tests {
             deconstructor.deconstructing.as_ref(),
             Some(PayloadRef::Block { block, .. }) if *block == router_id
         ));
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_source_router_void_chain() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let source_def = launcher
+            .content_loader
+            .block_by_name("payload-source")
+            .unwrap();
+        let router_block_def = launcher
+            .content_loader
+            .block_by_name("payload-router")
+            .unwrap();
+        let void_def = launcher
+            .content_loader
+            .block_by_name("payload-void")
+            .unwrap();
+        let carried_block = launcher.content_loader.block_by_name("router").unwrap();
+        let carried_block_id = carried_block.base().id;
+        let source_tile = point2_pack(4, 4);
+        let source_trns = source_def.base().size / 2 + 1;
+        let router_x = 4 + source_trns + (router_block_def.base().size - 1) / 2;
+        let router_tile = point2_pack(router_x, 4);
+        let router_trns = router_block_def.base().size / 2 + 1;
+        let void_x = router_x + router_trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(void_x, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, source_def.base().clone(), TeamId(6));
+        source_building.set_rotation(0);
+        let mut router_building =
+            BuildingComp::new(router_tile, router_block_def.base().clone(), TeamId(6));
+        router_building.set_rotation(1);
+
+        launcher.runtime.state.world.resize(20, 10);
+        launcher.runtime.add_building(source_building);
+        launcher.runtime.add_building(router_building);
+        launcher.runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState {
+                    config_block: Some(carried_block_id),
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            router_tile,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState::default(),
+                sorted: Some(PayloadSortKey {
+                    content_type: ContentType::Block.ordinal() as i8,
+                    id: carried_block_id,
+                }),
+                rec_dir: 0,
+                matches: false,
+                smooth_rot: 90.0,
+                control_time: -1.0,
+            },
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut spawned_payloads = 0;
+        let mut source_transfers = 0;
+        let mut router_transfers = 0;
+        let mut void_incinerations = 0;
+        for frame in 1..=360 {
+            launcher.update();
+            assert_eq!(launcher.runtime.state.update_id, frame);
+            if let Some(report) = launcher.last_runtime_payload_report {
+                spawned_payloads += report.source.spawned_block_payloads;
+                source_transfers += report.source.transferred_payloads;
+                router_transfers += report.conveyor.transferred_payloads;
+                void_incinerations += report.void.incinerated_payloads;
+            }
+            if void_incinerations > 0 {
+                break;
+            }
+        }
+
+        assert!(spawned_payloads >= 1);
+        assert!(source_transfers >= 1);
+        assert!(router_transfers >= 1);
+        assert!(void_incinerations >= 1);
+        let Some(GameRuntimePayloadBlockState::Router { matches, .. }) =
+            launcher.runtime.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert!(*matches);
+        let Some(GameRuntimePayloadBlockState::Void(_common)) =
+            launcher.runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
     }
 }

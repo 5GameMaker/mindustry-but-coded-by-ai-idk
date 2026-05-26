@@ -1616,3 +1616,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：仍需补 `source/router`、linked `payload-mass-driver` 与 network snapshot 同步的跨多帧/联机 smoke，并继续迁移完整 UnitPayload、renderer/UI 与 Java 客户端互通细节。
+
+### 12.10 服务端 PayloadSource → PayloadRouter → PayloadVoid 跨多帧 smoke
+
+- 2026-05-26：新增 `server_update_drives_owned_payload_source_router_void_chain`，在同一个 server aggregate 中构造 `payload-source → payload-router → payload-void` 链路；source 配置为生成 `router` block payload，payload-router 配置同 block sort key，连续推进多个 `launcher.update()` 后验证 source 生成/转交、router 按匹配方向输出、void 最终 incinerate。
+- 该测试覆盖 sandbox source、router sort key / `matches`、payload conveyor aggregate report 与 payload void 的组合运行；由于 payload-source 会持续生成 payload，测试按“至少一次完整流转”断言，避免把持续生产误判为失败。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_router_void_chain --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_conveyor_void_chain --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：linked `payload-mass-driver` 仍需自然多帧 charge/fire smoke；payload runtime 与 `network_world_data_template()`/Java 客户端可见 state 的端到端同步还需继续补。
