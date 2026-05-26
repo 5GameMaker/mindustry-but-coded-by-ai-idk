@@ -2695,6 +2695,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core power_graph`
 - 仍未完成：当前 diode 只覆盖相邻 front/back building 与 battery graph 转移；图内多建筑 battery 分配、`PowerDiode.bar(...)` UI、禁用/环境规则细节和与真实 `Groups.powerGraph` 调度顺序仍需继续对照。
 
+### 12.62 PowerNode 批量配置与 placed autolink 入口
+
+- 2026-05-27：继续迁移 Java `PowerNode.config(Point2[].class, ...)` 与 `PowerNodeBuild.placed()` 的运行态入口。
+- Java 依据：
+  - `config(Point2[].class)` 先逐条清理旧 links，再把相对 `Point2` 转换成绝对 tile pos 逐条走 `Integer` config；
+  - `placed()` 在非客户端且当前 links 为空时自动调用 `getPotentialLinks(...)` 并 `configureAny(...)`。
+- Rust 新增/变化：
+  - `GameRuntimePowerNodeBatchLinkReport`；
+  - `GameRuntime::configure_owned_power_node_relative_links(...)`：按 Java 顺序清旧链、应用相对 link 列表、记录 linked/cleared/rejected/missing；
+  - `GameRuntime::placed_owned_power_node(...)`：服务端侧、空 links 时调用 `autolink_owned_power_node(...)`；
+  - `point2_pack` 进入 runtime 主模块导入，用于相对 link 坐标转绝对 tile pos。
+- 测试：
+  - `game_runtime_reconfigures_power_node_relative_links_like_java_point_array`
+  - `game_runtime_placed_power_node_autolinks_only_when_server_side_and_empty`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_reconfigures_power_node_relative_links_like_java_point_array`
+  - `cargo test -p mindustry-core game_runtime_placed_power_node_autolinks_only_when_server_side_and_empty`
+  - `cargo test -p mindustry-core power_node`
+- 仍未完成：真实 placement 调用点仍需从 build/placement 流程接入 `placed_owned_power_node(...)`；UI tap/client packet 路径、`PowerNode.insulated(...)` raycast、`getNodeLinks(...)` 辅助扫描仍待迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
