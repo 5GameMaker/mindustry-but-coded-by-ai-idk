@@ -1760,7 +1760,18 @@ pub struct GameRuntimeItemMassDriverInFlight {
     pub to_tile: i32,
     pub to_block_id: ContentId,
     pub to_team: TeamId,
+    pub from_x: f32,
+    pub from_y: f32,
+    pub to_x: f32,
+    pub to_y: f32,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub speed: f32,
+    pub travel_ticks: f32,
     pub remaining_ticks: f32,
+    pub elapsed_ticks: f32,
+    pub lifetime_ticks: f32,
     pub expire_ticks: f32,
     pub target_lost: bool,
     pub items: Vec<(ContentId, i32)>,
@@ -10996,8 +11007,10 @@ impl GameRuntime {
         let mut pending = Vec::new();
         for mut shot in std::mem::take(&mut self.item_mass_driver_in_flight) {
             let delta = frame_delta.max(0.0);
-            shot.remaining_ticks -= delta;
+            shot.elapsed_ticks = (shot.elapsed_ticks + delta).min(shot.travel_ticks.max(0.0));
+            shot.remaining_ticks = (shot.travel_ticks - shot.elapsed_ticks).max(0.0);
             shot.expire_ticks -= delta;
+            Self::update_item_mass_driver_shot_position(&mut shot);
             if !shot.target_lost
                 && self
                     .item_mass_driver_in_flight_target_index(content, &shot)
@@ -11032,6 +11045,16 @@ impl GameRuntime {
         report
     }
 
+    fn update_item_mass_driver_shot_position(shot: &mut GameRuntimeItemMassDriverInFlight) {
+        let progress = if shot.travel_ticks <= 0.0001 {
+            1.0
+        } else {
+            (shot.elapsed_ticks / shot.travel_ticks).clamp(0.0, 1.0)
+        };
+        shot.x = shot.from_x + (shot.to_x - shot.from_x) * progress;
+        shot.y = shot.from_y + (shot.to_y - shot.from_y) * progress;
+    }
+
     fn create_item_mass_driver_despawn_event(
         &self,
         content: &ContentLoader,
@@ -11048,8 +11071,12 @@ impl GameRuntime {
         }
         let bolt = MassDriverBolt::default();
         let random_angle_offsets = vec![0.0; item_amounts.len()];
-        let drops =
-            bolt.despawn_drop_plans(&item_amounts, &item_amounts, 0.0, &random_angle_offsets);
+        let drops = bolt.despawn_drop_plans(
+            &item_amounts,
+            &item_amounts,
+            shot.rotation,
+            &random_angle_offsets,
+        );
         let explosion = bolt.dynamic_explosion_plan(
             content.items(),
             &item_amounts,
@@ -11298,6 +11325,14 @@ impl GameRuntime {
         angle
     }
 
+    fn angle_trnsx(angle: f32, len: f32) -> f32 {
+        angle.to_radians().cos() * len
+    }
+
+    fn angle_trnsy(angle: f32, len: f32) -> f32 {
+        angle.to_radians().sin() * len
+    }
+
     fn move_toward_angle(from: f32, to: f32, amount: f32) -> f32 {
         let delta = Self::angle_delta(from, to);
         if delta.abs() <= amount {
@@ -11350,6 +11385,15 @@ impl GameRuntime {
         };
         let source_tile = self.buildings[source_index].tile_pos;
         let target_tile = self.buildings[target_index].tile_pos;
+        let rotation = self.angle_between_buildings(source_index, target_index);
+        let (from_x, from_y) = (
+            self.buildings[source_index].x + Self::angle_trnsx(rotation, driver_block.translation),
+            self.buildings[source_index].y + Self::angle_trnsy(rotation, driver_block.translation),
+        );
+        let (to_x, to_y) = (
+            self.buildings[target_index].x,
+            self.buildings[target_index].y,
+        );
         let time_to_arrive = mass_driver_time_to_arrive(
             self.distance_between_buildings(source_index, target_index),
             driver_block.bullet_speed,
@@ -11389,7 +11433,18 @@ impl GameRuntime {
                 to_tile: target_tile,
                 to_block_id: self.buildings[target_index].block.id,
                 to_team: self.buildings[target_index].team,
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                x: from_x,
+                y: from_y,
+                rotation,
+                speed: driver_block.bullet_speed,
+                travel_ticks: time_to_arrive,
                 remaining_ticks: time_to_arrive,
+                elapsed_ticks: 0.0,
+                lifetime_ticks: driver_block.bullet_lifetime,
                 expire_ticks: driver_block.bullet_lifetime,
                 target_lost: false,
                 items: entries,
@@ -24342,7 +24397,7 @@ mod tests {
     }
 
     #[test]
-    fn game_runtime_item_mass_driver_transfers_items_to_linked_receiver() {
+    fn game_runtime_item_mass_driver_sends_items_in_flight_and_delivers_after_delay() {
         let content = ContentLoader::create_base_content().unwrap();
         let driver_def = content.block_by_name("mass-driver").unwrap();
         let copper = content
@@ -24409,12 +24464,18 @@ mod tests {
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
         assert_eq!(runtime.item_mass_driver_in_flight.len(), 1);
-        assert_eq!(runtime.item_mass_driver_in_flight[0].from_tile, source_tile);
-        assert_eq!(runtime.item_mass_driver_in_flight[0].to_tile, target_tile);
-        assert_eq!(
-            runtime.item_mass_driver_in_flight[0].items,
-            vec![(copper, 20)]
-        );
+        let shot = &runtime.item_mass_driver_in_flight[0];
+        assert_eq!(shot.from_tile, source_tile);
+        assert_eq!(shot.to_tile, target_tile);
+        assert_eq!(shot.items, vec![(copper, 20)]);
+        assert_eq!(shot.x, shot.from_x);
+        assert_eq!(shot.y, shot.from_y);
+        assert!(shot.to_x > shot.from_x);
+        assert!((shot.rotation - 0.0).abs() <= f32::EPSILON);
+        assert_eq!(shot.travel_ticks, shot.remaining_ticks);
+        assert_eq!(shot.elapsed_ticks, 0.0);
+        assert_eq!(shot.lifetime_ticks, shot.expire_ticks);
+        assert!(shot.speed > 0.0);
         assert_eq!(
             runtime
                 .item_mass_driver_reload_counters
@@ -24422,6 +24483,14 @@ mod tests {
                 .copied(),
             Some(1.0)
         );
+
+        let before_x = runtime.item_mass_driver_in_flight[0].x;
+        let travel_report = runtime
+            .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(travel_report.transferred_items, 0);
+        assert!(runtime.item_mass_driver_in_flight[0].x > before_x);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
 
         let arrival_ticks = runtime.item_mass_driver_in_flight[0].remaining_ticks.ceil() as i32 + 1;
         let mut delivered = 0;
