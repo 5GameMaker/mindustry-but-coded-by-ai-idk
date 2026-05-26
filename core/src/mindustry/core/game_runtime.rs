@@ -1780,6 +1780,31 @@ pub struct GameRuntimeItemMassDriverInFlight {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeItemMassDriverShootEvent {
+    pub from_tile: i32,
+    pub to_tile: i32,
+    pub x: f32,
+    pub y: f32,
+    pub shoot_effect: String,
+    pub smoke_effect: String,
+    pub shoot_sound: String,
+    pub shoot_sound_volume: f32,
+    pub shake: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeItemMassDriverReceiveEvent {
+    pub from_tile: i32,
+    pub to_tile: i32,
+    pub x: f32,
+    pub y: f32,
+    pub receive_effect: String,
+    pub receive_sound: String,
+    pub shoot_sound_volume: f32,
+    pub shake: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntimeItemMassDriverDespawnEvent {
     pub from_tile: i32,
     pub to_tile: i32,
@@ -2210,6 +2235,8 @@ pub struct GameRuntime {
     pub item_mass_driver_reload_counters: BTreeMap<i32, f32>,
     pub item_mass_driver_waiting_shooters: BTreeMap<i32, Vec<i32>>,
     pub item_mass_driver_in_flight: Vec<GameRuntimeItemMassDriverInFlight>,
+    pub item_mass_driver_shoot_events: Vec<GameRuntimeItemMassDriverShootEvent>,
+    pub item_mass_driver_receive_events: Vec<GameRuntimeItemMassDriverReceiveEvent>,
     pub item_mass_driver_despawn_events: Vec<GameRuntimeItemMassDriverDespawnEvent>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub storage_linked_cores: BTreeMap<i32, i32>,
@@ -2272,6 +2299,8 @@ impl GameRuntime {
             item_mass_driver_reload_counters: BTreeMap::new(),
             item_mass_driver_waiting_shooters: BTreeMap::new(),
             item_mass_driver_in_flight: Vec::new(),
+            item_mass_driver_shoot_events: Vec::new(),
+            item_mass_driver_receive_events: Vec::new(),
             item_mass_driver_despawn_events: Vec::new(),
             storage_runtime_states: BTreeMap::new(),
             storage_linked_cores: BTreeMap::new(),
@@ -7306,6 +7335,8 @@ impl GameRuntime {
         self.item_mass_driver_reload_counters.clear();
         self.item_mass_driver_waiting_shooters.clear();
         self.item_mass_driver_in_flight.clear();
+        self.item_mass_driver_shoot_events.clear();
+        self.item_mass_driver_receive_events.clear();
         self.item_mass_driver_despawn_events.clear();
         self.storage_runtime_states.clear();
         self.storage_linked_cores.clear();
@@ -11144,6 +11175,22 @@ impl GameRuntime {
             self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
             return 0;
         };
+        let Some(BlockDef::Distribution(target_block)) =
+            content.block(self.buildings[target_index].block.id)
+        else {
+            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            return 0;
+        };
+        let receive_event = GameRuntimeItemMassDriverReceiveEvent {
+            from_tile: shot.from_tile,
+            to_tile: shot.to_tile,
+            x: shot.to_x,
+            y: shot.to_y,
+            receive_effect: target_block.receive_effect.clone(),
+            receive_sound: target_block.receive_sound.clone(),
+            shoot_sound_volume: target_block.shoot_sound_volume,
+            shake: target_block.shake,
+        };
 
         let target_capacity = self.buildings[target_index].block.item_capacity * 2;
         let target_total = self.buildings[target_index]
@@ -11179,6 +11226,7 @@ impl GameRuntime {
             shot.to_tile,
             GameRuntimeDistributionBlockState::MassDriver(target_state),
         );
+        self.item_mass_driver_receive_events.push(receive_event);
         delivered
     }
 
@@ -11477,6 +11525,18 @@ impl GameRuntime {
                 expire_ticks: driver_block.bullet_lifetime,
                 target_lost: false,
                 items: entries,
+            });
+        self.item_mass_driver_shoot_events
+            .push(GameRuntimeItemMassDriverShootEvent {
+                from_tile: source_tile,
+                to_tile: target_tile,
+                x: from_x,
+                y: from_y,
+                shoot_effect: driver_block.shoot_effect.clone(),
+                smoke_effect: driver_block.smoke_effect.clone(),
+                shoot_sound: driver_block.shoot_sound.clone(),
+                shoot_sound_volume: driver_block.shoot_sound_volume,
+                shake: driver_block.shake,
             });
         total_used
     }
@@ -24495,6 +24555,8 @@ mod tests {
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
         assert_eq!(runtime.item_mass_driver_in_flight.len(), 1);
         let shot = &runtime.item_mass_driver_in_flight[0];
+        let shot_from = (shot.from_x, shot.from_y);
+        let shot_to = (shot.to_x, shot.to_y);
         assert_eq!(shot.from_tile, source_tile);
         assert_eq!(shot.to_tile, target_tile);
         assert_eq!(shot.items, vec![(copper, 20)]);
@@ -24506,6 +24568,16 @@ mod tests {
         assert_eq!(shot.elapsed_ticks, 0.0);
         assert_eq!(shot.lifetime_ticks, shot.expire_ticks);
         assert!(shot.speed > 0.0);
+        assert_eq!(runtime.item_mass_driver_shoot_events.len(), 1);
+        let shoot_event = &runtime.item_mass_driver_shoot_events[0];
+        assert_eq!(shoot_event.from_tile, source_tile);
+        assert_eq!(shoot_event.to_tile, target_tile);
+        assert_eq!(shoot_event.shoot_effect, "shootBig2");
+        assert_eq!(shoot_event.smoke_effect, "shootBigSmoke2");
+        assert_eq!(shoot_event.shoot_sound, "massdriver");
+        assert_eq!(shoot_event.shoot_sound_volume, 0.5);
+        assert_eq!(shoot_event.shake, 3.0);
+        assert_eq!((shoot_event.x, shoot_event.y), shot_from);
         assert_eq!(
             runtime
                 .item_mass_driver_reload_counters
@@ -24536,6 +24608,15 @@ mod tests {
         assert_eq!(delivered, 20);
         assert!(runtime.item_mass_driver_in_flight.is_empty());
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 20);
+        assert_eq!(runtime.item_mass_driver_receive_events.len(), 1);
+        let receive_event = &runtime.item_mass_driver_receive_events[0];
+        assert_eq!(receive_event.from_tile, source_tile);
+        assert_eq!(receive_event.to_tile, target_tile);
+        assert_eq!(receive_event.receive_effect, "mineBig");
+        assert_eq!(receive_event.receive_sound, "massdriverReceive");
+        assert_eq!(receive_event.shoot_sound_volume, 0.5);
+        assert_eq!(receive_event.shake, 3.0);
+        assert_eq!((receive_event.x, receive_event.y), shot_to);
         let target_reload = runtime
             .item_mass_driver_reload_counters
             .get(&target_tile)
@@ -24674,6 +24755,7 @@ mod tests {
             }
         }
         assert_eq!(runtime.item_mass_driver_in_flight.len(), 1);
+        assert_eq!(runtime.item_mass_driver_shoot_events.len(), 1);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
         assert!(runtime.remove_building_by_tile_pos(target_tile).is_some());
 
@@ -24711,6 +24793,10 @@ mod tests {
         assert_eq!(expiry_report.despawned_shots, 1);
         assert_eq!(expiry_report.dropped_items, 20);
         assert_eq!(expiry_report.explosion_events, 1);
+        assert!(
+            runtime.item_mass_driver_receive_events.is_empty(),
+            "target-lost mass driver shot must not emit a receive event"
+        );
         assert_eq!(runtime.item_mass_driver_despawn_events.len(), 1);
         let event = &runtime.item_mass_driver_despawn_events[0];
         assert_eq!(event.from_tile, source_tile);

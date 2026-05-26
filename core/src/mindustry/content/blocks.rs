@@ -1795,6 +1795,11 @@ pub struct DistributionBlockData {
     pub knockback: f32,
     pub bullet_speed: f32,
     pub bullet_lifetime: f32,
+    pub shoot_effect: String,
+    pub smoke_effect: String,
+    pub receive_effect: String,
+    pub shoot_sound: String,
+    pub receive_sound: String,
     pub shoot_sound_volume: f32,
     pub shake: f32,
 }
@@ -1860,6 +1865,11 @@ impl DistributionBlockData {
             knockback: 0.0,
             bullet_speed: 0.0,
             bullet_lifetime: 0.0,
+            shoot_effect: "none".into(),
+            smoke_effect: "none".into(),
+            receive_effect: "none".into(),
+            shoot_sound: "none".into(),
+            receive_sound: "none".into(),
             shoot_sound_volume: 0.0,
             shake: 0.0,
         };
@@ -1999,6 +2009,11 @@ impl DistributionBlockData {
                 self.reload = 100.0;
                 self.bullet_speed = 5.5;
                 self.bullet_lifetime = 200.0;
+                self.shoot_effect = "shootBig2".into();
+                self.smoke_effect = "shootBigSmoke2".into();
+                self.receive_effect = "mineBig".into();
+                self.shoot_sound = "massdriver".into();
+                self.receive_sound = "massdriverReceive".into();
                 self.shoot_sound_volume = 0.5;
                 self.shake = 3.0;
             }
@@ -23451,6 +23466,11 @@ mod tests {
         assert_eq!(driver.knockback, 4.0);
         assert_eq!(driver.bullet_speed, 5.5);
         assert_eq!(driver.bullet_lifetime, 200.0);
+        assert_eq!(driver.shoot_effect, "shootBig2");
+        assert_eq!(driver.smoke_effect, "shootBigSmoke2");
+        assert_eq!(driver.receive_effect, "mineBig");
+        assert_eq!(driver.shoot_sound, "massdriver");
+        assert_eq!(driver.receive_sound, "massdriverReceive");
         assert_eq!(driver.shoot_sound_volume, 0.5);
         assert_eq!(driver.shake, 3.0);
         assert_eq!(

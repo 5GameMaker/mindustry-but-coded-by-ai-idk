@@ -3186,3 +3186,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_core_handle_item`
   - `cargo test -p mindustry-core game_runtime_linked_storage_unloader_updates_campaign_core_delta`
 - 仍未完成：`RequestItemCallPacket`/`TakeItemsCallPacket` 在 server 权威事件循环中仍未自动调用 `input_handler::take_items(...)` 与 `GameRuntime::apply_item_remove_stack_plan(...)`；下一步可继续把 server packet 消费桥接到该 helper。
+
+### 12.87 Item MassDriver shoot/receive effect 事件侧车
+
+- 2026-05-27：补齐普通 item `MassDriver` 上游默认 effect/sound/shake 字段，并在 runtime 发射/命中交付路径记录 shoot/receive 事件侧车，为后续真实 ECS effect/sound 播放与联机同步留出统一接入点。
+- Java 依据：
+  - `MassDriver.shootEffect = Fx.shootBig2`、`smokeEffect = Fx.shootBigSmoke2`、`receiveEffect = Fx.mineBig`、`shootSound = Sounds.massdriver`、`receiveSound = Sounds.massdriverReceive`、`shootSoundVolume = 0.5f`、`shake = 3f`；
+  - `MassDriverBuild.fire(...)` 在创建 `MassDriverBolt` 后播放 `shootEffect`、`smokeEffect`、`Effect.shake(...)` 和 `shootSound.at(...)`；
+  - `MassDriverBuild.handlePayload(...)` 成功接收 payload 后播放 `receiveEffect`、`receiveSound.at(...)` 和 `Effect.shake(...)`。
+- Rust 新增/变化：
+  - `DistributionBlockData` 新增 `shoot_effect/smoke_effect/receive_effect/shoot_sound/receive_sound`，并给 `DistributionBlockKind::MassDriver` 设置上游默认值；
+  - `GameRuntime` 新增 `item_mass_driver_shoot_events` 与 `item_mass_driver_receive_events`，reset/clear 路径会同步清空；
+  - `item_mass_driver_fire_to_link(...)` 成功扣物并创建 in-flight shot 时记录发射事件，包含源/目标 tile、发射坐标、shoot/smoke effect、shoot sound、volume 与 shake；
+  - `resolve_item_mass_driver_in_flight_shot(...)` 只有目标仍有效且成功进入交付路径时记录接收事件；target-lost/despawn 路径不会伪造 receive event。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_item_mass_driver_sends_items_in_flight_and_delivers_after_delay`
+  - `cargo test -p mindustry-core game_runtime_item_mass_driver`
+  - `cargo test -p mindustry-core unloader_and_mass_driver_keep_upstream_subset`
+  - `cargo check --workspace`
+- 仍未完成：当前仍只是 runtime event sidecar，还没有在 desktop/server/client 真实播放 effect/sound/shake，也未把这些事件编码进联机协议或 ECS effect entity；后续应把侧车消费到渲染/音频/网络快照链路。
