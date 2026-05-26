@@ -1867,12 +1867,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_applies_client_payload_mass_driver_snapshot_child_tail_with_content`
   - `game_runtime_applies_client_payload_loader_snapshot_child_tail_with_content`
   - `game_runtime_applies_client_payload_source_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_deconstructor_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_constructor_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_void_snapshot_child_tail_with_content`
 - 已验证：
   - `cargo test -p mindustry-core game_runtime_applies_client --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
   - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
-- 仍未完成：payload BlockSnapshot 目前是 core 单测覆盖，真实联机 smoke 还未扩展到 payload；`PayloadDeconstructor/Constructor/Void` 虽可通过 revision 0 dispatcher 读取，但还缺对应 client snapshot 单测与真实联机 smoke；UnitPayload 完整实体恢复仍需后续继续。
+  - `cargo check -p mindustry-core`
+- 仍未完成：payload BlockSnapshot 目前是 core 单测覆盖，真实联机 smoke 还未扩展到 payload；UnitPayload 完整实体恢复仍需后续继续。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

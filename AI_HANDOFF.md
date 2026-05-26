@@ -1436,12 +1436,15 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `game_runtime_applies_client_payload_mass_driver_snapshot_child_tail_with_content`
   - `game_runtime_applies_client_payload_loader_snapshot_child_tail_with_content`
   - `game_runtime_applies_client_payload_source_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_deconstructor_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_constructor_snapshot_child_tail_with_content`
+  - `game_runtime_applies_client_payload_void_snapshot_child_tail_with_content`
 - 已跑：
   - `cargo test -p mindustry-core game_runtime_applies_client --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
   - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `cargo check -p mindustry-core`
 - 下一步建议：
-  1. 给 `PayloadDeconstructor/Constructor/Void` 补同类 client snapshot 单测，确认 revision 0 top-level terminal payload/ref 解析。
-  2. 扩展真实联机 `BlockSnapshotCallPacket` smoke 到 payload-router 或 payload-mass-driver，验证 server→desktop 真实链路 materialize 到 `payload_runtime_states`。
-  3. 继续推进 turret `readSync` 特例与 entity snapshot typed materialize；不要把 payload state 留成孤立 helper。
+  1. 扩展真实联机 `BlockSnapshotCallPacket` smoke 到 payload-router 或 payload-mass-driver，验证 server→desktop 真实链路 materialize 到 `payload_runtime_states`。
+  2. 继续推进 turret `readSync` 特例与 entity snapshot typed materialize；不要把 payload state 留成孤立 helper。

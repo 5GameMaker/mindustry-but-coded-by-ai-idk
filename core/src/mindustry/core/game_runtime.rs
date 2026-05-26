@@ -13585,6 +13585,159 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_applies_client_payload_deconstructor_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let deconstructor = content
+            .block_by_name("small-deconstructor")
+            .expect("base content should include small-deconstructor")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(5, 5);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            deconstructor.clone(),
+            TeamId(6),
+        ));
+
+        let synced_building = BuildingComp::new(tile_pos, deconstructor.clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: -0.5, y: 0.75 },
+            pay_rotation: 15.0,
+            carried: false,
+        };
+        let deconstructor_state = PayloadDeconstructorState {
+            progress: 0.4,
+            accum: Some(vec![1.0, 2.5, 0.25]),
+            has_payload: false,
+            has_deconstructing: false,
+            deconstructing: None,
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_block_build_common(&mut sync_bytes, &common).unwrap();
+        write_deconstructor_extra(
+            &mut sync_bytes,
+            deconstructor_state.progress,
+            deconstructor_state.accum.as_deref(),
+        )
+        .unwrap();
+        write_payload_ref(&mut sync_bytes, None).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content,
+            tile_pos,
+            deconstructor.id,
+            sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Deconstructor {
+                common,
+                deconstructor: deconstructor_state,
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_payload_constructor_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let constructor = content
+            .block_by_name("constructor")
+            .expect("base content should include constructor")
+            .base()
+            .clone();
+        let recipe = content.block_by_name("router").map(|block| block.base().id);
+        let tile_pos = point2_pack(6, 5);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(9, 9);
+        runtime.add_building(BuildingComp::new(tile_pos, constructor.clone(), TeamId(6)));
+
+        let synced_building = BuildingComp::new(tile_pos, constructor.clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 0.0, y: -1.0 },
+            pay_rotation: 180.0,
+            carried: false,
+        };
+        let producer = BlockProducerState {
+            progress: 3.5,
+            has_payload: false,
+            ..BlockProducerState::default()
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_block_build_common(&mut sync_bytes, &common).unwrap();
+        write_block_producer_progress(&mut sync_bytes, producer.progress).unwrap();
+        write_constructor_recipe(&mut sync_bytes, recipe).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content,
+            tile_pos,
+            constructor.id,
+            sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Constructor {
+                common,
+                producer,
+                recipe,
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_payload_void_snapshot_child_tail_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let void_def = content
+            .block_by_name("payload-void")
+            .expect("base content should include payload-void")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(2, 6);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 9);
+        runtime.add_building(BuildingComp::new(tile_pos, void_def.clone(), TeamId(6)));
+
+        let synced_building = BuildingComp::new(tile_pos, void_def.clone(), TeamId(6));
+        let common = PayloadBlockBuildState {
+            payload: None,
+            pay_vector: Vec2 { x: 0.25, y: -0.75 },
+            pay_rotation: 270.0,
+            carried: false,
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        write_payload_block_build_common(&mut sync_bytes, &common).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content,
+            tile_pos,
+            void_def.id,
+            sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        assert_eq!(
+            runtime.payload_runtime_states.get(&tile_pos),
+            Some(&GameRuntimePayloadBlockState::Void(common))
+        );
+    }
+
+    #[test]
     fn game_runtime_applies_client_entity_and_hidden_snapshot_sidecars() {
         let mut runtime = GameRuntime::default();
 
