@@ -2071,6 +2071,21 @@ impl NetClient {
         true
     }
 
+    pub fn apply_take_items_packet(
+        storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
+        packet: &TakeItemsCallPacket,
+    ) -> bool {
+        let (Some(build_pos), Some(item)) = (packet.build.tile_pos, packet.item.as_deref()) else {
+            return false;
+        };
+        let mirror = storage.entry(build_pos).or_default();
+        let previous = mirror.items.get(item).copied().unwrap_or(0);
+        mirror
+            .items
+            .insert(item.to_string(), (previous - packet.amount.max(0)).max(0));
+        true
+    }
+
     pub fn apply_set_liquid_packet(
         storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
         packet: &SetLiquidCallPacket,
@@ -3093,6 +3108,7 @@ impl NetClient {
                     PacketKind::TakeItemsCallPacket(packet) => {
                         let now = Instant::now();
                         state.take_items_packets_seen += 1;
+                        Self::apply_take_items_packet(&mut state.building_storage_mirrors, packet);
                         state.last_take_items = Some(packet.clone());
                         state.last_take_items_at = Some(now);
                         (false, false)
@@ -4760,6 +4776,41 @@ mod tests {
         assert_eq!(mirror.items.get("lead"), Some(&3));
         assert_eq!(mirror.items.get("scrap"), Some(&4));
 
+        assert!(NetClient::apply_take_items_packet(
+            &mut storage,
+            &TakeItemsCallPacket {
+                build,
+                item: Some("copper".into()),
+                amount: 5,
+                to: UnitRef::Unit { id: 9 },
+            },
+        ));
+        assert_eq!(
+            storage
+                .get(&build.tile_pos.unwrap())
+                .unwrap()
+                .items
+                .get("copper"),
+            Some(&2)
+        );
+        assert!(NetClient::apply_take_items_packet(
+            &mut storage,
+            &TakeItemsCallPacket {
+                build,
+                item: Some("copper".into()),
+                amount: 99,
+                to: UnitRef::Unit { id: 9 },
+            },
+        ));
+        assert_eq!(
+            storage
+                .get(&build.tile_pos.unwrap())
+                .unwrap()
+                .items
+                .get("copper"),
+            Some(&0)
+        );
+
         assert!(NetClient::apply_set_liquid_packet(
             &mut storage,
             &SetLiquidCallPacket {
@@ -6100,7 +6151,7 @@ mod tests {
             .building_storage_mirrors
             .get(&primary_build.tile_pos.unwrap())
             .unwrap();
-        assert_eq!(primary_storage.items.get("copper"), Some(&42));
+        assert_eq!(primary_storage.items.get("copper"), Some(&37));
         assert_eq!(primary_storage.liquids.get("water"), Some(&6.5));
         let secondary_storage = state
             .building_storage_mirrors

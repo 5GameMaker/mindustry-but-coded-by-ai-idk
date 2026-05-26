@@ -3153,3 +3153,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-core take_items_`
 - 仍未完成：`input_handler` 仍是纯 helper，尚未把 `ItemRemoveStackPlan` 接入完整 `GameRuntime`/campaign sector 状态；linked storage 还需要 runtime 侧根据 `storage_linked_cores` 判定后再应用 `handleCoreItem(-amount)`。
+
+### 12.85 NetClient takeItems 库存镜像扣减
+
+- 2026-05-27：补齐 Java 客户端收到 `TakeItemsCallPacket` 后对本地建筑库存的可见变化；Rust `NetClientState.building_storage_mirrors` 现在会在收包时扣减对应 item。
+- Java 依据：
+  - `InputHandler.takeItems(...)` 是 `@Remote(called = Loc.server)`，客户端收到后执行 `build.removeStack(...)` 并把物品加入目标 unit；
+  - 当前 Rust 客户端已有 `SetItem/SetItems/ClearItems` 对 `building_storage_mirrors` 的应用，`TakeItems` 之前只记录 last packet，导致 UI/runtime 镜像会保留 stale 库存。
+- Rust 新增/变化：
+  - `NetClient::apply_take_items_packet(...)` 从 `ClientTileStorageMirror.items` 中扣减 `packet.amount.max(0)`，结果下限 clamp 到 0；
+  - `NetClient::update()` 的 `PacketKind::TakeItemsCallPacket` 分支调用该应用函数，同时保留原有 packet 计数与 last packet 记录；
+  - 更新 forwarded inventory packet 测试，确认 `SetItem(copper=42)` 后收到 `TakeItems(copper,5)` 时客户端镜像变为 37。
+- 验证：
+  - `cargo test -p mindustry-core net_client::tests::apply_building_item_and_liquid_packets_updates_storage_mirror`
+  - `cargo test -p mindustry-core net_client::tests::update_records_server_forwarded_inventory_payload_and_unit_packets`
+- 仍未完成：客户端还没有独立 unit item mirror，因此 `to.addItem(...)` 只在 packet/mirror 层留下建筑扣减；后续应把 unit/entity snapshot 或 typed unit runtime 与 `TakeItemsCallPacket.to` 接起来。
