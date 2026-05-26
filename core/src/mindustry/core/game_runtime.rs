@@ -5018,6 +5018,12 @@ impl GameRuntime {
         angle
     }
 
+    fn payload_router_smooth_rot_step(current: f32, target: f32, delta_ticks: f32) -> f32 {
+        let delta = ((target - current + 540.0).rem_euclid(360.0)) - 180.0;
+        let alpha = 1.0 - (1.0_f32 - 0.2_f32).powf(delta_ticks.max(0.0));
+        (current + delta * alpha.clamp(0.0, 1.0)).rem_euclid(360.0)
+    }
+
     pub fn advance_owned_payload_conveyors(
         &mut self,
         content: &ContentLoader,
@@ -5113,7 +5119,11 @@ impl GameRuntime {
                         interp_progress,
                     );
                     *control_time -= frame_delta;
-                    *smooth_rot = rotation as f32 * 90.0;
+                    *smooth_rot = Self::payload_router_smooth_rot_step(
+                        *smooth_rot,
+                        rotation as f32 * 90.0,
+                        frame_delta,
+                    );
                     let cur_step =
                         payload_conveyor_cur_step(progress_time, payload_block.move_time);
                     payload_conveyor_should_attempt_move(conveyor, cur_step)
@@ -10343,6 +10353,48 @@ mod tests {
             common.payload.as_ref(),
             Some(PayloadRef::Block { block, .. }) if *block == carried_block.base().id
         ));
+    }
+
+    #[test]
+    fn game_runtime_payload_router_smooth_rot_slerps_toward_rotation() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let router_tile = point2_pack(4, 4);
+        let mut router_building =
+            BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+        router_building.set_rotation(1);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(router_building);
+        runtime.payload_runtime_states.insert(
+            router_tile,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState::default(),
+                sorted: None,
+                rec_dir: 0,
+                matches: false,
+                smooth_rot: 0.0,
+                control_time: -1.0,
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_conveyors(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.conveyor_candidates, 1);
+        let Some(GameRuntimePayloadBlockState::Router {
+            smooth_rot,
+            control_time,
+            ..
+        }) = runtime.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert!((*smooth_rot - 18.0).abs() < 0.001);
+        assert_eq!(*control_time, -2.0);
     }
 
     #[test]
