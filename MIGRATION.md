@@ -2791,6 +2791,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：真实 build placement/network packet 路径仍需统一切到 `add_placed_building(...)`；BeamNode 的 `getNodeLinks(...)`、PowerNode UI tap/client config packet、Java 默认 `Block.connectedPower/consumesPower` 内容层总对齐仍待迁移。
 
+### 12.66 PowerNode 点击配置入口
+
+- 2026-05-27：迁移 Java `PowerNodeBuild.onConfigureBuildTapped(...)` 的 runtime 语义，补上“点击合法目标 toggle 连线 / 双击自己自动找线或清线”的 owned `GameRuntime` 入口。
+- Java 依据：
+  - 点击合法目标时只检查 `linkValid(this, other)`，直接 `configure(other.pos())`，因此保留单条 link toggle 行为，且不额外检查 insulated；
+  - 双击自己且 links 为空时走 `getPotentialLinks(...)` 收集候选，再 `configure(Point2[])` 批量配置；
+  - 双击自己且 links 非空时 `configure(new Point2[0])` 清空全部链接；
+  - 其他情况返回未处理，Java UI 层可继续走其它配置逻辑。
+- Rust 新增/变化：
+  - `GameRuntimePowerNodeTapResult`；
+  - `GameRuntime::configure_tapped_owned_power_node(...)`：先尝试合法目标 toggle，失败且是 self tap 时按当前 links 空/非空分别 autolink 或 clear；
+  - 复用 `configure_owned_power_node_link(...)`、`autolink_owned_power_node(...)` 与 `configure_owned_power_node_relative_links(...)`，避免生成独立的 tap-only link 状态。
+- 测试：
+  - `game_runtime_power_node_tap_toggles_valid_target_like_java_config_tap`
+  - `game_runtime_power_node_double_tap_autolinks_when_empty_and_clears_when_linked`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_power_node_tap_toggles_valid_target_like_java_config_tap`
+  - `cargo test -p mindustry-core game_runtime_power_node_double_tap_autolinks_when_empty_and_clears_when_linked`
+  - `cargo test -p mindustry-core power_node`
+  - `cargo check --workspace`
+  - `git diff --check`
+- 仍未完成：`TileTapCallPacket` / `TileConfigCallPacket` 尚未把真实客户端点击事件切到该入口；返回值目前表达 runtime 结果，尚未映射 Java UI 的 consumed boolean/deselect 行为。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

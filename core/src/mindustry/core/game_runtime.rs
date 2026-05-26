@@ -1993,6 +1993,17 @@ pub enum GameRuntimePowerNodeLinkResult {
     SourceFull,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePowerNodeTapResult {
+    Link(GameRuntimePowerNodeLinkResult),
+    Autolinked(usize),
+    Cleared(usize),
+    MissingSource,
+    MissingTarget,
+    NotPowerNode,
+    Ignored,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimePowerNodeBatchLinkReport {
     pub cleared: usize,
@@ -4344,6 +4355,62 @@ impl GameRuntime {
         }
 
         report
+    }
+
+    pub fn configure_tapped_owned_power_node(
+        &mut self,
+        content: &ContentLoader,
+        source_tile_pos: i32,
+        tapped_tile_pos: i32,
+    ) -> GameRuntimePowerNodeTapResult {
+        let Some(source_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == source_tile_pos)
+        else {
+            return GameRuntimePowerNodeTapResult::MissingSource;
+        };
+        if !Self::owned_power_node_metadata(content, &self.buildings[source_index])
+            .is_some_and(|metadata| metadata.is_node)
+        {
+            return GameRuntimePowerNodeTapResult::NotPowerNode;
+        }
+
+        let tapped_index = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tapped_tile_pos);
+        if let Some(target_index) = tapped_index {
+            if self.owned_power_node_link_valid_between(content, source_index, target_index, true) {
+                return GameRuntimePowerNodeTapResult::Link(self.configure_owned_power_node_link(
+                    content,
+                    source_tile_pos,
+                    tapped_tile_pos,
+                ));
+            }
+        }
+
+        if source_tile_pos != tapped_tile_pos {
+            return if tapped_index.is_some() {
+                GameRuntimePowerNodeTapResult::Ignored
+            } else {
+                GameRuntimePowerNodeTapResult::MissingTarget
+            };
+        }
+
+        if self.buildings[source_index]
+            .power
+            .as_ref()
+            .map_or(true, |power| power.links.is_empty())
+        {
+            GameRuntimePowerNodeTapResult::Autolinked(
+                self.autolink_owned_power_node(content, source_tile_pos),
+            )
+        } else {
+            let report =
+                self.configure_owned_power_node_relative_links(content, source_tile_pos, &[]);
+            GameRuntimePowerNodeTapResult::Cleared(report.cleared)
+        }
     }
 
     fn rebuild_owned_power_graphs_from_proximity(
@@ -17836,6 +17903,98 @@ mod tests {
                 .links,
             vec![target_pos]
         );
+    }
+
+    #[test]
+    fn game_runtime_power_node_tap_toggles_valid_target_like_java_config_tap() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let source_pos = point2_pack(10, 10);
+        let target_pos = point2_pack(14, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            target_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.configure_tapped_owned_power_node(&content, source_pos, target_pos),
+            GameRuntimePowerNodeTapResult::Link(GameRuntimePowerNodeLinkResult::Linked)
+        );
+        assert_eq!(
+            runtime.configure_tapped_owned_power_node(&content, source_pos, target_pos),
+            GameRuntimePowerNodeTapResult::Link(GameRuntimePowerNodeLinkResult::Unlinked)
+        );
+        assert!(runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == source_pos)
+            .unwrap()
+            .power
+            .as_ref()
+            .unwrap()
+            .links
+            .is_empty());
+    }
+
+    #[test]
+    fn game_runtime_power_node_double_tap_autolinks_when_empty_and_clears_when_linked() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let source_pos = point2_pack(10, 10);
+        let target_pos = point2_pack(14, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            target_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.configure_tapped_owned_power_node(&content, source_pos, source_pos),
+            GameRuntimePowerNodeTapResult::Autolinked(1)
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == source_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![target_pos]
+        );
+        assert_eq!(
+            runtime.configure_tapped_owned_power_node(&content, source_pos, source_pos),
+            GameRuntimePowerNodeTapResult::Cleared(1)
+        );
+        assert!(runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == source_pos)
+            .unwrap()
+            .power
+            .as_ref()
+            .unwrap()
+            .links
+            .is_empty());
     }
 
     #[test]
