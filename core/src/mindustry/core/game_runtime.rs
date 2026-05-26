@@ -1589,6 +1589,7 @@ pub struct GameRuntimeOwnedItemTransportFrameReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeOwnedPayloadFrameReport {
     pub source: GameRuntimePayloadSourceFrameReport,
+    pub conveyor: GameRuntimePayloadConveyorFrameReport,
     pub void: GameRuntimePayloadVoidFrameReport,
 }
 
@@ -12184,17 +12185,29 @@ impl GameRuntime {
 
         let frame_delta = advanced.delta_ticks as f32;
         let tick = advanced.tick as f32;
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame_delta, can_overdrive);
+        }
+
+        Some(self.advance_owned_payload_conveyors_ticks(content, frame_delta, tick))
+    }
+
+    fn advance_owned_payload_conveyors_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+        tick: f32,
+    ) -> GameRuntimePayloadConveyorFrameReport {
         let mut report = GameRuntimePayloadConveyorFrameReport::default();
         let mut pending_payload_moves = Vec::new();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, enabled) = {
-                let building = &mut self.buildings[index];
-                let can_overdrive = content
-                    .block(building.block.id)
-                    .map(BlockDef::can_overdrive)
-                    .unwrap_or(false);
-                building.advance_update_timing(frame_delta, can_overdrive);
+                let building = &self.buildings[index];
                 report.visited_buildings += 1;
                 (building.tile_pos, building.block.id, building.enabled)
             };
@@ -12320,7 +12333,7 @@ impl GameRuntime {
             }
         }
 
-        Some(report)
+        report
     }
 
     fn create_common_unit_payload_ref(
@@ -12584,6 +12597,11 @@ impl GameRuntime {
         let item_transport = self.advance_owned_item_transport_blocks_ticks(content, frame.delta);
         let payload = GameRuntimeOwnedPayloadFrameReport {
             source: self.advance_owned_payload_sources_ticks(content, frame.delta),
+            conveyor: self.advance_owned_payload_conveyors_ticks(
+                content,
+                frame.delta,
+                advanced.tick as f32,
+            ),
             void: self.advance_owned_payload_voids_ticks(content, frame.delta),
         };
 

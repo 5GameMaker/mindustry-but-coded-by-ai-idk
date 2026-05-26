@@ -735,3 +735,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadConveyor/Router/Constructor/Loader/Deconstructor/PayloadMassDriver` 还未接入 server aggregate。最建议下一步接入 `PayloadConveyor`，随后新增 server 测试覆盖 source 生成/移动到 conveyor/void 的实际链路。
+
+---
+
+## 17. 最新闭环记录：服务端 PayloadConveyor/Router 主循环接入
+
+- 目标：继续把 payload 搬运链路接入服务端主循环；本闭环接入 `PayloadConveyor` 与同一 public 入口覆盖的 `PayloadRouter` 最小 ticks。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 已接入：`GameRuntimeOwnedPayloadFrameReport` 新增 `conveyor: GameRuntimePayloadConveyorFrameReport`；`advance_owned_runtime_blocks(...)` 的 payload 顺序现在是 source → conveyor/router → void。
+- 已接入：`advance_owned_payload_conveyors(...)` 拆出 `advance_owned_payload_conveyors_ticks(content, frame_delta, tick)`。public wrapper 保留独立 frame/timing；server aggregate 复用 ticks，避免重复推进 `advance_game_update_frame(...)`。
+- 新增测试：`server_update_drives_owned_payload_conveyor_from_launcher_runtime`。该测试在服务端 runtime 中放置携带 `BuildPayload(router)` 的 `payload-conveyor` 指向 `payload-void`，把 `state.tick` 设到 conveyor step 边界前一 tick，调用 `launcher.update()` 后断言：
+  - `last_runtime_payload_report.unwrap().conveyor.attempted_moves == 1`
+  - `conveyor.transferred_payloads == 1`
+  - conveyor item 清空，void 收到 `PayloadRef::Block(router)`
+  - `runtime.state.update_id == 1`
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_conveyor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_conveyor_moves_item_into_front_payload_void --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_effect_building_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`PayloadConstructor/Loader/Deconstructor/PayloadMassDriver` 还没有进入 server aggregate。下一步建议接入 `PayloadConstructor`，让 server 主循环能从材料生产 build payload，再进入已经接入的 conveyor/void 链路。

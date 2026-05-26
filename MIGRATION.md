@@ -1503,3 +1503,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：PayloadSource 进入主循环后，`PayloadConveyor/Router/Constructor/Loader/Deconstructor/PayloadMassDriver` 仍需按同样方式拆 ticks 并接入；当前 source 生成后能移动自身 payload，但完整 source→conveyor→void 服务端链路还需 conveyor 接入后再验证。
+
+### 12.3 服务端 PayloadConveyor/Router 主循环接入
+
+- 2026-05-26：`GameRuntimeOwnedPayloadFrameReport` 追加 `conveyor: GameRuntimePayloadConveyorFrameReport`，`advance_owned_runtime_blocks(...)` 已在 source 后、void 前推进 `PayloadConveyor` / `PayloadRouter` ticks。
+- `advance_owned_payload_conveyors(...)` 已拆出内部 `advance_owned_payload_conveyors_ticks(content, frame_delta, tick)`；public 入口仍独立推进 frame/timing，服务端聚合路径复用 ticks，继续保持单帧只推进一次 `GameState::advance_game_update_frame(...)`。
+- 新增测试 `server_update_drives_owned_payload_conveyor_from_launcher_runtime`：构造已携带 `BuildPayload(router)` 的 `payload-conveyor` 指向 `payload-void`，将 runtime tick 对齐到 conveyor step 边界后调用 `launcher.update()`，验证 conveyor item 被转交到 void，且 `runtime.state.update_id == 1`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_conveyor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_conveyor_moves_item_into_front_payload_void --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_effect_building_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`PayloadConstructor/Loader/Deconstructor/PayloadMassDriver` 还没进入服务端 aggregate；source→conveyor→void 已具备组成服务端链路的必要节点，但还需要后续补一个跨多帧 server smoke test 来验证生成、移动、接收与销毁的完整顺序。

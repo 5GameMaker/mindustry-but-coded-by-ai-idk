@@ -246,7 +246,7 @@ mod tests {
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
-        PayloadBlockBuildState, PayloadRef, PayloadSourceState,
+        PayloadBlockBuildState, PayloadConveyorState, PayloadRef, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
@@ -851,6 +851,85 @@ mod tests {
             panic!("payload source sidecar should remain present");
         };
         assert!(source.has_payload);
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_id
+        ));
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_conveyor_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let conveyor_def = launcher
+            .content_loader
+            .block_by_name("payload-conveyor")
+            .unwrap();
+        let void_def = launcher
+            .content_loader
+            .block_by_name("payload-void")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let conveyor_block = conveyor_def.base().clone();
+        let void_block = void_def.base().clone();
+        let router_id = router_def.base().id;
+        let move_time = match conveyor_def {
+            BlockDef::Payload(payload) => payload.move_time,
+            _ => unreachable!(),
+        };
+        let conveyor_tile = point2_pack(4, 4);
+        let trns = conveyor_block.size / 2 + 1;
+        let void_tile = point2_pack(4 + trns + (void_block.size - 1) / 2, 4);
+        let mut conveyor_building = BuildingComp::new(conveyor_tile, conveyor_block, TeamId(6));
+        conveyor_building.set_rotation(0);
+        let mut build_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), router_def.base().clone(), TeamId(6))
+            .write_base(&mut build_bytes, false)
+            .unwrap();
+
+        launcher.runtime.state.world.resize(12, 9);
+        launcher.runtime.add_building(conveyor_building);
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(void_tile, void_block, TeamId(6)));
+        launcher.runtime.payload_runtime_states.insert(
+            conveyor_tile,
+            GameRuntimePayloadBlockState::Conveyor(PayloadConveyorState {
+                item: Some(PayloadRef::Block {
+                    block: router_id,
+                    version: 0,
+                    build_bytes,
+                }),
+                step: 0,
+                step_accepted: 0,
+                ..PayloadConveyorState::default()
+            }),
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.tick = move_time as f64 - 1.0;
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_payload_report
+            .expect("server update should cache the latest payload batch");
+        assert_eq!(report.conveyor.attempted_moves, 1);
+        assert_eq!(report.conveyor.transferred_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) =
+            launcher.runtime.payload_runtime_states.get(&conveyor_tile)
+        else {
+            panic!("payload conveyor sidecar should remain present");
+        };
+        assert!(conveyor.item.is_none());
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            launcher.runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
         assert!(matches!(
             common.payload.as_ref(),
             Some(PayloadRef::Block { block, .. }) if *block == router_id
