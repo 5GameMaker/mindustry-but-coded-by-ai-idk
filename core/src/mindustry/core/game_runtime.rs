@@ -4450,11 +4450,43 @@ impl GameRuntime {
         target: &BuildingComp,
         target_laser_range: Option<f32>,
     ) -> bool {
-        let dx = (source.tile_x() - target.tile_x()) as f32;
-        let dy = (source.tile_y() - target.tile_y()) as f32;
-        let dist2 = dx * dx + dy * dy;
-        dist2 <= source_laser_range * source_laser_range
-            || target_laser_range.is_some_and(|range| dist2 <= range * range)
+        Self::owned_power_node_circle_overlaps_block(source, source_laser_range, target)
+            || target_laser_range.is_some_and(|range| {
+                Self::owned_power_node_circle_overlaps_block(target, range, source)
+            })
+    }
+
+    fn owned_power_node_circle_overlaps_block(
+        source: &BuildingComp,
+        laser_range: f32,
+        target: &BuildingComp,
+    ) -> bool {
+        let (circle_x, circle_y) = Self::owned_building_center_tiles(source);
+        let (min_x, min_y, max_x, max_y) = Self::owned_building_rect_tiles(target);
+        let closest_x = circle_x.clamp(min_x, max_x);
+        let closest_y = circle_y.clamp(min_y, max_y);
+        let dx = circle_x - closest_x;
+        let dy = circle_y - closest_y;
+        dx * dx + dy * dy <= laser_range * laser_range
+    }
+
+    fn owned_building_center_tiles(building: &BuildingComp) -> (f32, f32) {
+        let tile_size = TILE_SIZE as f32;
+        (
+            building.tile_x() as f32 + building.block.offset / tile_size,
+            building.tile_y() as f32 + building.block.offset / tile_size,
+        )
+    }
+
+    fn owned_building_rect_tiles(building: &BuildingComp) -> (f32, f32, f32, f32) {
+        let (center_x, center_y) = Self::owned_building_center_tiles(building);
+        let half_size = building.block.size.max(1) as f32 / 2.0;
+        (
+            center_x - half_size,
+            center_y - half_size,
+            center_x + half_size,
+            center_y + half_size,
+        )
     }
 
     fn add_owned_power_link_pair(
@@ -17484,6 +17516,45 @@ mod tests {
                 .unwrap()
                 .links,
             vec![target_pos]
+        );
+    }
+
+    #[test]
+    fn game_runtime_power_node_range_uses_java_circle_rect_overlap_for_large_targets() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let large_solar_def = content.block_by_name("solar-panel-large").unwrap();
+        let source_pos = point2_pack(10, 10);
+        let large_target_pos = point2_pack(17, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            large_target_pos,
+            large_solar_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.configure_owned_power_node_link(&content, source_pos, large_target_pos),
+            GameRuntimePowerNodeLinkResult::Linked
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == source_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![large_target_pos]
         );
     }
 

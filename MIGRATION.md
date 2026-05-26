@@ -2737,7 +2737,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_autolink_skips_insulated_power_lines_but_manual_config_stays_java_like`
   - `cargo check --workspace`
   - `git diff --check`
-- 仍未完成：`PowerNode.getNodeLinks(...)` 尚未作为独立 runtime helper 暴露给非 node block placement/preview；当前 range overlap 仍是 center tile 近似，后续需继续补 Java hitbox overlap 与 UI tap/client packet 接入。
+- 仍未完成：`PowerNode.getNodeLinks(...)` 尚未作为独立 runtime helper 暴露给非 node block placement/preview；UI tap/client packet 接入仍待迁移。
+
+### 12.64 PowerNode range hitbox overlap 对齐
+
+- 2026-05-27：把 `GameRuntime` 的 PowerNode 范围判定从 tile-center 距离近似改为 Java `PowerNode.overlaps(...)` 的 circle-vs-rect hitbox overlap。
+- Java 依据：
+  - `PowerNode.overlaps(src, other, range)` 使用 source 建筑坐标作为圆心、`laserRange * tilesize` 作为半径；
+  - target 使用 `other.tile.worldx()/worldy() + other.block.offset` 作为矩形中心、`other.block.size * tilesize` 作为矩形宽高；
+  - 因此大尺寸 target 即使中心点超过 `laserRange`，只要矩形 hitbox 与范围圆相交仍可连接。
+- Rust 新增/变化：
+  - `owned_power_node_link_overlaps(...)` 改为双向调用 `owned_power_node_circle_overlaps_block(...)`；
+  - 新增 `owned_building_center_tiles(...)` / `owned_building_rect_tiles(...)`，使用 `Block.offset` 和 `Block.size` 在 tile 单位下复刻 Java hitbox；
+  - 保持目标也是 PowerNode 时的反向 range 判定。
+- 测试：
+  - `game_runtime_power_node_range_uses_java_circle_rect_overlap_for_large_targets`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_power_node_range_uses_java_circle_rect_overlap_for_large_targets`
+  - `cargo test -p mindustry-core power_node`
+  - `cargo test -p mindustry-core game_runtime_power_line_insulated_matches_java_raycast_flags`
+  - `cargo test -p mindustry-core game_runtime_autolink_skips_insulated_power_lines_but_manual_config_stays_java_like`
+  - `cargo check --workspace`
+  - `git diff --check`
+- 仍未完成：source 建筑坐标当前仍以 owned building tile/offset 计算，未来如引入可移动/非 tile-aligned building 坐标，需要进一步对齐 Java `Building.x/y`；`getNodeLinks(...)`、UI tap/client packet 接入仍待迁移。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
