@@ -1668,6 +1668,20 @@ pub enum GameRuntimePayloadRouterControlResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimeItemMassDriverConfig {
+    Packed(i32),
+    Relative { dx: i32, dy: i32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimeItemMassDriverConfigureResult {
+    Linked,
+    Cleared,
+    MissingBuilding,
+    NotMassDriver,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameRuntimePayloadMassDriverConfig {
     Packed(i32),
     Relative { dx: i32, dy: i32 },
@@ -2057,6 +2071,77 @@ impl GameRuntime {
         GameRuntimePayloadRouterControlResult::Controlled
     }
 
+    pub fn configure_owned_item_mass_driver(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        config: Option<GameRuntimeItemMassDriverConfig>,
+    ) -> GameRuntimeItemMassDriverConfigureResult {
+        let Some(index) = self.building_index_by_tile_pos(tile_pos) else {
+            return GameRuntimeItemMassDriverConfigureResult::MissingBuilding;
+        };
+
+        match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::MassDriver => {}
+            Some(_) | None => {
+                return GameRuntimeItemMassDriverConfigureResult::NotMassDriver;
+            }
+        }
+
+        let mut state = self.ensure_item_mass_driver_state(tile_pos);
+        let Some(config) = config else {
+            state.link = -1;
+            self.distribution_runtime_states.insert(
+                tile_pos,
+                GameRuntimeDistributionBlockState::MassDriver(state),
+            );
+            self.buildings[index].config = None;
+            self.remove_item_mass_driver_waiting_shooter_from_all(tile_pos);
+            return GameRuntimeItemMassDriverConfigureResult::Cleared;
+        };
+
+        let link = match config {
+            GameRuntimeItemMassDriverConfig::Packed(link) => link,
+            GameRuntimeItemMassDriverConfig::Relative { dx, dy } => {
+                payload_mass_driver_config_from_relative(
+                    self.buildings[index].tile_x(),
+                    self.buildings[index].tile_y(),
+                    dx,
+                    dy,
+                )
+            }
+        };
+
+        if link == -1 {
+            state.link = -1;
+            self.distribution_runtime_states.insert(
+                tile_pos,
+                GameRuntimeDistributionBlockState::MassDriver(state),
+            );
+            self.buildings[index].config = None;
+            self.remove_item_mass_driver_waiting_shooter_from_all(tile_pos);
+            return GameRuntimeItemMassDriverConfigureResult::Cleared;
+        }
+
+        if state.link != link {
+            self.remove_item_mass_driver_waiting_shooter_from_all(tile_pos);
+        }
+        state.link = link;
+        self.distribution_runtime_states.insert(
+            tile_pos,
+            GameRuntimeDistributionBlockState::MassDriver(state),
+        );
+        let (dx, dy) = payload_mass_driver_config_relative(
+            link,
+            self.buildings[index].tile_x(),
+            self.buildings[index].tile_y(),
+        );
+        self.buildings[index].config =
+            Some(type_io::TypeValue::Point2(type_io::Point2::new(dx, dy)));
+        GameRuntimeItemMassDriverConfigureResult::Linked
+    }
+
     pub fn configure_owned_payload_mass_driver(
         &mut self,
         content: &ContentLoader,
@@ -2203,9 +2288,7 @@ impl GameRuntime {
             .remove(&removed.tile_pos);
         self.item_mass_driver_waiting_shooters
             .remove(&removed.tile_pos);
-        for waiting in self.item_mass_driver_waiting_shooters.values_mut() {
-            waiting.retain(|shooter| *shooter != removed.tile_pos);
-        }
+        self.remove_item_mass_driver_waiting_shooter_from_all(removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -7505,6 +7588,13 @@ impl GameRuntime {
                     .remove(&receiver_tile_pos);
             }
         }
+    }
+
+    fn remove_item_mass_driver_waiting_shooter_from_all(&mut self, shooter_tile_pos: i32) {
+        self.item_mass_driver_waiting_shooters.retain(|_, waiting| {
+            waiting.retain(|queued| *queued != shooter_tile_pos);
+            !waiting.is_empty()
+        });
     }
 
     fn distance_between_buildings(&self, from_index: usize, to_index: usize) -> f32 {
@@ -17225,6 +17315,103 @@ mod tests {
 
         assert_eq!(payload.first().copied(), Some(0));
         assert_eq!(payload, base_payload);
+    }
+
+    #[test]
+    fn game_runtime_configures_owned_item_mass_driver_relative_and_clears_link() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("mass-driver").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let source_tile = point2_pack(4, 4);
+        let target_tile = point2_pack(12, 4);
+        let router_tile = point2_pack(2, 2);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(20, 10);
+        runtime.add_building(BuildingComp::new(
+            source_tile,
+            driver_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.add_building(BuildingComp::new(
+            target_tile,
+            driver_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.add_building(BuildingComp::new(
+            router_tile,
+            router_def.base().clone(),
+            TeamId(6),
+        ));
+
+        assert_eq!(
+            runtime.configure_owned_item_mass_driver(
+                &content,
+                source_tile,
+                Some(GameRuntimeItemMassDriverConfig::Relative { dx: 8, dy: 0 }),
+            ),
+            GameRuntimeItemMassDriverConfigureResult::Linked
+        );
+        let Some(GameRuntimeDistributionBlockState::MassDriver(state)) =
+            runtime.distribution_runtime_states.get(&source_tile)
+        else {
+            panic!("item mass driver sidecar should be created by configure");
+        };
+        assert_eq!(state.link, target_tile);
+        assert_eq!(
+            runtime.buildings[0].config,
+            Some(TypeValue::Point2(type_io::Point2::new(8, 0)))
+        );
+
+        runtime
+            .item_mass_driver_waiting_shooters
+            .insert(target_tile, vec![source_tile]);
+        assert_eq!(
+            runtime.configure_owned_item_mass_driver(
+                &content,
+                source_tile,
+                Some(GameRuntimeItemMassDriverConfig::Packed(target_tile)),
+            ),
+            GameRuntimeItemMassDriverConfigureResult::Linked
+        );
+        assert_eq!(
+            runtime.item_mass_driver_waiting_shooters.get(&target_tile),
+            Some(&vec![source_tile]),
+            "same link should keep an already valid waiting shooter queue"
+        );
+
+        assert_eq!(
+            runtime.configure_owned_item_mass_driver(&content, source_tile, None),
+            GameRuntimeItemMassDriverConfigureResult::Cleared
+        );
+        let Some(GameRuntimeDistributionBlockState::MassDriver(state)) =
+            runtime.distribution_runtime_states.get(&source_tile)
+        else {
+            panic!("item mass driver sidecar should remain present after clear");
+        };
+        assert_eq!(state.link, -1);
+        assert_eq!(runtime.buildings[0].config, None);
+        assert!(runtime
+            .item_mass_driver_waiting_shooters
+            .get(&target_tile)
+            .is_none());
+
+        assert_eq!(
+            runtime.configure_owned_item_mass_driver(
+                &content,
+                router_tile,
+                Some(GameRuntimeItemMassDriverConfig::Packed(target_tile)),
+            ),
+            GameRuntimeItemMassDriverConfigureResult::NotMassDriver
+        );
+        assert_eq!(
+            runtime.configure_owned_item_mass_driver(
+                &content,
+                point2_pack(1, 1),
+                Some(GameRuntimeItemMassDriverConfig::Packed(target_tile)),
+            ),
+            GameRuntimeItemMassDriverConfigureResult::MissingBuilding
+        );
     }
 
     #[test]
