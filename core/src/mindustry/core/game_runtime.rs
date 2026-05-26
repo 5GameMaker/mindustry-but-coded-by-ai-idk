@@ -2502,7 +2502,73 @@ impl GameRuntime {
             }
         }
 
+        self.refresh_owned_core_storage_capacities(content);
         self.storage_linked_cores.len()
+    }
+
+    fn refresh_owned_core_storage_capacities(&mut self, content: &ContentLoader) -> usize {
+        let mut capacity_by_team = BTreeMap::<u8, i32>::new();
+
+        for building in &self.buildings {
+            if matches!(
+                content.block(building.block.id),
+                Some(BlockDef::Storage(storage)) if storage.kind == StorageBlockKind::Core
+            ) {
+                *capacity_by_team.entry(building.team.0).or_insert(0) +=
+                    building.block.item_capacity;
+            }
+        }
+
+        for (storage_tile, core_tile) in &self.storage_linked_cores {
+            let Some(storage) = self
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == *storage_tile)
+            else {
+                continue;
+            };
+            let Some(core) = self
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == *core_tile)
+            else {
+                continue;
+            };
+            if storage.team == core.team {
+                *capacity_by_team.entry(core.team.0).or_insert(0) += storage.block.item_capacity;
+            }
+        }
+
+        let core_updates: Vec<_> = self
+            .buildings
+            .iter()
+            .filter_map(|building| {
+                if matches!(
+                    content.block(building.block.id),
+                    Some(BlockDef::Storage(storage)) if storage.kind == StorageBlockKind::Core
+                ) {
+                    Some((
+                        building.tile_pos,
+                        *capacity_by_team
+                            .get(&building.team.0)
+                            .unwrap_or(&building.block.item_capacity),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for (tile_pos, storage_capacity) in &core_updates {
+            let entry = self
+                .storage_runtime_states
+                .entry(*tile_pos)
+                .or_insert_with(|| GameRuntimeStorageBlockState::Core(CoreBuildState::default()));
+            let GameRuntimeStorageBlockState::Core(state) = entry;
+            state.storage_capacity = *storage_capacity;
+        }
+
+        core_updates.len()
     }
 
     fn linked_core_index_for_storage(
@@ -2531,6 +2597,18 @@ impl GameRuntime {
     fn item_module_owner_index(&self, content: &ContentLoader, building_index: usize) -> usize {
         self.linked_core_index_for_storage(content, building_index)
             .unwrap_or(building_index)
+    }
+
+    fn maximum_accepted_for_item_owner(&self, building_index: usize) -> i32 {
+        let Some(building) = self.buildings.get(building_index) else {
+            return 0;
+        };
+        match self.storage_runtime_states.get(&building.tile_pos) {
+            Some(GameRuntimeStorageBlockState::Core(state)) if state.storage_capacity > 0 => {
+                state.storage_capacity
+            }
+            _ => building.block.item_capacity,
+        }
     }
 
     fn item_taken_event_tile_pos(&self, content: &ContentLoader, building_index: usize) -> i32 {
@@ -5542,6 +5620,7 @@ impl GameRuntime {
         {
             return false;
         }
+        let target_max_accepted = self.maximum_accepted_for_item_owner(target_item_owner_index);
 
         let (source, target) = if source_index < target_item_owner_index {
             let (left, right) = self.buildings.split_at_mut(target_item_owner_index);
@@ -5569,7 +5648,7 @@ impl GameRuntime {
         let target_full = if target_is_mass_driver {
             target_items.total() >= target.block.item_capacity
         } else {
-            target_items.get(item_id) >= target.block.item_capacity
+            target_items.get(item_id) >= target_max_accepted
         };
         if target_full {
             return false;
@@ -8379,10 +8458,7 @@ impl GameRuntime {
                     })
             })
             .unwrap_or(building_index);
-        self.buildings
-            .get(owner_index)
-            .map(|building| building.block.item_capacity)
-            .unwrap_or(0)
+        self.maximum_accepted_for_item_owner(owner_index)
     }
 
     fn item_unloader_trade_item(
@@ -10062,20 +10138,15 @@ impl GameRuntime {
                     return false;
                 };
                 let stored = items.get(item_id);
+                let maximum_accepted = self.maximum_accepted_for_item_owner(target_owner_index);
                 match storage.kind {
                     StorageBlockKind::Storage => storage_accept_item(
                         target_owner_index != target_index,
-                        core_accept_item(
-                            false,
-                            stored,
-                            self.buildings[target_owner_index].block.item_capacity,
-                        ),
+                        core_accept_item(false, stored, maximum_accepted),
                         stored,
                         target.block.item_capacity,
                     ),
-                    StorageBlockKind::Core => {
-                        core_accept_item(false, stored, target.block.item_capacity)
-                    }
+                    StorageBlockKind::Core => core_accept_item(false, stored, maximum_accepted),
                 }
             }
             _ => false,
@@ -18282,6 +18353,58 @@ mod tests {
             .unwrap();
         assert_eq!(storage.items.as_ref().unwrap().get(copper), 120);
         assert_eq!(storage.items.as_ref().unwrap().get(lead), 20);
+    }
+
+    #[test]
+    fn game_runtime_core_capacity_includes_linked_storage_for_acceptance() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(1, 1);
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), TeamId(6));
+        let core_capacity = core_def.base().item_capacity;
+        core_building
+            .items
+            .as_mut()
+            .unwrap()
+            .set(copper, core_capacity);
+        let linked_storage_building =
+            BuildingComp::new(linked_storage_tile, container_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(source_building);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+        assert_eq!(runtime.refresh_owned_storage_core_links(&content), 1);
+        assert_eq!(
+            runtime.storage_runtime_states.get(&core_tile),
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: core_capacity + container_def.base().item_capacity,
+                ..CoreBuildState::default()
+            }))
+        );
+
+        assert!(runtime.dump_item_to_target(&content, 0, 2, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(
+            runtime.buildings[1].items.as_ref().unwrap().get(copper),
+            core_capacity + 1
+        );
+        assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 0);
     }
 
     #[test]
