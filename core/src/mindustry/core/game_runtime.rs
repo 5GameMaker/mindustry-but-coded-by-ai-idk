@@ -2503,6 +2503,7 @@ impl GameRuntime {
         }
 
         self.refresh_owned_core_storage_capacities(content);
+        self.merge_owned_core_and_linked_storage_items(content);
         self.storage_linked_cores.len()
     }
 
@@ -2594,9 +2595,73 @@ impl GameRuntime {
         })
     }
 
+    fn canonical_core_index_for_team(
+        &self,
+        content: &ContentLoader,
+        team: TeamId,
+    ) -> Option<usize> {
+        self.buildings
+            .iter()
+            .enumerate()
+            .find_map(|(index, building)| {
+                (building.team == team
+                    && matches!(
+                        content.block(building.block.id),
+                        Some(BlockDef::Storage(storage)) if storage.kind == StorageBlockKind::Core
+                    ))
+                .then_some(index)
+            })
+    }
+
     fn item_module_owner_index(&self, content: &ContentLoader, building_index: usize) -> usize {
-        self.linked_core_index_for_storage(content, building_index)
-            .unwrap_or(building_index)
+        if let Some(core_index) = self.linked_core_index_for_storage(content, building_index) {
+            return self
+                .canonical_core_index_for_team(content, self.buildings[core_index].team)
+                .unwrap_or(core_index);
+        }
+        let Some(building) = self.buildings.get(building_index) else {
+            return building_index;
+        };
+        if matches!(
+            content.block(building.block.id),
+            Some(BlockDef::Storage(storage)) if storage.kind == StorageBlockKind::Core
+        ) {
+            return self
+                .canonical_core_index_for_team(content, building.team)
+                .unwrap_or(building_index);
+        }
+        building_index
+    }
+
+    fn merge_owned_core_and_linked_storage_items(&mut self, content: &ContentLoader) -> usize {
+        let moves: Vec<_> = (0..self.buildings.len())
+            .filter_map(|index| {
+                let owner_index = self.item_module_owner_index(content, index);
+                if owner_index == index || owner_index >= self.buildings.len() {
+                    return None;
+                }
+                let entries: Vec<_> = self.buildings[index].items.as_ref()?.each().collect();
+                (!entries.is_empty()).then_some((index, owner_index, entries))
+            })
+            .collect();
+
+        let mut merged = 0;
+        for (from_index, owner_index, entries) in moves {
+            for (item_id, amount) in entries {
+                if amount <= 0 {
+                    continue;
+                }
+                if let Some(owner_items) = self.buildings[owner_index].items.as_mut() {
+                    owner_items.add(item_id, amount);
+                }
+            }
+            if let Some(items) = self.buildings[from_index].items.as_mut() {
+                items.clear();
+            }
+            merged += 1;
+        }
+
+        merged
     }
 
     fn maximum_accepted_for_item_owner(&self, building_index: usize) -> i32 {
@@ -18403,6 +18468,61 @@ mod tests {
         assert_eq!(
             runtime.buildings[1].items.as_ref().unwrap().get(copper),
             core_capacity + 1
+        );
+        assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 0);
+    }
+
+    #[test]
+    fn game_runtime_same_team_cores_share_canonical_item_owner() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let source_tile = point2_pack(1, 1);
+        let first_core_tile = point2_pack(3, 6);
+        let second_core_tile = point2_pack(9, 6);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let mut first_core = BuildingComp::new(first_core_tile, core_def.base().clone(), TeamId(6));
+        first_core
+            .items
+            .as_mut()
+            .unwrap()
+            .set(copper, core_def.base().item_capacity);
+        let mut second_core =
+            BuildingComp::new(second_core_tile, core_def.base().clone(), TeamId(6));
+        second_core.items.as_mut().unwrap().add(lead, 7);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(source_building);
+        runtime.add_building(first_core);
+        runtime.add_building(second_core);
+
+        assert_eq!(runtime.refresh_owned_storage_core_links(&content), 0);
+        assert_eq!(
+            runtime.storage_runtime_states.get(&first_core_tile),
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: core_def.base().item_capacity * 2,
+                ..CoreBuildState::default()
+            }))
+        );
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(lead), 7);
+        assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(lead), 0);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 2, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(
+            runtime.buildings[1].items.as_ref().unwrap().get(copper),
+            core_def.base().item_capacity + 1
         );
         assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 0);
     }
