@@ -611,6 +611,7 @@ pub struct NetClientState {
     pub last_block_snapshot_at: Option<Instant>,
     pub block_snapshot_packets_seen: u64,
     pub last_block_snapshot_mirror: Option<ClientBlockSnapshotMirror>,
+    pub block_snapshot_record_mirrors: BTreeMap<i32, ClientBlockSnapshotRecordMirror>,
     pub last_connect_call: Option<ConnectCallPacket>,
     pub last_connect_call_at: Option<Instant>,
     pub connect_call_packets_seen: u64,
@@ -642,6 +643,7 @@ pub struct NetClientState {
     pub last_entity_snapshot_at: Option<Instant>,
     pub entity_snapshot_packets_seen: u64,
     pub entity_snapshot_mirrors: Vec<ClientEntitySnapshotMirror>,
+    pub entity_snapshot_record_mirrors: BTreeMap<i32, ClientEntitySnapshotRecordMirror>,
     pub last_hidden_snapshot: Option<HiddenSnapshotCallPacket>,
     pub last_hidden_snapshot_at: Option<Instant>,
     pub hidden_snapshot_packets_seen: u64,
@@ -892,6 +894,10 @@ impl fmt::Debug for NetClientState {
                 "last_block_snapshot_mirror",
                 &self.last_block_snapshot_mirror,
             )
+            .field(
+                "block_snapshot_record_mirrors_len",
+                &self.block_snapshot_record_mirrors.len(),
+            )
             .field("connect_call_packets_seen", &self.connect_call_packets_seen)
             .field("connect_config", &self.connect_config)
             .field("connect_packet_sent", &self.connect_packet_sent)
@@ -928,6 +934,10 @@ impl fmt::Debug for NetClientState {
             .field(
                 "entity_snapshot_mirrors_len",
                 &self.entity_snapshot_mirrors.len(),
+            )
+            .field(
+                "entity_snapshot_record_mirrors_len",
+                &self.entity_snapshot_record_mirrors.len(),
             )
             .field(
                 "hidden_snapshot_packets_seen",
@@ -2796,9 +2806,13 @@ impl NetClient {
                         state.entity_snapshot_packets_seen += 1;
                         state.last_entity_snapshot = Some(snapshot.clone());
                         state.last_entity_snapshot_at = Some(now);
-                        state
-                            .entity_snapshot_mirrors
-                            .push(ClientEntitySnapshotMirror::from(snapshot));
+                        let mirror = ClientEntitySnapshotMirror::from(snapshot);
+                        for record in &mirror.records {
+                            state
+                                .entity_snapshot_record_mirrors
+                                .insert(record.entity_id, record.clone());
+                        }
+                        state.entity_snapshot_mirrors.push(mirror);
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
@@ -2809,6 +2823,9 @@ impl NetClient {
                         state.last_hidden_snapshot_at = Some(now);
                         state.last_hidden_snapshot_mirror =
                             Some(ClientHiddenSnapshotMirror::from(snapshot));
+                        for entity_id in &snapshot.ids {
+                            state.entity_snapshot_record_mirrors.remove(entity_id);
+                        }
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
@@ -2827,8 +2844,13 @@ impl NetClient {
                         state.block_snapshot_packets_seen += 1;
                         state.last_block_snapshot = Some(snapshot.clone());
                         state.last_block_snapshot_at = Some(now);
-                        state.last_block_snapshot_mirror =
-                            Some(ClientBlockSnapshotMirror::from(snapshot));
+                        let mirror = ClientBlockSnapshotMirror::from(snapshot);
+                        for record in &mirror.records {
+                            state
+                                .block_snapshot_record_mirrors
+                                .insert(record.tile_pos, record.clone());
+                        }
+                        state.last_block_snapshot_mirror = Some(mirror);
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
@@ -3475,11 +3497,11 @@ mod tests {
     use crate::mindustry::world::{point2_pack, Tile, Tiles};
 
     use super::{
-        ClientBulletMirror, ClientCameraView, ClientConnectConfig, ClientHiddenSnapshotMirror,
-        ClientInputSnapshot, ClientLogicExplosionMirror, ClientMapAreaMirror,
-        ClientMarkerTextMirror, ClientPlayerSpawnMirror, ClientPlayerTeamEditorMirror,
-        ClientTileBlockKind, ClientTileStorageMirror, ClientWeatherMirror, NetClient,
-        CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
+        ClientBlockSnapshotMirror, ClientBulletMirror, ClientCameraView, ClientConnectConfig,
+        ClientEntitySnapshotMirror, ClientHiddenSnapshotMirror, ClientInputSnapshot,
+        ClientLogicExplosionMirror, ClientMapAreaMirror, ClientMarkerTextMirror,
+        ClientPlayerSpawnMirror, ClientPlayerTeamEditorMirror, ClientTileBlockKind,
+        ClientTileStorageMirror, ClientWeatherMirror, NetClient, CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -4956,6 +4978,70 @@ mod tests {
         assert_eq!(mirror.records[0].block_id, 77);
         assert_eq!(mirror.records[0].sync_bytes, vec![4, 5, 6]);
         assert!(mirror.parse_error.is_none());
+        assert_eq!(
+            state
+                .block_snapshot_record_mirrors
+                .get(&point2_pack(2, 3))
+                .expect("latest block snapshot record should be indexed by tile"),
+            &mirror.records[0]
+        );
+    }
+
+    #[test]
+    fn snapshot_mirrors_split_header_only_multi_records_and_report_opaque_payloads() {
+        let mut block_data = Vec::new();
+        block_data.extend_from_slice(&point2_pack(2, 3).to_be_bytes());
+        block_data.extend_from_slice(&77i16.to_be_bytes());
+        block_data.extend_from_slice(&point2_pack(4, 5).to_be_bytes());
+        block_data.extend_from_slice(&88i16.to_be_bytes());
+        let block = ClientBlockSnapshotMirror::from(&BlockSnapshotCallPacket {
+            amount: 2,
+            data: block_data,
+        });
+        assert_eq!(block.records.len(), 2);
+        assert_eq!(block.records[0].tile_pos, point2_pack(2, 3));
+        assert_eq!(block.records[0].block_id, 77);
+        assert!(block.records[0].sync_bytes.is_empty());
+        assert_eq!(block.records[1].tile_pos, point2_pack(4, 5));
+        assert_eq!(block.records[1].block_id, 88);
+        assert!(block.parse_error.is_none());
+
+        let mut entity_data = Vec::new();
+        entity_data.extend_from_slice(&1234i32.to_be_bytes());
+        entity_data.push(7);
+        entity_data.extend_from_slice(&5678i32.to_be_bytes());
+        entity_data.push(8);
+        let entity = ClientEntitySnapshotMirror::from(&EntitySnapshotCallPacket {
+            amount: 2,
+            data: entity_data,
+        });
+        assert_eq!(entity.records.len(), 2);
+        assert_eq!(entity.records[0].entity_id, 1234);
+        assert_eq!(entity.records[0].type_id, 7);
+        assert!(entity.records[0].sync_bytes.is_empty());
+        assert_eq!(entity.records[1].entity_id, 5678);
+        assert_eq!(entity.records[1].type_id, 8);
+        assert!(entity.parse_error.is_none());
+
+        let opaque_block = ClientBlockSnapshotMirror::from(&BlockSnapshotCallPacket {
+            amount: 2,
+            data: vec![0; 13],
+        });
+        assert!(opaque_block.records.is_empty());
+        assert!(opaque_block
+            .parse_error
+            .as_deref()
+            .is_some_and(|error| error.contains("not splittable")));
+
+        let short_entity = ClientEntitySnapshotMirror::from(&EntitySnapshotCallPacket {
+            amount: 1,
+            data: vec![0; 4],
+        });
+        assert!(short_entity.records.is_empty());
+        assert!(short_entity
+            .parse_error
+            .as_deref()
+            .is_some_and(|error| error.contains("too short")));
     }
 
     #[test]
@@ -5198,6 +5284,13 @@ mod tests {
             vec![8, 9]
         );
         assert!(state.entity_snapshot_mirrors[0].parse_error.is_none());
+        assert_eq!(
+            state
+                .entity_snapshot_record_mirrors
+                .get(&1234)
+                .expect("latest entity snapshot record should be indexed by entity id"),
+            &state.entity_snapshot_mirrors[0].records[0]
+        );
         assert_eq!(state.hidden_snapshot_packets_seen, 1);
         assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden_snapshot));
         assert!(state.last_hidden_snapshot_at.is_some());
@@ -5256,6 +5349,39 @@ mod tests {
         assert!(state.last_hidden_snapshot.is_none());
         assert!(state.last_server_snapshot_at.is_none());
         assert!(state.last_packet.is_none());
+    }
+
+    #[test]
+    fn hidden_snapshot_removes_indexed_entity_snapshot_records() {
+        let client = NetClient::default();
+        let mut entity_data = Vec::new();
+        entity_data.extend_from_slice(&4242i32.to_be_bytes());
+        entity_data.push(9);
+        entity_data.extend_from_slice(&[1, 2, 3]);
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::EntitySnapshotCallPacket(
+                EntitySnapshotCallPacket {
+                    amount: 1,
+                    data: entity_data,
+                },
+            ));
+            net.handle_client_received(PacketKind::HiddenSnapshotCallPacket(
+                HiddenSnapshotCallPacket { ids: vec![4242] },
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.entity_snapshot_packets_seen, 1);
+        assert_eq!(state.hidden_snapshot_packets_seen, 1);
+        assert!(state.entity_snapshot_record_mirrors.get(&4242).is_none());
+        assert_eq!(state.entity_snapshot_mirrors.len(), 1);
+        assert_eq!(state.entity_snapshot_mirrors[0].records[0].entity_id, 4242);
     }
 
     #[test]

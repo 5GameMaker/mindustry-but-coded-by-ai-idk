@@ -3062,3 +3062,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_preview_due_broadcast_syncs_empty_ready_players`
   - `cargo test -p mindustry-tests real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream -- --test-threads=1`
 - 仍未完成：当前 server preview sidecar 仍以 `connection_id` 作为临时 player id；真实 source 仍未替换成完整 player entity 绑定；双真实 Rust desktop 与 Java↔Rust preview 联机 smoke 仍需继续补。
+
+### 12.80 NetClient snapshot record 索引
+
+- 2026-05-27：补强 Java `NetClient.entitySnapshot(...)` / `blockSnapshot(...)` 的 Rust 客户端镜像层，把已解析出的 record mirror 继续索引到 `NetClientState`，便于 desktop/runtime 后续按 entity id / tile pos 查询最新 snapshot record。
+- Java 依据：
+  - entity snapshot 的 `data` 每条记录为 `int entityId`、`byte typeId`、后续 `entity.writeSync(...)` 可变长 payload；
+  - block snapshot 的 `data` 每条记录为 `int tilePos`、`short blockId`、后续 `build.writeSync(...)` 可变长 payload；
+  - hidden snapshot 会让客户端隐藏/移除对应实体镜像，因此 Rust 的 entity record cache 也应清掉对应 id。
+- Rust 新增/变化：
+  - `NetClientState` 新增 `block_snapshot_record_mirrors: BTreeMap<i32, ClientBlockSnapshotRecordMirror>`，按 `tile_pos` 保存最新 block snapshot record；
+  - `NetClientState` 新增 `entity_snapshot_record_mirrors: BTreeMap<i32, ClientEntitySnapshotRecordMirror>`，按 `entity_id` 保存最新 entity snapshot record；
+  - `EntitySnapshotCallPacket` / `BlockSnapshotCallPacket` 的真实收包分支在保留 raw packet 与 packet-level mirror 的同时，写入上述索引；
+  - `HiddenSnapshotCallPacket` 会从 entity record 索引中移除对应 id，避免后续 runtime 消费 stale entity。
+- 验证：
+  - `cargo test -p mindustry-core update_records_block_snapshot_metadata_for_later_world_application`
+  - `cargo test -p mindustry-core snapshot_mirrors_split_header_only_multi_records_and_report_opaque_payloads`
+  - `cargo test -p mindustry-core update_records_server_snapshots_when_client_loaded`
+  - `cargo test -p mindustry-core hidden_snapshot_removes_indexed_entity_snapshot_records`
+- 仍未完成：多 record snapshot 中每条 `writeSync(...)` 是变长 payload，当前只有 `amount == 1` 时能无歧义保留 payload；`amount > 1` 且携带 opaque payload 时仍需等完整 entity/building typed decoder 后才能精确切分并回放到 runtime。
