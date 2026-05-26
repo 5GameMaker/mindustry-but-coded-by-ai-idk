@@ -2171,3 +2171,198 @@ fn real_server_desktop_payload_void_block_snapshot_updates_runtime_after_world_s
     desktop.net_client.net_mut().disconnect();
     server.close_network();
 }
+
+#[test]
+fn real_server_desktop_item_turret_block_snapshot_preserves_rotation_reload_after_world_stream() {
+    use mindustry_core::mindustry::core::{
+        game_runtime::GameRuntimeTurretBlockState, GameRuntimeNetworkContext,
+    };
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
+    use mindustry_core::mindustry::net::BlockSnapshotCallPacket;
+    use mindustry_core::mindustry::world::blocks::defense::turrets::{
+        item_turret_write_ammo, turret_write_child, ItemAmmoEntry, TurretState,
+    };
+    use mindustry_core::mindustry::world::point2_pack;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(10, 10);
+    let duo_base = server
+        .content_loader
+        .block_by_name("duo")
+        .expect("base content should include duo")
+        .base()
+        .clone();
+    let copper_id = server
+        .content_loader
+        .item_by_name("copper")
+        .expect("base content should include copper")
+        .base
+        .mappable
+        .base
+        .id;
+    let duo_tile = point2_pack(4, 5);
+    let duo_id = duo_base.id;
+    server
+        .runtime
+        .add_building(BuildingComp::new(duo_tile, duo_base.clone(), TeamId(6)));
+    let existing_turret = TurretState {
+        reload_counter: 1.25,
+        rotation: 12.0,
+        ..TurretState::default()
+    };
+    server.runtime.turret_runtime_states.insert(
+        duo_tile,
+        GameRuntimeTurretBlockState::Item {
+            turret: existing_turret.clone(),
+            ammo: vec![ItemAmmoEntry {
+                item_id: copper_id,
+                amount: 1,
+            }],
+        },
+    );
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+            && matches!(
+                desktop.runtime.turret_runtime_states.get(&duo_tile),
+                Some(GameRuntimeTurretBlockState::Item { turret, .. })
+                    if turret.rotation == existing_turret.rotation
+                        && turret.reload_counter == existing_turret.reload_counter
+            )
+    });
+
+    let connection_id = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        state
+            .last_connect_confirm_connection_id
+            .expect("server should receive connect confirm before item turret snapshot")
+    };
+    let mut synced_duo = BuildingComp::new(duo_tile, duo_base, TeamId(6));
+    synced_duo.health = 23.0;
+    synced_duo.set_rotation(1);
+    let incoming_turret = TurretState {
+        reload_counter: 9.0,
+        rotation: 90.0,
+        ..TurretState::default()
+    };
+    let new_ammo = vec![ItemAmmoEntry {
+        item_id: copper_id,
+        amount: 7,
+    }];
+    let mut block_sync_bytes = Vec::new();
+    synced_duo.write_base(&mut block_sync_bytes, false).unwrap();
+    turret_write_child(&mut block_sync_bytes, &incoming_turret).unwrap();
+    item_turret_write_ammo(&mut block_sync_bytes, &new_ammo).unwrap();
+    let snapshot = BlockSnapshotCallPacket {
+        amount: 1,
+        data: {
+            let mut data = Vec::new();
+            data.extend_from_slice(&duo_tile.to_be_bytes());
+            data.extend_from_slice(&duo_id.to_be_bytes());
+            data.extend_from_slice(&block_sync_bytes);
+            data
+        },
+    };
+    server
+        .net_server
+        .send_block_snapshot(connection_id, snapshot.clone())
+        .expect("real server should send item turret snapshot");
+
+    let mut expected_turret = incoming_turret.clone();
+    expected_turret.rotation = existing_turret.rotation;
+    expected_turret.reload_counter = existing_turret.reload_counter;
+    expected_turret.total_ammo = 7;
+    let mut applied = false;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        desktop.update();
+        server.update();
+        let received = {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            last_client_status = format!(
+                "block_snapshots={} last_block={:?} last_server_snapshot={:?} provider_events={:?}",
+                state.block_snapshot_packets_seen,
+                state.last_block_snapshot,
+                state.last_server_snapshot_at,
+                state.last_provider_events,
+            );
+            state.last_block_snapshot.as_ref() == Some(&snapshot)
+        };
+        let materialized = matches!(
+            desktop.runtime.turret_runtime_states.get(&duo_tile),
+            Some(GameRuntimeTurretBlockState::Item { turret, ammo })
+                if turret == &expected_turret && ammo == &new_ammo
+        );
+        applied = received && materialized;
+        if applied {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        applied,
+        "desktop should receive and apply real item turret snapshot after world stream while preserving local rotation/reload; client: {last_client_status}"
+    );
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.block_snapshot_packets_seen, 1);
+        assert_eq!(state.last_block_snapshot.as_ref(), Some(&snapshot));
+        let mirror = state
+            .last_block_snapshot_mirror
+            .as_ref()
+            .expect("item turret snapshot should materialize into lightweight mirror");
+        assert_eq!(mirror.records.len(), 1);
+        assert_eq!(mirror.records[0].tile_pos, duo_tile);
+        assert_eq!(mirror.records[0].block_id, duo_id);
+        assert_eq!(mirror.records[0].sync_bytes, block_sync_bytes);
+        assert!(mirror.parse_error.is_none());
+    }
+    let runtime_record = desktop
+        .runtime
+        .client_block_snapshot_records
+        .get(&duo_tile)
+        .expect("real item turret snapshot should apply to client runtime sidecar");
+    assert_eq!(runtime_record.block_id, duo_id);
+    assert_eq!(runtime_record.sync_bytes, block_sync_bytes);
+    let runtime_building = desktop
+        .runtime
+        .buildings()
+        .iter()
+        .find(|building| building.tile_pos == duo_tile)
+        .expect("duo building should remain materialized");
+    assert_eq!(runtime_building.health, 23.0);
+    assert_eq!(runtime_building.rotation, 1);
+    assert_eq!(
+        desktop.runtime.turret_runtime_states.get(&duo_tile),
+        Some(&GameRuntimeTurretBlockState::Item {
+            turret: expected_turret,
+            ammo: new_ammo,
+        })
+    );
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}

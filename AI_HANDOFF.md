@@ -1689,3 +1689,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 补真实联机 item turret BlockSnapshot smoke，验证 server→desktop 链路也保留 rotation/reload 并更新 ammo。
   2. 给 `Continuous/PayloadAmmo/Generic` turret 补 core 单测。
   3. 继续 entity snapshot typed runtime。
+
+---
+
+## 48. 最新闭环记录：真实联机 ItemTurret BlockSnapshot 保留 rotation/reload
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把上一闭环的 `TurretBuild.readSync(...)` 保留语义接到真实 server→desktop BlockSnapshot 路径。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：
+  - `real_server_desktop_item_turret_block_snapshot_preserves_rotation_reload_after_world_stream`
+- 测试覆盖：
+  - 服务端 world stream 先 materialize `duo` building，并下发旧 `GameRuntimeTurretBlockState::Item`；
+  - desktop runtime 先确认旧 `rotation/reload_counter` 已存在；
+  - 服务端发送真实 `BlockSnapshotCallPacket`，sync bytes 为 `BuildingComp::write_base(...) + turret_write_child(...) + item_turret_write_ammo(...)`；
+  - desktop 端确认 `NetClient.last_block_snapshot_mirror`、raw sidecar、building base health/rotation、turret ammo/total_ammo 都更新；
+  - 同时确认 `TurretState.rotation/reload_counter` 保留旧值，匹配 Java `TurretBuild.readSync(...)` 的客户端抗抖逻辑。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_item_turret_block_snapshot_preserves_rotation_reload_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 给 `Continuous/PayloadAmmo/Generic` turret 补 core/真实联机测试，继续扩大 `TurretBuild.readSync` 覆盖。
+  2. 继续 entity snapshot typed runtime，把 raw entity sidecar 接入真实 entity pool/mirror。

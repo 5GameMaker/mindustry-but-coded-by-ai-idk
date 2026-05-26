@@ -2007,6 +2007,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：真实联机 turret BlockSnapshot smoke 尚未补；`Continuous/PayloadAmmo/Generic` turret 的 rotation/reload 保留还需逐类补测试；PointDefense/TractorBeam 不走 `TurretBuild.readSync` 的保留逻辑。
 
+### 12.34 真实联机 ItemTurret BlockSnapshot `readSync` 保留 smoke
+
+- 2026-05-26：新增 `real_server_desktop_item_turret_block_snapshot_preserves_rotation_reload_after_world_stream`，在真实 `ServerLauncher -> DesktopLauncher` 链路中验证 item turret snapshot。
+- 测试流程：
+  - 服务端 world stream 先 materialize 一个 `duo` building，并通过 map building payload 下发旧 `GameRuntimeTurretBlockState::Item`；
+  - desktop runtime 确认已有旧 `TurretState.rotation/reload_counter`；
+  - 服务端随后发送包含 `BuildingComp::write_base(...) + turret_write_child(...) + item_turret_write_ammo(...)` 的 `BlockSnapshotCallPacket`；
+  - desktop 端断言 mirror/raw sidecar/base building 均更新，同时 `ammo/total_ammo` 接受 snapshot 新值，但 `rotation/reload_counter` 保留 world stream 后的旧值。
+- 该 smoke 把 12.33 的 core 行为接入真实 net client/server packet 路径，覆盖 Java `TurretBuild.readSync(...)` 的关键客户端抗抖语义。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_item_turret_block_snapshot_preserves_rotation_reload_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：`Continuous/PayloadAmmo/Generic` turret 的 rotation/reload 保留还需逐类补 core/真实联机测试；PointDefense/TractorBeam 不走 `TurretBuild.readSync` 的保留逻辑。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

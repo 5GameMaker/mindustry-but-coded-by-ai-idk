@@ -628,7 +628,11 @@ impl<'a> RulesJsonParser<'a> {
         if end > self.chars.len() {
             return false;
         }
-        if self.chars[self.index..end].iter().copied().eq(literal.chars()) {
+        if self.chars[self.index..end]
+            .iter()
+            .copied()
+            .eq(literal.chars())
+        {
             self.index = end;
             true
         } else {
