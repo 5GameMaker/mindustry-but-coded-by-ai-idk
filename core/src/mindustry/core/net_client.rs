@@ -240,6 +240,187 @@ impl From<&PlayerSpawnCallPacket> for ClientPlayerSpawnMirror {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientBlockSnapshotRecordMirror {
+    pub tile_pos: i32,
+    pub block_id: i16,
+    pub sync_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientBlockSnapshotMirror {
+    pub amount: i16,
+    pub data: Vec<u8>,
+    pub records: Vec<ClientBlockSnapshotRecordMirror>,
+    pub parse_error: Option<String>,
+}
+
+impl From<&BlockSnapshotCallPacket> for ClientBlockSnapshotMirror {
+    fn from(snapshot: &BlockSnapshotCallPacket) -> Self {
+        let (records, parse_error) =
+            decode_client_block_snapshot_records(snapshot.amount, &snapshot.data);
+        Self {
+            amount: snapshot.amount,
+            data: snapshot.data.clone(),
+            records,
+            parse_error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientEntitySnapshotRecordMirror {
+    pub entity_id: i32,
+    pub type_id: u8,
+    pub sync_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientEntitySnapshotMirror {
+    pub amount: i16,
+    pub data: Vec<u8>,
+    pub records: Vec<ClientEntitySnapshotRecordMirror>,
+    pub parse_error: Option<String>,
+}
+
+impl From<&EntitySnapshotCallPacket> for ClientEntitySnapshotMirror {
+    fn from(snapshot: &EntitySnapshotCallPacket) -> Self {
+        let (records, parse_error) =
+            decode_client_entity_snapshot_records(snapshot.amount, &snapshot.data);
+        Self {
+            amount: snapshot.amount,
+            data: snapshot.data.clone(),
+            records,
+            parse_error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientHiddenSnapshotMirror {
+    pub ids: Vec<i32>,
+}
+
+impl From<&HiddenSnapshotCallPacket> for ClientHiddenSnapshotMirror {
+    fn from(snapshot: &HiddenSnapshotCallPacket) -> Self {
+        Self {
+            ids: snapshot.ids.clone(),
+        }
+    }
+}
+
+fn decode_client_block_snapshot_records(
+    amount: i16,
+    data: &[u8],
+) -> (Vec<ClientBlockSnapshotRecordMirror>, Option<String>) {
+    let Ok(amount) = usize::try_from(amount) else {
+        return (Vec::new(), Some("negative block snapshot amount".into()));
+    };
+    if amount == 0 {
+        return (Vec::new(), None);
+    }
+
+    const HEADER: usize = 6;
+    if amount == 1 {
+        if data.len() < HEADER {
+            return (
+                Vec::new(),
+                Some(format!(
+                    "block snapshot data too short: {} < {}",
+                    data.len(),
+                    HEADER
+                )),
+            );
+        }
+        return (
+            vec![ClientBlockSnapshotRecordMirror {
+                tile_pos: i32::from_be_bytes(data[0..4].try_into().unwrap()),
+                block_id: i16::from_be_bytes(data[4..6].try_into().unwrap()),
+                sync_bytes: data[HEADER..].to_vec(),
+            }],
+            None,
+        );
+    }
+
+    let expected = amount.saturating_mul(HEADER);
+    if data.len() != expected {
+        return (
+            Vec::new(),
+            Some(format!(
+                "multi-record block snapshot with opaque sync bytes is not splittable yet: len={} expected_header_only={}",
+                data.len(),
+                expected
+            )),
+        );
+    }
+
+    let records = data
+        .chunks_exact(HEADER)
+        .map(|chunk| ClientBlockSnapshotRecordMirror {
+            tile_pos: i32::from_be_bytes(chunk[0..4].try_into().unwrap()),
+            block_id: i16::from_be_bytes(chunk[4..6].try_into().unwrap()),
+            sync_bytes: Vec::new(),
+        })
+        .collect();
+    (records, None)
+}
+
+fn decode_client_entity_snapshot_records(
+    amount: i16,
+    data: &[u8],
+) -> (Vec<ClientEntitySnapshotRecordMirror>, Option<String>) {
+    let Ok(amount) = usize::try_from(amount) else {
+        return (Vec::new(), Some("negative entity snapshot amount".into()));
+    };
+    if amount == 0 {
+        return (Vec::new(), None);
+    }
+
+    const HEADER: usize = 5;
+    if amount == 1 {
+        if data.len() < HEADER {
+            return (
+                Vec::new(),
+                Some(format!(
+                    "entity snapshot data too short: {} < {}",
+                    data.len(),
+                    HEADER
+                )),
+            );
+        }
+        return (
+            vec![ClientEntitySnapshotRecordMirror {
+                entity_id: i32::from_be_bytes(data[0..4].try_into().unwrap()),
+                type_id: data[4],
+                sync_bytes: data[HEADER..].to_vec(),
+            }],
+            None,
+        );
+    }
+
+    let expected = amount.saturating_mul(HEADER);
+    if data.len() != expected {
+        return (
+            Vec::new(),
+            Some(format!(
+                "multi-record entity snapshot with opaque sync bytes is not splittable yet: len={} expected_header_only={}",
+                data.len(),
+                expected
+            )),
+        );
+    }
+
+    let records = data
+        .chunks_exact(HEADER)
+        .map(|chunk| ClientEntitySnapshotRecordMirror {
+            entity_id: i32::from_be_bytes(chunk[0..4].try_into().unwrap()),
+            type_id: chunk[4],
+            sync_bytes: Vec::new(),
+        })
+        .collect();
+    (records, None)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientGameStateMirror {
     pub wave_time: f32,
@@ -429,6 +610,7 @@ pub struct NetClientState {
     pub last_block_snapshot: Option<BlockSnapshotCallPacket>,
     pub last_block_snapshot_at: Option<Instant>,
     pub block_snapshot_packets_seen: u64,
+    pub last_block_snapshot_mirror: Option<ClientBlockSnapshotMirror>,
     pub last_connect_call: Option<ConnectCallPacket>,
     pub last_connect_call_at: Option<Instant>,
     pub connect_call_packets_seen: u64,
@@ -459,9 +641,11 @@ pub struct NetClientState {
     pub last_entity_snapshot: Option<EntitySnapshotCallPacket>,
     pub last_entity_snapshot_at: Option<Instant>,
     pub entity_snapshot_packets_seen: u64,
+    pub entity_snapshot_mirrors: Vec<ClientEntitySnapshotMirror>,
     pub last_hidden_snapshot: Option<HiddenSnapshotCallPacket>,
     pub last_hidden_snapshot_at: Option<Instant>,
     pub hidden_snapshot_packets_seen: u64,
+    pub last_hidden_snapshot_mirror: Option<ClientHiddenSnapshotMirror>,
     pub last_state_snapshot: Option<StateSnapshotCallPacket>,
     pub last_state_snapshot_at: Option<Instant>,
     pub state_snapshot_packets_seen: u64,
@@ -703,6 +887,10 @@ impl fmt::Debug for NetClientState {
                 "block_snapshot_packets_seen",
                 &self.block_snapshot_packets_seen,
             )
+            .field(
+                "last_block_snapshot_mirror",
+                &self.last_block_snapshot_mirror,
+            )
             .field("connect_call_packets_seen", &self.connect_call_packets_seen)
             .field("connect_config", &self.connect_config)
             .field("connect_packet_sent", &self.connect_packet_sent)
@@ -737,8 +925,16 @@ impl fmt::Debug for NetClientState {
                 &self.entity_snapshot_packets_seen,
             )
             .field(
+                "entity_snapshot_mirrors_len",
+                &self.entity_snapshot_mirrors.len(),
+            )
+            .field(
                 "hidden_snapshot_packets_seen",
                 &self.hidden_snapshot_packets_seen,
+            )
+            .field(
+                "last_hidden_snapshot_mirror",
+                &self.last_hidden_snapshot_mirror,
             )
             .field(
                 "state_snapshot_packets_seen",
@@ -2595,6 +2791,9 @@ impl NetClient {
                         state.entity_snapshot_packets_seen += 1;
                         state.last_entity_snapshot = Some(snapshot.clone());
                         state.last_entity_snapshot_at = Some(now);
+                        state
+                            .entity_snapshot_mirrors
+                            .push(ClientEntitySnapshotMirror::from(snapshot));
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
@@ -2603,6 +2802,8 @@ impl NetClient {
                         state.hidden_snapshot_packets_seen += 1;
                         state.last_hidden_snapshot = Some(snapshot.clone());
                         state.last_hidden_snapshot_at = Some(now);
+                        state.last_hidden_snapshot_mirror =
+                            Some(ClientHiddenSnapshotMirror::from(snapshot));
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
@@ -2621,6 +2822,8 @@ impl NetClient {
                         state.block_snapshot_packets_seen += 1;
                         state.last_block_snapshot = Some(snapshot.clone());
                         state.last_block_snapshot_at = Some(now);
+                        state.last_block_snapshot_mirror =
+                            Some(ClientBlockSnapshotMirror::from(snapshot));
                         state.last_server_snapshot_at = Some(now);
                         (false, false)
                     }
@@ -3264,10 +3467,11 @@ mod tests {
     use crate::mindustry::world::{point2_pack, Tile, Tiles};
 
     use super::{
-        ClientBulletMirror, ClientCameraView, ClientConnectConfig, ClientInputSnapshot,
-        ClientLogicExplosionMirror, ClientMapAreaMirror, ClientMarkerTextMirror,
-        ClientPlayerSpawnMirror, ClientPlayerTeamEditorMirror, ClientTileBlockKind,
-        ClientTileStorageMirror, ClientWeatherMirror, NetClient, CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
+        ClientBulletMirror, ClientCameraView, ClientConnectConfig, ClientHiddenSnapshotMirror,
+        ClientInputSnapshot, ClientLogicExplosionMirror, ClientMapAreaMirror,
+        ClientMarkerTextMirror, ClientPlayerSpawnMirror, ClientPlayerTeamEditorMirror,
+        ClientTileBlockKind, ClientTileStorageMirror, ClientWeatherMirror, NetClient,
+        CLIENT_PLAN_PREVIEW_CHUNK_SIZE,
     };
 
     #[derive(Clone, Default)]
@@ -4714,10 +4918,11 @@ mod tests {
     #[test]
     fn update_records_block_snapshot_metadata_for_later_world_application() {
         let client = NetClient::default();
-        let packet = BlockSnapshotCallPacket {
-            amount: 2,
-            data: vec![1, 2, 3, 4, 5, 6],
-        };
+        let mut data = Vec::new();
+        data.extend_from_slice(&point2_pack(2, 3).to_be_bytes());
+        data.extend_from_slice(&77i16.to_be_bytes());
+        data.extend_from_slice(&[4, 5, 6]);
+        let packet = BlockSnapshotCallPacket { amount: 1, data };
 
         {
             let mut net = client.net_mut();
@@ -4733,6 +4938,16 @@ mod tests {
         assert_eq!(state.last_block_snapshot.as_ref(), Some(&packet));
         assert!(state.last_block_snapshot_at.is_some());
         assert!(state.last_server_snapshot_at.is_some());
+        let mirror = state
+            .last_block_snapshot_mirror
+            .as_ref()
+            .expect("block snapshot should materialize into a lightweight mirror");
+        assert_eq!(mirror.amount, 1);
+        assert_eq!(mirror.records.len(), 1);
+        assert_eq!(mirror.records[0].tile_pos, point2_pack(2, 3));
+        assert_eq!(mirror.records[0].block_id, 77);
+        assert_eq!(mirror.records[0].sync_bytes, vec![4, 5, 6]);
+        assert!(mirror.parse_error.is_none());
     }
 
     #[test]
@@ -4920,9 +5135,13 @@ mod tests {
             rand1: 22,
             core_data: vec![1, 2, 3],
         };
+        let mut entity_data = Vec::new();
+        entity_data.extend_from_slice(&1234i32.to_be_bytes());
+        entity_data.push(7);
+        entity_data.extend_from_slice(&[8, 9]);
         let entity_snapshot = EntitySnapshotCallPacket {
-            amount: 2,
-            data: vec![7, 8, 9],
+            amount: 1,
+            data: entity_data,
         };
         let hidden_snapshot = HiddenSnapshotCallPacket { ids: vec![4, 5] };
 
@@ -4962,9 +5181,22 @@ mod tests {
         assert_eq!(state.entity_snapshot_packets_seen, 1);
         assert_eq!(state.last_entity_snapshot.as_ref(), Some(&entity_snapshot));
         assert!(state.last_entity_snapshot_at.is_some());
+        assert_eq!(state.entity_snapshot_mirrors.len(), 1);
+        assert_eq!(state.entity_snapshot_mirrors[0].records.len(), 1);
+        assert_eq!(state.entity_snapshot_mirrors[0].records[0].entity_id, 1234);
+        assert_eq!(state.entity_snapshot_mirrors[0].records[0].type_id, 7);
+        assert_eq!(
+            state.entity_snapshot_mirrors[0].records[0].sync_bytes,
+            vec![8, 9]
+        );
+        assert!(state.entity_snapshot_mirrors[0].parse_error.is_none());
         assert_eq!(state.hidden_snapshot_packets_seen, 1);
         assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden_snapshot));
         assert!(state.last_hidden_snapshot_at.is_some());
+        assert_eq!(
+            state.last_hidden_snapshot_mirror,
+            Some(ClientHiddenSnapshotMirror { ids: vec![4, 5] })
+        );
         assert!(state.last_server_snapshot_at.is_some());
         assert!(matches!(
             state.last_packet,

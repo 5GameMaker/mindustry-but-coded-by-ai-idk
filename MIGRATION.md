@@ -1744,3 +1744,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/net_server.rs tests/src/lib.rs`
   - `git diff --check`
 - 仍未完成：block/entity snapshot bytes 的实际 world/entity mirror 应用、客户端输入/构建回传、Java↔Rust 互通、renderer/UI/完整可游玩闭环仍需继续。
+
+### 12.19 客户端 snapshot bytes 轻量镜像
+
+- 2026-05-26：在 `NetClientState` 中新增 `last_block_snapshot_mirror`、`entity_snapshot_mirrors`、`last_hidden_snapshot_mirror`，把收到的 `BlockSnapshotCallPacket` / `EntitySnapshotCallPacket` / `HiddenSnapshotCallPacket` 从原始 packet 记录推进到可查询的轻量镜像。
+- Block mirror 按 Java `NetServer.writeBlockSnapshots()` / `NetClient.blockSnapshot(...)` 的 header 结构解析：
+  - `int tile_pos`
+  - `short block_id`
+  - 后续 `build.writeSync(...)` 暂存为 opaque `sync_bytes`
+- Entity mirror 按 Java `NetServer.writeEntitySnapshot(...)` / `NetClient.readSyncEntity(...)` 的 header 结构解析：
+  - `int entity_id`
+  - `byte type_id`
+  - 后续 `entity.writeSync(...)` 暂存为 opaque `sync_bytes`
+- 因 Java snapshot 子记录没有独立长度，本闭环只安全拆分：
+  - `amount == 1`：解析 header，剩余全部作为 `sync_bytes`；
+  - `amount > 1` 且数据刚好为纯 header 长度：解析多条 header；
+  - 其他多记录 opaque sync bytes 场景写入 `parse_error`，避免假装已经完成字段级 `readSync` 回放。
+- 已扩展真实联机测试：
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 断言 entity snapshot mirror 中的 `entity_id/type_id` 与 hidden ids；
+  - `real_server_desktop_block_snapshot_updates_net_client_after_world_stream` 断言 block snapshot mirror 中的 `tile_pos/block_id/sync_bytes`。
+- 已验证：
+  - `rustfmt --check core/src/mindustry/core/net_client.rs tests/src/lib.rs`
+  - `git diff --check`
+  - `cargo test -p mindustry-core update_records_server_snapshots_when_client_loaded --lib`
+  - `cargo test -p mindustry-core update_records_block_snapshot_metadata_for_later_world_application --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-tests`
+- 仍未完成：需要继续把轻量镜像接入真实 client world/entity runtime，按具体 block/entity 类型补 Java `readSync/writeSync` 字段级解析与回放，并推进客户端输入、构建、单位控制回传和 Java↔Rust 互通 smoke。

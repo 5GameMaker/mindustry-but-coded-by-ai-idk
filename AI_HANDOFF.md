@@ -1197,3 +1197,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/net_server.rs tests/src/lib.rs`
   - `git diff --check`
 - 后续建议：下一步把 block/entity snapshot bytes materialize 到客户端 world/entity mirror；然后推进客户端输入、构建请求、单位控制回传与 Java↔Rust 互通 smoke。
+
+---
+
+## 33. 最新闭环记录：客户端 snapshot bytes 轻量镜像
+
+- 目标：把客户端收到的 block/entity/hidden snapshot 从“只保存原始 packet”推进到 Java-like header 可查询镜像，为后续真正写入 world/entity runtime 打底。
+- Rust 主改动：
+  - `core/src/mindustry/core/net_client.rs`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增/扩展状态：
+  - `ClientBlockSnapshotRecordMirror { tile_pos, block_id, sync_bytes }`
+  - `ClientBlockSnapshotMirror { amount, data, records, parse_error }`
+  - `ClientEntitySnapshotRecordMirror { entity_id, type_id, sync_bytes }`
+  - `ClientEntitySnapshotMirror { amount, data, records, parse_error }`
+  - `ClientHiddenSnapshotMirror { ids }`
+  - `NetClientState.last_block_snapshot_mirror`
+  - `NetClientState.entity_snapshot_mirrors`
+  - `NetClientState.last_hidden_snapshot_mirror`
+- 解析约束：
+  - Java block snapshot 子记录 header 是 `int pos` + `short blockId`，后续为 `build.writeSync(...)`；
+  - Java entity snapshot 子记录 header 是 `int entityId` + `byte typeId`，后续为 `entity.writeSync(...)`；
+  - 因子记录没有独立长度，本闭环只完整支持单记录 opaque bytes 与多记录 header-only；多记录且含 opaque sync bytes 时写 `parse_error`，不要误判为已完成字段级同步。
+- 已扩展验证：
+  - `update_records_block_snapshot_metadata_for_later_world_application`
+  - `update_records_server_snapshots_when_client_loaded`
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`
+  - `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`
+- 已跑：
+  - `rustfmt --check core/src/mindustry/core/net_client.rs tests/src/lib.rs`
+  - `git diff --check`
+  - `cargo test -p mindustry-core update_records_server_snapshots_when_client_loaded --lib`
+  - `cargo test -p mindustry-core update_records_block_snapshot_metadata_for_later_world_application --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-tests`
+- 下一步建议：
+  1. 把 `ClientBlockSnapshotMirror` 按 `tile_pos/block_id` 应用到 client-side world/block mirror 或真实 runtime building。
+  2. 把 `ClientEntitySnapshotMirror` 按 `entity_id/type_id` 应用到 entity mirror collection。
+  3. 按 Java 参考逐类补 `readSync/writeSync` 字段解析，而不是停留在 opaque bytes。
+  4. 继续推进客户端输入、构建请求、单位控制回传与 Java↔Rust 联机 smoke。

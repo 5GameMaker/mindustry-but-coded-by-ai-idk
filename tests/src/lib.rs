@@ -550,13 +550,21 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         rand1: 202,
         core_data: Vec::new(),
     };
+    let mut first_entity_data = Vec::new();
+    first_entity_data.extend_from_slice(&1001i32.to_be_bytes());
+    first_entity_data.push(2);
     let first_entity = EntitySnapshotCallPacket {
         amount: 1,
-        data: vec![7, 8],
+        data: first_entity_data,
     };
+    let mut second_entity_data = Vec::new();
+    second_entity_data.extend_from_slice(&1002i32.to_be_bytes());
+    second_entity_data.push(3);
+    second_entity_data.extend_from_slice(&1003i32.to_be_bytes());
+    second_entity_data.push(4);
     let second_entity = EntitySnapshotCallPacket {
         amount: 2,
-        data: vec![9, 10, 11],
+        data: second_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
 
@@ -630,8 +638,24 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         assert_eq!(state.last_state_snapshot.as_ref(), Some(&state_snapshot));
         assert_eq!(state.entity_snapshot_packets_seen, 2);
         assert_eq!(state.last_entity_snapshot.as_ref(), Some(&second_entity));
+        assert_eq!(state.entity_snapshot_mirrors.len(), 2);
+        assert_eq!(state.entity_snapshot_mirrors[0].records.len(), 1);
+        assert_eq!(state.entity_snapshot_mirrors[0].records[0].entity_id, 1001);
+        assert_eq!(state.entity_snapshot_mirrors[0].records[0].type_id, 2);
+        assert_eq!(state.entity_snapshot_mirrors[1].records.len(), 2);
+        assert_eq!(state.entity_snapshot_mirrors[1].records[0].entity_id, 1002);
+        assert_eq!(state.entity_snapshot_mirrors[1].records[0].type_id, 3);
+        assert_eq!(state.entity_snapshot_mirrors[1].records[1].entity_id, 1003);
+        assert_eq!(state.entity_snapshot_mirrors[1].records[1].type_id, 4);
         assert_eq!(state.hidden_snapshot_packets_seen, 1);
         assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden));
+        assert_eq!(
+            state
+                .last_hidden_snapshot_mirror
+                .as_ref()
+                .map(|mirror| mirror.ids.as_slice()),
+            Some(&[4, 5][..])
+        );
         assert!(state.last_server_snapshot_at.is_some());
     }
     assert_eq!(desktop.game_state.wave, state_snapshot.wave);
@@ -680,8 +704,14 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
             .expect("server should receive connect confirm before block snapshot")
     };
     let snapshot = BlockSnapshotCallPacket {
-        amount: 2,
-        data: vec![1, 2, 3, 4, 5, 6],
+        amount: 1,
+        data: {
+            let mut data = Vec::new();
+            data.extend_from_slice(&42i32.to_be_bytes());
+            data.extend_from_slice(&7i16.to_be_bytes());
+            data.extend_from_slice(&[1, 2, 3]);
+            data
+        },
     };
     server
         .net_server
@@ -730,6 +760,15 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
         assert_eq!(state.block_snapshot_packets_seen, 1);
         assert_eq!(state.last_block_snapshot.as_ref(), Some(&snapshot));
         assert!(state.last_block_snapshot_at.is_some());
+        let mirror = state
+            .last_block_snapshot_mirror
+            .as_ref()
+            .expect("block snapshot should materialize into lightweight mirror");
+        assert_eq!(mirror.records.len(), 1);
+        assert_eq!(mirror.records[0].tile_pos, 42);
+        assert_eq!(mirror.records[0].block_id, 7);
+        assert_eq!(mirror.records[0].sync_bytes, vec![1, 2, 3]);
+        assert!(mirror.parse_error.is_none());
         assert!(state.last_server_snapshot_at.is_some());
     }
     assert_eq!(
