@@ -89,21 +89,22 @@ use crate::mindustry::{
         payload_conveyor_handle_payload, payload_conveyor_should_attempt_move,
         payload_conveyor_update_timing, payload_loader_accept_payload,
         payload_loader_charge_battery, payload_loader_liquid_flow, payload_loader_should_export,
-        payload_ref_sort_key, payload_router_check_match, payload_router_pick_next_rotation,
-        payload_source_clear_config, payload_source_configure_block, payload_source_configure_unit,
-        payload_source_update, payload_unloader_drain_battery, payload_unloader_full,
-        payload_unloader_liquid_flow, payload_unloader_should_export, payload_void_update,
-        read_block_producer_progress, read_constructor_recipe, read_deconstructor_extra,
-        read_payload_loader_extra, read_payload_mass_driver_extra, read_payload_ref_to_end,
-        read_payload_router_extra, read_payload_source_extra,
-        read_terminal_payload_block_build_common, read_terminal_payload_conveyor_extra,
-        write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
-        write_payload_block_build_common, write_payload_conveyor_extra, write_payload_loader_extra,
-        write_payload_mass_driver_extra, write_payload_ref, write_payload_router_extra,
-        write_payload_source_extra, BlockProducerState, PayloadBlockBuildState,
-        PayloadConveyorState, PayloadDeconstructorState, PayloadLoaderState,
-        PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceSpawn, PayloadSourceState,
-        Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
+        payload_ref_sort_key, payload_router_check_match, payload_router_logic_control,
+        payload_router_pick_next_rotation, payload_source_clear_config,
+        payload_source_configure_block, payload_source_configure_unit, payload_source_update,
+        payload_unloader_drain_battery, payload_unloader_full, payload_unloader_liquid_flow,
+        payload_unloader_should_export, payload_void_update, read_block_producer_progress,
+        read_constructor_recipe, read_deconstructor_extra, read_payload_loader_extra,
+        read_payload_mass_driver_extra, read_payload_ref_to_end, read_payload_router_extra,
+        read_payload_source_extra, read_terminal_payload_block_build_common,
+        read_terminal_payload_conveyor_extra, write_block_producer_progress,
+        write_constructor_recipe, write_deconstructor_extra, write_payload_block_build_common,
+        write_payload_conveyor_extra, write_payload_loader_extra, write_payload_mass_driver_extra,
+        write_payload_ref, write_payload_router_extra, write_payload_source_extra,
+        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
+        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
+        PayloadSortKey, PayloadSourceSpawn, PayloadSourceState, Vec2 as PayloadVec2,
+        PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
         read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
@@ -1456,6 +1457,14 @@ pub enum GameRuntimePayloadRouterConfigureResult {
     UnknownUnit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimePayloadRouterControlResult {
+    Controlled,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotPayloadRouter,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Construct(GameRuntimeConstructBlockState),
@@ -1776,6 +1785,37 @@ impl GameRuntime {
             sorted_key.id,
         )));
         configured_result
+    }
+
+    pub fn control_owned_payload_router_rotation(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        requested_rotation: i32,
+    ) -> GameRuntimePayloadRouterControlResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimePayloadRouterControlResult::MissingBuilding;
+        };
+
+        match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::Payload(payload)) if payload.kind == PayloadBlockKind::PayloadRouter => {
+            }
+            Some(_) | None => return GameRuntimePayloadRouterControlResult::NotPayloadRouter,
+        }
+
+        let Some(GameRuntimePayloadBlockState::Router { control_time, .. }) =
+            self.payload_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimePayloadRouterControlResult::MissingRuntimeState;
+        };
+
+        *control_time =
+            payload_router_logic_control(&mut self.buildings[index].rotation, requested_rotation);
+        GameRuntimePayloadRouterControlResult::Controlled
     }
 
     pub fn command_owned_payload_source(
@@ -10138,6 +10178,93 @@ mod tests {
         assert!(matches!(
             common.payload.as_ref(),
             Some(PayloadRef::Unit { class_id: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn game_runtime_payload_router_logic_control_holds_manual_rotation() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("payload-router").unwrap();
+        let void_def = content.block_by_name("payload-void").unwrap();
+        let carried_block = content.block_by_name("router").unwrap();
+        let router_tile = point2_pack(4, 4);
+        let trns = router_def.base().size / 2 + 1;
+        let void_center_y = 4 + trns + (void_def.base().size - 1) / 2;
+        let void_tile = point2_pack(4, void_center_y);
+        let mut router_building =
+            BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+        router_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 12);
+        runtime.add_building(router_building);
+        runtime.add_building(BuildingComp::new(
+            void_tile,
+            void_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            router_tile,
+            GameRuntimePayloadBlockState::Router {
+                conveyor: PayloadConveyorState {
+                    item: Some(base_only_build_payload_ref(&content, "router")),
+                    step: 0,
+                    step_accepted: 0,
+                    ..PayloadConveyorState::default()
+                },
+                sorted: Some(PayloadSortKey {
+                    content_type: ContentType::Block.ordinal() as i8,
+                    id: carried_block.base().id,
+                }),
+                rec_dir: 0,
+                matches: true,
+                smooth_rot: 0.0,
+                control_time: -1.0,
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            void_tile,
+            GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+        );
+
+        assert_eq!(
+            runtime.control_owned_payload_router_rotation(&content, router_tile, 1),
+            GameRuntimePayloadRouterControlResult::Controlled
+        );
+        assert_eq!(runtime.buildings[0].rotation, 1);
+        let Some(GameRuntimePayloadBlockState::Router { control_time, .. }) =
+            runtime.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert_eq!(*control_time, 360.0);
+
+        let report = runtime
+            .advance_owned_payload_conveyors(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.transferred_payloads, 1);
+        assert_eq!(runtime.buildings[0].rotation, 1);
+        let Some(GameRuntimePayloadBlockState::Router {
+            conveyor,
+            control_time,
+            ..
+        }) = runtime.payload_runtime_states.get(&router_tile)
+        else {
+            panic!("payload router sidecar should remain present");
+        };
+        assert!(conveyor.item.is_none());
+        assert_eq!(*control_time, 300.0);
+
+        let Some(GameRuntimePayloadBlockState::Void(common)) =
+            runtime.payload_runtime_states.get(&void_tile)
+        else {
+            panic!("payload void sidecar should remain present");
+        };
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == carried_block.base().id
         ));
     }
 
