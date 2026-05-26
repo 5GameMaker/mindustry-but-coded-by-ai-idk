@@ -1573,6 +1573,26 @@ pub struct GameRuntimeItemJunctionFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeOwnedItemTransportFrameReport {
+    pub router_forwarded_items: usize,
+    pub item_unloader_moved_items: usize,
+    pub directional_unloader_moved_items: usize,
+    pub duct_forwarded_items: usize,
+    pub duct_bridge_forwarded_items: usize,
+    pub stack_router_forwarded_items: usize,
+    pub stack_conveyor_forwarded_items: usize,
+    pub mass_driver_forwarded_items: usize,
+    pub bridge_forwarded_items: usize,
+    pub junction_forwarded_items: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GameRuntimeOwnedFrameReport {
+    pub item_transport: GameRuntimeOwnedItemTransportFrameReport,
+    pub effect: EffectBlockFrameBatchReport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimePayloadLoaderFrameReport {
     pub visited_buildings: usize,
     pub loader_candidates: usize,
@@ -5811,36 +5831,20 @@ impl GameRuntime {
             report.dumped_items +=
                 self.dump_accumulated_items_from_unloader(content, tile_pos, offload_speed, delta);
         }
-        report.router_forwarded_items += self
-            .advance_owned_item_routers_ticks(content, frame_delta)
-            .moved_items;
-        report.item_unloader_moved_items += self
-            .advance_owned_item_unloaders_ticks(content, frame_delta)
-            .moved_items;
-        report.directional_unloader_moved_items += self
-            .advance_owned_directional_unloaders_ticks(content, frame_delta)
-            .moved_items;
-        report.duct_forwarded_items += self
-            .advance_owned_item_ducts_ticks(content, frame_delta)
-            .moved_items;
-        report.stack_router_forwarded_items += self
-            .advance_owned_stack_routers_ticks(content, frame_delta)
-            .moved_items;
-        let duct_bridge_report = self.advance_owned_duct_bridges_ticks(content, frame_delta);
-        report.duct_bridge_forwarded_items +=
-            duct_bridge_report.moved_items + duct_bridge_report.dumped_items;
-        let stack_report = self.advance_owned_stack_conveyors_ticks(content, frame_delta);
+        let item_transport_report =
+            self.advance_owned_item_transport_blocks_ticks(content, frame_delta);
+        report.router_forwarded_items += item_transport_report.router_forwarded_items;
+        report.item_unloader_moved_items += item_transport_report.item_unloader_moved_items;
+        report.directional_unloader_moved_items +=
+            item_transport_report.directional_unloader_moved_items;
+        report.duct_forwarded_items += item_transport_report.duct_forwarded_items;
+        report.duct_bridge_forwarded_items += item_transport_report.duct_bridge_forwarded_items;
+        report.stack_router_forwarded_items += item_transport_report.stack_router_forwarded_items;
         report.stack_conveyor_forwarded_items +=
-            stack_report.moved_stacks + stack_report.dumped_items;
-        let mass_driver_report = self.advance_owned_item_mass_drivers_ticks(content, frame_delta);
-        report.mass_driver_forwarded_items +=
-            mass_driver_report.transferred_items + mass_driver_report.dumped_items;
-        report.bridge_forwarded_items += self
-            .advance_owned_item_bridges_ticks(content, frame_delta)
-            .moved_items;
-        report.junction_forwarded_items += self
-            .advance_owned_item_junctions_ticks(content, frame_delta)
-            .moved_items;
+            item_transport_report.stack_conveyor_forwarded_items;
+        report.mass_driver_forwarded_items += item_transport_report.mass_driver_forwarded_items;
+        report.bridge_forwarded_items += item_transport_report.bridge_forwarded_items;
+        report.junction_forwarded_items += item_transport_report.junction_forwarded_items;
 
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
             if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
@@ -6467,6 +6471,67 @@ impl GameRuntime {
         self.buildings
             .iter()
             .position(|building| building.tile_pos == tile_pos)
+    }
+
+    pub fn advance_owned_item_transport_blocks(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeOwnedItemTransportFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        self.refresh_owned_building_update_permissions(content);
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(advanced.delta_ticks as f32, can_overdrive);
+        }
+        Some(self.advance_owned_item_transport_blocks_ticks(content, advanced.delta_ticks as f32))
+    }
+
+    fn advance_owned_item_transport_blocks_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeOwnedItemTransportFrameReport {
+        let mut report = GameRuntimeOwnedItemTransportFrameReport::default();
+        report.router_forwarded_items += self
+            .advance_owned_item_routers_ticks(content, frame_delta)
+            .moved_items;
+        report.item_unloader_moved_items += self
+            .advance_owned_item_unloaders_ticks(content, frame_delta)
+            .moved_items;
+        report.directional_unloader_moved_items += self
+            .advance_owned_directional_unloaders_ticks(content, frame_delta)
+            .moved_items;
+        report.duct_forwarded_items += self
+            .advance_owned_item_ducts_ticks(content, frame_delta)
+            .moved_items;
+        report.stack_router_forwarded_items += self
+            .advance_owned_stack_routers_ticks(content, frame_delta)
+            .moved_items;
+        let duct_bridge_report = self.advance_owned_duct_bridges_ticks(content, frame_delta);
+        report.duct_bridge_forwarded_items +=
+            duct_bridge_report.moved_items + duct_bridge_report.dumped_items;
+        let stack_report = self.advance_owned_stack_conveyors_ticks(content, frame_delta);
+        report.stack_conveyor_forwarded_items +=
+            stack_report.moved_stacks + stack_report.dumped_items;
+        let mass_driver_report = self.advance_owned_item_mass_drivers_ticks(content, frame_delta);
+        report.mass_driver_forwarded_items +=
+            mass_driver_report.transferred_items + mass_driver_report.dumped_items;
+        report.bridge_forwarded_items += self
+            .advance_owned_item_bridges_ticks(content, frame_delta)
+            .moved_items;
+        report.junction_forwarded_items += self
+            .advance_owned_item_junctions_ticks(content, frame_delta)
+            .moved_items;
+        report
     }
 
     pub fn advance_owned_item_routers(
@@ -12458,6 +12523,60 @@ impl GameRuntime {
             frame,
             &mut batch_resources,
         ))
+    }
+
+    pub fn advance_owned_runtime_blocks<'a, 'b>(
+        &'a mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+        resources: GameRuntimeOwnedEffectResources<'a, 'b>,
+    ) -> Option<GameRuntimeOwnedFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        let frame = effect_block_frame_input_from_game_update(
+            advanced,
+            TILE_SIZE as f32,
+            self.state.rules.fog,
+            self.state.rules.static_fog,
+        )?;
+
+        self.refresh_owned_building_update_permissions(content);
+        self.refresh_owned_storage_core_links(content);
+
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame.delta, can_overdrive);
+        }
+
+        let item_transport = self.advance_owned_item_transport_blocks_ticks(content, frame.delta);
+
+        let mut batch_resources = EffectBlockFrameBatchResources {
+            fog_control: Some(&mut self.state.fog_control),
+            bullets: resources.bullets,
+            bullet_type: resources.bullet_type,
+            units: resources.units,
+            suppressed: resources.suppressed,
+            force_coolant: resources.force_coolant,
+            spark_random: resources.spark_random,
+        };
+
+        let effect = effect_block_update_building_slice_with_stores(
+            &mut self.effect_runtime_store,
+            &mut self.effect_timer_store,
+            content,
+            self.buildings.as_mut_slice(),
+            frame,
+            &mut batch_resources,
+        );
+
+        Some(GameRuntimeOwnedFrameReport {
+            item_transport,
+            effect,
+        })
     }
 }
 

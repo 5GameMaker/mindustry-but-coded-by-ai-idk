@@ -1451,3 +1451,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 不使用 `D:/MDT/mindustry-rust`；
 - 乱码先按 UTF-8 处理；
 - 每个迁移闭环中文提交并推送 `origin main`。
+
+## 12. 最新闭环：服务端 owned runtime 主循环聚合
+
+- 2026-05-26：`GameRuntime` 新增 `GameRuntimeOwnedItemTransportFrameReport` 与 `GameRuntimeOwnedFrameReport`，把已迁移的 owned item transport（router/unloader/directional unloader/duct/duct bridge/stack router/stack conveyor/mass driver/item bridge/junction）按单个 frame 聚合报告输出。
+- `advance_owned_item_transport_blocks(...)` 作为 item transport 独立入口保留；内部私有 `advance_owned_item_transport_blocks_ticks(...)` 可被更高层 frame aggregate 复用，避免每类 public `advance_owned_*` 各自调用 `advance_game_update_frame(...)` 导致 tick/update_id 翻倍。
+- `advance_owned_runtime_blocks(...)` 已把 item transport 与 effect blocks 接到同一个 runtime frame：每次只调用一次 `GameState::advance_game_update_frame(...)`，随后刷新 owned building update permission / linked storage，再推进 building timing、item transport 和 effect runtime。
+- `server::ServerLauncher::update(...)` 已改为调用 `update_runtime_owned_blocks(1/60)`，并缓存 `last_runtime_item_transport_report` 与 `last_runtime_effect_report`；这一步把已迁移的普通 item 物流与 effect building 从单测/局部 helper 接入真实服务端主循环。
+- 已新增 server 级测试 `server_update_drives_owned_item_transport_from_launcher_runtime`，构造 `router -> item-void`，通过 `launcher.update()` 验证 router 物品被服务端主循环搬运，且 `runtime.state.update_id == 1`，锁定“不重复推进 frame”的约束。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_effect_building_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_unloader --lib`
+  - `cargo test -p mindustry-core game_runtime_item_router --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：payload source/constructor/conveyor/loader/void 等 payload runtime 还没有统一纳入 `ServerLauncher::update(...)` 的 single-frame aggregate；后续应继续把更多 owned runtime tick 接入同一个 `advance_owned_runtime_blocks(...)`，不能回退为多个 public advance 串行调用。

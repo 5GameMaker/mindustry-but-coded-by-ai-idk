@@ -2,7 +2,8 @@ pub mod server_control;
 
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext,
-    GameRuntimeOwnedEffectResources, NetServer,
+    GameRuntimeOwnedEffectResources, GameRuntimeOwnedFrameReport,
+    GameRuntimeOwnedItemTransportFrameReport, NetServer,
 };
 use mindustry_core::mindustry::ctype::ContentId;
 use mindustry_core::mindustry::entities::{
@@ -27,6 +28,7 @@ pub struct ServerLauncher {
     pub runtime: GameRuntime,
     pub content_loader: ContentLoader,
     pub last_runtime_effect_report: Option<EffectBlockFrameBatchReport>,
+    pub last_runtime_item_transport_report: Option<GameRuntimeOwnedItemTransportFrameReport>,
     pub net_server: NetServer,
     pub network_error: Option<String>,
 }
@@ -47,6 +49,7 @@ impl ServerLauncher {
             runtime,
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
             args,
@@ -82,7 +85,13 @@ impl ServerLauncher {
     pub fn update(&mut self) {
         self.net_server.update();
         let _ = self.flush_pending_world_data();
-        self.last_runtime_effect_report = self.update_runtime_effect_blocks(1.0 / 60.0);
+        if let Some(report) = self.update_runtime_owned_blocks(1.0 / 60.0) {
+            self.last_runtime_item_transport_report = Some(report.item_transport);
+            self.last_runtime_effect_report = Some(report.effect);
+        } else {
+            self.last_runtime_item_transport_report = None;
+            self.last_runtime_effect_report = None;
+        }
     }
 
     pub fn flush_pending_world_data(&mut self) -> io::Result<usize> {
@@ -148,6 +157,31 @@ impl ServerLauncher {
         let mut spark_random = |_: &UnitComp| 1.0;
 
         self.runtime.advance_owned_effect_blocks(
+            &self.content_loader,
+            delta_seconds,
+            GameRuntimeOwnedEffectResources {
+                bullets: &mut bullets,
+                bullet_type: &mut bullet_type,
+                units: &mut units,
+                suppressed: &mut suppressed,
+                force_coolant: &mut force_coolant,
+                spark_random: &mut spark_random,
+            },
+        )
+    }
+
+    pub fn update_runtime_owned_blocks(
+        &mut self,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeOwnedFrameReport> {
+        let mut bullets: Vec<BulletComp> = Vec::new();
+        let mut units: Vec<UnitComp> = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+
+        self.runtime.advance_owned_runtime_blocks(
             &self.content_loader,
             delta_seconds,
             GameRuntimeOwnedEffectResources {
@@ -417,6 +451,7 @@ mod tests {
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -477,6 +512,7 @@ mod tests {
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -543,6 +579,7 @@ mod tests {
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
         };
@@ -665,6 +702,50 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .get(silicon),
+            0
+        );
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_item_transport_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let item_void_def = launcher.content_loader.block_by_name("item-void").unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let router_tile = point2_pack(4, 4);
+        let void_tile = point2_pack(5, 4);
+        let mut router = BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+        router.items.as_mut().unwrap().add(copper, 1);
+
+        launcher.runtime.state.world.resize(10, 10);
+        launcher.runtime.add_building(router);
+        launcher.runtime.add_building(BuildingComp::new(
+            void_tile,
+            item_void_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_item_transport_report
+            .expect("server update should cache the latest item transport batch");
+        assert_eq!(report.router_forwarded_items, 1);
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
             0
         );
         assert_eq!(launcher.runtime.state.update_id, 1);

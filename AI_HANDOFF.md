@@ -647,3 +647,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 已验证：`cargo test -p mindustry-core places_core --lib` 通过 2/2；`core-zone` footprint 上直接放置 `core-shard` 并注册队伍 core。
 - 已验证：`cargo test -p mindustry-core core_handle_item --lib` 通过 2/2；`cargo test -p mindustry-core core_incinerates --lib` 通过 2/2；`cargo test -p mindustry-core campaign_core_delta --lib` 通过 1/1；`cargo test -p mindustry-core canonical_item_owner --lib` 通过 1/1；`cargo test -p mindustry-core linked_storage --lib` 通过 5/5；`cargo test -p mindustry-core directional_unloader --lib` 通过 5/5；`cargo test -p mindustry-core item_unloader --lib` 通过 3/3；`cargo test -p mindustry-core game_runtime_payload_unloader --lib` 通过 13/13；`cargo check -p mindustry-core` 通过（仅既有 unused warning）；`rustfmt --check core/src/mindustry/core/game_runtime.rs` 与 `git diff --check` 通过。
 - 仍未完成：Java 共享 `ItemModule` 引用的真正内存级等价、真实 `StorageBlock.incinerateEffect(...)` 视觉效果、更多 owned runtime tick 纳入 server update 主循环、非 core-zone construction flow 与升级 FX/Event、真实 player spawn、完整 UI/renderer 行为。
+
+---
+
+## 14. 最新闭环记录：服务端 owned runtime 主循环聚合
+
+- 参考目标：把已迁移的 owned runtime block tick 接入真实 `server::ServerLauncher::update(...)`，避免它们只停留在单元测试或独立 helper 中；同时不能用多个 public `advance_owned_*` 串行调用造成 `GameState::advance_game_update_frame(...)` 被重复推进。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `core/src/mindustry/core/mod.rs`
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 已接入：`GameRuntimeOwnedItemTransportFrameReport` / `GameRuntimeOwnedFrameReport`，统一汇总 item transport 与 effect runtime 的 frame 结果。
+- 已接入：`advance_owned_item_transport_blocks(...)` 和私有 `advance_owned_item_transport_blocks_ticks(...)`。public 入口仍可单独推进 item transport；私有 ticks 入口供更高层 aggregate 在同一 frame 内复用。
+- 已接入：`advance_owned_runtime_blocks(...)`，单次调用只推进一次 `state.advance_game_update_frame(delta_seconds)`，随后刷新 update permission / linked storage / building timing，再运行 item transport ticks 与 effect building batch。
+- 已接入：`ServerLauncher::update(...)` 现在调用 `update_runtime_owned_blocks(1.0 / 60.0)`，并缓存：
+  - `last_runtime_item_transport_report`
+  - `last_runtime_effect_report`
+- 已新增测试：`server_update_drives_owned_item_transport_from_launcher_runtime`。该测试构造服务端 runtime 内的 `router -> item-void`，调用 `launcher.update()` 后断言 router 的 copper 被搬走、report 中 `router_forwarded_items == 1`，且 `runtime.state.update_id == 1`，用于锁定 server update 接入和单 frame 推进。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_effect_building_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_unloader --lib`
+  - `cargo test -p mindustry-core game_runtime_item_router --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 当前重要限制：payload source/constructor/conveyor/loader/void 等 payload runtime 还没有纳入 `advance_owned_runtime_blocks(...)` / `ServerLauncher::update(...)` 的统一 single-frame 聚合；后续继续接入时必须复用私有 ticks/内部 frame 输入，禁止简单串多个 public advance 入口导致 update_id/timing 翻倍。
+- 子代理提示：本轮尝试拉起 `explorer` 做下一闭环只读扫描时遇到 agent thread limit；如果后续线程可用，优先派 `explorer` 扫描 `game_runtime.rs` 里剩余 `advance_owned_*` public 入口与 `server/src/lib.rs` 的主循环缺口。
