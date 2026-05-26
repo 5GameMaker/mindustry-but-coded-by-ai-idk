@@ -1,5 +1,12 @@
 # AI 交接文档：Mindustry Java → Rust 迁移
 
+```text
+CONTEXT_BOOTSTRAP_RUST_WORKDIR=D:/MDT/rust-mindustry
+CONTEXT_BOOTSTRAP_JAVA_REFERENCE=D:/MDT/mindustry-upstream-v157.4
+CONTEXT_BOOTSTRAP_FORBIDDEN_OLD_RUST_DIR=D:/MDT/mindustry-rust
+CONTEXT_BOOTSTRAP_GIT_BRANCH=main
+```
+
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
 ## 0. 固定路径速记（上下文压缩后优先看）
