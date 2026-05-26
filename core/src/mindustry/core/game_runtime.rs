@@ -1588,6 +1588,7 @@ pub struct GameRuntimeOwnedItemTransportFrameReport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeOwnedPayloadFrameReport {
+    pub constructor: GameRuntimePayloadConstructorFrameReport,
     pub source: GameRuntimePayloadSourceFrameReport,
     pub conveyor: GameRuntimePayloadConveyorFrameReport,
     pub void: GameRuntimePayloadVoidFrameReport,
@@ -4759,7 +4760,7 @@ impl GameRuntime {
         &mut self,
         content: &ContentLoader,
         delta_seconds: f32,
-        mut recipe_build_time: impl FnMut(&BlockDef) -> Option<f32>,
+        recipe_build_time: impl FnMut(&BlockDef) -> Option<f32>,
     ) -> Option<GameRuntimePayloadConstructorFrameReport> {
         self.consume_world_load_events_and_reset_sidecars();
 
@@ -4772,17 +4773,29 @@ impl GameRuntime {
         self.refresh_owned_storage_core_links(content);
 
         let frame_delta = advanced.delta_ticks as f32;
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame_delta, can_overdrive);
+        }
+
+        Some(self.advance_owned_payload_constructors_ticks(content, frame_delta, recipe_build_time))
+    }
+
+    fn advance_owned_payload_constructors_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+        mut recipe_build_time: impl FnMut(&BlockDef) -> Option<f32>,
+    ) -> GameRuntimePayloadConstructorFrameReport {
         let mut report = GameRuntimePayloadConstructorFrameReport::default();
         let mut pending_payload_moves = Vec::new();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, team, enabled, efficiency, rotation, rotdeg, time_scale) = {
-                let building = &mut self.buildings[index];
-                let can_overdrive = content
-                    .block(building.block.id)
-                    .map(BlockDef::can_overdrive)
-                    .unwrap_or(false);
-                building.advance_update_timing(frame_delta, can_overdrive);
+                let building = &self.buildings[index];
                 report.visited_buildings += 1;
                 (
                     building.tile_pos,
@@ -4910,7 +4923,7 @@ impl GameRuntime {
             }
         }
 
-        Some(report)
+        report
     }
 
     pub fn advance_owned_payload_sources(
@@ -12596,6 +12609,11 @@ impl GameRuntime {
 
         let item_transport = self.advance_owned_item_transport_blocks_ticks(content, frame.delta);
         let payload = GameRuntimeOwnedPayloadFrameReport {
+            constructor: self.advance_owned_payload_constructors_ticks(
+                content,
+                frame.delta,
+                |block| Some(block.effective_build_time(content.items())),
+            ),
             source: self.advance_owned_payload_sources_ticks(content, frame.delta),
             conveyor: self.advance_owned_payload_conveyors_ticks(
                 content,

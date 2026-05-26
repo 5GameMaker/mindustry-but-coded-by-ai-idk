@@ -246,7 +246,8 @@ mod tests {
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
-        PayloadBlockBuildState, PayloadConveyorState, PayloadRef, PayloadSourceState,
+        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState, PayloadRef,
+        PayloadSourceState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
@@ -930,6 +931,65 @@ mod tests {
         else {
             panic!("payload void sidecar should remain present");
         };
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_id
+        ));
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_constructor_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let constructor_def = launcher
+            .content_loader
+            .block_by_name("constructor")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let router_id = router_def.base().id;
+        let constructor_tile = point2_pack(4, 4);
+        let mut constructor_building =
+            BuildingComp::new(constructor_tile, constructor_def.base().clone(), TeamId(6));
+        for requirement in router_def.requirements() {
+            constructor_building
+                .items
+                .as_mut()
+                .unwrap()
+                .set(requirement.item, requirement.amount);
+        }
+
+        launcher.runtime.state.world.resize(10, 10);
+        launcher.runtime.add_building(constructor_building);
+        launcher.runtime.payload_runtime_states.insert(
+            constructor_tile,
+            GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState {
+                    progress: 9.5,
+                    ..BlockProducerState::default()
+                },
+                recipe: Some(router_id),
+            },
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_payload_report
+            .expect("server update should cache the latest payload batch");
+        assert_eq!(report.constructor.produced_payloads, 1);
+        assert_eq!(report.constructor.moved_out_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Constructor {
+            common, producer, ..
+        }) = launcher
+            .runtime
+            .payload_runtime_states
+            .get(&constructor_tile)
+        else {
+            panic!("payload constructor sidecar should remain present");
+        };
+        assert!(producer.has_payload);
         assert!(matches!(
             common.payload.as_ref(),
             Some(PayloadRef::Block { block, .. }) if *block == router_id

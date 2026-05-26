@@ -1521,3 +1521,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadConstructor/Loader/Deconstructor/PayloadMassDriver` 还没进入服务端 aggregate；source→conveyor→void 已具备组成服务端链路的必要节点，但还需要后续补一个跨多帧 server smoke test 来验证生成、移动、接收与销毁的完整顺序。
+
+### 12.4 服务端 PayloadConstructor 主循环接入
+
+- 2026-05-26：`GameRuntimeOwnedPayloadFrameReport` 追加 `constructor: GameRuntimePayloadConstructorFrameReport`，`advance_owned_runtime_blocks(...)` 的 payload 顺序变为 constructor → source → conveyor/router → void。
+- `advance_owned_payload_constructors_with_recipe_build_time(...)` 已拆出内部 `advance_owned_payload_constructors_ticks(...)`；public 入口仍负责单独推进 frame/timing，服务端聚合路径使用 content registry 的 `BlockDef::effective_build_time(...)` 回调复用 ticks，避免重复推进全局 frame。
+- 新增测试 `server_update_drives_owned_payload_constructor_from_launcher_runtime`：服务端 runtime 中构造带 router 材料与 recipe 的 `constructor`，调用 `launcher.update()` 后验证生产 `BuildPayload(router)`、`producer.has_payload=true`，且 `runtime.state.update_id == 1`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_advances_owned_payload_constructor_into_build_payload --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_constructor_moves_output_into_front_payload_void --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_conveyor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`PayloadLoader/Unloader`、`PayloadDeconstructor` 与 `PayloadMassDriver` 还没进入 server aggregate；constructor 已进入主循环但完整 constructor→conveyor→void 多帧 smoke 仍待补。
