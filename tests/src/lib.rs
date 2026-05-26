@@ -508,9 +508,11 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
 #[test]
 fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
+    use mindustry_core::mindustry::io::{type_io, TeamId, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
         EntitySnapshotCallPacket, HiddenSnapshotCallPacket, StateSnapshotCallPacket,
     };
+    use mindustry_core::mindustry::r#type::ItemStack;
     use mindustry_server::ServerLauncher;
     use std::thread;
     use std::time::Duration;
@@ -552,9 +554,48 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         rand1: 202,
         core_data: Vec::new(),
     };
+    let dagger_id = server
+        .content_loader
+        .unit_by_name("dagger")
+        .expect("base content should include dagger")
+        .base
+        .mappable
+        .base
+        .id;
+    let unit_sync = type_io::UnitSyncWire {
+        abilities: Vec::new(),
+        ammo: 7.0,
+        controller: type_io::ControllerWire::Ground,
+        elevation: 0.25,
+        flag: 42.5,
+        health: 88.0,
+        is_shooting: true,
+        mine_tile: None,
+        mounts: Vec::new(),
+        plans: None,
+        rotation: 270.0,
+        shield: 9.0,
+        spawned_by_core: true,
+        stack: ItemStack::new("copper", 4),
+        statuses: Vec::new(),
+        team: TeamId(3),
+        type_id: dagger_id,
+        update_building: false,
+        vel: IoVec2 { x: 1.5, y: -2.0 },
+        x: 48.0,
+        y: 56.0,
+    };
+    let mut first_entity_sync_bytes = Vec::new();
+    type_io::write_unit_sync(
+        &mut first_entity_sync_bytes,
+        &server.content_loader,
+        &unit_sync,
+    )
+    .unwrap();
     let mut first_entity_data = Vec::new();
     first_entity_data.extend_from_slice(&1001i32.to_be_bytes());
     first_entity_data.push(2);
+    first_entity_data.extend_from_slice(&first_entity_sync_bytes);
     let first_entity = EntitySnapshotCallPacket {
         amount: 1,
         data: first_entity_data,
@@ -671,6 +712,22 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             .map(|record| record.type_id),
         Some(2)
     );
+    let typed_unit = desktop
+        .runtime
+        .client_unit_snapshot_entities
+        .get(&1001)
+        .expect("real entity snapshot should materialize typed unit runtime");
+    assert_eq!(typed_unit.id(), 1001);
+    assert_eq!(typed_unit.type_info.base.mappable.base.id, dagger_id);
+    assert_eq!(typed_unit.team_id(), TeamId(3));
+    assert_eq!(typed_unit.x(), 48.0);
+    assert_eq!(typed_unit.y(), 56.0);
+    assert_eq!(typed_unit.rotation(), 270.0);
+    assert_eq!(typed_unit.health.health, 88.0);
+    assert_eq!(typed_unit.weapons.ammo, 7.0);
+    assert!(typed_unit.entity.is_added());
+    assert_eq!(typed_unit.sync.hooks.read_sync_calls, 1);
+    assert_eq!(typed_unit.sync.hooks.snap_sync_calls, 1);
     assert_eq!(
         desktop
             .runtime

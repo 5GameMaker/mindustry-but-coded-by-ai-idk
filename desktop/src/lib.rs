@@ -182,11 +182,15 @@ impl DesktopLauncher {
                 report.merge(self.runtime.note_client_entity_snapshot_parse_error());
             }
             for record in &mirror.records {
-                report.merge(self.runtime.apply_client_entity_snapshot_record(
-                    record.entity_id,
-                    record.type_id,
-                    record.sync_bytes.clone(),
-                ));
+                report.merge(
+                    self.runtime
+                        .apply_client_entity_snapshot_record_with_content(
+                            &self.content_loader,
+                            record.entity_id,
+                            record.type_id,
+                            record.sync_bytes.clone(),
+                        ),
+                );
             }
         }
         self.last_applied_entity_snapshot_mirror_count = entity_mirrors.len();

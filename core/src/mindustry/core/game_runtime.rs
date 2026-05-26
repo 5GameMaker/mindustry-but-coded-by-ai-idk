@@ -1233,6 +1233,7 @@ pub struct GameRuntimeClientSnapshotApplyReport {
     pub block_remaining_sync_bytes: usize,
     pub entity_records_seen: usize,
     pub entity_records_applied: usize,
+    pub entity_typed_records_applied: usize,
     pub entity_parse_errors: usize,
     pub entity_opaque_bytes: usize,
     pub hidden_ids_seen: usize,
@@ -1256,6 +1257,7 @@ impl GameRuntimeClientSnapshotApplyReport {
         self.block_remaining_sync_bytes += other.block_remaining_sync_bytes;
         self.entity_records_seen += other.entity_records_seen;
         self.entity_records_applied += other.entity_records_applied;
+        self.entity_typed_records_applied += other.entity_typed_records_applied;
         self.entity_parse_errors += other.entity_parse_errors;
         self.entity_opaque_bytes += other.entity_opaque_bytes;
         self.hidden_ids_seen += other.hidden_ids_seen;
@@ -2000,6 +2002,7 @@ pub struct GameRuntime {
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
+    pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
 }
 
@@ -2049,6 +2052,7 @@ impl GameRuntime {
             construct_runtime_states: BTreeMap::new(),
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
+            client_unit_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
         }
     }
@@ -2323,6 +2327,68 @@ impl GameRuntime {
         }
     }
 
+    pub fn apply_client_entity_snapshot_record_with_content(
+        &mut self,
+        content: &ContentLoader,
+        entity_id: i32,
+        type_id: u8,
+        sync_bytes: Vec<u8>,
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        let mut report =
+            self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes.clone());
+        if self.try_apply_client_unit_entity_snapshot(content, entity_id, &sync_bytes) {
+            report.entity_typed_records_applied = 1;
+        }
+        report
+    }
+
+    fn try_apply_client_unit_entity_snapshot(
+        &mut self,
+        content: &ContentLoader,
+        entity_id: i32,
+        sync_bytes: &[u8],
+    ) -> bool {
+        if sync_bytes.is_empty() {
+            return false;
+        }
+
+        let mut read = sync_bytes;
+        let Ok(sync) = type_io::read_unit_sync(&mut read, content) else {
+            return false;
+        };
+        if !read.is_empty() {
+            return false;
+        }
+
+        let Some(unit_type) = content.unit(sync.type_id).cloned() else {
+            return false;
+        };
+        let recreate = self
+            .client_unit_snapshot_entities
+            .get(&entity_id)
+            .map(|unit| unit.type_info.base.mappable.base.id != sync.type_id)
+            .unwrap_or(true);
+        if recreate {
+            self.client_unit_snapshot_entities.insert(
+                entity_id,
+                UnitComp::new(entity_id, unit_type.clone(), sync.team),
+            );
+        }
+
+        let Some(unit) = self.client_unit_snapshot_entities.get_mut(&entity_id) else {
+            return false;
+        };
+        unit.sync.read_sync();
+        unit.apply_sync_wire(&sync);
+        unit.entity.id = entity_id;
+        if recreate {
+            unit.sync.snap_sync();
+            unit.add();
+        }
+        unit.after_sync();
+        true
+    }
+
     pub fn apply_client_hidden_snapshot_ids(
         &mut self,
         ids: &[i32],
@@ -2333,8 +2399,16 @@ impl GameRuntime {
         };
         for id in ids {
             self.client_hidden_entity_ids.insert(*id);
+            let mut existing = false;
             if let Some(record) = self.client_entity_snapshot_records.get_mut(id) {
                 record.hidden = true;
+                existing = true;
+            }
+            if let Some(unit) = self.client_unit_snapshot_entities.get_mut(id) {
+                unit.sync.handle_sync_hidden();
+                existing = true;
+            }
+            if existing {
                 report.hidden_existing_entities += 1;
             } else {
                 report.hidden_missing_entities += 1;
@@ -5128,6 +5202,7 @@ impl GameRuntime {
         self.construct_runtime_states.clear();
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
+        self.client_unit_snapshot_entities.clear();
         self.client_hidden_entity_ids.clear();
     }
 
@@ -13121,7 +13196,7 @@ mod tests {
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
             Vec2 as IoVec2,
         },
-        r#type::{PayloadKey, PayloadSeq, Sector},
+        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector},
         world::{
             blocks::campaign::{
                 write_accelerator_state, write_landing_pad_state, write_launch_pad_state,
@@ -14281,6 +14356,101 @@ mod tests {
         );
         assert!(runtime.client_hidden_entity_ids.contains(&1001));
         assert!(runtime.client_hidden_entity_ids.contains(&2002));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_entity_snapshot_to_typed_runtime_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let dagger = content
+            .unit_by_name("dagger")
+            .expect("base content should include dagger");
+        let sync = type_io::UnitSyncWire {
+            abilities: Vec::new(),
+            ammo: 7.0,
+            controller: type_io::ControllerWire::Ground,
+            elevation: 0.25,
+            flag: 42.5,
+            health: 88.0,
+            is_shooting: true,
+            mine_tile: None,
+            mounts: Vec::new(),
+            plans: None,
+            rotation: 270.0,
+            shield: 9.0,
+            spawned_by_core: true,
+            stack: ItemStack::new("copper", 4),
+            statuses: Vec::new(),
+            team: TeamId(3),
+            type_id: dagger.id(),
+            update_building: false,
+            vel: IoVec2 { x: 1.5, y: -2.0 },
+            x: 48.0,
+            y: 56.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_unit_sync(&mut sync_bytes, &content, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_record_with_content(
+            &content,
+            4242,
+            2,
+            sync_bytes.clone(),
+        );
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        assert_eq!(report.entity_opaque_bytes, sync_bytes.len());
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&4242)
+            .expect("typed unit snapshot should also preserve raw sidecar");
+        assert_eq!(raw.type_id, 2);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+        assert!(!raw.hidden);
+
+        let unit = runtime
+            .client_unit_snapshot_entities
+            .get(&4242)
+            .expect("unit sync wire should materialize typed client unit");
+        assert_eq!(unit.id(), 4242);
+        assert!(unit.entity.is_added());
+        assert_eq!(unit.type_info.id(), dagger.id());
+        assert_eq!(unit.team_id(), TeamId(3));
+        assert_eq!(unit.x(), 48.0);
+        assert_eq!(unit.y(), 56.0);
+        assert_eq!(unit.rotation(), 270.0);
+        assert_eq!(unit.elevation, 0.25);
+        assert_eq!(unit.flag, 42.5);
+        assert_eq!(unit.health.health, 88.0);
+        assert_eq!(unit.weapons.ammo, 7.0);
+        assert!(unit.weapons.is_shooting);
+        assert_eq!(unit.items.stack.item.as_deref(), Some("copper"));
+        assert!(unit.spawned_by_core);
+        assert_eq!(unit.sync.hooks.read_sync_calls, 1);
+        assert_eq!(unit.sync.hooks.snap_sync_calls, 1);
+        assert_eq!(unit.sync.hooks.after_sync_calls, 1);
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[4242]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+        assert!(
+            runtime
+                .client_entity_snapshot_records
+                .get(&4242)
+                .unwrap()
+                .hidden
+        );
+        assert_eq!(
+            runtime
+                .client_unit_snapshot_entities
+                .get(&4242)
+                .unwrap()
+                .sync
+                .hooks
+                .handle_sync_hidden_calls,
+            1
+        );
     }
 
     fn single_building_network_map(

@@ -1765,3 +1765,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 如果继续 turret 路线：补 `Continuous` 或 `Generic` 的真实 server→desktop smoke。
   2. 如果转入更大互通缺口：推进 entity snapshot typed runtime。
+
+---
+
+## 51. 最新闭环记录：EntitySnapshot typed Unit runtime 初步接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 entity snapshot 从 raw sidecar 推进一步，至少能把真实 server→desktop `EntitySnapshotCallPacket` 中的 unit sync bytes materialize 到 typed `UnitComp`。
+- Java 依据：
+  - `core/src/mindustry/core/NetClient.java::readSyncEntity(...)`
+  - `core/src/mindustry/core/NetClient.java::entitySnapshot(...)`
+  - `core/src/mindustry/core/NetClient.java::hiddenSnapshot(...)`
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `desktop/src/lib.rs`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - `GameRuntime` 新增 `client_unit_snapshot_entities`；
+  - 新增 `apply_client_entity_snapshot_record_with_content(...)`：先保留 raw `GameRuntimeClientEntitySnapshotRecord`，再尝试 `type_io::read_unit_sync(...)`；
+  - 成功解析后创建/更新 `UnitComp`，调用 `read_sync`，新建时 `snap_sync + add`，随后 `after_sync`；
+  - hidden snapshot 对 typed unit 调 `handle_sync_hidden`；
+  - `DesktopLauncher::sync_snapshot_mirrors(...)` 现在传入 `ContentLoader`，真实链路可落到 typed unit runtime。
+- 测试：
+  - `game_runtime_applies_client_unit_entity_snapshot_to_typed_runtime_with_content`
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 已扩展为发送 `dagger` 的 `UnitSyncWire` bytes，并断言 desktop typed unit runtime。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entity_snapshot_to_typed_runtime_with_content --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 建立/迁移 Java `EntityMapping` class-id 对照，避免 typed unit 解析完全依赖“能否按 UnitSyncWire 读通”。
+  2. 继续做 `PlayerComp` typed snapshot。
+  3. 支持 entity snapshot 多 record 变长拆包，而不是当前仅 amount=1 能携带 opaque sync bytes。

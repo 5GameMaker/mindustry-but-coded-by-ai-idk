@@ -2053,6 +2053,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：真实联机 smoke 当前只覆盖 `ItemTurret`；如果继续沿 turret 方向推进，可补 `Continuous` 或 `Generic` 的 server→desktop smoke。
 
+### 12.37 EntitySnapshot typed Unit runtime 初步接入
+
+- 2026-05-26：在 raw entity snapshot sidecar 之外，新增 `UnitSyncWire -> UnitComp` 的 typed runtime 接入。
+- Java 依据：
+  - `NetClient.readSyncEntity(...)`：按 `id + typeID` 找/建 `Syncc`，执行 `entity.readSync(read)`，新建实体 `snapSync()` 后 `add()`；
+  - `NetClient.entitySnapshot(...)`：遍历 snapshot records；
+  - `NetClient.hiddenSnapshot(...)`：对已有 sync entity 调 `handleSyncHidden()`。
+- Rust 行为：
+  - `GameRuntime` 新增 `client_unit_snapshot_entities: BTreeMap<i32, UnitComp>`；
+  - 新增 `apply_client_entity_snapshot_record_with_content(...)`，保留 raw sidecar，同时尝试用 `type_io::read_unit_sync(...)` 解析 `sync_bytes`；
+  - 成功解析且 `UnitSyncWire.type_id` 能映射到 content unit 时，创建/更新 `UnitComp`，调用 `SyncComp::read_sync()`，新建时 `snap_sync()+add()`，之后 `after_sync()`；
+  - `apply_client_hidden_snapshot_ids(...)` 对 typed unit 调 `handle_sync_hidden()`；
+  - `DesktopLauncher::sync_snapshot_mirrors(...)` 改为传入 `ContentLoader`，使真实 net client mirror 能落到 typed unit runtime。
+- 测试：
+  - `game_runtime_applies_client_unit_entity_snapshot_to_typed_runtime_with_content`
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 server→desktop entity snapshot 现在携带 `dagger` 的 Java-like `UnitSyncWire` bytes，并断言 desktop runtime materialize typed unit。
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entity_snapshot_to_typed_runtime_with_content --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：entity `type_id` 到 Java `EntityMapping` 的精确 class-id 分发仍未完整建模；PlayerComp typed snapshot 与多 record 变长拆包仍需后续推进。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
