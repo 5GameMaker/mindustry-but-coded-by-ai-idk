@@ -2328,6 +2328,10 @@ impl GameRuntime {
         self.item_mass_driver_waiting_shooters
             .remove(&removed.tile_pos);
         self.remove_item_mass_driver_waiting_shooter_from_all(removed.tile_pos);
+        self.split_linked_storage_items_after_core_removed(&removed);
+        self.storage_linked_cores.retain(|storage_tile, core_tile| {
+            *storage_tile != removed.tile_pos && *core_tile != removed.tile_pos
+        });
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -2340,6 +2344,60 @@ impl GameRuntime {
         self.construct_runtime_states.remove(&removed.tile_pos);
         self.refresh_owned_building_proximity();
         Some(removed)
+    }
+
+    fn split_linked_storage_items_after_core_removed(&mut self, removed: &BuildingComp) -> usize {
+        let Some(core_items) = removed.items.as_ref() else {
+            return 0;
+        };
+
+        let linked_storage_tiles: Vec<_> = self
+            .storage_linked_cores
+            .iter()
+            .filter_map(|(storage_tile, core_tile)| {
+                (*core_tile == removed.tile_pos).then_some(*storage_tile)
+            })
+            .collect();
+        if linked_storage_tiles.is_empty() {
+            return 0;
+        }
+
+        let linked_storage_indices: Vec<_> = linked_storage_tiles
+            .iter()
+            .filter_map(|tile_pos| {
+                self.buildings
+                    .iter()
+                    .position(|building| building.tile_pos == *tile_pos && building.items.is_some())
+            })
+            .collect();
+        let total_capacity: i32 = linked_storage_indices
+            .iter()
+            .map(|index| self.buildings[*index].block.item_capacity)
+            .sum();
+        if total_capacity <= 0 {
+            return 0;
+        }
+
+        let core_entries: Vec<_> = core_items.each().collect();
+        let mut split_storages = 0;
+        for storage_index in linked_storage_indices {
+            let storage_capacity = self.buildings[storage_index].block.item_capacity;
+            let Some(storage_items) = self.buildings[storage_index].items.as_mut() else {
+                continue;
+            };
+            storage_items.clear();
+            for (item_id, amount) in &core_entries {
+                let split_amount = ((*amount as f32 * storage_capacity as f32
+                    / total_capacity as f32)
+                    .min(storage_capacity as f32)) as i32;
+                if split_amount > 0 {
+                    storage_items.set(*item_id, split_amount);
+                }
+            }
+            split_storages += 1;
+        }
+
+        split_storages
     }
 
     fn overlapping_building_positions(&self, building: &BuildingComp) -> Vec<i32> {
@@ -18180,6 +18238,50 @@ mod tests {
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
         assert_eq!(runtime.buildings[3].items.as_ref().unwrap().get(copper), 1);
+    }
+
+    #[test]
+    fn game_runtime_core_removal_splits_linked_storage_items() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), TeamId(6));
+        core_building.items.as_mut().unwrap().add(copper, 120);
+        core_building.items.as_mut().unwrap().add(lead, 20);
+        let linked_storage_building =
+            BuildingComp::new(linked_storage_tile, container_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+        assert_eq!(runtime.refresh_owned_storage_core_links(&content), 1);
+        assert_eq!(
+            runtime.storage_linked_cores.get(&linked_storage_tile),
+            Some(&core_tile)
+        );
+
+        let removed = runtime.remove_building_by_tile_pos(core_tile).unwrap();
+
+        assert_eq!(removed.items.as_ref().unwrap().get(copper), 120);
+        assert!(runtime.storage_linked_cores.is_empty());
+        let storage = runtime
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == linked_storage_tile)
+            .unwrap();
+        assert_eq!(storage.items.as_ref().unwrap().get(copper), 120);
+        assert_eq!(storage.items.as_ref().unwrap().get(lead), 20);
     }
 
     #[test]

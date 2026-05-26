@@ -633,5 +633,6 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 已接入：runtime-only `storage_linked_cores`，通过当前 building proximity 重建 Java `StorageBuild.linkedCore` 的最小关系；只使用 `D:/MDT/mindustry-upstream-v157.4` 作为参考，禁止误用废案目录。
 - 已接入：普通 `Unloader` 从 linked storage 卸货时读取/移除 linked core 的 item module，保持 `unloader.allowCoreUnload=true` 的 Java 默认语义；`DirectionalUnloader` 遇到 core 或 linked storage 时按 `allowCoreUnload=false` 默认拒绝。
 - 已接入：`GameRuntimeItemTakenEvent`，DirectionalUnloader 成功搬运后记录 Java `back.itemTaken(item)` hook；linked storage 的事件目标转发到 core tile。
+- 已接入：core 移除时的 linked storage 拆分；`remove_building_at_index(...)` 会按 Java `CoreBuild.onRemoved()` 的容量比例公式把 core items 拆回仍存在的 linked storage，并清掉失效 link。
 - 已验证：`cargo test -p mindustry-core directional_unloader --lib` 通过 5/5；`cargo test -p mindustry-core item_unloader --lib` 通过 3/3；`cargo test -p mindustry-core game_runtime_payload_unloader --lib` 通过 13/13；`cargo check -p mindustry-core` 通过（仅既有 unused warning）；`rustfmt --check core/src/mindustry/core/game_runtime.rs` 与 `git diff --check` 通过。
-- 仍未完成：Java 共享 `ItemModule` 引用的完整等价、campaign `handleCoreItem(...)` 真实副作用、core 移除后按容量比例把 items 拆回 storage、多核心 `storageCapacity` 同步、完整 UI/renderer 行为。
+- 仍未完成：Java 共享 `ItemModule` 引用的完整等价、campaign `handleCoreItem(...)` 真实副作用、多核心 `storageCapacity` 同步、core placement/upgrade 全流程、完整 UI/renderer 行为。
