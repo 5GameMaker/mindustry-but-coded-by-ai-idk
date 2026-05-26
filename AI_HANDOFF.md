@@ -826,3 +826,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadLoader/Unloader`、`PayloadMassDriver` 尚未接入 server aggregate。下一步建议优先接入 `PayloadLoader/Unloader`，但要注意它当前内部会调用 item transport ticks；接入 aggregate 时必须避免 item transport 被推进两次。
+
+---
+
+## 20. 最新闭环记录：服务端 PayloadLoader/Unloader 主循环接入
+
+- 目标：把 `PayloadLoader/PayloadUnloader` 的 move-in/move-out、payload 内 items/liquids/power 装卸以及 unloader dump 路径接入服务端主循环，同时避免它内部的 item transport helper 与全局 item transport aggregate 重复推进同一帧。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 已接入：`GameRuntimeOwnedPayloadFrameReport` 新增 `loader: GameRuntimePayloadLoaderFrameReport`；`advance_owned_runtime_blocks(...)` 的 payload 顺序目前是 constructor → source → conveyor/router → loader/unloader → deconstructor → void。
+- 已接入：`advance_owned_payload_loaders(...)` 拆出 `advance_owned_payload_loaders_ticks(content, frame_delta, run_item_transport)`。public wrapper 传 `true` 保持旧语义；server aggregate 传 `false`，因为 aggregate 开头已经统一执行过 `advance_owned_item_transport_blocks_ticks(...)`。
+- 新增测试：`server_update_drives_owned_payload_loader_from_launcher_runtime`。该测试在服务端 runtime 中放置 `payload-loader`，预装 `BuildPayload(container)` 与 5 个 copper，调用 `launcher.update()` 后断言：
+  - `last_runtime_payload_report.unwrap().loader.loader_candidates == 1`
+  - `loader.updated_loaders == 1`
+  - `loader.moved_in_payloads == 1`
+  - `loader.loaded_items == 5`
+  - loader building 中 copper 清零
+  - `runtime.state.update_id == 1`
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_loader_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_loader --lib`
+  - `cargo test -p mindustry-core payload_unloader --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`PayloadMassDriver` 尚未接入 server aggregate。下一步建议按 explorer Beauvoir 的结论拆 `advance_owned_payload_mass_drivers(...)` 的 tick-only helper，把 `GameRuntimePayloadMassDriverFrameReport` 加进 `GameRuntimeOwnedPayloadFrameReport`，并新增 server-level fired/received/update_id smoke test。

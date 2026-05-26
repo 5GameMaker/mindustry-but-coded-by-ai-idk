@@ -247,7 +247,7 @@ mod tests {
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
         BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
-        PayloadDeconstructorState, PayloadRef, PayloadSourceState,
+        PayloadDeconstructorState, PayloadLoaderState, PayloadRef, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
@@ -1057,6 +1057,73 @@ mod tests {
             deconstructor.deconstructing.as_ref(),
             Some(PayloadRef::Block { block, .. }) if *block == router_id
         ));
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_loader_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .unwrap();
+        let container_def = launcher.content_loader.block_by_name("container").unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let loader_tile = point2_pack(4, 4);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.items.as_mut().unwrap().add(copper, 5);
+        loader_building.power.as_mut().unwrap().status = 1.0;
+        let mut build_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), container_def.base().clone(), TeamId(6))
+            .write_base(&mut build_bytes, false)
+            .unwrap();
+
+        launcher.runtime.state.world.resize(10, 10);
+        launcher.runtime.add_building(loader_building);
+        launcher.runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(PayloadRef::Block {
+                        block: container_def.base().id,
+                        version: 0,
+                        build_bytes,
+                    }),
+                    ..PayloadBlockBuildState::default()
+                },
+                loader: PayloadLoaderState {
+                    load_timer: 1.0,
+                    ..PayloadLoaderState::default()
+                },
+            },
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_payload_report
+            .expect("server update should cache the latest payload batch");
+        assert_eq!(report.loader.loader_candidates, 1);
+        assert_eq!(report.loader.updated_loaders, 1);
+        assert_eq!(report.loader.moved_in_payloads, 1);
+        assert_eq!(report.loader.loaded_items, 5);
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            0
+        );
         assert_eq!(launcher.runtime.state.update_id, 1);
     }
 }

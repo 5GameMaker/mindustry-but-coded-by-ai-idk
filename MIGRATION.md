@@ -1558,3 +1558,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadLoader/Unloader` 与 `PayloadMassDriver` 还没进入 server aggregate；deconstructor 的完成回收路径已在 core 测试覆盖，但还缺 server-level 长 delta/progress 输出 items 测试。
+
+### 12.6 服务端 PayloadLoader/Unloader 主循环接入
+
+- 2026-05-26：`GameRuntimeOwnedPayloadFrameReport` 追加 `loader: GameRuntimePayloadLoaderFrameReport`，`advance_owned_runtime_blocks(...)` 的 payload 顺序目前为 constructor → source → conveyor/router → loader/unloader → deconstructor → void。
+- `advance_owned_payload_loaders(...)` 已拆出内部 `advance_owned_payload_loaders_ticks(content, frame_delta, run_item_transport)`；public 入口仍独立推进 frame/timing 且保持 `run_item_transport=true` 的旧语义，server aggregate 使用 `run_item_transport=false`，避免在同一帧里把全局 item transport ticks 推进两次。
+- 新增测试 `server_update_drives_owned_payload_loader_from_launcher_runtime`：构造带 `BuildPayload(container)` 的 `payload-loader` 与 5 个铜，调用 `launcher.update()` 后验证 loader report 被缓存、payload move-in 与 item 装载进入服务端主循环，且 `runtime.state.update_id == 1`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_loader_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_loader --lib`
+  - `cargo test -p mindustry-core payload_unloader --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_item_transport_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`PayloadMassDriver` 尚未接入 server aggregate；loader/unloader 已进入主循环，但真实 power graph、完整 block-specific `acceptItem/handleItem/acceptLiquid` override 与多段 complex transport/liquid graph 仍需继续迁移。

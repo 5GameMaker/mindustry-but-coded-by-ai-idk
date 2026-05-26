@@ -1591,6 +1591,7 @@ pub struct GameRuntimeOwnedPayloadFrameReport {
     pub constructor: GameRuntimePayloadConstructorFrameReport,
     pub source: GameRuntimePayloadSourceFrameReport,
     pub conveyor: GameRuntimePayloadConveyorFrameReport,
+    pub loader: GameRuntimePayloadLoaderFrameReport,
     pub deconstructor: GameRuntimePayloadDeconstructorFrameReport,
     pub void: GameRuntimePayloadVoidFrameReport,
 }
@@ -5704,6 +5705,23 @@ impl GameRuntime {
         self.refresh_owned_building_update_permissions(content);
 
         let frame_delta = advanced.delta_ticks as f32;
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame_delta, can_overdrive);
+        }
+
+        Some(self.advance_owned_payload_loaders_ticks(content, frame_delta, true))
+    }
+
+    fn advance_owned_payload_loaders_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+        run_item_transport: bool,
+    ) -> GameRuntimePayloadLoaderFrameReport {
         let mut report = GameRuntimePayloadLoaderFrameReport::default();
         let mut pending_payload_moves = Vec::new();
         let mut pending_unloader_liquid_dumps = Vec::new();
@@ -5711,12 +5729,7 @@ impl GameRuntime {
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, enabled, efficiency, rotation, rotdeg, time_scale) = {
-                let building = &mut self.buildings[index];
-                let can_overdrive = content
-                    .block(building.block.id)
-                    .map(BlockDef::can_overdrive)
-                    .unwrap_or(false);
-                building.advance_update_timing(frame_delta, can_overdrive);
+                let building = &self.buildings[index];
                 report.visited_buildings += 1;
                 (
                     building.tile_pos,
@@ -5875,20 +5888,23 @@ impl GameRuntime {
             report.dumped_items +=
                 self.dump_accumulated_items_from_unloader(content, tile_pos, offload_speed, delta);
         }
-        let item_transport_report =
-            self.advance_owned_item_transport_blocks_ticks(content, frame_delta);
-        report.router_forwarded_items += item_transport_report.router_forwarded_items;
-        report.item_unloader_moved_items += item_transport_report.item_unloader_moved_items;
-        report.directional_unloader_moved_items +=
-            item_transport_report.directional_unloader_moved_items;
-        report.duct_forwarded_items += item_transport_report.duct_forwarded_items;
-        report.duct_bridge_forwarded_items += item_transport_report.duct_bridge_forwarded_items;
-        report.stack_router_forwarded_items += item_transport_report.stack_router_forwarded_items;
-        report.stack_conveyor_forwarded_items +=
-            item_transport_report.stack_conveyor_forwarded_items;
-        report.mass_driver_forwarded_items += item_transport_report.mass_driver_forwarded_items;
-        report.bridge_forwarded_items += item_transport_report.bridge_forwarded_items;
-        report.junction_forwarded_items += item_transport_report.junction_forwarded_items;
+        if run_item_transport {
+            let item_transport_report =
+                self.advance_owned_item_transport_blocks_ticks(content, frame_delta);
+            report.router_forwarded_items += item_transport_report.router_forwarded_items;
+            report.item_unloader_moved_items += item_transport_report.item_unloader_moved_items;
+            report.directional_unloader_moved_items +=
+                item_transport_report.directional_unloader_moved_items;
+            report.duct_forwarded_items += item_transport_report.duct_forwarded_items;
+            report.duct_bridge_forwarded_items += item_transport_report.duct_bridge_forwarded_items;
+            report.stack_router_forwarded_items +=
+                item_transport_report.stack_router_forwarded_items;
+            report.stack_conveyor_forwarded_items +=
+                item_transport_report.stack_conveyor_forwarded_items;
+            report.mass_driver_forwarded_items += item_transport_report.mass_driver_forwarded_items;
+            report.bridge_forwarded_items += item_transport_report.bridge_forwarded_items;
+            report.junction_forwarded_items += item_transport_report.junction_forwarded_items;
+        }
 
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
             if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
@@ -5896,7 +5912,7 @@ impl GameRuntime {
             }
         }
 
-        Some(report)
+        report
     }
 
     fn dump_accumulated_items_from_unloader(
@@ -12632,6 +12648,7 @@ impl GameRuntime {
                 frame.delta,
                 advanced.tick as f32,
             ),
+            loader: self.advance_owned_payload_loaders_ticks(content, frame.delta, false),
             deconstructor: self.advance_owned_payload_deconstructors_ticks(content, frame.delta),
             void: self.advance_owned_payload_voids_ticks(content, frame.delta),
         };
