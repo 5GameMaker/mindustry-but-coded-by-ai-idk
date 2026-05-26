@@ -706,15 +706,17 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
         port.to_string(),
     ]);
     server.runtime.state.world.resize(8, 8);
-    let router_def = server
+    let router_base = server
         .content_loader
         .block_by_name("router")
-        .expect("base content should include router");
+        .expect("base content should include router")
+        .base()
+        .clone();
     let router_tile = point2_pack(2, 2);
-    let router_id = router_def.base().id;
+    let router_id = router_base.id;
     server.runtime.add_building(BuildingComp::new(
         router_tile,
-        router_def.base().clone(),
+        router_base.clone(),
         TeamId(6),
     ));
     server.init();
@@ -735,13 +737,20 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
             .last_connect_confirm_connection_id
             .expect("server should receive connect confirm before block snapshot")
     };
+    let mut synced_router = BuildingComp::new(router_tile, router_base, TeamId(6));
+    synced_router.health = 31.0;
+    synced_router.set_rotation(3);
+    let mut block_sync_bytes = Vec::new();
+    synced_router
+        .write_base(&mut block_sync_bytes, false)
+        .unwrap();
     let snapshot = BlockSnapshotCallPacket {
         amount: 1,
         data: {
             let mut data = Vec::new();
             data.extend_from_slice(&router_tile.to_be_bytes());
             data.extend_from_slice(&router_id.to_be_bytes());
-            data.extend_from_slice(&[1, 2, 3]);
+            data.extend_from_slice(&block_sync_bytes);
             data
         },
     };
@@ -799,7 +808,7 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
         assert_eq!(mirror.records.len(), 1);
         assert_eq!(mirror.records[0].tile_pos, router_tile);
         assert_eq!(mirror.records[0].block_id, router_id);
-        assert_eq!(mirror.records[0].sync_bytes, vec![1, 2, 3]);
+        assert_eq!(mirror.records[0].sync_bytes, block_sync_bytes);
         assert!(mirror.parse_error.is_none());
         assert!(state.last_server_snapshot_at.is_some());
     }
@@ -809,7 +818,15 @@ fn real_server_desktop_block_snapshot_updates_net_client_after_world_stream() {
         .get(&router_tile)
         .expect("real block snapshot should apply to client runtime sidecar");
     assert_eq!(runtime_record.block_id, router_id);
-    assert_eq!(runtime_record.sync_bytes, vec![1, 2, 3]);
+    assert_eq!(runtime_record.sync_bytes, block_sync_bytes);
+    let runtime_building = desktop
+        .runtime
+        .buildings()
+        .iter()
+        .find(|building| building.tile_pos == router_tile)
+        .expect("router building should remain materialized");
+    assert_eq!(runtime_building.health, 31.0);
+    assert_eq!(runtime_building.rotation, 3);
     assert_eq!(
         desktop.runtime.network_context,
         GameRuntimeNetworkContext::client()

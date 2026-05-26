@@ -1149,6 +1149,14 @@ mod tests {
         launcher.update();
         assert!(launcher.last_client_snapshot_apply_report.is_none());
 
+        let mut synced_router = BuildingComp::new(tile_pos, router_base.clone(), TeamId(6));
+        synced_router.health = 27.0;
+        synced_router.set_rotation(3);
+        let mut block_sync_bytes = Vec::new();
+        synced_router
+            .write_base(&mut block_sync_bytes, false)
+            .unwrap();
+
         {
             let state = launcher.net_client.state();
             let mut state = state.lock().unwrap();
@@ -1158,7 +1166,7 @@ mod tests {
                 records: vec![ClientBlockSnapshotRecordMirror {
                     tile_pos,
                     block_id: router_base.id,
-                    sync_bytes: vec![1, 2, 3],
+                    sync_bytes: block_sync_bytes.clone(),
                 }],
                 parse_error: None,
             });
@@ -1184,6 +1192,7 @@ mod tests {
             .last_client_snapshot_apply_report
             .expect("snapshot mirrors should apply to runtime sidecars");
         assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
         assert_eq!(report.entity_records_applied, 1);
         assert_eq!(report.hidden_existing_entities, 1);
 
@@ -1193,7 +1202,15 @@ mod tests {
             .get(&tile_pos)
             .expect("block snapshot should land on runtime sidecar");
         assert_eq!(block_record.block_id, router_base.id);
-        assert_eq!(block_record.sync_bytes, vec![1, 2, 3]);
+        assert_eq!(block_record.sync_bytes, block_sync_bytes);
+        let building = launcher
+            .runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 27.0);
+        assert_eq!(building.rotation, 3);
 
         let entity_record = launcher
             .runtime

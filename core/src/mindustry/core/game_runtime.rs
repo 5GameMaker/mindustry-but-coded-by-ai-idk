@@ -1188,11 +1188,14 @@ pub struct GameRuntimeClientEntitySnapshotRecord {
 pub struct GameRuntimeClientSnapshotApplyReport {
     pub block_records_seen: usize,
     pub block_records_applied: usize,
+    pub block_base_records_applied: usize,
+    pub block_base_read_errors: usize,
     pub block_parse_errors: usize,
     pub block_missing_tiles: usize,
     pub block_missing_buildings: usize,
     pub block_id_mismatches: usize,
     pub block_opaque_bytes: usize,
+    pub block_remaining_sync_bytes: usize,
     pub entity_records_seen: usize,
     pub entity_records_applied: usize,
     pub entity_parse_errors: usize,
@@ -1206,11 +1209,14 @@ impl GameRuntimeClientSnapshotApplyReport {
     pub fn merge(&mut self, other: Self) {
         self.block_records_seen += other.block_records_seen;
         self.block_records_applied += other.block_records_applied;
+        self.block_base_records_applied += other.block_base_records_applied;
+        self.block_base_read_errors += other.block_base_read_errors;
         self.block_parse_errors += other.block_parse_errors;
         self.block_missing_tiles += other.block_missing_tiles;
         self.block_missing_buildings += other.block_missing_buildings;
         self.block_id_mismatches += other.block_id_mismatches;
         self.block_opaque_bytes += other.block_opaque_bytes;
+        self.block_remaining_sync_bytes += other.block_remaining_sync_bytes;
         self.entity_records_seen += other.entity_records_seen;
         self.entity_records_applied += other.entity_records_applied;
         self.entity_parse_errors += other.entity_parse_errors;
@@ -2040,12 +2046,23 @@ impl GameRuntime {
             report.block_id_mismatches = 1;
             return report;
         }
-        if self
-            .building_index_by_tile_pos(build_ref.tile_pos)
-            .is_none()
-        {
+        let Some(building_index) = self.building_index_by_tile_pos(build_ref.tile_pos) else {
             report.block_missing_buildings = 1;
             return report;
+        };
+
+        let mut synced_building = self.buildings[building_index].clone();
+        let mut sync_read = sync_bytes.as_slice();
+        match synced_building.read_base(&mut sync_read) {
+            Ok(()) => {
+                report.block_base_records_applied = 1;
+                report.block_remaining_sync_bytes = sync_read.len();
+                self.buildings[building_index] = synced_building;
+                self.sync_world_footprint_refs(building_index);
+            }
+            Err(_) => {
+                report.block_base_read_errors = 1;
+            }
         }
 
         self.client_block_snapshot_records.insert(
@@ -13008,10 +13025,20 @@ mod tests {
         runtime.state.world.resize(6, 6);
         runtime.add_building(BuildingComp::new(tile_pos, router.clone(), TeamId(6)));
 
-        let report = runtime.apply_client_block_snapshot_record(tile_pos, router.id, vec![1, 2]);
+        let mut synced_building = BuildingComp::new(tile_pos, router.clone(), TeamId(6));
+        synced_building.health = 23.0;
+        synced_building.set_rotation(3);
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+
+        let report =
+            runtime.apply_client_block_snapshot_record(tile_pos, router.id, sync_bytes.clone());
         assert_eq!(report.block_records_seen, 1);
         assert_eq!(report.block_records_applied, 1);
-        assert_eq!(report.block_opaque_bytes, 2);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_base_read_errors, 0);
+        assert_eq!(report.block_opaque_bytes, sync_bytes.len());
+        assert_eq!(report.block_remaining_sync_bytes, 0);
         let record = runtime
             .client_block_snapshot_records
             .get(&tile_pos)
@@ -13019,7 +13046,15 @@ mod tests {
         assert_eq!(record.tile_pos, tile_pos);
         assert_eq!(record.building_tile_pos, tile_pos);
         assert_eq!(record.block_id, router.id);
-        assert_eq!(record.sync_bytes, vec![1, 2]);
+        assert_eq!(record.sync_bytes, sync_bytes);
+        let stored_sync_bytes = record.sync_bytes.clone();
+        let building = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 23.0);
+        assert_eq!(building.rotation, 3);
 
         let mismatch = runtime.apply_client_block_snapshot_record(
             tile_pos,
@@ -13035,7 +13070,7 @@ mod tests {
                 .get(&tile_pos)
                 .unwrap()
                 .sync_bytes,
-            vec![1, 2]
+            stored_sync_bytes
         );
 
         let missing =

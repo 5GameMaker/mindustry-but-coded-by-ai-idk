@@ -1798,3 +1798,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
 - 仍未完成：block/entity 的 `sync_bytes` 仍是 opaque；下一步需要按具体 block `readSync(version)` 与 entity `readSync` 逐类解析，并接入真实 client entity pool / world building typed state。
+
+### 12.21 BlockSnapshot 基础 `Building.readSync` 回放
+
+- 2026-05-26：`GameRuntime::apply_client_block_snapshot_record(...)` 不再只是保存 block snapshot raw bytes；在 `tile.build` 存在且 block id 匹配后，会先用当前 `BuildingComp::read_base(...)` 回放 Java `Building.writeSync -> writeAll -> writeBase` 的基础段，更新客户端 runtime building 的 health、rotation、team、enabled/module/efficiency 等基础状态。
+- `GameRuntimeClientSnapshotApplyReport` 新增：
+  - `block_base_records_applied`
+  - `block_base_read_errors`
+  - `block_remaining_sync_bytes`
+- 仍会保留完整 `sync_bytes` 到 `client_block_snapshot_records`，并把基础段后的剩余字节计入 `block_remaining_sync_bytes`，后续逐类接入 block-specific `read(read, revision)` / override `readSync(...)`。
+- 已扩展真实联机测试：`real_server_desktop_block_snapshot_updates_net_client_after_world_stream` 现在让 server world stream 先携带真实 router building，再发送含 `BuildingComp::write_base(...)` 的 matching block snapshot，断言 desktop runtime 中该 building 的 health/rotation 被真实更新。
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：block-specific tail 仍未按具体类型和 revision 消费；turret 等 override `readSync(...)` 还需保持 Java 的“同步时保留 rotation/reload”特殊语义。

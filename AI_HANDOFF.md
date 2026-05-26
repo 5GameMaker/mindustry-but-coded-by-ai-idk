@@ -1284,3 +1284,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 选择一类简单 building（例如 router/conveyor/storage 中已有 typed state 的部分）实现 `sync_bytes -> typed readSync` 回放。
   2. 设计真实 client entity pool，逐步替代 `client_entity_snapshot_records` 的 raw sidecar。
   3. 继续推进客户端输入/构建/单位控制回传，保证 runtime 是整体联机闭环。
+
+---
+
+## 35. 最新闭环记录：BlockSnapshot 基础 `Building.readSync` 回放
+
+- 目标：把上一闭环的 block snapshot runtime sidecar 再推进一步，至少回放 Java `Building.writeSync()` 的基础 `writeBase/readBase` 段，真实更新客户端 runtime building，而不是只保存 opaque bytes。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `desktop/src/lib.rs`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - `GameRuntime::apply_client_block_snapshot_record(...)` 在 tile/building 存在且 block id 匹配后，会 clone 当前 building，使用 `BuildingComp::read_base(...)` 消费 `sync_bytes` 前缀；
+  - 成功后替换 runtime building，并 `sync_world_footprint_refs(index)` 保持 world `BuildingRef` 同步；
+  - 失败时不写入半解析 building，只增加 `block_base_read_errors`；
+  - 原始 `sync_bytes` 仍保存到 `client_block_snapshot_records`，便于后续继续解析 child tail。
+- 报表新增：
+  - `block_base_records_applied`
+  - `block_base_read_errors`
+  - `block_remaining_sync_bytes`
+- 测试更新：
+  - core 单测用 `BuildingComp::write_base(...)` 构造真实 sync bytes，并断言 health/rotation 更新；
+  - desktop 单测断言 snapshot mirror 进入 runtime 后实际更新 building；
+  - 真实联机 block snapshot smoke 现在发送 matching router building 的真实 base sync bytes，并断言 desktop runtime building health/rotation 更新。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_block_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 给无 child tail 的简单 block 锁定 `block_remaining_sync_bytes == 0`。
+  2. 按 block family 接入 child `read(...)` tail，例如 storage/distribution，再到 turret/payload。
+  3. 实现 turret override `readSync(...)` 的 Java 特例：同步时保留 rotation/reload。
