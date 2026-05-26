@@ -795,3 +795,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadLoader/Unloader`、`PayloadDeconstructor`、`PayloadMassDriver` 尚未接入 server aggregate。下一步建议接入 `PayloadLoader/Unloader`，因为它和普通 item/liquid/power 搬运及已接入的 item transport 有直接交叉。
+
+---
+
+## 19. 最新闭环记录：服务端 PayloadDeconstructor 主循环接入
+
+- 目标：把 `PayloadDeconstructor` 的 move-in / start-deconstruction / progress 逻辑接入服务端主循环，避免只能通过 core 单测推进。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 已接入：`GameRuntimeOwnedPayloadFrameReport` 新增 `deconstructor: GameRuntimePayloadDeconstructorFrameReport`；`advance_owned_runtime_blocks(...)` 的 payload 顺序目前是 constructor → source → conveyor/router → deconstructor → void。
+- 已接入：`advance_owned_payload_deconstructors(...)` 拆出 `advance_owned_payload_deconstructors_ticks(...)`。public wrapper 仍负责独立 frame/timing；server aggregate 复用 ticks。
+- 新增测试：`server_update_drives_owned_payload_deconstructor_from_launcher_runtime`。该测试在服务端 runtime 中放置 `small-deconstructor`，预装 `BuildPayload(router)`，调用 `launcher.update()` 后断言：
+  - `last_runtime_payload_report.unwrap().deconstructor.moved_in_payloads == 1`
+  - `deconstructor.started_deconstructions == 1`
+  - common payload 清空，`deconstructing` 中保留 `PayloadRef::Block(router)`
+  - `runtime.state.update_id == 1`
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_deconstructor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_deconstructor_moves_in_payload_and_starts_deconstruction --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_deconstructor_progresses_and_outputs_items --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_conveyor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`PayloadLoader/Unloader`、`PayloadMassDriver` 尚未接入 server aggregate。下一步建议优先接入 `PayloadLoader/Unloader`，但要注意它当前内部会调用 item transport ticks；接入 aggregate 时必须避免 item transport 被推进两次。

@@ -1539,3 +1539,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadLoader/Unloader`、`PayloadDeconstructor` 与 `PayloadMassDriver` 还没进入 server aggregate；constructor 已进入主循环但完整 constructor→conveyor→void 多帧 smoke 仍待补。
+
+### 12.5 服务端 PayloadDeconstructor 主循环接入
+
+- 2026-05-26：`GameRuntimeOwnedPayloadFrameReport` 追加 `deconstructor: GameRuntimePayloadDeconstructorFrameReport`，`advance_owned_runtime_blocks(...)` 的 payload 顺序目前为 constructor → source → conveyor/router → deconstructor → void。
+- `advance_owned_payload_deconstructors(...)` 已拆出内部 `advance_owned_payload_deconstructors_ticks(...)`；public 入口保持独立推进 frame/timing，server aggregate 复用 ticks，使 payload deconstructor 的 move-in/start-deconstruction/progress 逻辑进入服务端主循环。
+- 新增测试 `server_update_drives_owned_payload_deconstructor_from_launcher_runtime`：构造带 `BuildPayload(router)` 的 `small-deconstructor`，通过 `launcher.update()` 验证 payload 从 common slot 转入 `deconstructing`，并保持 `runtime.state.update_id == 1`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_deconstructor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_deconstructor_moves_in_payload_and_starts_deconstruction --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_deconstructor_progresses_and_outputs_items --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_constructor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_conveyor_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_source_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_void_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：`PayloadLoader/Unloader` 与 `PayloadMassDriver` 还没进入 server aggregate；deconstructor 的完成回收路径已在 core 测试覆盖，但还缺 server-level 长 delta/progress 输出 items 测试。

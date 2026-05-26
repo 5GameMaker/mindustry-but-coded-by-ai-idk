@@ -246,8 +246,8 @@ mod tests {
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
-        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState, PayloadRef,
-        PayloadSourceState,
+        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
+        PayloadDeconstructorState, PayloadRef, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
@@ -992,6 +992,69 @@ mod tests {
         assert!(producer.has_payload);
         assert!(matches!(
             common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == router_id
+        ));
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_deconstructor_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let deconstructor_def = launcher
+            .content_loader
+            .block_by_name("small-deconstructor")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let router_id = router_def.base().id;
+        let deconstructor_tile = point2_pack(4, 4);
+        let mut build_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), router_def.base().clone(), TeamId(6))
+            .write_base(&mut build_bytes, false)
+            .unwrap();
+
+        launcher.runtime.state.world.resize(10, 10);
+        launcher.runtime.add_building(BuildingComp::new(
+            deconstructor_tile,
+            deconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.payload_runtime_states.insert(
+            deconstructor_tile,
+            GameRuntimePayloadBlockState::Deconstructor {
+                common: PayloadBlockBuildState {
+                    payload: Some(PayloadRef::Block {
+                        block: router_id,
+                        version: 0,
+                        build_bytes,
+                    }),
+                    ..PayloadBlockBuildState::default()
+                },
+                deconstructor: PayloadDeconstructorState::default(),
+            },
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_payload_report
+            .expect("server update should cache the latest payload batch");
+        assert_eq!(report.deconstructor.moved_in_payloads, 1);
+        assert_eq!(report.deconstructor.started_deconstructions, 1);
+        let Some(GameRuntimePayloadBlockState::Deconstructor {
+            common,
+            deconstructor,
+        }) = launcher
+            .runtime
+            .payload_runtime_states
+            .get(&deconstructor_tile)
+        else {
+            panic!("payload deconstructor sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(deconstructor.has_deconstructing);
+        assert!(matches!(
+            deconstructor.deconstructing.as_ref(),
             Some(PayloadRef::Block { block, .. }) if *block == router_id
         ));
         assert_eq!(launcher.runtime.state.update_id, 1);
