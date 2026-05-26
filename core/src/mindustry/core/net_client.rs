@@ -108,6 +108,15 @@ pub struct ClientUnitPayloadMirror {
     pub payload_drops_seen: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClientUnitItemMirror {
+    pub item: Option<String>,
+    pub amount: i32,
+    pub take_items_packets_seen: u64,
+    pub transfer_item_to_packets_seen: u64,
+    pub transfer_item_to_unit_packets_seen: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ClientMarkerTextMirror {
     pub fetch: bool,
@@ -702,6 +711,7 @@ pub struct NetClientState {
     pub clear_liquids_packets_seen: u64,
     pub building_storage_mirrors: BTreeMap<i32, ClientTileStorageMirror>,
     pub unit_payload_mirrors: BTreeMap<i32, ClientUnitPayloadMirror>,
+    pub unit_item_mirrors: BTreeMap<i32, ClientUnitItemMirror>,
     pub last_take_items: Option<TakeItemsCallPacket>,
     pub last_take_items_at: Option<Instant>,
     pub take_items_packets_seen: u64,
@@ -1003,6 +1013,7 @@ impl fmt::Debug for NetClientState {
             )
             .field("building_storage_mirrors", &self.building_storage_mirrors)
             .field("unit_payload_mirrors", &self.unit_payload_mirrors)
+            .field("unit_item_mirrors", &self.unit_item_mirrors)
             .field("take_items_packets_seen", &self.take_items_packets_seen)
             .field(
                 "transfer_item_effect_packets_seen",
@@ -2096,6 +2107,32 @@ impl NetClient {
         true
     }
 
+    fn add_item_to_unit_item_mirror(mirror: &mut ClientUnitItemMirror, item: &str, amount: i32) {
+        let amount = amount.max(0);
+        if amount == 0 {
+            return;
+        }
+        if mirror.item.as_deref() == Some(item) {
+            mirror.amount = mirror.amount.saturating_add(amount);
+        } else {
+            mirror.item = Some(item.to_string());
+            mirror.amount = amount;
+        }
+    }
+
+    pub fn apply_take_items_to_unit_mirror(
+        units: &mut BTreeMap<i32, ClientUnitItemMirror>,
+        packet: &TakeItemsCallPacket,
+    ) -> bool {
+        let (UnitRef::Unit { id }, Some(item)) = (packet.to, packet.item.as_deref()) else {
+            return false;
+        };
+        let mirror = units.entry(id).or_default();
+        mirror.take_items_packets_seen += 1;
+        Self::add_item_to_unit_item_mirror(mirror, item, packet.amount);
+        true
+    }
+
     pub fn apply_transfer_item_to_packet(
         storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
         packet: &TransferItemToCallPacket,
@@ -2108,6 +2145,36 @@ impl NetClient {
         mirror
             .items
             .insert(item.to_string(), previous + packet.amount.max(0));
+        true
+    }
+
+    pub fn apply_transfer_item_to_source_unit_mirror(
+        units: &mut BTreeMap<i32, ClientUnitItemMirror>,
+        packet: &TransferItemToCallPacket,
+    ) -> bool {
+        let (UnitRef::Unit { id }, Some(item)) = (packet.unit, packet.item.as_deref()) else {
+            return false;
+        };
+        let Some(mirror) = units.get_mut(&id) else {
+            return false;
+        };
+        mirror.transfer_item_to_packets_seen += 1;
+        if mirror.item.as_deref() == Some(item) {
+            mirror.amount = (mirror.amount - packet.amount.max(0)).max(0);
+        }
+        true
+    }
+
+    pub fn apply_transfer_item_to_unit_mirror(
+        units: &mut BTreeMap<i32, ClientUnitItemMirror>,
+        packet: &TransferItemToUnitCallPacket,
+    ) -> bool {
+        let (Some(unit_id), Some(item)) = (packet.to.id, packet.item.as_deref()) else {
+            return false;
+        };
+        let mirror = units.entry(unit_id).or_default();
+        mirror.transfer_item_to_unit_packets_seen += 1;
+        Self::add_item_to_unit_item_mirror(mirror, item, 1);
         true
     }
 
@@ -3173,6 +3240,7 @@ impl NetClient {
                         let now = Instant::now();
                         state.take_items_packets_seen += 1;
                         Self::apply_take_items_packet(&mut state.building_storage_mirrors, packet);
+                        Self::apply_take_items_to_unit_mirror(&mut state.unit_item_mirrors, packet);
                         state.last_take_items = Some(packet.clone());
                         state.last_take_items_at = Some(now);
                         (false, false)
@@ -3191,6 +3259,10 @@ impl NetClient {
                             &mut state.building_storage_mirrors,
                             packet,
                         );
+                        Self::apply_transfer_item_to_source_unit_mirror(
+                            &mut state.unit_item_mirrors,
+                            packet,
+                        );
                         state.last_transfer_item_to = Some(packet.clone());
                         state.last_transfer_item_to_at = Some(now);
                         (false, false)
@@ -3198,6 +3270,10 @@ impl NetClient {
                     PacketKind::TransferItemToUnitCallPacket(packet) => {
                         let now = Instant::now();
                         state.transfer_item_to_unit_packets_seen += 1;
+                        Self::apply_transfer_item_to_unit_mirror(
+                            &mut state.unit_item_mirrors,
+                            packet,
+                        );
                         state.last_transfer_item_to_unit = Some(packet.clone());
                         state.last_transfer_item_to_unit_at = Some(now);
                         (false, false)
@@ -5056,6 +5132,133 @@ mod tests {
     }
 
     #[test]
+    fn apply_unit_item_packets_updates_unit_item_mirror() {
+        let build = BuildingRef::new(point2_pack(3, 3));
+        let mut units = BTreeMap::new();
+
+        assert!(NetClient::apply_take_items_to_unit_mirror(
+            &mut units,
+            &TakeItemsCallPacket {
+                build,
+                item: Some("copper".into()),
+                amount: 5,
+                to: UnitRef::Unit { id: 77 },
+            },
+        ));
+        let mirror = units.get(&77).unwrap();
+        assert_eq!(mirror.item.as_deref(), Some("copper"));
+        assert_eq!(mirror.amount, 5);
+        assert_eq!(mirror.take_items_packets_seen, 1);
+
+        assert!(NetClient::apply_transfer_item_to_source_unit_mirror(
+            &mut units,
+            &TransferItemToCallPacket {
+                unit: UnitRef::Unit { id: 77 },
+                item: Some("copper".into()),
+                amount: 3,
+                x: 1.0,
+                y: 2.0,
+                build,
+            },
+        ));
+        let mirror = units.get(&77).unwrap();
+        assert_eq!(mirror.amount, 2);
+        assert_eq!(mirror.transfer_item_to_packets_seen, 1);
+
+        assert!(NetClient::apply_transfer_item_to_source_unit_mirror(
+            &mut units,
+            &TransferItemToCallPacket {
+                unit: UnitRef::Unit { id: 77 },
+                item: Some("copper".into()),
+                amount: 99,
+                x: 1.0,
+                y: 2.0,
+                build,
+            },
+        ));
+        let mirror = units.get(&77).unwrap();
+        assert_eq!(mirror.amount, 0);
+        assert_eq!(mirror.transfer_item_to_packets_seen, 2);
+
+        assert!(NetClient::apply_take_items_to_unit_mirror(
+            &mut units,
+            &TakeItemsCallPacket {
+                build,
+                item: Some("lead".into()),
+                amount: 4,
+                to: UnitRef::Unit { id: 77 },
+            },
+        ));
+        let mirror = units.get(&77).unwrap();
+        assert_eq!(mirror.item.as_deref(), Some("lead"));
+        assert_eq!(mirror.amount, 4);
+        assert_eq!(mirror.take_items_packets_seen, 2);
+
+        assert!(NetClient::apply_transfer_item_to_unit_mirror(
+            &mut units,
+            &TransferItemToUnitCallPacket {
+                item: Some("scrap".into()),
+                x: 4.0,
+                y: 5.0,
+                to: EntityRef::new(78),
+            },
+        ));
+        assert!(NetClient::apply_transfer_item_to_unit_mirror(
+            &mut units,
+            &TransferItemToUnitCallPacket {
+                item: Some("scrap".into()),
+                x: 4.0,
+                y: 5.0,
+                to: EntityRef::new(78),
+            },
+        ));
+        let mirror = units.get(&78).unwrap();
+        assert_eq!(mirror.item.as_deref(), Some("scrap"));
+        assert_eq!(mirror.amount, 2);
+        assert_eq!(mirror.transfer_item_to_unit_packets_seen, 2);
+
+        assert!(!NetClient::apply_take_items_to_unit_mirror(
+            &mut units,
+            &TakeItemsCallPacket {
+                build,
+                item: Some("copper".into()),
+                amount: 1,
+                to: UnitRef::Null,
+            },
+        ));
+        assert!(!NetClient::apply_transfer_item_to_source_unit_mirror(
+            &mut units,
+            &TransferItemToCallPacket {
+                unit: UnitRef::Unit { id: 79 },
+                item: Some("copper".into()),
+                amount: 1,
+                x: 1.0,
+                y: 2.0,
+                build,
+            },
+        ));
+        assert!(!NetClient::apply_transfer_item_to_unit_mirror(
+            &mut units,
+            &TransferItemToUnitCallPacket {
+                item: None,
+                x: 4.0,
+                y: 5.0,
+                to: EntityRef::new(80),
+            },
+        ));
+        assert!(!NetClient::apply_transfer_item_to_unit_mirror(
+            &mut units,
+            &TransferItemToUnitCallPacket {
+                item: Some("scrap".into()),
+                x: 4.0,
+                y: 5.0,
+                to: EntityRef::null(),
+            },
+        ));
+        assert_eq!(units.len(), 2);
+    }
+
+    #[test]
     fn apply_building_team_and_health_packets_updates_lightweight_mirror() {
         let mut tiles = Tiles::new(4, 4);
         let center = point2_pack(1, 1);
@@ -6347,6 +6550,10 @@ mod tests {
         assert_eq!(state.take_items_packets_seen, 1);
         assert_eq!(state.last_take_items.as_ref(), Some(&take_items));
         assert!(state.last_take_items_at.is_some());
+        let taken_unit_mirror = state.unit_item_mirrors.get(&410).unwrap();
+        assert_eq!(taken_unit_mirror.item.as_deref(), Some("copper"));
+        assert_eq!(taken_unit_mirror.amount, 5);
+        assert_eq!(taken_unit_mirror.take_items_packets_seen, 1);
         assert_eq!(state.transfer_item_effect_packets_seen, 1);
         assert_eq!(
             state.last_transfer_item_effect.as_ref(),
@@ -6365,6 +6572,10 @@ mod tests {
             Some(&transfer_item_to_unit)
         );
         assert!(state.last_transfer_item_to_unit_at.is_some());
+        let transfer_unit_mirror = state.unit_item_mirrors.get(&316).unwrap();
+        assert_eq!(transfer_unit_mirror.item.as_deref(), Some("titanium"));
+        assert_eq!(transfer_unit_mirror.amount, 1);
+        assert_eq!(transfer_unit_mirror.transfer_item_to_unit_packets_seen, 1);
         assert_eq!(state.request_item_packets_seen, 1);
         assert_eq!(state.last_request_item.as_ref(), Some(&request_item));
         assert!(state.last_request_item_at.is_some());

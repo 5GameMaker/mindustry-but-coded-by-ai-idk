@@ -3316,3 +3316,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core update_records_server_forwarded_inventory_payload_and_unit_packets`
   - `cargo check --workspace`
 - 仍未完成：当前 payload mirror 仍只是 client sidecar 计数与观测统计，尚未保存完整 `BuildPayload` bytes、`UnitPayload` runtime state，也未接入真实 `GameRuntime.client_unit_snapshot_entities` 的 typed `PayloadComp`；后续需要把这些 sidecar 与 entity snapshot / unit runtime / renderer UI 统一起来，避免长期停留在独立镜像层。
+
+### 12.94 Client TakeItems/TransferItemToUnit 单位物品 mirror 消费
+
+- 2026-05-27：继续收敛客户端存货可观察状态，把 `TakeItemsCallPacket`、`TransferItemToCallPacket` 的源单位扣减路径以及 `TransferItemToUnitCallPacket` 从纯 last-packet 记录推进到单位 item sidecar mirror mutation。
+- Java 依据：
+  - `InputHandler.takeItems(Building build, Item item, int amount, Unit to)` 从建筑扣物后调用 `to.addItem(item, removed)`；
+  - `InputHandler.transferItemTo(Unit unit, Item item, int amount, float x, float y, Building build)` 在 `unit.item() == item` 时扣减源单位 stack；
+  - `InputHandler.transferItemToUnit(Item item, float x, float y, Itemsc to)` 在 transfer effect 完成后执行 `to.addItem(item)`，上游矿工本地拾矿路径会调用该入口。
+- Rust 新增/变化：
+  - `NetClientState` 新增 `unit_item_mirrors: BTreeMap<i32, ClientUnitItemMirror>`，按单位/entity id 保存当前 sidecar item、amount 和三类包的观测计数；
+  - `NetClient::apply_take_items_to_unit_mirror(...)` 让 `TakeItemsCallPacket.to` 对应单位增加 `amount.max(0)` 的 item；
+  - `NetClient::apply_transfer_item_to_source_unit_mirror(...)` 只在已有且 item 匹配的源单位 mirror 上扣减 `amount.max(0)`，避免无 snapshot 基线时凭空伪造未知剩余量；
+  - `NetClient::apply_transfer_item_to_unit_mirror(...)` 把 `TransferItemToUnitCallPacket.to` 的 entity id 当作临时 Itemsc/unit mirror key，每包按 Java `addItem(item)` 增加 1；
+  - `handle_client_received(...)` 的 TakeItems/TransferItemTo/TransferItemToUnit 分支现在会同时维护建筑库存 mirror 与单位 item mirror。
+- 验证：
+  - `cargo test -p mindustry-core apply_unit_item_packets_updates_unit_item_mirror`
+  - `cargo test -p mindustry-core update_records_server_forwarded_inventory_payload_and_unit_packets`
+  - `cargo check --workspace`
+- 仍未完成：当前单位 item mirror 仍是 NetClient sidecar，尚未与 `GameRuntime.client_unit_snapshot_entities` 的 typed `UnitComp.items.stack` 双向合并；`TransferItemToUnitCallPacket.to` 是泛型 `EntityRef`/`Itemsc`，后续需要用 entity snapshot type 信息区分 Unit/Building，并把 item transfer effect 的视觉/音效回放接到 desktop renderer。
