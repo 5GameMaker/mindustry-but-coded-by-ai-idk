@@ -1,5 +1,7 @@
 # Mindustry Java → Rust 迁移总控文档
 
+**固定 Rust 工作路径（上下文压缩后不要重新找）：`D:\MDT\rust-mindustry`；命令中统一写作 `D:/MDT/rust-mindustry`。**
+
 ```text
 CONTEXT_BOOTSTRAP_RUST_WORKDIR=D:/MDT/rust-mindustry
 CONTEXT_BOOTSTRAP_JAVA_REFERENCE=D:/MDT/mindustry-upstream-v157.4
