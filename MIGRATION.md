@@ -3042,3 +3042,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-tests real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream -- --test-threads=1`
 - 仍未完成：该 smoke 避免了双真实 desktop 同时握手带来的端口/握手不稳定，source 端仍是模拟连接；后续在连接身份配置稳定后，应补双真实 Rust desktop 或 Java↔Rust preview smoke。
+
+### 12.79 Server preview 周期广播
+
+- 2026-05-27：将 12.76/12.77 的“收到客户端 preview snapshot 后立即转发”修正为更接近 Java `NetServer.planPreviewSyncTime` 的 server 周期广播模型。
+- Java 依据：
+  - `planPreviewSyncTime = Timekeeper.ofSeconds(0.5f)`，server update 中约每 500ms 遍历 `Groups.player`；
+  - 每个玩家广播前执行 `++player.lastPreviewPlanGroupServer`，再读取 `player.getPreviewPlans()`；
+  - 空 preview 也调用 `clientPlanSnapshotSend(player, id, null)`，用于让同队其他客户端清理旧预览；
+  - `clientPlanSnapshotSend(...)` 只发给同队、非本人、非 local、连接在线的玩家，过长 plans 按 chunk 拆分。
+- Rust 新增/变化：
+  - `ServerLauncher` 新增 `next_server_preview_broadcast_at` 与 `server_preview_broadcasts_sent`；
+  - `ServerLauncher::update()` 在网络事件应用后按 `PLAN_PREVIEW_SYNC_INTERVAL_MS` 节流调用 `broadcast_server_preview_plans_if_due(...)`；
+  - `ClientPlanSnapshotCallPacket` 现在只更新 server 侧 `PlayerComp` preview sidecar，不再即时转发；
+  - `broadcast_server_preview_plans(...)` 会先同步所有 ready `connection_states` 到 `server_preview_players`，再调用 `PlayerComp::get_preview_plans(now_millis)`，通过 `NetServer::broadcast_client_plan_previews(...)` 发送同队 preview/null chunk；
+  - ready 但尚未发送过 preview 的玩家也会参与首次周期广播，保持 Java “空 plans 发 null”语义。
+- 验证：
+  - `cargo test -p mindustry-server server_update_records_client_plan_snapshot_and_broadcasts_preview_to_teammates`
+  - `cargo test -p mindustry-server server_preview_due_broadcast_syncs_empty_ready_players`
+  - `cargo test -p mindustry-tests real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream -- --test-threads=1`
+- 仍未完成：当前 server preview sidecar 仍以 `connection_id` 作为临时 player id；真实 source 仍未替换成完整 player entity 绑定；双真实 Rust desktop 与 Java↔Rust preview 联机 smoke 仍需继续补。

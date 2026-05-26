@@ -112,7 +112,10 @@ fn pump_real_server_desktop_until(
 fn real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream()
 {
     use mindustry_core::mindustry::io::{BuildPlanWire, Vec2};
-    use mindustry_core::mindustry::net::{ClientPlanSnapshotCallPacket, NetConnection, PacketKind};
+    use mindustry_core::mindustry::net::{
+        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket, NetConnection,
+        PacketKind,
+    };
     use mindustry_server::ServerLauncher;
     use std::thread;
     use std::time::Duration;
@@ -176,6 +179,18 @@ fn real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_a
             }),
         );
     }
+    assert_eq!(server.apply_new_network_server_events(), 1);
+    server
+        .net_server
+        .send_client_plan_snapshot_received(
+            target_connection_id,
+            ClientPlanSnapshotReceivedCallPacket {
+                player_id: source_connection_id,
+                group_id: 12,
+                plans: Some(vec![BuildPlanWire::new_place(4, 5, 1, "router")]),
+            },
+        )
+        .expect("real server should send forwarded preview packet to target desktop");
 
     let mut delivered = false;
     let mut last_client_status = String::new();

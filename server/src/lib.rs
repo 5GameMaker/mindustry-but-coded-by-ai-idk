@@ -1,6 +1,9 @@
 pub mod server_control;
 
 use mindustry_core::mindustry::core::game_runtime::GameRuntimePowerNodeConfigResult;
+use mindustry_core::mindustry::core::net_server::{
+    PlayerPreviewPlanSource, PLAN_PREVIEW_SYNC_INTERVAL_MS,
+};
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext,
     GameRuntimeOwnedEffectResources, GameRuntimeOwnedFrameReport,
@@ -11,11 +14,10 @@ use mindustry_core::mindustry::entities::{
     bullet::BulletType,
     comp::{BuildingComp, BulletComp, PlayerComp, UnitComp},
 };
-use mindustry_core::mindustry::io::{ContentPatchSet, TeamId};
+use mindustry_core::mindustry::io::{BuildPlanWire, ContentPatchSet, TeamId};
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, Net, NetConnection, NetworkPlayerData, NetworkWorldData,
-    PacketKind, ProviderEvent,
+    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, Net, NetConnection,
+    NetworkPlayerData, NetworkWorldData, PacketKind, ProviderEvent,
 };
 use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
@@ -24,7 +26,7 @@ use server_control::ServerControl;
 use std::{
     collections::BTreeMap,
     io,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone)]
@@ -42,6 +44,8 @@ pub struct ServerLauncher {
     pub runtime_power_node_config_packets_changed: usize,
     pub server_preview_players: BTreeMap<i32, PlayerComp>,
     pub server_preview_plan_packets_applied: usize,
+    pub next_server_preview_broadcast_at: Option<Instant>,
+    pub server_preview_broadcasts_sent: usize,
     pub next_network_event_index: usize,
     pub net_server: NetServer,
     pub network_error: Option<String>,
@@ -70,6 +74,10 @@ impl ServerLauncher {
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
             server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: Some(
+                Instant::now() + Duration::from_millis(PLAN_PREVIEW_SYNC_INTERVAL_MS as u64),
+            ),
+            server_preview_broadcasts_sent: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
             network_error: None,
@@ -106,6 +114,11 @@ impl ServerLauncher {
     pub fn update(&mut self) {
         self.net_server.update();
         self.apply_new_network_server_events();
+        if let Err(error) =
+            self.broadcast_server_preview_plans_if_due(Instant::now(), Self::current_millis())
+        {
+            self.network_error = Some(error.to_string());
+        }
         let _ = self.flush_pending_world_data();
         if let Some(report) = self.update_runtime_owned_blocks(1.0 / 60.0) {
             self.last_runtime_item_transport_report = Some(report.item_transport);
@@ -167,46 +180,17 @@ impl ServerLauncher {
                     if connection_id < 0 {
                         continue;
                     }
-                    let source_team = match self.apply_server_preview_plan_packet(
+                    match self.apply_server_preview_plan_packet(
                         connection_id,
                         &snapshot,
                         Self::current_millis(),
                     ) {
-                        Ok(Some(team)) => team,
+                        Ok(Some(_)) => changed += 1,
                         Ok(None) => continue,
                         Err(error) => {
                             self.network_error = Some(error.to_string());
                             continue;
                         }
-                    };
-                    let target_connection_ids = {
-                        let state = self.net_server.state();
-                        let state = state.lock().expect("NetServerState mutex poisoned");
-                        state
-                            .connection_states
-                            .iter()
-                            .filter_map(|(target_connection_id, connection)| {
-                                (*target_connection_id != connection_id
-                                    && connection.team == source_team
-                                    && !connection.kicked
-                                    && Self::connection_can_receive_preview(connection))
-                                .then_some(*target_connection_id)
-                            })
-                            .collect::<Vec<_>>()
-                    };
-                    if target_connection_ids.is_empty() {
-                        continue;
-                    }
-                    match self.net_server.send_client_plan_snapshot_received_to_many(
-                        target_connection_ids,
-                        ClientPlanSnapshotReceivedCallPacket {
-                            player_id: connection_id,
-                            group_id: snapshot.group_id,
-                            plans: snapshot.plans.clone(),
-                        },
-                    ) {
-                        Ok(sent) => changed += sent,
-                        Err(error) => self.network_error = Some(error.to_string()),
                     }
                 }
                 _ => {}
@@ -270,6 +254,93 @@ impl ServerLauncher {
             && connection.player_added
             && !connection.kicked
             && !connection.has_disconnected
+    }
+
+    pub fn broadcast_server_preview_plans_if_due(
+        &mut self,
+        now: Instant,
+        now_millis: i64,
+    ) -> io::Result<usize> {
+        self.sync_server_preview_players_from_connections();
+        if self.server_preview_players.is_empty() {
+            return Ok(0);
+        }
+        if self
+            .next_server_preview_broadcast_at
+            .is_some_and(|deadline| now < deadline)
+        {
+            return Ok(0);
+        }
+
+        self.next_server_preview_broadcast_at =
+            Some(now + Duration::from_millis(PLAN_PREVIEW_SYNC_INTERVAL_MS as u64));
+        self.broadcast_server_preview_plans(now_millis)
+    }
+
+    pub fn broadcast_server_preview_plans(&mut self, now_millis: i64) -> io::Result<usize> {
+        self.sync_server_preview_players_from_connections();
+        let mut players = Vec::new();
+
+        for (connection_id, player) in self.server_preview_players.iter_mut() {
+            let plans = player
+                .get_preview_plans(now_millis)
+                .iter()
+                .take(MAX_PLAYER_PREVIEW_PLANS)
+                .map(BuildPlanWire::from_build_plan)
+                .collect();
+            players.push(PlayerPreviewPlanSource {
+                player_id: player.id,
+                team: player.team,
+                connection_id: Some(*connection_id),
+                local: false,
+                connected: true,
+                last_preview_plan_group_server: player.last_preview_plan_group_server,
+                plans,
+            });
+        }
+
+        let sent = self
+            .net_server
+            .broadcast_client_plan_previews(&mut players)?;
+        for player_source in players {
+            if let Some(connection_id) = player_source.connection_id {
+                if let Some(player) = self.server_preview_players.get_mut(&connection_id) {
+                    player.last_preview_plan_group_server =
+                        player_source.last_preview_plan_group_server;
+                }
+            }
+        }
+        self.server_preview_broadcasts_sent += sent;
+        Ok(sent)
+    }
+
+    fn sync_server_preview_players_from_connections(&mut self) {
+        let ready_connections = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state
+                .connection_states
+                .iter()
+                .filter_map(|(connection_id, connection)| {
+                    Self::connection_can_receive_preview(connection)
+                        .then_some((*connection_id, connection.clone()))
+                })
+                .collect::<Vec<_>>()
+        };
+        self.server_preview_players
+            .retain(|connection_id, _| ready_connections.iter().any(|(id, _)| id == connection_id));
+        for (connection_id, connection) in ready_connections {
+            let player = self
+                .server_preview_players
+                .entry(connection_id)
+                .or_insert_with(|| PlayerComp::new(connection.team));
+            player.id = connection_id;
+            player.team = connection.team;
+            player.name = connection.name.clone();
+            player.color = connection.color as u32;
+            player.locale = connection.locale.clone();
+            player.con = Some(connection);
+        }
     }
 
     fn current_millis() -> i64 {
@@ -431,7 +502,7 @@ mod tests {
     use std::io;
     use std::net::{TcpListener, UdpSocket};
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     fn free_local_port() -> u16 {
         for _ in 0..32 {
@@ -645,6 +716,8 @@ mod tests {
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
             server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: None,
+            server_preview_broadcasts_sent: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -713,6 +786,8 @@ mod tests {
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
             server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: None,
+            server_preview_broadcasts_sent: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -845,7 +920,7 @@ mod tests {
     }
 
     #[test]
-    fn server_update_forwards_client_plan_snapshot_to_other_connections() {
+    fn server_update_records_client_plan_snapshot_and_broadcasts_preview_to_teammates() {
         let sent_packets = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent_packets),
@@ -864,6 +939,8 @@ mod tests {
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
             server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: None,
+            server_preview_broadcasts_sent: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -919,23 +996,7 @@ mod tests {
         assert_eq!(launcher.network_error, None);
 
         let sent = sent_packets.lock().unwrap();
-        assert_eq!(sent.len(), 1);
-        let mut target_ids = sent
-            .iter()
-            .map(|(connection_id, _, _)| *connection_id)
-            .collect::<Vec<_>>();
-        target_ids.sort_unstable();
-        assert_eq!(target_ids, vec![22]);
-        assert!(sent.iter().all(|(_, packet, reliable)| {
-            !*reliable
-                && matches!(
-                    packet,
-                    PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
-                        if packet.player_id == 11
-                            && packet.group_id == 7
-                            && packet.plans.as_ref() == Some(&plans)
-                )
-        }));
+        assert!(sent.is_empty());
         drop(sent);
         {
             let player = launcher.server_preview_players.get(&11).unwrap();
@@ -948,57 +1009,137 @@ mod tests {
             assert!(player.con.is_some());
         }
 
-        {
-            let mut net = launcher.net_server.net_mut();
-            net.handle_server_received_from_connection(
-                Some(11),
-                true,
-                PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
-                    group_id: 8,
-                    plans: None,
-                }),
-            );
-        }
+        let broadcasted = launcher
+            .broadcast_server_preview_plans(i64::MAX / 4)
+            .expect("preview broadcast should write to capture provider");
+        assert_eq!(broadcasted, 2);
 
-        assert_eq!(launcher.apply_new_network_server_events(), 1);
         let sent = sent_packets.lock().unwrap();
         assert_eq!(sent.len(), 2);
-        assert_eq!(
-            sent.iter()
-                .filter(|(_, packet, reliable)| {
-                    !*reliable
-                        && matches!(
-                            packet,
-                            PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
-                                if packet.player_id == 11
-                                    && packet.group_id == 8
-                                    && packet.plans.is_none()
-                        )
-                })
-                .count(),
-            1
-        );
+        assert!(sent.iter().any(|(connection_id, packet, reliable)| {
+            *connection_id == 22
+                && !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
+                        if packet.player_id == 11
+                            && packet.group_id == 0
+                            && packet.plans.as_ref() == Some(&plans)
+                )
+        }));
+        assert!(sent.iter().any(|(connection_id, packet, reliable)| {
+            *connection_id == 11
+                && !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
+                        if packet.player_id == 22 && packet.group_id == 0 && packet.plans.is_none()
+                )
+        }));
+        assert!(!sent
+            .iter()
+            .any(|(connection_id, _, _)| *connection_id == 33));
+        assert!(!sent
+            .iter()
+            .any(|(connection_id, _, _)| *connection_id == 44));
         drop(sent);
 
         let state = launcher.net_server.state();
         let state = state.lock().unwrap();
-        assert_eq!(state.client_plan_snapshot_packets_seen, 2);
+        assert_eq!(state.client_plan_snapshot_packets_seen, 1);
         assert_eq!(state.client_plan_snapshots_forwarded, 2);
         assert!(state.last_client_plan_snapshot_forwarded_error.is_none());
-        assert_eq!(
-            state
-                .connection_states
-                .get(&11)
-                .expect("source connection should stay registered")
-                .sent
-                .len(),
-            0
-        );
         drop(state);
-        assert_eq!(launcher.server_preview_plan_packets_applied, 2);
+        assert_eq!(launcher.server_preview_plan_packets_applied, 1);
+        assert_eq!(launcher.server_preview_broadcasts_sent, 2);
         let player = launcher.server_preview_players.get(&11).unwrap();
-        assert_eq!(player.last_preview_plan_group, 8);
+        assert_eq!(player.last_preview_plan_group, 7);
+        assert_eq!(player.last_preview_plan_group_server, 0);
         assert!(player.preview_plans_assembling.is_empty());
+        assert_eq!(player.preview_plans_current.len(), 1);
+        let target = launcher.server_preview_players.get(&22).unwrap();
+        assert_eq!(target.last_preview_plan_group_server, 0);
+        assert!(target.preview_plans_current.is_empty());
+    }
+
+    #[test]
+    fn server_preview_due_broadcast_syncs_empty_ready_players() {
+        let sent_packets = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent_packets),
+        };
+        let mut launcher = ServerLauncher {
+            context: AppContext::server("config"),
+            args: Vec::new(),
+            control: super::ServerControl::new(Vec::new()),
+            runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
+            last_runtime_power_node_config_result: None,
+            runtime_power_node_config_packets_seen: 0,
+            runtime_power_node_config_packets_changed: 0,
+            server_preview_players: BTreeMap::new(),
+            server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: None,
+            server_preview_broadcasts_sent: 0,
+            next_network_event_index: 0,
+            net_server: NetServer::new(Net::new(Box::new(provider))),
+            network_error: None,
+        };
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            for connection_id in [101, 102] {
+                net.handle_server_received_from_connection(
+                    Some(connection_id),
+                    true,
+                    PacketKind::Connect(Connect {
+                        address_tcp: format!("127.0.0.1:{connection_id}"),
+                    }),
+                );
+            }
+        }
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            for connection_id in [101, 102] {
+                let connection = state.connection_states.get_mut(&connection_id).unwrap();
+                connection.team = TeamId(3);
+                connection.has_connected = true;
+                connection.player_added = true;
+            }
+        }
+
+        let now = Instant::now();
+        let sent = launcher
+            .broadcast_server_preview_plans_if_due(now, i64::MAX / 4)
+            .expect("empty preview broadcast should be written to capture provider");
+        assert_eq!(sent, 2);
+        assert_eq!(launcher.server_preview_players.len(), 2);
+        assert_eq!(launcher.server_preview_broadcasts_sent, 2);
+
+        let sent = sent_packets.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert!(sent.iter().any(|(connection_id, packet, reliable)| {
+            *connection_id == 102
+                && !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
+                        if packet.player_id == 101 && packet.group_id == 0 && packet.plans.is_none()
+                )
+        }));
+        assert!(sent.iter().any(|(connection_id, packet, reliable)| {
+            *connection_id == 101
+                && !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::ClientPlanSnapshotReceivedCallPacket(packet)
+                        if packet.player_id == 102 && packet.group_id == 0 && packet.plans.is_none()
+                )
+        }));
     }
 
     #[test]
@@ -1021,6 +1162,8 @@ mod tests {
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
             server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: None,
+            server_preview_broadcasts_sent: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -1111,6 +1254,8 @@ mod tests {
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
             server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: None,
+            server_preview_broadcasts_sent: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
@@ -1220,6 +1365,8 @@ mod tests {
             runtime_power_node_config_packets_changed: 0,
             server_preview_players: BTreeMap::new(),
             server_preview_plan_packets_applied: 0,
+            next_server_preview_broadcast_at: None,
+            server_preview_broadcasts_sent: 0,
             next_network_event_index: 0,
             net_server: NetServer::new(Net::new(Box::new(provider))),
             network_error: None,
