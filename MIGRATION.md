@@ -3136,3 +3136,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_item_mass_driver_resolves_on_bolt_hit_plan_before_remaining_ticks_zero`
   - `cargo test -p mindustry-core game_runtime_item_mass_driver`
 - 仍未完成：当前仍是 runtime-only in-flight 侧车，还未生成真实 ECS bullet entity，也未播放 `shootEffect/receiveEffect/sound/shake`，随机掉落仍使用确定性全掉落测试路径；后续应继续把 effect/event、真实 bullet mirror 和联机同步接到 desktop/server 链路。
+
+### 12.84 InputHandler takeItems removeStack 侧效计划
+
+- 2026-05-27：补齐 `InputHandler.takeItems(...)` 的 Java `build.removeStack(...)` 语义出口；Rust 纯 input helper 在成功扣物时现在会返回 `ItemRemoveStackPlan`，供上层按 core / linked storage 路由 campaign sector core-item delta。
+- Java 依据：
+  - `InputHandler.takeItems(Building build, Item item, int amount, Unit to)` 先执行 `build.removeStack(item, Math.min(to.maxAccepted(item), amount))`，再把 removed 加到 unit；
+  - `CoreBuild.removeStack(...)` 会在 campaign default team 下 `handleCoreItem(item, -result)`；
+  - `StorageBuild.removeStack(...)` 只有在 `linkedCore != null` 时才执行等价 core-item delta；
+  - `InputHandler.setItem/setItems/setTileItems` 远程入口是直接 `build.items.set(...)`，不是 `removeStack(...)`，本闭环不为这些 direct-set 路径伪造 removeStack 侧效。
+- Rust 新增/变化：
+  - 新增 `ItemRemoveStackPlan { build, item, item_id, amount_removed, source_is_core, source_is_storage }`；
+  - `TakeItemsOutcome` 新增 `remove_stack: Option<ItemRemoveStackPlan>`；
+  - `take_items(...)` 成功扣物时返回 removeStack 计划，失败/无移除时保持 `None`；
+  - 新增 core source 覆盖测试，确认 `source_is_core` 会随 block flag 透出。
+- 验证：
+  - `cargo test -p mindustry-core take_items_`
+- 仍未完成：`input_handler` 仍是纯 helper，尚未把 `ItemRemoveStackPlan` 接入完整 `GameRuntime`/campaign sector 状态；linked storage 还需要 runtime 侧根据 `storage_linked_cores` 判定后再应用 `handleCoreItem(-amount)`。

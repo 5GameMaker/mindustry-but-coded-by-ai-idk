@@ -31,7 +31,10 @@ use crate::mindustry::net::{
 };
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
 use crate::mindustry::vars::TILE_SIZE;
-use crate::mindustry::world::{meta::BuildVisibility, placement_bounds, point2_pack, BuildBounds};
+use crate::mindustry::world::{
+    meta::{BlockFlag, BuildVisibility},
+    placement_bounds, point2_pack, BuildBounds,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileConfigRejectReason {
@@ -264,11 +267,22 @@ pub enum TakeItemsRejectReason {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ItemRemoveStackPlan {
+    pub build: BuildingRef,
+    pub item: Option<String>,
+    pub item_id: i16,
+    pub amount_removed: i32,
+    pub source_is_core: bool,
+    pub source_is_storage: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TakeItemsOutcome {
     pub accepted: bool,
     pub rejection: Option<TakeItemsRejectReason>,
     pub requested_amount: i32,
     pub removed_amount: i32,
+    pub remove_stack: Option<ItemRemoveStackPlan>,
     pub transfer_effects: Vec<TransferItemEffectCallPacket>,
     pub packet: Option<TakeItemsCallPacket>,
 }
@@ -2205,6 +2219,7 @@ impl TakeItemsOutcome {
             rejection: Some(reason),
             requested_amount,
             removed_amount: 0,
+            remove_stack: None,
             transfer_effects: Vec::new(),
             packet: None,
         }
@@ -3142,6 +3157,8 @@ where
     };
     let build_ref = BuildingRef::new(build.tile_pos);
     let (x, y) = (build.x, build.y);
+    let source_is_core = build.block.flags.contains(&BlockFlag::Core);
+    let source_is_storage = build.block.flags.contains(&BlockFlag::Storage);
 
     let Some(items) = build.items.as_mut() else {
         return TakeItemsOutcome::rejected(TakeItemsRejectReason::MissingItemStorage, amount);
@@ -3184,6 +3201,14 @@ where
         rejection: None,
         requested_amount: amount,
         removed_amount,
+        remove_stack: Some(ItemRemoveStackPlan {
+            build: build_ref,
+            item: Some(item_name.clone()),
+            item_id,
+            amount_removed: removed_amount,
+            source_is_core,
+            source_is_storage,
+        }),
         transfer_effects,
         packet: Some(TakeItemsCallPacket {
             build: build_ref,
@@ -7634,6 +7659,17 @@ mod tests {
         assert!(outcome.accepted);
         assert_eq!(outcome.requested_amount, 6);
         assert_eq!(outcome.removed_amount, 3);
+        assert_eq!(
+            outcome.remove_stack,
+            Some(ItemRemoveStackPlan {
+                build: BuildingRef::new(point2_pack(22, 24)),
+                item: Some("copper".into()),
+                item_id: 0,
+                amount_removed: 3,
+                source_is_core: false,
+                source_is_storage: false,
+            })
+        );
         assert_eq!(building.items.as_ref().unwrap().get(0), 5);
         assert_eq!(unit.items.item(), Some("copper"));
         assert_eq!(unit.items.stack.amount, 5);
@@ -7644,6 +7680,39 @@ mod tests {
         assert_eq!(packet.item.as_deref(), Some("copper"));
         assert_eq!(packet.amount, 3);
         assert_eq!(packet.to, UnitRef::Unit { id: 46 });
+    }
+
+    #[test]
+    fn take_items_records_core_remove_stack_side_effect_plan() {
+        let mut core_block = item_block();
+        core_block.flags.push(BlockFlag::Core);
+        let core_tile = point2_pack(31, 24);
+        let mut building = BuildingComp::new(core_tile, core_block, TeamId(1));
+        building.items.as_mut().unwrap().set(0, 8);
+        let mut unit = UnitComp::new(49, unit_type(10), TeamId(1));
+
+        let outcome = take_items(
+            Some(&mut building),
+            Some("copper".into()),
+            4,
+            Some(&mut unit),
+            item_id,
+        );
+
+        assert!(outcome.accepted);
+        assert_eq!(
+            outcome.remove_stack,
+            Some(ItemRemoveStackPlan {
+                build: BuildingRef::new(core_tile),
+                item: Some("copper".into()),
+                item_id: 0,
+                amount_removed: 4,
+                source_is_core: true,
+                source_is_storage: false,
+            })
+        );
+        assert_eq!(building.items.as_ref().unwrap().get(0), 4);
+        assert_eq!(unit.items.stack.amount, 4);
     }
 
     #[test]
