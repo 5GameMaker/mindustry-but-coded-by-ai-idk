@@ -3298,3 +3298,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core update_records_server_forwarded_inventory_payload_and_unit_packets`
   - `cargo check --workspace`
 - 仍未完成：这里只更新 building storage mirror，尚未同步扣减 client-side unit item mirror，也没有播放 item transfer effect；`TransferItemToUnitCallPacket`、`PayloadDroppedCallPacket`、`PickedBuildPayloadCallPacket` 仍需继续从 last-packet 记录推进到真实 runtime/mirror mutation。
+
+### 12.93 Client payload pickup/drop 单位载荷 mirror 消费
+
+- 2026-05-27：把 `PickedBuildPayloadCallPacket`、`PickedUnitPayloadCallPacket` 和 `PayloadDroppedCallPacket` 从“只记录 last packet/计数”推进到客户端单位载荷 sidecar mirror mutation，补上 server payload pickup/drop 权威链路在 client 侧的最小可观察状态同步。
+- Java 依据：
+  - `InputHandler.pickedBuildPayload(Unit unit, Building build, boolean onGround)` 成功后会让单位 `PayloadComp` 增加一个建筑 payload；
+  - `InputHandler.pickedUnitPayload(Unit unit, Unit target)` 成功后会让承载单位增加一个单位 payload；
+  - `InputHandler.payloadDropped(Unit unit, float x, float y)` 会对承载单位执行 `dropLastPayload()`，客户端收到出站包后需要让 payload 计数镜像向 Java 的单位 payload 栈变化靠拢。
+- Rust 新增/变化：
+  - `NetClientState` 新增 `unit_payload_mirrors: BTreeMap<i32, ClientUnitPayloadMirror>`，按承载单位 id 保存 payload count 与 pickup/drop 观测计数；
+  - 新增 `NetClient::apply_picked_build_payload_packet(...)`、`apply_picked_unit_payload_packet(...)` 和 `apply_payload_dropped_packet(...)`，只接受 `UnitRef::Unit`，pickup 递增 `payload_count`，drop 使用 `saturating_sub(1)` 避免 stale/乱序包导致负数；
+  - `handle_client_received(...)` 的 `PickedBuildPayloadCallPacket`、`PickedUnitPayloadCallPacket`、`PayloadDroppedCallPacket` 分支现在先更新 unit payload mirror，再保留原有 last packet/timestamp/seen 记录；
+  - client 总记录测试现在断言 build-pickup、unit-pickup 和 drop 三条包路径都会更新对应承载单位的 payload sidecar。
+- 验证：
+  - `cargo test -p mindustry-core apply_payload_packets_updates_unit_payload_mirror`
+  - `cargo test -p mindustry-core update_records_server_forwarded_inventory_payload_and_unit_packets`
+  - `cargo check --workspace`
+- 仍未完成：当前 payload mirror 仍只是 client sidecar 计数与观测统计，尚未保存完整 `BuildPayload` bytes、`UnitPayload` runtime state，也未接入真实 `GameRuntime.client_unit_snapshot_entities` 的 typed `PayloadComp`；后续需要把这些 sidecar 与 entity snapshot / unit runtime / renderer UI 统一起来，避免长期停留在独立镜像层。

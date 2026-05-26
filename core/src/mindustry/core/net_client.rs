@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::mindustry::ctype::ContentId;
 use crate::mindustry::entities::comp::{PlayerComp, UnitComp};
 use crate::mindustry::entities::units::BuildPlan;
-use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
+use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue, UnitRef};
 use crate::mindustry::logic::LMarkerControl;
 use crate::mindustry::net::{
     read_world_data, AutoDoorToggleCallPacket, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
@@ -98,6 +98,14 @@ pub struct ClientTileStorageMirror {
     pub team: Option<i32>,
     pub health: Option<f32>,
     pub door_open: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClientUnitPayloadMirror {
+    pub payload_count: usize,
+    pub picked_build_payloads_seen: u64,
+    pub picked_unit_payloads_seen: u64,
+    pub payload_drops_seen: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -693,6 +701,7 @@ pub struct NetClientState {
     pub last_clear_liquids_at: Option<Instant>,
     pub clear_liquids_packets_seen: u64,
     pub building_storage_mirrors: BTreeMap<i32, ClientTileStorageMirror>,
+    pub unit_payload_mirrors: BTreeMap<i32, ClientUnitPayloadMirror>,
     pub last_take_items: Option<TakeItemsCallPacket>,
     pub last_take_items_at: Option<Instant>,
     pub take_items_packets_seen: u64,
@@ -993,6 +1002,7 @@ impl fmt::Debug for NetClientState {
                 &self.clear_liquids_packets_seen,
             )
             .field("building_storage_mirrors", &self.building_storage_mirrors)
+            .field("unit_payload_mirrors", &self.unit_payload_mirrors)
             .field("take_items_packets_seen", &self.take_items_packets_seen)
             .field(
                 "transfer_item_effect_packets_seen",
@@ -2101,6 +2111,45 @@ impl NetClient {
         true
     }
 
+    pub fn apply_picked_build_payload_packet(
+        payloads: &mut BTreeMap<i32, ClientUnitPayloadMirror>,
+        packet: &PickedBuildPayloadCallPacket,
+    ) -> bool {
+        let UnitRef::Unit { id } = packet.unit else {
+            return false;
+        };
+        let mirror = payloads.entry(id).or_default();
+        mirror.payload_count += 1;
+        mirror.picked_build_payloads_seen += 1;
+        true
+    }
+
+    pub fn apply_picked_unit_payload_packet(
+        payloads: &mut BTreeMap<i32, ClientUnitPayloadMirror>,
+        packet: &PickedUnitPayloadCallPacket,
+    ) -> bool {
+        let UnitRef::Unit { id } = packet.unit else {
+            return false;
+        };
+        let mirror = payloads.entry(id).or_default();
+        mirror.payload_count += 1;
+        mirror.picked_unit_payloads_seen += 1;
+        true
+    }
+
+    pub fn apply_payload_dropped_packet(
+        payloads: &mut BTreeMap<i32, ClientUnitPayloadMirror>,
+        packet: &PayloadDroppedCallPacket,
+    ) -> bool {
+        let UnitRef::Unit { id } = packet.unit else {
+            return false;
+        };
+        let mirror = payloads.entry(id).or_default();
+        mirror.payload_count = mirror.payload_count.saturating_sub(1);
+        mirror.payload_drops_seen += 1;
+        true
+    }
+
     pub fn apply_set_liquid_packet(
         storage: &mut BTreeMap<i32, ClientTileStorageMirror>,
         packet: &SetLiquidCallPacket,
@@ -3184,6 +3233,10 @@ impl NetClient {
                     PacketKind::PickedBuildPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.picked_build_payload_packets_seen += 1;
+                        Self::apply_picked_build_payload_packet(
+                            &mut state.unit_payload_mirrors,
+                            packet,
+                        );
                         state.last_picked_build_payload = Some(packet.clone());
                         state.last_picked_build_payload_at = Some(now);
                         (false, false)
@@ -3191,6 +3244,10 @@ impl NetClient {
                     PacketKind::PickedUnitPayloadCallPacket(packet) => {
                         let now = Instant::now();
                         state.picked_unit_payload_packets_seen += 1;
+                        Self::apply_picked_unit_payload_packet(
+                            &mut state.unit_payload_mirrors,
+                            packet,
+                        );
                         state.last_picked_unit_payload = Some(packet.clone());
                         state.last_picked_unit_payload_at = Some(now);
                         (false, false)
@@ -3205,6 +3262,7 @@ impl NetClient {
                     PacketKind::PayloadDroppedCallPacket(packet) => {
                         let now = Instant::now();
                         state.payload_dropped_packets_seen += 1;
+                        Self::apply_payload_dropped_packet(&mut state.unit_payload_mirrors, packet);
                         state.last_payload_dropped = Some(packet.clone());
                         state.last_payload_dropped_at = Some(now);
                         (false, false)
@@ -4909,6 +4967,95 @@ mod tests {
     }
 
     #[test]
+    fn apply_payload_packets_updates_unit_payload_mirror() {
+        let mut payloads = BTreeMap::new();
+        let unit = UnitRef::Unit { id: 77 };
+
+        assert!(NetClient::apply_picked_build_payload_packet(
+            &mut payloads,
+            &PickedBuildPayloadCallPacket {
+                unit,
+                build_pos: Some(point2_pack(1, 1)),
+                on_ground: true,
+            },
+        ));
+        let mirror = payloads.get(&77).unwrap();
+        assert_eq!(mirror.payload_count, 1);
+        assert_eq!(mirror.picked_build_payloads_seen, 1);
+        assert_eq!(mirror.picked_unit_payloads_seen, 0);
+        assert_eq!(mirror.payload_drops_seen, 0);
+
+        assert!(NetClient::apply_picked_unit_payload_packet(
+            &mut payloads,
+            &PickedUnitPayloadCallPacket {
+                unit,
+                target: UnitRef::Unit { id: 78 },
+            },
+        ));
+        let mirror = payloads.get(&77).unwrap();
+        assert_eq!(mirror.payload_count, 2);
+        assert_eq!(mirror.picked_build_payloads_seen, 1);
+        assert_eq!(mirror.picked_unit_payloads_seen, 1);
+
+        assert!(NetClient::apply_payload_dropped_packet(
+            &mut payloads,
+            &PayloadDroppedCallPacket {
+                unit,
+                x: 5.0,
+                y: 6.0,
+            },
+        ));
+        let mirror = payloads.get(&77).unwrap();
+        assert_eq!(mirror.payload_count, 1);
+        assert_eq!(mirror.payload_drops_seen, 1);
+
+        assert!(NetClient::apply_payload_dropped_packet(
+            &mut payloads,
+            &PayloadDroppedCallPacket {
+                unit,
+                x: 7.0,
+                y: 8.0,
+            },
+        ));
+        assert!(NetClient::apply_payload_dropped_packet(
+            &mut payloads,
+            &PayloadDroppedCallPacket {
+                unit,
+                x: 9.0,
+                y: 10.0,
+            },
+        ));
+        let mirror = payloads.get(&77).unwrap();
+        assert_eq!(mirror.payload_count, 0);
+        assert_eq!(mirror.payload_drops_seen, 3);
+
+        assert!(!NetClient::apply_picked_build_payload_packet(
+            &mut payloads,
+            &PickedBuildPayloadCallPacket {
+                unit: UnitRef::Null,
+                build_pos: Some(point2_pack(2, 2)),
+                on_ground: false,
+            },
+        ));
+        assert!(!NetClient::apply_picked_unit_payload_packet(
+            &mut payloads,
+            &PickedUnitPayloadCallPacket {
+                unit: UnitRef::Null,
+                target: UnitRef::Unit { id: 79 },
+            },
+        ));
+        assert!(!NetClient::apply_payload_dropped_packet(
+            &mut payloads,
+            &PayloadDroppedCallPacket {
+                unit: UnitRef::Null,
+                x: 11.0,
+                y: 12.0,
+            },
+        ));
+        assert_eq!(payloads.len(), 1);
+    }
+
+    #[test]
     fn apply_building_team_and_health_packets_updates_lightweight_mirror() {
         let mut tiles = Tiles::new(4, 4);
         let center = point2_pack(1, 1);
@@ -6251,6 +6398,12 @@ mod tests {
             Some(&picked_unit_payload)
         );
         assert!(state.last_picked_unit_payload_at.is_some());
+        let picked_build_mirror = state.unit_payload_mirrors.get(&401).unwrap();
+        assert_eq!(picked_build_mirror.payload_count, 1);
+        assert_eq!(picked_build_mirror.picked_build_payloads_seen, 1);
+        let picked_unit_mirror = state.unit_payload_mirrors.get(&405).unwrap();
+        assert_eq!(picked_unit_mirror.payload_count, 1);
+        assert_eq!(picked_unit_mirror.picked_unit_payloads_seen, 1);
         assert_eq!(state.request_drop_payload_packets_seen, 1);
         assert_eq!(
             state.last_request_drop_payload.as_ref(),
@@ -6260,6 +6413,9 @@ mod tests {
         assert_eq!(state.payload_dropped_packets_seen, 1);
         assert_eq!(state.last_payload_dropped.as_ref(), Some(&payload_dropped));
         assert!(state.last_payload_dropped_at.is_some());
+        let dropped_payload_mirror = state.unit_payload_mirrors.get(&407).unwrap();
+        assert_eq!(dropped_payload_mirror.payload_count, 0);
+        assert_eq!(dropped_payload_mirror.payload_drops_seen, 1);
         assert_eq!(state.unit_entered_payload_packets_seen, 1);
         assert_eq!(
             state.last_unit_entered_payload.as_ref(),
