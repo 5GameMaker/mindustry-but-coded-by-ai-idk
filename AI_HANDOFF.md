@@ -2267,6 +2267,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
   - `cargo check -p mindustry-core`
 - 下一步建议：
-  1. 继续迁移 `LocationPingComp` 或下一个 class-id/revision 明确的实体形状，并优先接入 runtime 而不是只放 helper。
+  1. `LocationPingComp` / Player ping 行为已由第 67 节补上；继续迁移下一个 class-id/revision 明确的实体形状，并优先接入 runtime 而不是只放 helper。
   2. 后续渲染/atlas 迁移后，用真实 `TextureRegion.width/height/scl()` 替换 `LaunchCoreBlock::from_block_def(...)` 的占位 icon 尺寸。
   3. 将 launch lifecycle 接入真实 effect/group/update 流程；当前已经有 runtime sidecar，但还不是完整 Java `Groups` 生命周期。
+
+---
+
+## 67. 最新闭环记录：LocationPingComp class-id 与 Player ping runtime 行为
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：核查 class-id `48` 的 `LocationPingComp`，并将实际位置 ping 行为接入 `PlayerComp` runtime。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.LocationPingComp=48`；
+  - 未发现 `core/src/.../LocationPingComp.java` 或 `annotations/src/main/resources/revisions/LocationPingComp`；
+  - 实际逻辑在 `InputHandler.pingLocation(...)` 与 `PlayerComp.drawPing()`：同队可见时写 `pingX/pingY/pingTime=1f/pingText`，文本按 `Vars.maxPingTextLength` 截断，`pingDuration = 20f * 60f`。
+- Rust 主改动：
+  - `entities::LOCATION_PING_CLASS_ID = 48`；
+  - `PlayerComp::normalized_ping_text(...)`、`apply_ping_location(...)`、`advance_ping(...)`、`ping_alpha(...)`、`ping_draw_plan(...)`；
+  - `PlayerPingDrawPlan` 作为 renderer 前置计划；
+  - `input_handler::ping_location(...)` 复用 `PlayerComp` 的 ping 文本和 runtime 写入逻辑。
+- 已跑：
+  - `cargo test -p mindustry-core ping_location --lib`
+  - `cargo test -p mindustry-core player --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 继续迁移 `PowerGraphComp` / `PowerGraphUpdaterComp` 等 class-id 明确但 runtime 尚不完整的实体/组件，优先从 Java 源和 revision 证据出发。
+  2. 将 `PlayerPingDrawPlan` 接到真实 graphics/UI renderer；当前只完成 Java 行为计划与 runtime 状态。
+  3. 保持每个闭环完成后验证、更新 `MIGRATION.md`/`AI_HANDOFF.md`、中文提交并推送 `origin main`。

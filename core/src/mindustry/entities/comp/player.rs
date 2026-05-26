@@ -16,6 +16,23 @@ const PREVIEW_PLAN_COMMIT_DELAY_MS: i64 = 100;
 const LOCAL_PLAYER_IP: &str = "localhost";
 const LOCAL_PLAYER_ID: &str = "[LOCAL]";
 
+pub const PLAYER_PING_DURATION: f32 = 20.0 * 60.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerPingDrawPlan {
+    pub x: f32,
+    pub y: f32,
+    pub alpha: f32,
+    pub square_radius: f32,
+    pub triangle_x: f32,
+    pub triangle_y: f32,
+    pub triangle_radius: f32,
+    pub name: String,
+    pub name_y: f32,
+    pub text: Option<String>,
+    pub text_y: Option<f32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlayerUnitState {
     pub reference: UnitRef,
@@ -428,6 +445,82 @@ impl PlayerComp {
         self.ping_time > 0.0
     }
 
+    pub fn normalized_ping_text(text: &str, max_text_len: usize) -> Option<String> {
+        if text.is_empty() {
+            None
+        } else if text.chars().count() > max_text_len {
+            Some(text.chars().take(max_text_len).collect::<String>() + "...")
+        } else {
+            Some(text.to_string())
+        }
+    }
+
+    pub fn apply_ping_location(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: &str,
+        max_text_len: usize,
+    ) -> Option<String> {
+        let displayed_text = Self::normalized_ping_text(text, max_text_len);
+        self.ping_x = x;
+        self.ping_y = y;
+        self.ping_time = 1.0;
+        self.ping_text = displayed_text.clone();
+        displayed_text
+    }
+
+    pub fn advance_ping(&mut self, delta: f32) {
+        if self.ping_time > 0.0 {
+            self.ping_time = (self.ping_time - delta / PLAYER_PING_DURATION).max(0.0);
+        }
+    }
+
+    pub fn ping_alpha(&self) -> f32 {
+        if self.ping_time <= 0.0 {
+            return 0.0;
+        }
+        let fade_out = pow5_out(map_clamped(self.ping_time, 1.0 / 20.0, 0.0, 1.0, 0.0));
+        let fade_in = pow5_out(map(self.ping_time, 1.0, 0.98, 0.0, 1.0));
+        fade_out.min(fade_in).clamp(0.0, 1.0)
+    }
+
+    pub fn ping_draw_plan(
+        &self,
+        show_pings: bool,
+        same_team_visible: bool,
+        display_scale: f32,
+        hover: f32,
+    ) -> Option<PlayerPingDrawPlan> {
+        if self.ping_time <= 0.0 || !show_pings || !same_team_visible || self.name.is_empty() {
+            return None;
+        }
+
+        let scale = 4.0 / display_scale.max(f32::EPSILON);
+        let scaling = 1.0 + pow5_in(map(self.ping_time, 1.0, 0.96, 1.0, 0.0)).clamp(0.0, 1.0) * 3.0;
+        let text = self.ping_text.clone();
+        let name_y = if text.is_some() {
+            self.ping_y + (20.0 + hover) * scale
+        } else {
+            self.ping_y + (16.0 + hover) * scale
+        };
+        let text_y = text.as_ref().map(|_| self.ping_y + (16.0 + hover) * scale);
+
+        Some(PlayerPingDrawPlan {
+            x: self.ping_x,
+            y: self.ping_y,
+            alpha: self.ping_alpha(),
+            square_radius: 2.0 * scaling * scale,
+            triangle_x: self.ping_x,
+            triangle_y: self.ping_y + 9.0 * scale + hover * scale,
+            triangle_radius: 3.0 * scale,
+            name: self.name.clone(),
+            name_y,
+            text,
+            text_y,
+        })
+    }
+
     pub fn ip(&self) -> &str {
         self.con
             .as_ref()
@@ -501,6 +594,22 @@ fn strip_colors(value: &str) -> String {
     }
 
     out
+}
+
+fn map(value: f32, from1: f32, to1: f32, from2: f32, to2: f32) -> f32 {
+    from2 + (value - from1) * (to2 - from2) / (to1 - from1)
+}
+
+fn map_clamped(value: f32, from1: f32, to1: f32, from2: f32, to2: f32) -> f32 {
+    map(value, from1, to1, from2, to2).clamp(0.0, 1.0)
+}
+
+fn pow5_out(value: f32) -> f32 {
+    1.0 - (1.0 - value).powi(5)
+}
+
+fn pow5_in(value: f32) -> f32 {
+    value.powi(5)
 }
 
 #[cfg(test)]
@@ -597,6 +706,41 @@ mod tests {
         assert!(player.display_ammo(true));
         assert!(player.is_pinging());
         assert_eq!(player.unit_ref(), Some(UnitRef::Block { tile_pos: 42 }));
+    }
+
+    #[test]
+    fn ping_location_normalizes_text_and_draw_plan_follows_java_timing() {
+        let mut player = PlayerComp::default();
+        player.name = "frog".into();
+
+        let displayed = player.apply_ping_location(12.0, 34.0, "abcdef", 4);
+
+        assert_eq!(displayed.as_deref(), Some("abcd..."));
+        assert_eq!((player.ping_x, player.ping_y), (12.0, 34.0));
+        assert_eq!(player.ping_time, 1.0);
+        assert_eq!(player.ping_text.as_deref(), Some("abcd..."));
+        assert_eq!(player.ping_alpha(), 0.0);
+
+        player.advance_ping(PLAYER_PING_DURATION / 2.0);
+        assert_eq!(player.ping_time, 0.5);
+        assert!(player.ping_alpha() > 0.95);
+
+        let plan = player
+            .ping_draw_plan(true, true, 2.0, 0.5)
+            .expect("visible same-team active ping should produce a draw plan");
+        assert_eq!((plan.x, plan.y), (12.0, 34.0));
+        assert_eq!(plan.name, "frog");
+        assert_eq!(plan.text.as_deref(), Some("abcd..."));
+        assert_eq!(plan.name_y, 34.0 + 20.5 * 2.0);
+        assert_eq!(plan.text_y, Some(34.0 + 16.5 * 2.0));
+        assert!(plan.square_radius >= 4.0);
+        assert!(player.ping_draw_plan(false, true, 2.0, 0.5).is_none());
+        assert!(player.ping_draw_plan(true, false, 2.0, 0.5).is_none());
+
+        player.advance_ping(PLAYER_PING_DURATION);
+        assert_eq!(player.ping_time, 0.0);
+        assert!(!player.is_pinging());
+        assert!(player.ping_draw_plan(true, true, 2.0, 0.5).is_none());
     }
 
     #[test]

@@ -2487,6 +2487,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：LaunchCore 仍需接入真实 launch lifecycle / draw system / effect group；当前 `LaunchCoreBlock::from_block_def(...)` 对 fullIcon atlas 尺寸采用 content size 的占位推导，待 renderer/atlas 完整迁移后替换为真实 `TextureRegion` 尺寸与 `scl()`。
 
+### 12.53 LocationPingComp class-id 与 Player ping runtime 行为
+
+- 2026-05-27：核查 `LocationPingComp` 并推进实际玩家 ping runtime 行为。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.LocationPingComp=48`；
+  - 参考仓库中未发现 `core/src/.../LocationPingComp.java`，也没有 `annotations/src/main/resources/revisions/LocationPingComp`；该 class-id 当前表现为保留/生成映射；
+  - 实际位置 ping 行为位于 `core/src/mindustry/input/InputHandler.java::pingLocation(...)` 与 `PlayerComp.drawPing()`：
+    - 同队可见时设置 `player.pingX/pingY/pingTime=1f/pingText`；
+    - 文本为空则 `null`，超过 `Vars.maxPingTextLength` 则截断并追加 `...`；
+    - `drawPing()` 使用 `pingDuration = 20f * 60f` 衰减，并按 `pow5Out/pow5In` 计算 alpha/缩放。
+- Rust 新增/变化：
+  - `entities::LOCATION_PING_CLASS_ID = 48` 并锁定 class-id baseline；
+  - `PlayerComp::normalized_ping_text(...)`；
+  - `PlayerComp::apply_ping_location(...)`；
+  - `PlayerComp::advance_ping(...)` / `ping_alpha(...)` / `ping_draw_plan(...)`；
+  - `PlayerPingDrawPlan` 记录 square/triangle/name/text 的 renderer 输入；
+  - `input_handler::ping_location(...)` 复用 `PlayerComp` 的文本归一化和 runtime 写入，避免 helper 与实体状态分叉。
+- 测试：
+  - `ping_location_normalizes_text_and_draw_plan_follows_java_timing`
+  - `ping_location_updates_visible_same_team_player_and_truncates_text`
+  - `ping_location_rejects_admin_denied_as_validate_error`
+  - `client_ping_location_packet_uses_client_payload_shape`
+  - `entity_class_ids_match_upstream_classids_properties_baseline`
+- 已验证：
+  - `cargo test -p mindustry-core ping_location --lib`
+  - `cargo test -p mindustry-core player --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：位置 ping 的真实 renderer 绘制仍需接入 graphics/UI 层；`LocationPingComp` 没有可迁移源文件或 revision，后续若上游生成产物出现实体实现，应再补 typed/revision runtime。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

@@ -4148,20 +4148,11 @@ where
     }
 
     let text = text.unwrap_or_default();
-    let displayed_text = if text.is_empty() {
-        None
-    } else if text.chars().count() > context.max_text_len {
-        Some(text.chars().take(context.max_text_len).collect::<String>() + "...")
-    } else {
-        Some(text.clone())
-    };
+    let displayed_text = PlayerComp::normalized_ping_text(&text, context.max_text_len);
 
     if context.same_team_visible {
         if let Some(player) = player {
-            player.ping_x = x;
-            player.ping_y = y;
-            player.ping_time = 1.0;
-            player.ping_text = displayed_text.clone();
+            player.apply_ping_location(x, y, &text, context.max_text_len);
         }
     }
 
