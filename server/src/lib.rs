@@ -664,6 +664,109 @@ mod tests {
     }
 
     #[test]
+    fn server_world_data_roundtrips_payload_loader_state_through_runtime_loader() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher {
+            context: AppContext::server("config"),
+            args: Vec::new(),
+            control: super::ServerControl::new(Vec::new()),
+            runtime: GameRuntime::default(),
+            content_loader: ContentLoader::create_base_content_or_panic(),
+            last_runtime_effect_report: None,
+            last_runtime_item_transport_report: None,
+            last_runtime_payload_report: None,
+            net_server: NetServer::new(Net::new(Box::new(provider))),
+            network_error: None,
+        };
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .expect("base content should include payload-loader");
+        let container_def = launcher
+            .content_loader
+            .block_by_name("container")
+            .expect("base content should include container");
+        let loader_tile = point2_pack(4, 4);
+        let container_id = container_def.base().id;
+        let mut payload_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), container_def.base().clone(), TeamId(6))
+            .write_base(&mut payload_bytes, false)
+            .unwrap();
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.set_rotation(2);
+
+        launcher.runtime.state.world.resize(12, 12);
+        launcher.runtime.add_building(loader_building);
+        launcher.runtime.payload_runtime_states.insert(
+            loader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(PayloadRef::Block {
+                        block: container_id,
+                        version: 0,
+                        build_bytes: payload_bytes,
+                    }),
+                    ..PayloadBlockBuildState::default()
+                },
+                loader: PayloadLoaderState {
+                    exporting: true,
+                    ..PayloadLoaderState::default()
+                },
+            },
+        );
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(74),
+                false,
+                PacketKind::Connect(Connect {
+                    address_tcp: "127.0.0.1:6567".into(),
+                }),
+            );
+            net.handle_server_received_from_connection(
+                Some(74),
+                false,
+                PacketKind::ConnectPacket(connect_packet("rust-payload-loader")),
+            );
+        }
+
+        launcher.update();
+
+        let sent = sent.lock().unwrap();
+        let world_data = decode_captured_world_data(&sent, 74);
+        assert_eq!(world_data.player_id, 74);
+        let map = world_data
+            .map_snapshot
+            .expect("runtime map snapshot should be sent in world data");
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(&launcher.content_loader, &map);
+        assert_eq!(report.building_records, 1);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.building_parse_errors, 0);
+        assert_eq!(loaded.buildings().len(), 1);
+        assert_eq!(loaded.buildings()[0].tile_pos, loader_tile);
+        assert_eq!(loaded.buildings()[0].rotation, 2);
+
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            loaded.payload_runtime_states.get(&loader_tile)
+        else {
+            panic!("payload loader sidecar should roundtrip through server world data");
+        };
+        assert!(loader.exporting);
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Block { block, .. }) if *block == container_id
+        ));
+    }
+
+    #[test]
     fn server_runtime_effect_update_is_wired_to_launcher_runtime() {
         let mut launcher = ServerLauncher::new(Vec::new());
         assert!(launcher.update_runtime_effect_blocks(1.0 / 60.0).is_none());

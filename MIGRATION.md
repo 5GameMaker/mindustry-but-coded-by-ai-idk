@@ -1629,3 +1629,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：linked `payload-mass-driver` 仍需自然多帧 charge/fire smoke；payload runtime 与 `network_world_data_template()`/Java 客户端可见 state 的端到端同步还需继续补。
+
+### 12.11 服务端 world-data payload sidecar 端到端回读
+
+- 2026-05-26：新增 `server_world_data_roundtrips_payload_loader_state_through_runtime_loader`，用 server `CaptureProvider` 捕获真实 `WORLD_STREAM`，经 `read_world_data(...)` 解出 `NetworkWorldData.map_snapshot`，再用全新的 `GameRuntime::load_network_map_with_buildings(...)` 回读，验证 `payload-loader` 的 `PayloadBlockBuild` common payload 与 `PayloadLoaderState.exporting` 能从服务端 runtime sidecar 进入 world stream 并恢复。
+- 该闭环证明 payload 状态不只存在于 server runtime 单测，而是能通过现有 `network_world_data_template()` / `write_world_data(...)` / stream chunk / `read_world_data(...)` / map loader 链路成为客户端可见的 world-data 状态。
+- 已验证：
+  - `cargo test -p mindustry-server server_world_data_roundtrips_payload_loader_state_through_runtime_loader --lib`
+  - `cargo test -p mindustry-server server_world_data_exports_owned_building_chunks_for_runtime_loader --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：还需扩展到 payload mass-driver/router/deconstructor 的 world-data roundtrip、真实 desktop client 接收应用 smoke，以及 Java↔Rust 联机兼容验证。

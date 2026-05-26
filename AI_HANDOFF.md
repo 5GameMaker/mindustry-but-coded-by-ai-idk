@@ -975,3 +975,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - Rawls the 2nd 只读结论：payload 低层 codec 与 runtime export/load roundtrip 已较完整，最明显缺口是 server runtime payload sidecar 经 `network_world_data_template()` / world stream / `read_world_data()` / 新 `GameRuntime::load_network_map_with_buildings(...)` 的端到端 smoke。下一闭环建议优先补 server world-data payload state roundtrip。
+
+---
+
+## 25. 最新闭环记录：服务端 world-data payload sidecar 端到端回读
+
+- 目标：把 payload runtime sidecar 从 server 内部状态推进到 network world stream，再由新 runtime 回读，证明 payload 状态能成为客户端可见 world-data，而不是只存在于服务端单测。
+- Rust 主改动：
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`server_world_data_roundtrips_payload_loader_state_through_runtime_loader`。
+- 测试链路：
+  - 构造带 `payload-loader` building 的 `ServerLauncher`；
+  - 写入 `GameRuntimePayloadBlockState::Loader`，其中 common payload 是 `BuildPayload(container)`，`PayloadLoaderState.exporting = true`；
+  - 通过 `Connect` + `ConnectPacket` 触发 pending world data；
+  - 调用 `launcher.update()`，用 `CaptureProvider` 捕获真实 `WORLD_STREAM`；
+  - `decode_captured_world_data(...)` / `read_world_data(...)` 得到 `NetworkWorldData`；
+  - 从 `map_snapshot` 新建 `GameRuntime::default()` 并调用 `load_network_map_with_buildings(...)`；
+  - 断言 building 恢复、payload loader sidecar 恢复、common payload block id 为 container、loader exporting 为 true。
+- 已验证：
+  - `cargo test -p mindustry-server server_world_data_roundtrips_payload_loader_state_through_runtime_loader --lib`
+  - `cargo test -p mindustry-server server_world_data_exports_owned_building_chunks_for_runtime_loader --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 后续建议：把同类 world-data roundtrip 扩展到 `PayloadMassDriver`（link/reload/charge/loaded/charging）、`PayloadRouter`（sorted/recDir/matches）、`PayloadDeconstructor`（progress/deconstructing），再接 desktop/client `apply_network_world_data` smoke。
