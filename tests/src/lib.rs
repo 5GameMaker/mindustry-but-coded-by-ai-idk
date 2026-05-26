@@ -109,6 +109,147 @@ fn pump_real_server_desktop_until(
 }
 
 #[test]
+fn real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream()
+{
+    use mindustry_core::mindustry::io::{BuildPlanWire, Vec2};
+    use mindustry_core::mindustry::net::{ClientPlanSnapshotCallPacket, NetConnection, PacketKind};
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(12, 12);
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context
+            == mindustry_core::mindustry::core::GameRuntimeNetworkContext::client()
+    });
+
+    let (source_connection_id, target_connection_id, target_team) = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        let target_connection_id = state
+            .last_connect_confirm_connection_id
+            .expect("target desktop should confirm before preview smoke");
+        let target_team = state
+            .connection_states
+            .get(&target_connection_id)
+            .expect("target connection should be tracked")
+            .team;
+        (
+            target_connection_id + 10_000,
+            target_connection_id,
+            target_team,
+        )
+    };
+    {
+        let state = server.net_server.state();
+        let mut state = state.lock().unwrap();
+        let mut source_connection = NetConnection::new("simulated-preview-source");
+        source_connection.name = "preview-source".into();
+        source_connection.team = target_team;
+        source_connection.has_connected = true;
+        source_connection.player_added = true;
+        state
+            .connection_states
+            .insert(source_connection_id, source_connection);
+    }
+    {
+        let mut net = server.net_server.net_mut();
+        net.handle_server_received_from_connection(
+            Some(source_connection_id),
+            true,
+            PacketKind::ClientPlanSnapshotCallPacket(ClientPlanSnapshotCallPacket {
+                group_id: 12,
+                plans: Some(vec![BuildPlanWire::new_place(4, 5, 1, "router")]),
+            }),
+        );
+    }
+
+    let mut delivered = false;
+    let mut last_client_status = String::new();
+    for _ in 0..120 {
+        server.update();
+        desktop.update();
+        server.update();
+        desktop.update();
+
+        {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            delivered = state
+                .client_plan_snapshot_received_packets
+                .iter()
+                .any(|packet| {
+                    packet.player_id == source_connection_id
+                        && packet.plans.as_ref().is_some_and(|plans| plans.len() == 1)
+                });
+            last_client_status = format!(
+                "received={} last={:?} events={:?}",
+                state.client_plan_snapshot_received_packets.len(),
+                state.last_client_plan_snapshot_received,
+                state.last_provider_events,
+            );
+        }
+
+        if delivered && desktop.remote_players.contains_key(&source_connection_id) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        delivered,
+        "target desktop should receive forwarded preview snapshot; {last_client_status}"
+    );
+    assert!(desktop.remote_players.contains_key(&source_connection_id));
+    let remote = desktop.remote_players.get(&source_connection_id).unwrap();
+    assert_eq!(remote.preview_plans_assembling.len(), 1);
+    assert_eq!(remote.team, desktop.player.team);
+
+    let overlay_count = desktop.rebuild_other_player_preview_overlays_at(
+        i64::MAX / 4,
+        1.0,
+        Some(Vec2::new(32.0, 40.0)),
+    );
+    assert_eq!(overlay_count, 1);
+    let overlay = &desktop.other_player_preview_overlays[0];
+    assert_eq!(overlay.player_id, source_connection_id);
+    assert_eq!(overlay.entries.len(), 1);
+    assert_eq!(overlay.entries[0].block, "router");
+    assert_eq!(overlay.entries[0].world_pos, Vec2::new(32.0, 40.0));
+
+    {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.client_plan_snapshot_packets_seen, 1);
+        assert_eq!(state.client_plan_snapshots_forwarded, 1);
+        assert_eq!(
+            state.last_client_plan_snapshot_forwarded_connection_id,
+            Some(target_connection_id)
+        );
+    }
+    assert_eq!(server.server_preview_plan_packets_applied, 1);
+    assert!(server
+        .server_preview_players
+        .contains_key(&source_connection_id));
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}
+
+#[test]
 fn real_server_desktop_world_stream_materializes_payload_sidecar() {
     use mindustry_core::mindustry::core::{
         game_runtime::GameRuntimePayloadBlockState, GameRuntimeNetworkContext,

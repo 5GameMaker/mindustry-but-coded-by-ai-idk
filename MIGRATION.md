@@ -3030,3 +3030,15 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-server server_update_forwards_client_plan_snapshot_to_other_connections`
 - 仍未完成：server preview sidecar 仍以 `connection_id` 作为临时 player id；还需要接入真实 player entity id、周期性 `planPreviewSyncTime` 广播、以及多客户端 server->desktop smoke。
+
+### 12.78 Real server -> desktop preview snapshot smoke
+
+- 2026-05-27：补充真实 `ServerLauncher` + 真实 `DesktopLauncher` 的 preview snapshot smoke，确认 server 侧收到 `ClientPlanSnapshotCallPacket` 后，通过真实网络发送的 `ClientPlanSnapshotReceivedCallPacket` 会被 desktop `NetClient` 接收，并进入 `remote_players`/overlay cache。
+- Rust 新增/变化：
+  - `tests/src/lib.rs` 新增 `real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream`；
+  - 测试先让真实 desktop 完成 world stream / connect confirm，再在 server state 中插入一个同队、已加入的模拟 source connection；
+  - 通过 `Net::handle_server_received_from_connection(...)` 注入 source preview packet，让 `ServerLauncher::update()` 走真实 server event 消费与 `send_client_plan_snapshot_received_to_many(...)`；
+  - target desktop 通过真实 `ArcNetProvider` 收包，`DesktopLauncher::update()` 将 packet 应用到 `remote_players`，最后用 content registry 重建 `other_player_preview_overlays`。
+- 验证：
+  - `cargo test -p mindustry-tests real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream -- --test-threads=1`
+- 仍未完成：该 smoke 避免了双真实 desktop 同时握手带来的端口/握手不稳定，source 端仍是模拟连接；后续在连接身份配置稳定后，应补双真实 Rust desktop 或 Java↔Rust preview smoke。
