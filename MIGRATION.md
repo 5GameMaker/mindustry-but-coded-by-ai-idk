@@ -2910,3 +2910,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_add_placed_building_refreshes_beam_node_links_like_java_update_directions`
   - `game_runtime_load_network_map_rebuilds_beam_node_links_before_first_frame`
 - 仍未完成：BeamNode `drawPlace/getNodeLinks` 的纯预览 API、真实绘制层消费 `beam_node_links`、以及 `world.tileChanges` dirty-bit 跳过重复刷新仍待继续迁移。
+
+### 12.71 BeamNode 放置预览候选枚举
+
+- 2026-05-27：迁移 Java `Block.drawPotentialLinks(...) -> BeamNode.getNodeLinks(...) -> BeamNodeBuild.couldConnect(...)` 的非渲染候选枚举部分，为后续真实绘制层消费提供 runtime API。
+- Java 依据：
+  - `Block.drawPotentialLinks(...)` 对 power block 放置预览同时枚举 `PowerNode` 与 `BeamNode`；
+  - `BeamNode.getNodeLinks(...)` 对目标方块四个方向各取最近可连接 BeamNode；
+  - `BeamNodeBuild.couldConnect(...)` 从 BeamNode 沿方向扫描，遇到绝缘墙或同队 powered/connected building 即失败，扫到目标 block 矩形则成功。
+- Rust 新增/变化：
+  - `GameRuntime::owned_beam_node_potential_links_for_block(...)`：按目标方块/队伍返回最多四个 BeamNode 候选 tile pos，顺序对应 Java 方向枚举；
+  - `owned_beam_node_could_connect_to_block(...)` 复用 `beam_node_could_connect_scan_range(...)` 与 `beam_node_within_target_rect(...)`，并保留 Java 的 `maxRange = 30` 预览上限。
+- 测试：
+  - `game_runtime_beam_node_potential_links_match_block_draw_potential_links`
+  - `game_runtime_beam_node_potential_links_stop_at_insulated_wall_like_java_could_connect`
+- 仍未完成：当前 API 只输出候选，不直接绘制；后续需要让 desktop/render placement preview 与 BeamNode laser draw 消费这些候选/`beam_node_links`。

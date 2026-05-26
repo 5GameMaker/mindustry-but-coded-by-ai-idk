@@ -130,14 +130,15 @@ use crate::mindustry::{
         Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
-        beam_node_could_connect_scan_range, power_diode_transfer_amount,
-        power_graph_battery_stored, power_graph_total_battery_capacity, power_node_link_valid,
-        read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
-        read_nuclear_reactor_state, read_power_generator_state, read_variable_reactor_state,
-        write_heater_generator_state, write_impact_reactor_state, write_light_block_state,
-        write_nuclear_reactor_state, write_power_generator_state, write_variable_reactor_state,
-        HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
-        PowerGeneratorState, PowerGraphNode, PowerGraphRuntime, VariableReactorState,
+        beam_node_could_connect_scan_range, beam_node_within_target_rect,
+        power_diode_transfer_amount, power_graph_battery_stored,
+        power_graph_total_battery_capacity, power_node_link_valid, read_heater_generator_state,
+        read_impact_reactor_state, read_light_block_state, read_nuclear_reactor_state,
+        read_power_generator_state, read_variable_reactor_state, write_heater_generator_state,
+        write_impact_reactor_state, write_light_block_state, write_nuclear_reactor_state,
+        write_power_generator_state, write_variable_reactor_state, HeaterGeneratorState,
+        ImpactReactorState, LightBlockState, NuclearReactorState, PowerGeneratorState,
+        PowerGraphNode, PowerGraphRuntime, VariableReactorState,
     },
     world::blocks::production::{
         item_incinerator_accept_item, read_beam_drill_state, read_burst_drill_state,
@@ -2036,6 +2037,8 @@ struct GameRuntimePowerNodeMetadata {
 struct GameRuntimeBeamNodeMetadata {
     range: i32,
 }
+
+const BEAM_NODE_MAX_PREVIEW_RANGE: i32 = 30;
 
 fn two_buildings_mut(
     buildings: &mut [BuildingComp],
@@ -4454,6 +4457,108 @@ impl GameRuntime {
             self.refresh_owned_power_graphs_with_content(content);
         }
         changed
+    }
+
+    pub fn owned_beam_node_potential_links_for_block(
+        &self,
+        content: &ContentLoader,
+        block: &Block,
+        target_tile_pos: i32,
+        team: TeamId,
+    ) -> Vec<i32> {
+        if !(block.consumes_power || block.outputs_power)
+            || !block.has_power
+            || !block.connected_power
+        {
+            return Vec::new();
+        }
+
+        let mut closest_by_direction: [Option<(f32, i32)>; 4] = [None; 4];
+        for (beam_index, beam) in self.buildings.iter().enumerate() {
+            if beam.team != team {
+                continue;
+            }
+            if Self::owned_beam_node_metadata(content, beam).is_none() {
+                continue;
+            }
+
+            for beam_direction in 0..4 {
+                let target_direction = (beam_direction + 2) % 4;
+                if !self.owned_beam_node_could_connect_to_block(
+                    content,
+                    beam_index,
+                    beam_direction,
+                    block,
+                    target_tile_pos,
+                ) {
+                    continue;
+                }
+
+                let dx = beam.tile_x() as f32 - point2_x(target_tile_pos) as f32;
+                let dy = beam.tile_y() as f32 - point2_y(target_tile_pos) as f32;
+                let dst2 = dx * dx + dy * dy;
+                if closest_by_direction[target_direction]
+                    .is_none_or(|(closest_dst2, _)| dst2 < closest_dst2)
+                {
+                    closest_by_direction[target_direction] = Some((dst2, beam.tile_pos));
+                }
+            }
+        }
+
+        closest_by_direction
+            .into_iter()
+            .filter_map(|entry| entry.map(|(_, tile_pos)| tile_pos))
+            .collect()
+    }
+
+    fn owned_beam_node_could_connect_to_block(
+        &self,
+        content: &ContentLoader,
+        beam_index: usize,
+        direction: usize,
+        target: &Block,
+        target_tile_pos: i32,
+    ) -> bool {
+        const DIRECTIONS: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+        let Some(beam) = self.buildings.get(beam_index) else {
+            return false;
+        };
+        let Some(metadata) = Self::owned_beam_node_metadata(content, beam) else {
+            return false;
+        };
+        let (dx, dy) = DIRECTIONS[direction];
+        let max_distance = metadata.range.min(BEAM_NODE_MAX_PREVIEW_RANGE);
+        for distance in beam_node_could_connect_scan_range(max_distance, beam.block.size) {
+            let x = beam.tile_x() + distance * dx;
+            let y = beam.tile_y() + distance * dy;
+            let Some(tile) = self.state.world.tile(x, y) else {
+                return false;
+            };
+
+            let blocks_beam = tile.build.is_some_and(|build| {
+                self.building_index_at(build.tile_pos).is_some_and(|index| {
+                    Self::owned_building_is_insulated(content, &self.buildings[index])
+                }) || (build.team == i32::from(beam.team.0)
+                    && content.block(tile.block).is_some_and(|block| {
+                        block.base().has_power && block.base().connected_power
+                    }))
+            });
+            if blocks_beam {
+                return false;
+            }
+
+            if beam_node_within_target_rect(
+                x,
+                y,
+                point2_x(target_tile_pos) as i32,
+                point2_y(target_tile_pos) as i32,
+                target.size,
+            ) {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn refresh_owned_beam_node_links_at(
@@ -18384,6 +18489,80 @@ mod tests {
                 .links,
             vec![beam_pos]
         );
+    }
+
+    #[test]
+    fn game_runtime_beam_node_potential_links_match_block_draw_potential_links() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let beam_def = content.block_by_name("beam-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let target_pos = point2_pack(10, 10);
+        let right_beam_pos = point2_pack(15, 10);
+        let left_beam_pos = point2_pack(5, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            right_beam_pos,
+            beam_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            left_beam_pos,
+            beam_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.owned_beam_node_potential_links_for_block(
+                &content,
+                mender_def.base(),
+                target_pos,
+                TeamId(1),
+            ),
+            vec![right_beam_pos, left_beam_pos]
+        );
+        assert!(runtime
+            .owned_beam_node_potential_links_for_block(
+                &content,
+                mender_def.base(),
+                target_pos,
+                TeamId(2),
+            )
+            .is_empty());
+    }
+
+    #[test]
+    fn game_runtime_beam_node_potential_links_stop_at_insulated_wall_like_java_could_connect() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let beam_def = content.block_by_name("beam-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let wall_def = content.block_by_name("plastanium-wall").unwrap();
+        let target_pos = point2_pack(10, 10);
+        let wall_pos = point2_pack(12, 10);
+        let beam_pos = point2_pack(15, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            beam_pos,
+            beam_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            wall_pos,
+            wall_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert!(runtime
+            .owned_beam_node_potential_links_for_block(
+                &content,
+                mender_def.base(),
+                target_pos,
+                TeamId(1),
+            )
+            .is_empty());
     }
 
     #[test]
