@@ -1156,7 +1156,7 @@ impl PayloadDriverState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PayloadMassDriverState {
     pub link: i32,
     pub turret_rotation: f32,
@@ -1165,6 +1165,11 @@ pub struct PayloadMassDriverState {
     pub charge: f32,
     pub loaded: bool,
     pub charging: bool,
+    pub pay_length: f32,
+    pub effect_delay_timer: f32,
+    pub last_other: Option<i32>,
+    pub waiting_shooters: Vec<i32>,
+    pub rec_payload: Option<PayloadRef>,
 }
 
 impl Default for PayloadMassDriverState {
@@ -1177,6 +1182,11 @@ impl Default for PayloadMassDriverState {
             charge: 0.0,
             loaded: false,
             charging: false,
+            pay_length: 0.0,
+            effect_delay_timer: -1.0,
+            last_other: None,
+            waiting_shooters: Vec::new(),
+            rec_payload: None,
         }
     }
 }
@@ -1245,6 +1255,20 @@ pub fn payload_mass_driver_loaded_pay_length(
     knockback: f32,
 ) -> f32 {
     length - reload_counter * knockback
+}
+
+pub fn payload_mass_driver_move_turret_toward(
+    turret_rotation: &mut f32,
+    target_rotation: f32,
+    rotate_speed: f32,
+    delta: f32,
+    efficiency: f32,
+) {
+    *turret_rotation = move_toward_angle(
+        *turret_rotation,
+        target_rotation,
+        rotate_speed * delta * efficiency,
+    );
 }
 
 pub fn payload_mass_driver_ready_to_fire(
@@ -2034,6 +2058,7 @@ mod tests {
             charge: 10.0,
             loaded: true,
             charging: true,
+            ..PayloadMassDriverState::default()
         };
         let mut bytes = Vec::new();
         write_payload_mass_driver_extra(&mut bytes, &state).unwrap();

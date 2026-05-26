@@ -16,8 +16,8 @@ use crate::mindustry::{
     content::blocks::{
         BlockDef, CampaignBlockKind, CraftingBlockKind, DefenseWallKind, DistributionBlockKind,
         EffectBlockKind, LegacyBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind,
-        PayloadLoaderBlockData, PayloadLoaderBlockKind, PowerBlockKind, ProductionBlockKind,
-        SandboxBlockKind, StorageBlockKind, TurretBlockKind,
+        PayloadLoaderBlockData, PayloadLoaderBlockKind, PayloadMassDriverBlockData, PowerBlockKind,
+        ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -90,7 +90,12 @@ use crate::mindustry::{
         payload_conveyor_update_timing, payload_deconstructor_accept_payload,
         payload_deconstructor_update_progress, payload_loader_accept_payload,
         payload_loader_charge_battery, payload_loader_liquid_flow, payload_loader_should_export,
+        payload_mass_driver_accepting_should_idle, payload_mass_driver_charge_until_fire,
         payload_mass_driver_config_from_relative, payload_mass_driver_config_relative,
+        payload_mass_driver_discharge, payload_mass_driver_idle_next,
+        payload_mass_driver_loaded_pay_length, payload_mass_driver_move_turret_toward,
+        payload_mass_driver_ready_to_fire, payload_mass_driver_reload_tick,
+        payload_mass_driver_reset_after_fire, payload_mass_driver_shooting_should_idle,
         payload_ref_sort_key, payload_router_check_match, payload_router_logic_control,
         payload_router_pick_next_rotation, payload_source_clear_config,
         payload_source_configure_block, payload_source_configure_unit, payload_source_update,
@@ -104,8 +109,8 @@ use crate::mindustry::{
         write_payload_conveyor_extra, write_payload_loader_extra, write_payload_mass_driver_extra,
         write_payload_ref, write_payload_router_extra, write_payload_source_extra,
         BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
-        PayloadDeconstructorState, PayloadLoaderState, PayloadMassDriverState, PayloadRef,
-        PayloadSortKey, PayloadSourceSpawn, PayloadSourceState, Vec2 as PayloadVec2,
+        PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState, PayloadMassDriverState,
+        PayloadRef, PayloadSortKey, PayloadSourceSpawn, PayloadSourceState, Vec2 as PayloadVec2,
         PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
@@ -1420,6 +1425,22 @@ pub struct GameRuntimePayloadDeconstructorFrameReport {
     pub finished_deconstructions: usize,
     pub produced_items: usize,
     pub invalid_payloads: usize,
+    pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimePayloadMassDriverFrameReport {
+    pub visited_buildings: usize,
+    pub mass_driver_candidates: usize,
+    pub updated_mass_drivers: usize,
+    pub invalid_links: usize,
+    pub queued_shooters: usize,
+    pub moved_in_payloads: usize,
+    pub staged_payloads: usize,
+    pub charged_shots: usize,
+    pub fired_payloads: usize,
+    pub received_payloads: usize,
+    pub receive_effects_completed: usize,
     pub missing_runtime_states: usize,
 }
 
@@ -4128,6 +4149,413 @@ impl GameRuntime {
         Some(report)
     }
 
+    pub fn advance_owned_payload_mass_drivers(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimePayloadMassDriverFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+
+        self.refresh_owned_building_update_permissions(content);
+
+        let frame_delta = advanced.delta_ticks as f32;
+        let mut report = GameRuntimePayloadMassDriverFrameReport::default();
+        let mut mass_driver_indices = Vec::new();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, enabled, efficiency, time_scale) = {
+                let building = &mut self.buildings[index];
+                let can_overdrive = content
+                    .block(building.block.id)
+                    .map(BlockDef::can_overdrive)
+                    .unwrap_or(false);
+                building.advance_update_timing(frame_delta, can_overdrive);
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.enabled,
+                    building.efficiency,
+                    building.time_scale,
+                )
+            };
+
+            if !enabled {
+                continue;
+            }
+
+            let Some(BlockDef::PayloadMassDriver(driver_def)) = content.block(block_id) else {
+                continue;
+            };
+            report.mass_driver_candidates += 1;
+            mass_driver_indices.push(index);
+
+            let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
+                self.payload_runtime_states.get(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            let link_index = self.payload_mass_driver_link_index(index, driver.link, driver_def);
+            let link_tile_pos = link_index.map(|link_index| self.buildings[link_index].tile_pos);
+            if driver.link != -1 && link_index.is_none() {
+                report.invalid_links += 1;
+            }
+
+            let has_payload = common.payload.is_some();
+            let mut waiting_shooters = Vec::new();
+            for shooter in driver.waiting_shooters.iter().copied() {
+                if self.payload_mass_driver_waiting_shooter_valid(content, tile_pos, shooter)
+                    && !waiting_shooters.contains(&shooter)
+                {
+                    waiting_shooters.push(shooter);
+                }
+            }
+            let current_shooter_index = waiting_shooters.first().and_then(|tile_pos| {
+                self.buildings
+                    .iter()
+                    .position(|building| building.tile_pos == *tile_pos)
+            });
+            let current_shooter_angle = current_shooter_index.map(|shooter_index| {
+                self.payload_mass_driver_angle_between_buildings(index, shooter_index)
+            });
+            let had_receive_delay = driver.effect_delay_timer > 0.0;
+
+            let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
+                self.payload_runtime_states.get_mut(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            driver.waiting_shooters = waiting_shooters;
+            payload_mass_driver_discharge(
+                &mut driver.charge,
+                driver.charging,
+                frame_delta * time_scale,
+            );
+            driver.effect_delay_timer -= frame_delta * time_scale;
+            if had_receive_delay && driver.effect_delay_timer <= 0.0 && driver.last_other.is_some()
+            {
+                driver.reload_counter = 1.0;
+                driver.last_other = None;
+                driver.rec_payload = None;
+                report.receive_effects_completed += 1;
+            }
+            driver.charging = false;
+
+            if let Some(link_tile_pos) = link_tile_pos {
+                driver.link = link_tile_pos;
+            }
+
+            payload_mass_driver_reload_tick(
+                &mut driver.reload_counter,
+                frame_delta * time_scale * efficiency,
+                driver_def.reload,
+            );
+
+            if driver.state == PayloadDriverState::Idle {
+                driver.state = payload_mass_driver_idle_next(
+                    driver.waiting_shooters.is_empty(),
+                    has_payload,
+                    link_index.is_some(),
+                );
+            }
+
+            match driver.state {
+                PayloadDriverState::Accepting => {
+                    if payload_mass_driver_accepting_should_idle(
+                        current_shooter_index.is_some(),
+                        has_payload,
+                    ) {
+                        driver.state = PayloadDriverState::Idle;
+                    } else if let Some(angle) = current_shooter_angle {
+                        payload_mass_driver_move_turret_toward(
+                            &mut driver.turret_rotation,
+                            angle,
+                            driver_def.rotate_speed,
+                            frame_delta,
+                            efficiency,
+                        );
+                    }
+                }
+                PayloadDriverState::Shooting => {
+                    if payload_mass_driver_shooting_should_idle(
+                        link_index.is_some(),
+                        driver.waiting_shooters.is_empty(),
+                        has_payload,
+                    ) {
+                        driver.state = PayloadDriverState::Idle;
+                    }
+                }
+                PayloadDriverState::Idle => {}
+            }
+
+            common.pay_rotation = common.pay_rotation.rem_euclid(360.0);
+            report.updated_mass_drivers += 1;
+        }
+
+        for index in mass_driver_indices {
+            let tile_pos = self.buildings[index].tile_pos;
+            let Some(BlockDef::PayloadMassDriver(driver_def)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+
+            let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
+                self.payload_runtime_states.get(&tile_pos).cloned()
+            else {
+                continue;
+            };
+
+            if driver.state != PayloadDriverState::Shooting {
+                continue;
+            }
+
+            let Some(link_index) =
+                self.payload_mass_driver_link_index(index, driver.link, driver_def)
+            else {
+                continue;
+            };
+            let target_tile_pos = self.buildings[link_index].tile_pos;
+            let target_rotation =
+                self.payload_mass_driver_angle_between_buildings(index, link_index);
+            let target_snapshot = match self.payload_runtime_states.get(&target_tile_pos) {
+                Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) => {
+                    (common.clone(), driver.clone())
+                }
+                _ => continue,
+            };
+
+            if payload_mass_driver_shooting_should_idle(
+                true,
+                driver.waiting_shooters.is_empty(),
+                common.payload.is_some(),
+            ) {
+                if let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+                    self.payload_runtime_states.get_mut(&tile_pos)
+                {
+                    driver.state = PayloadDriverState::Idle;
+                }
+                continue;
+            }
+
+            let mut moved_out = false;
+            let mut staged_now = false;
+            if let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
+                self.payload_runtime_states.get_mut(&tile_pos)
+            {
+                common.pay_rotation = {
+                    let mut value = common.pay_rotation;
+                    payload_mass_driver_move_turret_toward(
+                        &mut value,
+                        driver.turret_rotation,
+                        driver_def.payload_rotate_speed,
+                        frame_delta,
+                        1.0,
+                    );
+                    value
+                };
+
+                if driver.loaded {
+                    let load_length = payload_mass_driver_loaded_pay_length(
+                        driver_def.length,
+                        driver.reload_counter,
+                        driver_def.knockback,
+                    );
+                    driver.pay_length +=
+                        driver_def.payload_speed * frame_delta * self.buildings[index].time_scale;
+                    if driver.pay_length >= load_length {
+                        driver.pay_length = load_length;
+                        moved_out = true;
+                    }
+                    let radians = driver.turret_rotation.to_radians();
+                    common.pay_vector = PayloadVec2 {
+                        x: radians.cos() * driver.pay_length,
+                        y: radians.sin() * driver.pay_length,
+                    };
+                } else if common.payload.is_some()
+                    && payload_block_move_in(
+                        common,
+                        true,
+                        driver_def.rotate,
+                        self.buildings[index].rotdeg(),
+                        driver_def.payload_speed,
+                        driver_def.payload_rotate_speed,
+                        frame_delta * self.buildings[index].time_scale,
+                    )
+                {
+                    driver.pay_length = 0.0;
+                    driver.loaded = true;
+                    staged_now = true;
+                    report.moved_in_payloads += 1;
+                }
+            }
+            if staged_now {
+                report.staged_payloads += 1;
+            }
+
+            let source_payload = match self.payload_runtime_states.get(&tile_pos) {
+                Some(GameRuntimePayloadBlockState::MassDriver { common, .. }) => {
+                    common.payload.as_ref()
+                }
+                _ => None,
+            };
+            let Some(source_payload) = source_payload else {
+                continue;
+            };
+
+            if !moved_out
+                || target_snapshot.0.payload.is_some()
+                || !Self::payload_mass_driver_payload_fits(content, driver_def, source_payload)
+            {
+                continue;
+            }
+
+            if let Some(GameRuntimePayloadBlockState::MassDriver {
+                common: target_common,
+                driver: target_driver,
+            }) = self.payload_runtime_states.get_mut(&target_tile_pos)
+            {
+                if target_common.payload.is_none()
+                    && !target_driver.waiting_shooters.contains(&tile_pos)
+                {
+                    target_driver.waiting_shooters.push(tile_pos);
+                    report.queued_shooters += 1;
+                }
+            }
+
+            let target_snapshot = match self.payload_runtime_states.get(&target_tile_pos) {
+                Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) => {
+                    (common.clone(), driver.clone())
+                }
+                _ => continue,
+            };
+
+            if let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+                self.payload_runtime_states.get_mut(&tile_pos)
+            {
+                if driver.reload_counter <= 0.0 {
+                    payload_mass_driver_move_turret_toward(
+                        &mut driver.turret_rotation,
+                        target_rotation,
+                        driver_def.rotate_speed,
+                        frame_delta,
+                        self.buildings[index].efficiency,
+                    );
+                }
+            }
+
+            let source_snapshot = match self.payload_runtime_states.get(&tile_pos) {
+                Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) => {
+                    (common.clone(), driver.clone())
+                }
+                _ => continue,
+            };
+
+            let ready = payload_mass_driver_ready_to_fire(
+                moved_out,
+                source_snapshot.0.payload.is_some(),
+                target_snapshot.0.payload.is_none(),
+                source_snapshot.1.reload_counter,
+                target_snapshot
+                    .1
+                    .waiting_shooters
+                    .first()
+                    .map(|shooter| *shooter == tile_pos)
+                    .unwrap_or(false),
+                target_snapshot.1.state,
+                target_snapshot.1.reload_counter,
+                source_snapshot.1.turret_rotation,
+                target_rotation,
+                target_snapshot.1.turret_rotation,
+            );
+
+            let mut should_fire = false;
+            if let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+                self.payload_runtime_states.get_mut(&tile_pos)
+            {
+                should_fire = payload_mass_driver_charge_until_fire(
+                    &mut driver.charge,
+                    frame_delta
+                        * self.buildings[index].time_scale
+                        * self.buildings[index].efficiency,
+                    driver_def.charge_time,
+                    ready,
+                );
+                driver.charging = ready;
+                if ready {
+                    report.charged_shots += 1;
+                }
+            }
+
+            if !should_fire {
+                continue;
+            }
+
+            let Some(payload) = self
+                .payload_runtime_states
+                .get_mut(&tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimePayloadBlockState::MassDriver { common, driver } => {
+                        let payload = common.payload.take()?;
+                        payload_mass_driver_reset_after_fire(driver);
+                        common.pay_vector = PayloadVec2::ZERO;
+                        Some(payload)
+                    }
+                    _ => None,
+                })
+            else {
+                continue;
+            };
+
+            if let Some(GameRuntimePayloadBlockState::MassDriver {
+                common: target_common,
+                driver: target_driver,
+            }) = self.payload_runtime_states.get_mut(&target_tile_pos)
+            {
+                if target_common.payload.is_none() {
+                    let source_pos = PayloadVec2 {
+                        x: self.buildings[index].x,
+                        y: self.buildings[index].y,
+                    };
+                    let target_pos = PayloadVec2 {
+                        x: self.buildings[link_index].x,
+                        y: self.buildings[link_index].y,
+                    };
+                    payload_block_handle_payload(
+                        target_common,
+                        payload.clone(),
+                        target_pos,
+                        source_pos,
+                        source_snapshot.0.pay_rotation,
+                        self.buildings[link_index].block.size,
+                        TILE_SIZE as f32,
+                    );
+                    target_driver.rec_payload = Some(payload);
+                    target_driver.effect_delay_timer = driver_def.transfer_effect_lifetime;
+                    target_driver.last_other = Some(tile_pos);
+                    target_driver.loaded = false;
+                    target_driver.pay_length = 0.0;
+                    target_driver
+                        .waiting_shooters
+                        .retain(|shooter| *shooter != tile_pos);
+                    report.fired_payloads += 1;
+                    report.received_payloads += 1;
+                }
+            }
+        }
+
+        Some(report)
+    }
+
     pub fn advance_owned_payload_loaders(
         &mut self,
         content: &ContentLoader,
@@ -5033,6 +5461,97 @@ impl GameRuntime {
         } else {
             false
         }
+    }
+
+    fn payload_ref_size_tiles(content: &ContentLoader, payload: &PayloadRef) -> Option<f32> {
+        match payload {
+            PayloadRef::Block { block, .. } => {
+                content.block(*block).map(|block| block.base().size as f32)
+            }
+            PayloadRef::Unit { .. } => payload_ref_sort_key(payload)
+                .filter(|key| key.content_type == ContentType::Unit.ordinal() as i8)
+                .and_then(|key| content.unit(key.id))
+                .map(|unit| unit.hit_size / TILE_SIZE as f32),
+        }
+    }
+
+    fn payload_mass_driver_payload_fits(
+        content: &ContentLoader,
+        driver: &PayloadMassDriverBlockData,
+        payload: &PayloadRef,
+    ) -> bool {
+        Self::payload_ref_size_tiles(content, payload)
+            .map(|size| size <= driver.max_payload_size)
+            .unwrap_or(false)
+    }
+
+    fn payload_mass_driver_link_index(
+        &self,
+        source_index: usize,
+        link: i32,
+        driver: &PayloadMassDriverBlockData,
+    ) -> Option<usize> {
+        if link == -1 {
+            return None;
+        }
+        let source = &self.buildings[source_index];
+        let target_index = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == link)?;
+        let target = &self.buildings[target_index];
+        if target.team != source.team || target.block.id != source.block.id {
+            return None;
+        }
+        let dx = target.x - source.x;
+        let dy = target.y - source.y;
+        let dst = (dx * dx + dy * dy).sqrt();
+        (dst <= driver.range).then_some(target_index)
+    }
+
+    fn payload_mass_driver_waiting_shooter_valid(
+        &self,
+        content: &ContentLoader,
+        receiver_tile_pos: i32,
+        shooter_tile_pos: i32,
+    ) -> bool {
+        let Some(shooter_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == shooter_tile_pos)
+        else {
+            return false;
+        };
+        let Some(BlockDef::PayloadMassDriver(shooter_def)) =
+            content.block(self.buildings[shooter_index].block.id)
+        else {
+            return false;
+        };
+        let Some(GameRuntimePayloadBlockState::MassDriver { driver, .. }) =
+            self.payload_runtime_states.get(&shooter_tile_pos)
+        else {
+            return false;
+        };
+        self.payload_mass_driver_link_index(shooter_index, driver.link, shooter_def)
+            .map(|target_index| self.buildings[target_index].tile_pos == receiver_tile_pos)
+            .unwrap_or(false)
+    }
+
+    fn payload_mass_driver_angle_between_buildings(
+        &self,
+        source_index: usize,
+        target_index: usize,
+    ) -> f32 {
+        Self::payload_angle_between(
+            PayloadVec2 {
+                x: self.buildings[source_index].x,
+                y: self.buildings[source_index].y,
+            },
+            PayloadVec2 {
+                x: self.buildings[target_index].x,
+                y: self.buildings[target_index].y,
+            },
+        )
     }
 
     fn transfer_payload_output_to_front(
@@ -5994,7 +6513,8 @@ mod tests {
                 LogicLink, LogicProcessorVariableState, LogicProcessorWaitState,
             },
             blocks::payloads::{
-                write_block_producer_progress, write_constructor_recipe, write_deconstructor_extra,
+                payload_mass_driver_loaded_pay_length, write_block_producer_progress,
+                write_constructor_recipe, write_deconstructor_extra,
                 write_payload_block_build_common, write_payload_conveyor_extra,
                 write_payload_loader_extra, write_payload_mass_driver_extra, write_payload_ref,
                 write_payload_router_extra, write_payload_source_extra, BlockProducerState,
@@ -8547,6 +9067,7 @@ mod tests {
             charge: 0.75,
             loaded: true,
             charging: true,
+            ..PayloadMassDriverState::default()
         };
         assert_eq!(
             roundtrip_exported_payload_state(
@@ -8556,7 +9077,7 @@ mod tests {
                 26,
                 GameRuntimePayloadBlockState::MassDriver {
                     common: common.clone(),
-                    driver,
+                    driver: driver.clone(),
                 },
             ),
             Some(GameRuntimePayloadBlockState::MassDriver {
@@ -9736,6 +10257,7 @@ mod tests {
             charge: 12.0,
             loaded: true,
             charging: true,
+            ..PayloadMassDriverState::default()
         };
         let mut building_bytes = Vec::new();
         building_bytes.push(1);
@@ -9863,6 +10385,105 @@ mod tests {
         };
         assert_eq!(driver.link, -1);
         assert_eq!(runtime.buildings[0].config, None);
+    }
+
+    #[test]
+    fn game_runtime_advances_owned_payload_mass_driver_queues_and_fires_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("payload-mass-driver").unwrap();
+        let driver_data = match driver_def {
+            BlockDef::PayloadMassDriver(driver) => driver,
+            _ => panic!("payload-mass-driver should use payload mass driver data"),
+        };
+        let source_tile = point2_pack(4, 4);
+        let target_tile = point2_pack(8, 4);
+        let payload = base_only_build_payload_ref(&content, "router");
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(16, 10);
+        runtime.add_building(BuildingComp::new(
+            source_tile,
+            driver_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.add_building(BuildingComp::new(
+            target_tile,
+            driver_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState {
+                    payload: Some(payload.clone()),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                driver: PayloadMassDriverState {
+                    link: target_tile,
+                    turret_rotation: 0.0,
+                    state: PayloadDriverState::Shooting,
+                    reload_counter: 0.0,
+                    charge: driver_data.charge_time,
+                    loaded: true,
+                    charging: true,
+                    pay_length: payload_mass_driver_loaded_pay_length(
+                        driver_data.length,
+                        0.0,
+                        driver_data.knockback,
+                    ),
+                    ..PayloadMassDriverState::default()
+                },
+            },
+        );
+        runtime.payload_runtime_states.insert(
+            target_tile,
+            GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState::default(),
+                driver: PayloadMassDriverState {
+                    turret_rotation: 180.0,
+                    state: PayloadDriverState::Accepting,
+                    waiting_shooters: vec![source_tile],
+                    ..PayloadMassDriverState::default()
+                },
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_mass_drivers(&content, 1.0 / 60.0)
+            .expect("mass driver frame should advance");
+
+        assert_eq!(report.mass_driver_candidates, 2);
+        assert_eq!(report.charged_shots, 1);
+        assert_eq!(report.fired_payloads, 1);
+        assert_eq!(report.received_payloads, 1);
+
+        let Some(GameRuntimePayloadBlockState::MassDriver {
+            common: source_common,
+            driver: source_driver,
+        }) = runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("source mass driver state should remain present");
+        };
+        assert_eq!(source_common.payload, None);
+        assert_eq!(source_driver.state, PayloadDriverState::Idle);
+        assert_eq!(source_driver.reload_counter, 1.0);
+        assert!(!source_driver.loaded);
+
+        let Some(GameRuntimePayloadBlockState::MassDriver {
+            common: target_common,
+            driver: target_driver,
+        }) = runtime.payload_runtime_states.get(&target_tile)
+        else {
+            panic!("target mass driver state should remain present");
+        };
+        assert_eq!(target_common.payload, Some(payload.clone()));
+        assert_eq!(target_driver.rec_payload, Some(payload));
+        assert_eq!(target_driver.last_other, Some(source_tile));
+        assert!(target_driver.effect_delay_timer > 0.0);
+        assert!(target_driver.waiting_shooters.is_empty());
     }
 
     #[test]
