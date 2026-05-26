@@ -14020,6 +14020,175 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_applies_client_continuous_liquid_turret_snapshot_preserving_rotation_reload_with_content(
+    ) {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret = content
+            .block_by_name("sublimate")
+            .expect("base content should include sublimate")
+            .base()
+            .clone();
+        let tile_pos = point2_pack(5, 2);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(tile_pos, turret.clone(), TeamId(6)));
+        let existing_turret = TurretState {
+            reload_counter: 5.0,
+            rotation: 95.0,
+            ..TurretState::default()
+        };
+        runtime.turret_runtime_states.insert(
+            tile_pos,
+            GameRuntimeTurretBlockState::Continuous {
+                turret: existing_turret.clone(),
+                continuous: ContinuousTurretState {
+                    last_length: 16.0,
+                    bullets: 1,
+                },
+            },
+        );
+
+        let mut synced_building = BuildingComp::new(tile_pos, turret.clone(), TeamId(6));
+        synced_building.health = 31.0;
+        synced_building.set_rotation(1);
+        let incoming_turret = TurretState {
+            reload_counter: 13.0,
+            rotation: 210.0,
+            ..TurretState::default()
+        };
+        let incoming_continuous = ContinuousTurretState {
+            last_length: 42.0,
+            bullets: 3,
+        };
+        let mut sync_bytes = Vec::new();
+        synced_building.write_base(&mut sync_bytes, false).unwrap();
+        turret_write_child(&mut sync_bytes, &incoming_turret).unwrap();
+        continuous_turret_write_child(&mut sync_bytes, &incoming_continuous).unwrap();
+
+        let report = runtime.apply_client_block_snapshot_record_with_content(
+            &content, tile_pos, turret.id, sync_bytes,
+        );
+        assert_eq!(report.block_records_applied, 1);
+        assert_eq!(report.block_base_records_applied, 1);
+        assert_eq!(report.block_child_records_applied, 1);
+        assert_eq!(report.block_remaining_sync_bytes, 0);
+        let building = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert_eq!(building.health, 31.0);
+        assert_eq!(building.rotation, 1);
+
+        let mut expected_turret = incoming_turret;
+        expected_turret.rotation = existing_turret.rotation;
+        expected_turret.reload_counter = existing_turret.reload_counter;
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::Continuous {
+                turret: expected_turret,
+                continuous: ContinuousTurretState {
+                    bullets: 0,
+                    ..incoming_continuous
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_liquid_and_laser_turret_snapshots_preserving_rotation_reload_with_content(
+    ) {
+        fn assert_generic_turret_snapshot_preserves(
+            content: &ContentLoader,
+            block_name: &str,
+            tile_pos: i32,
+            health: f32,
+            building_rotation: i32,
+            existing_turret: TurretState,
+            incoming_turret: TurretState,
+        ) {
+            let turret = content
+                .block_by_name(block_name)
+                .unwrap_or_else(|| panic!("base content should include {block_name}"))
+                .base()
+                .clone();
+            let mut runtime = GameRuntime::default();
+            runtime.state.world.resize(8, 8);
+            runtime.add_building(BuildingComp::new(tile_pos, turret.clone(), TeamId(6)));
+            runtime.turret_runtime_states.insert(
+                tile_pos,
+                GameRuntimeTurretBlockState::Generic(existing_turret.clone()),
+            );
+
+            let mut synced_building = BuildingComp::new(tile_pos, turret.clone(), TeamId(6));
+            synced_building.health = health;
+            synced_building.set_rotation(building_rotation);
+            let mut sync_bytes = Vec::new();
+            synced_building.write_base(&mut sync_bytes, false).unwrap();
+            turret_write_child(&mut sync_bytes, &incoming_turret).unwrap();
+
+            let report = runtime.apply_client_block_snapshot_record_with_content(
+                content, tile_pos, turret.id, sync_bytes,
+            );
+            assert_eq!(report.block_records_applied, 1);
+            assert_eq!(report.block_base_records_applied, 1);
+            assert_eq!(report.block_child_records_applied, 1);
+            assert_eq!(report.block_remaining_sync_bytes, 0);
+            let building = runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == tile_pos)
+                .unwrap();
+            assert_eq!(building.health, health);
+            assert_eq!(building.rotation, building_rotation);
+
+            let mut expected_turret = incoming_turret;
+            expected_turret.rotation = existing_turret.rotation;
+            expected_turret.reload_counter = existing_turret.reload_counter;
+            assert_eq!(
+                runtime.turret_runtime_states.get(&tile_pos),
+                Some(&GameRuntimeTurretBlockState::Generic(expected_turret))
+            );
+        }
+
+        let content = ContentLoader::create_base_content().unwrap();
+        assert_generic_turret_snapshot_preserves(
+            &content,
+            "wave",
+            point2_pack(6, 2),
+            33.0,
+            2,
+            TurretState {
+                reload_counter: 6.0,
+                rotation: 115.0,
+                ..TurretState::default()
+            },
+            TurretState {
+                reload_counter: 14.0,
+                rotation: 240.0,
+                ..TurretState::default()
+            },
+        );
+        assert_generic_turret_snapshot_preserves(
+            &content,
+            "meltdown",
+            point2_pack(7, 2),
+            35.0,
+            3,
+            TurretState {
+                reload_counter: 7.0,
+                rotation: 135.0,
+                ..TurretState::default()
+            },
+            TurretState {
+                reload_counter: 15.0,
+                rotation: 270.0,
+                ..TurretState::default()
+            },
+        );
+    }
+
+    #[test]
     fn game_runtime_preserves_payload_ammo_turret_snapshot_rotation_reload_after_reading_payloads()
     {
         let content = ContentLoader::create_base_content().unwrap();

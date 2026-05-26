@@ -2038,6 +2038,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：`ContinuousLiquidTurret/LiquidTurret/LaserTurret` 可继续补同类 content-level 单测；真实联机 smoke 当前只覆盖 `ItemTurret`。
 
+### 12.36 Turret `readSync` content-level 覆盖补齐 ContinuousLiquid/Liquid/Laser
+
+- 2026-05-26：继续补齐 Java `TurretBuild.readSync(...)` 保留语义在剩余 content-level turret kind 上的覆盖：
+  - `sublimate` / `ContinuousLiquidTurret`：走 `GameRuntimeTurretBlockState::Continuous` + revision 3；
+  - `wave` / `LiquidTurret`：走 `GameRuntimeTurretBlockState::Generic` + revision 1；
+  - `meltdown` / `LaserTurret`：走 `GameRuntimeTurretBlockState::Generic` + revision 1。
+- 新增测试：
+  - `game_runtime_applies_client_continuous_liquid_turret_snapshot_preserving_rotation_reload_with_content`
+  - `game_runtime_applies_client_liquid_and_laser_turret_snapshots_preserving_rotation_reload_with_content`
+- 至此 core content-level 已覆盖 `ItemTurret/PowerTurret/LiquidTurret/LaserTurret/ContinuousTurret/ContinuousLiquidTurret` 的 client BlockSnapshot 保留路径；`PayloadAmmoTurret` 仍使用自定义 block reader 覆盖，因为基础 content 暂无注册项。
+- 已验证：
+  - `cargo test -p mindustry-core rotation_reload --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：真实联机 smoke 当前只覆盖 `ItemTurret`；如果继续沿 turret 方向推进，可补 `Continuous` 或 `Generic` 的 server→desktop smoke。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

@@ -1741,3 +1741,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 继续给 `ContinuousLiquidTurret/LiquidTurret/LaserTurret` 补同类 content-level 单测。
   2. 或转入 entity snapshot typed runtime，把 raw entity sidecar 接入真实 entity pool/mirror。
+
+---
+
+## 50. 最新闭环记录：ContinuousLiquid/Liquid/Laser Turret readSync 保留单测
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：收敛 49 中剩余的 content-level turret kind 覆盖缺口。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：
+  - `game_runtime_applies_client_continuous_liquid_turret_snapshot_preserving_rotation_reload_with_content`
+  - `game_runtime_applies_client_liquid_and_laser_turret_snapshots_preserving_rotation_reload_with_content`
+- 覆盖说明：
+  - `sublimate`/ContinuousLiquidTurret：真实 content + client BlockSnapshot child-tail dispatcher；
+  - `wave`/LiquidTurret 与 `meltdown`/LaserTurret：真实 content + Generic turret child-tail reader；
+  - 断言 building base 更新，但 `TurretState.rotation/reload_counter` 保留旧值。
+- 已跑：
+  - `cargo test -p mindustry-core rotation_reload --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 如果继续 turret 路线：补 `Continuous` 或 `Generic` 的真实 server→desktop smoke。
+  2. 如果转入更大互通缺口：推进 entity snapshot typed runtime。
