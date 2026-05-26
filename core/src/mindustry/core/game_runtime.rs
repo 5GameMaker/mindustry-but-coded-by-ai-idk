@@ -62,13 +62,14 @@ use crate::mindustry::{
         read_directional_unloader_state, read_duct_junction_state, read_duct_router_state,
         read_duct_state, read_item_bridge_state, read_mass_driver_state,
         read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
-        sorter_rejects_instant_three_chain, sorter_should_direct, write_buffered_bridge_state,
-        write_conveyor_state, write_directional_unloader_state, write_duct_junction_state,
-        write_duct_router_state, write_duct_state, write_item_bridge_state,
-        write_mass_driver_state, write_sorter_state, write_stack_conveyor_state,
-        BufferedItemBridgeState, ConveyorItemState, ConveyorState, DirectionalUnloaderState,
-        DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState, MassDriverState,
-        OverflowRoute, SideRoute, SorterState, StackConveyorState, CONVEYOR_CAPACITY,
+        sorter_rejects_instant_three_chain, sorter_should_direct, stack_conveyor_accept_item,
+        stack_conveyor_cooldown_step, write_buffered_bridge_state, write_conveyor_state,
+        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
+        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
+        write_stack_conveyor_state, BufferedItemBridgeState, ConveyorItemState, ConveyorState,
+        DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
+        MassDriverState, OverflowRoute, SideRoute, SorterState, StackConveyorState,
+        StackConveyorStateKind, CONVEYOR_CAPACITY,
     },
     world::blocks::heat::{read_heat_producer_state, write_heat_producer_state, HeatProducerState},
     world::blocks::legacy::{
@@ -1445,6 +1446,17 @@ pub struct GameRuntimeItemDuctFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeStackConveyorFrameReport {
+    pub visited_buildings: usize,
+    pub stack_candidates: usize,
+    pub updated_stacks: usize,
+    pub attempted_moves: usize,
+    pub moved_stacks: usize,
+    pub dumped_items: usize,
+    pub missing_targets: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeDuctBridgeFrameReport {
     pub visited_buildings: usize,
     pub bridge_candidates: usize,
@@ -1499,6 +1511,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub router_forwarded_items: usize,
     pub duct_forwarded_items: usize,
     pub duct_bridge_forwarded_items: usize,
+    pub stack_conveyor_forwarded_items: usize,
     pub bridge_forwarded_items: usize,
     pub junction_forwarded_items: usize,
 }
@@ -4855,6 +4868,9 @@ impl GameRuntime {
         let duct_bridge_report = self.advance_owned_duct_bridges_ticks(content, frame_delta);
         report.duct_bridge_forwarded_items +=
             duct_bridge_report.moved_items + duct_bridge_report.dumped_items;
+        let stack_report = self.advance_owned_stack_conveyors_ticks(content, frame_delta);
+        report.stack_conveyor_forwarded_items +=
+            stack_report.moved_stacks + stack_report.dumped_items;
         report.bridge_forwarded_items += self
             .advance_owned_item_bridges_ticks(content, frame_delta)
             .moved_items;
@@ -5071,6 +5087,14 @@ impl GameRuntime {
         );
         if target_is_duct_bridge {
             return self.dump_item_to_duct_bridge(content, source_index, target_index, item_id);
+        }
+        let target_is_stack_conveyor = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::StackConveyor
+        );
+        if target_is_stack_conveyor {
+            return self.dump_item_to_stack_conveyor(content, source_index, target_index, item_id);
         }
         let target_is_conveyor = matches!(
             content.block(self.buildings[target_index].block.id),
@@ -6223,6 +6247,29 @@ impl GameRuntime {
                 self.ensure_duct_bridge_state(target_tile_pos);
                 true
             }
+            DistributionBlockKind::StackConveyor => {
+                let was_empty = self.buildings[target_index]
+                    .items
+                    .as_ref()
+                    .is_none_or(|items| items.empty());
+                let item_capacity = self.buildings[target_index].block.item_capacity;
+                let Some(target_items) = self.buildings[target_index].items.as_mut() else {
+                    return false;
+                };
+                if target_items.total() >= item_capacity
+                    || (target_items.any() && target_items.get(item_id) <= 0)
+                {
+                    return false;
+                }
+                target_items.add(item_id, 1);
+                let state = self.ensure_stack_conveyor_state(target_tile_pos);
+                if was_empty {
+                    state.link = target_tile_pos;
+                    state.cooldown = 0.0;
+                }
+                state.last_item = Some(item_id);
+                true
+            }
             DistributionBlockKind::Router => {
                 let item_capacity = self.buildings[target_index].block.item_capacity;
                 let Some(target_items) = self.buildings[target_index].items.as_mut() else {
@@ -6384,6 +6431,311 @@ impl GameRuntime {
             .map(|item| item.base.mappable.base.id)
             .find(|item_id| items.get(*item_id) > 0)
             .or_else(|| items.each().map(|(item_id, _)| item_id).next())
+    }
+
+    pub fn advance_owned_stack_conveyors(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeStackConveyorFrameReport> {
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        Some(self.advance_owned_stack_conveyors_ticks(content, advanced.delta_ticks as f32))
+    }
+
+    fn advance_owned_stack_conveyors_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeStackConveyorFrameReport {
+        let mut report = GameRuntimeStackConveyorFrameReport::default();
+        let stack_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                report.visited_buildings += 1;
+                match content.block(building.block.id) {
+                    Some(BlockDef::Distribution(distribution))
+                        if distribution.kind == DistributionBlockKind::StackConveyor =>
+                    {
+                        report.stack_candidates += 1;
+                        Some(index)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for index in stack_indices {
+            let Some(BlockDef::Distribution(stack_block)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+            let tile_pos = self.buildings[index].tile_pos;
+            let enabled = self.buildings[index].enabled;
+            let efficiency = self.buildings[index].efficiency;
+            let eff = if enabled {
+                efficiency + stack_block.base_efficiency
+            } else {
+                1.0
+            };
+            {
+                let state = self.ensure_stack_conveyor_state(tile_pos);
+                if state.cooldown > 0.0 {
+                    state.cooldown = stack_conveyor_cooldown_step(
+                        state.cooldown,
+                        stack_block.speed,
+                        eff,
+                        frame_delta,
+                        stack_block.recharge,
+                    );
+                }
+            }
+
+            let mut state = self.stack_conveyor_state(tile_pos);
+            if state.link == -1 || state.cooldown > 0.0 {
+                self.distribution_runtime_states.insert(
+                    tile_pos,
+                    GameRuntimeDistributionBlockState::StackConveyor(state),
+                );
+                report.updated_stacks += 1;
+                continue;
+            }
+
+            if state.last_item.is_none_or(|item| {
+                !self.buildings[index]
+                    .items
+                    .as_ref()
+                    .is_some_and(|items| items.get(item) > 0)
+            }) {
+                state.last_item = self.first_item_id_from_building(content, index);
+            }
+            self.distribution_runtime_states.insert(
+                tile_pos,
+                GameRuntimeDistributionBlockState::StackConveyor(state),
+            );
+
+            if !enabled {
+                report.updated_stacks += 1;
+                continue;
+            }
+
+            let state_kind = self.stack_conveyor_state_kind(content, index);
+            match state_kind {
+                StackConveyorStateKind::Unload => {
+                    while let Some(item_id) = self.stack_conveyor_state(tile_pos).last_item {
+                        report.attempted_moves += 1;
+                        if !self.stack_conveyor_dump_current_item(content, index, item_id) {
+                            report.missing_targets += 1;
+                            break;
+                        }
+                        report.dumped_items += 1;
+                        if !self.buildings[index]
+                            .items
+                            .as_ref()
+                            .is_some_and(|items| items.get(item_id) > 0)
+                        {
+                            let state = self.ensure_stack_conveyor_state(tile_pos);
+                            state.last_item = None;
+                            state.link = -1;
+                            break;
+                        }
+                    }
+                }
+                StackConveyorStateKind::Move | StackConveyorStateKind::Load => {
+                    let should_transfer = state_kind != StackConveyorStateKind::Load
+                        || self.buildings[index].items.as_ref().is_some_and(|items| {
+                            items.total() >= self.buildings[index].block.item_capacity
+                        });
+                    if should_transfer {
+                        report.attempted_moves += 1;
+                        if self.stack_conveyor_transfer_to_front_stack(content, index) {
+                            report.moved_stacks += 1;
+                        } else {
+                            report.missing_targets += 1;
+                        }
+                    }
+                }
+            }
+            report.updated_stacks += 1;
+        }
+
+        report
+    }
+
+    fn stack_conveyor_state(&self, tile_pos: i32) -> StackConveyorState {
+        match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::StackConveyor(state)) => *state,
+            _ => StackConveyorState {
+                link: -1,
+                cooldown: 0.0,
+                last_item: None,
+            },
+        }
+    }
+
+    fn ensure_stack_conveyor_state(&mut self, tile_pos: i32) -> &mut StackConveyorState {
+        let entry = self
+            .distribution_runtime_states
+            .entry(tile_pos)
+            .or_insert_with(|| {
+                GameRuntimeDistributionBlockState::StackConveyor(StackConveyorState {
+                    link: -1,
+                    cooldown: 0.0,
+                    last_item: None,
+                })
+            });
+        let GameRuntimeDistributionBlockState::StackConveyor(state) = entry else {
+            *entry = GameRuntimeDistributionBlockState::StackConveyor(StackConveyorState {
+                link: -1,
+                cooldown: 0.0,
+                last_item: None,
+            });
+            let GameRuntimeDistributionBlockState::StackConveyor(state) = entry else {
+                unreachable!("stack conveyor state was just inserted")
+            };
+            return state;
+        };
+        state
+    }
+
+    fn stack_conveyor_state_kind(
+        &self,
+        content: &ContentLoader,
+        index: usize,
+    ) -> StackConveyorStateKind {
+        let Some(building) = self.buildings.get(index) else {
+            return StackConveyorStateKind::Move;
+        };
+        let Some(BlockDef::Distribution(stack_block)) = content.block(building.block.id) else {
+            return StackConveyorStateKind::Move;
+        };
+        let front_stack = self
+            .neighbor_building_index(index, building.rotation)
+            .and_then(|front| self.buildings.get(front))
+            .is_some_and(|front| {
+                front.team == building.team && front.block.id == building.block.id
+            });
+        let back_stack = self
+            .neighbor_building_index(index, (building.rotation + 2).rem_euclid(4))
+            .and_then(|back| self.buildings.get(back))
+            .is_some_and(|back| back.team == building.team && back.block.id == building.block.id);
+        if front_stack && !back_stack {
+            StackConveyorStateKind::Load
+        } else if !front_stack && back_stack && stack_block.output_router {
+            StackConveyorStateKind::Unload
+        } else {
+            StackConveyorStateKind::Move
+        }
+    }
+
+    fn stack_conveyor_dump_current_item(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        let rotation = self.buildings[source_index].rotation;
+        if let Some(target_index) = self.neighbor_building_index(source_index, rotation) {
+            if self.dump_item_to_target(content, source_index, target_index, item_id) {
+                return true;
+            }
+        }
+        self.dump_one_item_from_building(content, source_index)
+    }
+
+    fn stack_conveyor_transfer_to_front_stack(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+    ) -> bool {
+        let rotation = self.buildings[source_index].rotation;
+        let Some(front_index) = self.neighbor_building_index(source_index, rotation) else {
+            return false;
+        };
+        if !matches!(
+            content.block(self.buildings[front_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::StackConveyor
+        ) || self.buildings[front_index].team != self.buildings[source_index].team
+        {
+            return false;
+        }
+        let front_tile_pos = self.buildings[front_index].tile_pos;
+        if self.stack_conveyor_state(front_tile_pos).link != -1 {
+            return false;
+        }
+
+        let source_tile_pos = self.buildings[source_index].tile_pos;
+        let last_item = self.stack_conveyor_state(source_tile_pos).last_item;
+        let source_entries: Vec<_> = self.buildings[source_index]
+            .items
+            .as_ref()
+            .map(|items| items.each().collect())
+            .unwrap_or_default();
+        if source_entries.is_empty() {
+            return false;
+        }
+
+        {
+            let (source, target) = if source_index < front_index {
+                let (left, right) = self.buildings.split_at_mut(front_index);
+                (&mut left[source_index], &mut right[0])
+            } else {
+                let (left, right) = self.buildings.split_at_mut(source_index);
+                (&mut right[0], &mut left[front_index])
+            };
+            let Some(source_items) = source.items.as_mut() else {
+                return false;
+            };
+            let Some(target_items) = target.items.as_mut() else {
+                return false;
+            };
+            if target_items.total() > 0 {
+                return false;
+            }
+            for (item, amount) in &source_entries {
+                target_items.add(*item, *amount);
+            }
+            source_items.clear();
+        }
+
+        let recharge = self
+            .content_stack_conveyor_recharge(content, source_index)
+            .unwrap_or(2.0);
+        {
+            let source_state = self.ensure_stack_conveyor_state(source_tile_pos);
+            source_state.link = -1;
+            source_state.cooldown = recharge;
+            source_state.last_item = None;
+        }
+        {
+            let target_state = self.ensure_stack_conveyor_state(front_tile_pos);
+            target_state.link = source_tile_pos;
+            target_state.cooldown = 1.0;
+            target_state.last_item =
+                last_item.or_else(|| source_entries.first().map(|(item, _)| *item));
+        }
+        true
+    }
+
+    fn content_stack_conveyor_recharge(
+        &self,
+        content: &ContentLoader,
+        index: usize,
+    ) -> Option<f32> {
+        match content.block(self.buildings.get(index)?.block.id) {
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::StackConveyor =>
+            {
+                Some(distribution.recharge)
+            }
+            _ => None,
+        }
     }
 
     pub fn advance_owned_duct_bridges(
@@ -7096,6 +7448,59 @@ impl GameRuntime {
         true
     }
 
+    fn dump_item_to_stack_conveyor(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        if !self.dump_target_accepts_item(content, source_index, target_index, item_id) {
+            return false;
+        }
+        let target_tile_pos = self.buildings[target_index].tile_pos;
+        let was_empty = self.buildings[target_index]
+            .items
+            .as_ref()
+            .is_none_or(|items| items.empty());
+
+        {
+            let (source, target) = if source_index < target_index {
+                let (left, right) = self.buildings.split_at_mut(target_index);
+                (&mut left[source_index], &mut right[0])
+            } else {
+                let (left, right) = self.buildings.split_at_mut(source_index);
+                (&mut right[0], &mut left[target_index])
+            };
+
+            let Some(source_items) = source.items.as_mut() else {
+                return false;
+            };
+            if source_items.get(item_id) <= 0 {
+                return false;
+            }
+            let Some(target_items) = target.items.as_mut() else {
+                return false;
+            };
+            if target_items.total() >= target.block.item_capacity
+                || (target_items.any() && target_items.get(item_id) <= 0)
+            {
+                return false;
+            }
+
+            source_items.remove(item_id, 1);
+            target_items.add(item_id, 1);
+        }
+
+        let state = self.ensure_stack_conveyor_state(target_tile_pos);
+        if was_empty {
+            state.link = target_tile_pos;
+            state.cooldown = 0.0;
+        }
+        state.last_item = Some(item_id);
+        true
+    }
+
     fn dump_item_to_duct(
         &mut self,
         content: &ContentLoader,
@@ -7522,6 +7927,30 @@ impl GameRuntime {
                 if distribution.kind == DistributionBlockKind::DuctBridge =>
             {
                 self.duct_bridge_accepts_item(content, source_index, target_index)
+            }
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::StackConveyor =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                let item_total = items.total();
+                let items_empty_or_same = items.empty() || items.get(item_id) > 0;
+                let state = self.stack_conveyor_state(target.tile_pos);
+                let state_kind = self.stack_conveyor_state_kind(content, target_index);
+                let source_is_front = self.neighbor_building_index(target_index, target.rotation)
+                    == Some(source_index);
+                stack_conveyor_accept_item(
+                    source_index == target_index,
+                    item_total,
+                    target.block.item_capacity,
+                    items_empty_or_same,
+                    state.cooldown,
+                    distribution.recharge,
+                    state_kind,
+                    target.block.item_capacity,
+                    source_is_front,
+                )
             }
             Some(BlockDef::Distribution(distribution))
                 if distribution.kind == DistributionBlockKind::Duct =>
@@ -15168,6 +15597,121 @@ mod tests {
 
         assert_eq!(payload.first().copied(), Some(0));
         assert_eq!(payload, base_payload);
+    }
+
+    #[test]
+    fn game_runtime_stack_conveyor_accepts_input_when_it_is_loading_dock() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let stack_def = content.block_by_name("plastanium-conveyor").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(3, 4);
+        let load_tile = point2_pack(4, 4);
+        let next_tile = point2_pack(5, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let load_building = BuildingComp::new(load_tile, stack_def.base().clone(), TeamId(6));
+        let next_building = BuildingComp::new(next_tile, stack_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(load_building);
+        runtime.add_building(next_building);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        let Some(GameRuntimeDistributionBlockState::StackConveyor(state)) =
+            runtime.distribution_runtime_states.get(&load_tile)
+        else {
+            panic!("stack conveyor sidecar should be created by handleItem");
+        };
+        assert_eq!(state.link, load_tile);
+        assert_eq!(state.last_item, Some(copper));
+    }
+
+    #[test]
+    fn game_runtime_stack_conveyor_transfers_full_stack_and_unloads_to_real_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let stack_def = content.block_by_name("plastanium-conveyor").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let load_tile = point2_pack(4, 4);
+        let unload_tile = point2_pack(5, 4);
+        let item_void_tile = point2_pack(6, 4);
+        let mut load_building = BuildingComp::new(load_tile, stack_def.base().clone(), TeamId(6));
+        load_building
+            .items
+            .as_mut()
+            .unwrap()
+            .add(copper, stack_def.base().item_capacity);
+        let unload_building = BuildingComp::new(unload_tile, stack_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(load_building);
+        runtime.add_building(unload_building);
+        runtime.add_building(item_void_building);
+        runtime.distribution_runtime_states.insert(
+            load_tile,
+            GameRuntimeDistributionBlockState::StackConveyor(StackConveyorState {
+                link: load_tile,
+                cooldown: 0.0,
+                last_item: Some(copper),
+            }),
+        );
+
+        let transfer_report = runtime
+            .advance_owned_stack_conveyors(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(transfer_report.moved_stacks, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().total(), 0);
+        assert_eq!(
+            runtime.buildings[1].items.as_ref().unwrap().get(copper),
+            stack_def.base().item_capacity
+        );
+        let Some(GameRuntimeDistributionBlockState::StackConveyor(unload_state)) =
+            runtime.distribution_runtime_states.get(&unload_tile)
+        else {
+            panic!("unload stack sidecar should receive transferred stack");
+        };
+        assert_eq!(unload_state.link, load_tile);
+        assert_eq!(unload_state.last_item, Some(copper));
+
+        let unload_report = runtime
+            .advance_owned_stack_conveyors(&content, 16.0 / 60.0)
+            .unwrap();
+        assert_eq!(
+            unload_report.dumped_items,
+            stack_def.base().item_capacity as usize
+        );
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 0);
+        let Some(GameRuntimeDistributionBlockState::StackConveyor(unload_state)) =
+            runtime.distribution_runtime_states.get(&unload_tile)
+        else {
+            panic!("unload stack sidecar should remain present");
+        };
+        assert_eq!(unload_state.link, -1);
+        assert_eq!(unload_state.last_item, None);
+        assert!(runtime.buildings[2].items.is_none());
     }
 
     #[test]
