@@ -12,8 +12,8 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::io::{
-    read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync, read_unit_sync,
-    read_weather_state_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
+    read_bullet_sync, read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync,
+    read_unit_sync, read_weather_state_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
@@ -371,6 +371,25 @@ impl DesktopLauncher {
                         .apply_client_player_snapshot_record(entity_id, player_sync);
                     report.entity_typed_records_applied += 1;
                 }
+                Some(EntityClassKind::Bullet) => {
+                    let Ok(bullet_sync) = read_bullet_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    if self.runtime.apply_client_bullet_sync_wire(
+                        &self.content_loader,
+                        entity_id,
+                        &bullet_sync,
+                    ) {
+                        report.entity_typed_records_applied += 1;
+                    }
+                }
                 Some(EntityClassKind::Decal) => {
                     let Ok(decal_sync) = read_decal_sync(&mut read) else {
                         report.entity_parse_errors += 1;
@@ -699,8 +718,8 @@ mod tests {
     };
     use mindustry_core::mindustry::{
         entities::{
-            comp::BuildingComp, PlayerComp, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
-            PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+            comp::BuildingComp, PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
+            FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -1666,6 +1685,23 @@ mod tests {
         };
         let mut unit_bytes = Vec::new();
         type_io::write_unit_sync(&mut unit_bytes, &launcher.content_loader, &unit_sync).unwrap();
+        let bullet_sync = type_io::BulletSyncWire {
+            collided: vec![7, 9],
+            damage: 33.0,
+            data: TypeValue::String("spark-bullet".into()),
+            fdata: 2.5,
+            lifetime: 120.0,
+            owner: type_io::EntityRef::new(8801),
+            rotation: 180.0,
+            team: TeamId(4),
+            time: 10.0,
+            bullet_type_id: 1,
+            vel: IoVec2 { x: -0.25, y: 1.5 },
+            x: 20.0,
+            y: 40.0,
+        };
+        let mut bullet_bytes = Vec::new();
+        type_io::write_bullet_sync(&mut bullet_bytes, &bullet_sync).unwrap();
         let effect_sync = type_io::EffectStateSyncWire {
             color: type_io::RgbaColor::new(0x336699cc),
             data: TypeValue::String("spark".into()),
@@ -1745,6 +1781,9 @@ mod tests {
         data.extend_from_slice(&8801i32.to_be_bytes());
         data.push(2);
         data.extend_from_slice(&unit_bytes);
+        data.extend_from_slice(&9800i32.to_be_bytes());
+        data.push(BULLET_CLASS_ID);
+        data.extend_from_slice(&bullet_bytes);
         data.extend_from_slice(&9801i32.to_be_bytes());
         data.push(EFFECT_STATE_CLASS_ID);
         data.extend_from_slice(&effect_bytes);
@@ -1767,7 +1806,7 @@ mod tests {
             state
                 .entity_snapshot_mirrors
                 .push(ClientEntitySnapshotMirror {
-                    amount: 7,
+                    amount: 8,
                     data,
                     records: Vec::new(),
                     parse_error: Some(
@@ -1780,10 +1819,10 @@ mod tests {
         launcher.update();
 
         let report = launcher.last_client_snapshot_apply_report.expect(
-            "mixed fallback should apply player, unit, decal, effect, fire, puddle and weather records",
+            "mixed fallback should apply player, unit, bullet, decal, effect, fire, puddle and weather records",
         );
-        assert_eq!(report.entity_records_applied, 7);
-        assert_eq!(report.entity_typed_records_applied, 7);
+        assert_eq!(report.entity_records_applied, 8);
+        assert_eq!(report.entity_typed_records_applied, 8);
         assert_eq!(report.entity_parse_errors, 0);
 
         assert_eq!(
@@ -1851,6 +1890,24 @@ mod tests {
         assert_eq!(unit.y(), 45.0);
         assert_eq!(unit.rotation(), 180.0);
         assert!(unit.weapons.is_shooting);
+
+        let bullet = launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .get(&9800)
+            .expect("mixed fallback should materialize bullet record");
+        assert_eq!(bullet.bullet_type_id, 1);
+        assert_eq!(bullet.team, TeamId(4));
+        assert_eq!(bullet.owner, type_io::EntityRef::new(8801));
+        assert_eq!(bullet.collided_ids, vec![7, 9]);
+        assert_eq!(bullet.damage, 33.0);
+        assert_eq!(bullet.data, TypeValue::String("spark-bullet".into()));
+        assert_eq!(bullet.fdata, 2.5);
+        assert_eq!(bullet.lifetime, 120.0);
+        assert_eq!(bullet.rotation, 180.0);
+        assert_eq!(bullet.time, 10.0);
+        assert_eq!(bullet.velocity, IoVec2 { x: -0.25, y: 1.5 });
+        assert_eq!((bullet.x, bullet.y), (20.0, 40.0));
 
         let effect = launcher
             .runtime

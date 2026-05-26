@@ -925,6 +925,23 @@ pub struct DecalSyncWire {
     pub y: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BulletSyncWire {
+    pub collided: Vec<i32>,
+    pub damage: f32,
+    pub data: TypeValue,
+    pub fdata: f32,
+    pub lifetime: f32,
+    pub owner: EntityRef,
+    pub rotation: f32,
+    pub team: TeamId,
+    pub time: f32,
+    pub bullet_type_id: ContentId,
+    pub vel: Vec2,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PuddleSyncWire {
     pub amount: f32,
@@ -1267,6 +1284,53 @@ pub fn read_decal_sync<R: Read>(read: &mut R) -> io::Result<DecalSyncWire> {
         lifetime,
         rotation,
         time,
+        x,
+        y,
+    })
+}
+
+pub fn write_bullet_sync<W: Write>(write: &mut W, sync: &BulletSyncWire) -> io::Result<()> {
+    write_int_seq(write, &sync.collided)?;
+    write_f32(write, sync.damage)?;
+    write_object(write, &sync.data)?;
+    write_f32(write, sync.fdata)?;
+    write_f32(write, sync.lifetime)?;
+    write_entity_ref(write, sync.owner)?;
+    write_f32(write, sync.rotation)?;
+    write_team(write, Some(sync.team))?;
+    write_f32(write, sync.time)?;
+    write_bullet_type_id(write, sync.bullet_type_id)?;
+    write_vec2(write, sync.vel)?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)
+}
+
+pub fn read_bullet_sync<R: Read>(read: &mut R) -> io::Result<BulletSyncWire> {
+    let collided = read_int_seq(read)?;
+    let damage = read_f32(read)?;
+    let data = read_object(read)?;
+    let fdata = read_f32(read)?;
+    let lifetime = read_f32(read)?;
+    let owner = read_entity_ref(read)?;
+    let rotation = read_f32(read)?;
+    let team = read_team(read)?;
+    let time = read_f32(read)?;
+    let bullet_type_id = read_bullet_type_id(read)?;
+    let vel = read_vec2(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(BulletSyncWire {
+        collided,
+        damage,
+        data,
+        fdata,
+        lifetime,
+        owner,
+        rotation,
+        team,
+        time,
+        bullet_type_id,
+        vel,
         x,
         y,
     })
@@ -3119,6 +3183,59 @@ mod tests {
         expected.extend_from_slice(&sync.y.to_be_bytes());
         assert_eq!(bytes, expected);
         assert_eq!(read_decal_sync(&mut bytes.as_slice()).unwrap(), sync);
+    }
+
+    #[test]
+    fn bullet_sync_wire_roundtrips_java_revision_2_write_sync_shape() {
+        let sync = BulletSyncWire {
+            collided: vec![7, -9],
+            damage: 33.5,
+            data: TypeValue::String("pierce".into()),
+            fdata: 1.25,
+            lifetime: 120.0,
+            owner: EntityRef::new(4242),
+            rotation: 270.0,
+            team: TeamId(6),
+            time: 12.0,
+            bullet_type_id: 5,
+            vel: Vec2::new(-0.5, 2.25),
+            x: 100.0,
+            y: 200.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_bullet_sync(&mut bytes, &sync).unwrap();
+
+        let mut expected = Vec::new();
+        write_int_seq(&mut expected, &[7, -9]).unwrap();
+        expected.extend_from_slice(&sync.damage.to_be_bytes());
+        write_object(&mut expected, &TypeValue::String("pierce".into())).unwrap();
+        expected.extend_from_slice(&sync.fdata.to_be_bytes());
+        expected.extend_from_slice(&sync.lifetime.to_be_bytes());
+        expected.extend_from_slice(&4242i32.to_be_bytes());
+        expected.extend_from_slice(&sync.rotation.to_be_bytes());
+        expected.push(6);
+        expected.extend_from_slice(&sync.time.to_be_bytes());
+        expected.extend_from_slice(&5i16.to_be_bytes());
+        expected.extend_from_slice(&sync.vel.x.to_be_bytes());
+        expected.extend_from_slice(&sync.vel.y.to_be_bytes());
+        expected.extend_from_slice(&sync.x.to_be_bytes());
+        expected.extend_from_slice(&sync.y.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(read_bullet_sync(&mut bytes.as_slice()).unwrap(), sync);
+
+        let sync_without_owner = BulletSyncWire {
+            owner: EntityRef::null(),
+            data: TypeValue::Null,
+            collided: Vec::new(),
+            ..sync
+        };
+        bytes.clear();
+        write_bullet_sync(&mut bytes, &sync_without_owner).unwrap();
+        assert_eq!(
+            read_bullet_sync(&mut bytes.as_slice()).unwrap(),
+            sync_without_owner
+        );
     }
 
     #[test]

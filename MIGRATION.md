@@ -2383,6 +2383,45 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：Decal 目前落在 runtime typed sidecar，尚未接入真实 renderer/texture atlas region lifecycle；`region` 因 Java sync 不传输，只能由创建端/渲染端保留或后续生命周期恢复；`BulletComp` 等其他 entity snapshot wire 仍待迁移。
 
+### 12.50 BulletComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 2026-05-27：迁移 Java `BulletComp.writeSync/readSync` 最新 revision 2 的 wire 形状并接入 single-record / mixed entity snapshot dispatcher。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.BulletComp=7`；
+  - `annotations/src/main/resources/revisions/BulletComp/2.json`：字段顺序 `collided, damage, data, fdata, lifetime, owner, rotation, team, time, type, vel, x, y`；
+  - `TypeIO.writeIntSeq/readIntSeq` 写 `int length + i32[]`；
+  - `TypeIO.writeObject/readObject` 写动态 object；
+  - `TypeIO.writeEntity/readEntity` 写 owner entity id；
+  - `TypeIO.writeTeam/readTeam` 写 `u8` team id；
+  - `TypeIO.writeBulletType/readBulletType` 写 `short` bullet content id；
+  - `TypeIO.writeVec2/readVec2` 写两个 `float`。
+- Rust 新增/变化：
+  - `type_io::BulletSyncWire`；
+  - `type_io::write_bullet_sync(...)` / `read_bullet_sync(...)`；
+  - `EntityClassKind::Bullet` 与 `BULLET_CLASS_ID = 7`；
+  - `BulletComp::apply_sync_wire(...)`：恢复 `collided/damage/data/fdata/lifetime/owner/rotation/team/time/type/vel/x/y`；
+  - `GameRuntime.client_bullet_snapshot_entities`；
+  - `GameRuntime::apply_client_bullet_sync_wire(...)`，通过 `ContentLoader::get_by_id(ContentType::Bullet, ...)` 校验 bullet content id；
+  - hidden snapshot 对 typed bullet 计为 existing；
+  - `DesktopLauncher` 正常 single-record 与 mixed fallback 都能在 `EntityClassKind::Bullet` 下 materialize typed bullet。
+- 测试/真实 smoke：
+  - `bullet_sync_wire_roundtrips_java_revision_2_write_sync_shape`
+  - `bullet_component_applies_revision_2_sync_wire_fields`
+  - `game_runtime_applies_client_bullet_entity_snapshot_to_typed_runtime`
+  - `game_runtime_applies_bullet_entity_snapshot_packet_with_content`
+  - 扩展 `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`，同 packet 现在覆盖 Player + Unit + Bullet + Decal + Effect + Fire + Puddle + Weather；
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 mixed packet 现在为 `amount=9`，新增 `1011 + BULLET_CLASS_ID + BulletSyncWire`，断言 raw sidecar 与 `runtime.client_bullet_snapshot_entities[1011]`。
+- 已验证：
+  - `cargo test -p mindustry-core bullet_sync --lib`
+  - `cargo test -p mindustry-core bullet_component_applies_revision_2_sync_wire_fields --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_bullet_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_bullet_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：Bullet 目前落在 runtime typed sidecar，尚未接入完整 `Groups.bullet` lifecycle、碰撞/渲染/服务端真实实体枚举发包；`Mover` 是 Java transient runtime 回调，不属于 snapshot wire，后续应在 bullet runtime 更新路径中单独迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

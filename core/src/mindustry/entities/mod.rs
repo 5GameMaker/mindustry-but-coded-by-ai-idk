@@ -31,6 +31,7 @@ pub struct EntityClassIdEntry {
 pub enum EntityClassKind {
     Player,
     Unit,
+    Bullet,
     Decal,
     Effect,
     Fire,
@@ -40,6 +41,7 @@ pub enum EntityClassKind {
 }
 
 pub const PLAYER_CLASS_ID: u8 = 12;
+pub const BULLET_CLASS_ID: u8 = 7;
 pub const DECAL_CLASS_ID: u8 = 8;
 pub const EFFECT_STATE_CLASS_ID: u8 = 9;
 pub const FIRE_CLASS_ID: u8 = 10;
@@ -108,7 +110,7 @@ pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.BulletComp",
-        id: 7,
+        id: BULLET_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.DecalComp",
@@ -266,6 +268,8 @@ pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
     let name = entity_class_name(id)?;
     if id == PLAYER_CLASS_ID {
         Some(EntityClassKind::Player)
+    } else if id == BULLET_CLASS_ID {
+        Some(EntityClassKind::Bullet)
     } else if id == DECAL_CLASS_ID {
         Some(EntityClassKind::Decal)
     } else if id == EFFECT_STATE_CLASS_ID {
@@ -445,7 +449,7 @@ mod tests {
         assert_eq!(entity_class_id("block"), Some(2));
         assert_eq!(
             entity_class_id("mindustry.entities.comp.BulletComp"),
-            Some(7)
+            Some(BULLET_CLASS_ID)
         );
         assert_eq!(
             entity_class_id("mindustry.type.Weather.WeatherStateComp"),
@@ -496,7 +500,10 @@ mod tests {
             entity_class_kind(WEATHER_STATE_CLASS_ID),
             Some(EntityClassKind::Weather)
         );
-        assert_eq!(entity_class_kind(7), Some(EntityClassKind::Other));
+        assert_eq!(
+            entity_class_kind(BULLET_CLASS_ID),
+            Some(EntityClassKind::Bullet)
+        );
         assert_eq!(entity_class_kind(255), None);
 
         let mut names = BTreeSet::new();

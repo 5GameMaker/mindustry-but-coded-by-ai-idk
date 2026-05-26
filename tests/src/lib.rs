@@ -510,8 +510,8 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
     use mindustry_core::mindustry::ctype::Content;
     use mindustry_core::mindustry::entities::{
-        DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
-        WEATHER_STATE_CLASS_ID,
+        BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID,
+        PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
     };
     use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
@@ -705,6 +705,23 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     };
     let mut effect_bytes = Vec::new();
     type_io::write_effect_state_sync(&mut effect_bytes, &effect_sync).unwrap();
+    let bullet_sync = type_io::BulletSyncWire {
+        collided: vec![7, 9],
+        damage: 33.0,
+        data: type_io::TypeValue::String("spark-bullet".into()),
+        fdata: 2.5,
+        lifetime: 120.0,
+        owner: type_io::EntityRef::new(1004),
+        rotation: 180.0,
+        team: TeamId(6),
+        time: 10.0,
+        bullet_type_id: 1,
+        vel: IoVec2 { x: -0.25, y: 1.5 },
+        x: 20.0,
+        y: 40.0,
+    };
+    let mut bullet_bytes = Vec::new();
+    type_io::write_bullet_sync(&mut bullet_bytes, &bullet_sync).unwrap();
     let decal_sync = type_io::DecalSyncWire {
         color: type_io::RgbaColor::new(0x11223344),
         lifetime: 30.0,
@@ -779,6 +796,9 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.extend_from_slice(&1009i32.to_be_bytes());
     multi_entity_data.push(EFFECT_STATE_CLASS_ID);
     multi_entity_data.extend_from_slice(&effect_bytes);
+    multi_entity_data.extend_from_slice(&1011i32.to_be_bytes());
+    multi_entity_data.push(BULLET_CLASS_ID);
+    multi_entity_data.extend_from_slice(&bullet_bytes);
     multi_entity_data.extend_from_slice(&1010i32.to_be_bytes());
     multi_entity_data.push(DECAL_CLASS_ID);
     multi_entity_data.extend_from_slice(&decal_bytes);
@@ -798,7 +818,7 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.push(WEATHER_STATE_CLASS_ID);
     multi_entity_data.extend_from_slice(&weather_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 8,
+        amount: 9,
         data: multi_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
@@ -853,6 +873,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .runtime
                 .client_effect_snapshot_entities
                 .contains_key(&1009)
+            && desktop
+                .runtime
+                .client_bullet_snapshot_entities
+                .contains_key(&1011)
             && desktop
                 .runtime
                 .client_decal_snapshot_entities
@@ -1027,6 +1051,34 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     assert_eq!(effect.time, 12.0);
     assert_eq!(effect.x, 100.0);
     assert_eq!(effect.y, 200.0);
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1011)
+            .map(|record| (record.type_id, record.sync_bytes.as_slice())),
+        Some((BULLET_CLASS_ID, bullet_bytes.as_slice()))
+    );
+    let bullet = desktop
+        .runtime
+        .client_bullet_snapshot_entities
+        .get(&1011)
+        .expect("real mixed entity snapshot should materialize typed bullet runtime");
+    assert_eq!(bullet.bullet_type_id, 1);
+    assert_eq!(bullet.team, TeamId(6));
+    assert_eq!(bullet.owner, type_io::EntityRef::new(1004));
+    assert_eq!(bullet.collided_ids, vec![7, 9]);
+    assert_eq!(bullet.damage, 33.0);
+    assert_eq!(
+        bullet.data,
+        type_io::TypeValue::String("spark-bullet".into())
+    );
+    assert_eq!(bullet.fdata, 2.5);
+    assert_eq!(bullet.lifetime, 120.0);
+    assert_eq!(bullet.rotation, 180.0);
+    assert_eq!(bullet.time, 10.0);
+    assert_eq!(bullet.velocity, IoVec2 { x: -0.25, y: 1.5 });
+    assert_eq!((bullet.x, bullet.y), (20.0, 40.0));
     assert_eq!(
         desktop
             .runtime

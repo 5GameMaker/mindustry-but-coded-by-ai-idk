@@ -1549,6 +1549,15 @@ fn read_client_decal_sync_exact(sync_bytes: &[u8]) -> Option<type_io::DecalSyncW
     read.is_empty().then_some(sync)
 }
 
+fn read_client_bullet_sync_exact(sync_bytes: &[u8]) -> Option<type_io::BulletSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_bullet_sync(&mut read).ok()?;
+    read.is_empty().then_some(sync)
+}
+
 fn read_client_puddle_sync_exact(sync_bytes: &[u8]) -> Option<type_io::PuddleSyncWire> {
     if sync_bytes.is_empty() {
         return None;
@@ -2070,6 +2079,7 @@ pub struct GameRuntime {
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
+    pub client_bullet_snapshot_entities: BTreeMap<i32, BulletComp>,
     pub client_decal_snapshot_entities: BTreeMap<i32, DecalComp>,
     pub client_effect_snapshot_entities: BTreeMap<i32, EffectStateComp>,
     pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
@@ -2126,6 +2136,7 @@ impl GameRuntime {
             construct_runtime_states: BTreeMap::new(),
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
+            client_bullet_snapshot_entities: BTreeMap::new(),
             client_decal_snapshot_entities: BTreeMap::new(),
             client_effect_snapshot_entities: BTreeMap::new(),
             client_fire_snapshot_entities: BTreeMap::new(),
@@ -2423,6 +2434,13 @@ impl GameRuntime {
                     report.entity_typed_records_applied = 1;
                 }
             }
+            Some(EntityClassKind::Bullet) => {
+                if let Some(sync) = read_client_bullet_sync_exact(&sync_bytes) {
+                    if self.apply_client_bullet_sync_wire(content, entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
             Some(EntityClassKind::Decal) => {
                 if let Some(sync) = read_client_decal_sync_exact(&sync_bytes) {
                     if self.apply_client_decal_sync_wire(entity_id, &sync) {
@@ -2519,6 +2537,18 @@ impl GameRuntime {
                     );
                     self.apply_client_unit_sync_wire(content, entity_id, &sync)
                 }
+                Some(EntityClassKind::Bullet) => {
+                    let Ok(sync) = type_io::read_bullet_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_bullet_sync_wire(content, entity_id, &sync)
+                }
                 Some(EntityClassKind::Decal) => {
                     let Ok(sync) = type_io::read_decal_sync(&mut read) else {
                         report.entity_parse_errors += 1;
@@ -2613,6 +2643,28 @@ impl GameRuntime {
             .entry(entity_id)
             .or_insert_with(|| FireComp::new(sync.x, sync.y, sync.lifetime));
         fire.apply_sync_wire(sync);
+        true
+    }
+
+    pub fn apply_client_bullet_sync_wire(
+        &mut self,
+        content: &ContentLoader,
+        entity_id: i32,
+        sync: &type_io::BulletSyncWire,
+    ) -> bool {
+        if content
+            .get_by_id(ContentType::Bullet, sync.bullet_type_id)
+            .is_none()
+        {
+            return false;
+        }
+        let bullet = self
+            .client_bullet_snapshot_entities
+            .entry(entity_id)
+            .or_insert_with(|| {
+                BulletComp::new(sync.bullet_type_id, sync.team, sync.owner, sync.x, sync.y)
+            });
+        bullet.apply_sync_wire(sync);
         true
     }
 
@@ -2744,6 +2796,9 @@ impl GameRuntime {
             let mut existing = false;
             if let Some(record) = self.client_entity_snapshot_records.get_mut(id) {
                 record.hidden = true;
+                existing = true;
+            }
+            if self.client_bullet_snapshot_entities.contains_key(id) {
                 existing = true;
             }
             if self.client_decal_snapshot_entities.contains_key(id) {
@@ -5559,6 +5614,7 @@ impl GameRuntime {
         self.construct_runtime_states.clear();
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
+        self.client_bullet_snapshot_entities.clear();
         self.client_decal_snapshot_entities.clear();
         self.client_effect_snapshot_entities.clear();
         self.client_fire_snapshot_entities.clear();
@@ -13555,8 +13611,8 @@ mod tests {
         core::GameStateState,
         ctype::{Content, ContentType},
         entities::{
-            units::BuildPlan, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
-            PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+            units::BuildPlan, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
+            FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
         },
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
@@ -14812,6 +14868,66 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_applies_client_bullet_entity_snapshot_to_typed_runtime() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let sync = type_io::BulletSyncWire {
+            collided: vec![5, 9],
+            damage: 33.0,
+            data: TypeValue::String("payload".into()),
+            fdata: 2.5,
+            lifetime: 120.0,
+            owner: type_io::EntityRef::new(42),
+            rotation: 180.0,
+            team: TeamId(3),
+            time: 10.0,
+            bullet_type_id: 1,
+            vel: IoVec2 { x: -0.25, y: 1.5 },
+            x: 20.0,
+            y: 40.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_bullet_sync(&mut sync_bytes, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_record_with_content(
+            &content,
+            7006,
+            BULLET_CLASS_ID,
+            sync_bytes.clone(),
+        );
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&7006)
+            .expect("bullet snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, BULLET_CLASS_ID);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+
+        let bullet = runtime
+            .client_bullet_snapshot_entities
+            .get(&7006)
+            .expect("bullet sync should materialize typed runtime bullet");
+        assert_eq!(bullet.bullet_type_id, 1);
+        assert_eq!(bullet.team, TeamId(3));
+        assert_eq!(bullet.owner, type_io::EntityRef::new(42));
+        assert_eq!(bullet.collided_ids, vec![5, 9]);
+        assert_eq!(bullet.damage, 33.0);
+        assert_eq!(bullet.data, TypeValue::String("payload".into()));
+        assert_eq!(bullet.fdata, 2.5);
+        assert_eq!(bullet.lifetime, 120.0);
+        assert_eq!(bullet.rotation, 180.0);
+        assert_eq!(bullet.time, 10.0);
+        assert_eq!(bullet.velocity, IoVec2 { x: -0.25, y: 1.5 });
+        assert_eq!((bullet.x, bullet.y), (20.0, 40.0));
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[7006]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
     fn game_runtime_applies_decal_entity_snapshot_packet_with_content() {
         let content = ContentLoader::create_base_content().unwrap();
         let sync = type_io::DecalSyncWire {
@@ -14841,6 +14957,47 @@ mod tests {
         assert_eq!(decal.time, 2.0);
         assert_eq!(decal.x, 12.0);
         assert_eq!(decal.y, 24.0);
+    }
+
+    #[test]
+    fn game_runtime_applies_bullet_entity_snapshot_packet_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let sync = type_io::BulletSyncWire {
+            collided: Vec::new(),
+            damage: 12.0,
+            data: TypeValue::Null,
+            fdata: 0.0,
+            lifetime: 60.0,
+            owner: type_io::EntityRef::null(),
+            rotation: 15.0,
+            team: TeamId(2),
+            time: 2.0,
+            bullet_type_id: 2,
+            vel: IoVec2 { x: 0.5, y: -0.25 },
+            x: 12.0,
+            y: 24.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_bullet_sync(&mut sync_bytes, &sync).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&7103i32.to_be_bytes());
+        data.push(BULLET_CLASS_ID);
+        data.extend_from_slice(&sync_bytes);
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_packet_with_content(&content, 1, &data);
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        assert_eq!(report.entity_parse_errors, 0);
+
+        let bullet = runtime.client_bullet_snapshot_entities.get(&7103).unwrap();
+        assert_eq!(bullet.bullet_type_id, 2);
+        assert_eq!(bullet.rotation, 15.0);
+        assert_eq!(bullet.time, 2.0);
+        assert_eq!(bullet.velocity, IoVec2 { x: 0.5, y: -0.25 });
+        assert_eq!(bullet.x, 12.0);
+        assert_eq!(bullet.y, 24.0);
     }
 
     #[test]

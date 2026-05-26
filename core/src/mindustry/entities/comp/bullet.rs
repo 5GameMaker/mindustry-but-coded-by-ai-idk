@@ -7,7 +7,7 @@
 
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::ContentId;
-use crate::mindustry::io::{EntityRef, TeamId, TypeValue, Vec2};
+use crate::mindustry::io::{BulletSyncWire, EntityRef, TeamId, TypeValue, Vec2};
 use crate::mindustry::logic::{rgba_u32_to_double_bits, LAccess};
 
 const TILE_SIZE: f32 = 8.0;
@@ -353,6 +353,22 @@ impl BulletComp {
             || no_aim
     }
 
+    pub fn apply_sync_wire(&mut self, sync: &BulletSyncWire) {
+        self.collided_ids = sync.collided.clone();
+        self.damage = sync.damage;
+        self.data = sync.data.clone();
+        self.fdata = sync.fdata;
+        self.lifetime = sync.lifetime;
+        self.owner = sync.owner;
+        self.rotation = sync.rotation;
+        self.team = sync.team;
+        self.time = sync.time;
+        self.bullet_type_id = sync.bullet_type_id;
+        self.velocity = sync.vel;
+        self.x = sync.x;
+        self.y = sync.y;
+    }
+
     fn team_color_bits(&self) -> f64 {
         rgba_u32_to_double_bits(team_color_rgba(self.team))
     }
@@ -689,6 +705,41 @@ mod tests {
         assert!(!bullet.hit);
         assert!(bullet.collided_ids.is_empty());
         assert!(!bullet.is_active());
+    }
+
+    #[test]
+    fn bullet_component_applies_revision_2_sync_wire_fields() {
+        let mut bullet = BulletComp::new(1, TeamId(1), EntityRef::null(), 0.0, 0.0);
+        let sync = BulletSyncWire {
+            collided: vec![5, 9],
+            damage: 33.0,
+            data: TypeValue::String("payload".into()),
+            fdata: 2.5,
+            lifetime: 120.0,
+            owner: EntityRef::new(42),
+            rotation: 180.0,
+            team: TeamId(3),
+            time: 10.0,
+            bullet_type_id: 4,
+            vel: Vec2 { x: -0.25, y: 1.5 },
+            x: 20.0,
+            y: 40.0,
+        };
+
+        bullet.apply_sync_wire(&sync);
+
+        assert_eq!(bullet.collided_ids, vec![5, 9]);
+        assert_eq!(bullet.damage, 33.0);
+        assert_eq!(bullet.data, TypeValue::String("payload".into()));
+        assert_eq!(bullet.fdata, 2.5);
+        assert_eq!(bullet.lifetime, 120.0);
+        assert_eq!(bullet.owner, EntityRef::new(42));
+        assert_eq!(bullet.rotation, 180.0);
+        assert_eq!(bullet.team, TeamId(3));
+        assert_eq!(bullet.time, 10.0);
+        assert_eq!(bullet.bullet_type_id, 4);
+        assert_eq!(bullet.velocity, Vec2 { x: -0.25, y: 1.5 });
+        assert_eq!((bullet.x, bullet.y), (20.0, 40.0));
     }
 
     #[test]
