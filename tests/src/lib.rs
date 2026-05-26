@@ -1069,3 +1069,184 @@ fn real_server_desktop_payload_block_snapshot_updates_runtime_after_world_stream
     desktop.net_client.net_mut().disconnect();
     server.close_network();
 }
+
+#[test]
+fn real_server_desktop_payload_mass_driver_block_snapshot_updates_runtime_after_world_stream() {
+    use mindustry_core::mindustry::core::{
+        game_runtime::GameRuntimePayloadBlockState, GameRuntimeNetworkContext,
+    };
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
+    use mindustry_core::mindustry::net::BlockSnapshotCallPacket;
+    use mindustry_core::mindustry::world::blocks::payloads::{
+        write_payload_block_build_common, write_payload_mass_driver_extra, PayloadBlockBuildState,
+        PayloadDriverState, PayloadMassDriverState, Vec2,
+    };
+    use mindustry_core::mindustry::world::point2_pack;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    server.runtime.state.world.resize(10, 10);
+    let driver_base = server
+        .content_loader
+        .block_by_name("payload-mass-driver")
+        .expect("base content should include payload-mass-driver")
+        .base()
+        .clone();
+    let driver_tile = point2_pack(4, 4);
+    let driver_id = driver_base.id;
+    server.runtime.add_building(BuildingComp::new(
+        driver_tile,
+        driver_base.clone(),
+        TeamId(6),
+    ));
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+            && desktop
+                .runtime
+                .buildings()
+                .iter()
+                .any(|building| building.tile_pos == driver_tile)
+    });
+
+    let connection_id = {
+        let state = server.net_server.state();
+        let state = state.lock().unwrap();
+        state
+            .last_connect_confirm_connection_id
+            .expect("server should receive connect confirm before payload mass driver snapshot")
+    };
+    let mut synced_driver = BuildingComp::new(driver_tile, driver_base, TeamId(6));
+    synced_driver.health = 23.0;
+    synced_driver.set_rotation(1);
+    let common = PayloadBlockBuildState {
+        payload: None,
+        pay_vector: Vec2 { x: 1.5, y: -2.25 },
+        pay_rotation: 45.0,
+        carried: false,
+    };
+    let driver_state = PayloadMassDriverState {
+        link: point2_pack(7, 4),
+        turret_rotation: 135.0,
+        state: PayloadDriverState::Shooting,
+        reload_counter: 0.5,
+        charge: 12.0,
+        loaded: true,
+        charging: true,
+        ..PayloadMassDriverState::default()
+    };
+    let mut block_sync_bytes = Vec::new();
+    synced_driver
+        .write_base(&mut block_sync_bytes, false)
+        .unwrap();
+    write_payload_block_build_common(&mut block_sync_bytes, &common).unwrap();
+    write_payload_mass_driver_extra(&mut block_sync_bytes, &driver_state).unwrap();
+    let snapshot = BlockSnapshotCallPacket {
+        amount: 1,
+        data: {
+            let mut data = Vec::new();
+            data.extend_from_slice(&driver_tile.to_be_bytes());
+            data.extend_from_slice(&driver_id.to_be_bytes());
+            data.extend_from_slice(&block_sync_bytes);
+            data
+        },
+    };
+    server
+        .net_server
+        .send_block_snapshot(connection_id, snapshot.clone())
+        .expect("real server should send payload mass driver snapshot");
+
+    let mut applied = false;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        desktop.update();
+        server.update();
+        let received = {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            last_client_status = format!(
+                "block_snapshots={} last_block={:?} last_server_snapshot={:?} provider_events={:?}",
+                state.block_snapshot_packets_seen,
+                state.last_block_snapshot,
+                state.last_server_snapshot_at,
+                state.last_provider_events,
+            );
+            state.last_block_snapshot.as_ref() == Some(&snapshot)
+        };
+        let materialized = matches!(
+            desktop.runtime.payload_runtime_states.get(&driver_tile),
+            Some(GameRuntimePayloadBlockState::MassDriver {
+                common: applied_common,
+                driver,
+            }) if *applied_common == common && *driver == driver_state
+        );
+        applied = received && materialized;
+        if applied {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        applied,
+        "desktop should receive and apply real payload mass driver snapshot after world stream; client: {last_client_status}"
+    );
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.block_snapshot_packets_seen, 1);
+        assert_eq!(state.last_block_snapshot.as_ref(), Some(&snapshot));
+        let mirror = state
+            .last_block_snapshot_mirror
+            .as_ref()
+            .expect("payload mass driver snapshot should materialize into lightweight mirror");
+        assert_eq!(mirror.records.len(), 1);
+        assert_eq!(mirror.records[0].tile_pos, driver_tile);
+        assert_eq!(mirror.records[0].block_id, driver_id);
+        assert_eq!(mirror.records[0].sync_bytes, block_sync_bytes);
+        assert!(mirror.parse_error.is_none());
+    }
+    let runtime_record = desktop
+        .runtime
+        .client_block_snapshot_records
+        .get(&driver_tile)
+        .expect("real payload mass driver snapshot should apply to client runtime sidecar");
+    assert_eq!(runtime_record.block_id, driver_id);
+    assert_eq!(runtime_record.sync_bytes, block_sync_bytes);
+    let runtime_building = desktop
+        .runtime
+        .buildings()
+        .iter()
+        .find(|building| building.tile_pos == driver_tile)
+        .expect("payload-mass-driver building should remain materialized");
+    assert_eq!(runtime_building.health, 23.0);
+    assert_eq!(runtime_building.rotation, 1);
+    assert_eq!(
+        desktop.runtime.payload_runtime_states.get(&driver_tile),
+        Some(&GameRuntimePayloadBlockState::MassDriver {
+            common,
+            driver: driver_state,
+        })
+    );
+    assert_eq!(
+        desktop.runtime.network_context,
+        GameRuntimeNetworkContext::client()
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}

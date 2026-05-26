@@ -1479,3 +1479,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 扩展真实 payload snapshot smoke 到 `PayloadMassDriver`，因为它有 revision 1 tail 与更多字段。
   2. 再扩展 `PayloadLoader/Source/Deconstructor/Constructor/Void`，逐步覆盖所有 payload family。
   3. 继续推进 turret `readSync` override 与 entity snapshot typed runtime，不要停留在 raw sidecar。
+
+---
+
+## 41. 最新闭环记录：真实联机 PayloadMassDriver BlockSnapshot child tail smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：继续扩展真实 payload BlockSnapshot 联机覆盖，从 `PayloadRouter` 推进到 Java `PayloadDriverBuild.version()==1` 的 `PayloadMassDriver`。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_payload_mass_driver_block_snapshot_updates_runtime_after_world_stream`
+  - 服务端 world stream 先 materialize `payload-mass-driver` building；
+  - 服务端随后发送 `BlockSnapshotCallPacket`，sync bytes 为 `BuildingComp::write_base(...) + write_payload_block_build_common(...) + write_payload_mass_driver_extra(...)`；
+  - desktop 端等待 `NetClient.last_block_snapshot` 与 `runtime.payload_runtime_states[driver_tile]` 同时更新。
+- 断言覆盖：
+  - mirror header 的 `tile_pos/block_id/sync_bytes`；
+  - runtime raw sidecar `client_block_snapshot_records`；
+  - building 基础 health/rotation；
+  - `GameRuntimePayloadBlockState::MassDriver { common, driver }` 完整恢复，其中 `driver` 覆盖 `link/turret_rotation/state/reload_counter/charge/loaded/charging`。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_mass_driver_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续真实联机 payload snapshot：`PayloadLoader` 或 `PayloadSource`，它们同样是 revision 1 且和服务端 payload aggregate 已有关联。
+  2. 再补 `PayloadDeconstructor/Constructor/Void` 的真实 snapshot smoke。
+  3. 开始规划 turret `readSync` override：Java turret sync 需要保留 rotation/reload，不能直接复用 save-map child tail 语义。

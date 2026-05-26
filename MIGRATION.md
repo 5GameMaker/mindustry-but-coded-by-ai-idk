@@ -1892,7 +1892,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
-- 仍未完成：真实联机 payload snapshot 目前只覆盖 `PayloadRouter`；还需补 `PayloadMassDriver/Loader/Source/Deconstructor/Constructor/Void` 的真实 snapshot smoke，并继续推进 entity snapshot typed materialize。
+- 仍未完成：真实联机 payload snapshot 目前覆盖 `PayloadRouter` 与 `PayloadMassDriver`；还需补 `PayloadLoader/Source/Deconstructor/Constructor/Void` 的真实 snapshot smoke，并继续推进 entity snapshot typed materialize。
+
+### 12.27 真实联机 PayloadMassDriver BlockSnapshot child tail smoke
+
+- 2026-05-26：新增 `real_server_desktop_payload_mass_driver_block_snapshot_updates_runtime_after_world_stream`，在真实 `ServerLauncher -> DesktopLauncher` 联机链路中先通过 world stream materialize 一个 `payload-mass-driver` building，再发送 `BuildingComp::write_base(...) + write_payload_block_build_common(...) + write_payload_mass_driver_extra(...)` 组成的 `BlockSnapshotCallPacket`。
+- 测试覆盖 Java `PayloadDriverBuild.version()==1` 的 child tail 字段：`link/turretRotation/state/reloadCounter/charge/loaded/charging`，并同时验证 `PayloadBlockBuild` common 段的 `payVector/payRotation/payload/carried`。
+- 测试断言：
+  - `NetClient.last_block_snapshot_mirror` 能解析 payload-mass-driver snapshot header；
+  - `desktop.runtime.client_block_snapshot_records` 保留完整 sync bytes；
+  - 客户端 building 基础 health/rotation 由 `read_base` 更新；
+  - `desktop.runtime.payload_runtime_states` 中恢复完整 `GameRuntimePayloadBlockState::MassDriver { common, driver }`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_mass_driver_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：`PayloadLoader/Source/Deconstructor/Constructor/Void` 的真实 BlockSnapshot smoke、entity snapshot typed runtime 与 Java↔Rust 更完整联机互通仍需继续。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
