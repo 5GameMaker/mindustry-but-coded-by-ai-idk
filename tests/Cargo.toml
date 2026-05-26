@@ -6,3 +6,5 @@ version.workspace = true
 
 [dependencies]
 mindustry-core = { path = "../core" }
+mindustry-desktop = { path = "../desktop" }
+mindustry-server = { path = "../server" }

@@ -1055,3 +1055,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check desktop/src/lib.rs`
   - `git diff --check`
 - 后续建议：补真实 server/client ArcNetProvider 联机 world stream smoke，让 `ServerLauncher` 发送出的 payload world-data 被 `DesktopLauncher` 的 `NetClient` 实际接收并 materialize；随后扩展到 Java 客户端兼容验证。
+
+---
+
+## 28. 最新闭环记录：真实 ServerLauncher → DesktopLauncher world-stream payload smoke
+
+- 目标：去掉手写 `NetClientState.last_loaded_world_data` 的假注入，验证真实 server/client 本地联机链路能把 payload sidecar 从服务端 runtime 传到 desktop runtime。
+- Rust 主改动：
+  - `core/src/mindustry/core/net_client.rs`
+  - `tests/Cargo.toml`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_world_stream_materializes_payload_sidecar`。
+- 测试链路：
+  - `ServerLauncher::new(...)` 创建真实服务端，runtime 中放置 `payload-loader` building；
+  - 写入 `GameRuntimePayloadBlockState::Loader`，其中 common payload 是 `BuildPayload(container)`，`PayloadLoaderState.exporting = true`；
+  - `server.init()` 打开真实 `ArcNetProvider` 本地 TCP/UDP 端口；
+  - `mindustry_desktop::run --connect 127.0.0.1:port` 启动真实 desktop/client；
+  - 循环 pump `desktop.update()` / `server.update()`，让客户端发送 `ConnectPacket`，服务端接受并 `flush_pending_world_data()`，客户端接收 `WORLD_STREAM` 后自动 `ConnectConfirmCallPacket`；
+  - 断言 desktop `NetClientState.last_loaded_world_data` 存在、`connect_confirm_sent=true`、服务端 `world_streams_sent=1`、desktop runtime 进入 `GameRuntimeNetworkContext::client()`，并恢复 payload loader sidecar 与 `BuildPayload(container)`。
+- 重要修正：
+  - `ClientConnectConfig::default()` 现在给出非空 Java-like `uuid/usid`，否则真实 wire path 会因为空 UUID 生成的 `ConnectPacket` 无法被服务端 reader/validation 接受；capture-provider 单测不会暴露这个问题。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_world_stream_materializes_payload_sidecar --lib`
+  - `cargo test -p mindustry-desktop desktop_run_connect_arg_starts_real_client_handshake --lib`
+  - `cargo test -p mindustry-core update_sends_configured_connect_packet_once_after_connect_event --lib`
+  - `cargo check -p mindustry-tests`
+- 后续建议：把真实联机 world-stream smoke 扩展到 `PayloadRouter/PayloadMassDriver/PayloadDeconstructor`，随后推进 state snapshot/实时增量同步与 Java 客户端/服务端互通 smoke。

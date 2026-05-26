@@ -1668,3 +1668,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check desktop/src/lib.rs`
   - `git diff --check`
 - 仍未完成：还需从真实 server stream 到 desktop net-client 的联机 smoke、Java 客户端互通验证，以及更多 payload 类型在 desktop materialize 后的运行/渲染状态测试。
+
+### 12.14 真实 ServerLauncher → DesktopLauncher world-stream payload smoke
+
+- 2026-05-26：新增 workspace 集成测试 `real_server_desktop_world_stream_materializes_payload_sidecar`，在 `tests` crate 中同时启动真实 `ServerLauncher` 与 `DesktopLauncher`，通过本地 `ArcNetProvider` TCP/UDP 握手发送真实 `ConnectPacket`，由服务端 `flush_pending_world_data()` 发出真实 `WORLD_STREAM`，再由客户端 `NetClient` 重组 `Streamable`、`read_world_data(...)`、自动发送 `ConnectConfirmCallPacket`，最后由 `DesktopLauncher::sync_runtime_state_from_world_data(...)` materialize payload sidecar。
+- 同步修正 `ClientConnectConfig::default()`：默认 `uuid/usid` 不再为空，避免真实 wire path 中 `ConnectPacket::write_to(...)` 生成不可被服务端 Java-like reader/validation 接受的连接包。之前 capture-provider 单测不经真实序列化/反序列化，无法覆盖这个问题。
+- 该闭环证明 payload-loader sidecar 已串过：
+  - server runtime payload state
+  - `network_world_data_template()` / `write_world_data(...)`
+  - `ArcNetProvider` stream begin/chunk
+  - `NetClient.last_loaded_world_data`
+  - desktop runtime map loader
+  - `GameRuntimeNetworkContext::client()`
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_world_stream_materializes_payload_sidecar --lib`
+  - `cargo test -p mindustry-desktop desktop_run_connect_arg_starts_real_client_handshake --lib`
+  - `cargo test -p mindustry-core update_sends_configured_connect_packet_once_after_connect_event --lib`
+  - `cargo check -p mindustry-tests`
+- 仍未完成：还需扩展到多 payload 类型的真实联机 world-stream smoke、state snapshot/实时增量同步、Java 客户端/服务端互通验证，以及 renderer/UI/输入控制闭环。
