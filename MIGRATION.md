@@ -2348,6 +2348,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：Effect 目前落在 runtime typed sidecar，尚未接入完整 `EffectRegistry`、renderer/effect lifecycle 与服务端真实 entity group 枚举发包；`BulletComp` 等其他 entity snapshot wire 仍待迁移。
 
+### 12.49 DecalComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 2026-05-27：迁移 Java `DecalComp.writeSync/readSync` 的当前 wire 形状并接入 single-record / mixed entity snapshot dispatcher。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.DecalComp=8`；
+  - `annotations/src/main/resources/revisions/DecalComp/0.json`：字段顺序 `color, lifetime, region, rotation, time, x, y`；
+  - `TypeIO.writeColor/readColor` 写 `int rgba`；
+  - `region` 类型是 `arc.graphics.g2d.TextureRegion`，上游 annotation serializer 没有对应 TypeIO，因此生成的 Java sync code 会跳过该字段、不产生 wire bytes。
+- Rust 新增/变化：
+  - `type_io::DecalSyncWire`；
+  - `type_io::write_decal_sync(...)` / `read_decal_sync(...)`，严格按实际 wire bytes 写 `color, lifetime, rotation, time, x, y`；
+  - `EntityClassKind::Decal` 与 `DECAL_CLASS_ID = 8`；
+  - `DecalComp::apply_sync_wire(...)`：恢复 `color/lifetime/rotation/time/x/y`，并保留既有 `DecalRegion`；
+  - `GameRuntime.client_decal_snapshot_entities`；
+  - `GameRuntime::apply_client_decal_sync_wire(...)`；
+  - hidden snapshot 对 typed decal 计为 existing；
+  - `DesktopLauncher` 正常 single-record 与 mixed fallback 都能在 `EntityClassKind::Decal` 下 materialize typed decal。
+- 测试/真实 smoke：
+  - `decal_sync_wire_roundtrips_java_write_sync_shape`
+  - `decal_component_applies_sync_wire_and_preserves_region`
+  - `game_runtime_applies_client_decal_entity_snapshot_to_typed_runtime`
+  - `game_runtime_applies_decal_entity_snapshot_packet_with_content`
+  - 扩展 `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`，同 packet 现在覆盖 Player + Unit + Decal + Effect + Fire + Puddle + Weather；
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 mixed packet 现在为 `amount=8`，新增 `1010 + DECAL_CLASS_ID + DecalSyncWire`，断言 raw sidecar 与 `runtime.client_decal_snapshot_entities[1010]`。
+- 已验证：
+  - `cargo test -p mindustry-core decal_sync --lib`
+  - `cargo test -p mindustry-core decal_component --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_decal_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_decal_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：Decal 目前落在 runtime typed sidecar，尚未接入真实 renderer/texture atlas region lifecycle；`region` 因 Java sync 不传输，只能由创建端/渲染端保留或后续生命周期恢复；`BulletComp` 等其他 entity snapshot wire 仍待迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

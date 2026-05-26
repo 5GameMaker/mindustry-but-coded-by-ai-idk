@@ -2133,5 +2133,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
   1. 将 Effect typed sidecar 与完整 `EffectRegistry`/renderer/effect lifecycle 统一，避免长期只停留在 snapshot mirror。
-  2. 继续迁移 `BulletComp` / `DecalComp` / `LaunchCoreComp` 等 entity snapshot wire。
+  2. `DecalComp` 已由第 63 节补上；继续迁移 `BulletComp` / `LaunchCoreComp` 等 entity snapshot wire。
   3. 后续补服务端从真实 entity groups 枚举 EffectState 的发包路径，而不只是 smoke 中人工构造 packet。
+
+---
+
+## 63. 最新闭环记录：DecalComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 class-id `8` 的 Java `DecalComp` sync wire 从 opaque entity bytes 推进到 Rust typed sidecar，并继续扩展真实 `ServerLauncher -> DesktopLauncher` mixed entity snapshot smoke。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.DecalComp=8`；
+  - `annotations/src/main/resources/revisions/DecalComp/0.json`：字段顺序 `color, lifetime, region, rotation, time, x, y`；
+  - `TypeIO.writeColor/readColor` 写 `int rgba`；
+  - `region` 是 `TextureRegion`，上游 annotation serializer 没有对应 TypeIO，生成的 Java sync code 会跳过该字段，不产生 wire bytes。
+- Rust 主改动：
+  - `type_io::DecalSyncWire` 与 `read_decal_sync/write_decal_sync`，实际 wire 顺序为 `color, lifetime, rotation, time, x, y`；
+  - `EntityClassKind::Decal` 与 `DECAL_CLASS_ID`；
+  - `DecalComp::apply_sync_wire(...)` 恢复颜色/生命周期/位置/旋转，保留既有 `DecalRegion`；
+  - `GameRuntime.client_decal_snapshot_entities` 与 `apply_client_decal_sync_wire(...)`；
+  - hidden snapshot 对 typed decal 计为 existing；
+  - `DesktopLauncher` mixed fallback 现在支持 Player + Unit + Decal + Effect + Fire + Puddle + Weather 分类拆包；
+  - 真实联机 smoke 的第三个 entity snapshot packet 现在为 `amount=8`，新增 `1010 + DECAL_CLASS_ID + DecalSyncWire`。
+- 已跑：
+  - `cargo test -p mindustry-core decal_sync --lib`
+  - `cargo test -p mindustry-core decal_component --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_decal_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_decal_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 继续按子代理已核对结果迁移 `BulletComp`：class-id `7`，revision 2 字段 `collided, damage, data, fdata, lifetime, owner, rotation, team, time, type, vel, x, y`。
+  2. 将 Decal typed sidecar 接入真实 renderer/texture atlas region lifecycle；注意 Java sync 不传 `region`，不能凭 snapshot 恢复贴图。
+  3. 收敛 `GameRuntime` 与 `DesktopLauncher` 的 entity snapshot dispatcher，减少每新增实体类型都双处修改。

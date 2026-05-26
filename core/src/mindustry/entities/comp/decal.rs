@@ -1,5 +1,7 @@
 //! Decal component mirroring upstream `mindustry.entities.comp.DecalComp`.
 
+use crate::mindustry::io::DecalSyncWire;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DecalColor {
     pub r: f32,
@@ -15,6 +17,15 @@ impl DecalColor {
         b: 1.0,
         a: 1.0,
     };
+
+    pub fn from_rgba(rgba: u32) -> Self {
+        Self {
+            r: ((rgba >> 24) & 0xff) as f32 / 255.0,
+            g: ((rgba >> 16) & 0xff) as f32 / 255.0,
+            b: ((rgba >> 8) & 0xff) as f32 / 255.0,
+            a: (rgba & 0xff) as f32 / 255.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,6 +40,10 @@ impl DecalRegion {
             name: name.into(),
             width,
         }
+    }
+
+    pub fn unknown() -> Self {
+        Self::new("unknown", 0.0)
     }
 }
 
@@ -90,6 +105,17 @@ impl DecalComp {
     pub fn clip_size(&self) -> f32 {
         self.region.width * 2.0
     }
+
+    pub fn apply_sync_wire(&mut self, sync: &DecalSyncWire) {
+        self.color = DecalColor::from_rgba(sync.color.rgba() as u32);
+        self.lifetime = sync.lifetime;
+        self.rotation = sync.rotation;
+        self.time = sync.time;
+        self.x = sync.x;
+        self.y = sync.y;
+        // Upstream sync cannot serialize TextureRegion; preserve the existing
+        // region assigned by the creator/renderer side instead of replacing it.
+    }
 }
 
 fn curve(value: f32, start: f32) -> f32 {
@@ -128,5 +154,31 @@ mod tests {
         let decal = DecalComp::new(DecalRegion::new("mark", 16.0));
 
         assert_eq!(decal.clip_size(), 32.0);
+    }
+
+    #[test]
+    fn decal_component_applies_sync_wire_and_preserves_region() {
+        let mut decal = DecalComp::new(DecalRegion::new("scorch", 12.0));
+        let sync = DecalSyncWire {
+            color: crate::mindustry::io::type_io::RgbaColor::new(0x336699cc),
+            lifetime: 45.0,
+            rotation: 180.0,
+            time: 9.0,
+            x: 20.0,
+            y: 40.0,
+        };
+
+        decal.apply_sync_wire(&sync);
+
+        assert!((decal.color.r - 0x33 as f32 / 255.0).abs() < 0.0001);
+        assert!((decal.color.g - 0x66 as f32 / 255.0).abs() < 0.0001);
+        assert!((decal.color.b - 0x99 as f32 / 255.0).abs() < 0.0001);
+        assert!((decal.color.a - 0xcc as f32 / 255.0).abs() < 0.0001);
+        assert_eq!(decal.lifetime, 45.0);
+        assert_eq!(decal.rotation, 180.0);
+        assert_eq!(decal.time, 9.0);
+        assert_eq!((decal.x, decal.y), (20.0, 40.0));
+        assert_eq!(decal.region.name, "scorch");
+        assert_eq!(decal.region.width, 12.0);
     }
 }

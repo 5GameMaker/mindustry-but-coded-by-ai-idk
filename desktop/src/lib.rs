@@ -12,7 +12,7 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::io::{
-    read_effect_state_sync, read_fire_sync, read_puddle_sync, read_unit_sync,
+    read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync, read_unit_sync,
     read_weather_state_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
 };
 use mindustry_core::mindustry::net::{
@@ -371,6 +371,24 @@ impl DesktopLauncher {
                         .apply_client_player_snapshot_record(entity_id, player_sync);
                     report.entity_typed_records_applied += 1;
                 }
+                Some(EntityClassKind::Decal) => {
+                    let Ok(decal_sync) = read_decal_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    if self
+                        .runtime
+                        .apply_client_decal_sync_wire(entity_id, &decal_sync)
+                    {
+                        report.entity_typed_records_applied += 1;
+                    }
+                }
                 Some(EntityClassKind::Effect) => {
                     let Ok(effect_sync) = read_effect_state_sync(&mut read) else {
                         report.entity_parse_errors += 1;
@@ -681,8 +699,8 @@ mod tests {
     };
     use mindustry_core::mindustry::{
         entities::{
-            comp::BuildingComp, PlayerComp, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID,
-            PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+            comp::BuildingComp, PlayerComp, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
+            PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -1666,6 +1684,16 @@ mod tests {
         };
         let mut effect_bytes = Vec::new();
         type_io::write_effect_state_sync(&mut effect_bytes, &effect_sync).unwrap();
+        let decal_sync = type_io::DecalSyncWire {
+            color: type_io::RgbaColor::new(0x11223344),
+            lifetime: 30.0,
+            rotation: 15.0,
+            time: 2.0,
+            x: 12.0,
+            y: 24.0,
+        };
+        let mut decal_bytes = Vec::new();
+        type_io::write_decal_sync(&mut decal_bytes, &decal_sync).unwrap();
         let fire_sync = type_io::FireSyncWire {
             lifetime: 120.0,
             tile_pos: Some(mindustry_core::mindustry::world::point2_pack(2, 3)),
@@ -1720,6 +1748,9 @@ mod tests {
         data.extend_from_slice(&9801i32.to_be_bytes());
         data.push(EFFECT_STATE_CLASS_ID);
         data.extend_from_slice(&effect_bytes);
+        data.extend_from_slice(&9802i32.to_be_bytes());
+        data.push(DECAL_CLASS_ID);
+        data.extend_from_slice(&decal_bytes);
         data.extend_from_slice(&9901i32.to_be_bytes());
         data.push(FIRE_CLASS_ID);
         data.extend_from_slice(&fire_bytes);
@@ -1736,7 +1767,7 @@ mod tests {
             state
                 .entity_snapshot_mirrors
                 .push(ClientEntitySnapshotMirror {
-                    amount: 6,
+                    amount: 7,
                     data,
                     records: Vec::new(),
                     parse_error: Some(
@@ -1749,10 +1780,10 @@ mod tests {
         launcher.update();
 
         let report = launcher.last_client_snapshot_apply_report.expect(
-            "mixed fallback should apply player, unit, effect, fire, puddle and weather records",
+            "mixed fallback should apply player, unit, decal, effect, fire, puddle and weather records",
         );
-        assert_eq!(report.entity_records_applied, 6);
-        assert_eq!(report.entity_typed_records_applied, 6);
+        assert_eq!(report.entity_records_applied, 7);
+        assert_eq!(report.entity_typed_records_applied, 7);
         assert_eq!(report.entity_parse_errors, 0);
 
         assert_eq!(
@@ -1835,6 +1866,17 @@ mod tests {
         assert_eq!(effect.time, 12.0);
         assert_eq!(effect.x, 100.0);
         assert_eq!(effect.y, 200.0);
+
+        let decal = launcher
+            .runtime
+            .client_decal_snapshot_entities
+            .get(&9802)
+            .expect("mixed fallback should materialize decal record");
+        assert_eq!(decal.lifetime, 30.0);
+        assert_eq!(decal.rotation, 15.0);
+        assert_eq!(decal.time, 2.0);
+        assert_eq!(decal.x, 12.0);
+        assert_eq!(decal.y, 24.0);
 
         let fire = launcher
             .runtime

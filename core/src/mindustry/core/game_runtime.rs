@@ -25,7 +25,8 @@ use crate::mindustry::{
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
-            BuildingComp, BulletComp, EffectStateComp, FireComp, PuddleComp, PuddleTile, UnitComp,
+            BuildingComp, BulletComp, DecalComp, DecalRegion, EffectStateComp, FireComp,
+            PuddleComp, PuddleTile, UnitComp,
         },
         entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
@@ -1539,6 +1540,15 @@ fn read_client_fire_sync_exact(sync_bytes: &[u8]) -> Option<type_io::FireSyncWir
     read.is_empty().then_some(sync)
 }
 
+fn read_client_decal_sync_exact(sync_bytes: &[u8]) -> Option<type_io::DecalSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_decal_sync(&mut read).ok()?;
+    read.is_empty().then_some(sync)
+}
+
 fn read_client_puddle_sync_exact(sync_bytes: &[u8]) -> Option<type_io::PuddleSyncWire> {
     if sync_bytes.is_empty() {
         return None;
@@ -2060,6 +2070,7 @@ pub struct GameRuntime {
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
+    pub client_decal_snapshot_entities: BTreeMap<i32, DecalComp>,
     pub client_effect_snapshot_entities: BTreeMap<i32, EffectStateComp>,
     pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
@@ -2115,6 +2126,7 @@ impl GameRuntime {
             construct_runtime_states: BTreeMap::new(),
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
+            client_decal_snapshot_entities: BTreeMap::new(),
             client_effect_snapshot_entities: BTreeMap::new(),
             client_fire_snapshot_entities: BTreeMap::new(),
             client_player_snapshot_entities: BTreeMap::new(),
@@ -2411,6 +2423,13 @@ impl GameRuntime {
                     report.entity_typed_records_applied = 1;
                 }
             }
+            Some(EntityClassKind::Decal) => {
+                if let Some(sync) = read_client_decal_sync_exact(&sync_bytes) {
+                    if self.apply_client_decal_sync_wire(entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
             Some(EntityClassKind::Effect) => {
                 if let Some(sync) = read_client_effect_state_sync_exact(&sync_bytes) {
                     if self.apply_client_effect_state_sync_wire(entity_id, &sync) {
@@ -2499,6 +2518,18 @@ impl GameRuntime {
                         self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
                     );
                     self.apply_client_unit_sync_wire(content, entity_id, &sync)
+                }
+                Some(EntityClassKind::Decal) => {
+                    let Ok(sync) = type_io::read_decal_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_decal_sync_wire(entity_id, &sync)
                 }
                 Some(EntityClassKind::Effect) => {
                     let Ok(sync) = type_io::read_effect_state_sync(&mut read) else {
@@ -2595,6 +2626,19 @@ impl GameRuntime {
             .entry(entity_id)
             .or_insert_with(|| EffectStateComp::new(entity_id));
         effect.apply_sync_wire(sync, None);
+        true
+    }
+
+    pub fn apply_client_decal_sync_wire(
+        &mut self,
+        entity_id: i32,
+        sync: &type_io::DecalSyncWire,
+    ) -> bool {
+        let decal = self
+            .client_decal_snapshot_entities
+            .entry(entity_id)
+            .or_insert_with(|| DecalComp::new(DecalRegion::unknown()));
+        decal.apply_sync_wire(sync);
         true
     }
 
@@ -2700,6 +2744,9 @@ impl GameRuntime {
             let mut existing = false;
             if let Some(record) = self.client_entity_snapshot_records.get_mut(id) {
                 record.hidden = true;
+                existing = true;
+            }
+            if self.client_decal_snapshot_entities.contains_key(id) {
                 existing = true;
             }
             if self.client_effect_snapshot_entities.contains_key(id) {
@@ -5512,6 +5559,7 @@ impl GameRuntime {
         self.construct_runtime_states.clear();
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
+        self.client_decal_snapshot_entities.clear();
         self.client_effect_snapshot_entities.clear();
         self.client_fire_snapshot_entities.clear();
         self.client_player_snapshot_entities.clear();
@@ -13507,8 +13555,8 @@ mod tests {
         core::GameStateState,
         ctype::{Content, ContentType},
         entities::{
-            units::BuildPlan, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
-            WEATHER_STATE_CLASS_ID,
+            units::BuildPlan, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
+            PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
         },
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
@@ -14715,6 +14763,84 @@ mod tests {
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7001]);
         assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_decal_entity_snapshot_to_typed_runtime() {
+        let sync = type_io::DecalSyncWire {
+            color: type_io::RgbaColor::new(0x336699cc),
+            lifetime: 45.0,
+            rotation: 135.0,
+            time: 9.5,
+            x: 64.0,
+            y: 80.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_decal_sync(&mut sync_bytes, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_record_with_content(
+            &ContentLoader::create_base_content().unwrap(),
+            7005,
+            DECAL_CLASS_ID,
+            sync_bytes.clone(),
+        );
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&7005)
+            .expect("decal snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, DECAL_CLASS_ID);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+
+        let decal = runtime
+            .client_decal_snapshot_entities
+            .get(&7005)
+            .expect("decal sync should materialize typed runtime decal");
+        assert_eq!(decal.lifetime, 45.0);
+        assert_eq!(decal.rotation, 135.0);
+        assert_eq!(decal.time, 9.5);
+        assert_eq!(decal.x, 64.0);
+        assert_eq!(decal.y, 80.0);
+        assert_eq!(decal.region.name, "unknown");
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[7005]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_decal_entity_snapshot_packet_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let sync = type_io::DecalSyncWire {
+            color: type_io::RgbaColor::new(0x11223344),
+            lifetime: 30.0,
+            rotation: 15.0,
+            time: 2.0,
+            x: 12.0,
+            y: 24.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_decal_sync(&mut sync_bytes, &sync).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&7102i32.to_be_bytes());
+        data.push(DECAL_CLASS_ID);
+        data.extend_from_slice(&sync_bytes);
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_packet_with_content(&content, 1, &data);
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        assert_eq!(report.entity_parse_errors, 0);
+
+        let decal = runtime.client_decal_snapshot_entities.get(&7102).unwrap();
+        assert_eq!(decal.rotation, 15.0);
+        assert_eq!(decal.time, 2.0);
+        assert_eq!(decal.x, 12.0);
+        assert_eq!(decal.y, 24.0);
     }
 
     #[test]

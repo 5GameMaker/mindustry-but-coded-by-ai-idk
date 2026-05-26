@@ -916,6 +916,16 @@ pub struct FireSyncWire {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DecalSyncWire {
+    pub color: RgbaColor,
+    pub lifetime: f32,
+    pub rotation: f32,
+    pub time: f32,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PuddleSyncWire {
     pub amount: f32,
     pub liquid_id: Option<ContentId>,
@@ -1227,6 +1237,35 @@ pub fn read_fire_sync<R: Read>(read: &mut R) -> io::Result<FireSyncWire> {
     Ok(FireSyncWire {
         lifetime,
         tile_pos,
+        time,
+        x,
+        y,
+    })
+}
+
+pub fn write_decal_sync<W: Write>(write: &mut W, sync: &DecalSyncWire) -> io::Result<()> {
+    write_color(write, sync.color)?;
+    write_f32(write, sync.lifetime)?;
+    // Upstream revision 0 lists `region: TextureRegion` between lifetime and
+    // rotation, but the annotation serializer has no TextureRegion TypeIO
+    // method. Generated Java sync code therefore logs and skips that field.
+    write_f32(write, sync.rotation)?;
+    write_f32(write, sync.time)?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)
+}
+
+pub fn read_decal_sync<R: Read>(read: &mut R) -> io::Result<DecalSyncWire> {
+    let color = read_color(read)?;
+    let lifetime = read_f32(read)?;
+    let rotation = read_f32(read)?;
+    let time = read_f32(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(DecalSyncWire {
+        color,
+        lifetime,
+        rotation,
         time,
         x,
         y,
@@ -3053,6 +3092,33 @@ mod tests {
             read_fire_sync(&mut bytes.as_slice()).unwrap(),
             sync_without_tile
         );
+    }
+
+    #[test]
+    fn decal_sync_wire_roundtrips_java_write_sync_shape() {
+        let sync = DecalSyncWire {
+            color: RgbaColor::new(0x88aabbccu32 as i32),
+            lifetime: 60.0,
+            rotation: 45.0,
+            time: 12.5,
+            x: 96.0,
+            y: 128.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_decal_sync(&mut bytes, &sync).unwrap();
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&(0x88aabbccu32 as i32).to_be_bytes());
+        expected.extend_from_slice(&sync.lifetime.to_be_bytes());
+        // DecalComp revision 0 includes `region: TextureRegion`, but upstream
+        // generated writeSync cannot serialize TextureRegion and emits no bytes.
+        expected.extend_from_slice(&sync.rotation.to_be_bytes());
+        expected.extend_from_slice(&sync.time.to_be_bytes());
+        expected.extend_from_slice(&sync.x.to_be_bytes());
+        expected.extend_from_slice(&sync.y.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(read_decal_sync(&mut bytes.as_slice()).unwrap(), sync);
     }
 
     #[test]
