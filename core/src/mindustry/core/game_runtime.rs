@@ -56,7 +56,8 @@ use crate::mindustry::{
         EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
     world::blocks::distribution::{
-        choose_side_route, conveyor_accept_item, duct_accept_item, duct_junction_accept_item,
+        choose_side_route, conveyor_accept_item, directional_unloader_can_unload,
+        directional_unloader_next_offset, duct_accept_item, duct_junction_accept_item,
         duct_router_accept_item, item_bridge_transport_iterations, item_bridge_warmup_step,
         junction_can_release, mass_driver_link_valid, overflow_gate_route,
         read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
@@ -1447,6 +1448,17 @@ pub struct GameRuntimeItemDuctFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeDirectionalUnloaderFrameReport {
+    pub visited_buildings: usize,
+    pub unloader_candidates: usize,
+    pub updated_unloaders: usize,
+    pub attempted_moves: usize,
+    pub moved_items: usize,
+    pub missing_targets: usize,
+    pub blocked_sources: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeStackConveyorFrameReport {
     pub visited_buildings: usize,
     pub stack_candidates: usize,
@@ -1522,6 +1534,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub invalid_payloads: usize,
     pub missing_runtime_states: usize,
     pub router_forwarded_items: usize,
+    pub directional_unloader_moved_items: usize,
     pub duct_forwarded_items: usize,
     pub duct_bridge_forwarded_items: usize,
     pub stack_conveyor_forwarded_items: usize,
@@ -1674,6 +1687,7 @@ pub struct GameRuntime {
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
     pub item_router_runtime_states: BTreeMap<i32, GameRuntimeItemRouterState>,
     pub item_duct_progress_states: BTreeMap<i32, f32>,
+    pub item_directional_unloader_timers: BTreeMap<i32, f32>,
     pub item_bridge_transport_counters: BTreeMap<i32, f32>,
     pub item_junction_time_counters: BTreeMap<i32, f32>,
     pub item_mass_driver_reload_counters: BTreeMap<i32, f32>,
@@ -1709,6 +1723,7 @@ impl GameRuntime {
             distribution_runtime_states: BTreeMap::new(),
             item_router_runtime_states: BTreeMap::new(),
             item_duct_progress_states: BTreeMap::new(),
+            item_directional_unloader_timers: BTreeMap::new(),
             item_bridge_transport_counters: BTreeMap::new(),
             item_junction_time_counters: BTreeMap::new(),
             item_mass_driver_reload_counters: BTreeMap::new(),
@@ -2136,6 +2151,8 @@ impl GameRuntime {
         self.distribution_runtime_states.remove(&removed.tile_pos);
         self.item_router_runtime_states.remove(&removed.tile_pos);
         self.item_duct_progress_states.remove(&removed.tile_pos);
+        self.item_directional_unloader_timers
+            .remove(&removed.tile_pos);
         self.item_bridge_transport_counters
             .remove(&removed.tile_pos);
         self.item_junction_time_counters.remove(&removed.tile_pos);
@@ -3736,6 +3753,7 @@ impl GameRuntime {
         self.distribution_runtime_states.clear();
         self.item_router_runtime_states.clear();
         self.item_duct_progress_states.clear();
+        self.item_directional_unloader_timers.clear();
         self.item_bridge_transport_counters.clear();
         self.item_junction_time_counters.clear();
         self.item_mass_driver_reload_counters.clear();
@@ -4880,6 +4898,9 @@ impl GameRuntime {
         }
         report.router_forwarded_items += self
             .advance_owned_item_routers_ticks(content, frame_delta)
+            .moved_items;
+        report.directional_unloader_moved_items += self
+            .advance_owned_directional_unloaders_ticks(content, frame_delta)
             .moved_items;
         report.duct_forwarded_items += self
             .advance_owned_item_ducts_ticks(content, frame_delta)
@@ -7334,6 +7355,241 @@ impl GameRuntime {
         total_used
     }
 
+    pub fn advance_owned_directional_unloaders(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeDirectionalUnloaderFrameReport> {
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        Some(self.advance_owned_directional_unloaders_ticks(content, advanced.delta_ticks as f32))
+    }
+
+    fn advance_owned_directional_unloaders_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeDirectionalUnloaderFrameReport {
+        let mut report = GameRuntimeDirectionalUnloaderFrameReport::default();
+        let unloader_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                report.visited_buildings += 1;
+                match content.block(building.block.id) {
+                    Some(BlockDef::Distribution(distribution))
+                        if distribution.kind == DistributionBlockKind::DirectionalUnloader =>
+                    {
+                        report.unloader_candidates += 1;
+                        Some(index)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for index in unloader_indices {
+            let Some(BlockDef::Distribution(unloader_block)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+            if !self.buildings[index].enabled {
+                continue;
+            }
+
+            let tile_pos = self.buildings[index].tile_pos;
+            let edelta = frame_delta
+                * self.buildings[index].efficiency.max(0.0)
+                * self.buildings[index].time_scale.max(0.0);
+            let timer = self
+                .item_directional_unloader_timers
+                .entry(tile_pos)
+                .or_insert(0.0);
+            *timer += edelta;
+            if *timer < unloader_block.speed {
+                report.updated_unloaders += 1;
+                continue;
+            }
+
+            report.attempted_moves += 1;
+            let moved = self.directional_unloader_try_move(content, index, unloader_block);
+            if moved {
+                let timer = self
+                    .item_directional_unloader_timers
+                    .entry(tile_pos)
+                    .or_insert(0.0);
+                *timer %= unloader_block.speed.max(0.0001);
+                report.moved_items += 1;
+            } else {
+                let timer = self
+                    .item_directional_unloader_timers
+                    .entry(tile_pos)
+                    .or_insert(0.0);
+                *timer = (*timer).min(unloader_block.speed);
+                if self
+                    .directional_unloader_front_back(content, index)
+                    .is_some()
+                {
+                    report.blocked_sources += 1;
+                } else {
+                    report.missing_targets += 1;
+                }
+            }
+            report.updated_unloaders += 1;
+        }
+
+        report
+    }
+
+    fn directional_unloader_front_back(
+        &self,
+        content: &ContentLoader,
+        unloader_index: usize,
+    ) -> Option<(usize, usize)> {
+        let unloader = self.buildings.get(unloader_index)?;
+        let Some(BlockDef::Distribution(unloader_block)) = content.block(unloader.block.id) else {
+            return None;
+        };
+        if unloader_block.kind != DistributionBlockKind::DirectionalUnloader {
+            return None;
+        }
+        let front_index = self.neighbor_building_index(unloader_index, unloader.rotation)?;
+        let back_index =
+            self.neighbor_building_index(unloader_index, (unloader.rotation + 2).rem_euclid(4))?;
+        let front = self.buildings.get(front_index)?;
+        let back = self.buildings.get(back_index)?;
+        let back_block = content.block(back.block.id)?;
+        let back_is_core_or_linked_core = matches!(back_block, BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core);
+
+        directional_unloader_can_unload(
+            true,
+            true,
+            front.team == unloader.team && back.team == unloader.team,
+            Self::payload_block_unloadable(back_block) && back.items.is_some(),
+            back_is_core_or_linked_core,
+            unloader_block.allow_core_unload,
+        )
+        .then_some((front_index, back_index))
+    }
+
+    fn directional_unloader_try_move(
+        &mut self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        _unloader_block: &crate::mindustry::content::blocks::DistributionBlockData,
+    ) -> bool {
+        let Some((front_index, back_index)) =
+            self.directional_unloader_front_back(content, unloader_index)
+        else {
+            return false;
+        };
+        let tile_pos = self.buildings[unloader_index].tile_pos;
+        let mut state = match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::DirectionalUnloader(state)) => *state,
+            Some(_) => return false,
+            None => DirectionalUnloaderState {
+                unload_item: None,
+                offset: 0,
+            },
+        };
+
+        if let Some(item_id) = state.unload_item {
+            return self.directional_unloader_transfer_item(
+                content,
+                unloader_index,
+                back_index,
+                front_index,
+                item_id,
+            );
+        }
+
+        let items: Vec<_> = content
+            .items()
+            .iter()
+            .map(|item| item.base.mappable.base.id)
+            .collect();
+        if items.is_empty() {
+            return false;
+        }
+        let start = state.offset.rem_euclid(items.len() as i32) as usize;
+        for attempt in 0..items.len() {
+            let item_id = items[(start + attempt) % items.len()];
+            if self.directional_unloader_transfer_item(
+                content,
+                unloader_index,
+                back_index,
+                front_index,
+                item_id,
+            ) {
+                state.offset = directional_unloader_next_offset(item_id as i32);
+                self.distribution_runtime_states.insert(
+                    tile_pos,
+                    GameRuntimeDistributionBlockState::DirectionalUnloader(state),
+                );
+                return true;
+            }
+        }
+
+        self.distribution_runtime_states.entry(tile_pos).or_insert(
+            GameRuntimeDistributionBlockState::DirectionalUnloader(state),
+        );
+        false
+    }
+
+    fn directional_unloader_transfer_item(
+        &mut self,
+        content: &ContentLoader,
+        unloader_index: usize,
+        back_index: usize,
+        front_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        if unloader_index == back_index
+            || unloader_index == front_index
+            || back_index >= self.buildings.len()
+            || front_index >= self.buildings.len()
+            || unloader_index >= self.buildings.len()
+        {
+            return false;
+        }
+        if !self.buildings[back_index]
+            .items
+            .as_ref()
+            .is_some_and(|items| items.get(item_id) > 0)
+        {
+            return false;
+        }
+        if !self.dump_target_accepts_item(content, unloader_index, front_index, item_id) {
+            return false;
+        }
+
+        if let Some(items) = self.buildings[unloader_index].items.as_mut() {
+            items.add(item_id, 1);
+        } else {
+            return false;
+        }
+
+        let moved_to_front =
+            self.dump_item_to_target(content, unloader_index, front_index, item_id);
+        if !moved_to_front {
+            if let Some(items) = self.buildings[unloader_index].items.as_mut() {
+                if items.get(item_id) > 0 {
+                    items.remove(item_id, 1);
+                }
+            }
+            return false;
+        }
+
+        if let Some(back_items) = self.buildings[back_index].items.as_mut() {
+            back_items.remove(item_id, 1);
+        }
+        true
+    }
+
     pub fn advance_owned_item_ducts(
         &mut self,
         content: &ContentLoader,
@@ -8291,12 +8547,7 @@ impl GameRuntime {
                     content
                         .block(source.block.id)
                         .is_some_and(|block| match block {
-                            BlockDef::Distribution(distribution) => matches!(
-                                distribution.kind,
-                                DistributionBlockKind::Duct
-                                    | DistributionBlockKind::DuctRouter
-                                    | DistributionBlockKind::OverflowDuct
-                            ),
+                            BlockDef::Distribution(distribution) => distribution.is_duct,
                             _ => false,
                         });
                 duct_accept_item(
@@ -16032,6 +16283,121 @@ mod tests {
         assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
         assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+    }
+
+    #[test]
+    fn game_runtime_directional_unloader_unloads_configured_item_to_front_neighbor() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("duct-unloader").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let back_tile = point2_pack(3, 4);
+        let unloader_tile = point2_pack(5, 4);
+        let front_tile = point2_pack(6, 4);
+        let mut back_building =
+            BuildingComp::new(back_tile, container_def.base().clone(), TeamId(6));
+        back_building.items.as_mut().unwrap().add(copper, 2);
+        let mut unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        unloader_building.set_rotation(0);
+        let front_building = BuildingComp::new(front_tile, router_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(back_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(front_building);
+        runtime.distribution_runtime_states.insert(
+            unloader_tile,
+            GameRuntimeDistributionBlockState::DirectionalUnloader(DirectionalUnloaderState {
+                unload_item: Some(copper),
+                offset: 0,
+            }),
+        );
+
+        let report = runtime
+            .advance_owned_directional_unloaders(&content, 4.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.unloader_candidates, 1);
+        assert_eq!(report.attempted_moves, 1);
+        assert_eq!(report.moved_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&unloader_tile),
+            Some(&GameRuntimeDistributionBlockState::DirectionalUnloader(
+                DirectionalUnloaderState {
+                    unload_item: Some(copper),
+                    offset: 0,
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn game_runtime_directional_unloader_round_robins_items_from_offset() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("duct-unloader").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let back_tile = point2_pack(3, 4);
+        let unloader_tile = point2_pack(5, 4);
+        let front_tile = point2_pack(6, 4);
+        let mut back_building =
+            BuildingComp::new(back_tile, container_def.base().clone(), TeamId(6));
+        back_building.items.as_mut().unwrap().add(lead, 1);
+        let mut unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        unloader_building.set_rotation(0);
+        let front_building = BuildingComp::new(front_tile, router_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(back_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(front_building);
+        runtime.distribution_runtime_states.insert(
+            unloader_tile,
+            GameRuntimeDistributionBlockState::DirectionalUnloader(DirectionalUnloaderState {
+                unload_item: None,
+                offset: copper as i32,
+            }),
+        );
+
+        let report = runtime
+            .advance_owned_directional_unloaders(&content, 4.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.moved_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(lead), 0);
+        assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(lead), 1);
+        assert_eq!(
+            runtime.distribution_runtime_states.get(&unloader_tile),
+            Some(&GameRuntimeDistributionBlockState::DirectionalUnloader(
+                DirectionalUnloaderState {
+                    unload_item: None,
+                    offset: directional_unloader_next_offset(lead as i32),
+                }
+            ))
+        );
     }
 
     #[test]
