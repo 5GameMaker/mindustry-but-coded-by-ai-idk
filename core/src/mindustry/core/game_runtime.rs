@@ -1739,6 +1739,15 @@ pub enum GameRuntimeCoreUpgradeResult {
     InvalidPlacement,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimeCorePlaceResult {
+    Placed,
+    Upgraded,
+    UnknownCore,
+    InvalidPlacement,
+    UpgradeFailed(GameRuntimeCoreUpgradeResult),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum GameRuntimeLoadedBlockState {
     Construct(GameRuntimeConstructBlockState),
@@ -2449,6 +2458,40 @@ impl GameRuntime {
         self.refresh_owned_storage_core_links(content);
 
         GameRuntimeCoreUpgradeResult::Upgraded
+    }
+
+    pub fn place_owned_core(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        team: TeamId,
+        core_block_id: ContentId,
+    ) -> GameRuntimeCorePlaceResult {
+        let Some(BlockDef::Storage(core)) = content.block(core_block_id) else {
+            return GameRuntimeCorePlaceResult::UnknownCore;
+        };
+        if core.kind != StorageBlockKind::Core {
+            return GameRuntimeCorePlaceResult::UnknownCore;
+        }
+
+        if self
+            .building_index_at(tile_pos)
+            .is_some_and(|index| self.buildings[index].block.flags.contains(&BlockFlag::Core))
+        {
+            return match self.upgrade_owned_core(content, tile_pos, core_block_id) {
+                GameRuntimeCoreUpgradeResult::Upgraded => GameRuntimeCorePlaceResult::Upgraded,
+                other => GameRuntimeCorePlaceResult::UpgradeFailed(other),
+            };
+        }
+
+        if !self.can_place_owned_core_on(content, tile_pos, team, core_block_id) {
+            return GameRuntimeCorePlaceResult::InvalidPlacement;
+        }
+
+        let building = BuildingComp::new(tile_pos, core.base.clone(), team);
+        self.add_building(building);
+        self.refresh_owned_storage_core_links(content);
+        GameRuntimeCorePlaceResult::Placed
     }
 
     pub fn add_building(&mut self, building: BuildingComp) -> usize {
@@ -13201,6 +13244,42 @@ mod tests {
             runtime.storage_runtime_states.get(&tile_pos),
             Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
                 storage_capacity: foundation_def.base().item_capacity,
+                ..CoreBuildState::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn game_runtime_places_core_on_core_zone_without_existing_core() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let shard_def = content.block_by_name("core-shard").unwrap();
+        let core_zone = content.block_by_name("core-zone").unwrap();
+        assert!(core_zone
+            .as_floor()
+            .is_some_and(|floor| floor.allow_core_placement));
+        let team = TeamId(6);
+        let tile_pos = point2_pack(8, 8);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        for (x, y) in footprint_tiles(8, 8, shard_def.base().size) {
+            runtime.state.world.tile_mut(x, y).unwrap().floor = core_zone.base().id;
+        }
+
+        assert!(runtime.can_place_owned_core_on(&content, tile_pos, team, shard_def.base().id));
+        assert_eq!(
+            runtime.place_owned_core(&content, tile_pos, team, shard_def.base().id),
+            GameRuntimeCorePlaceResult::Placed
+        );
+
+        assert_eq!(runtime.buildings().len(), 1);
+        assert_eq!(runtime.buildings()[0].block.id, shard_def.base().id);
+        assert_eq!(runtime.state.teams.cores(team.0).len(), 1);
+        assert_eq!(runtime.state.teams.cores(team.0)[0].id, tile_pos);
+        assert_eq!(
+            runtime.storage_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                storage_capacity: shard_def.base().item_capacity,
                 ..CoreBuildState::default()
             }))
         );
