@@ -56,16 +56,18 @@ use crate::mindustry::{
         EffectBlockTimerStateStore, EffectProjectorRuntimeState, ShieldWallState,
     },
     world::blocks::distribution::{
-        conveyor_accept_item, duct_accept_item, duct_router_accept_item,
-        read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
-        read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
-        read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
-        read_stack_conveyor_state, write_buffered_bridge_state, write_conveyor_state,
-        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
-        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
-        write_stack_conveyor_state, BufferedItemBridgeState, ConveyorItemState, ConveyorState,
-        DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
-        MassDriverState, SorterState, StackConveyorState, CONVEYOR_CAPACITY,
+        choose_side_route, conveyor_accept_item, duct_accept_item, duct_router_accept_item,
+        overflow_gate_route, read_buffered_bridge_state, read_conveyor_state,
+        read_directional_unloader_state, read_duct_junction_state, read_duct_router_state,
+        read_duct_state, read_item_bridge_state, read_mass_driver_state,
+        read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
+        sorter_rejects_instant_three_chain, sorter_should_direct, write_buffered_bridge_state,
+        write_conveyor_state, write_directional_unloader_state, write_duct_junction_state,
+        write_duct_router_state, write_duct_state, write_item_bridge_state,
+        write_mass_driver_state, write_sorter_state, write_stack_conveyor_state,
+        BufferedItemBridgeState, ConveyorItemState, ConveyorState, DirectionalUnloaderState,
+        DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState, MassDriverState,
+        OverflowRoute, SideRoute, SorterState, StackConveyorState, CONVEYOR_CAPACITY,
     },
     world::blocks::heat::{read_heat_producer_state, write_heat_producer_state, HeatProducerState},
     world::blocks::legacy::{
@@ -4954,6 +4956,22 @@ impl GameRuntime {
         if target_is_duct {
             return self.dump_item_to_duct(content, source_index, target_index, item_id);
         }
+        let target_is_instant_transfer = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::Sorter | DistributionBlockKind::OverflowGate
+                )
+        );
+        if target_is_instant_transfer {
+            return self.dump_item_through_instant_transfer(
+                content,
+                source_index,
+                target_index,
+                item_id,
+            );
+        }
 
         let (source, target) = if source_index < target_index {
             let (left, right) = self.buildings.split_at_mut(target_index);
@@ -4984,6 +5002,257 @@ impl GameRuntime {
         source_items.remove(item_id, 1);
         target_items.add(item_id, 1);
         true
+    }
+
+    fn dump_item_through_instant_transfer(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        instant_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        let Some((target_index, next_rotation_bits)) = self.instant_transfer_item_destination(
+            content,
+            source_index,
+            instant_index,
+            item_id,
+            true,
+        ) else {
+            return false;
+        };
+        if !self.dump_target_accepts_item(content, instant_index, target_index, item_id) {
+            return false;
+        }
+
+        let target_is_sink = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Sandbox(sandbox)) if sandbox.kind == SandboxBlockKind::ItemVoid
+        ) || matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Crafting(crafting))
+                if crafting.kind == CraftingBlockKind::ItemIncinerator
+        );
+        let target_accepts_simple_items = target_is_sink
+            || match content.block(self.buildings[target_index].block.id) {
+                Some(BlockDef::Storage(_)) => true,
+                Some(BlockDef::Distribution(distribution))
+                    if distribution.kind == DistributionBlockKind::Router =>
+                {
+                    true
+                }
+                _ => false,
+            };
+        if !target_accepts_simple_items {
+            return false;
+        }
+
+        if source_index == target_index
+            || source_index >= self.buildings.len()
+            || target_index >= self.buildings.len()
+        {
+            return false;
+        }
+
+        let (source, target) = if source_index < target_index {
+            let (left, right) = self.buildings.split_at_mut(target_index);
+            (&mut left[source_index], &mut right[0])
+        } else {
+            let (left, right) = self.buildings.split_at_mut(source_index);
+            (&mut right[0], &mut left[target_index])
+        };
+
+        let Some(source_items) = source.items.as_mut() else {
+            return false;
+        };
+        if source_items.get(item_id) <= 0 {
+            return false;
+        }
+        source_items.remove(item_id, 1);
+
+        if !target_is_sink {
+            let Some(target_items) = target.items.as_mut() else {
+                return false;
+            };
+            if target_items.total() >= target.block.item_capacity {
+                return false;
+            }
+            target_items.add(item_id, 1);
+        }
+
+        if let Some(next_rotation_bits) = next_rotation_bits {
+            if let Some(instant) = self.buildings.get_mut(instant_index) {
+                instant.rotation = next_rotation_bits;
+            }
+        }
+        true
+    }
+
+    fn instant_transfer_item_destination(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        instant_index: usize,
+        item_id: ContentId,
+        flip: bool,
+    ) -> Option<(usize, Option<i32>)> {
+        let instant = self.buildings.get(instant_index)?;
+        let BlockDef::Distribution(distribution) = content.block(instant.block.id)? else {
+            return None;
+        };
+        let direction = self.relative_direction_between_buildings(source_index, instant_index)?;
+        let source_instant = self.building_instant_transfer(content, source_index);
+
+        match distribution.kind {
+            DistributionBlockKind::Sorter => {
+                let sort_item = match self.distribution_runtime_states.get(&instant.tile_pos) {
+                    Some(GameRuntimeDistributionBlockState::Sorter(state)) => state.sort_item,
+                    Some(_) => return None,
+                    None => None,
+                };
+                let direct =
+                    sorter_should_direct(item_id, sort_item, distribution.invert, instant.enabled);
+                if direct {
+                    let target_index = self.neighbor_building_index(instant_index, direction)?;
+                    if sorter_rejects_instant_three_chain(
+                        direct,
+                        source_instant,
+                        self.building_instant_transfer(content, target_index),
+                    ) {
+                        return None;
+                    }
+                    return self
+                        .instant_transfer_neighbor_accepts(
+                            content,
+                            instant_index,
+                            target_index,
+                            item_id,
+                            false,
+                        )
+                        .then_some((target_index, None));
+                }
+
+                let left_dir = (direction - 1).rem_euclid(4);
+                let right_dir = (direction + 1).rem_euclid(4);
+                let left = self.neighbor_building_index(instant_index, left_dir);
+                let right = self.neighbor_building_index(instant_index, right_dir);
+                let left_accepts = left.is_some_and(|target| {
+                    self.instant_transfer_neighbor_accepts(
+                        content,
+                        instant_index,
+                        target,
+                        item_id,
+                        source_instant,
+                    )
+                });
+                let right_accepts = right.is_some_and(|target| {
+                    self.instant_transfer_neighbor_accepts(
+                        content,
+                        instant_index,
+                        target,
+                        item_id,
+                        source_instant,
+                    )
+                });
+                let (route, next_bits) = choose_side_route(
+                    left_accepts,
+                    right_accepts,
+                    instant.rotation,
+                    direction,
+                    flip,
+                )?;
+                let target = match route {
+                    SideRoute::Left => left?,
+                    SideRoute::Right => right?,
+                };
+                Some((target, (next_bits != instant.rotation).then_some(next_bits)))
+            }
+            DistributionBlockKind::OverflowGate => {
+                let forward = self.neighbor_building_index(instant_index, direction);
+                let left_dir = (direction - 1).rem_euclid(4);
+                let right_dir = (direction + 1).rem_euclid(4);
+                let left = self.neighbor_building_index(instant_index, left_dir);
+                let right = self.neighbor_building_index(instant_index, right_dir);
+                let can_forward = forward.is_some_and(|target| {
+                    self.instant_transfer_neighbor_accepts(
+                        content,
+                        instant_index,
+                        target,
+                        item_id,
+                        source_instant,
+                    )
+                });
+                let left_accepts = left.is_some_and(|target| {
+                    self.instant_transfer_neighbor_accepts(
+                        content,
+                        instant_index,
+                        target,
+                        item_id,
+                        source_instant,
+                    )
+                });
+                let right_accepts = right.is_some_and(|target| {
+                    self.instant_transfer_neighbor_accepts(
+                        content,
+                        instant_index,
+                        target,
+                        item_id,
+                        source_instant,
+                    )
+                });
+                let (route, next_bits) = overflow_gate_route(
+                    can_forward,
+                    distribution.invert == instant.enabled,
+                    left_accepts,
+                    right_accepts,
+                    instant.rotation,
+                    direction,
+                    flip,
+                )?;
+                let target = match route {
+                    OverflowRoute::Forward => forward?,
+                    OverflowRoute::Left => left?,
+                    OverflowRoute::Right => right?,
+                };
+                Some((target, (next_bits != instant.rotation).then_some(next_bits)))
+            }
+            _ => None,
+        }
+    }
+
+    fn instant_transfer_neighbor_accepts(
+        &self,
+        content: &ContentLoader,
+        instant_index: usize,
+        target_index: usize,
+        item_id: ContentId,
+        source_instant: bool,
+    ) -> bool {
+        if source_instant && self.building_instant_transfer(content, target_index) {
+            return false;
+        }
+        self.dump_target_accepts_item(content, instant_index, target_index, item_id)
+    }
+
+    fn building_instant_transfer(&self, content: &ContentLoader, index: usize) -> bool {
+        self.buildings
+            .get(index)
+            .and_then(|building| content.block(building.block.id))
+            .is_some_and(|block| match block {
+                BlockDef::Distribution(distribution) => distribution.instant_transfer,
+                _ => false,
+            })
+    }
+
+    fn neighbor_building_index(&self, center_index: usize, direction: i32) -> Option<usize> {
+        let center = self.buildings.get(center_index)?;
+        let (dx, dy) = autotiler_direction(direction);
+        let target_ref = self
+            .state
+            .world
+            .build(center.tile_x() + dx, center.tile_y() + dy)?;
+        self.buildings
+            .iter()
+            .position(|building| building.tile_pos == target_ref.tile_pos)
     }
 
     fn dump_item_to_duct(
@@ -5421,6 +5690,21 @@ impl GameRuntime {
                     self.relative_direction_between_buildings(source_index, target_index),
                     target.rotation,
                 )
+            }
+            Some(BlockDef::Distribution(distribution))
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::Sorter | DistributionBlockKind::OverflowGate
+                ) =>
+            {
+                self.instant_transfer_item_destination(
+                    content,
+                    source_index,
+                    target_index,
+                    item_id,
+                    false,
+                )
+                .is_some()
             }
             Some(BlockDef::Storage(storage)) => {
                 let Some(items) = target.items.as_ref() else {
@@ -12650,6 +12934,127 @@ mod tests {
         };
         assert_eq!(router.current, Some(copper));
         assert_eq!(router.sort_item, None);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_through_sorter_to_item_void() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let sorter_def = content.block_by_name("sorter").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let sorter_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let item_void_tile = point2_pack(point2_x(sorter_tile) as i32 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let sorter_building = BuildingComp::new(sorter_tile, sorter_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(sorter_building);
+        runtime.add_building(item_void_building);
+        runtime.distribution_runtime_states.insert(
+            sorter_tile,
+            GameRuntimeDistributionBlockState::Sorter(SorterState {
+                sort_item: Some(copper),
+            }),
+        );
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 4);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 4);
+        assert!(runtime.buildings[1].items.is_none());
+        assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_offloads_items_through_overflow_gate_to_item_void() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let overflow_def = content.block_by_name("overflow-gate").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let overflow_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let item_void_tile = point2_pack(point2_x(overflow_tile) as i32 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let overflow_building =
+            BuildingComp::new(overflow_tile, overflow_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(overflow_building);
+        runtime.add_building(item_void_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(unload_report.unloaded_items, 8);
+        assert_eq!(unload_report.dumped_items, 4);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 4);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 0);
+        assert!(runtime.buildings[2].items.is_none());
     }
 
     #[test]
