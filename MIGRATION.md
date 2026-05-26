@@ -2836,6 +2836,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：需要继续审计各具体 block 构造器中显式改写 `consumes_power/connected_power` 的地方，确认是否存在因早期默认值不一致而遗留的冗余赋值或漏设。
 
+### 12.68 BeamNode 方向链接 runtime
+
+- 2026-05-27：迁移 Java `BeamNodeBuild.updateDirections()` 的最小 owned runtime 链路，让 BeamNode 不再停留在纯公式 helper，而是能实际维护 `PowerModule.links` 并参与 `GameRuntime` power graph。
+- Java 依据：
+  - `BeamNodeBuild.updateDirections()` 逐方向扫描，距离范围为 `1 + size/2 .. range + size/2`；
+  - 扫描遇到 `isInsulated()` building 立即停止；
+  - 命中同队、`hasPower && connectedPower` 且不是 `PowerNode` 的 building 时，写入该方向 `links[i]` / `dests[i]`；
+  - 方向目标变化时，先移除旧目标双方 `power.links` 并 reflow，再向新目标双方写入 `power.links` 并合并 graph。
+- Rust 新增/变化：
+  - `GameRuntime` 新增 `beam_node_links: BTreeMap<i32, [Option<i32>; 4]>` sidecar，用于保存每个 BeamNode 四方向上一轮目标，避免错误清理其它 BeamNode/PowerNode 写入的 reciprocal links；
+  - `refresh_owned_beam_node_links(...)` 扫描所有 BeamNode，并在链接变化后刷新 proximity 与 content-aware power graph；
+  - `advance_owned_power_graphs(...)` 开始时刷新 BeamNode links，使真实 power phase 能看到 BeamNode 方向链接；
+  - 移除 building 与 reset sidecars 时同步清理 BeamNode sidecar。
+- 测试：
+  - `game_runtime_refreshes_beam_node_links_and_power_graphs_like_java_update_directions`
+  - `game_runtime_beam_node_unlinks_when_insulated_wall_blocks_previous_direction`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_refreshes_beam_node_links_and_power_graphs_like_java_update_directions`
+  - `cargo test -p mindustry-core game_runtime_beam_node_unlinks_when_insulated_wall_blocks_previous_direction`
+  - `cargo test -p mindustry-core beam_node`
+  - `cargo test -p mindustry-core power_graph`
+  - `cargo test -p mindustry-core game_runtime_power_diode_transfers_between_front_and_back_graphs`
+  - `cargo check --workspace`
+  - `git diff --check`
+- 仍未完成：`BeamNode.getNodeLinks(...)` 的 placement preview/反向 placement 链路尚未迁移；BeamNode draw/dests 可见性、`world.tileChanges` 增量刷新条件与真实渲染选择规则仍待继续对照。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

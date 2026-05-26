@@ -130,14 +130,14 @@ use crate::mindustry::{
         Vec2 as PayloadVec2, PAYLOAD_BLOCK_TYPE, PAYLOAD_UNIT_TYPE,
     },
     world::blocks::power::{
-        power_diode_transfer_amount, power_graph_battery_stored,
-        power_graph_total_battery_capacity, power_node_link_valid, read_heater_generator_state,
-        read_impact_reactor_state, read_light_block_state, read_nuclear_reactor_state,
-        read_power_generator_state, read_variable_reactor_state, write_heater_generator_state,
-        write_impact_reactor_state, write_light_block_state, write_nuclear_reactor_state,
-        write_power_generator_state, write_variable_reactor_state, HeaterGeneratorState,
-        ImpactReactorState, LightBlockState, NuclearReactorState, PowerGeneratorState,
-        PowerGraphNode, PowerGraphRuntime, VariableReactorState,
+        beam_node_could_connect_scan_range, power_diode_transfer_amount,
+        power_graph_battery_stored, power_graph_total_battery_capacity, power_node_link_valid,
+        read_heater_generator_state, read_impact_reactor_state, read_light_block_state,
+        read_nuclear_reactor_state, read_power_generator_state, read_variable_reactor_state,
+        write_heater_generator_state, write_impact_reactor_state, write_light_block_state,
+        write_nuclear_reactor_state, write_power_generator_state, write_variable_reactor_state,
+        HeaterGeneratorState, ImpactReactorState, LightBlockState, NuclearReactorState,
+        PowerGeneratorState, PowerGraphNode, PowerGraphRuntime, VariableReactorState,
     },
     world::blocks::production::{
         item_incinerator_accept_item, read_beam_drill_state, read_burst_drill_state,
@@ -2030,6 +2030,11 @@ struct GameRuntimePowerNodeMetadata {
     same_block_connection: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GameRuntimeBeamNodeMetadata {
+    range: i32,
+}
+
 fn two_buildings_mut(
     buildings: &mut [BuildingComp],
     first: usize,
@@ -2148,6 +2153,7 @@ pub struct GameRuntime {
     pub power_runtime_states: BTreeMap<i32, GameRuntimePowerBlockState>,
     pub power_graphs: Vec<PowerGraphRuntime>,
     pub power_graph_memberships: BTreeMap<i32, usize>,
+    pub beam_node_links: BTreeMap<i32, [Option<i32>; 4]>,
     pub production_runtime_states: BTreeMap<i32, GameRuntimeProductionBlockState>,
     pub crafting_runtime_states: BTreeMap<i32, GameRuntimeCraftingBlockState>,
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
@@ -2209,6 +2215,7 @@ impl GameRuntime {
             power_runtime_states: BTreeMap::new(),
             power_graphs: Vec::new(),
             power_graph_memberships: BTreeMap::new(),
+            beam_node_links: BTreeMap::new(),
             production_runtime_states: BTreeMap::new(),
             crafting_runtime_states: BTreeMap::new(),
             distribution_runtime_states: BTreeMap::new(),
@@ -3652,6 +3659,14 @@ impl GameRuntime {
         self.effect_timer_store.remove(removed.tile_pos);
         self.payload_runtime_states.remove(&removed.tile_pos);
         self.power_runtime_states.remove(&removed.tile_pos);
+        self.beam_node_links.remove(&removed.tile_pos);
+        for links in self.beam_node_links.values_mut() {
+            for link in links.iter_mut() {
+                if *link == Some(removed.tile_pos) {
+                    *link = None;
+                }
+            }
+        }
         self.production_runtime_states.remove(&removed.tile_pos);
         self.crafting_runtime_states.remove(&removed.tile_pos);
         self.distribution_runtime_states.remove(&removed.tile_pos);
@@ -3890,6 +3905,7 @@ impl GameRuntime {
     }
 
     pub fn advance_owned_power_graphs(&mut self, content: &ContentLoader, delta: f32) -> usize {
+        self.refresh_owned_beam_node_links(content);
         let graph_count = self.rebuild_owned_power_graphs_from_proximity(Some(content), delta);
 
         for graph in &mut self.power_graphs {
@@ -4413,6 +4429,159 @@ impl GameRuntime {
         }
     }
 
+    pub fn refresh_owned_beam_node_links(&mut self, content: &ContentLoader) -> usize {
+        self.refresh_owned_building_proximity();
+        let beam_indices = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                Self::owned_beam_node_metadata(content, building).map(|metadata| (index, metadata))
+            })
+            .collect::<Vec<_>>();
+
+        let mut changed = 0;
+        for (source_index, metadata) in beam_indices {
+            changed += self.refresh_owned_beam_node_links_at(content, source_index, metadata);
+        }
+
+        if changed > 0 {
+            self.refresh_owned_building_proximity();
+            self.refresh_owned_power_graphs_with_content(content);
+        }
+        changed
+    }
+
+    fn refresh_owned_beam_node_links_at(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        metadata: GameRuntimeBeamNodeMetadata,
+    ) -> usize {
+        let Some(source) = self.buildings.get(source_index) else {
+            return 0;
+        };
+        let source_tile_pos = source.tile_pos;
+        let mut next_links = [None; 4];
+        for direction in 0..4 {
+            next_links[direction] = self.owned_beam_node_find_link_in_direction(
+                content,
+                source_index,
+                metadata,
+                direction,
+            );
+        }
+
+        let previous_links = self
+            .beam_node_links
+            .get(&source_tile_pos)
+            .copied()
+            .unwrap_or([None; 4]);
+        let mut changed = 0;
+        for direction in 0..4 {
+            let previous = previous_links[direction];
+            let next = next_links[direction];
+            if previous == next {
+                continue;
+            }
+
+            if let Some(previous_tile_pos) = previous {
+                self.remove_owned_beam_node_link(source_index, source_tile_pos, previous_tile_pos);
+            }
+            if let Some(next_tile_pos) = next {
+                if let Some(target_index) = self
+                    .buildings
+                    .iter()
+                    .position(|building| building.tile_pos == next_tile_pos)
+                {
+                    Self::add_owned_power_link_pair(
+                        &mut self.buildings,
+                        source_index,
+                        target_index,
+                        source_tile_pos,
+                        next_tile_pos,
+                    );
+                }
+            }
+            changed += 1;
+        }
+
+        if next_links == [None; 4] {
+            self.beam_node_links.remove(&source_tile_pos);
+        } else {
+            self.beam_node_links.insert(source_tile_pos, next_links);
+        }
+        changed
+    }
+
+    fn owned_beam_node_find_link_in_direction(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        metadata: GameRuntimeBeamNodeMetadata,
+        direction: usize,
+    ) -> Option<i32> {
+        const DIRECTIONS: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+        let source = self.buildings.get(source_index)?;
+        let (dx, dy) = DIRECTIONS[direction];
+        for distance in beam_node_could_connect_scan_range(metadata.range, source.block.size) {
+            let x = source.tile_x() + distance * dx;
+            let y = source.tile_y() + distance * dy;
+            let Some(other_ref) = self.state.world.build(x, y) else {
+                continue;
+            };
+            let Some(other_index) = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == other_ref.tile_pos)
+            else {
+                continue;
+            };
+            let other = &self.buildings[other_index];
+            if Self::owned_building_is_insulated(content, other) {
+                break;
+            }
+            if other.power.is_some()
+                && other.block.has_power
+                && other.block.connected_power
+                && other.team == source.team
+                && !Self::owned_power_node_metadata(content, other)
+                    .is_some_and(|metadata| metadata.is_node)
+            {
+                return Some(other.tile_pos);
+            }
+        }
+        None
+    }
+
+    fn remove_owned_beam_node_link(
+        &mut self,
+        source_index: usize,
+        source_tile_pos: i32,
+        target_tile_pos: i32,
+    ) {
+        if let Some(target_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == target_tile_pos)
+        {
+            Self::remove_owned_power_link_pair(
+                &mut self.buildings,
+                source_index,
+                target_index,
+                source_tile_pos,
+                target_tile_pos,
+            );
+        } else if let Some(power) = self
+            .buildings
+            .get_mut(source_index)
+            .and_then(|building| building.power.as_mut())
+        {
+            power.links.retain(|link| *link != target_tile_pos);
+            power.init = false;
+        }
+    }
+
     fn rebuild_owned_power_graphs_from_proximity(
         &mut self,
         content: Option<&ContentLoader>,
@@ -4777,6 +4946,18 @@ impl GameRuntime {
             laser_range: power.laser_range,
             autolink: power.autolink,
             same_block_connection: power.same_block_connection,
+        })
+    }
+
+    fn owned_beam_node_metadata(
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> Option<GameRuntimeBeamNodeMetadata> {
+        let Some(BlockDef::Power(power)) = content.block(building.block.id) else {
+            return None;
+        };
+        (power.kind == PowerBlockKind::BeamNode).then_some(GameRuntimeBeamNodeMetadata {
+            range: power.range as i32,
         })
     }
 
@@ -6903,6 +7084,7 @@ impl GameRuntime {
         self.power_runtime_states.clear();
         self.power_graphs.clear();
         self.power_graph_memberships.clear();
+        self.beam_node_links.clear();
         self.production_runtime_states.clear();
         self.crafting_runtime_states.clear();
         self.distribution_runtime_states.clear();
@@ -18092,6 +18274,104 @@ mod tests {
                 .links,
             vec![mender_pos]
         );
+    }
+
+    #[test]
+    fn game_runtime_refreshes_beam_node_links_and_power_graphs_like_java_update_directions() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let beam_def = content.block_by_name("beam-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let beam_pos = point2_pack(10, 10);
+        let mender_pos = point2_pack(15, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            beam_pos,
+            beam_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            mender_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(runtime.refresh_owned_beam_node_links(&content), 1);
+        assert_eq!(
+            runtime.beam_node_links.get(&beam_pos),
+            Some(&[Some(mender_pos), None, None, None])
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == beam_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![mender_pos]
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == mender_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![beam_pos]
+        );
+        assert_eq!(runtime.power_graphs.len(), 1);
+    }
+
+    #[test]
+    fn game_runtime_beam_node_unlinks_when_insulated_wall_blocks_previous_direction() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let beam_def = content.block_by_name("beam-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let wall_def = content.block_by_name("plastanium-wall").unwrap();
+        let beam_pos = point2_pack(10, 10);
+        let wall_pos = point2_pack(12, 10);
+        let mender_pos = point2_pack(15, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            beam_pos,
+            beam_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            mender_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+        assert_eq!(runtime.refresh_owned_beam_node_links(&content), 1);
+
+        runtime.add_building(BuildingComp::new(
+            wall_pos,
+            wall_def.base().clone(),
+            TeamId(1),
+        ));
+        assert_eq!(runtime.refresh_owned_beam_node_links(&content), 1);
+        assert!(!runtime.beam_node_links.contains_key(&beam_pos));
+        for pos in [beam_pos, mender_pos] {
+            assert!(runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links
+                .is_empty());
+        }
     }
 
     #[test]
