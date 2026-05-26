@@ -73,7 +73,8 @@ use crate::mindustry::{
         write_legacy_mech_pad_extra, write_legacy_unit_factory_extra, LegacyUnitFactoryExtra,
     },
     world::blocks::liquid::{
-        read_liquid_bridge_state, write_liquid_bridge_state, LiquidBridgeState,
+        accept_same_or_low_amount, calc_dump_transfer, read_liquid_bridge_state,
+        write_liquid_bridge_state, LiquidBridgeState,
     },
     world::blocks::logic::{
         read_canvas_state, read_logic_display_state, read_logic_processor_state, read_memory_state,
@@ -1409,6 +1410,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub unloaded_items: usize,
     pub dumped_items: usize,
     pub unloaded_liquid_events: usize,
+    pub dumped_liquid_events: usize,
     pub drained_batteries: usize,
     pub destroyed_instant_payloads: usize,
     pub invalid_payloads: usize,
@@ -4574,6 +4576,7 @@ impl GameRuntime {
         let frame_delta = advanced.delta_ticks as f32;
         let mut report = GameRuntimePayloadLoaderFrameReport::default();
         let mut pending_payload_moves = Vec::new();
+        let mut pending_unloader_liquid_dumps = Vec::new();
         let mut pending_unloader_item_dumps = Vec::new();
 
         for index in 0..self.buildings.len() {
@@ -4678,6 +4681,7 @@ impl GameRuntime {
                         loader_def.offload_speed,
                         frame_delta * time_scale,
                     ));
+                    pending_unloader_liquid_dumps.push(tile_pos);
                     if payload_unloader_should_export(loader) {
                         if Self::payload_ref_block_instant_deconstruct(
                             content,
@@ -4730,6 +4734,11 @@ impl GameRuntime {
             }
 
             report.updated_loaders += 1;
+        }
+
+        for tile_pos in pending_unloader_liquid_dumps {
+            report.dumped_liquid_events +=
+                self.dump_current_liquid_from_unloader(content, tile_pos);
         }
 
         for (tile_pos, offload_speed, delta) in pending_unloader_item_dumps {
@@ -4785,6 +4794,53 @@ impl GameRuntime {
                     dumped += 1;
                 }
             }
+        }
+        dumped
+    }
+
+    fn dump_current_liquid_from_unloader(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+    ) -> usize {
+        let Some(source_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return 0;
+        };
+        if source_index >= self.buildings.len() {
+            return 0;
+        }
+
+        let (liquid_id, proximity, start_dump) = {
+            let source = &self.buildings[source_index];
+            let Some(liquids) = source.liquids.as_ref() else {
+                return 0;
+            };
+            let Some(liquid_id) = liquids.current() else {
+                return 0;
+            };
+            if liquids.get(liquid_id) <= 0.0001 || source.proximity.is_empty() {
+                return 0;
+            }
+            (liquid_id, source.proximity.clone(), source.cdump)
+        };
+        let prox_len = proximity.len();
+        let mut dumped = 0;
+        for attempt in 0..prox_len {
+            let target_ref = proximity[(start_dump + attempt) % prox_len];
+            let target_index = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == target_ref.tile_pos);
+            if let Some(target_index) = target_index {
+                if self.dump_liquid_to_target(content, source_index, target_index, liquid_id) {
+                    dumped += 1;
+                }
+            }
+            self.increment_building_dump(source_index, prox_len);
         }
         dumped
     }
@@ -4900,6 +4956,61 @@ impl GameRuntime {
         true
     }
 
+    fn dump_liquid_to_target(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        liquid_id: ContentId,
+    ) -> bool {
+        if source_index == target_index
+            || source_index >= self.buildings.len()
+            || target_index >= self.buildings.len()
+            || !self.dump_liquid_target_accepts(content, source_index, target_index, liquid_id)
+        {
+            return false;
+        }
+
+        let (source, target) = if source_index < target_index {
+            let (left, right) = self.buildings.split_at_mut(target_index);
+            (&mut left[source_index], &mut right[0])
+        } else {
+            let (left, right) = self.buildings.split_at_mut(source_index);
+            (&mut right[0], &mut left[target_index])
+        };
+
+        let source_capacity = source.block.liquid_capacity;
+        let target_capacity = target.block.liquid_capacity;
+        let Some(source_liquids) = source.liquids.as_mut() else {
+            return false;
+        };
+        let Some(target_liquids) = target.liquids.as_mut() else {
+            return false;
+        };
+        if !accept_same_or_low_amount(
+            target_liquids.current(),
+            liquid_id,
+            target_liquids.current_amount(),
+        ) {
+            return false;
+        }
+
+        let flow = calc_dump_transfer(
+            source_liquids.get(liquid_id),
+            source_capacity,
+            target_liquids.get(liquid_id),
+            target_capacity,
+            2.0,
+        );
+        if flow <= 0.0 {
+            return false;
+        }
+
+        target_liquids.add(liquid_id, flow);
+        source_liquids.remove(liquid_id, flow);
+        true
+    }
+
     fn dump_target_accepts_item(
         &self,
         content: &ContentLoader,
@@ -4937,6 +5048,33 @@ impl GameRuntime {
             }
             _ => false,
         }
+    }
+
+    fn dump_liquid_target_accepts(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        liquid_id: ContentId,
+    ) -> bool {
+        let (Some(source), Some(target)) = (
+            self.buildings.get(source_index),
+            self.buildings.get(target_index),
+        ) else {
+            return false;
+        };
+        if source.team != target.team || !target.block.has_liquids {
+            return false;
+        }
+        if !matches!(content.block(target.block.id), Some(BlockDef::Liquid(_))) {
+            return false;
+        }
+        let Some(liquids) = target.liquids.as_ref() else {
+            return false;
+        };
+        target.block.liquid_capacity > 0.0
+            && liquids.get(liquid_id) < target.block.liquid_capacity
+            && accept_same_or_low_amount(liquids.current(), liquid_id, liquids.current_amount())
     }
 
     fn payload_loader_load_inner_building(
@@ -11834,6 +11972,73 @@ mod tests {
             GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
                 .unwrap();
         assert_eq!(payload_building.items.as_ref().unwrap().get(copper), 2);
+    }
+
+    #[test]
+    fn game_runtime_payload_unloader_dumps_liquid_to_adjacent_liquid_container() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let liquid_container_def = content.block_by_name("liquid-container").unwrap();
+        let water = content
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let liquid_container_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let liquid_container_building = BuildingComp::new(
+            liquid_container_tile,
+            liquid_container_def.base().clone(),
+            TeamId(6),
+        );
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(liquid_container_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(
+                        &content,
+                        "liquid-container",
+                        |building| {
+                            building.liquids.as_mut().unwrap().add(water, 80.0);
+                        },
+                    )),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.unloaded_liquid_events, 1);
+        assert_eq!(report.dumped_liquid_events, 1);
+        assert!((runtime.buildings[0].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
+        assert!((runtime.buildings[1].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
+
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&unloader_tile)
+        else {
+            panic!("payload unloader sidecar should remain present");
+        };
+        assert!((loader.payload_liquid_amount - 40.0).abs() < 0.001);
+        let (payload_building, _) =
+            GameRuntime::payload_ref_building_with_tail(&content, common.payload.as_ref().unwrap())
+                .unwrap();
+        assert!((payload_building.liquids.as_ref().unwrap().get(water) - 40.0).abs() < 0.001);
     }
 
     #[test]
