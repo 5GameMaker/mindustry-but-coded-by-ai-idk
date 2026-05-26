@@ -652,6 +652,62 @@ pub fn read_buffered_bridge_state<R: Read>(
     })
 }
 
+pub fn stack_router_accept_item(
+    unloading: bool,
+    current: Option<ContentId>,
+    item: ContentId,
+    items_total: i32,
+    item_capacity: i32,
+    source_relative_to_tile: Option<i32>,
+    rotation: i32,
+) -> bool {
+    !unloading
+        && (current.is_none() || current == Some(item))
+        && items_total < item_capacity
+        && source_relative_to_tile.map(|relative| relative.rem_euclid(4))
+            == Some(rotation.rem_euclid(4))
+}
+
+pub fn stack_router_should_begin_unloading(progress: f32, speed: f32) -> bool {
+    speed > 0.0 && progress >= speed
+}
+
+pub fn stack_router_progress_step(
+    unloading: bool,
+    current: Option<ContentId>,
+    items_total: i32,
+    item_capacity: i32,
+    progress: f32,
+    enabled: bool,
+    efficiency: f32,
+    base_efficiency: f32,
+    speed: f32,
+) -> (f32, bool) {
+    if unloading || current.is_none() || items_total < item_capacity {
+        return (progress, unloading);
+    }
+
+    let next_progress = progress
+        + if enabled {
+            efficiency + base_efficiency
+        } else {
+            0.0
+        };
+    let begin_unloading = stack_router_should_begin_unloading(next_progress, speed);
+    if begin_unloading {
+        (
+            if speed > 0.0 {
+                next_progress % speed
+            } else {
+                next_progress
+            },
+            true,
+        )
+    } else {
+        (next_progress, false)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StackConveyorStateKind {
     Move,
@@ -1120,6 +1176,76 @@ mod tests {
         assert_eq!(
             read_stack_conveyor_state(&mut bytes.as_slice(), Some(9)).unwrap(),
             stack
+        );
+    }
+
+    #[test]
+    fn stack_router_accept_item_and_progress_helpers_follow_java_branching() {
+        assert!(stack_router_accept_item(false, None, 7, 0, 10, Some(2), 2));
+        assert!(stack_router_accept_item(
+            false,
+            Some(7),
+            7,
+            9,
+            10,
+            Some(2),
+            2
+        ));
+        assert!(!stack_router_accept_item(
+            true,
+            Some(7),
+            7,
+            9,
+            10,
+            Some(2),
+            2
+        ));
+        assert!(!stack_router_accept_item(
+            false,
+            Some(7),
+            8,
+            9,
+            10,
+            Some(2),
+            2
+        ));
+        assert!(!stack_router_accept_item(
+            false,
+            Some(7),
+            7,
+            10,
+            10,
+            Some(2),
+            2
+        ));
+        assert!(!stack_router_accept_item(
+            false,
+            Some(7),
+            7,
+            9,
+            10,
+            Some(1),
+            2
+        ));
+
+        assert!(!stack_router_should_begin_unloading(2.99, 3.0));
+        assert!(stack_router_should_begin_unloading(3.0, 3.0));
+
+        assert_eq!(
+            stack_router_progress_step(false, Some(7), 10, 10, 2.5, true, 1.0, 0.5, 3.0),
+            (1.0, true)
+        );
+        assert_eq!(
+            stack_router_progress_step(false, Some(7), 10, 10, 2.5, false, 1.0, 0.5, 3.0),
+            (2.5, false)
+        );
+        assert_eq!(
+            stack_router_progress_step(false, None, 10, 10, 2.5, true, 1.0, 0.5, 3.0),
+            (2.5, false)
+        );
+        assert_eq!(
+            stack_router_progress_step(true, Some(7), 10, 10, 2.5, true, 1.0, 0.5, 3.0),
+            (2.5, true)
         );
     }
 }

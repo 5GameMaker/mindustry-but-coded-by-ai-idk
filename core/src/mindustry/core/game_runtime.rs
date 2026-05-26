@@ -64,14 +64,14 @@ use crate::mindustry::{
         read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
         read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
         read_stack_conveyor_state, sorter_rejects_instant_three_chain, sorter_should_direct,
-        stack_conveyor_accept_item, stack_conveyor_cooldown_step, write_buffered_bridge_state,
-        write_conveyor_state, write_directional_unloader_state, write_duct_junction_state,
-        write_duct_router_state, write_duct_state, write_item_bridge_state,
-        write_mass_driver_state, write_sorter_state, write_stack_conveyor_state,
-        BufferedItemBridgeState, ConveyorItemState, ConveyorState, DirectionalUnloaderState,
-        DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState, MassDriverState,
-        MassDriverStateKind, OverflowRoute, SideRoute, SorterState, StackConveyorState,
-        StackConveyorStateKind, CONVEYOR_CAPACITY,
+        stack_conveyor_accept_item, stack_conveyor_cooldown_step, stack_router_accept_item,
+        stack_router_progress_step, write_buffered_bridge_state, write_conveyor_state,
+        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
+        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
+        write_stack_conveyor_state, BufferedItemBridgeState, ConveyorItemState, ConveyorState,
+        DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
+        MassDriverState, MassDriverStateKind, OverflowRoute, SideRoute, SorterState,
+        StackConveyorState, StackConveyorStateKind, CONVEYOR_CAPACITY,
     },
     world::blocks::heat::{read_heat_producer_state, write_heat_producer_state, HeatProducerState},
     world::blocks::legacy::{
@@ -1459,6 +1459,18 @@ pub struct GameRuntimeDirectionalUnloaderFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeStackRouterFrameReport {
+    pub visited_buildings: usize,
+    pub router_candidates: usize,
+    pub updated_routers: usize,
+    pub started_unloading: usize,
+    pub attempted_moves: usize,
+    pub moved_items: usize,
+    pub missing_targets: usize,
+    pub blocked_targets: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeStackConveyorFrameReport {
     pub visited_buildings: usize,
     pub stack_candidates: usize,
@@ -1537,6 +1549,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub directional_unloader_moved_items: usize,
     pub duct_forwarded_items: usize,
     pub duct_bridge_forwarded_items: usize,
+    pub stack_router_forwarded_items: usize,
     pub stack_conveyor_forwarded_items: usize,
     pub mass_driver_forwarded_items: usize,
     pub bridge_forwarded_items: usize,
@@ -1688,6 +1701,7 @@ pub struct GameRuntime {
     pub item_router_runtime_states: BTreeMap<i32, GameRuntimeItemRouterState>,
     pub item_duct_progress_states: BTreeMap<i32, f32>,
     pub item_directional_unloader_timers: BTreeMap<i32, f32>,
+    pub item_stack_router_unloading: BTreeMap<i32, bool>,
     pub item_bridge_transport_counters: BTreeMap<i32, f32>,
     pub item_junction_time_counters: BTreeMap<i32, f32>,
     pub item_mass_driver_reload_counters: BTreeMap<i32, f32>,
@@ -1724,6 +1738,7 @@ impl GameRuntime {
             item_router_runtime_states: BTreeMap::new(),
             item_duct_progress_states: BTreeMap::new(),
             item_directional_unloader_timers: BTreeMap::new(),
+            item_stack_router_unloading: BTreeMap::new(),
             item_bridge_transport_counters: BTreeMap::new(),
             item_junction_time_counters: BTreeMap::new(),
             item_mass_driver_reload_counters: BTreeMap::new(),
@@ -2153,6 +2168,7 @@ impl GameRuntime {
         self.item_duct_progress_states.remove(&removed.tile_pos);
         self.item_directional_unloader_timers
             .remove(&removed.tile_pos);
+        self.item_stack_router_unloading.remove(&removed.tile_pos);
         self.item_bridge_transport_counters
             .remove(&removed.tile_pos);
         self.item_junction_time_counters.remove(&removed.tile_pos);
@@ -3754,6 +3770,7 @@ impl GameRuntime {
         self.item_router_runtime_states.clear();
         self.item_duct_progress_states.clear();
         self.item_directional_unloader_timers.clear();
+        self.item_stack_router_unloading.clear();
         self.item_bridge_transport_counters.clear();
         self.item_junction_time_counters.clear();
         self.item_mass_driver_reload_counters.clear();
@@ -4905,6 +4922,9 @@ impl GameRuntime {
         report.duct_forwarded_items += self
             .advance_owned_item_ducts_ticks(content, frame_delta)
             .moved_items;
+        report.stack_router_forwarded_items += self
+            .advance_owned_stack_routers_ticks(content, frame_delta)
+            .moved_items;
         let duct_bridge_report = self.advance_owned_duct_bridges_ticks(content, frame_delta);
         report.duct_bridge_forwarded_items +=
             duct_bridge_report.moved_items + duct_bridge_report.dumped_items;
@@ -5158,6 +5178,7 @@ impl GameRuntime {
                     DistributionBlockKind::Duct
                         | DistributionBlockKind::DuctRouter
                         | DistributionBlockKind::OverflowDuct
+                        | DistributionBlockKind::StackRouter
                 )
         );
         if target_is_duct {
@@ -7590,6 +7611,274 @@ impl GameRuntime {
         true
     }
 
+    pub fn advance_owned_stack_routers(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeStackRouterFrameReport> {
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        Some(self.advance_owned_stack_routers_ticks(content, advanced.delta_ticks as f32))
+    }
+
+    fn advance_owned_stack_routers_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeStackRouterFrameReport {
+        let mut report = GameRuntimeStackRouterFrameReport::default();
+        let router_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                report.visited_buildings += 1;
+                match content.block(building.block.id) {
+                    Some(BlockDef::Distribution(distribution))
+                        if distribution.kind == DistributionBlockKind::StackRouter =>
+                    {
+                        report.router_candidates += 1;
+                        Some(index)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for index in router_indices {
+            let Some(BlockDef::Distribution(router_block)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+            let tile_pos = self.buildings[index].tile_pos;
+            let Some(current) = self.stack_router_refresh_current_from_items(index) else {
+                report.updated_routers += 1;
+                continue;
+            };
+
+            let items_total = self.buildings[index]
+                .items
+                .as_ref()
+                .map(|items| items.total())
+                .unwrap_or(0);
+            if items_total <= 0 {
+                self.clear_stack_router_current(tile_pos);
+                self.item_stack_router_unloading.insert(tile_pos, false);
+                self.item_duct_progress_states.insert(tile_pos, 0.0);
+                report.updated_routers += 1;
+                continue;
+            }
+
+            let mut unloading = self
+                .item_stack_router_unloading
+                .get(&tile_pos)
+                .copied()
+                .unwrap_or(false);
+            if !unloading && items_total >= self.buildings[index].block.item_capacity {
+                let speed = router_block.speed.max(0.0001);
+                let progress = self
+                    .item_duct_progress_states
+                    .entry(tile_pos)
+                    .or_insert(0.0);
+                let (next_progress, next_unloading) = stack_router_progress_step(
+                    unloading,
+                    Some(current),
+                    items_total,
+                    self.buildings[index].block.item_capacity,
+                    *progress,
+                    self.buildings[index].enabled,
+                    self.buildings[index].efficiency.max(0.0)
+                        * self.buildings[index].time_scale.max(0.0)
+                        * frame_delta,
+                    router_block.base_efficiency.max(0.0)
+                        * self.buildings[index].time_scale.max(0.0)
+                        * frame_delta,
+                    speed,
+                );
+                *progress = next_progress;
+                if !unloading && next_unloading {
+                    unloading = next_unloading;
+                    self.item_stack_router_unloading.insert(tile_pos, true);
+                    report.started_unloading += 1;
+                }
+            }
+
+            if unloading {
+                while self.buildings[index]
+                    .items
+                    .as_ref()
+                    .is_some_and(|items| items.get(current) > 0)
+                {
+                    let Some(target_index) = self.stack_router_target(content, index, current)
+                    else {
+                        report.missing_targets += 1;
+                        break;
+                    };
+                    report.attempted_moves += 1;
+                    if self.dump_item_to_target(content, index, target_index, current) {
+                        report.moved_items += 1;
+                    } else {
+                        report.blocked_targets += 1;
+                        break;
+                    }
+                }
+
+                if self.buildings[index]
+                    .items
+                    .as_ref()
+                    .is_none_or(|items| items.get(current) == 0)
+                {
+                    self.clear_stack_router_current(tile_pos);
+                    self.item_stack_router_unloading.insert(tile_pos, false);
+                }
+            }
+
+            let item_state = self.buildings[index].items.as_ref();
+            if item_state.is_none_or(|items| items.empty()) {
+                self.clear_stack_router_current(tile_pos);
+                self.item_stack_router_unloading.insert(tile_pos, false);
+            } else if self
+                .stack_router_current(tile_pos)
+                .is_none_or(|item| item_state.is_none_or(|items| items.get(item) == 0))
+            {
+                if let Some(next_item) = item_state.and_then(|items| {
+                    items
+                        .each()
+                        .find_map(|(item, amount)| (amount > 0).then_some(item))
+                }) {
+                    self.set_stack_router_current(tile_pos, next_item);
+                }
+            }
+
+            report.updated_routers += 1;
+        }
+
+        report
+    }
+
+    fn stack_router_refresh_current_from_items(
+        &mut self,
+        router_index: usize,
+    ) -> Option<ContentId> {
+        let tile_pos = self.buildings.get(router_index)?.tile_pos;
+        if let Some(current) = self.stack_router_current(tile_pos) {
+            if self.buildings[router_index]
+                .items
+                .as_ref()
+                .is_some_and(|items| items.get(current) > 0)
+            {
+                return Some(current);
+            }
+            self.clear_stack_router_current(tile_pos);
+        }
+
+        let next_item = self.buildings[router_index]
+            .items
+            .as_ref()
+            .and_then(|items| {
+                items
+                    .each()
+                    .find_map(|(item, amount)| (amount > 0).then_some(item))
+            });
+        if let Some(next_item) = next_item {
+            self.set_stack_router_current(tile_pos, next_item);
+            Some(next_item)
+        } else {
+            self.item_stack_router_unloading.insert(tile_pos, false);
+            self.item_duct_progress_states.insert(tile_pos, 0.0);
+            None
+        }
+    }
+
+    fn stack_router_current(&self, tile_pos: i32) -> Option<ContentId> {
+        match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::DuctRouter(state)) => state.current,
+            _ => None,
+        }
+    }
+
+    fn stack_router_sort_item(&self, tile_pos: i32) -> Option<ContentId> {
+        match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::DuctRouter(state)) => state.sort_item,
+            _ => None,
+        }
+    }
+
+    fn set_stack_router_current(&mut self, tile_pos: i32, item_id: ContentId) {
+        let entry = self
+            .distribution_runtime_states
+            .entry(tile_pos)
+            .or_insert_with(|| {
+                GameRuntimeDistributionBlockState::DuctRouter(DuctRouterState {
+                    sort_item: None,
+                    current: None,
+                })
+            });
+        match entry {
+            GameRuntimeDistributionBlockState::DuctRouter(state) => state.current = Some(item_id),
+            _ => {
+                *entry = GameRuntimeDistributionBlockState::DuctRouter(DuctRouterState {
+                    sort_item: None,
+                    current: Some(item_id),
+                });
+            }
+        }
+    }
+
+    fn clear_stack_router_current(&mut self, tile_pos: i32) {
+        if let Some(GameRuntimeDistributionBlockState::DuctRouter(state)) =
+            self.distribution_runtime_states.get_mut(&tile_pos)
+        {
+            state.current = None;
+        }
+    }
+
+    fn stack_router_target(
+        &mut self,
+        content: &ContentLoader,
+        router_index: usize,
+        item_id: ContentId,
+    ) -> Option<usize> {
+        let prox_len = self.buildings[router_index].proximity.len();
+        if prox_len == 0 {
+            return None;
+        }
+        let tile_pos = self.buildings[router_index].tile_pos;
+        let dump = self.buildings[router_index].cdump;
+        let sort_item = self.stack_router_sort_item(tile_pos);
+        for attempt in 0..prox_len {
+            let target_ref = self.buildings[router_index].proximity[(attempt + dump) % prox_len];
+            let Some(target_index) = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == target_ref.tile_pos)
+            else {
+                self.increment_building_dump(router_index, prox_len);
+                continue;
+            };
+            let Some(rel) = self.relative_direction_between_buildings(router_index, target_index)
+            else {
+                self.increment_building_dump(router_index, prox_len);
+                continue;
+            };
+            let sorted_rejects = sort_item.is_some_and(|sort| {
+                (item_id == sort) != (rel == self.buildings[router_index].rotation)
+            });
+            if !sorted_rejects
+                && rel != (self.buildings[router_index].rotation + 2).rem_euclid(4)
+                && self.dump_target_accepts_item(content, router_index, target_index, item_id)
+            {
+                self.increment_building_dump(router_index, prox_len);
+                return Some(target_index);
+            }
+            self.increment_building_dump(router_index, prox_len);
+        }
+        None
+    }
+
     pub fn advance_owned_item_ducts(
         &mut self,
         content: &ContentLoader,
@@ -7732,7 +8021,9 @@ impl GameRuntime {
                     }
                 }
             }
-            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+            DistributionBlockKind::DuctRouter
+            | DistributionBlockKind::OverflowDuct
+            | DistributionBlockKind::StackRouter => {
                 let entry = self
                     .distribution_runtime_states
                     .entry(tile_pos)
@@ -7759,7 +8050,9 @@ impl GameRuntime {
                     state.current = None;
                 }
             }
-            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+            DistributionBlockKind::DuctRouter
+            | DistributionBlockKind::OverflowDuct
+            | DistributionBlockKind::StackRouter => {
                 if let Some(GameRuntimeDistributionBlockState::DuctRouter(state)) =
                     self.distribution_runtime_states.get_mut(&tile_pos)
                 {
@@ -8129,7 +8422,9 @@ impl GameRuntime {
                 self.item_duct_progress_states.insert(target_tile_pos, -1.0);
                 true
             }
-            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+            DistributionBlockKind::DuctRouter
+            | DistributionBlockKind::OverflowDuct
+            | DistributionBlockKind::StackRouter => {
                 let entry = self
                     .distribution_runtime_states
                     .entry(target_tile_pos)
@@ -8557,6 +8852,32 @@ impl GameRuntime {
                     target.rotation,
                     distribution.armored,
                     source_is_duct,
+                )
+            }
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::StackRouter =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                let current = match self.distribution_runtime_states.get(&target.tile_pos) {
+                    Some(GameRuntimeDistributionBlockState::DuctRouter(state)) => state.current,
+                    Some(_) => return false,
+                    None => None,
+                };
+                let unloading = self
+                    .item_stack_router_unloading
+                    .get(&target.tile_pos)
+                    .copied()
+                    .unwrap_or(false);
+                stack_router_accept_item(
+                    unloading,
+                    current,
+                    item_id,
+                    items.total(),
+                    target.block.item_capacity,
+                    self.relative_direction_between_buildings(source_index, target_index),
+                    target.rotation,
                 )
             }
             Some(BlockDef::Distribution(distribution))
@@ -16513,6 +16834,120 @@ mod tests {
         assert_eq!(unload_state.link, -1);
         assert_eq!(unload_state.last_item, None);
         assert!(runtime.buildings[2].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_stack_router_unloads_full_stack_to_real_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let stack_router_def = content.block_by_name("surge-router").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let router_tile = point2_pack(4, 4);
+        let item_void_tile = point2_pack(5, 4);
+        let mut router_building =
+            BuildingComp::new(router_tile, stack_router_def.base().clone(), TeamId(6));
+        router_building.set_rotation(0);
+        router_building
+            .items
+            .as_mut()
+            .unwrap()
+            .add(copper, stack_router_def.base().item_capacity);
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(router_building);
+        runtime.add_building(item_void_building);
+        runtime.distribution_runtime_states.insert(
+            router_tile,
+            GameRuntimeDistributionBlockState::DuctRouter(DuctRouterState {
+                sort_item: None,
+                current: Some(copper),
+            }),
+        );
+
+        let report = runtime
+            .advance_owned_stack_routers(&content, 6.0 / 60.0)
+            .unwrap();
+        assert_eq!(report.started_unloading, 1);
+        assert_eq!(
+            report.moved_items,
+            stack_router_def.base().item_capacity as usize
+        );
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().total(), 0);
+        assert_eq!(
+            runtime
+                .item_stack_router_unloading
+                .get(&router_tile)
+                .copied(),
+            Some(false)
+        );
+        let Some(GameRuntimeDistributionBlockState::DuctRouter(state)) =
+            runtime.distribution_runtime_states.get(&router_tile)
+        else {
+            panic!("stack router should keep duct-router-compatible state sidecar");
+        };
+        assert_eq!(state.current, None);
+        assert!(runtime.buildings[1].items.is_none());
+    }
+
+    #[test]
+    fn game_runtime_stack_router_accepts_same_item_only_while_not_unloading() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("router").unwrap();
+        let stack_router_def = content.block_by_name("surge-router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let source_tile = point2_pack(4, 4);
+        let router_tile = point2_pack(5, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, source_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let mut router_building =
+            BuildingComp::new(router_tile, stack_router_def.base().clone(), TeamId(6));
+        router_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(router_building);
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(
+            runtime.item_duct_progress_states.get(&router_tile).copied(),
+            Some(-1.0)
+        );
+        let Some(GameRuntimeDistributionBlockState::DuctRouter(state)) =
+            runtime.distribution_runtime_states.get(&router_tile)
+        else {
+            panic!("stack router should create duct-router-compatible sidecar");
+        };
+        assert_eq!(state.current, Some(copper));
+
+        runtime.buildings[0].items.as_mut().unwrap().add(lead, 1);
+        assert!(!runtime.dump_item_to_target(&content, 0, 1, lead));
+
+        runtime
+            .item_stack_router_unloading
+            .insert(router_tile, true);
+        runtime.buildings[0].items.as_mut().unwrap().add(copper, 1);
+        assert!(!runtime.dump_item_to_target(&content, 0, 1, copper));
     }
 
     #[test]
