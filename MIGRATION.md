@@ -2978,3 +2978,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_power_node_config_value_accepts_java_integer_and_point_array`
   - `cargo test -p mindustry-server server_update_applies_power_node_tile_config_packets_to_runtime`
 - 仍未完成：这里只接入了 `TileConfigCallPacket` 对 PowerNode link 的服务端状态变更；后续还需要把变更广播/rollback、desktop 侧配置 UI、以及 `TileTapCallPacket` 的通用 TapEvent/插件事件语义继续对照 Java。
+
+### 12.75 Desktop 远端玩家 preview overlay cache
+
+- 2026-05-27：把 12.73 的 `other_player_preview_overlay_plan(...)` 接入 desktop 侧真实 `NetClient -> GameRuntime -> PlayerComp` 数据链，开始形成可供 renderer/UI 消费的其他玩家建造预览 overlay cache。
+- Java 依据：
+  - `Groups.player` 中远端 `Player` 持有 `previewPlans`，`InputHandler.drawOtherBuildPlans()` 每帧遍历同队非本地玩家；
+  - `ClientPlanSnapshotReceivedCallPacket` 携带 `player/group/plans`，客户端需要按玩家累积 preview group；
+  - player snapshot 提供远端玩家 name/team/position，preview overlay hover 使用这些字段。
+- Rust 新增/变化：
+  - `NetClientState` 新增 `client_plan_snapshot_received_packets` 历史缓存，避免 desktop 只看到最后一个 preview packet；
+  - `DesktopLauncher` 新增 `remote_players: BTreeMap<i32, PlayerComp>`，从 `GameRuntime.client_player_snapshot_entities` materialize 远端玩家镜像，不覆盖本地玩家；
+  - `DesktopLauncher::sync_remote_preview_plan_packets(...)` 按 `ClientPlanSnapshotReceivedCallPacket.player_id` 调用 `NetClient::apply_received_preview_plans_to_player(...)`；
+  - `DesktopLauncher::rebuild_other_player_preview_overlays_at(...)` 通过真实 content registry 提供 block `size/offset`，生成 `other_player_preview_overlays`；
+  - world reset / cursor reset 时同步清理远端玩家、overlay cache 与 preview packet cursor。
+- 验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_builds_remote_player_preview_overlay_from_snapshot_and_plan_packets`
+  - `cargo test -p mindustry-core update_records_received_preview_plan_packets_and_applies_to_player`
+- 仍未完成：当前 cache 已可消费但还没有真实 renderer/UI 绘制；远端玩家生命周期仍依赖 snapshot/hidden sidecar 的后续完善，真实多人多 chunk plan 的端到端 server->desktop smoke 仍需继续补。

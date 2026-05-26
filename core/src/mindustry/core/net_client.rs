@@ -671,6 +671,7 @@ pub struct NetClientState {
     pub last_client_plan_snapshot_received: Option<ClientPlanSnapshotReceivedCallPacket>,
     pub last_client_plan_snapshot_received_at: Option<Instant>,
     pub client_plan_snapshot_received_packets_seen: u64,
+    pub client_plan_snapshot_received_packets: Vec<ClientPlanSnapshotReceivedCallPacket>,
     pub last_set_item: Option<SetItemCallPacket>,
     pub last_set_item_at: Option<Instant>,
     pub set_item_packets_seen: u64,
@@ -967,6 +968,10 @@ impl fmt::Debug for NetClientState {
             .field(
                 "client_plan_snapshot_received_packets_seen",
                 &self.client_plan_snapshot_received_packets_seen,
+            )
+            .field(
+                "client_plan_snapshot_received_packets_len",
+                &self.client_plan_snapshot_received_packets.len(),
             )
             .field("set_item_packets_seen", &self.set_item_packets_seen)
             .field("set_items_packets_seen", &self.set_items_packets_seen)
@@ -3007,6 +3012,9 @@ impl NetClient {
                         state.client_plan_snapshot_received_packets_seen += 1;
                         state.last_client_plan_snapshot_received = Some(snapshot.clone());
                         state.last_client_plan_snapshot_received_at = Some(now);
+                        state
+                            .client_plan_snapshot_received_packets
+                            .push(snapshot.clone());
                         (false, false)
                     }
                     PacketKind::SetItemCallPacket(packet) => {
@@ -5650,6 +5658,10 @@ mod tests {
         assert_eq!(
             state.last_client_plan_snapshot_received.as_ref(),
             Some(&packet)
+        );
+        assert_eq!(
+            state.client_plan_snapshot_received_packets.as_slice(),
+            std::slice::from_ref(&packet)
         );
         assert!(state.last_client_plan_snapshot_received_at.is_some());
         drop(state);

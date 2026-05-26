@@ -11,18 +11,23 @@ use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
     entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
+use mindustry_core::mindustry::input::input_handler::{
+    other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
+    OtherPlayerPreviewOverlayPlan,
+};
 use mindustry_core::mindustry::io::{
     read_bullet_sync, read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync,
     read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
-    LegacyTeamBlocks, TeamId,
+    LegacyTeamBlocks, TeamId, Vec2,
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
     StateSnapshotCallPacket,
 };
-use mindustry_core::mindustry::vars::AppContext;
+use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopConnectTarget {
@@ -37,6 +42,8 @@ pub struct DesktopLauncher {
     pub game_state: GameState,
     pub runtime: GameRuntime,
     pub player: PlayerComp,
+    pub remote_players: BTreeMap<i32, PlayerComp>,
+    pub other_player_preview_overlays: Vec<OtherPlayerPreviewOverlayPlan>,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -48,6 +55,7 @@ pub struct DesktopLauncher {
     last_applied_hidden_snapshot_mirror: Option<ClientHiddenSnapshotMirror>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
+    last_applied_client_plan_snapshot_received_count: usize,
 }
 
 impl DesktopLauncher {
@@ -59,6 +67,8 @@ impl DesktopLauncher {
             game_state: GameState::new(),
             runtime: GameRuntime::default(),
             player: PlayerComp::default(),
+            remote_players: BTreeMap::new(),
+            other_player_preview_overlays: Vec::new(),
             connect_target,
             connect_error: None,
             args,
@@ -70,6 +80,7 @@ impl DesktopLauncher {
             last_applied_hidden_snapshot_mirror: None,
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
+            last_applied_client_plan_snapshot_received_count: 0,
         }
     }
 
@@ -80,6 +91,10 @@ impl DesktopLauncher {
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
         self.sync_snapshot_mirrors();
+        let now_millis = current_millis();
+        self.sync_remote_player_snapshots_from_runtime();
+        self.sync_remote_preview_plan_packets(now_millis);
+        self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
     }
 
     pub fn connect_from_args(&mut self) {
@@ -131,6 +146,8 @@ impl DesktopLauncher {
                     self.runtime
                         .set_network_context(GameRuntimeNetworkContext::offline());
                     self.player = PlayerComp::default();
+                    self.remote_players.clear();
+                    self.other_player_preview_overlays.clear();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
                     self.last_runtime_map_load_report = None;
@@ -251,19 +268,21 @@ impl DesktopLauncher {
     }
 
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
-        let (block_mirror, entity_count, hidden_mirror) = {
+        let (block_mirror, entity_count, hidden_mirror, preview_plan_count) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
             (
                 state.last_block_snapshot_mirror.clone(),
                 state.entity_snapshot_mirrors.len(),
                 state.last_hidden_snapshot_mirror.clone(),
+                state.client_plan_snapshot_received_packets.len(),
             )
         };
         self.last_applied_block_snapshot_mirror = block_mirror;
         self.last_applied_entity_snapshot_mirror_count = entity_count;
         self.last_applied_hidden_snapshot_mirror = hidden_mirror;
         self.last_client_snapshot_apply_report = None;
+        self.last_applied_client_plan_snapshot_received_count = preview_plan_count;
     }
 
     fn clear_snapshot_apply_cursors(&mut self) {
@@ -271,6 +290,9 @@ impl DesktopLauncher {
         self.last_applied_entity_snapshot_mirror_count = 0;
         self.last_applied_hidden_snapshot_mirror = None;
         self.last_client_snapshot_apply_report = None;
+        self.last_applied_client_plan_snapshot_received_count = 0;
+        self.remote_players.clear();
+        self.other_player_preview_overlays.clear();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -304,6 +326,122 @@ impl DesktopLauncher {
         self.runtime
             .apply_client_player_snapshot_record(entity_id, player_sync);
         true
+    }
+
+    fn sync_remote_player_snapshots_from_runtime(&mut self) -> usize {
+        let hidden_ids: Vec<i32> = self
+            .runtime
+            .client_hidden_entity_ids
+            .iter()
+            .copied()
+            .collect();
+        for id in hidden_ids {
+            self.remote_players.remove(&id);
+        }
+
+        let snapshots: Vec<_> = self
+            .runtime
+            .client_player_snapshot_entities
+            .iter()
+            .map(|(id, sync)| (*id, sync.clone()))
+            .collect();
+        let mut synced = 0;
+        for (entity_id, sync) in snapshots {
+            if entity_id == self.player.id {
+                self.remote_players.remove(&entity_id);
+                continue;
+            }
+
+            let player = self.remote_players.entry(entity_id).or_insert_with(|| {
+                let mut player = PlayerComp::new(sync.team);
+                player.id = entity_id;
+                player
+            });
+            player.id = entity_id;
+            player.apply_network_player_sync_data(&sync, false);
+            player.after_sync_unit_state(PlayerUnitSwitchContext {
+                is_local: false,
+                headless: false,
+                net_client: true,
+            });
+            synced += 1;
+        }
+        synced
+    }
+
+    fn sync_remote_preview_plan_packets(&mut self, now_millis: i64) -> usize {
+        let packets = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.client_plan_snapshot_received_packets.clone()
+        };
+        if packets.len() < self.last_applied_client_plan_snapshot_received_count {
+            self.last_applied_client_plan_snapshot_received_count = 0;
+        }
+
+        let mut applied = 0;
+        for packet in packets
+            .iter()
+            .skip(self.last_applied_client_plan_snapshot_received_count)
+        {
+            if packet.player_id == self.player.id {
+                continue;
+            }
+
+            let player = self
+                .remote_players
+                .entry(packet.player_id)
+                .or_insert_with(|| {
+                    let mut player = PlayerComp::new(self.player.team);
+                    player.id = packet.player_id;
+                    player.name = format!("player-{}", packet.player_id);
+                    player
+                });
+            if NetClient::apply_received_preview_plans_to_player(
+                player,
+                packet,
+                now_millis,
+                MAX_PLAYER_PREVIEW_PLANS,
+            )
+            .is_ok()
+            {
+                applied += 1;
+            }
+        }
+        self.last_applied_client_plan_snapshot_received_count = packets.len();
+        applied
+    }
+
+    pub fn rebuild_other_player_preview_overlays_at(
+        &mut self,
+        now_millis: i64,
+        delta: f32,
+        mouse_world: Option<Vec2>,
+    ) -> usize {
+        let frame = OtherPlayerPreviewOverlayFrame {
+            local_player_id: self.player.id,
+            local_team: self.player.team,
+            now_millis,
+            delta,
+            mouse_world,
+        };
+        let content_loader = self.content_loader.clone();
+        let mut overlays = Vec::new();
+        for player in self.remote_players.values_mut() {
+            let overlay = other_player_preview_overlay_plan(player, frame, |name| {
+                content_loader
+                    .block_by_name(name)
+                    .map(|block| OtherPlayerPreviewBlock {
+                        size: block.base().size,
+                        offset: block.base().offset,
+                    })
+            });
+            if !overlay.entries.is_empty() || overlay.overlap.is_some() {
+                overlays.push(overlay);
+            }
+        }
+        self.other_player_preview_overlays = overlays;
+        self.other_player_preview_overlays.len()
     }
 
     fn apply_client_fire_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -686,6 +824,14 @@ pub fn banner() -> String {
     format!("mindustry desktop bootstrap ({UPSTREAM_BASELINE})")
 }
 
+fn current_millis() -> i64 {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    millis.min(i64::MAX as u128) as i64
+}
+
 fn parse_connect_target(args: &[String]) -> Option<DesktopConnectTarget> {
     for (index, arg) in args.iter().enumerate() {
         if arg == "--connect" {
@@ -734,7 +880,8 @@ mod tests {
     };
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::net::{
-        NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
+        NetworkWorldData, StateSnapshotCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -1655,6 +1802,85 @@ mod tests {
         assert!(!launcher.player.typing);
         assert_eq!(launcher.player.x, 10.0);
         assert_eq!(launcher.player.y, 20.0);
+    }
+
+    #[test]
+    fn desktop_launcher_builds_remote_player_preview_overlay_from_snapshot_and_plan_packets() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(Some(sample_network_player_data(None, None)));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+        assert_eq!(launcher.player.id, 91);
+        assert_eq!(launcher.player.team, TeamId(6));
+
+        let remote_id = 1234;
+        let remote_sync = NetworkPlayerSyncData {
+            name: Some("ally-builder".into()),
+            team: launcher.player.team,
+            x: 64.0,
+            y: 72.0,
+            ..sample_network_player_sync_data(None)
+        };
+        let mut sync_bytes = Vec::new();
+        remote_sync.write_to(&mut sync_bytes).unwrap();
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state
+                .entity_snapshot_mirrors
+                .push(ClientEntitySnapshotMirror {
+                    amount: 1,
+                    data: Vec::new(),
+                    records: vec![ClientEntitySnapshotRecordMirror {
+                        entity_id: remote_id,
+                        type_id: PLAYER_CLASS_ID,
+                        sync_bytes,
+                    }],
+                    parse_error: None,
+                });
+        }
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::ClientPlanSnapshotReceivedCallPacket(
+                ClientPlanSnapshotReceivedCallPacket {
+                    player_id: remote_id,
+                    group_id: 1,
+                    plans: Some(vec![type_io::BuildPlanWire::new_place(4, 5, 1, "router")]),
+                },
+            ));
+        }
+
+        launcher.update();
+        assert!(launcher.remote_players.contains_key(&remote_id));
+        assert!(launcher.other_player_preview_overlays.is_empty());
+
+        let overlay_count = launcher.rebuild_other_player_preview_overlays_at(
+            i64::MAX / 4,
+            1.0,
+            Some(IoVec2::new(32.0, 40.0)),
+        );
+        assert_eq!(overlay_count, 1);
+        let overlay = &launcher.other_player_preview_overlays[0];
+        assert_eq!(overlay.player_id, remote_id);
+        assert_eq!(overlay.player_name, "ally-builder");
+        assert_eq!(overlay.player_pos, IoVec2::new(64.0, 72.0));
+        assert_eq!(overlay.entries.len(), 1);
+        assert_eq!(overlay.entries[0].block, "router");
+        assert_eq!(overlay.entries[0].world_pos, IoVec2::new(32.0, 40.0));
+        assert!(overlay.entries[0].overlapping_mouse);
+        assert_eq!(
+            overlay.overlap.as_ref().unwrap().player_name,
+            "ally-builder"
+        );
     }
 
     #[test]
