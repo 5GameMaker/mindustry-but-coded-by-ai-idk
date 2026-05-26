@@ -1946,6 +1946,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
-  1. 将 `ENTITY_CLASS_IDS` 升级为实际 dispatcher：`type_id -> Player/Unit/Bullet/Fire/...`。
-  2. 先把 unit class-id families 接到 dispatcher，替换“非 player 就尝试 UnitSyncWire”的临时逻辑。
+  1. 将 `EntityClassKind::Other` 继续拆成 Bullet/Fire/Weather/Effect 等实际 dispatcher。
+  2. 继续迁移 `Other` 类 `Syncc` 的 readSync/writeSync wire。
   3. 后续按 class-id 表继续迁移其他 `Syncc` 的 readSync/writeSync wire。
+
+---
+
+## 57. 最新闭环记录：Entity class-id kind 分类接入 mixed fallback
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：让 mixed entity snapshot fallback 从“非 player 就尝试 UnitSyncWire”推进为基于 class-id registry 的第一层分发。
+- Rust 主改动：
+  - `core/src/mindustry/entities/mod.rs`
+  - `desktop/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - 新增 `EntityClassKind::{Player, Unit, Other}` 与 `entity_class_kind(id)`；
+  - `DesktopLauncher` mixed fallback 对本地 player 同时校验 `entity_id == player.id` 和 `type_id == PLAYER_CLASS_ID`；
+  - 非 player record 只有 `entity_class_kind(type_id) == Unit` 时才走 `read_unit_sync(...)`；
+  - `Other` class-id 暂不猜测解析，直接作为 parse error 暴露，避免把未迁移实体误读成 Unit。
+- 已跑：
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 优先从 `Other` 中挑一个低复杂 `Syncc`（如 `FireComp`/`PuddleComp`/`WeatherStateComp`）迁移 readSync/writeSync wire。
+  2. 给 `EntityClassKind` 增加更细粒度枚举，避免 `Other` 一桶装。
+  3. 逐步让 `GameRuntime`/`DesktopLauncher` 共享同一个 entity snapshot dispatcher。

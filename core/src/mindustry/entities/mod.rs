@@ -27,6 +27,13 @@ pub struct EntityClassIdEntry {
     pub id: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityClassKind {
+    Player,
+    Unit,
+    Other,
+}
+
 pub const PLAYER_CLASS_ID: u8 = 12;
 
 /// Java `annotations/src/main/resources/classids.properties` migrated into a
@@ -245,6 +252,17 @@ pub fn entity_class_name(id: u8) -> Option<&'static str> {
         .map(|entry| entry.name)
 }
 
+pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
+    let name = entity_class_name(id)?;
+    if id == PLAYER_CLASS_ID {
+        Some(EntityClassKind::Player)
+    } else if name.contains('.') {
+        Some(EntityClassKind::Other)
+    } else {
+        Some(EntityClassKind::Unit)
+    }
+}
+
 pub use abilities::{
     Ability, ArmorPlateAbility, ArmorPlateUpdate, BasicAbility, EnergyFieldAbility,
     EnergyFieldAction, EnergyFieldHit, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility,
@@ -417,6 +435,13 @@ mod tests {
             entity_class_id("mindustry.entities.comp.LocationPingComp"),
             Some(48)
         );
+        assert_eq!(
+            entity_class_kind(PLAYER_CLASS_ID),
+            Some(EntityClassKind::Player)
+        );
+        assert_eq!(entity_class_kind(2), Some(EntityClassKind::Unit));
+        assert_eq!(entity_class_kind(7), Some(EntityClassKind::Other));
+        assert_eq!(entity_class_kind(255), None);
 
         let mut names = BTreeSet::new();
         let mut ids = BTreeSet::new();

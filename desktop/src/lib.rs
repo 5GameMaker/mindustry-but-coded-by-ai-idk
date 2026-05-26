@@ -8,7 +8,9 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
-use mindustry_core::mindustry::entities::{PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID};
+use mindustry_core::mindustry::entities::{
+    entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
+};
 use mindustry_core::mindustry::io::{
     read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
 };
@@ -333,6 +335,10 @@ impl DesktopLauncher {
                 continue;
             }
 
+            if entity_class_kind(type_id) != Some(EntityClassKind::Unit) {
+                report.entity_parse_errors += 1;
+                return report;
+            }
             let Ok(_unit_sync) = read_unit_sync(&mut read, &self.content_loader) else {
                 report.entity_parse_errors += 1;
                 return report;

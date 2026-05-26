@@ -2181,6 +2181,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：registry 目前只是静态查询表；`GameRuntime`/`DesktopLauncher` 尚未全面按 class-id dispatcher 分发所有 `Syncc`。
 
+### 12.43 Entity class-id kind 分类接入 mixed fallback
+
+- 2026-05-26：在 class-id registry 上新增 `EntityClassKind::{Player, Unit, Other}` 与 `entity_class_kind(id)`。
+- 分类规则：
+  - `PLAYER_CLASS_ID` -> `Player`；
+  - class-id 名称不含 `.` 的上游 unit/entity name -> `Unit`；
+  - fully-qualified component/state name -> `Other`。
+- `DesktopLauncher` mixed fallback 现在：
+  - 本地 player 必须同时满足 `entity_id == player.id` 与 `type_id == PLAYER_CLASS_ID`；
+  - 非 player record 只有在 `entity_class_kind(type_id) == Unit` 时才尝试 `UnitSyncWire`；
+  - 其他 class-id 不再盲目按 UnitSyncWire 猜测，转为 parse error，等待对应 `Syncc` 迁移。
+- 已验证：
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：`EntityClassKind::Other` 还没有具体 dispatcher；Bullet/Fire/Weather/Effect 等 readSync wire 仍待迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
