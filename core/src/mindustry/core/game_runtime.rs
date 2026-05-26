@@ -58,17 +58,18 @@ use crate::mindustry::{
     world::blocks::distribution::{
         choose_side_route, conveyor_accept_item, duct_accept_item, duct_junction_accept_item,
         duct_router_accept_item, item_bridge_transport_iterations, item_bridge_warmup_step,
-        junction_can_release, overflow_gate_route, read_buffered_bridge_state, read_conveyor_state,
-        read_directional_unloader_state, read_duct_junction_state, read_duct_router_state,
-        read_duct_state, read_item_bridge_state, read_mass_driver_state,
-        read_overflow_gate_legacy_payload, read_sorter_state, read_stack_conveyor_state,
-        sorter_rejects_instant_three_chain, sorter_should_direct, stack_conveyor_accept_item,
-        stack_conveyor_cooldown_step, write_buffered_bridge_state, write_conveyor_state,
-        write_directional_unloader_state, write_duct_junction_state, write_duct_router_state,
-        write_duct_state, write_item_bridge_state, write_mass_driver_state, write_sorter_state,
-        write_stack_conveyor_state, BufferedItemBridgeState, ConveyorItemState, ConveyorState,
-        DirectionalUnloaderState, DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState,
-        MassDriverState, OverflowRoute, SideRoute, SorterState, StackConveyorState,
+        junction_can_release, mass_driver_link_valid, overflow_gate_route,
+        read_buffered_bridge_state, read_conveyor_state, read_directional_unloader_state,
+        read_duct_junction_state, read_duct_router_state, read_duct_state, read_item_bridge_state,
+        read_mass_driver_state, read_overflow_gate_legacy_payload, read_sorter_state,
+        read_stack_conveyor_state, sorter_rejects_instant_three_chain, sorter_should_direct,
+        stack_conveyor_accept_item, stack_conveyor_cooldown_step, write_buffered_bridge_state,
+        write_conveyor_state, write_directional_unloader_state, write_duct_junction_state,
+        write_duct_router_state, write_duct_state, write_item_bridge_state,
+        write_mass_driver_state, write_sorter_state, write_stack_conveyor_state,
+        BufferedItemBridgeState, ConveyorItemState, ConveyorState, DirectionalUnloaderState,
+        DuctJunctionState, DuctRouterState, DuctState, ItemBridgeState, MassDriverState,
+        MassDriverStateKind, OverflowRoute, SideRoute, SorterState, StackConveyorState,
         StackConveyorStateKind, CONVEYOR_CAPACITY,
     },
     world::blocks::heat::{read_heat_producer_state, write_heat_producer_state, HeatProducerState},
@@ -1468,6 +1469,18 @@ pub struct GameRuntimeDuctBridgeFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeItemMassDriverFrameReport {
+    pub visited_buildings: usize,
+    pub driver_candidates: usize,
+    pub updated_drivers: usize,
+    pub attempted_shots: usize,
+    pub shots_fired: usize,
+    pub transferred_items: usize,
+    pub dumped_items: usize,
+    pub missing_targets: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeItemBridgeFrameReport {
     pub visited_buildings: usize,
     pub bridge_candidates: usize,
@@ -1512,6 +1525,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub duct_forwarded_items: usize,
     pub duct_bridge_forwarded_items: usize,
     pub stack_conveyor_forwarded_items: usize,
+    pub mass_driver_forwarded_items: usize,
     pub bridge_forwarded_items: usize,
     pub junction_forwarded_items: usize,
 }
@@ -1662,6 +1676,7 @@ pub struct GameRuntime {
     pub item_duct_progress_states: BTreeMap<i32, f32>,
     pub item_bridge_transport_counters: BTreeMap<i32, f32>,
     pub item_junction_time_counters: BTreeMap<i32, f32>,
+    pub item_mass_driver_reload_counters: BTreeMap<i32, f32>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
@@ -1696,6 +1711,7 @@ impl GameRuntime {
             item_duct_progress_states: BTreeMap::new(),
             item_bridge_transport_counters: BTreeMap::new(),
             item_junction_time_counters: BTreeMap::new(),
+            item_mass_driver_reload_counters: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
@@ -2123,6 +2139,8 @@ impl GameRuntime {
         self.item_bridge_transport_counters
             .remove(&removed.tile_pos);
         self.item_junction_time_counters.remove(&removed.tile_pos);
+        self.item_mass_driver_reload_counters
+            .remove(&removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -3720,6 +3738,7 @@ impl GameRuntime {
         self.item_duct_progress_states.clear();
         self.item_bridge_transport_counters.clear();
         self.item_junction_time_counters.clear();
+        self.item_mass_driver_reload_counters.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -4871,6 +4890,9 @@ impl GameRuntime {
         let stack_report = self.advance_owned_stack_conveyors_ticks(content, frame_delta);
         report.stack_conveyor_forwarded_items +=
             stack_report.moved_stacks + stack_report.dumped_items;
+        let mass_driver_report = self.advance_owned_item_mass_drivers_ticks(content, frame_delta);
+        report.mass_driver_forwarded_items +=
+            mass_driver_report.transferred_items + mass_driver_report.dumped_items;
         report.bridge_forwarded_items += self
             .advance_owned_item_bridges_ticks(content, frame_delta)
             .moved_items;
@@ -5141,6 +5163,11 @@ impl GameRuntime {
             Some(BlockDef::Distribution(distribution))
                 if distribution.kind == DistributionBlockKind::Router
         );
+        let target_is_mass_driver = matches!(
+            content.block(self.buildings[target_index].block.id),
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::MassDriver
+        );
         let source_tile_pos = self.buildings[source_index].tile_pos;
         let target_tile_pos = self.buildings[target_index].tile_pos;
 
@@ -5167,7 +5194,12 @@ impl GameRuntime {
         let Some(target_items) = target.items.as_mut() else {
             return false;
         };
-        if target_items.get(item_id) >= target.block.item_capacity {
+        let target_full = if target_is_mass_driver {
+            target_items.total() >= target.block.item_capacity
+        } else {
+            target_items.get(item_id) >= target.block.item_capacity
+        };
+        if target_full {
             return false;
         }
         source_items.remove(item_id, 1);
@@ -7031,6 +7063,277 @@ impl GameRuntime {
         }
     }
 
+    pub fn advance_owned_item_mass_drivers(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeItemMassDriverFrameReport> {
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        Some(self.advance_owned_item_mass_drivers_ticks(content, advanced.delta_ticks as f32))
+    }
+
+    fn advance_owned_item_mass_drivers_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeItemMassDriverFrameReport {
+        let mut report = GameRuntimeItemMassDriverFrameReport::default();
+        let driver_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                report.visited_buildings += 1;
+                match content.block(building.block.id) {
+                    Some(BlockDef::Distribution(distribution))
+                        if distribution.kind == DistributionBlockKind::MassDriver =>
+                    {
+                        report.driver_candidates += 1;
+                        Some(index)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for index in driver_indices {
+            let Some(BlockDef::Distribution(driver_block)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+            let tile_pos = self.buildings[index].tile_pos;
+            let efficiency = self.buildings[index].efficiency;
+            let time_scale = self.buildings[index].time_scale;
+            let reload = self
+                .item_mass_driver_reload_counters
+                .entry(tile_pos)
+                .or_insert(0.0);
+            if *reload > 0.0 {
+                *reload = (*reload
+                    - frame_delta * efficiency.max(0.0) * time_scale.max(0.0)
+                        / driver_block.reload.max(0.0001))
+                .clamp(0.0, 1.0);
+            }
+
+            let mut state = self.ensure_item_mass_driver_state(tile_pos);
+            let link_index = self.item_mass_driver_link_target_index(content, index, state.link);
+            if link_index.is_some() && state.state == MassDriverStateKind::Idle {
+                state.state = MassDriverStateKind::Shooting;
+            }
+            if (state.state == MassDriverStateKind::Idle
+                || state.state == MassDriverStateKind::Accepting)
+                && self.dump_one_item_from_building(content, index)
+            {
+                report.dumped_items += 1;
+            }
+            if efficiency <= 0.0 {
+                self.distribution_runtime_states.insert(
+                    tile_pos,
+                    GameRuntimeDistributionBlockState::MassDriver(state),
+                );
+                report.updated_drivers += 1;
+                continue;
+            }
+
+            if state.state == MassDriverStateKind::Shooting {
+                let Some(link_index) = link_index else {
+                    state.state = MassDriverStateKind::Idle;
+                    self.distribution_runtime_states.insert(
+                        tile_pos,
+                        GameRuntimeDistributionBlockState::MassDriver(state),
+                    );
+                    report.missing_targets += 1;
+                    report.updated_drivers += 1;
+                    continue;
+                };
+                let target_capacity = self.buildings[link_index].block.item_capacity;
+                let source_total = self.buildings[index]
+                    .items
+                    .as_ref()
+                    .map(|items| items.total())
+                    .unwrap_or(0);
+                let target_total = self.buildings[link_index]
+                    .items
+                    .as_ref()
+                    .map(|items| items.total())
+                    .unwrap_or(0);
+                if source_total >= driver_block.min_distribute
+                    && target_capacity - target_total >= driver_block.min_distribute
+                    && self
+                        .item_mass_driver_reload_counters
+                        .get(&tile_pos)
+                        .copied()
+                        .unwrap_or(0.0)
+                        <= 0.0001
+                {
+                    report.attempted_shots += 1;
+                    state.rotation = self.angle_between_buildings(index, link_index);
+                    let moved = self.item_mass_driver_fire_to_link(content, index, link_index);
+                    if moved > 0 {
+                        report.shots_fired += 1;
+                        report.transferred_items += moved as usize;
+                        self.item_mass_driver_reload_counters.insert(tile_pos, 1.0);
+                        let target_tile_pos = self.buildings[link_index].tile_pos;
+                        self.item_mass_driver_reload_counters
+                            .insert(target_tile_pos, 1.0);
+                        let mut target_state = self.ensure_item_mass_driver_state(target_tile_pos);
+                        target_state.state = MassDriverStateKind::Idle;
+                        self.distribution_runtime_states.insert(
+                            target_tile_pos,
+                            GameRuntimeDistributionBlockState::MassDriver(target_state),
+                        );
+                        state.state = MassDriverStateKind::Idle;
+                    }
+                }
+            }
+
+            self.distribution_runtime_states.insert(
+                tile_pos,
+                GameRuntimeDistributionBlockState::MassDriver(state),
+            );
+            report.updated_drivers += 1;
+        }
+
+        report
+    }
+
+    fn ensure_item_mass_driver_state(&mut self, tile_pos: i32) -> MassDriverState {
+        match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::MassDriver(state)) => *state,
+            _ => {
+                let state = MassDriverState {
+                    link: -1,
+                    rotation: 90.0,
+                    state: MassDriverStateKind::Idle,
+                };
+                self.distribution_runtime_states.insert(
+                    tile_pos,
+                    GameRuntimeDistributionBlockState::MassDriver(state),
+                );
+                state
+            }
+        }
+    }
+
+    fn item_mass_driver_link_target_index(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        link: i32,
+    ) -> Option<usize> {
+        if link < 0 {
+            return None;
+        }
+        let source = self.buildings.get(source_index)?;
+        let target_index = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == link)?;
+        let target = &self.buildings[target_index];
+        let Some(BlockDef::Distribution(distribution)) = content.block(source.block.id) else {
+            return None;
+        };
+        mass_driver_link_valid(
+            true,
+            source.block.id == target.block.id,
+            source.team == target.team,
+            self.distance_between_buildings(source_index, target_index),
+            distribution.range,
+        )
+        .then_some(target_index)
+    }
+
+    fn distance_between_buildings(&self, from_index: usize, to_index: usize) -> f32 {
+        let (Some(from), Some(to)) = (self.buildings.get(from_index), self.buildings.get(to_index))
+        else {
+            return f32::INFINITY;
+        };
+        let dx = from.x - to.x;
+        let dy = from.y - to.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    fn angle_between_buildings(&self, from_index: usize, to_index: usize) -> f32 {
+        let (Some(from), Some(to)) = (self.buildings.get(from_index), self.buildings.get(to_index))
+        else {
+            return 90.0;
+        };
+        let mut angle = (to.y - from.y).atan2(to.x - from.x).to_degrees();
+        if angle < 0.0 {
+            angle += 360.0;
+        }
+        angle
+    }
+
+    fn item_mass_driver_fire_to_link(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+    ) -> i32 {
+        if source_index == target_index
+            || source_index >= self.buildings.len()
+            || target_index >= self.buildings.len()
+        {
+            return 0;
+        }
+        let source_capacity = self.buildings[source_index].block.item_capacity;
+        let target_capacity = self.buildings[target_index].block.item_capacity * 2;
+        let target_total = self.buildings[target_index]
+            .items
+            .as_ref()
+            .map(|items| items.total())
+            .unwrap_or(0);
+        let mut remaining_target_space = (target_capacity - target_total).max(0);
+        let mut total_used = 0;
+        let mut entries = Vec::new();
+        for item in content.items() {
+            let item_id = item.base.mappable.base.id;
+            let amount = self.buildings[source_index]
+                .items
+                .as_ref()
+                .map(|items| items.get(item_id))
+                .unwrap_or(0);
+            let move_amount = amount
+                .min(source_capacity - total_used)
+                .min(remaining_target_space);
+            if move_amount > 0 {
+                entries.push((item_id, move_amount));
+                total_used += move_amount;
+                remaining_target_space -= move_amount;
+            }
+            if total_used >= source_capacity || remaining_target_space <= 0 {
+                break;
+            }
+        }
+        if entries.is_empty() {
+            return 0;
+        }
+
+        let (source, target) = if source_index < target_index {
+            let (left, right) = self.buildings.split_at_mut(target_index);
+            (&mut left[source_index], &mut right[0])
+        } else {
+            let (left, right) = self.buildings.split_at_mut(source_index);
+            (&mut right[0], &mut left[target_index])
+        };
+        let Some(source_items) = source.items.as_mut() else {
+            return 0;
+        };
+        let Some(target_items) = target.items.as_mut() else {
+            return 0;
+        };
+        for (item_id, amount) in &entries {
+            source_items.remove(*item_id, *amount);
+            target_items.add(*item_id, *amount);
+        }
+        total_used
+    }
+
     pub fn advance_owned_item_ducts(
         &mut self,
         content: &ContentLoader,
@@ -7951,6 +8254,27 @@ impl GameRuntime {
                     target.block.item_capacity,
                     source_is_front,
                 )
+            }
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::MassDriver =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                items.total() < target.block.item_capacity
+                    && self
+                        .distribution_runtime_states
+                        .get(&target.tile_pos)
+                        .and_then(|state| match state {
+                            GameRuntimeDistributionBlockState::MassDriver(state) => {
+                                Some(state.link)
+                            }
+                            _ => None,
+                        })
+                        .and_then(|link| {
+                            self.item_mass_driver_link_target_index(content, target_index, link)
+                        })
+                        .is_some()
             }
             Some(BlockDef::Distribution(distribution))
                 if distribution.kind == DistributionBlockKind::Duct =>
@@ -15597,6 +15921,117 @@ mod tests {
 
         assert_eq!(payload.first().copied(), Some(0));
         assert_eq!(payload, base_payload);
+    }
+
+    #[test]
+    fn game_runtime_item_mass_driver_transfers_items_to_linked_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("mass-driver").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(4, 4);
+        let target_tile = point2_pack(12, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, driver_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 20);
+        let target_building = BuildingComp::new(target_tile, driver_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(20, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(target_building);
+        runtime.distribution_runtime_states.insert(
+            source_tile,
+            GameRuntimeDistributionBlockState::MassDriver(MassDriverState {
+                link: target_tile,
+                rotation: 90.0,
+                state: MassDriverStateKind::Idle,
+            }),
+        );
+
+        let report = runtime
+            .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(report.driver_candidates, 2);
+        assert_eq!(report.attempted_shots, 1);
+        assert_eq!(report.shots_fired, 1);
+        assert_eq!(report.transferred_items, 20);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 20);
+        assert_eq!(
+            runtime
+                .item_mass_driver_reload_counters
+                .get(&source_tile)
+                .copied(),
+            Some(1.0)
+        );
+        let target_reload = runtime
+            .item_mass_driver_reload_counters
+            .get(&target_tile)
+            .copied()
+            .expect("target reload counter should be initialized");
+        assert!(target_reload > 0.99 && target_reload <= 1.0);
+        let Some(GameRuntimeDistributionBlockState::MassDriver(source_state)) =
+            runtime.distribution_runtime_states.get(&source_tile)
+        else {
+            panic!("source mass driver sidecar should be kept");
+        };
+        assert_eq!(source_state.state, MassDriverStateKind::Idle);
+        assert!((source_state.rotation - 0.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn game_runtime_item_mass_driver_accepts_dump_only_with_valid_output_link() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let driver_def = content.block_by_name("mass-driver").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(3, 4);
+        let driver_tile = point2_pack(5, 4);
+        let receiver_tile = point2_pack(9, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, router_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 2);
+        let driver_building = BuildingComp::new(driver_tile, driver_def.base().clone(), TeamId(6));
+        let receiver_building =
+            BuildingComp::new(receiver_tile, driver_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(14, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(driver_building);
+        runtime.add_building(receiver_building);
+
+        assert!(!runtime.dump_item_to_target(&content, 0, 1, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 2);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 0);
+
+        runtime.distribution_runtime_states.insert(
+            driver_tile,
+            GameRuntimeDistributionBlockState::MassDriver(MassDriverState {
+                link: receiver_tile,
+                rotation: 90.0,
+                state: MassDriverStateKind::Idle,
+            }),
+        );
+
+        assert!(runtime.dump_item_to_target(&content, 0, 1, copper));
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
     }
 
     #[test]
