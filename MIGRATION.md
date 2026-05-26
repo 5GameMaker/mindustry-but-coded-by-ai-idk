@@ -2517,6 +2517,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
 - 仍未完成：位置 ping 的真实 renderer 绘制仍需接入 graphics/UI 层；`LocationPingComp` 没有可迁移源文件或 revision，后续若上游生成产物出现实体实现，应再补 typed/revision runtime。
 
+### 12.54 PowerGraph runtime 与 updater 实体闭环
+
+- 2026-05-27：将 `PowerGraphUpdaterComp` 从泛型转发壳推进到可驱动真实 Rust `PowerGraphRuntime` 的闭环。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.PowerGraphComp=41`、`mindustry.entities.comp.PowerGraphUpdaterComp=42`；
+  - `core/src/mindustry/entities/comp/PowerGraphUpdaterComp.java`：`@EntityDef(value = PowerGraphUpdaterc.class, serialize = false, genio = false)`，字段 `transient PowerGraph graph`，`update(){ graph.update(); }`；
+  - `annotations/src/main/resources/revisions/PowerGraphUpdaterComp/0.json`：`fields: []`；
+  - 未发现 checked-in `PowerGraphComp.java`，实际电网行为在 `core/src/mindustry/world/blocks/power/PowerGraph.java`；
+  - `PowerGraph.update()` 核心顺序：cheating consumer 快速置满 → 统计 produced/needed → 写 lastScaled/lastCapacity/lastStored/powerBalance → 用电池补差或充电 → distributePower 更新 consumer status。
+- Rust 新增/变化：
+  - `entities::POWER_GRAPH_CLASS_ID = 41`、`POWER_GRAPH_UPDATER_CLASS_ID = 42`；
+  - `PowerProducer`、`PowerConsumer`、`PowerGraphRuntime`；
+  - `PowerGraphRuntime::transfer_power(...)`、`power_balance(...)`、`has_power_balance_samples(...)`、`update_with_delta(...)`；
+  - `PowerGraphUpdaterComp<PowerGraphRuntime>` 实现 `PowerGraphUpdate`，updater 可直接驱动真实 power graph runtime；
+  - 保留既有 power helper 函数，并由 runtime 聚合成接近 Java `PowerGraph.update()` 的状态转移。
+- 测试：
+  - `power_graph_runtime_update_uses_batteries_and_updates_consumers`
+  - `power_graph_runtime_update_charges_batteries_and_handles_cheating_consumers`
+  - `power_graph_updater_drives_real_power_graph_runtime`
+  - `power_graph_updater_forwards_update_to_graph`
+  - `entity_class_ids_match_upstream_classids_properties_baseline`
+- 已验证：
+  - `cargo test -p mindustry-core power_graph_runtime --lib`
+  - `cargo test -p mindustry-core power_graph_updater --lib`
+  - `cargo test -p mindustry-core power_graph_beam_and_long_node_helpers_follow_upstream --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：尚未迁移 Java `PowerGraph.addGraph/add/reflow/remove/clear` 的完整建图/并图/拆图流程，也未把 `BuildingComp.onProximityAdded/updatePowerGraph/powerGraphRemoved/afterPickedUp` 全量接入；当前闭环先覆盖 updater 实体驱动真实 runtime update。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

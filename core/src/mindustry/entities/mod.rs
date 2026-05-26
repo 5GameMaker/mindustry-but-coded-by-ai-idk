@@ -48,6 +48,8 @@ pub const EFFECT_STATE_CLASS_ID: u8 = 9;
 pub const FIRE_CLASS_ID: u8 = 10;
 pub const LAUNCH_CORE_CLASS_ID: u8 = 11;
 pub const LOCATION_PING_CLASS_ID: u8 = 48;
+pub const POWER_GRAPH_CLASS_ID: u8 = 41;
+pub const POWER_GRAPH_UPDATER_CLASS_ID: u8 = 42;
 pub const PUDDLE_CLASS_ID: u8 = 13;
 pub const WEATHER_STATE_CLASS_ID: u8 = 14;
 pub const WORLD_LABEL_CLASS_ID: u8 = 35;
@@ -150,11 +152,11 @@ pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.PowerGraphComp",
-        id: 41,
+        id: POWER_GRAPH_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.PowerGraphUpdaterComp",
-        id: 42,
+        id: POWER_GRAPH_UPDATER_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.PuddleComp",
@@ -468,6 +470,14 @@ mod tests {
         assert_eq!(
             entity_class_id("mindustry.entities.comp.LaunchCoreComp"),
             Some(LAUNCH_CORE_CLASS_ID)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.PowerGraphComp"),
+            Some(POWER_GRAPH_CLASS_ID)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.PowerGraphUpdaterComp"),
+            Some(POWER_GRAPH_UPDATER_CLASS_ID)
         );
         assert_eq!(
             entity_class_kind(PLAYER_CLASS_ID),

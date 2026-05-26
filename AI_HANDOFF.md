@@ -2292,6 +2292,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
   - `cargo check -p mindustry-core`
 - 下一步建议：
-  1. 继续迁移 `PowerGraphComp` / `PowerGraphUpdaterComp` 等 class-id 明确但 runtime 尚不完整的实体/组件，优先从 Java 源和 revision 证据出发。
+  1. `PowerGraphComp` / `PowerGraphUpdaterComp` 已由第 68 节推进；继续迁移 power graph 建图/并图/拆图与 Building 生命周期钩子。
   2. 将 `PlayerPingDrawPlan` 接到真实 graphics/UI renderer；当前只完成 Java 行为计划与 runtime 状态。
   3. 保持每个闭环完成后验证、更新 `MIGRATION.md`/`AI_HANDOFF.md`、中文提交并推送 `origin main`。
+
+---
+
+## 68. 最新闭环记录：PowerGraph runtime 与 updater 实体闭环
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：将 `PowerGraphUpdaterComp` 从独立泛型转发壳推进到可驱动真实 Rust power graph runtime。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`PowerGraphComp=41`、`PowerGraphUpdaterComp=42`；
+  - `core/src/mindustry/entities/comp/PowerGraphUpdaterComp.java`：`serialize=false, genio=false`，`transient PowerGraph graph`，`update(){ graph.update(); }`；
+  - `annotations/src/main/resources/revisions/PowerGraphUpdaterComp/0.json`：空字段；
+  - `PowerGraphComp.java` 当前参考树未找到，实际电网行为在 `core/src/mindustry/world/blocks/power/PowerGraph.java`。
+- Rust 主改动：
+  - `entities::POWER_GRAPH_CLASS_ID = 41`、`POWER_GRAPH_UPDATER_CLASS_ID = 42`；
+  - 新增 `PowerProducer`、`PowerConsumer`、`PowerGraphRuntime`；
+  - `PowerGraphRuntime::update_with_delta(...)` 聚合 produced/needed、battery use/charge、coverage、consumer status、lastScaled/lastStored/lastCapacity/powerBalance；
+  - `PowerGraphRuntime::transfer_power(...)` 对齐 Java `transferPower` 的 battery 与 `energyDelta` 语义；
+  - `PowerGraphUpdaterComp<PowerGraphRuntime>` 实现 `PowerGraphUpdate`，updater `update()` 现在能驱动真实 runtime。
+- 已跑：
+  - `cargo test -p mindustry-core power_graph_runtime --lib`
+  - `cargo test -p mindustry-core power_graph_updater --lib`
+  - `cargo test -p mindustry-core power_graph_beam_and_long_node_helpers_follow_upstream --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo check -p mindustry-core`
+- 下一步建议：
+  1. 继续迁移 Java `PowerGraph.addGraph/add/reflow/remove/clear`，补建图/并图/拆图行为。
+  2. 将 `BuildingComp.onProximityAdded/updatePowerGraph/powerGraphRemoved/afterPickedUp` 接入 `PowerGraphRuntime`。
+  3. 后续再考虑 `PowerGraphComp` 若生成产物恢复，应补实体壳/映射而不是只保留 class-id。

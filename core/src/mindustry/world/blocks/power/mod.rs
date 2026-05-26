@@ -626,6 +626,193 @@ pub struct PowerBattery {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PowerProducer {
+    pub production: f32,
+    pub delta: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PowerConsumer {
+    pub should_consume_power: bool,
+    pub requested_power: f32,
+    pub usage: f32,
+    pub delta: f32,
+    pub buffered: bool,
+    pub capacity: f32,
+    pub status: f32,
+    pub cheating: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PowerGraphRuntime {
+    pub producers: Vec<PowerProducer>,
+    pub consumers: Vec<PowerConsumer>,
+    pub batteries: Vec<PowerBattery>,
+    pub last_power_produced: f32,
+    pub last_power_needed: f32,
+    pub last_power_stored: f32,
+    pub last_scaled_power_in: f32,
+    pub last_scaled_power_out: f32,
+    pub last_capacity: f32,
+    pub energy_delta: f32,
+    power_balance_samples: Vec<f32>,
+    power_balance_window: usize,
+}
+
+impl Default for PowerGraphRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PowerGraphRuntime {
+    pub fn new() -> Self {
+        Self {
+            producers: Vec::new(),
+            consumers: Vec::new(),
+            batteries: Vec::new(),
+            last_power_produced: 0.0,
+            last_power_needed: 0.0,
+            last_power_stored: 0.0,
+            last_scaled_power_in: 0.0,
+            last_scaled_power_out: 0.0,
+            last_capacity: 0.0,
+            energy_delta: 0.0,
+            power_balance_samples: Vec::new(),
+            power_balance_window: 60,
+        }
+    }
+
+    pub fn transfer_power(&mut self, amount: f32) {
+        if amount > 0.0 {
+            power_graph_charge_batteries(&mut self.batteries, amount);
+        } else {
+            power_graph_use_batteries(&mut self.batteries, -amount);
+        }
+        self.energy_delta += amount;
+    }
+
+    pub fn power_balance(&self) -> f32 {
+        if self.power_balance_samples.is_empty() {
+            0.0
+        } else {
+            self.power_balance_samples.iter().sum::<f32>() / self.power_balance_samples.len() as f32
+        }
+    }
+
+    pub fn has_power_balance_samples(&self) -> bool {
+        self.power_balance_samples.len() >= self.power_balance_window
+    }
+
+    pub fn update_with_delta(&mut self, time_delta: f32) {
+        if self
+            .consumers
+            .first()
+            .is_some_and(|consumer| consumer.cheating)
+        {
+            for consumer in &mut self.consumers {
+                consumer.status = 1.0;
+            }
+            self.last_power_needed = 1.0;
+            self.last_power_produced = 1.0;
+            return;
+        }
+
+        let safe_delta = if nearly(time_delta, 0.0, 0.0001) {
+            1.0
+        } else {
+            time_delta
+        };
+        let power_needed = power_graph_power_needed(
+            &self
+                .consumers
+                .iter()
+                .map(|consumer| {
+                    (
+                        consumer.should_consume_power,
+                        consumer.requested_power,
+                        consumer.delta,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        let mut power_produced = power_graph_power_produced(
+            &self
+                .producers
+                .iter()
+                .map(|producer| (producer.production, producer.delta))
+                .collect::<Vec<_>>(),
+        );
+
+        self.last_power_needed = power_needed;
+        self.last_power_produced = power_produced;
+        self.last_scaled_power_in =
+            power_graph_scaled_power_in(power_produced, self.energy_delta, safe_delta);
+        self.last_scaled_power_out = power_graph_scaled_power_out(power_needed, safe_delta);
+        self.last_capacity = power_graph_total_battery_capacity(&self.batteries);
+        self.last_power_stored = power_graph_battery_stored(&self.batteries);
+        self.push_power_balance_sample(
+            (self.last_power_produced - self.last_power_needed + self.energy_delta) / safe_delta,
+        );
+        self.energy_delta = 0.0;
+
+        if self.consumers.is_empty() && self.producers.is_empty() && self.batteries.is_empty() {
+            return;
+        }
+
+        let mut charged = false;
+        if !nearly(power_needed, power_produced, 0.0001) {
+            if power_needed > power_produced {
+                let used =
+                    power_graph_use_batteries(&mut self.batteries, power_needed - power_produced);
+                power_produced += used;
+                self.last_power_produced += used;
+            } else {
+                charged = true;
+                power_produced -= power_graph_charge_batteries(
+                    &mut self.batteries,
+                    power_produced - power_needed,
+                );
+            }
+        }
+
+        let coverage = power_graph_coverage(
+            power_needed,
+            power_produced,
+            charged,
+            self.last_power_stored,
+        );
+        for consumer in &mut self.consumers {
+            if consumer.buffered {
+                consumer.status = power_graph_buffered_status(
+                    consumer.status,
+                    consumer.requested_power,
+                    coverage,
+                    consumer.delta,
+                    consumer.capacity,
+                );
+            } else {
+                consumer.status = power_graph_unbuffered_status(
+                    consumer.should_consume_power,
+                    coverage,
+                    power_produced,
+                    power_needed,
+                    consumer.usage,
+                    consumer.delta,
+                );
+            }
+        }
+    }
+
+    fn push_power_balance_sample(&mut self, sample: f32) {
+        self.power_balance_samples.push(sample);
+        if self.power_balance_samples.len() > self.power_balance_window {
+            self.power_balance_samples.remove(0);
+        }
+    }
+}
+
 pub fn power_graph_satisfaction(last_power_produced: f32, last_power_needed: f32) -> f32 {
     if nearly(last_power_produced, 0.0, 0.0001) {
         0.0
@@ -1102,5 +1289,80 @@ mod tests {
         assert_eq!(beam_node_status(-1.0, 1.0), PowerBlockStatus::NoOutput);
         assert_eq!(beam_node_status(0.0, 0.0), PowerBlockStatus::NoInput);
         assert_eq!(long_power_node_warmup(0.0, 1), 0.05);
+    }
+
+    #[test]
+    fn power_graph_runtime_update_uses_batteries_and_updates_consumers() {
+        let mut graph = PowerGraphRuntime::new();
+        graph.producers.push(PowerProducer {
+            production: 4.0,
+            delta: 1.0,
+        });
+        graph.consumers.push(PowerConsumer {
+            should_consume_power: true,
+            requested_power: 8.0,
+            usage: 8.0,
+            delta: 1.0,
+            buffered: false,
+            capacity: 0.0,
+            status: 0.0,
+            cheating: false,
+        });
+        graph.batteries.push(PowerBattery {
+            status: 0.5,
+            capacity: 20.0,
+            enabled: true,
+        });
+
+        graph.update_with_delta(2.0);
+
+        assert_eq!(graph.last_power_needed, 8.0);
+        assert_eq!(graph.last_power_produced, 8.0);
+        assert_eq!(graph.last_power_stored, 10.0);
+        assert_eq!(graph.last_capacity, 20.0);
+        assert_eq!(graph.last_scaled_power_in, 2.0);
+        assert_eq!(graph.last_scaled_power_out, 4.0);
+        assert_eq!(graph.consumers[0].status, 1.0);
+        assert!((graph.batteries[0].status - 0.3).abs() < 0.0001);
+        assert_eq!(graph.power_balance(), -2.0);
+        assert!(!graph.has_power_balance_samples());
+    }
+
+    #[test]
+    fn power_graph_runtime_update_charges_batteries_and_handles_cheating_consumers() {
+        let mut graph = PowerGraphRuntime::new();
+        graph.producers.push(PowerProducer {
+            production: 10.0,
+            delta: 1.0,
+        });
+        graph.consumers.push(PowerConsumer {
+            should_consume_power: true,
+            requested_power: 4.0,
+            usage: 4.0,
+            delta: 1.0,
+            buffered: true,
+            capacity: 20.0,
+            status: 0.25,
+            cheating: false,
+        });
+        graph.batteries.push(PowerBattery {
+            status: 0.25,
+            capacity: 20.0,
+            enabled: true,
+        });
+
+        graph.update_with_delta(1.0);
+
+        assert_eq!(graph.last_power_needed, 4.0);
+        assert_eq!(graph.last_power_produced, 10.0);
+        assert!((graph.batteries[0].status - 0.55).abs() < 0.0001);
+        assert!((graph.consumers[0].status - 0.45).abs() < 0.0001);
+
+        graph.consumers[0].cheating = true;
+        graph.update_with_delta(1.0);
+
+        assert_eq!(graph.consumers[0].status, 1.0);
+        assert_eq!(graph.last_power_needed, 1.0);
+        assert_eq!(graph.last_power_produced, 1.0);
     }
 }
