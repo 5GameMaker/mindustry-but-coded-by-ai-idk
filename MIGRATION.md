@@ -1940,7 +1940,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
   - `git diff --check`
-- 仍未完成：真实 payload snapshot 尚缺 `PayloadDeconstructor/Constructor/Void`；随后应转入 revision 0 terminal payload/ref 分支，或开始 turret `readSync` 特例。
+- 仍未完成：真实 payload snapshot 尚缺 `PayloadConstructor/Void`；随后继续覆盖 revision 0 terminal common/recipe 分支，或开始 turret `readSync` 特例。
+
+### 12.30 真实联机 PayloadDeconstructor BlockSnapshot child tail smoke
+
+- 2026-05-26：新增 `real_server_desktop_payload_deconstructor_block_snapshot_updates_runtime_after_world_stream`，在真实 server→desktop 联机链路中先通过 world stream materialize 一个 `small-deconstructor` building，再发送 `BuildingComp::write_base(...) + write_payload_block_build_common(...) + write_deconstructor_extra(...) + write_payload_ref(...)` 组成的 `BlockSnapshotCallPacket`。
+- 测试覆盖 Java `PayloadDeconstructorBuild` 默认 revision `0` 的 terminal tail：`progress/accum/deconstructing`，其中 `deconstructing` 使用 `PayloadRef::Block(router)` 并保留 build bytes，验证 top-level `read_payload_ref_to_end(...)` 分支。
+- 测试断言：
+  - `NetClient.last_block_snapshot_mirror` 正确解析 payload-deconstructor snapshot header；
+  - `client_block_snapshot_records` 保留 raw sync bytes；
+  - 客户端 building 基础 health 被更新；
+  - `payload_runtime_states` 中恢复 `GameRuntimePayloadBlockState::Deconstructor { common, deconstructor }`，包含 `progress/accum/deconstructing`。
+- 已验证：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_deconstructor_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 仍未完成：真实 payload snapshot 尚缺 `PayloadConstructor/Void`；entity snapshot typed runtime、turret `readSync` override 与 Java↔Rust 更完整互通仍需继续。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 

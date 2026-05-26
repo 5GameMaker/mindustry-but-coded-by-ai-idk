@@ -1566,3 +1566,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 补真实联机 `PayloadDeconstructor/Constructor/Void` snapshot，覆盖 revision 0 terminal payload/ref 分支。
   2. 或开始 turret `readSync` override：Java turret snapshot 需要保留 rotation/reload，不可直接套 save-map tail。
   3. 继续推进 entity snapshot typed runtime，替代 raw entity sidecar。
+
+---
+
+## 44. 最新闭环记录：真实联机 PayloadDeconstructor BlockSnapshot child tail smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：覆盖 payload revision 0 terminal payload/ref 分支，验证 `PayloadDeconstructorBuild.write/read` 的 `progress/accum/deconstructing` 能通过真实 BlockSnapshot 同步到 desktop runtime。
+- Rust 主改动：
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 新增测试：`real_server_desktop_payload_deconstructor_block_snapshot_updates_runtime_after_world_stream`
+  - 服务端 world stream 先 materialize `small-deconstructor` building；
+  - 服务端随后发送 `BlockSnapshotCallPacket`，sync bytes 为 `BuildingComp::write_base(...) + write_payload_block_build_common(...) + write_deconstructor_extra(...) + write_payload_ref(...)`；
+  - `deconstructing` 使用 `PayloadRef::Block(router)` 并携带 router build bytes，专门覆盖 top-level `read_payload_ref_to_end(...)`。
+- 断言覆盖：
+  - mirror header 的 `tile_pos/block_id/sync_bytes`；
+  - runtime raw sidecar `client_block_snapshot_records`；
+  - building 基础 health；
+  - `GameRuntimePayloadBlockState::Deconstructor { common, deconstructor }` 完整恢复，其中 `progress/accum/deconstructing` 均对齐。
+- 已跑：
+  - `cargo test -p mindustry-tests real_server_desktop_payload_deconstructor_block_snapshot_updates_runtime_after_world_stream --lib`
+  - `cargo test -p mindustry-tests --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+  - `git diff --check`
+- 下一步建议：
+  1. 补真实联机 `PayloadConstructor` snapshot，覆盖 revision 0 `BlockProducerBuild.progress + Constructor.recipe`。
+  2. 补真实联机 `PayloadVoid` snapshot，覆盖 terminal common tail。
+  3. 转入 turret `readSync` override 与 entity snapshot typed runtime。
