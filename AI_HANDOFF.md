@@ -856,3 +856,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadMassDriver` 尚未接入 server aggregate。下一步建议按 explorer Beauvoir 的结论拆 `advance_owned_payload_mass_drivers(...)` 的 tick-only helper，把 `GameRuntimePayloadMassDriverFrameReport` 加进 `GameRuntimeOwnedPayloadFrameReport`，并新增 server-level fired/received/update_id smoke test。
+
+---
+
+## 21. 最新闭环记录：服务端 PayloadMassDriver 主循环接入
+
+- 目标：把 `PayloadMassDriver` 的双端 queue / charge / fire / receive 最小运行态接入服务端主循环，结束 payload family 在 server aggregate 中的最后一个主要缺口。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `server/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 已接入：`GameRuntimeOwnedPayloadFrameReport` 新增 `mass_driver: GameRuntimePayloadMassDriverFrameReport`；`advance_owned_runtime_blocks(...)` 的 payload 顺序目前是 constructor → source → conveyor/router → loader/unloader → mass-driver → deconstructor → void。
+- 已接入：`advance_owned_payload_mass_drivers(...)` 拆出 `advance_owned_payload_mass_drivers_ticks(content, frame_delta)`。public wrapper 仍负责独立 frame/timing；server aggregate 复用 ticks，保证 `update_id` 每次 `launcher.update()` 只增加一次。
+- 新增测试：`server_update_drives_owned_payload_mass_driver_from_launcher_runtime`。该测试在服务端 runtime 中构造 linked source/target mass driver，源端预装 `BuildPayload(router)` 且已 loaded/charged，目标端 accepting 并等待源端，调用 `launcher.update()` 后断言：
+  - `last_runtime_payload_report.unwrap().mass_driver.mass_driver_candidates == 2`
+  - `mass_driver.charged_shots == 1`
+  - `mass_driver.fired_payloads == 1`
+  - `mass_driver.received_payloads == 1`
+  - 源端 payload 清空且回到 Idle
+  - 目标端收到 payload，`last_other == source_tile`，`effect_delay_timer > 0`
+  - `runtime.state.update_id == 1`
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_mass_driver_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_advances_owned_payload_mass_driver_queues_and_fires_payload --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_loader_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_deconstructor_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 当前状态：payload constructor/source/conveyor-router/loader-unloader/mass-driver/deconstructor/void 都已进入 `advance_owned_runtime_blocks(...)` 的 single-frame aggregate。后续优先做跨多帧整体 smoke，证明这些节点在同一个 server `update()` 链里组成真实可游玩 runtime，而不是只各自有独立单测。

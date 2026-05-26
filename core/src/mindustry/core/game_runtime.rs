@@ -1592,6 +1592,7 @@ pub struct GameRuntimeOwnedPayloadFrameReport {
     pub source: GameRuntimePayloadSourceFrameReport,
     pub conveyor: GameRuntimePayloadConveyorFrameReport,
     pub loader: GameRuntimePayloadLoaderFrameReport,
+    pub mass_driver: GameRuntimePayloadMassDriverFrameReport,
     pub deconstructor: GameRuntimePayloadDeconstructorFrameReport,
     pub void: GameRuntimePayloadVoidFrameReport,
 }
@@ -5298,17 +5299,28 @@ impl GameRuntime {
         self.refresh_owned_building_update_permissions(content);
 
         let frame_delta = advanced.delta_ticks as f32;
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame_delta, can_overdrive);
+        }
+
+        Some(self.advance_owned_payload_mass_drivers_ticks(content, frame_delta))
+    }
+
+    fn advance_owned_payload_mass_drivers_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimePayloadMassDriverFrameReport {
         let mut report = GameRuntimePayloadMassDriverFrameReport::default();
         let mut mass_driver_indices = Vec::new();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, enabled, efficiency, time_scale) = {
-                let building = &mut self.buildings[index];
-                let can_overdrive = content
-                    .block(building.block.id)
-                    .map(BlockDef::can_overdrive)
-                    .unwrap_or(false);
-                building.advance_update_timing(frame_delta, can_overdrive);
+                let building = &self.buildings[index];
                 report.visited_buildings += 1;
                 (
                     building.tile_pos,
@@ -5687,7 +5699,7 @@ impl GameRuntime {
             }
         }
 
-        Some(report)
+        report
     }
 
     pub fn advance_owned_payload_loaders(
@@ -12649,6 +12661,7 @@ impl GameRuntime {
                 advanced.tick as f32,
             ),
             loader: self.advance_owned_payload_loaders_ticks(content, frame.delta, false),
+            mass_driver: self.advance_owned_payload_mass_drivers_ticks(content, frame.delta),
             deconstructor: self.advance_owned_payload_deconstructors_ticks(content, frame.delta),
             void: self.advance_owned_payload_voids_ticks(content, frame.delta),
         };

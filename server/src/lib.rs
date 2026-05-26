@@ -246,8 +246,9 @@ mod tests {
     };
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode};
     use mindustry_core::mindustry::world::blocks::payloads::{
-        BlockProducerState, PayloadBlockBuildState, PayloadConveyorState,
-        PayloadDeconstructorState, PayloadLoaderState, PayloadRef, PayloadSourceState,
+        payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
+        PayloadConveyorState, PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState,
+        PayloadMassDriverState, PayloadRef, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::io;
@@ -1124,6 +1125,110 @@ mod tests {
                 .get(copper),
             0
         );
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_payload_mass_driver_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let driver_def = launcher
+            .content_loader
+            .block_by_name("payload-mass-driver")
+            .unwrap();
+        let (driver_block, length, knockback, charge_time) = match driver_def {
+            BlockDef::PayloadMassDriver(driver) => (
+                driver.base.clone(),
+                driver.length,
+                driver.knockback,
+                driver.charge_time,
+            ),
+            _ => panic!("payload-mass-driver should use payload mass driver data"),
+        };
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let router_id = router_def.base().id;
+        let source_tile = point2_pack(4, 4);
+        let target_tile = point2_pack(8, 4);
+        let mut build_bytes = Vec::new();
+        BuildingComp::new(point2_pack(0, 0), router_def.base().clone(), TeamId(6))
+            .write_base(&mut build_bytes, false)
+            .unwrap();
+        let payload = PayloadRef::Block {
+            block: router_id,
+            version: 0,
+            build_bytes,
+        };
+
+        launcher.runtime.state.world.resize(16, 10);
+        launcher.runtime.add_building(BuildingComp::new(
+            source_tile,
+            driver_block.clone(),
+            TeamId(6),
+        ));
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(target_tile, driver_block, TeamId(6)));
+        launcher.runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState {
+                    payload: Some(payload.clone()),
+                    ..PayloadBlockBuildState::default()
+                },
+                driver: PayloadMassDriverState {
+                    link: target_tile,
+                    turret_rotation: 0.0,
+                    state: PayloadDriverState::Shooting,
+                    reload_counter: 0.0,
+                    charge: charge_time,
+                    loaded: true,
+                    charging: true,
+                    pay_length: payload_mass_driver_loaded_pay_length(length, 0.0, knockback),
+                    ..PayloadMassDriverState::default()
+                },
+            },
+        );
+        launcher.runtime.payload_runtime_states.insert(
+            target_tile,
+            GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState::default(),
+                driver: PayloadMassDriverState {
+                    turret_rotation: 180.0,
+                    state: PayloadDriverState::Accepting,
+                    waiting_shooters: vec![source_tile],
+                    ..PayloadMassDriverState::default()
+                },
+            },
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_payload_report
+            .expect("server update should cache the latest payload batch");
+        assert_eq!(report.mass_driver.mass_driver_candidates, 2);
+        assert_eq!(report.mass_driver.charged_shots, 1);
+        assert_eq!(report.mass_driver.fired_payloads, 1);
+        assert_eq!(report.mass_driver.received_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::MassDriver {
+            common: source_common,
+            driver: source_driver,
+        }) = launcher.runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("source mass driver state should remain present");
+        };
+        assert!(source_common.payload.is_none());
+        assert_eq!(source_driver.state, PayloadDriverState::Idle);
+        let Some(GameRuntimePayloadBlockState::MassDriver {
+            common: target_common,
+            driver: target_driver,
+        }) = launcher.runtime.payload_runtime_states.get(&target_tile)
+        else {
+            panic!("target mass driver state should remain present");
+        };
+        assert_eq!(target_common.payload, Some(payload));
+        assert_eq!(target_driver.last_other, Some(source_tile));
+        assert!(target_driver.effect_delay_timer > 0.0);
         assert_eq!(launcher.runtime.state.update_id, 1);
     }
 }

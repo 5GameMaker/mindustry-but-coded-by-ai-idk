@@ -1574,3 +1574,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
   - `git diff --check`
 - 仍未完成：`PayloadMassDriver` 尚未接入 server aggregate；loader/unloader 已进入主循环，但真实 power graph、完整 block-specific `acceptItem/handleItem/acceptLiquid` override 与多段 complex transport/liquid graph 仍需继续迁移。
+
+### 12.7 服务端 PayloadMassDriver 主循环接入
+
+- 2026-05-26：`GameRuntimeOwnedPayloadFrameReport` 追加 `mass_driver: GameRuntimePayloadMassDriverFrameReport`，`advance_owned_runtime_blocks(...)` 的 payload 顺序目前为 constructor → source → conveyor/router → loader/unloader → mass-driver → deconstructor → void。
+- `advance_owned_payload_mass_drivers(...)` 已拆出内部 `advance_owned_payload_mass_drivers_ticks(content, frame_delta)`；public 入口仍独立推进 frame/timing，server aggregate 复用 ticks，避免把 `GameState::advance_game_update_frame(...)` 与 building timing 重复推进。
+- 新增测试 `server_update_drives_owned_payload_mass_driver_from_launcher_runtime`：构造 linked 双端 `payload-mass-driver`，源端预装 `BuildPayload(router)` 并置为已装载/已充能，目标端处于 accepting 且等待源端；调用 `launcher.update()` 后验证 fired/received report、源端清空、目标端收到 payload/effect delay，并保持 `runtime.state.update_id == 1`。
+- 已验证：
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_mass_driver_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_advances_owned_payload_mass_driver_queues_and_fires_payload --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_loader_from_launcher_runtime --lib`
+  - `cargo test -p mindustry-server server_update_drives_owned_payload_deconstructor_from_launcher_runtime --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `rustfmt --check core/src/mindustry/core/game_runtime.rs core/src/mindustry/core/mod.rs server/src/lib.rs`
+  - `git diff --check`
+- 仍未完成：payload family 已全部进入当前 server aggregate 的最小主循环，但还缺跨多帧 end-to-end smoke（constructor/source → conveyor/router/loader/mass-driver/deconstructor/void）、UnitPayload 完整实体恢复、完整 renderer/UI 和更细的 Java 联机兼容验证。
