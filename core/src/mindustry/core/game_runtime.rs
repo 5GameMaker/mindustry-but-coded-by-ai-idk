@@ -1525,6 +1525,8 @@ pub struct GameRuntimeItemMassDriverInFlight {
     pub to_block_id: ContentId,
     pub to_team: TeamId,
     pub remaining_ticks: f32,
+    pub expire_ticks: f32,
+    pub target_lost: bool,
     pub items: Vec<(ContentId, i32)>,
 }
 
@@ -2301,8 +2303,6 @@ impl GameRuntime {
         self.item_mass_driver_waiting_shooters
             .remove(&removed.tile_pos);
         self.remove_item_mass_driver_waiting_shooter_from_all(removed.tile_pos);
-        self.item_mass_driver_in_flight
-            .retain(|shot| shot.from_tile != removed.tile_pos && shot.to_tile != removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -7465,15 +7465,47 @@ impl GameRuntime {
         let mut delivered = 0;
         let mut pending = Vec::new();
         for mut shot in std::mem::take(&mut self.item_mass_driver_in_flight) {
-            shot.remaining_ticks -= frame_delta.max(0.0);
+            let delta = frame_delta.max(0.0);
+            shot.remaining_ticks -= delta;
+            shot.expire_ticks -= delta;
+            if !shot.target_lost
+                && self
+                    .item_mass_driver_in_flight_target_index(content, &shot)
+                    .is_none()
+            {
+                shot.target_lost = true;
+            }
             if shot.remaining_ticks > 0.0 {
                 pending.push(shot);
                 continue;
             }
-            delivered += self.resolve_item_mass_driver_in_flight_shot(content, &shot);
+            if !shot.target_lost {
+                delivered += self.resolve_item_mass_driver_in_flight_shot(content, &shot);
+            } else if shot.expire_ticks > 0.0 {
+                self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+                pending.push(shot);
+            } else {
+                self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            }
         }
         self.item_mass_driver_in_flight = pending;
         delivered
+    }
+
+    fn item_mass_driver_in_flight_target_index(
+        &self,
+        content: &ContentLoader,
+        shot: &GameRuntimeItemMassDriverInFlight,
+    ) -> Option<usize> {
+        let target_index = self.building_index_by_tile_pos(shot.to_tile)?;
+        let target = &self.buildings[target_index];
+        if target.block.id != shot.to_block_id || target.team != shot.to_team {
+            return None;
+        }
+        let Some(BlockDef::Distribution(distribution)) = content.block(target.block.id) else {
+            return None;
+        };
+        (distribution.kind == DistributionBlockKind::MassDriver).then_some(target_index)
     }
 
     fn resolve_item_mass_driver_in_flight_shot(
@@ -7481,23 +7513,10 @@ impl GameRuntime {
         content: &ContentLoader,
         shot: &GameRuntimeItemMassDriverInFlight,
     ) -> usize {
-        let Some(target_index) = self.building_index_by_tile_pos(shot.to_tile) else {
+        let Some(target_index) = self.item_mass_driver_in_flight_target_index(content, shot) else {
             self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
             return 0;
         };
-        let target = &self.buildings[target_index];
-        if target.block.id != shot.to_block_id || target.team != shot.to_team {
-            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
-            return 0;
-        }
-        let Some(BlockDef::Distribution(distribution)) = content.block(target.block.id) else {
-            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
-            return 0;
-        };
-        if distribution.kind != DistributionBlockKind::MassDriver {
-            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
-            return 0;
-        }
 
         let target_capacity = self.buildings[target_index].block.item_capacity * 2;
         let target_total = self.buildings[target_index]
@@ -7800,6 +7819,8 @@ impl GameRuntime {
                 to_block_id: self.buildings[target_index].block.id,
                 to_team: self.buildings[target_index].team,
                 remaining_ticks: time_to_arrive,
+                expire_ticks: driver_block.bullet_lifetime,
+                target_lost: false,
                 items: entries,
             });
         total_used
@@ -17616,6 +17637,79 @@ mod tests {
             .item_mass_driver_waiting_shooters
             .get(&target_tile)
             .is_none());
+    }
+
+    #[test]
+    fn game_runtime_item_mass_driver_keeps_flight_after_target_removed_until_lifetime() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("mass-driver").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(4, 4);
+        let target_tile = point2_pack(12, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, driver_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 20);
+        let target_building = BuildingComp::new(target_tile, driver_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(20, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(target_building);
+        runtime.distribution_runtime_states.insert(
+            source_tile,
+            GameRuntimeDistributionBlockState::MassDriver(MassDriverState {
+                link: target_tile,
+                rotation: 90.0,
+                state: MassDriverStateKind::Idle,
+            }),
+        );
+
+        for _ in 0..32 {
+            let report = runtime
+                .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
+                .unwrap();
+            if report.shots_fired > 0 {
+                break;
+            }
+        }
+        assert_eq!(runtime.item_mass_driver_in_flight.len(), 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert!(runtime.remove_building_by_tile_pos(target_tile).is_some());
+
+        let arrival_ticks = runtime.item_mass_driver_in_flight[0].remaining_ticks.ceil() as i32 + 1;
+        for _ in 0..arrival_ticks {
+            runtime
+                .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
+                .unwrap();
+        }
+        assert_eq!(
+            runtime.building_index_by_tile_pos(target_tile),
+            None,
+            "removed target must not be recreated by in-flight delivery"
+        );
+        assert_eq!(runtime.item_mass_driver_in_flight.len(), 1);
+        assert!(runtime.item_mass_driver_in_flight[0].target_lost);
+
+        let expiry_ticks = runtime.item_mass_driver_in_flight[0].expire_ticks.ceil() as i32 + 1;
+        for _ in 0..expiry_ticks {
+            runtime
+                .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
+                .unwrap();
+            if runtime.item_mass_driver_in_flight.is_empty() {
+                break;
+            }
+        }
+        assert!(
+            runtime.item_mass_driver_in_flight.is_empty(),
+            "target-lost mass driver shot should be discarded after bullet lifetime"
+        );
     }
 
     #[test]
