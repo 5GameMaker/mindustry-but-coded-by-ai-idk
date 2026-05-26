@@ -13,7 +13,8 @@ use mindustry_core::mindustry::entities::{
 };
 use mindustry_core::mindustry::io::{
     read_bullet_sync, read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync,
-    read_unit_sync, read_weather_state_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
+    read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
+    LegacyTeamBlocks, TeamId,
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
@@ -499,6 +500,24 @@ impl DesktopLauncher {
                         report.entity_typed_records_applied += 1;
                     }
                 }
+                Some(EntityClassKind::WorldLabel) => {
+                    let Ok(label_sync) = read_world_label_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    if self
+                        .runtime
+                        .apply_client_world_label_sync_wire(entity_id, &label_sync)
+                    {
+                        report.entity_typed_records_applied += 1;
+                    }
+                }
                 _ => {
                     report.entity_parse_errors += 1;
                     return report;
@@ -720,6 +739,7 @@ mod tests {
         entities::{
             comp::BuildingComp, PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
             FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+            WORLD_LABEL_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -1773,6 +1793,17 @@ mod tests {
         };
         let mut weather_bytes = Vec::new();
         type_io::write_weather_state_sync(&mut weather_bytes, &weather_sync).unwrap();
+        let label_sync = type_io::WorldLabelSyncWire {
+            flags: 1 | 8,
+            font_size: 1.5,
+            parent_id: Some(8801),
+            text: Some("rally".into()),
+            x: 72.0,
+            y: 96.0,
+            z: 155.0,
+        };
+        let mut label_bytes = Vec::new();
+        type_io::write_world_label_sync(&mut label_bytes, &label_sync).unwrap();
 
         let mut data = Vec::new();
         data.extend_from_slice(&launcher.player.id.to_be_bytes());
@@ -1799,6 +1830,9 @@ mod tests {
         data.extend_from_slice(&9903i32.to_be_bytes());
         data.push(WEATHER_STATE_CLASS_ID);
         data.extend_from_slice(&weather_bytes);
+        data.extend_from_slice(&9904i32.to_be_bytes());
+        data.push(WORLD_LABEL_CLASS_ID);
+        data.extend_from_slice(&label_bytes);
 
         {
             let state = launcher.net_client.state();
@@ -1806,7 +1840,7 @@ mod tests {
             state
                 .entity_snapshot_mirrors
                 .push(ClientEntitySnapshotMirror {
-                    amount: 8,
+                    amount: 9,
                     data,
                     records: Vec::new(),
                     parse_error: Some(
@@ -1819,10 +1853,10 @@ mod tests {
         launcher.update();
 
         let report = launcher.last_client_snapshot_apply_report.expect(
-            "mixed fallback should apply player, unit, bullet, decal, effect, fire, puddle and weather records",
+            "mixed fallback should apply player, unit, bullet, decal, effect, fire, puddle, weather and world-label records",
         );
-        assert_eq!(report.entity_records_applied, 8);
-        assert_eq!(report.entity_typed_records_applied, 8);
+        assert_eq!(report.entity_records_applied, 9);
+        assert_eq!(report.entity_typed_records_applied, 9);
         assert_eq!(report.entity_parse_errors, 0);
 
         assert_eq!(
@@ -1975,6 +2009,17 @@ mod tests {
         assert_eq!(weather.x, 10.0);
         assert_eq!(weather.y, 20.0);
         assert!(weather.added);
+
+        let label = launcher
+            .runtime
+            .client_world_label_snapshot_entities
+            .get(&9904)
+            .expect("mixed fallback should materialize world label record");
+        assert_eq!(label.flags, 1 | 8);
+        assert_eq!(label.font_size, 1.5);
+        assert_eq!(label.parent_id, Some(8801));
+        assert_eq!(label.text, "rally");
+        assert_eq!((label.x, label.y, label.z), (72.0, 96.0, 155.0));
     }
 
     #[test]

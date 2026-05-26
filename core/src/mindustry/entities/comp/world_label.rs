@@ -1,6 +1,6 @@
 //! World label component mirroring upstream `mindustry.entities.comp.WorldLabelComp`.
 
-use crate::mindustry::entities::EntityPosition;
+use crate::mindustry::{entities::EntityPosition, io::WorldLabelSyncWire};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorldLabelAlign {
@@ -30,6 +30,7 @@ pub struct WorldLabelComp {
     pub font_size: f32,
     pub z: f32,
     pub flags: u8,
+    pub parent_id: Option<i32>,
     pub parent: Option<(f32, f32)>,
     removed: bool,
 }
@@ -41,6 +42,7 @@ impl WorldLabelComp {
     pub const FLAG_ALIGN_LEFT: u8 = 4;
     pub const FLAG_ALIGN_RIGHT: u8 = 8;
     pub const FLAG_AUTOSCALE: u8 = 16;
+    pub const FLAG_ONLY_PARENT_VISIBLE: u8 = 32;
 
     pub fn new(id: i32, x: f32, y: f32) -> Self {
         Self {
@@ -51,6 +53,7 @@ impl WorldLabelComp {
             font_size: 1.0,
             z: Self::DEFAULT_Z,
             flags: Self::FLAG_BACKGROUND | Self::FLAG_OUTLINE,
+            parent_id: None,
             parent: None,
             removed: false,
         }
@@ -101,6 +104,16 @@ impl WorldLabelComp {
         }
     }
 
+    pub fn apply_sync_wire(&mut self, sync: &WorldLabelSyncWire) {
+        self.flags = sync.flags;
+        self.font_size = sync.font_size;
+        self.parent_id = sync.parent_id;
+        self.text = sync.text.clone().unwrap_or_default();
+        self.x = sync.x;
+        self.y = sync.y;
+        self.z = sync.z;
+    }
+
     /// Java: must be called instead of `remove()`; also calls
     /// `Call.removeWorldLabel(id)`. The returned ID is that network call plan.
     pub fn hide(&mut self) -> i32 {
@@ -147,6 +160,31 @@ mod tests {
         assert_eq!((plan.x, plan.y), (12.0, 23.0));
         assert_eq!(plan.align, WorldLabelAlign::Center);
         assert_eq!(plan.line_align, WorldLabelAlign::Right);
+    }
+
+    #[test]
+    fn world_label_applies_revision_1_sync_wire_fields() {
+        let mut label = WorldLabelComp::new(5, 10.0, 20.0);
+        let sync = WorldLabelSyncWire {
+            flags: WorldLabelComp::FLAG_ALIGN_LEFT | WorldLabelComp::FLAG_AUTOSCALE,
+            font_size: 1.75,
+            parent_id: Some(42),
+            text: Some("hello".into()),
+            x: 30.0,
+            y: 40.0,
+            z: 155.0,
+        };
+
+        label.apply_sync_wire(&sync);
+
+        assert_eq!(
+            label.flags,
+            WorldLabelComp::FLAG_ALIGN_LEFT | WorldLabelComp::FLAG_AUTOSCALE
+        );
+        assert_eq!(label.font_size, 1.75);
+        assert_eq!(label.parent_id, Some(42));
+        assert_eq!(label.text, "hello");
+        assert_eq!((label.x, label.y, label.z), (30.0, 40.0, 155.0));
     }
 
     #[test]

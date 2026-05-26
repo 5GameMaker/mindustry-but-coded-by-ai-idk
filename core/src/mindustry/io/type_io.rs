@@ -942,6 +942,17 @@ pub struct BulletSyncWire {
     pub y: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldLabelSyncWire {
+    pub flags: u8,
+    pub font_size: f32,
+    pub parent_id: Option<i32>,
+    pub text: Option<String>,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PuddleSyncWire {
     pub amount: f32,
@@ -1333,6 +1344,38 @@ pub fn read_bullet_sync<R: Read>(read: &mut R) -> io::Result<BulletSyncWire> {
         vel,
         x,
         y,
+    })
+}
+
+pub fn write_world_label_sync<W: Write>(
+    write: &mut W,
+    sync: &WorldLabelSyncWire,
+) -> io::Result<()> {
+    write_u8(write, sync.flags)?;
+    write_f32(write, sync.font_size)?;
+    write_entity_ref(write, EntityRef { id: sync.parent_id })?;
+    write_string(write, sync.text.as_deref())?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)?;
+    write_f32(write, sync.z)
+}
+
+pub fn read_world_label_sync<R: Read>(read: &mut R) -> io::Result<WorldLabelSyncWire> {
+    let flags = read_u8(read)?;
+    let font_size = read_f32(read)?;
+    let parent_id = read_entity_ref(read)?.id;
+    let text = read_string(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    let z = read_f32(read)?;
+    Ok(WorldLabelSyncWire {
+        flags,
+        font_size,
+        parent_id,
+        text,
+        x,
+        y,
+        z,
     })
 }
 
@@ -3235,6 +3278,45 @@ mod tests {
         assert_eq!(
             read_bullet_sync(&mut bytes.as_slice()).unwrap(),
             sync_without_owner
+        );
+    }
+
+    #[test]
+    fn world_label_sync_wire_roundtrips_java_revision_1_write_sync_shape() {
+        let sync = WorldLabelSyncWire {
+            flags: 0b0010_1111,
+            font_size: 1.5,
+            parent_id: Some(4242),
+            text: Some("hello label".into()),
+            x: 12.0,
+            y: 24.0,
+            z: 152.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_world_label_sync(&mut bytes, &sync).unwrap();
+
+        let mut expected = Vec::new();
+        expected.push(sync.flags);
+        expected.extend_from_slice(&sync.font_size.to_be_bytes());
+        expected.extend_from_slice(&4242i32.to_be_bytes());
+        write_string(&mut expected, Some("hello label")).unwrap();
+        expected.extend_from_slice(&sync.x.to_be_bytes());
+        expected.extend_from_slice(&sync.y.to_be_bytes());
+        expected.extend_from_slice(&sync.z.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(read_world_label_sync(&mut bytes.as_slice()).unwrap(), sync);
+
+        let sync_without_refs = WorldLabelSyncWire {
+            parent_id: None,
+            text: None,
+            ..sync
+        };
+        bytes.clear();
+        write_world_label_sync(&mut bytes, &sync_without_refs).unwrap();
+        assert_eq!(
+            read_world_label_sync(&mut bytes.as_slice()).unwrap(),
+            sync_without_refs
         );
     }
 

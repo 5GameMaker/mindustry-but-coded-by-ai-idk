@@ -2205,5 +2205,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
   1. 将 Bullet typed sidecar 接入完整 `Groups.bullet` lifecycle、碰撞、渲染与服务端真实实体枚举发包。
-  2. 继续迁移剩余 entity snapshot：`LaunchCoreComp`、`WorldLabelComp`、`LocationPingComp` 等。
+  2. `WorldLabelComp` 已由第 65 节补上；继续迁移剩余 entity snapshot：`LaunchCoreComp`、`LocationPingComp` 等。
   3. 收敛 entity snapshot dispatcher，避免 `GameRuntime` / `DesktopLauncher` 双份 match 长期分叉。
+
+---
+
+## 65. 最新闭环记录：WorldLabelComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 class-id `35` 的 Java `WorldLabelComp` revision 1 sync wire 从 opaque entity bytes 推进到 Rust typed sidecar，并继续扩展真实 `ServerLauncher -> DesktopLauncher` mixed entity snapshot smoke。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.WorldLabelComp=35`；
+  - `annotations/src/main/resources/revisions/WorldLabelComp/1.json`：字段顺序 `flags, fontSize, parent, text, x, y, z`；
+  - `flags`：`byte`，`FLAG_ONLY_PARENT_VISIBLE = 32`；
+  - `fontSize/x/y/z`：`float`；
+  - `parent`：`TypeIO.writePosEntity/readPosEntity`，当前 wire 是 `i32 entity id`，空引用为 `-1`；
+  - `text`：`TypeIO.writeString/readString`。
+- Rust 主改动：
+  - `type_io::WorldLabelSyncWire` 与 `read_world_label_sync/write_world_label_sync`；
+  - `EntityClassKind::WorldLabel` 与 `WORLD_LABEL_CLASS_ID = 35`；
+  - `WorldLabelComp` 新增 `parent_id: Option<i32>`，并通过 `apply_sync_wire(...)` 恢复 flags、字体、父实体、文本、位置和 z；
+  - `GameRuntime.client_world_label_snapshot_entities` 与 `apply_client_world_label_sync_wire(...)`；
+  - hidden snapshot 对 typed world-label 计为 existing；
+  - `DesktopLauncher` mixed fallback 现在支持 Player + Unit + WorldLabel + Bullet + Decal + Effect + Fire + Puddle + Weather 分类拆包；
+  - 真实联机 smoke 的第三个 entity snapshot packet 现在为 `amount=10`，新增 `1012 + WORLD_LABEL_CLASS_ID + WorldLabelSyncWire`。
+- 已跑：
+  - `cargo test -p mindustry-core world_label_sync --lib`
+  - `cargo test -p mindustry-core world_label_applies_revision_1_sync_wire_fields --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_world_label_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_world_label_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 继续迁移 `LaunchCoreComp`：class-id `11`，revision 0 字段 `block, lifetime, time, x, y`，`block` 走 `TypeIO.writeBlock/readBlock` 的 short block id，空为 `-1`，其余为 `float`。
+  2. 将 WorldLabel typed sidecar 接入真实 label draw/lifecycle 与父实体可见性过滤；当前只保证 Java wire parity 与客户端 snapshot runtime mirror。
+  3. 收敛 `GameRuntime` / `DesktopLauncher` entity snapshot dispatcher，减少每新增实体类型都双处修改。

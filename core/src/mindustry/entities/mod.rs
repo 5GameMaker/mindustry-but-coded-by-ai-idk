@@ -37,6 +37,7 @@ pub enum EntityClassKind {
     Fire,
     Puddle,
     Weather,
+    WorldLabel,
     Other,
 }
 
@@ -47,6 +48,7 @@ pub const EFFECT_STATE_CLASS_ID: u8 = 9;
 pub const FIRE_CLASS_ID: u8 = 10;
 pub const PUDDLE_CLASS_ID: u8 = 13;
 pub const WEATHER_STATE_CLASS_ID: u8 = 14;
+pub const WORLD_LABEL_CLASS_ID: u8 = 35;
 
 /// Java `annotations/src/main/resources/classids.properties` migrated into a
 /// Rust lookup table. This is the stable outer `entity.classId()` byte used by
@@ -158,7 +160,7 @@ pub const ENTITY_CLASS_IDS: &[EntityClassIdEntry] = &[
     },
     EntityClassIdEntry {
         name: "mindustry.entities.comp.WorldLabelComp",
-        id: 35,
+        id: WORLD_LABEL_CLASS_ID,
     },
     EntityClassIdEntry {
         name: "mindustry.type.Weather.WeatherStateComp",
@@ -280,6 +282,8 @@ pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
         Some(EntityClassKind::Puddle)
     } else if id == WEATHER_STATE_CLASS_ID {
         Some(EntityClassKind::Weather)
+    } else if id == WORLD_LABEL_CLASS_ID {
+        Some(EntityClassKind::WorldLabel)
     } else if name.contains('.') {
         Some(EntityClassKind::Other)
     } else {
@@ -499,6 +503,14 @@ mod tests {
         assert_eq!(
             entity_class_kind(WEATHER_STATE_CLASS_ID),
             Some(EntityClassKind::Weather)
+        );
+        assert_eq!(
+            entity_class_id("mindustry.entities.comp.WorldLabelComp"),
+            Some(WORLD_LABEL_CLASS_ID)
+        );
+        assert_eq!(
+            entity_class_kind(WORLD_LABEL_CLASS_ID),
+            Some(EntityClassKind::WorldLabel)
         );
         assert_eq!(
             entity_class_kind(BULLET_CLASS_ID),

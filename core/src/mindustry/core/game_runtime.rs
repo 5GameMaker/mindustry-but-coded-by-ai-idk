@@ -26,7 +26,7 @@ use crate::mindustry::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
             BuildingComp, BulletComp, DecalComp, DecalRegion, EffectStateComp, FireComp,
-            PuddleComp, PuddleTile, UnitComp,
+            PuddleComp, PuddleTile, UnitComp, WorldLabelComp,
         },
         entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
@@ -1558,6 +1558,15 @@ fn read_client_bullet_sync_exact(sync_bytes: &[u8]) -> Option<type_io::BulletSyn
     read.is_empty().then_some(sync)
 }
 
+fn read_client_world_label_sync_exact(sync_bytes: &[u8]) -> Option<type_io::WorldLabelSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_world_label_sync(&mut read).ok()?;
+    read.is_empty().then_some(sync)
+}
+
 fn read_client_puddle_sync_exact(sync_bytes: &[u8]) -> Option<type_io::PuddleSyncWire> {
     if sync_bytes.is_empty() {
         return None;
@@ -2087,6 +2096,7 @@ pub struct GameRuntime {
     pub client_puddle_snapshot_entities: BTreeMap<i32, PuddleComp>,
     pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
     pub client_weather_snapshot_entities: BTreeMap<i32, WeatherState>,
+    pub client_world_label_snapshot_entities: BTreeMap<i32, WorldLabelComp>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
 }
 
@@ -2144,6 +2154,7 @@ impl GameRuntime {
             client_puddle_snapshot_entities: BTreeMap::new(),
             client_unit_snapshot_entities: BTreeMap::new(),
             client_weather_snapshot_entities: BTreeMap::new(),
+            client_world_label_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
         }
     }
@@ -2483,6 +2494,13 @@ impl GameRuntime {
                     }
                 }
             }
+            Some(EntityClassKind::WorldLabel) => {
+                if let Some(sync) = read_client_world_label_sync_exact(&sync_bytes) {
+                    if self.apply_client_world_label_sync_wire(entity_id, &sync) {
+                        report.entity_typed_records_applied = 1;
+                    }
+                }
+            }
             _ => {}
         }
         report
@@ -2608,6 +2626,18 @@ impl GameRuntime {
                         self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
                     );
                     self.apply_client_weather_state_sync_wire(content, entity_id, &sync)
+                }
+                Some(EntityClassKind::WorldLabel) => {
+                    let Ok(sync) = type_io::read_world_label_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    self.apply_client_world_label_sync_wire(entity_id, &sync)
                 }
                 _ => {
                     report.entity_parse_errors += 1;
@@ -2748,6 +2778,19 @@ impl GameRuntime {
         true
     }
 
+    pub fn apply_client_world_label_sync_wire(
+        &mut self,
+        entity_id: i32,
+        sync: &type_io::WorldLabelSyncWire,
+    ) -> bool {
+        let label = self
+            .client_world_label_snapshot_entities
+            .entry(entity_id)
+            .or_insert_with(|| WorldLabelComp::new(entity_id, sync.x, sync.y));
+        label.apply_sync_wire(sync);
+        true
+    }
+
     fn apply_client_unit_sync_wire(
         &mut self,
         content: &ContentLoader,
@@ -2818,6 +2861,9 @@ impl GameRuntime {
                 existing = true;
             }
             if self.client_weather_snapshot_entities.contains_key(id) {
+                existing = true;
+            }
+            if self.client_world_label_snapshot_entities.contains_key(id) {
                 existing = true;
             }
             if existing {
@@ -5622,6 +5668,7 @@ impl GameRuntime {
         self.client_puddle_snapshot_entities.clear();
         self.client_unit_snapshot_entities.clear();
         self.client_weather_snapshot_entities.clear();
+        self.client_world_label_snapshot_entities.clear();
         self.client_hidden_entity_ids.clear();
     }
 
@@ -13612,7 +13659,7 @@ mod tests {
         ctype::{Content, ContentType},
         entities::{
             units::BuildPlan, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
-            FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+            FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
@@ -15212,6 +15259,53 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_applies_client_world_label_entity_snapshot_to_typed_runtime() {
+        let sync = type_io::WorldLabelSyncWire {
+            flags: WorldLabelComp::FLAG_BACKGROUND | WorldLabelComp::FLAG_ALIGN_RIGHT,
+            font_size: 1.5,
+            parent_id: Some(7003),
+            text: Some("rally here".into()),
+            x: 72.0,
+            y: 96.0,
+            z: 155.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_world_label_sync(&mut sync_bytes, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_record_with_content(
+            &ContentLoader::create_base_content().unwrap(),
+            7007,
+            WORLD_LABEL_CLASS_ID,
+            sync_bytes.clone(),
+        );
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&7007)
+            .expect("world label snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, WORLD_LABEL_CLASS_ID);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+
+        let label = runtime
+            .client_world_label_snapshot_entities
+            .get(&7007)
+            .expect("world label sync should materialize typed runtime label");
+        assert_eq!(label.id, 7007);
+        assert_eq!(label.flags, sync.flags);
+        assert_eq!(label.font_size, 1.5);
+        assert_eq!(label.parent_id, Some(7003));
+        assert_eq!(label.text, "rally here");
+        assert_eq!((label.x, label.y, label.z), (72.0, 96.0, 155.0));
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[7007]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
     fn game_runtime_applies_weather_entity_snapshot_packet_with_content() {
         let content = ContentLoader::create_base_content().unwrap();
         let sandstorm = content
@@ -15253,6 +15347,43 @@ mod tests {
         assert_eq!(weather.wind_vector, (0.5, 0.25));
         assert_eq!(weather.x, 30.0);
         assert_eq!(weather.y, 40.0);
+    }
+
+    #[test]
+    fn game_runtime_applies_world_label_entity_snapshot_packet_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let sync = type_io::WorldLabelSyncWire {
+            flags: WorldLabelComp::FLAG_BACKGROUND | WorldLabelComp::FLAG_OUTLINE,
+            font_size: 2.0,
+            parent_id: None,
+            text: Some("defend".into()),
+            x: 30.0,
+            y: 40.0,
+            z: 160.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_world_label_sync(&mut sync_bytes, &sync).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&7104i32.to_be_bytes());
+        data.push(WORLD_LABEL_CLASS_ID);
+        data.extend_from_slice(&sync_bytes);
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_packet_with_content(&content, 1, &data);
+        assert_eq!(report.entity_records_seen, 1);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        assert_eq!(report.entity_parse_errors, 0);
+
+        let label = runtime
+            .client_world_label_snapshot_entities
+            .get(&7104)
+            .unwrap();
+        assert_eq!(label.flags, sync.flags);
+        assert_eq!(label.font_size, 2.0);
+        assert_eq!(label.parent_id, None);
+        assert_eq!(label.text, "defend");
+        assert_eq!((label.x, label.y, label.z), (30.0, 40.0, 160.0));
     }
 
     #[test]

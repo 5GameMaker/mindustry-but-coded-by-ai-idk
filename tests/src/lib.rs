@@ -511,7 +511,7 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     use mindustry_core::mindustry::ctype::Content;
     use mindustry_core::mindustry::entities::{
         BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID,
-        PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+        PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
     };
     use mindustry_core::mindustry::io::{type_io, TeamId, UnitRef, Vec2 as IoVec2};
     use mindustry_core::mindustry::net::{
@@ -775,6 +775,17 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     };
     let mut weather_bytes = Vec::new();
     type_io::write_weather_state_sync(&mut weather_bytes, &weather_sync).unwrap();
+    let label_sync = type_io::WorldLabelSyncWire {
+        flags: 1 | 8,
+        font_size: 1.5,
+        parent_id: Some(1004),
+        text: Some("rally".into()),
+        x: 72.0,
+        y: 96.0,
+        z: 155.0,
+    };
+    let mut label_bytes = Vec::new();
+    type_io::write_world_label_sync(&mut label_bytes, &label_sync).unwrap();
     let mut multi_first_bytes = Vec::new();
     type_io::write_unit_sync(
         &mut multi_first_bytes,
@@ -817,8 +828,11 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.extend_from_slice(&1008i32.to_be_bytes());
     multi_entity_data.push(WEATHER_STATE_CLASS_ID);
     multi_entity_data.extend_from_slice(&weather_bytes);
+    multi_entity_data.extend_from_slice(&1012i32.to_be_bytes());
+    multi_entity_data.push(WORLD_LABEL_CLASS_ID);
+    multi_entity_data.extend_from_slice(&label_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 9,
+        amount: 10,
         data: multi_entity_data,
     };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
@@ -893,6 +907,10 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .runtime
                 .client_weather_snapshot_entities
                 .contains_key(&1008)
+            && desktop
+                .runtime
+                .client_world_label_snapshot_entities
+                .contains_key(&1012)
         {
             break;
         }
@@ -1151,6 +1169,24 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     assert_eq!(weather.x, 10.0);
     assert_eq!(weather.y, 20.0);
     assert!(weather.added);
+    assert_eq!(
+        desktop
+            .runtime
+            .client_entity_snapshot_records
+            .get(&1012)
+            .map(|record| (record.type_id, record.sync_bytes.as_slice())),
+        Some((WORLD_LABEL_CLASS_ID, label_bytes.as_slice()))
+    );
+    let label = desktop
+        .runtime
+        .client_world_label_snapshot_entities
+        .get(&1012)
+        .expect("real mixed entity snapshot should materialize typed world-label runtime");
+    assert_eq!(label.flags, 1 | 8);
+    assert_eq!(label.font_size, 1.5);
+    assert_eq!(label.parent_id, Some(1004));
+    assert_eq!(label.text, "rally");
+    assert_eq!((label.x, label.y, label.z), (72.0, 96.0, 155.0));
     assert_eq!(
         desktop
             .runtime

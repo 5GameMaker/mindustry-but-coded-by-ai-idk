@@ -2422,6 +2422,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：Bullet 目前落在 runtime typed sidecar，尚未接入完整 `Groups.bullet` lifecycle、碰撞/渲染/服务端真实实体枚举发包；`Mover` 是 Java transient runtime 回调，不属于 snapshot wire，后续应在 bullet runtime 更新路径中单独迁移。
 
+### 12.51 WorldLabelComp EntitySnapshot typed runtime 与真实联机 smoke
+
+- 2026-05-27：迁移 Java `WorldLabelComp.writeSync/readSync` revision 1 的 wire 形状并接入 single-record / mixed entity snapshot dispatcher。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.WorldLabelComp=35`；
+  - `annotations/src/main/resources/revisions/WorldLabelComp/1.json`：字段顺序 `flags, fontSize, parent, text, x, y, z`；
+  - `flags` 写 `byte`，其中 `FLAG_ONLY_PARENT_VISIBLE = 32`；
+  - `fontSize/x/y/z` 写 `float`；
+  - `parent` 走 `TypeIO.writePosEntity/readPosEntity`，当前 snapshot wire 表现为 `i32 entity id`，空引用为 `-1`；
+  - `text` 走 `TypeIO.writeString/readString`。
+- Rust 新增/变化：
+  - `type_io::WorldLabelSyncWire`；
+  - `type_io::write_world_label_sync(...)` / `read_world_label_sync(...)`；
+  - `EntityClassKind::WorldLabel` 与 `WORLD_LABEL_CLASS_ID = 35`；
+  - `WorldLabelComp` 新增 `parent_id: Option<i32>` 与 `apply_sync_wire(...)`，恢复 `flags/font_size/parent_id/text/x/y/z`；
+  - `GameRuntime.client_world_label_snapshot_entities`；
+  - `GameRuntime::apply_client_world_label_sync_wire(...)`；
+  - hidden snapshot 对 typed world-label 计为 existing；
+  - `DesktopLauncher` 正常 single-record 与 mixed fallback 都能在 `EntityClassKind::WorldLabel` 下 materialize typed world-label。
+- 测试/真实 smoke：
+  - `world_label_sync_wire_roundtrips_java_revision_1_write_sync_shape`
+  - `world_label_applies_revision_1_sync_wire_fields`
+  - `game_runtime_applies_client_world_label_entity_snapshot_to_typed_runtime`
+  - `game_runtime_applies_world_label_entity_snapshot_packet_with_content`
+  - 扩展 `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`，同 packet 现在覆盖 Player + Unit + WorldLabel + Bullet + Decal + Effect + Fire + Puddle + Weather；
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`，真实 mixed packet 现在为 `amount=10`，新增 `1012 + WORLD_LABEL_CLASS_ID + WorldLabelSyncWire`，断言 raw sidecar 与 `runtime.client_world_label_snapshot_entities[1012]`。
+- 已验证：
+  - `cargo test -p mindustry-core world_label_sync --lib`
+  - `cargo test -p mindustry-core world_label_applies_revision_1_sync_wire_fields --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_world_label_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_world_label_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-core entity_class_ids_match_upstream_classids_properties_baseline --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：WorldLabel 目前落在 runtime typed sidecar，尚未接入完整 label draw/lifecycle、父实体可见性过滤与服务端真实 entity group 枚举发包；后续继续迁移 `LaunchCoreComp` / `LocationPingComp` 等 entity snapshot wire，并收敛 dispatcher 重复 match。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
