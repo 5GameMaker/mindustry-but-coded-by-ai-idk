@@ -12,7 +12,7 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::io::{
-    read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
+    read_fire_sync, read_unit_sync, ContentHeaderSnapshot, LegacyTeamBlocks, TeamId,
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
@@ -224,6 +224,11 @@ impl DesktopLauncher {
                 {
                     report.entity_typed_records_applied += 1;
                 }
+                if entity_class_kind(record.type_id) == Some(EntityClassKind::Fire)
+                    && self.apply_client_fire_entity_snapshot(record.entity_id, &record.sync_bytes)
+                {
+                    report.entity_typed_records_applied += 1;
+                }
             }
         }
         self.last_applied_entity_snapshot_mirror_count = entity_mirrors.len();
@@ -296,6 +301,18 @@ impl DesktopLauncher {
         true
     }
 
+    fn apply_client_fire_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
+        let mut read = sync_bytes;
+        let Ok(fire_sync) = read_fire_sync(&mut read) else {
+            return false;
+        };
+        if !read.is_empty() {
+            return false;
+        }
+        self.runtime
+            .apply_client_fire_sync_wire(entity_id, &fire_sync)
+    }
+
     fn apply_client_entity_snapshot_packet_mixed(
         &mut self,
         amount: i16,
@@ -335,25 +352,47 @@ impl DesktopLauncher {
                 continue;
             }
 
-            if entity_class_kind(type_id) != Some(EntityClassKind::Unit) {
-                report.entity_parse_errors += 1;
-                return report;
+            match entity_class_kind(type_id) {
+                Some(EntityClassKind::Unit) => {
+                    let Ok(_unit_sync) = read_unit_sync(&mut read, &self.content_loader) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record_with_content(
+                                &self.content_loader,
+                                entity_id,
+                                type_id,
+                                sync_bytes,
+                            ),
+                    );
+                }
+                Some(EntityClassKind::Fire) => {
+                    let Ok(fire_sync) = read_fire_sync(&mut read) else {
+                        report.entity_parse_errors += 1;
+                        return report;
+                    };
+                    let consumed = before_len - read.len();
+                    let sync_bytes = sync_start[..consumed].to_vec();
+                    report.merge(
+                        self.runtime
+                            .apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes),
+                    );
+                    if self
+                        .runtime
+                        .apply_client_fire_sync_wire(entity_id, &fire_sync)
+                    {
+                        report.entity_typed_records_applied += 1;
+                    }
+                }
+                _ => {
+                    report.entity_parse_errors += 1;
+                    return report;
+                }
             }
-            let Ok(_unit_sync) = read_unit_sync(&mut read, &self.content_loader) else {
-                report.entity_parse_errors += 1;
-                return report;
-            };
-            let consumed = before_len - read.len();
-            let sync_bytes = sync_start[..consumed].to_vec();
-            report.merge(
-                self.runtime
-                    .apply_client_entity_snapshot_record_with_content(
-                        &self.content_loader,
-                        entity_id,
-                        type_id,
-                        sync_bytes,
-                    ),
-            );
         }
 
         if !read.is_empty() {
@@ -567,7 +606,7 @@ mod tests {
         NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket,
     };
     use mindustry_core::mindustry::{
-        entities::{comp::BuildingComp, PlayerComp, PLAYER_CLASS_ID},
+        entities::{comp::BuildingComp, PlayerComp, FIRE_CLASS_ID, PLAYER_CLASS_ID},
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
         io::{
@@ -1532,6 +1571,15 @@ mod tests {
         };
         let mut unit_bytes = Vec::new();
         type_io::write_unit_sync(&mut unit_bytes, &launcher.content_loader, &unit_sync).unwrap();
+        let fire_sync = type_io::FireSyncWire {
+            lifetime: 120.0,
+            tile_pos: Some(mindustry_core::mindustry::world::point2_pack(2, 3)),
+            time: 30.0,
+            x: 16.0,
+            y: 24.0,
+        };
+        let mut fire_bytes = Vec::new();
+        type_io::write_fire_sync(&mut fire_bytes, &fire_sync).unwrap();
 
         let mut data = Vec::new();
         data.extend_from_slice(&launcher.player.id.to_be_bytes());
@@ -1540,6 +1588,9 @@ mod tests {
         data.extend_from_slice(&8801i32.to_be_bytes());
         data.push(2);
         data.extend_from_slice(&unit_bytes);
+        data.extend_from_slice(&9901i32.to_be_bytes());
+        data.push(FIRE_CLASS_ID);
+        data.extend_from_slice(&fire_bytes);
 
         {
             let state = launcher.net_client.state();
@@ -1547,7 +1598,7 @@ mod tests {
             state
                 .entity_snapshot_mirrors
                 .push(ClientEntitySnapshotMirror {
-                    amount: 2,
+                    amount: 3,
                     data,
                     records: Vec::new(),
                     parse_error: Some(
@@ -1561,9 +1612,9 @@ mod tests {
 
         let report = launcher
             .last_client_snapshot_apply_report
-            .expect("mixed fallback should apply player and unit records");
-        assert_eq!(report.entity_records_applied, 2);
-        assert_eq!(report.entity_typed_records_applied, 2);
+            .expect("mixed fallback should apply player, unit and fire records");
+        assert_eq!(report.entity_records_applied, 3);
+        assert_eq!(report.entity_typed_records_applied, 3);
         assert_eq!(report.entity_parse_errors, 0);
 
         assert_eq!(
@@ -1587,6 +1638,14 @@ mod tests {
                 .map(|record| record.sync_bytes.as_slice()),
             Some(unit_bytes.as_slice())
         );
+        assert_eq!(
+            launcher
+                .runtime
+                .client_entity_snapshot_records
+                .get(&9901)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(fire_bytes.as_slice())
+        );
 
         let unit = launcher
             .runtime
@@ -1599,6 +1658,19 @@ mod tests {
         assert_eq!(unit.y(), 45.0);
         assert_eq!(unit.rotation(), 180.0);
         assert!(unit.weapons.is_shooting);
+
+        let fire = launcher
+            .runtime
+            .client_fire_snapshot_entities
+            .get(&9901)
+            .expect("mixed fallback should materialize fire record");
+        assert_eq!(fire.lifetime, 120.0);
+        assert_eq!(fire.time, 30.0);
+        assert_eq!(fire.x, 16.0);
+        assert_eq!(fire.y, 24.0);
+        assert_eq!(fire.tile.unwrap().x, 2);
+        assert_eq!(fire.tile.unwrap().y, 3);
+        assert!(fire.registered);
     }
 
     #[test]

@@ -31,10 +31,12 @@ pub struct EntityClassIdEntry {
 pub enum EntityClassKind {
     Player,
     Unit,
+    Fire,
     Other,
 }
 
 pub const PLAYER_CLASS_ID: u8 = 12;
+pub const FIRE_CLASS_ID: u8 = 10;
 
 /// Java `annotations/src/main/resources/classids.properties` migrated into a
 /// Rust lookup table. This is the stable outer `entity.classId()` byte used by
@@ -256,6 +258,8 @@ pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
     let name = entity_class_name(id)?;
     if id == PLAYER_CLASS_ID {
         Some(EntityClassKind::Player)
+    } else if id == FIRE_CLASS_ID {
+        Some(EntityClassKind::Fire)
     } else if name.contains('.') {
         Some(EntityClassKind::Other)
     } else {
@@ -440,6 +444,10 @@ mod tests {
             Some(EntityClassKind::Player)
         );
         assert_eq!(entity_class_kind(2), Some(EntityClassKind::Unit));
+        assert_eq!(
+            entity_class_kind(FIRE_CLASS_ID),
+            Some(EntityClassKind::Fire)
+        );
         assert_eq!(entity_class_kind(7), Some(EntityClassKind::Other));
         assert_eq!(entity_class_kind(255), None);
 

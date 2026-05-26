@@ -1,5 +1,10 @@
 //! Fire entity component mirroring upstream `mindustry.entities.comp.FireComp`.
 
+use crate::mindustry::{
+    io::FireSyncWire,
+    world::{point2_x, point2_y},
+};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FireTile {
     pub x: i32,
@@ -155,6 +160,20 @@ impl FireComp {
     pub fn after_sync(&mut self) {
         self.registered = true;
     }
+
+    pub fn apply_sync_wire(&mut self, sync: &FireSyncWire) {
+        self.lifetime = sync.lifetime;
+        self.time = sync.time;
+        self.x = sync.x;
+        self.y = sync.y;
+        self.tile = sync.tile_pos.map(|tile_pos| FireTile {
+            x: point2_x(tile_pos) as i32,
+            y: point2_y(tile_pos) as i32,
+            build_present: false,
+            flammability: 0.0,
+        });
+        self.after_sync();
+    }
 }
 
 #[cfg(test)]
@@ -256,6 +275,35 @@ mod tests {
         fire.remove();
         assert!(!fire.registered);
         fire.after_sync();
+        assert!(fire.registered);
+    }
+
+    #[test]
+    fn fire_component_applies_sync_wire_and_registers_like_after_sync() {
+        let mut fire = FireComp::new(0.0, 0.0, 1.0);
+        let sync = FireSyncWire {
+            lifetime: 120.0,
+            tile_pos: Some(crate::mindustry::world::point2_pack(5, 6)),
+            time: 30.0,
+            x: 40.0,
+            y: 48.0,
+        };
+
+        fire.apply_sync_wire(&sync);
+
+        assert_eq!(fire.lifetime, 120.0);
+        assert_eq!(fire.time, 30.0);
+        assert_eq!(fire.x, 40.0);
+        assert_eq!(fire.y, 48.0);
+        assert_eq!(
+            fire.tile,
+            Some(FireTile {
+                x: 5,
+                y: 6,
+                build_present: false,
+                flammability: 0.0,
+            })
+        );
         assert!(fire.registered);
     }
 }

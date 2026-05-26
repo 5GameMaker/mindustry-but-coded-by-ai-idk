@@ -1972,6 +1972,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 下一步建议：
-  1. 优先从 `Other` 中挑一个低复杂 `Syncc`（如 `FireComp`/`PuddleComp`/`WeatherStateComp`）迁移 readSync/writeSync wire。
+  1. 继续从 `Other` 中挑低复杂 `Syncc`（如 `PuddleComp`/`WeatherStateComp`）迁移 readSync/writeSync wire。
   2. 给 `EntityClassKind` 增加更细粒度枚举，避免 `Other` 一桶装。
   3. 逐步让 `GameRuntime`/`DesktopLauncher` 共享同一个 entity snapshot dispatcher。
+
+---
+
+## 58. 最新闭环记录：FireComp EntitySnapshot typed runtime 接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：把 class-id `10` 的 Java `FireComp.writeSync/readSync` 从 opaque entity bytes 推进到 Rust typed runtime。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.FireComp=10`；
+  - `annotations/src/main/resources/revisions/FireComp/1.json`：sync 字段顺序 `lifetime, tile, time, x, y`；
+  - `FireComp.afterSync()` 调 `Fires.register(self())`。
+- Rust 主改动：
+  - `core/src/mindustry/io/type_io.rs`
+  - `core/src/mindustry/io/mod.rs`
+  - `core/src/mindustry/entities/comp/fire.rs`
+  - `core/src/mindustry/entities/mod.rs`
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `desktop/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - 新增 `FireSyncWire` 与 `read_fire_sync/write_fire_sync`；
+  - `FireComp::apply_sync_wire(...)` 按 Java sync 字段更新并执行 `after_sync()`；
+  - `GameRuntime` 新增 `client_fire_snapshot_entities` typed sidecar；
+  - mixed fallback 中 `EntityClassKind::Fire` 会解析 Fire wire，写 raw sidecar 并 materialize typed fire；
+  - 正常 single-record mirror 路径也会尝试 Fire typed apply；
+  - hidden snapshot 对 typed fire 计为 existing。
+- 已跑：
+  - `cargo test -p mindustry-core fire_sync --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_fire_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 把 Fire typed sidecar 与 `Fires` tile-indexed collection 的注册/查询统一起来。
+  2. 给真实 server→desktop entity snapshot smoke 加 Fire record。
+  3. 继续迁移 `PuddleComp` 或 `WeatherStateComp` 的 sync wire。

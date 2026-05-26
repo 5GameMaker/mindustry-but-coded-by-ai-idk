@@ -24,7 +24,7 @@ use crate::mindustry::{
     ctype::{ContentId, ContentType},
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
-        comp::{BuildingComp, BulletComp, UnitComp},
+        comp::{BuildingComp, BulletComp, FireComp, UnitComp},
     },
     game::CoreInfo,
     io::{
@@ -2015,6 +2015,7 @@ pub struct GameRuntime {
     pub construct_runtime_states: BTreeMap<i32, GameRuntimeConstructBlockState>,
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
+    pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
     pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
@@ -2066,6 +2067,7 @@ impl GameRuntime {
             construct_runtime_states: BTreeMap::new(),
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
+            client_fire_snapshot_entities: BTreeMap::new(),
             client_player_snapshot_entities: BTreeMap::new(),
             client_unit_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
@@ -2408,6 +2410,19 @@ impl GameRuntime {
         self.client_player_snapshot_entities.insert(entity_id, sync);
     }
 
+    pub fn apply_client_fire_sync_wire(
+        &mut self,
+        entity_id: i32,
+        sync: &type_io::FireSyncWire,
+    ) -> bool {
+        let fire = self
+            .client_fire_snapshot_entities
+            .entry(entity_id)
+            .or_insert_with(|| FireComp::new(sync.x, sync.y, sync.lifetime));
+        fire.apply_sync_wire(sync);
+        true
+    }
+
     fn apply_client_unit_sync_wire(
         &mut self,
         content: &ContentLoader,
@@ -2460,6 +2475,9 @@ impl GameRuntime {
             }
             if let Some(unit) = self.client_unit_snapshot_entities.get_mut(id) {
                 unit.sync.handle_sync_hidden();
+                existing = true;
+            }
+            if self.client_fire_snapshot_entities.contains_key(id) {
                 existing = true;
             }
             if existing {
@@ -5256,6 +5274,7 @@ impl GameRuntime {
         self.construct_runtime_states.clear();
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
+        self.client_fire_snapshot_entities.clear();
         self.client_player_snapshot_entities.clear();
         self.client_unit_snapshot_entities.clear();
         self.client_hidden_entity_ids.clear();
@@ -13246,7 +13265,7 @@ mod tests {
         content::blocks::{BulletKind, BulletSpec, PayloadTurretAmmo, TurretBlockData},
         core::GameStateState,
         ctype::{Content, ContentType},
-        entities::units::BuildPlan,
+        entities::{units::BuildPlan, FIRE_CLASS_ID},
         io::{
             LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId, TypeValue,
             Vec2 as IoVec2,
@@ -14411,6 +14430,47 @@ mod tests {
         );
         assert!(runtime.client_hidden_entity_ids.contains(&1001));
         assert!(runtime.client_hidden_entity_ids.contains(&2002));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_fire_entity_snapshot_to_typed_runtime() {
+        let sync = type_io::FireSyncWire {
+            lifetime: 120.0,
+            tile_pos: Some(point2_pack(4, 5)),
+            time: 33.0,
+            x: 32.0,
+            y: 40.0,
+        };
+        let mut sync_bytes = Vec::new();
+        type_io::write_fire_sync(&mut sync_bytes, &sync).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report =
+            runtime.apply_client_entity_snapshot_record(7001, FIRE_CLASS_ID, sync_bytes.clone());
+        assert_eq!(report.entity_records_applied, 1);
+        assert!(runtime.apply_client_fire_sync_wire(7001, &sync));
+
+        let raw = runtime
+            .client_entity_snapshot_records
+            .get(&7001)
+            .expect("fire snapshot should preserve raw sidecar");
+        assert_eq!(raw.type_id, FIRE_CLASS_ID);
+        assert_eq!(raw.sync_bytes, sync_bytes);
+
+        let fire = runtime
+            .client_fire_snapshot_entities
+            .get(&7001)
+            .expect("fire sync should materialize typed runtime fire");
+        assert_eq!(fire.lifetime, 120.0);
+        assert_eq!(fire.time, 33.0);
+        assert_eq!(fire.x, 32.0);
+        assert_eq!(fire.y, 40.0);
+        assert_eq!(fire.tile.unwrap().x, 4);
+        assert_eq!(fire.tile.unwrap().y, 5);
+        assert!(fire.registered);
+
+        let hidden = runtime.apply_client_hidden_snapshot_ids(&[7001]);
+        assert_eq!(hidden.hidden_existing_entities, 1);
     }
 
     #[test]

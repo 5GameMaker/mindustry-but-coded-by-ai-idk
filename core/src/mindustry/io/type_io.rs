@@ -906,6 +906,15 @@ pub struct AbilityWire {
     pub data: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FireSyncWire {
+    pub lifetime: f32,
+    pub tile_pos: Option<i32>,
+    pub time: f32,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitSyncWire {
     pub abilities: Vec<AbilityWire>,
@@ -1160,6 +1169,29 @@ pub fn read_statuses_into<R: Read>(
         statuses.push(read_status(read, loader)?);
     }
     Ok(())
+}
+
+pub fn write_fire_sync<W: Write>(write: &mut W, sync: &FireSyncWire) -> io::Result<()> {
+    write_f32(write, sync.lifetime)?;
+    write_tile_pos(write, sync.tile_pos)?;
+    write_f32(write, sync.time)?;
+    write_f32(write, sync.x)?;
+    write_f32(write, sync.y)
+}
+
+pub fn read_fire_sync<R: Read>(read: &mut R) -> io::Result<FireSyncWire> {
+    let lifetime = read_f32(read)?;
+    let tile_pos = read_tile_pos(read)?;
+    let time = read_f32(read)?;
+    let x = read_f32(read)?;
+    let y = read_f32(read)?;
+    Ok(FireSyncWire {
+        lifetime,
+        tile_pos,
+        time,
+        x,
+        y,
+    })
 }
 
 pub fn write_unit_sync<W: Write>(
@@ -2844,6 +2876,32 @@ mod tests {
         assert_eq!(
             read_ability_data(&mut bytes.as_slice()).unwrap(),
             ability_data
+        );
+    }
+
+    #[test]
+    fn fire_sync_wire_roundtrips_java_write_sync_shape() {
+        let sync = FireSyncWire {
+            lifetime: 90.0,
+            tile_pos: Some(point2_pack(3, 4)),
+            time: 12.5,
+            x: 24.0,
+            y: 32.0,
+        };
+
+        let mut bytes = Vec::new();
+        write_fire_sync(&mut bytes, &sync).unwrap();
+        assert_eq!(read_fire_sync(&mut bytes.as_slice()).unwrap(), sync);
+
+        let sync_without_tile = FireSyncWire {
+            tile_pos: None,
+            ..sync
+        };
+        bytes.clear();
+        write_fire_sync(&mut bytes, &sync_without_tile).unwrap();
+        assert_eq!(
+            read_fire_sync(&mut bytes.as_slice()).unwrap(),
+            sync_without_tile
         );
     }
 

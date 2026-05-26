@@ -2197,7 +2197,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
   - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
-- 仍未完成：`EntityClassKind::Other` 还没有具体 dispatcher；Bullet/Fire/Weather/Effect 等 readSync wire 仍待迁移。
+- 仍未完成：`EntityClassKind::Other` 仍只有部分具体 dispatcher；Bullet/Weather/Effect 等 readSync wire 仍待迁移，FireComp 已由下一节补上。
+
+### 12.44 FireComp EntitySnapshot typed runtime 接入
+
+- 2026-05-26：迁移 Java `FireComp.writeSync/readSync` 的当前 wire 形状并接入 mixed entity snapshot dispatcher。
+- Java 依据：
+  - `annotations/src/main/resources/classids.properties`：`mindustry.entities.comp.FireComp=10`；
+  - `annotations/src/main/resources/revisions/FireComp/1.json`：字段顺序 `lifetime, tile, time, x, y`；
+  - 生成的 `writeSync/readSync` 不写 revision，读完调用 `afterSync()`，而 Java `FireComp.afterSync()` 调 `Fires.register(self())`。
+- Rust 新增/变化：
+  - `type_io::FireSyncWire`；
+  - `type_io::write_fire_sync(...)` / `read_fire_sync(...)`；
+  - `FireComp::apply_sync_wire(...)`：恢复 `lifetime/tile/time/x/y` 并调用 `after_sync()`；
+  - `GameRuntime.client_fire_snapshot_entities`；
+  - `GameRuntime::apply_client_fire_sync_wire(...)`；
+  - hidden snapshot 对 typed fire 计为 existing（Java `handleSyncHidden()` 对 Fire 是空实现）；
+  - `DesktopLauncher` 正常 single-record 与 mixed fallback 都能在 `EntityClassKind::Fire` 下 materialize typed fire。
+- 测试：
+  - `fire_sync_wire_roundtrips_java_write_sync_shape`
+  - `fire_component_applies_sync_wire_and_registers_like_after_sync`
+  - `game_runtime_applies_client_fire_entity_snapshot_to_typed_runtime`
+  - 扩展 `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`，同 packet 现在覆盖 Player + Unit + Fire。
+- 已验证：
+  - `cargo test -p mindustry-core fire_sync --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_fire_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：Fire 目前落在 runtime typed sidecar，尚未与 `Fires` tile-indexed collection 完全统一；真实 server→desktop smoke 尚未携带 Fire record。
 
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
