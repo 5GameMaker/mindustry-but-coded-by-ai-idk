@@ -1297,6 +1297,13 @@ pub enum GameRuntimeStorageBlockState {
     Core(CoreBuildState),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameRuntimeItemTakenEvent {
+    pub source_tile_pos: i32,
+    pub event_tile_pos: i32,
+    pub item: ContentId,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeLiquidBlockState {
     Bridge(LiquidBridgeState),
@@ -1458,6 +1465,7 @@ pub struct GameRuntimeDirectionalUnloaderFrameReport {
     pub moved_items: usize,
     pub missing_targets: usize,
     pub blocked_sources: usize,
+    pub item_taken_events: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1764,6 +1772,8 @@ pub struct GameRuntime {
     pub item_mass_driver_in_flight: Vec<GameRuntimeItemMassDriverInFlight>,
     pub item_mass_driver_despawn_events: Vec<GameRuntimeItemMassDriverDespawnEvent>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
+    pub storage_linked_cores: BTreeMap<i32, i32>,
+    pub item_taken_events: Vec<GameRuntimeItemTakenEvent>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
     pub campaign_runtime_states: BTreeMap<i32, GameRuntimeCampaignBlockState>,
@@ -1807,6 +1817,8 @@ impl GameRuntime {
             item_mass_driver_in_flight: Vec::new(),
             item_mass_driver_despawn_events: Vec::new(),
             storage_runtime_states: BTreeMap::new(),
+            storage_linked_cores: BTreeMap::new(),
+            item_taken_events: Vec::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
             campaign_runtime_states: BTreeMap::new(),
@@ -2389,6 +2401,105 @@ impl GameRuntime {
         total
     }
 
+    pub fn refresh_owned_storage_core_links(&mut self, content: &ContentLoader) -> usize {
+        self.storage_linked_cores.clear();
+
+        let core_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| match content.block(building.block.id) {
+                Some(BlockDef::Storage(storage)) if storage.kind == StorageBlockKind::Core => {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .collect();
+
+        for core_index in core_indices {
+            let core_tile = self.buildings[core_index].tile_pos;
+            let core_team = self.buildings[core_index].team;
+            let proximity = self.buildings[core_index].proximity.clone();
+            for other_ref in proximity {
+                let Some(storage_index) = self
+                    .buildings
+                    .iter()
+                    .position(|building| building.tile_pos == other_ref.tile_pos)
+                else {
+                    continue;
+                };
+                let storage = &self.buildings[storage_index];
+                if storage.team != core_team
+                    || self.storage_linked_cores.contains_key(&storage.tile_pos)
+                {
+                    continue;
+                }
+                let Some(BlockDef::Storage(storage_block)) = content.block(storage.block.id) else {
+                    continue;
+                };
+                if storage_block.kind == StorageBlockKind::Storage && storage_block.core_merge {
+                    self.storage_linked_cores
+                        .insert(storage.tile_pos, core_tile);
+                }
+            }
+        }
+
+        self.storage_linked_cores.len()
+    }
+
+    fn linked_core_index_for_storage(
+        &self,
+        content: &ContentLoader,
+        storage_index: usize,
+    ) -> Option<usize> {
+        let storage = self.buildings.get(storage_index)?;
+        let Some(BlockDef::Storage(storage_block)) = content.block(storage.block.id) else {
+            return None;
+        };
+        if storage_block.kind != StorageBlockKind::Storage {
+            return None;
+        }
+        let core_tile = *self.storage_linked_cores.get(&storage.tile_pos)?;
+        self.buildings.iter().position(|candidate| {
+            candidate.tile_pos == core_tile
+                && candidate.team == storage.team
+                && matches!(
+                    content.block(candidate.block.id),
+                    Some(BlockDef::Storage(core)) if core.kind == StorageBlockKind::Core
+                )
+        })
+    }
+
+    fn item_module_owner_index(&self, content: &ContentLoader, building_index: usize) -> usize {
+        self.linked_core_index_for_storage(content, building_index)
+            .unwrap_or(building_index)
+    }
+
+    fn item_taken_event_tile_pos(&self, content: &ContentLoader, building_index: usize) -> i32 {
+        self.linked_core_index_for_storage(content, building_index)
+            .and_then(|core_index| self.buildings.get(core_index))
+            .map(|core| core.tile_pos)
+            .unwrap_or_else(|| self.buildings[building_index].tile_pos)
+    }
+
+    fn record_item_taken(
+        &mut self,
+        content: &ContentLoader,
+        building_index: usize,
+        item: ContentId,
+    ) {
+        if building_index >= self.buildings.len() {
+            return;
+        }
+        let source_tile_pos = self.buildings[building_index].tile_pos;
+        let event_tile_pos = self.item_taken_event_tile_pos(content, building_index);
+        self.item_taken_events.push(GameRuntimeItemTakenEvent {
+            source_tile_pos,
+            event_tile_pos,
+            item,
+        });
+    }
+
     pub fn clear_buildings(&mut self) {
         self.buildings.clear();
         self.state.world.clear_buildings();
@@ -2556,6 +2667,7 @@ impl GameRuntime {
 
         report.disabled_buildings = self.refresh_owned_building_update_permissions(content);
         report.proximity_links = self.refresh_owned_building_proximity();
+        self.refresh_owned_storage_core_links(content);
         self.state.world.clear_load_events();
         report
     }
@@ -3923,6 +4035,8 @@ impl GameRuntime {
         self.item_mass_driver_in_flight.clear();
         self.item_mass_driver_despawn_events.clear();
         self.storage_runtime_states.clear();
+        self.storage_linked_cores.clear();
+        self.item_taken_events.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
         self.campaign_runtime_states.clear();
@@ -3992,6 +4106,7 @@ impl GameRuntime {
         }
 
         self.refresh_owned_building_update_permissions(content);
+        self.refresh_owned_storage_core_links(content);
 
         let frame_delta = advanced.delta_ticks as f32;
         let mut report = GameRuntimePayloadConstructorFrameReport::default();
@@ -5363,13 +5478,19 @@ impl GameRuntime {
         );
         let source_tile_pos = self.buildings[source_index].tile_pos;
         let target_tile_pos = self.buildings[target_index].tile_pos;
+        let target_item_owner_index = self.item_module_owner_index(content, target_index);
+        if source_index == target_item_owner_index
+            || target_item_owner_index >= self.buildings.len()
+        {
+            return false;
+        }
 
-        let (source, target) = if source_index < target_index {
-            let (left, right) = self.buildings.split_at_mut(target_index);
+        let (source, target) = if source_index < target_item_owner_index {
+            let (left, right) = self.buildings.split_at_mut(target_item_owner_index);
             (&mut left[source_index], &mut right[0])
         } else {
             let (left, right) = self.buildings.split_at_mut(source_index);
-            (&mut right[0], &mut left[target_index])
+            (&mut right[0], &mut left[target_item_owner_index])
         };
 
         let Some(source_items) = source.items.as_mut() else {
@@ -5703,6 +5824,7 @@ impl GameRuntime {
         content: &ContentLoader,
         frame_delta: f32,
     ) -> GameRuntimeItemRouterFrameReport {
+        self.refresh_owned_storage_core_links(content);
         let mut report = GameRuntimeItemRouterFrameReport::default();
         let router_indices: Vec<_> = self
             .buildings
@@ -5881,6 +6003,7 @@ impl GameRuntime {
         content: &ContentLoader,
         frame_delta: f32,
     ) -> GameRuntimeItemBridgeFrameReport {
+        self.refresh_owned_storage_core_links(content);
         let mut report = GameRuntimeItemBridgeFrameReport::default();
         let bridge_indices: Vec<_> = self
             .buildings
@@ -5994,6 +6117,7 @@ impl GameRuntime {
         content: &ContentLoader,
         frame_delta: f32,
     ) -> GameRuntimeItemJunctionFrameReport {
+        self.refresh_owned_storage_core_links(content);
         let mut report = GameRuntimeItemJunctionFrameReport::default();
         let junction_indices: Vec<_> = self
             .buildings
@@ -7274,6 +7398,7 @@ impl GameRuntime {
         content: &ContentLoader,
         frame_delta: f32,
     ) -> GameRuntimeItemMassDriverFrameReport {
+        self.refresh_owned_storage_core_links(content);
         let mut report = GameRuntimeItemMassDriverFrameReport::default();
         let flight_report = self.advance_item_mass_driver_in_flight_ticks(content, frame_delta);
         report.transferred_items += flight_report.transferred_items;
@@ -7901,6 +8026,7 @@ impl GameRuntime {
         content: &ContentLoader,
         frame_delta: f32,
     ) -> GameRuntimeItemUnloaderFrameReport {
+        self.refresh_owned_storage_core_links(content);
         let mut report = GameRuntimeItemUnloaderFrameReport::default();
         let unloader_indices: Vec<_> = self
             .buildings
@@ -8038,10 +8164,15 @@ impl GameRuntime {
         source_index: usize,
         item_id: Option<ContentId>,
     ) -> bool {
-        let Some(source) = self.buildings.get(source_index) else {
+        if source_index >= self.buildings.len() {
             return false;
-        };
-        let Some(source_items) = source.items.as_ref() else {
+        }
+        let item_owner_index = self.item_module_owner_index(content, source_index);
+        let Some(source_items) = self
+            .buildings
+            .get(item_owner_index)
+            .and_then(|building| building.items.as_ref())
+        else {
             return false;
         };
         if let Some(item_id) = item_id {
@@ -8051,7 +8182,7 @@ impl GameRuntime {
         } else if source_items.empty() {
             return false;
         }
-        let Some(source_block) = content.block(source.block.id) else {
+        let Some(source_block) = content.block(self.buildings[source_index].block.id) else {
             return false;
         };
         if !Self::payload_block_unloadable(source_block) {
@@ -8059,6 +8190,14 @@ impl GameRuntime {
         }
         match source_block {
             BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core => {
+                unloader_block.allow_core_unload
+            }
+            BlockDef::Storage(storage)
+                if storage.kind == StorageBlockKind::Storage
+                    && self
+                        .linked_core_index_for_storage(content, source_index)
+                        .is_some() =>
+            {
                 unloader_block.allow_core_unload
             }
             BlockDef::Storage(_) => true,
@@ -8169,8 +8308,21 @@ impl GameRuntime {
     }
 
     fn item_unloader_maximum_accepted(&self, building_index: usize) -> i32 {
-        self.buildings
+        let owner_index = self
+            .buildings
             .get(building_index)
+            .and_then(|building| {
+                self.storage_linked_cores
+                    .get(&building.tile_pos)
+                    .and_then(|core_tile| {
+                        self.buildings
+                            .iter()
+                            .position(|candidate| candidate.tile_pos == *core_tile)
+                    })
+            })
+            .unwrap_or(building_index);
+        self.buildings
+            .get(owner_index)
             .map(|building| building.block.item_capacity)
             .unwrap_or(0)
     }
@@ -8252,10 +8404,12 @@ impl GameRuntime {
         to_index: usize,
         item_id: ContentId,
     ) -> bool {
+        let from_item_owner_index = self.item_module_owner_index(content, from_index);
         if unloader_index >= self.buildings.len()
             || from_index >= self.buildings.len()
+            || from_item_owner_index >= self.buildings.len()
             || to_index >= self.buildings.len()
-            || !self.buildings[from_index]
+            || !self.buildings[from_item_owner_index]
                 .items
                 .as_ref()
                 .is_some_and(|items| items.get(item_id) > 0)
@@ -8276,7 +8430,7 @@ impl GameRuntime {
             }
             return false;
         }
-        if let Some(source_items) = self.buildings[from_index].items.as_mut() {
+        if let Some(source_items) = self.buildings[from_item_owner_index].items.as_mut() {
             source_items.remove(item_id, 1);
         }
         true
@@ -8299,6 +8453,7 @@ impl GameRuntime {
         content: &ContentLoader,
         frame_delta: f32,
     ) -> GameRuntimeDirectionalUnloaderFrameReport {
+        self.refresh_owned_storage_core_links(content);
         let mut report = GameRuntimeDirectionalUnloaderFrameReport::default();
         let unloader_indices: Vec<_> = self
             .buildings
@@ -8351,6 +8506,7 @@ impl GameRuntime {
                     .or_insert(0.0);
                 *timer %= unloader_block.speed.max(0.0001);
                 report.moved_items += 1;
+                report.item_taken_events += 1;
             } else {
                 let timer = self
                     .item_directional_unloader_timers
@@ -8390,7 +8546,10 @@ impl GameRuntime {
         let front = self.buildings.get(front_index)?;
         let back = self.buildings.get(back_index)?;
         let back_block = content.block(back.block.id)?;
-        let back_is_core_or_linked_core = matches!(back_block, BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core);
+        let back_is_core_or_linked_core = matches!(back_block, BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core)
+            || self
+                .linked_core_index_for_storage(content, back_index)
+                .is_some();
 
         directional_unloader_can_unload(
             true,
@@ -8483,10 +8642,12 @@ impl GameRuntime {
         {
             return false;
         }
-        if !self.buildings[back_index]
-            .items
-            .as_ref()
-            .is_some_and(|items| items.get(item_id) > 0)
+        let back_item_owner_index = self.item_module_owner_index(content, back_index);
+        if back_item_owner_index >= self.buildings.len()
+            || !self.buildings[back_item_owner_index]
+                .items
+                .as_ref()
+                .is_some_and(|items| items.get(item_id) > 0)
         {
             return false;
         }
@@ -8511,9 +8672,10 @@ impl GameRuntime {
             return false;
         }
 
-        if let Some(back_items) = self.buildings[back_index].items.as_mut() {
+        if let Some(back_items) = self.buildings[back_item_owner_index].items.as_mut() {
             back_items.remove(item_id, 1);
         }
+        self.record_item_taken(content, back_index, item_id);
         true
     }
 
@@ -8802,6 +8964,7 @@ impl GameRuntime {
         content: &ContentLoader,
         frame_delta: f32,
     ) -> GameRuntimeItemDuctFrameReport {
+        self.refresh_owned_storage_core_links(content);
         let mut report = GameRuntimeItemDuctFrameReport::default();
         let duct_indices: Vec<_> = self
             .buildings
@@ -9832,14 +9995,26 @@ impl GameRuntime {
                 .is_some()
             }
             Some(BlockDef::Storage(storage)) => {
-                let Some(items) = target.items.as_ref() else {
+                let target_owner_index = self.item_module_owner_index(content, target_index);
+                let Some(items) = self
+                    .buildings
+                    .get(target_owner_index)
+                    .and_then(|building| building.items.as_ref())
+                else {
                     return false;
                 };
                 let stored = items.get(item_id);
                 match storage.kind {
-                    StorageBlockKind::Storage => {
-                        storage_accept_item(false, false, stored, target.block.item_capacity)
-                    }
+                    StorageBlockKind::Storage => storage_accept_item(
+                        target_owner_index != target_index,
+                        core_accept_item(
+                            false,
+                            stored,
+                            self.buildings[target_owner_index].block.item_capacity,
+                        ),
+                        stored,
+                        target.block.item_capacity,
+                    ),
                     StorageBlockKind::Core => {
                         core_accept_item(false, stored, target.block.item_capacity)
                     }
@@ -17955,6 +18130,59 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_item_unloader_unloads_linked_storage_from_core_items_when_allowed() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("unloader").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let unloader_tile = point2_pack(7, 6);
+        let router_tile = point2_pack(8, 6);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), TeamId(6));
+        core_building.items.as_mut().unwrap().add(copper, 2);
+        let linked_storage_building =
+            BuildingComp::new(linked_storage_tile, container_def.base().clone(), TeamId(6));
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let router_building = BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(router_building);
+        runtime.distribution_runtime_states.insert(
+            unloader_tile,
+            GameRuntimeDistributionBlockState::Unloader(Some(copper)),
+        );
+
+        let report = runtime
+            .advance_owned_item_unloaders(&content, 6.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(
+            runtime.storage_linked_cores.get(&linked_storage_tile),
+            Some(&core_tile)
+        );
+        assert_eq!(report.selected_items, 1);
+        assert_eq!(report.moved_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[3].items.as_ref().unwrap().get(copper), 1);
+    }
+
+    #[test]
     fn game_runtime_directional_unloader_unloads_configured_item_to_front_neighbor() {
         let content = ContentLoader::create_base_content().unwrap();
         let container_def = content.block_by_name("container").unwrap();
@@ -17999,8 +18227,17 @@ mod tests {
         assert_eq!(report.unloader_candidates, 1);
         assert_eq!(report.attempted_moves, 1);
         assert_eq!(report.moved_items, 1);
+        assert_eq!(report.item_taken_events, 1);
         assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 1);
         assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 1);
+        assert_eq!(
+            runtime.item_taken_events,
+            vec![GameRuntimeItemTakenEvent {
+                source_tile_pos: back_tile,
+                event_tile_pos: back_tile,
+                item: copper,
+            }]
+        );
         assert_eq!(
             runtime.distribution_runtime_states.get(&unloader_tile),
             Some(&GameRuntimeDistributionBlockState::DirectionalUnloader(
@@ -18010,6 +18247,65 @@ mod tests {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn game_runtime_directional_unloader_rejects_linked_storage_without_core_unload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let unloader_def = content.block_by_name("duct-unloader").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let unloader_tile = point2_pack(7, 6);
+        let router_tile = point2_pack(8, 6);
+        let mut core_building = BuildingComp::new(core_tile, core_def.base().clone(), TeamId(6));
+        core_building.items.as_mut().unwrap().add(copper, 2);
+        let linked_storage_building =
+            BuildingComp::new(linked_storage_tile, container_def.base().clone(), TeamId(6));
+        let mut unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        unloader_building.set_rotation(0);
+        let router_building = BuildingComp::new(router_tile, router_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+        runtime.add_building(unloader_building);
+        runtime.add_building(router_building);
+        runtime.distribution_runtime_states.insert(
+            unloader_tile,
+            GameRuntimeDistributionBlockState::DirectionalUnloader(DirectionalUnloaderState {
+                unload_item: Some(copper),
+                offset: 0,
+            }),
+        );
+
+        let report = runtime
+            .advance_owned_directional_unloaders(&content, 4.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(
+            runtime.storage_linked_cores.get(&linked_storage_tile),
+            Some(&core_tile)
+        );
+        assert_eq!(report.attempted_moves, 1);
+        assert_eq!(report.moved_items, 0);
+        assert_eq!(report.blocked_sources, 0);
+        assert_eq!(report.item_taken_events, 0);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 2);
+        assert_eq!(runtime.buildings[3].items.as_ref().unwrap().get(copper), 0);
+        assert!(runtime.item_taken_events.is_empty());
     }
 
     #[test]
