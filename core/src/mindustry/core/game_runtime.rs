@@ -1426,6 +1426,16 @@ pub struct GameRuntimeItemRouterFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeItemDuctFrameReport {
+    pub visited_buildings: usize,
+    pub duct_candidates: usize,
+    pub updated_ducts: usize,
+    pub attempted_moves: usize,
+    pub moved_items: usize,
+    pub missing_targets: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimePayloadLoaderFrameReport {
     pub visited_buildings: usize,
     pub loader_candidates: usize,
@@ -1446,6 +1456,7 @@ pub struct GameRuntimePayloadLoaderFrameReport {
     pub invalid_payloads: usize,
     pub missing_runtime_states: usize,
     pub router_forwarded_items: usize,
+    pub duct_forwarded_items: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1591,6 +1602,7 @@ pub struct GameRuntime {
     pub crafting_runtime_states: BTreeMap<i32, GameRuntimeCraftingBlockState>,
     pub distribution_runtime_states: BTreeMap<i32, GameRuntimeDistributionBlockState>,
     pub item_router_runtime_states: BTreeMap<i32, GameRuntimeItemRouterState>,
+    pub item_duct_progress_states: BTreeMap<i32, f32>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
@@ -1622,6 +1634,7 @@ impl GameRuntime {
             crafting_runtime_states: BTreeMap::new(),
             distribution_runtime_states: BTreeMap::new(),
             item_router_runtime_states: BTreeMap::new(),
+            item_duct_progress_states: BTreeMap::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
@@ -2045,6 +2058,7 @@ impl GameRuntime {
         self.crafting_runtime_states.remove(&removed.tile_pos);
         self.distribution_runtime_states.remove(&removed.tile_pos);
         self.item_router_runtime_states.remove(&removed.tile_pos);
+        self.item_duct_progress_states.remove(&removed.tile_pos);
         self.storage_runtime_states.remove(&removed.tile_pos);
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
@@ -3641,6 +3655,7 @@ impl GameRuntime {
         self.crafting_runtime_states.clear();
         self.distribution_runtime_states.clear();
         self.item_router_runtime_states.clear();
+        self.item_duct_progress_states.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -4783,6 +4798,9 @@ impl GameRuntime {
         report.router_forwarded_items += self
             .advance_owned_item_routers_ticks(content, frame_delta)
             .moved_items;
+        report.duct_forwarded_items += self
+            .advance_owned_item_ducts_ticks(content, frame_delta)
+            .moved_items;
 
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
             if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
@@ -5504,6 +5522,287 @@ impl GameRuntime {
             )
     }
 
+    pub fn advance_owned_item_ducts(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeItemDuctFrameReport> {
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+        Some(self.advance_owned_item_ducts_ticks(content, advanced.delta_ticks as f32))
+    }
+
+    fn advance_owned_item_ducts_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeItemDuctFrameReport {
+        let mut report = GameRuntimeItemDuctFrameReport::default();
+        let duct_indices: Vec<_> = self
+            .buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                report.visited_buildings += 1;
+                match content.block(building.block.id) {
+                    Some(BlockDef::Distribution(distribution))
+                        if matches!(
+                            distribution.kind,
+                            DistributionBlockKind::Duct
+                                | DistributionBlockKind::DuctRouter
+                                | DistributionBlockKind::OverflowDuct
+                        ) =>
+                    {
+                        report.duct_candidates += 1;
+                        Some(index)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for index in duct_indices {
+            let Some(BlockDef::Distribution(duct_block)) =
+                content.block(self.buildings[index].block.id)
+            else {
+                continue;
+            };
+            if !self.buildings[index].enabled {
+                continue;
+            }
+            let tile_pos = self.buildings[index].tile_pos;
+            let current = self.item_duct_current(tile_pos);
+            if current.is_none() {
+                if let Some(item_id) = self.buildings[index]
+                    .items
+                    .as_ref()
+                    .and_then(|items| items.each().map(|(item, _)| item).next())
+                {
+                    self.set_item_duct_current(tile_pos, duct_block.kind, item_id, None);
+                } else {
+                    self.item_duct_progress_states.insert(tile_pos, 0.0);
+                    continue;
+                }
+            }
+
+            let Some(item_id) = self.item_duct_current(tile_pos) else {
+                continue;
+            };
+            if !self.buildings[index]
+                .items
+                .as_ref()
+                .is_some_and(|items| items.get(item_id) > 0)
+            {
+                self.clear_item_duct_current(tile_pos, duct_block.kind);
+                self.item_duct_progress_states.insert(tile_pos, 0.0);
+                continue;
+            }
+
+            let speed = duct_block.speed.max(0.0001);
+            let progress = self
+                .item_duct_progress_states
+                .entry(tile_pos)
+                .or_insert(0.0);
+            *progress += frame_delta / speed * 2.0;
+            if *progress < 1.0 - 1.0 / speed {
+                report.updated_ducts += 1;
+                continue;
+            }
+
+            let Some(target_index) = self.item_duct_target(content, index, duct_block, item_id)
+            else {
+                report.missing_targets += 1;
+                report.updated_ducts += 1;
+                continue;
+            };
+            report.attempted_moves += 1;
+            if self.dump_item_to_target(content, index, target_index, item_id) {
+                self.clear_item_duct_current(tile_pos, duct_block.kind);
+                let threshold = 1.0 - 1.0 / speed;
+                let progress = self
+                    .item_duct_progress_states
+                    .entry(tile_pos)
+                    .or_insert(0.0);
+                *progress %= threshold;
+                report.moved_items += 1;
+            }
+            report.updated_ducts += 1;
+        }
+
+        report
+    }
+
+    fn item_duct_current(&self, tile_pos: i32) -> Option<ContentId> {
+        match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::Duct(state)) => state.current,
+            Some(GameRuntimeDistributionBlockState::DuctRouter(state)) => state.current,
+            _ => None,
+        }
+    }
+
+    fn set_item_duct_current(
+        &mut self,
+        tile_pos: i32,
+        kind: DistributionBlockKind,
+        item_id: ContentId,
+        rec_dir: Option<i32>,
+    ) {
+        match kind {
+            DistributionBlockKind::Duct => {
+                let entry = self
+                    .distribution_runtime_states
+                    .entry(tile_pos)
+                    .or_insert_with(|| {
+                        GameRuntimeDistributionBlockState::Duct(DuctState::default())
+                    });
+                if let GameRuntimeDistributionBlockState::Duct(state) = entry {
+                    state.current = Some(item_id);
+                    if let Some(rec_dir) = rec_dir {
+                        state.rec_dir = rec_dir;
+                    }
+                }
+            }
+            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+                let entry = self
+                    .distribution_runtime_states
+                    .entry(tile_pos)
+                    .or_insert_with(|| {
+                        GameRuntimeDistributionBlockState::DuctRouter(DuctRouterState {
+                            sort_item: None,
+                            current: None,
+                        })
+                    });
+                if let GameRuntimeDistributionBlockState::DuctRouter(state) = entry {
+                    state.current = Some(item_id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn clear_item_duct_current(&mut self, tile_pos: i32, kind: DistributionBlockKind) {
+        match kind {
+            DistributionBlockKind::Duct => {
+                if let Some(GameRuntimeDistributionBlockState::Duct(state)) =
+                    self.distribution_runtime_states.get_mut(&tile_pos)
+                {
+                    state.current = None;
+                }
+            }
+            DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
+                if let Some(GameRuntimeDistributionBlockState::DuctRouter(state)) =
+                    self.distribution_runtime_states.get_mut(&tile_pos)
+                {
+                    state.current = None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn item_duct_target(
+        &mut self,
+        content: &ContentLoader,
+        duct_index: usize,
+        duct_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        item_id: ContentId,
+    ) -> Option<usize> {
+        match duct_block.kind {
+            DistributionBlockKind::Duct => {
+                let direction = self.buildings[duct_index].rotation;
+                let target_index = self.neighbor_building_index(duct_index, direction)?;
+                self.dump_target_accepts_item(content, duct_index, target_index, item_id)
+                    .then_some(target_index)
+            }
+            DistributionBlockKind::DuctRouter => {
+                let prox_len = self.buildings[duct_index].proximity.len();
+                if prox_len == 0 {
+                    return None;
+                }
+                let dump = self.buildings[duct_index].cdump;
+                let sort_item = match self
+                    .distribution_runtime_states
+                    .get(&self.buildings[duct_index].tile_pos)
+                {
+                    Some(GameRuntimeDistributionBlockState::DuctRouter(state)) => state.sort_item,
+                    _ => None,
+                };
+                for attempt in 0..prox_len {
+                    let target_ref =
+                        self.buildings[duct_index].proximity[(attempt + dump) % prox_len];
+                    let Some(target_index) = self
+                        .buildings
+                        .iter()
+                        .position(|building| building.tile_pos == target_ref.tile_pos)
+                    else {
+                        self.increment_building_dump(duct_index, prox_len);
+                        continue;
+                    };
+                    let Some(rel) =
+                        self.relative_direction_between_buildings(duct_index, target_index)
+                    else {
+                        self.increment_building_dump(duct_index, prox_len);
+                        continue;
+                    };
+                    let sorted_rejects = sort_item.is_some_and(|sort| {
+                        (item_id == sort) != (rel == self.buildings[duct_index].rotation)
+                    });
+                    if !sorted_rejects
+                        && rel != (self.buildings[duct_index].rotation + 2).rem_euclid(4)
+                        && self.dump_target_accepts_item(content, duct_index, target_index, item_id)
+                    {
+                        self.increment_building_dump(duct_index, prox_len);
+                        return Some(target_index);
+                    }
+                    self.increment_building_dump(duct_index, prox_len);
+                }
+                None
+            }
+            DistributionBlockKind::OverflowDuct => {
+                self.overflow_duct_target(content, duct_index, duct_block, item_id)
+            }
+            _ => None,
+        }
+    }
+
+    fn overflow_duct_target(
+        &self,
+        content: &ContentLoader,
+        duct_index: usize,
+        duct_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        item_id: ContentId,
+    ) -> Option<usize> {
+        let rotation = self.buildings[duct_index].rotation;
+        if duct_block.invert {
+            for dir in [(rotation - 1).rem_euclid(4), (rotation + 1).rem_euclid(4)] {
+                if let Some(target_index) = self.neighbor_building_index(duct_index, dir) {
+                    if self.dump_target_accepts_item(content, duct_index, target_index, item_id) {
+                        return Some(target_index);
+                    }
+                }
+            }
+        }
+        let front = self.neighbor_building_index(duct_index, rotation);
+        if let Some(front) = front {
+            if self.dump_target_accepts_item(content, duct_index, front, item_id) {
+                return Some(front);
+            }
+        }
+        if duct_block.invert {
+            return None;
+        }
+        for dir in [(rotation - 1).rem_euclid(4), (rotation + 1).rem_euclid(4)] {
+            if let Some(target_index) = self.neighbor_building_index(duct_index, dir) {
+                if self.dump_target_accepts_item(content, duct_index, target_index, item_id) {
+                    return Some(target_index);
+                }
+            }
+        }
+        None
+    }
+
     fn dump_item_to_duct(
         &mut self,
         content: &ContentLoader,
@@ -5570,6 +5869,7 @@ impl GameRuntime {
                 };
                 state.current = Some(item_id);
                 state.rec_dir = relative;
+                self.item_duct_progress_states.insert(target_tile_pos, -1.0);
                 true
             }
             DistributionBlockKind::DuctRouter | DistributionBlockKind::OverflowDuct => {
@@ -5586,6 +5886,7 @@ impl GameRuntime {
                     return false;
                 };
                 state.current = Some(item_id);
+                self.item_duct_progress_states.insert(target_tile_pos, -1.0);
                 true
             }
             _ => false,
@@ -13182,6 +13483,72 @@ mod tests {
         };
         assert_eq!(duct.current, Some(copper));
         assert_eq!(duct.rec_dir, 0);
+    }
+
+    #[test]
+    fn game_runtime_item_duct_forwards_unloaded_item_to_real_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let duct_def = content.block_by_name("duct").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let duct_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let item_void_tile =
+            point2_pack(point2_x(duct_tile) as i32, point2_y(duct_tile) as i32 + 1);
+        let unloader_building =
+            BuildingComp::new(unloader_tile, unloader_def.base().clone(), TeamId(6));
+        let mut duct_building = BuildingComp::new(duct_tile, duct_def.base().clone(), TeamId(6));
+        duct_building.set_rotation(1);
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(10, 10);
+        runtime.add_building(unloader_building);
+        runtime.add_building(duct_building);
+        runtime.add_building(item_void_building);
+        runtime.payload_runtime_states.insert(
+            unloader_tile,
+            GameRuntimePayloadBlockState::Loader {
+                common: PayloadBlockBuildState {
+                    payload: Some(build_payload_ref_with(&content, "container", |building| {
+                        building.items.as_mut().unwrap().add(copper, 10);
+                    })),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                loader: PayloadLoaderState::default(),
+            },
+        );
+
+        runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        let unload_report = runtime
+            .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(unload_report.dumped_items, 4);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 1);
+
+        let duct_report = runtime.advance_owned_item_ducts(&content, 1.0).unwrap();
+        assert_eq!(duct_report.moved_items, 1);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        let Some(GameRuntimeDistributionBlockState::Duct(duct)) =
+            runtime.distribution_runtime_states.get(&duct_tile)
+        else {
+            panic!("duct sidecar should remain present");
+        };
+        assert_eq!(duct.current, None);
+        assert!(runtime.buildings[2].items.is_none());
     }
 
     #[test]
