@@ -23,7 +23,7 @@ use crate::mindustry::{
     core::game_state::GameState,
     ctype::{ContentId, ContentType},
     entities::{
-        bullet::BulletType,
+        bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{BuildingComp, BulletComp, UnitComp},
     },
     io::{
@@ -1516,6 +1516,9 @@ pub struct GameRuntimeItemMassDriverFrameReport {
     pub transferred_items: usize,
     pub dumped_items: usize,
     pub missing_targets: usize,
+    pub despawned_shots: usize,
+    pub dropped_items: usize,
+    pub explosion_events: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1528,6 +1531,14 @@ pub struct GameRuntimeItemMassDriverInFlight {
     pub expire_ticks: f32,
     pub target_lost: bool,
     pub items: Vec<(ContentId, i32)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeItemMassDriverDespawnEvent {
+    pub from_tile: i32,
+    pub to_tile: i32,
+    pub drops: Vec<MassDriverDropPlan>,
+    pub explosion: MassDriverExplosionPlan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1751,6 +1762,7 @@ pub struct GameRuntime {
     pub item_mass_driver_reload_counters: BTreeMap<i32, f32>,
     pub item_mass_driver_waiting_shooters: BTreeMap<i32, Vec<i32>>,
     pub item_mass_driver_in_flight: Vec<GameRuntimeItemMassDriverInFlight>,
+    pub item_mass_driver_despawn_events: Vec<GameRuntimeItemMassDriverDespawnEvent>,
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
@@ -1793,6 +1805,7 @@ impl GameRuntime {
             item_mass_driver_reload_counters: BTreeMap::new(),
             item_mass_driver_waiting_shooters: BTreeMap::new(),
             item_mass_driver_in_flight: Vec::new(),
+            item_mass_driver_despawn_events: Vec::new(),
             storage_runtime_states: BTreeMap::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
@@ -3908,6 +3921,7 @@ impl GameRuntime {
         self.item_mass_driver_reload_counters.clear();
         self.item_mass_driver_waiting_shooters.clear();
         self.item_mass_driver_in_flight.clear();
+        self.item_mass_driver_despawn_events.clear();
         self.storage_runtime_states.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -7261,8 +7275,11 @@ impl GameRuntime {
         frame_delta: f32,
     ) -> GameRuntimeItemMassDriverFrameReport {
         let mut report = GameRuntimeItemMassDriverFrameReport::default();
-        report.transferred_items +=
-            self.advance_item_mass_driver_in_flight_ticks(content, frame_delta);
+        let flight_report = self.advance_item_mass_driver_in_flight_ticks(content, frame_delta);
+        report.transferred_items += flight_report.transferred_items;
+        report.despawned_shots += flight_report.despawned_shots;
+        report.dropped_items += flight_report.dropped_items;
+        report.explosion_events += flight_report.explosion_events;
         let driver_indices: Vec<_> = self
             .buildings
             .iter()
@@ -7457,12 +7474,12 @@ impl GameRuntime {
         &mut self,
         content: &ContentLoader,
         frame_delta: f32,
-    ) -> usize {
+    ) -> GameRuntimeItemMassDriverFrameReport {
         if self.item_mass_driver_in_flight.is_empty() {
-            return 0;
+            return GameRuntimeItemMassDriverFrameReport::default();
         }
 
-        let mut delivered = 0;
+        let mut report = GameRuntimeItemMassDriverFrameReport::default();
         let mut pending = Vec::new();
         for mut shot in std::mem::take(&mut self.item_mass_driver_in_flight) {
             let delta = frame_delta.max(0.0);
@@ -7480,16 +7497,57 @@ impl GameRuntime {
                 continue;
             }
             if !shot.target_lost {
-                delivered += self.resolve_item_mass_driver_in_flight_shot(content, &shot);
+                report.transferred_items +=
+                    self.resolve_item_mass_driver_in_flight_shot(content, &shot);
             } else if shot.expire_ticks > 0.0 {
                 self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
                 pending.push(shot);
             } else {
                 self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+                let event = self.create_item_mass_driver_despawn_event(content, &shot);
+                report.dropped_items += event
+                    .drops
+                    .iter()
+                    .map(|drop| drop.amount_dropped.max(0) as usize)
+                    .sum::<usize>();
+                report.despawned_shots += 1;
+                report.explosion_events += 1;
+                self.item_mass_driver_despawn_events.push(event);
             }
         }
         self.item_mass_driver_in_flight = pending;
-        delivered
+        report
+    }
+
+    fn create_item_mass_driver_despawn_event(
+        &self,
+        content: &ContentLoader,
+        shot: &GameRuntimeItemMassDriverInFlight,
+    ) -> GameRuntimeItemMassDriverDespawnEvent {
+        let mut item_amounts = vec![0; content.items().len()];
+        for (item_id, amount) in &shot.items {
+            if *item_id >= 0 {
+                let index = *item_id as usize;
+                if let Some(slot) = item_amounts.get_mut(index) {
+                    *slot += (*amount).max(0);
+                }
+            }
+        }
+        let bolt = MassDriverBolt::default();
+        let random_angle_offsets = vec![0.0; item_amounts.len()];
+        let drops =
+            bolt.despawn_drop_plans(&item_amounts, &item_amounts, 0.0, &random_angle_offsets);
+        let explosion = bolt.dynamic_explosion_plan(
+            content.items(),
+            &item_amounts,
+            self.state.rules.damage_explosions,
+        );
+        GameRuntimeItemMassDriverDespawnEvent {
+            from_tile: shot.from_tile,
+            to_tile: shot.to_tile,
+            drops,
+            explosion,
+        }
     }
 
     fn item_mass_driver_in_flight_target_index(
@@ -17698,10 +17756,14 @@ mod tests {
         assert!(runtime.item_mass_driver_in_flight[0].target_lost);
 
         let expiry_ticks = runtime.item_mass_driver_in_flight[0].expire_ticks.ceil() as i32 + 1;
+        let mut expiry_report = GameRuntimeItemMassDriverFrameReport::default();
         for _ in 0..expiry_ticks {
-            runtime
+            let report = runtime
                 .advance_owned_item_mass_drivers(&content, 1.0 / 60.0)
                 .unwrap();
+            expiry_report.despawned_shots += report.despawned_shots;
+            expiry_report.dropped_items += report.dropped_items;
+            expiry_report.explosion_events += report.explosion_events;
             if runtime.item_mass_driver_in_flight.is_empty() {
                 break;
             }
@@ -17710,6 +17772,17 @@ mod tests {
             runtime.item_mass_driver_in_flight.is_empty(),
             "target-lost mass driver shot should be discarded after bullet lifetime"
         );
+        assert_eq!(expiry_report.despawned_shots, 1);
+        assert_eq!(expiry_report.dropped_items, 20);
+        assert_eq!(expiry_report.explosion_events, 1);
+        assert_eq!(runtime.item_mass_driver_despawn_events.len(), 1);
+        let event = &runtime.item_mass_driver_despawn_events[0];
+        assert_eq!(event.from_tile, source_tile);
+        assert_eq!(event.to_tile, target_tile);
+        assert_eq!(event.drops.len(), 1);
+        assert_eq!(event.drops[0].item_index, copper as usize);
+        assert_eq!(event.drops[0].amount_dropped, 20);
+        assert!(event.explosion.damage_explosions);
     }
 
     #[test]
