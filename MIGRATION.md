@@ -3119,3 +3119,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_item_unloader_moves_configured_item_from_storage_to_receiver`
   - `cargo test -p mindustry-core game_runtime_item_unloader_unloads_linked_storage_from_core_items_when_allowed`
 - 仍未完成：`linkedCore` 仍是 runtime 派生表 `storage_linked_cores`，不是 Building 持久字段；后续若更多路径直接“从 storage 取物”，必须继续统一调用 `record_item_taken(...)`，并补 save/load/网络 map 下 linked core 重建 smoke。
+
+### 12.83 Item MassDriver bolt update 接入 runtime
+
+- 2026-05-27：把普通 item `MassDriver` 的 runtime in-flight shot 从“只等 `remaining_ticks == 0` 交付”推进到复用 Java `MassDriverBolt.update(...)` 等价几何命中计划。
+- Java 依据：
+  - `MassDriverBolt.update(Bullet b)` 在目标存活时按 `baseDst/dst1/dst2` 判断是否进入命中半径或越过目标并相交；
+  - 目标死亡时 bullet 不交付，继续飞到 bullet lifetime 后按 `despawned()/hit()` 掉落和爆炸；
+  - 低 FPS 越过目标时会把 bullet 位置 snap 到目标边界后调用 `MassDriverBuild.handlePayload(...)`。
+- Rust 新增/变化：
+  - `advance_item_mass_driver_in_flight_ticks(...)` 每 tick 改为按 shot `speed + rotation + elapsed_ticks` 推进 bullet 当前位置，允许继续飞过目标直到 lifetime；
+  - 同一函数接入 `MassDriverBolt::update_plan(...)`，命中时立即调用 `resolve_item_mass_driver_in_flight_shot(...)`，`remaining_ticks` 退化为 travel 上界/观测字段，不再是唯一交付条件；
+  - `snap_position` 会回写到 shot 当前位置，后续接真实 bullet/entity 或 hit effect 时可复用；
+  - `target_lost`/`keep_flying` 仅表示寿命内继续飞，`expire_ticks <= 0` 时仍走现有 `create_item_mass_driver_despawn_event(...)` 掉落/爆炸路径，避免目标丢失 shot 永久挂起。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_item_mass_driver_resolves_on_bolt_hit_plan_before_remaining_ticks_zero`
+  - `cargo test -p mindustry-core game_runtime_item_mass_driver`
+- 仍未完成：当前仍是 runtime-only in-flight 侧车，还未生成真实 ECS bullet entity，也未播放 `shootEffect/receiveEffect/sound/shake`，随机掉落仍使用确定性全掉落测试路径；后续应继续把 effect/event、真实 bullet mirror 和联机同步接到 desktop/server 链路。

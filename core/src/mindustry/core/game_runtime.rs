@@ -10992,9 +10992,10 @@ impl GameRuntime {
 
         let mut report = GameRuntimeItemMassDriverFrameReport::default();
         let mut pending = Vec::new();
+        let bolt = MassDriverBolt::default();
         for mut shot in std::mem::take(&mut self.item_mass_driver_in_flight) {
             let delta = frame_delta.max(0.0);
-            shot.elapsed_ticks = (shot.elapsed_ticks + delta).min(shot.travel_ticks.max(0.0));
+            shot.elapsed_ticks = (shot.elapsed_ticks + delta).max(0.0);
             shot.remaining_ticks = (shot.travel_ticks - shot.elapsed_ticks).max(0.0);
             shot.expire_ticks -= delta;
             Self::update_item_mass_driver_shot_position(&mut shot);
@@ -11005,41 +11006,49 @@ impl GameRuntime {
             {
                 shot.target_lost = true;
             }
-            if shot.remaining_ticks > 0.0 {
+
+            let plan = bolt.update_plan(
+                shot.x,
+                shot.y,
+                shot.from_x,
+                shot.from_y,
+                shot.to_x,
+                shot.to_y,
+                shot.target_lost,
+            );
+            if let Some((x, y)) = plan.snap_position {
+                shot.x = x;
+                shot.y = y;
+            }
+            if plan.hit && !shot.target_lost {
+                report.transferred_items +=
+                    self.resolve_item_mass_driver_in_flight_shot(content, &shot);
+                continue;
+            }
+            if shot.expire_ticks > 0.0 {
                 pending.push(shot);
                 continue;
             }
-            if !shot.target_lost {
-                report.transferred_items +=
-                    self.resolve_item_mass_driver_in_flight_shot(content, &shot);
-            } else if shot.expire_ticks > 0.0 {
-                self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
-                pending.push(shot);
-            } else {
-                self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
-                let event = self.create_item_mass_driver_despawn_event(content, &shot);
-                report.dropped_items += event
-                    .drops
-                    .iter()
-                    .map(|drop| drop.amount_dropped.max(0) as usize)
-                    .sum::<usize>();
-                report.despawned_shots += 1;
-                report.explosion_events += 1;
-                self.item_mass_driver_despawn_events.push(event);
-            }
+
+            self.remove_item_mass_driver_waiting_shooter(shot.to_tile, shot.from_tile);
+            let event = self.create_item_mass_driver_despawn_event(content, &shot);
+            report.dropped_items += event
+                .drops
+                .iter()
+                .map(|drop| drop.amount_dropped.max(0) as usize)
+                .sum::<usize>();
+            report.despawned_shots += 1;
+            report.explosion_events += 1;
+            self.item_mass_driver_despawn_events.push(event);
         }
         self.item_mass_driver_in_flight = pending;
         report
     }
 
     fn update_item_mass_driver_shot_position(shot: &mut GameRuntimeItemMassDriverInFlight) {
-        let progress = if shot.travel_ticks <= 0.0001 {
-            1.0
-        } else {
-            (shot.elapsed_ticks / shot.travel_ticks).clamp(0.0, 1.0)
-        };
-        shot.x = shot.from_x + (shot.to_x - shot.from_x) * progress;
-        shot.y = shot.from_y + (shot.to_y - shot.from_y) * progress;
+        let distance = shot.speed.max(0.0) * shot.elapsed_ticks.max(0.0);
+        shot.x = shot.from_x + Self::angle_trnsx(shot.rotation, distance);
+        shot.y = shot.from_y + Self::angle_trnsy(shot.rotation, distance);
     }
 
     fn create_item_mass_driver_despawn_event(
@@ -24507,6 +24516,84 @@ mod tests {
         };
         assert_eq!(source_state.state, MassDriverStateKind::Shooting);
         assert!((source_state.rotation - 0.0).abs() <= f32::EPSILON);
+        assert!(runtime
+            .item_mass_driver_waiting_shooters
+            .get(&target_tile)
+            .is_none());
+    }
+
+    #[test]
+    fn game_runtime_item_mass_driver_resolves_on_bolt_hit_plan_before_remaining_ticks_zero() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let driver_def = content.block_by_name("mass-driver").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(4, 4);
+        let target_tile = point2_pack(12, 4);
+        let source_building =
+            BuildingComp::new(source_tile, driver_def.base().clone(), TeamId(6));
+        let target_building =
+            BuildingComp::new(target_tile, driver_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(20, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(target_building);
+        runtime
+            .item_mass_driver_waiting_shooters
+            .insert(target_tile, vec![source_tile]);
+
+        let Some(BlockDef::Distribution(driver_block)) = content.block(driver_def.base().id) else {
+            panic!("mass-driver should be a distribution block");
+        };
+        let from_x = runtime.buildings[0].x;
+        let from_y = runtime.buildings[0].y;
+        let to_x = runtime.buildings[1].x;
+        let to_y = runtime.buildings[1].y;
+        let speed = driver_block.bullet_speed;
+        let elapsed_inside_hit_radius = ((to_x - from_x).abs() - 6.0) / speed;
+        let travel_ticks = elapsed_inside_hit_radius + 30.0;
+        runtime
+            .item_mass_driver_in_flight
+            .push(GameRuntimeItemMassDriverInFlight {
+                from_tile: source_tile,
+                to_tile: target_tile,
+                to_block_id: runtime.buildings[1].block.id,
+                to_team: runtime.buildings[1].team,
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                x: from_x,
+                y: from_y,
+                rotation: 0.0,
+                speed,
+                travel_ticks,
+                remaining_ticks: travel_ticks - elapsed_inside_hit_radius,
+                elapsed_ticks: elapsed_inside_hit_radius,
+                lifetime_ticks: driver_block.bullet_lifetime,
+                expire_ticks: driver_block.bullet_lifetime,
+                target_lost: false,
+                items: vec![(copper, 3)],
+            });
+
+        let remaining_before = runtime.item_mass_driver_in_flight[0].remaining_ticks;
+        let report = runtime.advance_item_mass_driver_in_flight_ticks(&content, 0.0);
+
+        assert!(
+            remaining_before > 1.0,
+            "test setup must keep this shot far away from the old remaining_ticks delivery path"
+        );
+        assert_eq!(report.transferred_items, 3);
+        assert_eq!(report.despawned_shots, 0);
+        assert!(runtime.item_mass_driver_in_flight.is_empty());
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 3);
         assert!(runtime
             .item_mass_driver_waiting_shooters
             .get(&target_tile)
