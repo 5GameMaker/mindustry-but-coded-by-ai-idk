@@ -2942,3 +2942,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test --workspace`
   - `git diff --check`
 - 仍未完成：Desktop 快照路径仍需继续扩展到更多真实 Java entity 子类与本地/远端玩家切换 smoke。
+
+### 12.73 其他玩家 preview build plans overlay 消费入口
+
+- 2026-05-27：迁移 Java `PlayerComp.getPreviewPlans()` 与 `InputHandler.drawOtherBuildPlans()` 的非渲染消费语义，提供 Rust input/runtime 可复用的轻量 overlay plan builder，避免 preview build plans 只停留在网络字段或孤立 sidecar。
+- Java 依据：
+  - `PlayerComp.getPreviewPlans()` 在 preview group delay 后把 assembling plans commit 到 current preview plans；
+  - `InputHandler.drawOtherBuildPlans()` 对本地玩家或不同队玩家清空 preview plans；
+  - `drawOtherBuildPlans()` 在 `previewPlansDirty` 时重建 preview tree，并在鼠标 hover 其他玩家建造预览时给出玩家名/位置/选中反馈；
+  - `BuildPlan.animScale` 按 `Mathf.lerpDelta(animScale, 1f, 0.2f)` 推进。
+- Rust 新增/变化：
+  - `OtherPlayerPreviewOverlayFrame` 描述本地玩家、队伍、时间、delta 与鼠标世界坐标；
+  - `other_player_preview_overlay_plan(...)` 调用 `PlayerComp::get_preview_plans(...)`，按 Java 规则提交 delayed preview group、清理本地/敌队 plans、消费 dirty 标记；
+  - 新增 `OtherPlayerPreviewOverlayPlan` / `EntryPlan` / `OverlapPlan`，输出 world position、alpha、hover/overlap 与玩家位置，供后续 desktop/render 层消费；
+  - block 几何通过 `block_lookup` 注入，保持与真实 content registry 接线点分离，后续应由 desktop/runtime block registry 提供 `size/offset`。
+- 验证：
+  - `cargo test -p mindustry-core preview_overlay_plan_commits_only_after_preview_group_delay`
+  - `cargo test -p mindustry-core preview_overlay_plan_clears_local_or_enemy_preview_plans_like_java_draw_other_build_plans`
+  - `cargo test -p mindustry-core input_handler`
+- 仍未完成：当前切片只生成 overlay plan，不执行真实 renderer 绘制；后续需要让 desktop/input 持有远端 `PlayerComp` 列表并由 content registry 驱动 `block_lookup`，再把 overlay entries 接入真实预览/hover UI。

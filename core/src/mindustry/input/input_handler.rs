@@ -15,7 +15,7 @@ use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::{BlockPlan as TeamBlockPlan, Teams};
 use crate::mindustry::io::type_io::CommandWire;
 use crate::mindustry::io::Point2;
-use crate::mindustry::io::{BuildingRef, EntityRef, TypeValue, UnitRef, Vec2};
+use crate::mindustry::io::{BuildingRef, EntityRef, TeamId, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
     BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
     CommandBuildingCallPacket, CommandUnitsCallPacket, DeletePlansCallPacket, DropItemCallPacket,
@@ -1862,6 +1862,68 @@ pub struct CommandSelectionOverlayPlan {
     pub unit_markers: Vec<CommandUnitMarkerPlan>,
     pub building_markers: Vec<CommandBuildingMarkerPlan>,
     pub rect_fill: Option<SelectionRectFrame>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OtherPlayerPreviewOverlayFrame {
+    pub local_player_id: i32,
+    pub local_team: TeamId,
+    pub now_millis: i64,
+    pub delta: f32,
+    pub mouse_world: Option<Vec2>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OtherPlayerPreviewBlock {
+    pub size: i32,
+    pub offset: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OtherPlayerPreviewEntryPlan {
+    pub x: i32,
+    pub y: i32,
+    pub rotation: i32,
+    pub block: String,
+    pub world_pos: Vec2,
+    pub size: i32,
+    pub anim_scale: f32,
+    pub alpha: f32,
+    pub overlapping_mouse: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OtherPlayerPreviewOverlapPlan {
+    pub x: i32,
+    pub y: i32,
+    pub block: String,
+    pub player_name: String,
+    pub player_pos: Vec2,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OtherPlayerPreviewOverlayPlan {
+    pub player_id: i32,
+    pub player_name: String,
+    pub player_pos: Vec2,
+    pub entries: Vec<OtherPlayerPreviewEntryPlan>,
+    pub overlap: Option<OtherPlayerPreviewOverlapPlan>,
+    pub dirty_rebuilt: bool,
+    pub cleared_irrelevant: bool,
+}
+
+impl Default for OtherPlayerPreviewOverlayPlan {
+    fn default() -> Self {
+        Self {
+            player_id: 0,
+            player_name: String::new(),
+            player_pos: Vec2::new(0.0, 0.0),
+            entries: Vec::new(),
+            overlap: None,
+            dirty_rebuilt: false,
+            cleared_irrelevant: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -5849,6 +5911,110 @@ pub fn command_targets_overlay_plan(
     }
 }
 
+fn preview_lerp_delta(from: f32, to: f32, alpha: f32, delta: f32) -> f32 {
+    let t = (alpha * delta.max(0.0)).clamp(0.0, 1.0);
+    from + (to - from) * t
+}
+
+fn preview_plan_world_pos(plan: &BuildPlan, block: OtherPlayerPreviewBlock) -> Vec2 {
+    let tile_size = TILE_SIZE as f32;
+    Vec2 {
+        x: plan.x as f32 * tile_size + block.offset,
+        y: plan.y as f32 * tile_size + block.offset,
+    }
+}
+
+fn preview_plan_contains_mouse(
+    world_pos: Vec2,
+    block: OtherPlayerPreviewBlock,
+    mouse_world: Vec2,
+) -> bool {
+    let half = block.size.max(1) as f32 * TILE_SIZE as f32 / 2.0;
+    mouse_world.x >= world_pos.x - half
+        && mouse_world.x <= world_pos.x + half
+        && mouse_world.y >= world_pos.y - half
+        && mouse_world.y <= world_pos.y + half
+}
+
+pub fn other_player_preview_overlay_plan<F>(
+    player: &mut PlayerComp,
+    frame: OtherPlayerPreviewOverlayFrame,
+    mut block_lookup: F,
+) -> OtherPlayerPreviewOverlayPlan
+where
+    F: FnMut(&str) -> Option<OtherPlayerPreviewBlock>,
+{
+    player.get_preview_plans(frame.now_millis);
+
+    let mut overlay = OtherPlayerPreviewOverlayPlan {
+        player_id: player.id,
+        player_name: player.name.clone(),
+        player_pos: Vec2 {
+            x: player.x,
+            y: player.y,
+        },
+        ..OtherPlayerPreviewOverlayPlan::default()
+    };
+
+    if player.id == frame.local_player_id || player.team != frame.local_team {
+        player.preview_plans_current.clear();
+        player.preview_plans_dirty = false;
+        overlay.cleared_irrelevant = true;
+        return overlay;
+    }
+
+    overlay.dirty_rebuilt = player.preview_plans_dirty;
+    if player.preview_plans_dirty {
+        player.preview_plans_dirty = false;
+    }
+
+    for plan in &mut player.preview_plans_current {
+        if plan.breaking {
+            continue;
+        }
+        let Some(block_name) = plan.block.clone() else {
+            continue;
+        };
+        let Some(block) = block_lookup(&block_name) else {
+            continue;
+        };
+
+        plan.anim_scale = preview_lerp_delta(plan.anim_scale, 1.0, 0.2, frame.delta);
+        let world_pos = preview_plan_world_pos(plan, block);
+        let overlapping_mouse = frame
+            .mouse_world
+            .is_some_and(|mouse| preview_plan_contains_mouse(world_pos, block, mouse));
+        let alpha = if overlapping_mouse { 0.7 } else { 0.25 };
+
+        if overlapping_mouse {
+            overlay.overlap = Some(OtherPlayerPreviewOverlapPlan {
+                x: plan.x,
+                y: plan.y,
+                block: block_name.clone(),
+                player_name: player.name.clone(),
+                player_pos: Vec2 {
+                    x: player.x,
+                    y: player.y,
+                },
+            });
+        }
+
+        overlay.entries.push(OtherPlayerPreviewEntryPlan {
+            x: plan.x,
+            y: plan.y,
+            rotation: plan.rotation,
+            block: block_name,
+            world_pos,
+            size: block.size,
+            anim_scale: plan.anim_scale,
+            alpha,
+            overlapping_mouse,
+        });
+    }
+
+    overlay
+}
+
 pub fn command_overlay_plan(frame: CommandOverlayFrame) -> CommandOverlayPlan {
     if !frame.command_mode {
         return CommandOverlayPlan::default();
@@ -6811,6 +6977,105 @@ mod tests {
             ]
         );
         assert_eq!(plan.building_markers.len(), 1);
+    }
+
+    #[test]
+    fn preview_overlay_plan_commits_only_after_preview_group_delay() {
+        let mut remote = PlayerComp::new(TeamId(1));
+        remote.id = 7;
+        remote.name = "ally-builder".into();
+        remote.x = 64.0;
+        remote.y = 72.0;
+        remote.handle_preview_plans(1, &[BuildPlan::new_place(4, 5, 1, "router")], 0, 10);
+
+        let frame = |now_millis, mouse_world| OtherPlayerPreviewOverlayFrame {
+            local_player_id: 1,
+            local_team: TeamId(1),
+            now_millis,
+            delta: 1.0,
+            mouse_world,
+        };
+        let block_lookup = |name: &str| {
+            (name == "router").then_some(OtherPlayerPreviewBlock {
+                size: 1,
+                offset: TILE_SIZE as f32 / 2.0,
+            })
+        };
+
+        let early = other_player_preview_overlay_plan(&mut remote, frame(99, None), block_lookup);
+        assert!(early.entries.is_empty());
+        assert!(remote.receiving_new_plan_group);
+
+        let committed = other_player_preview_overlay_plan(
+            &mut remote,
+            frame(
+                100,
+                Some(Vec2::new(
+                    4.0 * TILE_SIZE as f32 + 4.0,
+                    5.0 * TILE_SIZE as f32 + 4.0,
+                )),
+            ),
+            block_lookup,
+        );
+        assert!(committed.dirty_rebuilt);
+        assert_eq!(committed.entries.len(), 1);
+        assert_eq!(committed.entries[0].block, "router");
+        assert_eq!(committed.entries[0].rotation, 1);
+        assert_eq!(committed.entries[0].world_pos, Vec2::new(36.0, 44.0));
+        assert_eq!(committed.entries[0].anim_scale, 0.2);
+        assert_eq!(committed.entries[0].alpha, 0.7);
+        assert!(committed.entries[0].overlapping_mouse);
+        assert_eq!(
+            committed.overlap,
+            Some(OtherPlayerPreviewOverlapPlan {
+                x: 4,
+                y: 5,
+                block: "router".into(),
+                player_name: "ally-builder".into(),
+                player_pos: Vec2::new(64.0, 72.0),
+            })
+        );
+        assert!(!remote.preview_plans_dirty);
+        assert!(!remote.receiving_new_plan_group);
+        assert!(remote.preview_plans_assembling.is_empty());
+    }
+
+    #[test]
+    fn preview_overlay_plan_clears_local_or_enemy_preview_plans_like_java_draw_other_build_plans() {
+        let mut local = PlayerComp::new(TeamId(1));
+        local.id = 9;
+        local.preview_plans_current = vec![BuildPlan::new_place(1, 2, 0, "router")];
+        local.preview_plans_dirty = true;
+
+        let frame = OtherPlayerPreviewOverlayFrame {
+            local_player_id: 9,
+            local_team: TeamId(1),
+            now_millis: 0,
+            delta: 1.0,
+            mouse_world: None,
+        };
+        let plan = other_player_preview_overlay_plan(&mut local, frame, |_| {
+            Some(OtherPlayerPreviewBlock {
+                size: 1,
+                offset: 4.0,
+            })
+        });
+        assert!(plan.cleared_irrelevant);
+        assert!(plan.entries.is_empty());
+        assert!(local.preview_plans_current.is_empty());
+        assert!(!local.preview_plans_dirty);
+
+        let mut enemy = PlayerComp::new(TeamId(2));
+        enemy.id = 10;
+        enemy.preview_plans_current = vec![BuildPlan::new_place(3, 4, 0, "router")];
+        let plan = other_player_preview_overlay_plan(&mut enemy, frame, |_| {
+            Some(OtherPlayerPreviewBlock {
+                size: 1,
+                offset: 4.0,
+            })
+        });
+        assert!(plan.cleared_irrelevant);
+        assert!(enemy.preview_plans_current.is_empty());
     }
 
     #[test]
