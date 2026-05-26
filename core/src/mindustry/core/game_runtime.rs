@@ -4617,7 +4617,7 @@ impl GameRuntime {
             source_index == target_index,
             true,
             target.block.has_power,
-            target.block.connected_power || target.block.has_power,
+            target.block.connected_power,
             source.team == target.team,
             source_metadata.same_block_connection,
             source.block.id == target.block.id,
@@ -4796,7 +4796,7 @@ impl GameRuntime {
     fn owned_power_building_should_autolink_to_nodes(building: &BuildingComp) -> bool {
         building.power.is_some()
             && building.block.has_power
-            && (building.block.connected_power || building.block.has_power)
+            && building.block.connected_power
             && (building.block.consumes_power || building.block.outputs_power)
     }
 

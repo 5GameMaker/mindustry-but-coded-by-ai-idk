@@ -2814,6 +2814,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：`TileTapCallPacket` / `TileConfigCallPacket` 尚未把真实客户端点击事件切到该入口；返回值目前表达 runtime 结果，尚未映射 Java UI 的 consumed boolean/deselect 行为。
 
+### 12.67 Block 电力默认元数据对齐
+
+- 2026-05-27：对齐 Java `Block` 基类默认电力字段，减少 `GameRuntime` PowerNode 链路里的临时 `has_power` 兼容判断。
+- Java 依据：
+  - `Block.consumesPower` 默认 `true`；
+  - `Block.outputsPower` 默认 `false`；
+  - `Block.connectedPower` 默认 `true`。
+- Rust 新增/变化：
+  - `Block::new(...)` 默认 `consumes_power = true`、`connected_power = true`，保留 `outputs_power = false`；
+  - `owned_power_node_link_valid_between(...)` 重新只信任 `target.block.connected_power`；
+  - `owned_power_building_should_autolink_to_nodes(...)` 回收 `connected_power || has_power` 兼容分支；
+  - `block_config_metadata_matches_upstream_defaults_and_helpers` 增加默认电力字段断言。
+- 已验证：
+  - `cargo test -p mindustry-core block_config_metadata_matches_upstream_defaults_and_helpers`
+  - `cargo test -p mindustry-core block_`
+  - `cargo test -p mindustry-core power_node`
+  - `cargo test -p mindustry-core game_runtime_placed_power_building_autolinks_existing_nodes_like_java_get_node_links`
+  - `cargo test -p mindustry-core game_runtime_add_placed_building_runs_power_placement_hooks`
+  - `cargo check --workspace`
+  - `git diff --check`
+- 仍未完成：需要继续审计各具体 block 构造器中显式改写 `consumes_power/connected_power` 的地方，确认是否存在因早期默认值不一致而遗留的冗余赋值或漏设。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

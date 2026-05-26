@@ -160,9 +160,9 @@ impl Block {
             light_clip_size: 0.0,
             item_capacity: 10,
             liquid_capacity: 10.0,
-            consumes_power: false,
+            consumes_power: true,
             outputs_power: false,
-            connected_power: false,
+            connected_power: true,
             conductive_power: false,
             cache_layer: CacheLayer::None,
             build_visibility: BuildVisibility::Shown,
@@ -322,6 +322,9 @@ mod tests {
         assert!(block.allow_config_inventory);
         assert_eq!((block.selection_rows, block.selection_columns), (5, 4));
         assert!(!block.consumes_tap);
+        assert!(block.consumes_power);
+        assert!(!block.outputs_power);
+        assert!(block.connected_power);
         assert_eq!(block.next_config(), None);
         assert!(!block.config_clearable());
 
