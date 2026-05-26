@@ -2764,6 +2764,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：source 建筑坐标当前仍以 owned building tile/offset 计算，未来如引入可移动/非 tile-aligned building 坐标，需要进一步对齐 Java `Building.x/y`；`getNodeLinks(...)`、UI tap/client packet 接入仍待迁移。
 
+### 12.65 BuildingComp.placed 反向 PowerNode 自动连线
+
+- 2026-05-27：迁移 Java `BuildingComp.placed() -> PowerNode.getNodeLinks(...) -> other.configureAny(pos())` 的 owned runtime 入口，让非 PowerNode 的耗电/产电建筑放置后由已有 PowerNode 反向自动连线。
+- Java 依据：
+  - `BuildingComp.placed()` 非客户端侧，在 `(block.consumesPower || block.outputsPower) && block.hasPower && block.connectedPower` 时调用 `PowerNode.getNodeLinks(...)`；
+  - 回调中先检查 `!other.power.links.contains(pos())`，再对已有 PowerNode 调 `configureAny(pos())`，避免 `PowerNode.config(Integer)` 的 toggle 语义误断链；
+  - `PowerNode.getNodeLinks(...)` 过滤 autolink、node 未满、范围 hitbox、同队、非重复 graph、非绝缘 raycast、非相邻建筑，并按距离排序。
+- Rust 新增/变化：
+  - `GameRuntimePlacedBuildingReport` 与 `GameRuntime::add_placed_building(...)`：提供“加入 owned world 后立即执行 placement power hooks”的集成入口，避免 placement hook 只停留为孤立 helper；
+  - `GameRuntime::placed_owned_power_building(...)`：server-side 入口，对齐 Java `BuildingComp.placed()` 的 power 条件；
+  - `GameRuntime::autolink_owned_power_nodes_to_building(...)`：扫描已有 PowerNode，复用 `configure_owned_power_node_link(...)` 写入双方 links 并重建 graph；
+  - 候选去重维护 `used_graphs`，预先加入 target 自身 graph 与相邻 conducting graph，成功链接后加入 node graph；
+  - 保留“已有 link 则跳过”，避免自动 placement 调用触发 toggle unlink；
+  - 当前 Rust 内容层部分 block 尚未全量设置 Java 默认 `connectedPower=true`，本入口临时按 `has_power` 兼容 Java 默认语义，后续内容默认值总对齐时应回收该兼容。
+- 测试：
+  - `game_runtime_placed_power_building_autolinks_existing_nodes_like_java_get_node_links`
+  - `game_runtime_placed_power_building_skips_adjacent_or_insulated_nodes_like_java_get_node_links`
+  - `game_runtime_add_placed_building_runs_power_placement_hooks`
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_add_placed_building_runs_power_placement_hooks`
+  - `cargo test -p mindustry-core game_runtime_placed_power_building_autolinks_existing_nodes_like_java_get_node_links`
+  - `cargo test -p mindustry-core game_runtime_placed_power_building_skips_adjacent_or_insulated_nodes_like_java_get_node_links`
+  - `cargo test -p mindustry-core power_node`
+  - `cargo check --workspace`
+  - `git diff --check`
+- 仍未完成：真实 build placement/network packet 路径仍需统一切到 `add_placed_building(...)`；BeamNode 的 `getNodeLinks(...)`、PowerNode UI tap/client config packet、Java 默认 `Block.connectedPower/consumesPower` 内容层总对齐仍待迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。

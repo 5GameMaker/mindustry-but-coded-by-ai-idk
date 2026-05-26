@@ -2003,6 +2003,13 @@ pub struct GameRuntimePowerNodeBatchLinkReport {
     pub not_power_node: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameRuntimePlacedBuildingReport {
+    pub index: usize,
+    pub power_node_links: usize,
+    pub power_building_links: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct GameRuntimePowerNodeMetadata {
     is_node: bool,
@@ -3583,6 +3590,23 @@ impl GameRuntime {
         index
     }
 
+    pub fn add_placed_building(
+        &mut self,
+        content: &ContentLoader,
+        building: BuildingComp,
+        client: bool,
+    ) -> GameRuntimePlacedBuildingReport {
+        let tile_pos = building.tile_pos;
+        let index = self.add_building(building);
+        let power_node_links = self.placed_owned_power_node(content, tile_pos, client);
+        let power_building_links = self.placed_owned_power_building(content, tile_pos, client);
+        GameRuntimePlacedBuildingReport {
+            index,
+            power_node_links,
+            power_building_links,
+        }
+    }
+
     pub fn remove_building_by_tile_pos(&mut self, tile_pos: i32) -> Option<BuildingComp> {
         let index = self
             .buildings
@@ -4124,6 +4148,138 @@ impl GameRuntime {
         self.autolink_owned_power_node(content, tile_pos)
     }
 
+    pub fn placed_owned_power_building(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        client: bool,
+    ) -> usize {
+        if client {
+            return 0;
+        }
+        let Some(target_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return 0;
+        };
+        if !Self::owned_power_building_should_autolink_to_nodes(&self.buildings[target_index]) {
+            return 0;
+        }
+
+        self.autolink_owned_power_nodes_to_building(content, tile_pos)
+    }
+
+    pub fn autolink_owned_power_nodes_to_building(
+        &mut self,
+        content: &ContentLoader,
+        target_tile_pos: i32,
+    ) -> usize {
+        let Some(target_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == target_tile_pos)
+        else {
+            return 0;
+        };
+        if !Self::owned_power_building_should_autolink_to_nodes(&self.buildings[target_index]) {
+            return 0;
+        }
+
+        self.refresh_owned_building_proximity();
+        self.refresh_owned_power_graphs_with_content(content);
+
+        let target_team = self.buildings[target_index].team;
+        let target_consumes_power = self.buildings[target_index].block.consumes_power;
+        let target_outputs_power = self.buildings[target_index].block.outputs_power;
+        let target_proximity = self.buildings[target_index].proximity.clone();
+        let mut used_graphs = BTreeSet::new();
+        if let Some(graph) = self.power_graph_memberships.get(&target_tile_pos).copied() {
+            used_graphs.insert(graph);
+        }
+        for other_ref in target_proximity {
+            let Some(other_index) = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == other_ref.tile_pos)
+            else {
+                continue;
+            };
+            let other = &self.buildings[other_index];
+            if other.team != target_team || other.power.is_none() {
+                continue;
+            }
+            if target_consumes_power
+                && other.block.consumes_power
+                && !target_outputs_power
+                && !other.block.outputs_power
+            {
+                continue;
+            }
+            if let Some(graph) = self.power_graph_memberships.get(&other.tile_pos).copied() {
+                used_graphs.insert(graph);
+            }
+        }
+
+        let mut candidates = Vec::new();
+        for (node_index, node) in self.buildings.iter().enumerate() {
+            if node_index == target_index || node.team != target_team {
+                continue;
+            }
+            let Some(node_metadata) = Self::owned_power_node_metadata(content, node) else {
+                continue;
+            };
+            if !node_metadata.is_node || !node_metadata.autolink {
+                continue;
+            }
+            let Some(power) = node.power.as_ref() else {
+                continue;
+            };
+            if power.links.contains(&target_tile_pos)
+                || power.links.len() as i32 >= node_metadata.max_nodes
+            {
+                continue;
+            }
+            if self.owned_power_node_adjacent(node_index, target_index)
+                || self.owned_power_line_insulated(content, target_index, node_index)
+                || !self.owned_power_node_link_valid_between(
+                    content,
+                    node_index,
+                    target_index,
+                    true,
+                )
+            {
+                continue;
+            }
+
+            let node_graph = self.power_graph_memberships.get(&node.tile_pos).copied();
+            candidates.push((
+                self.owned_power_node_distance2(node_index, target_index),
+                node.tile_pos,
+                node_graph,
+            ));
+        }
+        candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        let mut linked = 0;
+        for (_, node_tile_pos, node_graph) in candidates {
+            if node_graph.is_some_and(|graph| used_graphs.contains(&graph)) {
+                continue;
+            }
+            if self.configure_owned_power_node_link(content, node_tile_pos, target_tile_pos)
+                == GameRuntimePowerNodeLinkResult::Linked
+            {
+                linked += 1;
+                if let Some(graph) = node_graph {
+                    used_graphs.insert(graph);
+                }
+            }
+        }
+
+        linked
+    }
+
     pub fn configure_owned_power_node_relative_links(
         &mut self,
         content: &ContentLoader,
@@ -4568,6 +4724,13 @@ impl GameRuntime {
             || building.block.consumes_power
             || Self::owned_power_node_metadata(content, building)
                 .is_some_and(|metadata| metadata.is_node)
+    }
+
+    fn owned_power_building_should_autolink_to_nodes(building: &BuildingComp) -> bool {
+        building.power.is_some()
+            && building.block.has_power
+            && (building.block.connected_power || building.block.has_power)
+            && (building.block.consumes_power || building.block.outputs_power)
     }
 
     fn owned_power_node_adjacent(&self, source_index: usize, target_index: usize) -> bool {
@@ -17673,6 +17836,156 @@ mod tests {
                 .links,
             vec![target_pos]
         );
+    }
+
+    #[test]
+    fn game_runtime_placed_power_building_autolinks_existing_nodes_like_java_get_node_links() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let node_pos = point2_pack(10, 10);
+        let mender_pos = point2_pack(14, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            node_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            mender_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.placed_owned_power_building(&content, mender_pos, true),
+            0
+        );
+        assert_eq!(
+            runtime.placed_owned_power_building(&content, mender_pos, false),
+            1
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == node_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![mender_pos]
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == mender_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![node_pos]
+        );
+    }
+
+    #[test]
+    fn game_runtime_add_placed_building_runs_power_placement_hooks() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let node_pos = point2_pack(10, 10);
+        let mender_pos = point2_pack(14, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            node_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.add_placed_building(
+                &content,
+                BuildingComp::new(mender_pos, mender_def.base().clone(), TeamId(1)),
+                false,
+            ),
+            GameRuntimePlacedBuildingReport {
+                index: 1,
+                power_node_links: 0,
+                power_building_links: 1,
+            }
+        );
+        assert_eq!(
+            runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == node_pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links,
+            vec![mender_pos]
+        );
+    }
+
+    #[test]
+    fn game_runtime_placed_power_building_skips_adjacent_or_insulated_nodes_like_java_get_node_links(
+    ) {
+        let content = ContentLoader::create_base_content().unwrap();
+        let node_def = content.block_by_name("power-node").unwrap();
+        let mender_def = content.block_by_name("mender").unwrap();
+        let wall_def = content.block_by_name("plastanium-wall").unwrap();
+        let target_pos = point2_pack(10, 10);
+        let adjacent_node_pos = point2_pack(11, 10);
+        let insulated_node_pos = point2_pack(14, 10);
+        let wall_pos = point2_pack(12, 10);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            target_pos,
+            mender_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            adjacent_node_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            insulated_node_pos,
+            node_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            wall_pos,
+            wall_def.base().clone(),
+            TeamId(1),
+        ));
+
+        assert_eq!(
+            runtime.placed_owned_power_building(&content, target_pos, false),
+            0
+        );
+        for pos in [adjacent_node_pos, insulated_node_pos, target_pos] {
+            assert!(runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == pos)
+                .unwrap()
+                .power
+                .as_ref()
+                .unwrap()
+                .links
+                .is_empty());
+        }
     }
 
     #[test]
