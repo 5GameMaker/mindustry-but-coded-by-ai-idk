@@ -1,7 +1,7 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
-    GameState, GameStateState, NetClient,
+    GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::PlayerComp;
@@ -107,6 +107,8 @@ impl DesktopLauncher {
                 if self.last_applied_world_data.is_some() {
                     self.game_state = GameState::new();
                     self.runtime = GameRuntime::default();
+                    self.runtime
+                        .set_network_context(GameRuntimeNetworkContext::offline());
                     self.player = PlayerComp::default();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
@@ -160,10 +162,18 @@ impl DesktopLauncher {
 
     fn sync_runtime_state_from_game_state(&mut self) {
         self.runtime.state = self.game_state.clone();
+        let network_context = if self.last_applied_world_data.is_some() {
+            GameRuntimeNetworkContext::client()
+        } else {
+            GameRuntimeNetworkContext::offline()
+        };
+        self.runtime.set_network_context(network_context);
     }
 
     fn sync_runtime_state_from_world_data(&mut self, world_data: &NetworkWorldData) {
         self.sync_runtime_state_from_game_state();
+        self.runtime
+            .set_network_context(GameRuntimeNetworkContext::client());
         self.last_runtime_map_load_report = world_data.map_snapshot.as_ref().map(|map| {
             self.runtime
                 .load_network_map_with_buildings(&self.content_loader, map)
@@ -288,7 +298,7 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 #[cfg(test)]
 mod tests {
     use super::{run, DesktopLauncher};
-    use mindustry_core::mindustry::core::WorldLoadEventKind;
+    use mindustry_core::mindustry::core::{GameRuntimeNetworkContext, WorldLoadEventKind};
     use mindustry_core::mindustry::ctype::ContentId;
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::io::{
@@ -881,6 +891,10 @@ mod tests {
         assert_eq!(launcher.game_state.world.height(), 0);
         assert_eq!(launcher.runtime.state.world.width(), 0);
         assert_eq!(launcher.runtime.state.world.height(), 0);
+        assert_eq!(
+            launcher.runtime.network_context,
+            GameRuntimeNetworkContext::offline()
+        );
         assert!(launcher.game_state.world.load_events().is_empty());
         assert_eq!(launcher.player, PlayerComp::default());
     }
@@ -962,6 +976,10 @@ mod tests {
 
         launcher.update();
 
+        assert_eq!(
+            launcher.runtime.network_context,
+            GameRuntimeNetworkContext::client()
+        );
         let report = launcher
             .last_runtime_map_load_report
             .as_ref()

@@ -11,7 +11,7 @@ pub mod world;
 
 pub use file_tree::{normalize_path, AssetFile, FileTree, MusicAsset, SoundAsset};
 pub use game_runtime::{
-    GameRuntime, GameRuntimeEffectResources, GameRuntimeMapLoadReport,
+    GameRuntime, GameRuntimeEffectResources, GameRuntimeMapLoadReport, GameRuntimeNetworkContext,
     GameRuntimeOwnedEffectResources,
 };
 pub use game_state::{

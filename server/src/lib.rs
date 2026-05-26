@@ -1,7 +1,8 @@
 pub mod server_control;
 
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, GameRuntime, GameRuntimeOwnedEffectResources, NetServer,
+    content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext,
+    GameRuntimeOwnedEffectResources, NetServer,
 };
 use mindustry_core::mindustry::ctype::ContentId;
 use mindustry_core::mindustry::entities::{
@@ -37,10 +38,13 @@ impl ServerLauncher {
             context.port = port;
         }
 
+        let mut runtime = GameRuntime::default();
+        runtime.set_network_context(GameRuntimeNetworkContext::server());
+
         Self {
             context,
             control: ServerControl::new(args.clone()),
-            runtime: GameRuntime::default(),
+            runtime,
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_runtime_effect_report: None,
             net_server: NetServer::new(Net::new(Box::new(ArcNetProvider::new()))),
@@ -190,7 +194,8 @@ mod tests {
     use super::ServerLauncher;
     use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::{
-        content_loader::ContentLoader, GameRuntime, GameStateState, NetServer,
+        content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
+        NetServer,
     };
     use mindustry_core::mindustry::entities::comp::BuildingComp;
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
@@ -228,6 +233,10 @@ mod tests {
         ]);
 
         assert_eq!(launcher.context.port, port);
+        assert_eq!(
+            launcher.runtime.network_context,
+            GameRuntimeNetworkContext::server()
+        );
         assert!(launcher.runtime.buildings().is_empty());
         assert!(launcher.runtime.effect_runtime_store.is_empty());
         assert!(launcher.runtime.effect_timer_store.is_empty());
