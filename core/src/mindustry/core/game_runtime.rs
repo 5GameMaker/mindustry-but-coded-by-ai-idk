@@ -1514,6 +1514,18 @@ fn game_runtime_turret_state_mut(
     }
 }
 
+fn read_client_unit_sync_exact(
+    content: &ContentLoader,
+    sync_bytes: &[u8],
+) -> Option<type_io::UnitSyncWire> {
+    if sync_bytes.is_empty() {
+        return None;
+    }
+    let mut read = sync_bytes;
+    let sync = type_io::read_unit_sync(&mut read, content).ok()?;
+    read.is_empty().then_some(sync)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntimeConstructBlockState {
     pub size: i32,
@@ -2336,30 +2348,61 @@ impl GameRuntime {
     ) -> GameRuntimeClientSnapshotApplyReport {
         let mut report =
             self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes.clone());
-        if self.try_apply_client_unit_entity_snapshot(content, entity_id, &sync_bytes) {
-            report.entity_typed_records_applied = 1;
+        if let Some(sync) = read_client_unit_sync_exact(content, &sync_bytes) {
+            if self.apply_client_unit_sync_wire(content, entity_id, &sync) {
+                report.entity_typed_records_applied = 1;
+            }
         }
         report
     }
 
-    fn try_apply_client_unit_entity_snapshot(
+    pub fn apply_client_entity_snapshot_packet_with_content(
+        &mut self,
+        content: &ContentLoader,
+        amount: i16,
+        data: &[u8],
+    ) -> GameRuntimeClientSnapshotApplyReport {
+        let Ok(amount) = usize::try_from(amount) else {
+            return self.note_client_entity_snapshot_parse_error();
+        };
+
+        let mut report = GameRuntimeClientSnapshotApplyReport::default();
+        let mut read = data;
+        for _ in 0..amount {
+            if read.len() < 5 {
+                report.entity_parse_errors += 1;
+                return report;
+            }
+            let entity_id = i32::from_be_bytes(read[0..4].try_into().unwrap());
+            let type_id = read[4];
+            read = &read[5..];
+
+            let sync_start = read;
+            let before_len = sync_start.len();
+            let Ok(sync) = type_io::read_unit_sync(&mut read, content) else {
+                report.entity_parse_errors += 1;
+                return report;
+            };
+            let consumed = before_len - read.len();
+            let sync_bytes = sync_start[..consumed].to_vec();
+            report.merge(self.apply_client_entity_snapshot_record(entity_id, type_id, sync_bytes));
+            if self.apply_client_unit_sync_wire(content, entity_id, &sync) {
+                report.entity_typed_records_applied += 1;
+            }
+        }
+
+        if !read.is_empty() {
+            report.entity_parse_errors += 1;
+        }
+        report
+    }
+
+    fn apply_client_unit_sync_wire(
         &mut self,
         content: &ContentLoader,
         entity_id: i32,
-        sync_bytes: &[u8],
+        sync: &type_io::UnitSyncWire,
     ) -> bool {
-        if sync_bytes.is_empty() {
-            return false;
-        }
-
-        let mut read = sync_bytes;
-        let Ok(sync) = type_io::read_unit_sync(&mut read, content) else {
-            return false;
-        };
-        if !read.is_empty() {
-            return false;
-        }
-
         let Some(unit_type) = content.unit(sync.type_id).cloned() else {
             return false;
         };
@@ -2379,7 +2422,7 @@ impl GameRuntime {
             return false;
         };
         unit.sync.read_sync();
-        unit.apply_sync_wire(&sync);
+        unit.apply_sync_wire(sync);
         unit.entity.id = entity_id;
         if recreate {
             unit.sync.snap_sync();
@@ -14451,6 +14494,114 @@ mod tests {
                 .handle_sync_hidden_calls,
             1
         );
+    }
+
+    #[test]
+    fn game_runtime_applies_multi_unit_entity_snapshot_packet_with_content() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let dagger = content.unit_by_name("dagger").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let first_sync = type_io::UnitSyncWire {
+            abilities: Vec::new(),
+            ammo: 3.0,
+            controller: type_io::ControllerWire::Ground,
+            elevation: 0.1,
+            flag: 11.0,
+            health: 55.0,
+            is_shooting: false,
+            mine_tile: None,
+            mounts: Vec::new(),
+            plans: None,
+            rotation: 45.0,
+            shield: 1.0,
+            spawned_by_core: false,
+            stack: ItemStack::new("", 0),
+            statuses: Vec::new(),
+            team: TeamId(1),
+            type_id: dagger.id(),
+            update_building: false,
+            vel: IoVec2 { x: 0.5, y: 0.25 },
+            x: 16.0,
+            y: 24.0,
+        };
+        let second_sync = type_io::UnitSyncWire {
+            abilities: Vec::new(),
+            ammo: 5.0,
+            controller: type_io::ControllerWire::Ground,
+            elevation: 0.75,
+            flag: 22.0,
+            health: 66.0,
+            is_shooting: true,
+            mine_tile: None,
+            mounts: Vec::new(),
+            plans: None,
+            rotation: 135.0,
+            shield: 2.0,
+            spawned_by_core: true,
+            stack: ItemStack::new("", 0),
+            statuses: Vec::new(),
+            team: TeamId(2),
+            type_id: flare.id(),
+            update_building: false,
+            vel: IoVec2 { x: -0.5, y: 1.25 },
+            x: 32.0,
+            y: 40.0,
+        };
+
+        let mut first_bytes = Vec::new();
+        type_io::write_unit_sync(&mut first_bytes, &content, &first_sync).unwrap();
+        let mut second_bytes = Vec::new();
+        type_io::write_unit_sync(&mut second_bytes, &content, &second_sync).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&5001i32.to_be_bytes());
+        data.push(2);
+        data.extend_from_slice(&first_bytes);
+        data.extend_from_slice(&5002i32.to_be_bytes());
+        data.push(2);
+        data.extend_from_slice(&second_bytes);
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.apply_client_entity_snapshot_packet_with_content(&content, 2, &data);
+        assert_eq!(report.entity_records_seen, 2);
+        assert_eq!(report.entity_records_applied, 2);
+        assert_eq!(report.entity_typed_records_applied, 2);
+        assert_eq!(
+            report.entity_opaque_bytes,
+            first_bytes.len() + second_bytes.len()
+        );
+        assert_eq!(
+            runtime
+                .client_entity_snapshot_records
+                .get(&5001)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(first_bytes.as_slice())
+        );
+        assert_eq!(
+            runtime
+                .client_entity_snapshot_records
+                .get(&5002)
+                .map(|record| record.sync_bytes.as_slice()),
+            Some(second_bytes.as_slice())
+        );
+
+        let first = runtime.client_unit_snapshot_entities.get(&5001).unwrap();
+        assert_eq!(first.type_info.id(), dagger.id());
+        assert_eq!(first.team_id(), TeamId(1));
+        assert_eq!(first.x(), 16.0);
+        assert_eq!(first.y(), 24.0);
+        assert_eq!(first.rotation(), 45.0);
+        assert_eq!(first.sync.hooks.read_sync_calls, 1);
+        assert_eq!(first.sync.hooks.snap_sync_calls, 1);
+
+        let second = runtime.client_unit_snapshot_entities.get(&5002).unwrap();
+        assert_eq!(second.type_info.id(), flare.id());
+        assert_eq!(second.team_id(), TeamId(2));
+        assert_eq!(second.x(), 32.0);
+        assert_eq!(second.y(), 40.0);
+        assert_eq!(second.rotation(), 135.0);
+        assert!(second.weapons.is_shooting);
+        assert_eq!(second.sync.hooks.read_sync_calls, 1);
+        assert_eq!(second.sync.hooks.snap_sync_calls, 1);
     }
 
     fn single_building_network_map(

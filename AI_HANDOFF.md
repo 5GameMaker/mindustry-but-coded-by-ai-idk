@@ -1800,3 +1800,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 建立/迁移 Java `EntityMapping` class-id 对照，避免 typed unit 解析完全依赖“能否按 UnitSyncWire 读通”。
   2. 继续做 `PlayerComp` typed snapshot。
   3. 支持 entity snapshot 多 record 变长拆包，而不是当前仅 amount=1 能携带 opaque sync bytes。
+
+---
+
+## 52. 最新闭环记录：EntitySnapshot 多 UnitSync record fallback 拆包
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 仍禁止使用。
+- 目标：补上 Java `NetClient.entitySnapshot(...)` 里一个 packet 内连续读取多条 `readSyncEntity(...)` 的一部分能力。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+  - `desktop/src/lib.rs`
+  - `tests/src/lib.rs`
+  - `MIGRATION.md`
+  - `AI_HANDOFF.md`
+- 行为变化：
+  - 新增 `GameRuntime::apply_client_entity_snapshot_packet_with_content(...)`；
+  - 当 `ClientEntitySnapshotMirror` 因多 record 变长 `sync_bytes` 无法固定拆分而出现 `parse_error` 时，`DesktopLauncher::sync_snapshot_mirrors(...)` 会把原始 `amount/data` 交给 runtime fallback；
+  - fallback 按 `id + type_id + UnitSyncWire` 连续读取，成功后每条都写 raw sidecar 并 materialize typed `UnitComp`。
+- 测试：
+  - `game_runtime_applies_multi_unit_entity_snapshot_packet_with_content`
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 现在额外覆盖一个 `amount=2`、含两条 unit sync bytes 的真实 server→desktop entity snapshot。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_multi_unit_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 下一步建议：
+  1. 迁移 Java `EntityMapping` class-id registry，避免“能按 UnitSyncWire 读通”这种临时判断。
+  2. 接入 `PlayerComp` typed snapshot，复用 `NetworkPlayerData` 与 `PlayerComp::apply_network_player_data(...)`。
+  3. 支持混合实体类型的通用变长拆包。

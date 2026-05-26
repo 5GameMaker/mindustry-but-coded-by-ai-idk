@@ -562,6 +562,14 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         .mappable
         .base
         .id;
+    let flare_id = server
+        .content_loader
+        .unit_by_name("flare")
+        .expect("base content should include flare")
+        .base
+        .mappable
+        .base
+        .id;
     let unit_sync = type_io::UnitSyncWire {
         abilities: Vec::new(),
         ammo: 7.0,
@@ -609,6 +617,77 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         amount: 2,
         data: second_entity_data,
     };
+    let multi_first_sync = type_io::UnitSyncWire {
+        abilities: Vec::new(),
+        ammo: 3.0,
+        controller: type_io::ControllerWire::Ground,
+        elevation: 0.5,
+        flag: 11.0,
+        health: 55.0,
+        is_shooting: false,
+        mine_tile: None,
+        mounts: Vec::new(),
+        plans: None,
+        rotation: 45.0,
+        shield: 1.0,
+        spawned_by_core: false,
+        stack: ItemStack::new("", 0),
+        statuses: Vec::new(),
+        team: TeamId(4),
+        type_id: dagger_id,
+        update_building: false,
+        vel: IoVec2 { x: 0.5, y: 0.25 },
+        x: 64.0,
+        y: 72.0,
+    };
+    let multi_second_sync = type_io::UnitSyncWire {
+        abilities: Vec::new(),
+        ammo: 5.0,
+        controller: type_io::ControllerWire::Ground,
+        elevation: 0.75,
+        flag: 22.0,
+        health: 66.0,
+        is_shooting: true,
+        mine_tile: None,
+        mounts: Vec::new(),
+        plans: None,
+        rotation: 135.0,
+        shield: 2.0,
+        spawned_by_core: true,
+        stack: ItemStack::new("", 0),
+        statuses: Vec::new(),
+        team: TeamId(5),
+        type_id: flare_id,
+        update_building: false,
+        vel: IoVec2 { x: -0.5, y: 1.25 },
+        x: 80.0,
+        y: 88.0,
+    };
+    let mut multi_first_bytes = Vec::new();
+    type_io::write_unit_sync(
+        &mut multi_first_bytes,
+        &server.content_loader,
+        &multi_first_sync,
+    )
+    .unwrap();
+    let mut multi_second_bytes = Vec::new();
+    type_io::write_unit_sync(
+        &mut multi_second_bytes,
+        &server.content_loader,
+        &multi_second_sync,
+    )
+    .unwrap();
+    let mut multi_entity_data = Vec::new();
+    multi_entity_data.extend_from_slice(&1004i32.to_be_bytes());
+    multi_entity_data.push(2);
+    multi_entity_data.extend_from_slice(&multi_first_bytes);
+    multi_entity_data.extend_from_slice(&1005i32.to_be_bytes());
+    multi_entity_data.push(2);
+    multi_entity_data.extend_from_slice(&multi_second_bytes);
+    let multi_entity = EntitySnapshotCallPacket {
+        amount: 2,
+        data: multi_entity_data,
+    };
     let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
 
     server
@@ -616,7 +695,11 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         .send_entity_sync_snapshot(
             connection_id,
             state_snapshot.clone(),
-            vec![first_entity.clone(), second_entity.clone()],
+            vec![
+                first_entity.clone(),
+                second_entity.clone(),
+                multi_entity.clone(),
+            ],
             Some(hidden.clone()),
         )
         .expect("real server should send entity sync snapshot");
@@ -630,8 +713,8 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             let state = desktop.net_client.state();
             let state = state.lock().unwrap();
             applied = state.last_state_snapshot.as_ref() == Some(&state_snapshot)
-                && state.entity_snapshot_packets_seen == 2
-                && state.last_entity_snapshot.as_ref() == Some(&second_entity)
+                && state.entity_snapshot_packets_seen == 3
+                && state.last_entity_snapshot.as_ref() == Some(&multi_entity)
                 && state.last_hidden_snapshot.as_ref() == Some(&hidden);
             last_client_status = format!(
                 "state={} entity={} hidden={} last_entity={:?} last_hidden={:?} provider_events={:?}",
@@ -643,7 +726,13 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 state.last_provider_events,
             );
         }
-        if applied && desktop.game_state.wave == state_snapshot.wave {
+        if applied
+            && desktop.game_state.wave == state_snapshot.wave
+            && desktop
+                .runtime
+                .client_unit_snapshot_entities
+                .contains_key(&1005)
+        {
             break;
         }
         thread::sleep(Duration::from_millis(20));
@@ -663,8 +752,8 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             state.last_entity_snapshot_connection_id,
             Some(connection_id)
         );
-        assert_eq!(state.last_entity_snapshot.as_ref(), Some(&second_entity));
-        assert_eq!(state.entity_snapshot_packets_sent, 2);
+        assert_eq!(state.last_entity_snapshot.as_ref(), Some(&multi_entity));
+        assert_eq!(state.entity_snapshot_packets_sent, 3);
         assert_eq!(
             state.last_hidden_snapshot_connection_id,
             Some(connection_id)
@@ -679,9 +768,9 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         let state = state.lock().unwrap();
         assert_eq!(state.state_snapshot_packets_seen, 1);
         assert_eq!(state.last_state_snapshot.as_ref(), Some(&state_snapshot));
-        assert_eq!(state.entity_snapshot_packets_seen, 2);
-        assert_eq!(state.last_entity_snapshot.as_ref(), Some(&second_entity));
-        assert_eq!(state.entity_snapshot_mirrors.len(), 2);
+        assert_eq!(state.entity_snapshot_packets_seen, 3);
+        assert_eq!(state.last_entity_snapshot.as_ref(), Some(&multi_entity));
+        assert_eq!(state.entity_snapshot_mirrors.len(), 3);
         assert_eq!(state.entity_snapshot_mirrors[0].records.len(), 1);
         assert_eq!(state.entity_snapshot_mirrors[0].records[0].entity_id, 1001);
         assert_eq!(state.entity_snapshot_mirrors[0].records[0].type_id, 2);
@@ -690,6 +779,8 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         assert_eq!(state.entity_snapshot_mirrors[1].records[0].type_id, 3);
         assert_eq!(state.entity_snapshot_mirrors[1].records[1].entity_id, 1003);
         assert_eq!(state.entity_snapshot_mirrors[1].records[1].type_id, 4);
+        assert!(state.entity_snapshot_mirrors[2].records.is_empty());
+        assert!(state.entity_snapshot_mirrors[2].parse_error.is_some());
         assert_eq!(state.hidden_snapshot_packets_seen, 1);
         assert_eq!(state.last_hidden_snapshot.as_ref(), Some(&hidden));
         assert_eq!(
@@ -728,6 +819,27 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     assert!(typed_unit.entity.is_added());
     assert_eq!(typed_unit.sync.hooks.read_sync_calls, 1);
     assert_eq!(typed_unit.sync.hooks.snap_sync_calls, 1);
+    let multi_first = desktop
+        .runtime
+        .client_unit_snapshot_entities
+        .get(&1004)
+        .expect("multi-record entity snapshot fallback should materialize first unit");
+    assert_eq!(multi_first.type_info.base.mappable.base.id, dagger_id);
+    assert_eq!(multi_first.team_id(), TeamId(4));
+    assert_eq!(multi_first.x(), 64.0);
+    assert_eq!(multi_first.y(), 72.0);
+    assert_eq!(multi_first.rotation(), 45.0);
+    let multi_second = desktop
+        .runtime
+        .client_unit_snapshot_entities
+        .get(&1005)
+        .expect("multi-record entity snapshot fallback should materialize second unit");
+    assert_eq!(multi_second.type_info.base.mappable.base.id, flare_id);
+    assert_eq!(multi_second.team_id(), TeamId(5));
+    assert_eq!(multi_second.x(), 80.0);
+    assert_eq!(multi_second.y(), 88.0);
+    assert_eq!(multi_second.rotation(), 135.0);
+    assert!(multi_second.weapons.is_shooting);
     assert_eq!(
         desktop
             .runtime

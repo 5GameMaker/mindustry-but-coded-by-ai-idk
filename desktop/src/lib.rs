@@ -179,7 +179,20 @@ impl DesktopLauncher {
             .skip(self.last_applied_entity_snapshot_mirror_count)
         {
             if mirror.parse_error.is_some() {
-                report.merge(self.runtime.note_client_entity_snapshot_parse_error());
+                let fallback = self
+                    .runtime
+                    .apply_client_entity_snapshot_packet_with_content(
+                        &self.content_loader,
+                        mirror.amount,
+                        &mirror.data,
+                    );
+                if fallback.entity_records_applied > 0 || fallback.entity_typed_records_applied > 0
+                {
+                    report.merge(fallback);
+                } else {
+                    report.merge(self.runtime.note_client_entity_snapshot_parse_error());
+                }
+                continue;
             }
             for record in &mirror.records {
                 report.merge(

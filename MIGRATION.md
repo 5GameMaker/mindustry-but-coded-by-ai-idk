@@ -2076,6 +2076,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
 - 仍未完成：entity `type_id` 到 Java `EntityMapping` 的精确 class-id 分发仍未完整建模；PlayerComp typed snapshot 与多 record 变长拆包仍需后续推进。
 
+### 12.38 EntitySnapshot 多 UnitSync record 变长拆包 fallback
+
+- 2026-05-26：继续对齐 Java `NetClient.entitySnapshot(...) -> readSyncEntity(...)` 的“一个 packet 内连续读取多个 `id + typeID + entity.readSync(...)` record”行为。
+- 背景：`NetClient::decode_client_entity_snapshot_records(...)` 只有在 `amount == 1` 时能保留 opaque `sync_bytes`；多 record 且带变长 payload 时 mirror 层无法按固定 header 拆分，会给出 parse error。
+- Rust 新增：
+  - `GameRuntime::apply_client_entity_snapshot_packet_with_content(...)`
+    - 输入 `amount + data`；
+    - 按 `id(i32) + type_id(u8) + UnitSyncWire` 顺序连续读取；
+    - 为每条 record 同时写 raw sidecar 与 typed `UnitComp`；
+  - `DesktopLauncher::sync_snapshot_mirrors(...)` 在 mirror parse error 时尝试调用上述 runtime fallback；fallback 成功则不再只记录 parse error。
+- 测试：
+  - `game_runtime_applies_multi_unit_entity_snapshot_packet_with_content`
+  - 扩展 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`：额外发送 `amount=2` 且包含两条 `UnitSyncWire` 的 entity snapshot；NetClient mirror 仍显示 parse error，但 Desktop runtime fallback materialize `1004/1005` 两个 typed unit。
+- 已验证：
+  - `cargo test -p mindustry-core game_runtime_applies_multi_unit_entity_snapshot_packet_with_content --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_client_snapshot_mirrors_to_runtime_sidecars --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop -p mindustry-tests`
+- 仍未完成：fallback 当前只支持可按 `UnitSyncWire` 连续读通的 Unit records；完整 `EntityMapping` class-id registry、PlayerComp typed snapshot 与混合实体 record 仍需后续迁移。
+
 ### 12.23 真实联机 Conveyor BlockSnapshot child tail smoke
 
 - 2026-05-26：扩展 `real_server_desktop_block_snapshot_updates_net_client_after_world_stream`，真实 `ServerLauncher -> DesktopLauncher` world stream 先 materialize 一个 `conveyor` building，再由服务端发送包含 `BuildingComp::write_base(...) + write_conveyor_state(...)` 的 `BlockSnapshotCallPacket`。
