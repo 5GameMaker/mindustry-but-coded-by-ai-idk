@@ -153,7 +153,7 @@ use crate::mindustry::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
         ConstructBlockState,
     },
-    world::{footprint_tiles, get_edges, point2_x, point2_y, Tile},
+    world::{footprint_tiles, get_edges, point2_x, point2_y, Tile, TimeItem},
 };
 
 pub struct GameRuntimeEffectResources<'a, 'b> {
@@ -5009,7 +5009,10 @@ impl GameRuntime {
         let target_is_item_bridge = matches!(
             content.block(self.buildings[target_index].block.id),
             Some(BlockDef::Distribution(distribution))
-                if distribution.kind == DistributionBlockKind::ItemBridge
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::ItemBridge | DistributionBlockKind::BufferedItemBridge
+                )
         );
         if target_is_item_bridge {
             return self.dump_item_to_item_bridge(content, source_index, target_index, item_id);
@@ -5577,7 +5580,11 @@ impl GameRuntime {
                 report.visited_buildings += 1;
                 match content.block(building.block.id) {
                     Some(BlockDef::Distribution(distribution))
-                        if distribution.kind == DistributionBlockKind::ItemBridge =>
+                        if matches!(
+                            distribution.kind,
+                            DistributionBlockKind::ItemBridge
+                                | DistributionBlockKind::BufferedItemBridge
+                        ) =>
                     {
                         report.bridge_candidates += 1;
                         Some(index)
@@ -5621,6 +5628,19 @@ impl GameRuntime {
             );
             self.set_item_bridge_warmup(tile_pos, bridge_block.kind, warmup);
 
+            if bridge_block.kind == DistributionBlockKind::BufferedItemBridge {
+                self.advance_buffered_item_bridge_transport(
+                    content,
+                    index,
+                    target_index,
+                    bridge_block,
+                    frame_delta,
+                    &mut report,
+                );
+                report.updated_bridges += 1;
+                continue;
+            }
+
             let edelta =
                 frame_delta * self.buildings[index].efficiency * self.buildings[index].time_scale;
             let counter = self
@@ -5645,6 +5665,60 @@ impl GameRuntime {
         }
 
         report
+    }
+
+    fn advance_buffered_item_bridge_transport(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        bridge_block: &crate::mindustry::content::blocks::DistributionBlockData,
+        frame_delta: f32,
+        report: &mut GameRuntimeItemBridgeFrameReport,
+    ) {
+        let tile_pos = self.buildings[source_index].tile_pos;
+        let now = {
+            let counter = self
+                .item_bridge_transport_counters
+                .entry(tile_pos)
+                .or_insert(0.0);
+            *counter += frame_delta.max(0.0);
+            *counter
+        };
+        let capacity = bridge_block.buffer_capacity.max(0) as usize;
+        if capacity > 0
+            && self.buffered_item_bridge_buffer_len(tile_pos) < capacity
+            && self.buildings[source_index]
+                .items
+                .as_ref()
+                .is_some_and(|items| items.total() > 0)
+        {
+            if let Some(item_id) = self.first_item_id_from_building(content, source_index) {
+                if let Some(items) = self.buildings[source_index].items.as_mut() {
+                    if items.get(item_id) > 0 {
+                        items.remove(item_id, 1);
+                        self.buffered_item_bridge_push(tile_pos, capacity, item_id, now);
+                    }
+                }
+            }
+        }
+
+        let time_scale = self.buildings[source_index].time_scale.max(0.0001);
+        let delay = bridge_block.speed / time_scale;
+        let Some(item_id) = self.buffered_item_bridge_ready_item(tile_pos, delay, now) else {
+            return;
+        };
+        report.attempted_moves += 1;
+        if self.handle_item_bridge_buffer_item_to_target(
+            content,
+            source_index,
+            target_index,
+            item_id,
+        ) {
+            self.buffered_item_bridge_remove_head(tile_pos);
+            self.mark_item_bridge_moved(tile_pos);
+            report.moved_items += 1;
+        }
     }
 
     fn ensure_item_bridge_state(
@@ -5700,6 +5774,109 @@ impl GameRuntime {
             }
             _ => unreachable!("non item bridge kind"),
         }
+    }
+
+    fn buffered_item_bridge_buffer_len(&self, tile_pos: i32) -> usize {
+        match self.distribution_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeDistributionBlockState::BufferedItemBridge(state)) => {
+                state.index.max(0) as usize
+            }
+            _ => 0,
+        }
+    }
+
+    fn buffered_item_bridge_push(
+        &mut self,
+        tile_pos: i32,
+        capacity: usize,
+        item_id: ContentId,
+        now: f32,
+    ) {
+        self.ensure_item_bridge_state(tile_pos, DistributionBlockKind::BufferedItemBridge);
+        let Some(GameRuntimeDistributionBlockState::BufferedItemBridge(buffered)) =
+            self.distribution_runtime_states.get_mut(&tile_pos)
+        else {
+            return;
+        };
+        let index = buffered.index.max(0) as usize;
+        if index >= capacity {
+            return;
+        }
+        if buffered.buffer.len() < capacity {
+            buffered.buffer.resize(capacity, 0);
+        }
+        buffered.buffer[index] = TimeItem::new(-1, item_id as i16, now).pack() as i64;
+        buffered.index = (index + 1) as i32;
+    }
+
+    fn buffered_item_bridge_ready_item(
+        &self,
+        tile_pos: i32,
+        delay: f32,
+        now: f32,
+    ) -> Option<ContentId> {
+        let Some(GameRuntimeDistributionBlockState::BufferedItemBridge(state)) =
+            self.distribution_runtime_states.get(&tile_pos)
+        else {
+            return None;
+        };
+        if state.index <= 0 || state.buffer.is_empty() {
+            return None;
+        }
+        let entry = TimeItem::unpack(state.buffer[0] as u64);
+        (now >= entry.time + delay || now < entry.time).then_some(entry.item)
+    }
+
+    fn buffered_item_bridge_remove_head(&mut self, tile_pos: i32) {
+        let Some(GameRuntimeDistributionBlockState::BufferedItemBridge(state)) =
+            self.distribution_runtime_states.get_mut(&tile_pos)
+        else {
+            return;
+        };
+        let len = state.index.max(0) as usize;
+        if len == 0 {
+            return;
+        }
+        if len > 1 {
+            state.buffer.copy_within(1..len, 0);
+        }
+        state.index -= 1;
+        let next_len = state.index.max(0) as usize;
+        if next_len < state.buffer.len() {
+            state.buffer[next_len] = 0;
+        }
+    }
+
+    fn handle_item_bridge_buffer_item_to_target(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+        item_id: ContentId,
+    ) -> bool {
+        if !self.dump_target_accepts_item(content, source_index, target_index, item_id) {
+            return false;
+        }
+        let target_tile_pos = self.buildings[target_index].tile_pos;
+        let Some(target_kind) = content
+            .block(self.buildings[target_index].block.id)
+            .and_then(|block| match block {
+                BlockDef::Distribution(distribution) => Some(distribution.kind),
+                _ => None,
+            })
+        else {
+            return false;
+        };
+        let item_capacity = self.buildings[target_index].block.item_capacity;
+        let Some(target_items) = self.buildings[target_index].items.as_mut() else {
+            return false;
+        };
+        if target_items.total() >= item_capacity {
+            return false;
+        }
+        target_items.add(item_id, 1);
+        self.ensure_item_bridge_state(target_tile_pos, target_kind);
+        true
     }
 
     fn item_bridge_warmup(&self, tile_pos: i32) -> f32 {
@@ -6570,7 +6747,10 @@ impl GameRuntime {
                 items.total() == 0 && target.block.item_capacity > 0
             }
             Some(BlockDef::Distribution(distribution))
-                if distribution.kind == DistributionBlockKind::ItemBridge =>
+                if matches!(
+                    distribution.kind,
+                    DistributionBlockKind::ItemBridge | DistributionBlockKind::BufferedItemBridge
+                ) =>
             {
                 let Some(items) = target.items.as_ref() else {
                     return false;
@@ -14003,6 +14183,91 @@ mod tests {
             panic!("target bridge sidecar should remain present");
         };
         assert_eq!(target_state.incoming, vec![source_tile]);
+    }
+
+    #[test]
+    fn game_runtime_buffered_item_bridge_buffers_then_delivers_to_real_receiver() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let bridge_def = content.block_by_name("bridge-conveyor").unwrap();
+        let item_void_def = content.block_by_name("item-void").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let source_tile = point2_pack(3, 4);
+        let target_tile = point2_pack(7, 4);
+        let item_void_tile = point2_pack(7, 5);
+        let mut source_building =
+            BuildingComp::new(source_tile, bridge_def.base().clone(), TeamId(6));
+        source_building.items.as_mut().unwrap().add(copper, 1);
+        let target_building = BuildingComp::new(target_tile, bridge_def.base().clone(), TeamId(6));
+        let item_void_building =
+            BuildingComp::new(item_void_tile, item_void_def.base().clone(), TeamId(6));
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(12, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(target_building);
+        runtime.add_building(item_void_building);
+        runtime.distribution_runtime_states.insert(
+            source_tile,
+            GameRuntimeDistributionBlockState::BufferedItemBridge(BufferedItemBridgeState {
+                bridge: ItemBridgeState {
+                    link: target_tile,
+                    ..ItemBridgeState::default()
+                },
+                index: 0,
+                buffer: Vec::new(),
+            }),
+        );
+        runtime.distribution_runtime_states.insert(
+            target_tile,
+            GameRuntimeDistributionBlockState::BufferedItemBridge(BufferedItemBridgeState {
+                bridge: ItemBridgeState::default(),
+                index: 0,
+                buffer: Vec::new(),
+            }),
+        );
+
+        let first = runtime
+            .advance_owned_item_bridges(&content, 1.0 / 60.0)
+            .unwrap();
+        assert_eq!(first.moved_items, 0);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        let Some(GameRuntimeDistributionBlockState::BufferedItemBridge(source_state)) =
+            runtime.distribution_runtime_states.get(&source_tile)
+        else {
+            panic!("source buffered bridge sidecar should remain present");
+        };
+        assert_eq!(source_state.index, 1);
+
+        let second = runtime
+            .advance_owned_item_bridges(&content, 80.0 / 60.0)
+            .unwrap();
+
+        assert_eq!(second.moved_items, 1);
+        assert_eq!(second.dumped_items, 1);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().get(copper), 0);
+        assert!(runtime.buildings[2].items.is_none());
+        let Some(GameRuntimeDistributionBlockState::BufferedItemBridge(source_state)) =
+            runtime.distribution_runtime_states.get(&source_tile)
+        else {
+            panic!("source buffered bridge sidecar should remain present");
+        };
+        assert_eq!(source_state.index, 0);
+        assert!(source_state.bridge.moved);
+        assert!(source_state.bridge.warmup > 0.0);
+        let Some(GameRuntimeDistributionBlockState::BufferedItemBridge(target_state)) =
+            runtime.distribution_runtime_states.get(&target_tile)
+        else {
+            panic!("target buffered bridge sidecar should remain present");
+        };
+        assert_eq!(target_state.bridge.incoming, vec![source_tile]);
     }
 
     #[test]
