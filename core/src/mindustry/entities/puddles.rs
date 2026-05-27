@@ -463,12 +463,32 @@ impl Puddles {
         mut build_present: impl FnMut(i32, i32) -> bool,
         mut fire_chance: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
     ) -> PuddleUpdateReport {
+        self.update_all_with_passability_report_and_event_handler(
+            delta,
+            headless,
+            &mut passable,
+            &mut build_present,
+            &mut fire_chance,
+            |_, _| Vec::new(),
+        )
+    }
+
+    pub fn update_all_with_passability_report_and_event_handler(
+        &mut self,
+        delta: f32,
+        headless: bool,
+        mut passable: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
+        mut build_present: impl FnMut(i32, i32) -> bool,
+        mut fire_chance: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
+        mut on_event: impl FnMut(&mut Self, &PuddleUpdateEvent) -> Vec<(i32, i32)>,
+    ) -> PuddleUpdateReport {
         let mut keys: Vec<_> = self
             .puddles
             .iter()
             .map(|(key, entry)| (entry.puddle.id, *key))
             .collect();
         keys.sort_by_key(|(id, key)| (*id, *key));
+        let mut queued_ids: HashSet<_> = keys.iter().map(|(id, _)| *id).collect();
         let mut report = PuddleUpdateReport::default();
 
         let mut processed_ids = HashSet::new();
@@ -479,9 +499,19 @@ impl Puddles {
             if !processed_ids.insert(id) {
                 continue;
             }
+            let current_id = self.puddles.get(&key).map(|entry| entry.puddle.id);
+            if current_id != Some(id) {
+                if let Some(current_id) = current_id {
+                    if !processed_ids.contains(&current_id) && queued_ids.insert(current_id) {
+                        keys.push((current_id, key));
+                    }
+                }
+                continue;
+            }
             let spread_targets = self.d4_spread_targets(key.0, key.1, &mut passable);
             let mut entry_spread_deposits = Vec::new();
             let mut removed_id = None;
+            let event;
             {
                 let Some(entry) = self.puddles.get_mut(&key) else {
                     continue;
@@ -501,9 +531,7 @@ impl Puddles {
                     headless,
                     fire_chance_passed: fire_chance(key.0, key.1, &liquid),
                 });
-                if let Some(event) = PuddleUpdateEvent::from_plan(&entry.puddle, &liquid, plan) {
-                    report.events.push(event);
-                }
+                event = PuddleUpdateEvent::from_plan(&entry.puddle, &liquid, plan);
                 if plan.deposited_per_target > 0.0 {
                     for target in spread_targets
                         .into_iter()
@@ -544,9 +572,23 @@ impl Puddles {
                 if result.created {
                     if let Some(tile_key) = result.tile {
                         if let Some(entry) = self.puddles.get(&tile_key) {
-                            if !processed_ids.contains(&entry.puddle.id) {
+                            if !processed_ids.contains(&entry.puddle.id)
+                                && queued_ids.insert(entry.puddle.id)
+                            {
                                 keys.push((entry.puddle.id, tile_key));
                             }
+                        }
+                    }
+                }
+            }
+            if let Some(event) = event {
+                report.events.push(event.clone());
+                for tile_key in on_event(self, &event) {
+                    if let Some(entry) = self.puddles.get(&tile_key) {
+                        if !processed_ids.contains(&entry.puddle.id)
+                            && queued_ids.insert(entry.puddle.id)
+                        {
+                            keys.push((entry.puddle.id, tile_key));
                         }
                     }
                 }

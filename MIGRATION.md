@@ -5070,4 +5070,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server puddle --lib`
 - 仍未完成：
   - Rust `HashMap` tile registry 与 Java `EntityGroup.remove` 的 swap/index 修正仍不完全同构，复杂“删除非当前 index + append replacement”场景后续还需更多回归；
-  - `CellLiquid.update` 仍未 inline 到单个 puddle update 末尾。
+  - `CellLiquid.update` inline 时机已在 12.173 继续收紧。
+
+### 12.173 Server CellLiquid.update inline per-puddle event callback
+
+- 2026-05-28：继续收紧 Java `PuddleComp.update()` 末尾 `liquid.update(self())` 的执行时机，避免 Rust server 把所有 puddle base update 跑完后才批量处理 `CellLiquid.update`。
+- Java 依据：
+  - `PuddleComp.update()` 的末尾直接调用 `liquid.update(self())`；
+  - 因此较早 neoplasm puddle 的 `CellLiquid.update` 可以在同一 `Groups.puddle.update()` tick 中影响后续 water puddle 的 base update；
+  - 若 neoplasm 先把相邻 water puddle 降到 `maxLiquid / 1.5f` 以下，后续 water puddle 本 tick 不应再执行 overfilled spread。
+- Rust 新增/变化：
+  - `Puddles::update_all_with_passability_report_and_event_handler(...)`：
+    - 保留旧 `update_all_with_passability_report(...)` API；
+    - 新增 per-puddle event callback，当前 puddle update + immediate spread deposit 后立即触发；
+    - callback 返回 touched tile keys，外层会把新创建/替换且未处理的 puddle 追加到同 tick queue；
+    - 增加 current-id mismatch 检查，避免旧 queued key 在 tile 被替换后错误更新新 puddle。
+  - `server::ServerLauncher::tick_server_puddles(...)`：
+    - 临时取出 `runtime.server_puddles`，用 world/content snapshot 提供 passability/build-present；
+    - 通过 per-puddle callback 调用 `process_server_puddle_liquid_update(...)`；
+    - 移除旧的整轮后 `liquid_update` 批处理，避免双跑；
+    - `CellLiquid.update` 的 building 吸收、current-building damage/spread、nearby puddle absorb/replacement 与 `Trigger::NeoplasmReact` 现在按 puddle 顺序 inline 执行。
+  - 调整既有 CellLiquid replacement 测试：
+    - replacement neoplasm 现在会按 Java `EntityGroup.update()` 动态 append 在同 tick 继续 update；
+    - 因此 replacement amount 会有一次同 tick 蒸发，且在有 building water 时 replacement 自身的 `CellLiquid.update` 可再次把 remaining building water 写入 accepting。
+- 新增验证：
+  - `server_puddle_cell_liquid_update_runs_before_later_puddle_base_update`
+    - neoplasm 先创建，water 后创建；
+    - water 初始 amount 设为若未被 neoplasm 先吸收就会外溢；
+    - tick 后断言 water 没有向 `(3,2)` 产生多余 spread puddle，且 water amount 已低于 overfilled spread 阈值。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_runs_before_later_puddle_base_update --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - `affect_units/create_fire/puddle_on_building/particle_effect` 仍未全部搬进同一个 per-puddle callback 消费顺序；当前最关键的 `CellLiquid.update` 时机已收紧；
+  - callback 当前用 touched tile keys 重新入队，后续如果更多 liquid/update side-effect 会触达非 D4 tile，需要扩展 touched 范围或由具体 consumer 精确返回。

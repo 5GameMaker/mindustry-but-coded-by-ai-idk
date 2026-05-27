@@ -3762,5 +3762,47 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo fmt --check`、`git diff --check`；
   2. 中文提交并推送 `origin main`，建议标题：`即时清理移除液体坑`；
   3. 后续欠账：
-     - `CellLiquid.update` 仍是 report 后统一处理，不是 Java 单 puddle update 末尾 inline；
+     - `CellLiquid.update` report 后统一处理的时序欠账已在下一闭环继续处理；
      - Java `EntityGroup.remove` swap/index 行为与 Rust tile-keyed map 仍有复杂边界差异。
+
+---
+
+## 114. 最新闭环记录：CellLiquid.update 按 puddle 顺序 inline 到 server tick
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：把 server 侧 `CellLiquid.update(Puddle)` 从“整轮 puddle update 后批处理”提前到每个 puddle update 后的 callback，更接近 Java `PuddleComp.update()` 末尾立即 `liquid.update(self())`。
+- Java 依据：
+  - `PuddleComp.update()` 执行完基础蒸发、外溢、effects-only、`updateTime -= Time.delta` 后，马上调用 `liquid.update(self())`；
+  - 较早 neoplasm puddle 的 `CellLiquid.update` 可以影响同 tick 后续 water puddle 的 base update。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - 新增 `update_all_with_passability_report_and_event_handler(...)`；
+    - 旧 `update_all_with_passability_report(...)` 保持兼容，默认传 no-op callback；
+    - per-puddle callback 在 current puddle update + immediate spread deposits 后调用；
+    - callback 返回 touched tile keys，外层会追加新建/替换且未处理的 puddle；
+    - 增加 current-id mismatch 检查，避免旧 queued key 在 tile replacement 后错误更新新 puddle。
+  - `core/src/mindustry/entities/mod.rs`
+    - re-export `PuddleUpdateEvent`，供 server callback 使用。
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 临时取出 `runtime.server_puddles`，用 world/content snapshot 做 passability；
+    - per-puddle callback 调用 `process_server_puddle_liquid_update(...)`；
+    - 移除旧的整轮后 `liquid_update` loop，避免双跑；
+    - 新增 `server_puddle_cell_liquid_update_runs_before_later_puddle_base_update`。
+- 新回归场景：
+  - neoplasm 先创建、water 后创建；
+  - water 初始 amount 在旧 batch 模型下会先外溢；
+  - inline 后 neoplasm 先吸收 water，使 water 掉到 spread 阈值以下；
+  - 断言 `(3,2)` 没有多余 water spread puddle。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_runs_before_later_puddle_base_update --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`内联新生物液体更新时机`；
+  2. 后续欠账：
+     - `affect_units/create_fire/puddle_on_building/particle_effect` 仍未完全搬到 per-puddle callback 的 Java 顺序中；
+     - touched tile keys 当前覆盖 center+D4，后续更多 liquid side-effect 若触达更远范围要扩展。
