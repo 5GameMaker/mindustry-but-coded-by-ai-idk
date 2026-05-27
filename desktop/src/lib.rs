@@ -84,6 +84,7 @@ pub struct DesktopLauncher {
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
     last_service_trigger_apply_summary: Option<GameServiceApplySummary>,
     last_applied_client_plan_snapshot_received_count: usize,
+    puddle_particle_rand_state: u64,
 }
 
 impl DesktopLauncher {
@@ -128,6 +129,7 @@ impl DesktopLauncher {
             last_client_snapshot_apply_report: None,
             last_service_trigger_apply_summary: None,
             last_applied_client_plan_snapshot_received_count: 0,
+            puddle_particle_rand_state: DESKTOP_PUDDLE_PARTICLE_RAND_DEFAULT,
         }
     }
 
@@ -155,8 +157,15 @@ impl DesktopLauncher {
         self.sync_remote_preview_plan_packets(now_millis);
         self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
         self.runtime.tick_client_move_effect_abilities(1.0, false);
+        let mut puddle_particle_rand_state = self.puddle_particle_rand_state;
         self.runtime
-            .tick_client_puddle_snapshot_particle_effects(1.0, |_| (0.0, 0.0));
+            .tick_client_puddle_snapshot_particle_effects(1.0, |particle| {
+                (
+                    next_puddle_particle_range(&mut puddle_particle_rand_state, particle.range),
+                    next_puddle_particle_range(&mut puddle_particle_rand_state, particle.range),
+                )
+            });
+        self.puddle_particle_rand_state = puddle_particle_rand_state;
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -1346,6 +1355,8 @@ impl DesktopLauncher {
         self.sync_runtime_state_from_game_state();
         self.runtime
             .set_network_context(GameRuntimeNetworkContext::client());
+        self.puddle_particle_rand_state =
+            mix_puddle_particle_seed(world_data.rand_seed0, world_data.rand_seed1);
         self.last_runtime_map_load_report = world_data.map_snapshot.as_ref().map(|map| {
             self.runtime
                 .load_network_map_with_buildings(&self.content_loader, map)
@@ -1447,6 +1458,31 @@ fn current_millis() -> i64 {
         .unwrap_or_default()
         .as_millis();
     millis.min(i64::MAX as u128) as i64
+}
+
+const DESKTOP_PUDDLE_PARTICLE_RAND_DEFAULT: u64 = 0x9e37_79b9_7f4a_7c15;
+
+fn mix_puddle_particle_seed(seed0: i64, seed1: i64) -> u64 {
+    let mixed = (seed0 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ (seed1 as u64).rotate_left(32)
+        ^ 0xd1b5_4a32_d192_ed03;
+    if mixed == 0 {
+        DESKTOP_PUDDLE_PARTICLE_RAND_DEFAULT
+    } else {
+        mixed
+    }
+}
+
+fn next_puddle_particle_unit(rand_state: &mut u64) -> f32 {
+    *rand_state = (*rand_state)
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    ((*rand_state >> 40) as u32 as f32) / ((1u32 << 24) as f32)
+}
+
+fn next_puddle_particle_range(rand_state: &mut u64, range: f32) -> f32 {
+    let range = range.max(0.0);
+    (next_puddle_particle_unit(rand_state) * 2.0 - 1.0) * range
 }
 
 fn parse_connect_target(args: &[String]) -> Option<DesktopConnectTarget> {
@@ -2458,7 +2494,14 @@ mod tests {
             effect.effect.effect_id,
             standard_effect_id("ripple").unwrap() as u16
         );
-        assert_eq!((effect.effect.x, effect.effect.y), (8.0, 16.0));
+        let offset_x = effect.effect.x - 8.0;
+        let offset_y = effect.effect.y - 16.0;
+        assert!(offset_x.abs() <= 3.0);
+        assert!(offset_y.abs() <= 3.0);
+        assert!(
+            offset_x.abs() > 0.0001 || offset_y.abs() > 0.0001,
+            "desktop should no longer collapse Java Mathf.range(size) to the puddle center"
+        );
         assert_eq!(effect.data, TypeValue::Null);
     }
 

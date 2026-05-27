@@ -5268,3 +5268,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - desktop puddle particle offset 暂为 `(0,0)`，仍需接入 Java 等价 RNG/range；
   - `standard_effect_id(...)` 仍缺完整 Fx registry；
   - 真正 renderer 仍未消费 drain 出来的 effect packet。
+
+### 12.179 Desktop puddle particle range RNG
+
+- 2026-05-28：把 12.178 中 desktop puddle particle 的临时 `(0,0)` offset 替换为可复现的 range 随机偏移，使非 headless puddle particle 更接近 Java `Mathf.range(size)`。
+- Java 依据：
+  - `PuddleComp.update()` 调用 `liquid.particleEffect.at(x + Mathf.range(size), y + Mathf.range(size))`；
+  - `Mathf.range(size)` 语义为在 `[-size, size]` 范围内取随机偏移，X/Y 各取一次。
+- Rust 新增/变化：
+  - `desktop::DesktopLauncher` 新增 `puddle_particle_rand_state`；
+  - 新增 helper：
+    - `mix_puddle_particle_seed(seed0, seed1)`：从 network world 的 `rand_seed0/rand_seed1` 混合出 desktop puddle particle seed；
+    - `next_puddle_particle_unit(...)` / `next_puddle_particle_range(...)`：生成 `[0,1)` 与 `[-range, range]` 偏移；
+  - `sync_runtime_state_from_world_data(...)` 现在会按 world rand seeds 重置 puddle particle RNG；
+  - `DesktopLauncher::update()` 调用 `tick_client_puddle_snapshot_particle_effects(...)` 时为每个 particle 分别生成 X/Y range offset，不再固定在 puddle center。
+- 更新验证：
+  - `desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue`
+    - 现在断言 effect 坐标位于 Java range 范围内；
+    - 并断言不会退化为 puddle center。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 RNG 是 Rust 侧可复现 LCG，并非 Arc `Rand` 位级同构；
+  - `standard_effect_id(...)` 仍缺完整 Fx registry；
+  - 真正 renderer 仍未消费 drain 出来的 effect packet。

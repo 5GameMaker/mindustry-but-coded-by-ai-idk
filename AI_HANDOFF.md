@@ -3963,3 +3963,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - desktop puddle particle offset 仍是 `(0,0)`，需要接入 Java 等价 RNG；
      - 完整 Fx registry 和真实 renderer 仍未完成；
      - Puddle/CellLiquid 之外仍有大量 gameplay/block/client UI 文件待逐文件迁移。
+
+---
+
+## 120. 最新闭环记录：Desktop puddle particle range RNG
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：把 119 中 desktop puddle particle 的 `(0,0)` 临时 offset 替换为 `[-range, range]` 随机偏移。
+- Java 依据：
+  - `PuddleComp.update()` 的 particle 分支使用 `liquid.particleEffect.at(x + Mathf.range(size), y + Mathf.range(size))`；
+  - X/Y 各采样一次 range offset。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `puddle_particle_rand_state`；
+    - 新增 `mix_puddle_particle_seed(...)`、`next_puddle_particle_unit(...)`、`next_puddle_particle_range(...)`；
+    - `sync_runtime_state_from_world_data(...)` 使用 world `rand_seed0/rand_seed1` 重置 puddle particle RNG；
+    - `update()` 调用 `tick_client_puddle_snapshot_particle_effects(...)` 时生成 X/Y range offset。
+- 更新测试：
+  - `desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue`
+    - 断言坐标在 Java range 范围内；
+    - 断言不再退化为 puddle center。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`随机化液体坑粒子偏移`；
+  2. 后续欠账：
+     - RNG 目前不是 Arc `Rand` 位级同构；
+     - 完整 Fx registry 和真实 renderer 仍未完成；
+     - 继续向 Puddles/CellLiquid 外的大量 Java 文件迁移。
