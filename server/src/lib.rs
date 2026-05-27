@@ -5,7 +5,8 @@ use mindustry_core::mindustry::content::blocks::{
 };
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
-    GameRuntimePowerNodeConfigResult, GameRuntimeUnitCargoUnloadConfigureResult,
+    GameRuntimePowerNodeConfigResult, GameRuntimeUnitBlockState,
+    GameRuntimeUnitCargoUnloadConfigureResult,
 };
 use mindustry_core::mindustry::core::net_server::{
     PlayerPreviewPlanSource, PLAN_PREVIEW_SYNC_INTERVAL_MS,
@@ -52,6 +53,7 @@ use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
     AppContext, RuntimeMode, ITEM_TRANSFER_RANGE, MAX_PLAYER_PREVIEW_PLANS, TILE_SIZE,
 };
+use mindustry_core::mindustry::world::blocks::autotiler_direction;
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::world::blocks::payloads::{payload_ref_sort_key, PayloadRef};
 use mindustry_core::mindustry::world::meta::BuildVisibility;
@@ -272,6 +274,11 @@ impl ServerLauncher {
             }
             if let Err(error) =
                 self.broadcast_runtime_assembler_unit_spawns(&report.unit.assembler.spawned_tiles)
+            {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) =
+                self.apply_runtime_unit_assembler_spawns(&report.unit.assembler.spawned_tiles)
             {
                 self.network_error = Some(error.to_string());
             }
@@ -1532,6 +1539,83 @@ impl ServerLauncher {
                     true,
                 )?;
             }
+            applied += 1;
+        }
+
+        Ok(applied)
+    }
+
+    fn apply_runtime_unit_assembler_spawns(&mut self, tile_positions: &[i32]) -> io::Result<usize> {
+        if tile_positions.is_empty() {
+            return Ok(0);
+        }
+
+        let mut applied = 0;
+        let mut seen = BTreeSet::new();
+        for tile_pos in tile_positions {
+            if !seen.insert(*tile_pos) {
+                continue;
+            }
+            let Some(building) = self
+                .runtime
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == *tile_pos)
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(BlockDef::UnitAssembler(assembler_block)) =
+                self.content_loader.block(building.block.id)
+            else {
+                continue;
+            };
+            let current_tier = self
+                .runtime
+                .unit_runtime_states
+                .get(tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Assembler { assembler, .. } => {
+                        Some(assembler.current_tier.max(0) as usize)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0);
+            let Some(plan) = assembler_block
+                .plans
+                .get(current_tier.min(assembler_block.plans.len().saturating_sub(1)))
+            else {
+                continue;
+            };
+            let Some(unit_type) = self.content_loader.unit_by_name(&plan.unit).cloned() else {
+                continue;
+            };
+            let command_pos = self
+                .runtime
+                .unit_runtime_states
+                .get(tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Assembler { assembler, .. } => assembler.command_pos,
+                    _ => None,
+                });
+
+            let (dx, dy) = autotiler_direction(building.rotation);
+            let len = TILE_SIZE as f32
+                * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+            let spawn_x = building.x + dx as f32 * len;
+            let spawn_y = building.y + dy as f32 * len;
+            let unit_id = self.next_server_runtime_unit_id();
+            let mut unit = UnitComp::new(unit_id, unit_type, building.team);
+            unit.set_pos(spawn_x, spawn_y);
+            unit.set_rotation(building.rotdeg());
+            if let Some(target_pos) = command_pos {
+                unit.set_controller(UnitControllerState::Command(type_io::CommandWire {
+                    target_pos: Some(target_pos),
+                    ..type_io::CommandWire::default()
+                }));
+            }
+            self.server_units.insert(unit_id, unit);
             applied += 1;
         }
 
@@ -4924,6 +5008,8 @@ mod tests {
             panic!("tank-assembler should be a unit assembler");
         };
         let plan = &assembler_block.plans[0];
+        let plan_time = plan.time;
+        let plan_unit_name = plan.unit.clone();
         let assembler_tile = point2_pack(8, 8);
         launcher.runtime.add_building(BuildingComp::new(
             assembler_tile,
@@ -4933,6 +5019,10 @@ mod tests {
         if let Some(power) = launcher.runtime.buildings[0].power.as_mut() {
             power.status = 1.0;
         }
+        let expected_spawn_x = launcher.runtime.buildings()[0].x
+            + TILE_SIZE as f32 * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+        let expected_spawn_y = launcher.runtime.buildings()[0].y;
 
         let mut blocks = PayloadSeq::new();
         blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 4);
@@ -4941,13 +5031,15 @@ mod tests {
             10,
         );
         blocks.add(PayloadKey::new(ContentType::Block, router.base().id), 2);
+        let command_pos = Vec2::new(96.0, 128.0);
         launcher.runtime.unit_runtime_states.insert(
             assembler_tile,
             GameRuntimeUnitBlockState::Assembler {
                 common: PayloadBlockBuildState::default(),
                 assembler: UnitAssemblerState {
-                    progress: 1.0 - 1.0 / plan.time,
+                    progress: 1.0 - 1.0 / plan_time,
                     blocks,
+                    command_pos: Some(command_pos),
                     ..UnitAssemblerState::default()
                 },
             },
@@ -4962,6 +5054,20 @@ mod tests {
         };
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
+
+        let spawned_unit = launcher
+            .server_units
+            .values()
+            .find(|unit| unit.type_info.name() == plan_unit_name)
+            .expect("assembler completion should materialize the output unit server-side");
+        assert_eq!(spawned_unit.team_id(), TeamId(6));
+        assert_eq!(spawned_unit.x(), expected_spawn_x);
+        assert_eq!(spawned_unit.y(), expected_spawn_y);
+        assert_eq!(spawned_unit.rotation(), 0.0);
+        let UnitControllerState::Command(command) = &spawned_unit.controller else {
+            panic!("commanded assembler output should preserve command controller");
+        };
+        assert_eq!(command.target_pos, Some(command_pos));
 
         let sent = sent.lock().unwrap();
         assert!(sent.iter().any(|(_connection_id, packet, reliable)| {

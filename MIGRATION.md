@@ -4001,3 +4001,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop syncs_assembler_unit_spawned --lib`
   - `cargo test -p mindustry-server assembler_unit_spawn_packet --lib`
 - 仍未完成：完成时真实 materialize `plan.unit` / payload 投递、`commandPos` 应用、`Fx.unitAssemble` / create sound / `UnitCreateEvent`、AssemblerDroneSpawned 以及真实 Java↔Rust smoke 仍需继续迁移。
+
+### 12.125 UnitAssembler 完成后服务端实体产出
+
+- 2026-05-27：继续对照 Java `UnitAssemblerBuild.spawned()`，把上一节的 `AssemblerUnitSpawnedCallPacket` 事件推进到 Rust server 的真实 `server_units` 实体产出，避免 UnitAssembler 只复位 sidecar 而不产生可同步单位。
+- Java 依据：
+  - `spawned()` 使用当前 plan 的 `unit.create(team)` 创建输出单位；
+  - 若 `commandPos != null`，调用 `unit.command().commandPosition(commandPos)`；
+  - 输出位置来自 `getUnitSpawn()`，即按 assembler 旋转方向偏移 `(areaSize + size) / 2 * tilesize`。
+- Rust 新增/变化：
+  - `ServerLauncher::update()` 在收到 `report.unit.assembler.spawned_tiles` 后调用 `apply_runtime_unit_assembler_spawns(...)`；
+  - `apply_runtime_unit_assembler_spawns(...)` 按 tile 定位 UnitAssembler、当前 tier plan、输出 `UnitType` 与 `command_pos`，创建新的 server runtime unit；
+  - 新单位写入 `server_units`，位置按 Java `getUnitSpawn()` 等价公式计算，旋转使用 building `rotdeg()`，存在 `command_pos` 时设置 `UnitControllerState::Command`；
+  - 后续既有 `broadcast_server_unit_entity_snapshots()` 可把该单位同步给客户端。
+- 新增验证：
+  - `cargo test -p mindustry-server assembler_unit_spawn_packet --lib`
+- 仍未完成：Java `spawned()` 中“先包装成 `UnitPayload` 并尝试投递给目标建筑”的分支、`Units.notifyUnitSpawn`、create sound/effect/event、真实 AssemblerDrone/AssemblerAI/BuildingTether 与 Java↔Rust smoke 仍需继续迁移。
