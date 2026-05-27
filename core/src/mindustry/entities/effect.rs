@@ -102,6 +102,91 @@ pub fn standard_effect_render_lifetime(effect_id: Option<u16>, rotation: f32, cu
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandardEffectDrawKind {
+    FilledCircle,
+    StrokedCircle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectDrawPlan {
+    pub effect_id: i32,
+    pub layer: f32,
+    pub kind: StandardEffectDrawKind,
+    pub center: (f32, f32),
+    pub color_from: Option<&'static str>,
+    pub color_to: Option<&'static str>,
+    pub color_mix: f32,
+    pub input_color: Option<DecalColor>,
+    pub color_mul: f32,
+    pub radius: f32,
+    pub stroke: f32,
+}
+
+pub fn standard_effect_draw_plan(
+    effect_id: Option<u16>,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    time: f32,
+    lifetime: f32,
+    color: DecalColor,
+) -> Option<StandardEffectDrawPlan> {
+    let effect_id = effect_id.map(i32::from)?;
+    let effect = standard_effect(effect_id)?;
+    let lifetime = standard_effect_render_lifetime(Some(effect_id as u16), rotation, lifetime);
+    let fin = if lifetime.abs() <= f32::EPSILON {
+        1.0
+    } else {
+        (time / lifetime).clamp(0.0, 1.0)
+    };
+    let fout = 1.0 - fin;
+
+    let plan = match effect_id {
+        FX_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledCircle,
+            center: (x, y),
+            color_from: Some("Color.gray"),
+            color_to: Some("Pal.darkishGray"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            radius: (7.0 - 7.0 * fin) / 2.0,
+            stroke: 0.0,
+        },
+        FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledCircle,
+            center: (x, y),
+            color_from: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            radius: rotation * fout,
+            stroke: 0.0,
+        },
+        FX_RIPPLE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.5,
+            radius: (2.0 + fin * 4.0) * rotation,
+            stroke: fout * 1.4,
+        },
+        _ => return None,
+    };
+    Some(plan)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
     pub id: i32,
@@ -1315,6 +1400,59 @@ mod tests {
             100.0
         );
         assert_eq!(standard_effect_render_lifetime(None, 2.5, 10.0), 10.0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_smoke_trails_and_ripple() {
+        let smoke = standard_effect_draw_plan(
+            Some(FX_SMOKE_ID as u16),
+            10.0,
+            20.0,
+            0.0,
+            50.0,
+            100.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(smoke.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(smoke.center, (10.0, 20.0));
+        assert_eq!(smoke.color_from, Some("Color.gray"));
+        assert_eq!(smoke.color_to, Some("Pal.darkishGray"));
+        assert_eq!(smoke.color_mix, 0.5);
+        assert_eq!(smoke.radius, 1.75);
+
+        let trail = standard_effect_draw_plan(
+            Some(FX_MISSILE_TRAIL_SHORT_ID as u16),
+            1.0,
+            2.0,
+            4.0,
+            11.0,
+            22.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(trail.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(trail.input_color, Some(DecalColor::WHITE));
+        assert_eq!(trail.radius, 2.0);
+        assert_eq!(trail.layer, Layer::BULLET - 0.001);
+
+        let ripple = standard_effect_draw_plan(
+            Some(FX_RIPPLE_ID as u16),
+            3.0,
+            4.0,
+            2.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(ripple.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(ripple.color_mul, 1.5);
+        assert!((ripple.radius - 6.0).abs() < 0.0001);
+        assert!((ripple.stroke - 1.05).abs() < 0.0001);
+        assert!(
+            standard_effect_draw_plan(None, 0.0, 0.0, 0.0, 0.0, 1.0, DecalColor::WHITE).is_none()
+        );
     }
 
     #[test]

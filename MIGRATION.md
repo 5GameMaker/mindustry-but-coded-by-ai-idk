@@ -5495,7 +5495,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop standard_effect_draw --lib`
   - `cargo check -p mindustry-core`
   - `cargo check -p mindustry-desktop`
+  - `cargo test -p mindustry-core --lib`
+  - `cargo test -p mindustry-desktop --lib`
   - `git diff --check`
 - 仍未完成：
   - 这仍只更新 lifetime，没有产生真实 GPU draw command；
   - 其他 `Fx.java` renderer 内的视觉几何/颜色/随机粒子仍未完整迁移。
+
+### 12.186 Standard local effect draw plans
+
+- 2026-05-28：在 `EffectStateComp::draw_with(...)` 与 `DesktopLauncher::draw_standard_local_effect_states_for_render()` 基础上，开始把高频标准 Fx 的 renderer 公式转成可供桌面渲染层消费的 draw plan，而不是只执行 lifetime 回写。
+- Java 依据：
+  - `Fx.smoke`：
+    - `color(Color.gray, Pal.darkishGray, e.fin())`；
+    - `Fill.circle(e.x, e.y, (7f - e.fin() * 7f)/2f)`。
+  - `Fx.missileTrail` / `Fx.missileTrailShort`：
+    - `color(e.color)`；
+    - `Fill.circle(e.x, e.y, e.rotation * e.fout())`。
+  - `Fx.ripple`：
+    - `e.lifetime = 30f * e.rotation`；
+    - `color(e.color * 1.5f)`；
+    - `stroke(e.fout() * 1.4f)`；
+    - `Lines.circle(e.x, e.y, (2f + e.fin() * 4f) * e.rotation)`。
+- Rust 新增/变化：
+  - `StandardEffectDrawKind::{FilledCircle, StrokedCircle}`；
+  - `StandardEffectDrawPlan`，携带 `effect_id/layer/kind/center/color_from/color_to/color_mix/input_color/color_mul/radius/stroke`；
+  - `standard_effect_draw_plan(...)` 覆盖 `smoke`、`missileTrail`、`missileTrailShort`、`ripple`；
+  - `DesktopLauncher::collect_standard_local_effect_draw_plans_for_render()` 在 draw callback 中收集 draw plan，同时继续执行 Java 风格 lifetime 回写。
+- 新增验证：
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple`
+  - `desktop_launcher_standard_effect_draw_updates_ripple_lifetime` 增加 draw plan 断言。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-desktop standard_effect_draw --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - draw plan 仍需接到真实 GPU/2D backend；
+  - 当前只覆盖 4 个高频 Fx，完整 `Fx.java` renderer 仍待逐项迁移；
+  - 颜色名如 `Pal.darkishGray` 仍是符号计划，后续 renderer/asset layer 需要解析成实际颜色。

@@ -15,8 +15,9 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, standard_effect, standard_effect_render_lifetime, EffectRenderInput,
-    EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
+    entity_class_kind, standard_effect, standard_effect_draw_plan, standard_effect_render_lifetime,
+    EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
+    StandardEffectDrawPlan, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -192,9 +193,29 @@ impl DesktopLauncher {
     }
 
     pub fn draw_standard_local_effect_states_for_render(&mut self) -> usize {
+        self.collect_standard_local_effect_draw_plans_for_render()
+            .len()
+    }
+
+    pub fn collect_standard_local_effect_draw_plans_for_render(
+        &mut self,
+    ) -> Vec<StandardEffectDrawPlan> {
+        let mut plans = Vec::new();
         self.draw_local_effect_states_for_render(|input| {
+            if let Some(plan) = standard_effect_draw_plan(
+                input.effect_id,
+                input.x,
+                input.y,
+                input.rotation,
+                input.time,
+                input.lifetime,
+                input.color,
+            ) {
+                plans.push(plan);
+            }
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
-        })
+        });
+        plans
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -1581,9 +1602,10 @@ mod tests {
                 BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, PuddleComp,
                 UnitComp, UnitControllerState,
             },
-            entity_class_id, standard_effect_id, PlayerComp, PuddleLiquidInfo, BULLET_CLASS_ID,
-            DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
-            WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
+            entity_class_id, standard_effect_id, PlayerComp, PuddleLiquidInfo,
+            StandardEffectDrawKind, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
+            FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+            WORLD_LABEL_CLASS_ID,
         },
         game::{BlockPlan, Trigger, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -2438,6 +2460,12 @@ mod tests {
             30.0
         );
 
+        let plans = launcher.collect_standard_local_effect_draw_plans_for_render();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(plans[0].center, (8.0, 16.0));
+        assert_eq!(plans[0].color_mul, 1.5);
+        assert!((plans[0].radius - 4.0).abs() < 0.0001);
         assert_eq!(launcher.draw_standard_local_effect_states_for_render(), 1);
         assert_eq!(
             launcher
