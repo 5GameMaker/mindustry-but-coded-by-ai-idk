@@ -6578,3 +6578,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `launchPod=248` 仍需 scaled 子时间片与 lineAngle；
   - `healBlockFull=252` 仍需 block icon/rect/mixcol；
   - seeded stroked-circle primitive 仍需真实 renderer backend 消费。
+
+### 12.216 Seeded line primitive + Fx.disperseTrail
+
+- 2026-05-28：新增最小 seeded line primitive，用于承载 Java `lineAngle(...)` 类效果，并迁移 `Fx.disperseTrail`。
+- 本轮迁移：
+  - `disperseTrail=76`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:841` 附近：
+    - `disperseTrail = new Effect(13, ...)`；
+    - `color(Color.white, e.color, e.fin())`；
+    - `stroke(0.6f + e.fout() * 1.7f)`；
+    - `rand.setSeed(e.id)`；
+    - 每轮随机顺序：`rand.range(15f)` → `rand.random(e.fin()*27f)` → `rand.random(2f, 7f)`；
+    - `lineAngle(e.x + v.x, e.y + v.y, rot, e.fout()*random(2,7)+1.5)`。
+  - Java probe golden（`state_id=76, rotation=30, fin=fout=0.5, x=1, y=2`）：
+    - line0: `rot=202.726272583, start=(-6.679361343,-1.217186213), len=4.280647278`
+    - line1: `rot=211.697906494, start=(-0.282225013,1.208218694), len=4.923982620`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - `StandardEffectDrawKind` 新增 `SeededLineParticles`；
+    - 新增 `StandardEffectLineRenderPrimitive`；
+    - 新增 `line_render_primitives_from_seed()`；
+    - `ArcRand` 新增 `random_between(min,max)`；
+    - 新增 `FX_DISPERSE_TRAIL_ID = 76`，接入 name/metadata/draw plan；
+    - `disperseTrail` draw plan 使用 white→input color 插值、seeded line 展开和 Java 随机调用顺序。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `disperseTrail`；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 用 Java probe golden 锁定两个 line primitive 的 angle/start/length/stroke。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 仍未完成：
+  - line primitive 仍需真实 renderer backend 消费；
+  - `hitBullet*` 等后续 line/light/scaled 组合效果仍需更通用的 multi-pass 表达；
+  - `launchPod=248` 仍需 scaled circle + seeded line 组合。

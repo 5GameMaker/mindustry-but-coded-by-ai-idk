@@ -20,6 +20,8 @@ pub const FX_DYNAMIC_WAVE_ID: i32 = 73;
 pub const FX_SHIELD_WAVE_ID: i32 = 74;
 /// Upstream `Fx.shieldApply` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHIELD_APPLY_ID: i32 = 75;
+/// Upstream `Fx.disperseTrail` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DISPERSE_TRAIL_ID: i32 = 76;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
 /// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -159,6 +161,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "dynamicWave" => Some(FX_DYNAMIC_WAVE_ID),
         "shieldWave" => Some(FX_SHIELD_WAVE_ID),
         "shieldApply" => Some(FX_SHIELD_APPLY_ID),
+        "disperseTrail" => Some(FX_DISPERSE_TRAIL_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
@@ -249,6 +252,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_DYNAMIC_WAVE_ID => Effect::with_lifetime(FX_DYNAMIC_WAVE_ID, 22.0, DEFAULT_EFFECT_CLIP),
         FX_SHIELD_WAVE_ID => Effect::with_lifetime(FX_SHIELD_WAVE_ID, 22.0, DEFAULT_EFFECT_CLIP),
         FX_SHIELD_APPLY_ID => Effect::with_lifetime(FX_SHIELD_APPLY_ID, 11.0, DEFAULT_EFFECT_CLIP),
+        FX_DISPERSE_TRAIL_ID => {
+            Effect::with_lifetime(FX_DISPERSE_TRAIL_ID, 13.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
             Effect::with_lifetime(FX_UNIT_ASSEMBLE_ID, 70.0, DEFAULT_EFFECT_CLIP)
@@ -363,6 +369,7 @@ pub enum StandardEffectDrawKind {
     StrokedCircle,
     SeededCircleParticles,
     SeededStrokedCircleParticles,
+    SeededLineParticles,
     FilledSquare,
     StrokedSquare,
     SeededSquareParticles,
@@ -422,6 +429,16 @@ pub struct StandardEffectSquareRenderPrimitive {
     pub radius: f32,
     pub stroke: f32,
     pub rotation: f32,
+    pub alpha: f32,
+    pub color: Option<DecalColor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectLineRenderPrimitive {
+    pub start: (f32, f32),
+    pub angle: f32,
+    pub length: f32,
+    pub stroke: f32,
     pub alpha: f32,
     pub color: Option<DecalColor>,
 }
@@ -571,6 +588,7 @@ impl StandardEffectDrawPlan {
                     color,
                 })
                 .collect(),
+            StandardEffectDrawKind::SeededLineParticles => Vec::new(),
             StandardEffectDrawKind::FilledSquare
             | StandardEffectDrawKind::StrokedSquare
             | StandardEffectDrawKind::SeededSquareParticles => Vec::new(),
@@ -615,7 +633,36 @@ impl StandardEffectDrawPlan {
             StandardEffectDrawKind::FilledCircle
             | StandardEffectDrawKind::StrokedCircle
             | StandardEffectDrawKind::SeededCircleParticles
-            | StandardEffectDrawKind::SeededStrokedCircleParticles => Vec::new(),
+            | StandardEffectDrawKind::SeededStrokedCircleParticles
+            | StandardEffectDrawKind::SeededLineParticles => Vec::new(),
+        }
+    }
+
+    pub fn line_render_primitives_from_seed(&self) -> Vec<StandardEffectLineRenderPrimitive> {
+        let Some(particles) = self.particles else {
+            return Vec::new();
+        };
+        let color = self.resolved_draw_color();
+        match self.kind {
+            StandardEffectDrawKind::SeededLineParticles => {
+                let mut rand = ArcRand::with_seed(particles.seed as i64);
+                let mut lines = Vec::with_capacity(particles.count as usize);
+                for _ in 0..particles.count {
+                    let angle = particles.angle.unwrap_or(0.0) + rand.range(particles.angle_range);
+                    let length = rand.random(particles.length);
+                    let (x, y) = trns(angle, length);
+                    lines.push(StandardEffectLineRenderPrimitive {
+                        start: (self.center.0 + x, self.center.1 + y),
+                        angle,
+                        length: self.radius + particles.fout * rand.random_between(2.0, 7.0),
+                        stroke: self.stroke,
+                        alpha: self.alpha,
+                        color,
+                    });
+                }
+                lines
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -1015,6 +1062,45 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_DISPERSE_TRAIL_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededLineParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(lerp_color(DecalColor::WHITE, color, fin)),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 1.5,
+            stroke: 0.6 + fout * 1.7,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: Some(rotation + 180.0),
+                angle_range: 15.0,
+                length: fin * 27.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -2282,6 +2368,10 @@ impl ArcRand {
         self.next_float() * range
     }
 
+    fn random_between(&mut self, min: f32, max: f32) -> f32 {
+        min + self.next_float() * (max - min)
+    }
+
     fn range(&mut self, range: f32) -> f32 {
         self.next_float() * range * 2.0 - range
     }
@@ -3464,6 +3554,10 @@ mod tests {
         assert_eq!(standard_effect_id("dynamicWave"), Some(FX_DYNAMIC_WAVE_ID));
         assert_eq!(standard_effect_id("shieldWave"), Some(FX_SHIELD_WAVE_ID));
         assert_eq!(standard_effect_id("shieldApply"), Some(FX_SHIELD_APPLY_ID));
+        assert_eq!(
+            standard_effect_id("disperseTrail"),
+            Some(FX_DISPERSE_TRAIL_ID)
+        );
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
@@ -3629,6 +3723,10 @@ mod tests {
         assert_eq!(standard_effect(FX_DYNAMIC_WAVE_ID).unwrap().lifetime, 22.0);
         assert_eq!(standard_effect(FX_SHIELD_WAVE_ID).unwrap().lifetime, 22.0);
         assert_eq!(standard_effect(FX_SHIELD_APPLY_ID).unwrap().lifetime, 11.0);
+        assert_eq!(
+            standard_effect(FX_DISPERSE_TRAIL_ID).unwrap().lifetime,
+            13.0
+        );
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
@@ -3888,6 +3986,38 @@ mod tests {
         assert_eq!(shield_apply.input_color, Some(shield_color));
         assert_eq!(shield_apply.alpha, 0.7);
         assert_eq!(shield_apply.radius, 8.125);
+
+        let disperse_color = DecalColor::from_rgba(0x204080ff);
+        let disperse = standard_effect_draw_plan(
+            Some(FX_DISPERSE_TRAIL_ID as u16),
+            76,
+            1.0,
+            2.0,
+            30.0,
+            6.5,
+            13.0,
+            disperse_color,
+        )
+        .unwrap();
+        assert_eq!(disperse.kind, StandardEffectDrawKind::SeededLineParticles);
+        assert_eq!(disperse.stroke, 1.45);
+        assert_eq!(disperse.radius, 1.5);
+        let disperse_particles = disperse.particles.unwrap();
+        assert_eq!(disperse_particles.count, 2);
+        assert_eq!(disperse_particles.angle, Some(210.0));
+        assert_eq!(disperse_particles.angle_range, 15.0);
+        assert_eq!(disperse_particles.length, 13.5);
+        let disperse_lines = disperse.line_render_primitives_from_seed();
+        assert_eq!(disperse_lines.len(), 2);
+        assert_eq!(disperse_lines[0].stroke, 1.45);
+        assert!((disperse_lines[0].angle - 202.726_27).abs() < 0.0001);
+        assert!((disperse_lines[0].start.0 + 6.679_361).abs() < 0.0001);
+        assert!((disperse_lines[0].start.1 + 1.217_186).abs() < 0.0001);
+        assert!((disperse_lines[0].length - 4.280_647).abs() < 0.0001);
+        assert!((disperse_lines[1].angle - 211.697_9).abs() < 0.0001);
+        assert!((disperse_lines[1].start.0 + 0.282_225).abs() < 0.0001);
+        assert!((disperse_lines[1].start.1 - 1.208_219).abs() < 0.0001);
+        assert!((disperse_lines[1].length - 4.923_983).abs() < 0.0001);
 
         let hit_liquid = standard_effect_draw_plan(
             Some(FX_HIT_LIQUID_ID as u16),

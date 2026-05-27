@@ -4758,3 +4758,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `launchPod=248` 需要 scaled circle + lineAngle；
   2. `healBlockFull=252` 需要 rect/icon/mixcol；
   3. `shieldBreak` 需要 poly/arc primitive。
+
+---
+
+## 142. 最新闭环记录：Seeded line primitive 与 Fx.disperseTrail
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补 `lineAngle` 的最小 seeded line primitive，并迁移 `disperseTrail=76`。
+- Java 依据：
+  - `Fx.java:841-850`；
+  - lifetime `13`；
+  - 颜色 `Color.white -> e.color`，mix `fin`；
+  - stroke `0.6 + fout*1.7`；
+  - 随机顺序：`range(15)`、`random(fin*27)`、`random(2,7)`；
+  - line length `fout*random(2,7)+1.5`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `SeededLineParticles`；
+    - 新增 `StandardEffectLineRenderPrimitive`；
+    - 新增 `line_render_primitives_from_seed()`；
+    - `ArcRand` 新增 `random_between(min,max)`；
+    - 新增并接入 `FX_DISPERSE_TRAIL_ID = 76`；
+    - 测试使用 Java probe golden 锁定两个线段。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 下一步建议：
+  1. 可继续向 `hitBulletSmall/hitBulletColor` 推进，但需要 scaled + line + light；
+  2. `launchPod=248` 现在已有 line primitive，但还缺 scaled 子时间片组合表达；
+  3. `shieldBreak` 仍需 poly/arc primitive。
