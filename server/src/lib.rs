@@ -23,8 +23,8 @@ use mindustry_core::mindustry::entities::{
 use mindustry_core::mindustry::input::{
     drop_item, payload_dropped, picked_build_payload, picked_unit_payload, request_build_payload,
     request_drop_payload, request_item, request_unit_payload, take_items, transfer_inventory,
-    transfer_item_to, BuildPayloadPickupKind, DropItemContext, DropItemOutcome,
-    PayloadDroppedOutcome, PickedBuildPayloadOutcome, PickedUnitPayloadOutcome,
+    transfer_item_to, unit_entered_payload, BuildPayloadPickupKind, DropItemContext,
+    DropItemOutcome, PayloadDroppedOutcome, PickedBuildPayloadOutcome, PickedUnitPayloadOutcome,
     RequestBuildPayloadContext, RequestBuildPayloadOutcome, RequestDropPayloadContext,
     RequestDropPayloadOutcome, RequestItemContext, RequestItemOutcome, RequestUnitPayloadContext,
     RequestUnitPayloadOutcome, TakeItemsOutcome, TransferInventoryContext,
@@ -1075,6 +1075,49 @@ impl ServerLauncher {
         )?;
         self.runtime_picked_unit_payload_packets_sent += 1;
         self.last_runtime_picked_unit_payload_outcome = Some(picked_outcome);
+        Ok(true)
+    }
+
+    pub fn apply_server_unit_entered_payload(
+        &mut self,
+        unit_id: i32,
+        build_tile_pos: i32,
+    ) -> io::Result<bool> {
+        let Some(unit_snapshot) = self.server_units.get(&unit_id).cloned() else {
+            return Ok(false);
+        };
+        if !unit_snapshot.type_info.allowed_in_payloads {
+            return Ok(false);
+        }
+        let Some(building_snapshot) = self
+            .runtime
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == build_tile_pos)
+            .cloned()
+        else {
+            return Ok(false);
+        };
+
+        let outcome = unit_entered_payload(Some(&unit_snapshot), Some(&building_snapshot));
+        if !outcome.accepted {
+            return Ok(false);
+        }
+        if !self.runtime.attach_unit_payload_to_building(
+            &self.content_loader,
+            build_tile_pos,
+            &unit_snapshot,
+        ) {
+            return Ok(false);
+        }
+
+        self.server_units.remove(&unit_id);
+        if let Some(packet) = outcome.packet.as_ref() {
+            self.net_server.net_mut().send(
+                &PacketKind::UnitEnteredPayloadCallPacket(packet.clone()),
+                true,
+            )?;
+        }
         Ok(true)
     }
 
@@ -2360,6 +2403,71 @@ mod tests {
                     PacketKind::PickedUnitPayloadCallPacket(packet)
                         if packet.unit == UnitRef::Unit { id: 7 }
                             && packet.target == UnitRef::Unit { id: 8 }
+                )
+        }));
+    }
+
+    #[test]
+    fn server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6578).unwrap();
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let loader_block = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .unwrap()
+            .base()
+            .clone();
+        let tile_pos = point2_pack(11, 12);
+        launcher
+            .runtime
+            .buildings
+            .push(BuildingComp::new(tile_pos, loader_block, default_team));
+
+        let mut unit_type = launcher
+            .content_loader
+            .unit_by_name("flare")
+            .unwrap()
+            .clone();
+        unit_type.allowed_in_payloads = true;
+        let mut unit = UnitComp::new(5151, unit_type, default_team);
+        unit.set_pos(88.0, 96.0);
+        unit.set_rotation(180.0);
+        launcher.server_units.insert(5151, unit);
+
+        assert!(launcher
+            .apply_server_unit_entered_payload(5151, tile_pos)
+            .unwrap());
+
+        assert!(!launcher.server_units.contains_key(&5151));
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            launcher.runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload-loader should receive entered unit payload");
+        };
+        assert!(loader.has_payload);
+        assert!(matches!(
+            common.payload,
+            Some(PayloadRef::Unit {
+                class_id: 3,
+                ref unit_bytes
+            }) if unit_bytes.is_empty()
+        ));
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitEnteredPayloadCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 5151 }
+                            && packet.build == BuildingRef::new(tile_pos)
                 )
         }));
     }

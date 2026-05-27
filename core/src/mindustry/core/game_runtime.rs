@@ -3143,11 +3143,6 @@ impl GameRuntime {
         }
         report.team_matched = true;
 
-        let Some(payload) = Self::client_unit_payload_ref_from_unit(&unit_snapshot) else {
-            self.last_client_unit_entered_payload_report = Some(report);
-            return report;
-        };
-
         if let Some(mut removed_unit) = self.client_unit_snapshot_entities.remove(&unit_id) {
             removed_unit.remove(true);
             report.unit_removed = true;
@@ -3157,13 +3152,8 @@ impl GameRuntime {
         }
         self.client_hidden_entity_ids.insert(unit_id);
 
-        if self.ensure_client_payload_state_for_building(content, &building) {
-            report.payload_attached = self.attach_client_unit_payload_to_building_state(
-                &building,
-                &unit_snapshot,
-                payload,
-            );
-        }
+        report.payload_attached =
+            self.attach_unit_payload_to_building(content, build_tile_pos, &unit_snapshot);
 
         if report.payload_attached {
             self.client_unit_entered_payload_packets_applied += 1;
@@ -3172,14 +3162,38 @@ impl GameRuntime {
         report
     }
 
-    fn client_unit_payload_ref_from_unit(unit: &UnitComp) -> Option<PayloadRef> {
+    pub fn attach_unit_payload_to_building(
+        &mut self,
+        content: &ContentLoader,
+        build_tile_pos: i32,
+        unit: &UnitComp,
+    ) -> bool {
+        let Some(building) = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == build_tile_pos)
+            .cloned()
+        else {
+            return false;
+        };
+        if unit.team_id() != building.team {
+            return false;
+        }
+        let Some(payload) = Self::unit_payload_ref_from_unit(unit) else {
+            return false;
+        };
+        self.ensure_payload_state_for_building(content, &building)
+            && self.attach_unit_payload_to_building_state(&building, unit, payload)
+    }
+
+    fn unit_payload_ref_from_unit(unit: &UnitComp) -> Option<PayloadRef> {
         Some(PayloadRef::Unit {
             class_id: entity_class_id(unit.type_info.name())?,
             unit_bytes: Vec::new(),
         })
     }
 
-    fn ensure_client_payload_state_for_building(
+    fn ensure_payload_state_for_building(
         &mut self,
         content: &ContentLoader,
         building: &BuildingComp,
@@ -3231,7 +3245,7 @@ impl GameRuntime {
         true
     }
 
-    fn attach_client_unit_payload_to_building_state(
+    fn attach_unit_payload_to_building_state(
         &mut self,
         building: &BuildingComp,
         unit: &UnitComp,

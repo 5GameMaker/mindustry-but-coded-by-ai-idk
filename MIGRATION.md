@@ -3423,4 +3423,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unit_entered_payload_packet_uses_java_field_order`
   - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
   - `cargo check --workspace`
-- 仍未完成：payload 中的 unit 仍是 class id + 空 bytes placeholder，尚未写入完整 Java `UnitPayload` unit serialization；server 侧还缺从真实 CommandAI / unit buildOn runtime 触发并广播 `UnitEnteredPayloadCallPacket` 的整体链路；客户端 `Fx.unitDrop`/渲染效果尚未接入。
+- 仍未完成：payload 中的 unit 仍是 class id + 空 bytes placeholder，尚未写入完整 Java `UnitPayload` unit serialization；客户端 `Fx.unitDrop`/渲染效果尚未接入；server 侧还需要从真实 CommandAI / unit buildOn runtime 自动触发。
+
+### 12.100 Server UnitEnteredPayload 广播入口
+
+- 2026-05-27：把 `unit_entered_payload(...)` helper 接入 `ServerLauncher`，新增 `ServerLauncher::apply_server_unit_entered_payload(unit_id, build_tile_pos)`，形成 `server_units + runtime building -> UnitEnteredPayloadCallPacket reliable broadcast` 的最小 Rust server 出站闭环。
+- Java 依据：
+  - `CommandAI` 在服务端判定单位站在目标 building 上且 `build.acceptPayload(build, tmpPayload)` 后调用 `Call.unitEnteredPayload(unit, build)`；
+  - `InputHandler.unitEnteredPayload(...)` 在同队校验后移除 unit，并把 `UnitPayload` 写入目标 building。
+- Rust 新增/变化：
+  - `GameRuntime::attach_unit_payload_to_building(...)` 提取为通用 payload 挂载入口，client/server 可复用；
+  - `ServerLauncher::apply_server_unit_entered_payload(...)` 读取 `server_units` 与 `runtime.buildings`，调用 `unit_entered_payload(...)`，成功后通过通用 runtime payload 挂载入口写入目标 payload building，移除 `server_units[unit_id]`，并可靠广播 `UnitEnteredPayloadCallPacket`；
+  - 新增 server 测试覆盖 runtime payload-loader 接收 placeholder `PayloadRef::Unit`、server unit 移除和 reliable 出站包。
+- 验证：
+  - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
+  - `cargo check --workspace`
+- 仍未完成：该入口目前由测试/后续 AI 直接调用，尚未接到真实 `CommandAI` tick、unit `buildOn()` 检测和 `allowedInPayloads` 行为链；payload unit bytes 仍是 placeholder。
