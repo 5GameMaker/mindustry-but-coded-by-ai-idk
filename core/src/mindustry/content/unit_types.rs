@@ -70,7 +70,8 @@ pub fn load() -> Vec<UnitType> {
             u.step_sound = "mechStep".into();
             u.step_sound_pitch = 0.9;
             u.step_sound_volume = 0.35;
-            u.abilities.push("ShieldRegenFieldAbility".into());
+            u.abilities
+                .push("ShieldRegenFieldAbility:25:250:60:60".into());
         }),
         unit(&mut next_id, "reign", UnitKind::Standard, |u| {
             u.speed = 0.4;
@@ -112,7 +113,8 @@ pub fn load() -> Vec<UnitType> {
             u.mine_tier = 2;
             u.mine_speed = 3.0;
             u.ammo_type = "power:1300".into();
-            u.abilities.push("ShieldRegenFieldAbility".into());
+            u.abilities
+                .push("ShieldRegenFieldAbility:20:40:300:60".into());
         }),
         unit(&mut next_id, "quasar", UnitKind::Standard, |u| {
             u.mine_tier = 3;
@@ -400,6 +402,8 @@ pub fn load() -> Vec<UnitType> {
             u.rotate_speed = 1.8;
             u.hit_size = 20.0;
             u.armor = 7.0;
+            u.abilities
+                .push("ShieldRegenFieldAbility:20:40:240:60".into());
         }),
         unit(&mut next_id, "sei", UnitKind::Naval, |u| {
             u.health = 11000.0;
@@ -1194,6 +1198,24 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| entry == "LiquidExplodeAbility:neoplasm"));
+
+        let scepter = by_name(&units, "scepter");
+        assert!(scepter
+            .abilities
+            .iter()
+            .any(|entry| entry == "ShieldRegenFieldAbility:25:250:60:60"));
+
+        let pulsar = by_name(&units, "pulsar");
+        assert!(pulsar
+            .abilities
+            .iter()
+            .any(|entry| entry == "ShieldRegenFieldAbility:20:40:300:60"));
+
+        let bryde = by_name(&units, "bryde");
+        assert!(bryde
+            .abilities
+            .iter()
+            .any(|entry| entry == "ShieldRegenFieldAbility:20:40:240:60"));
 
         let oxynoe = by_name(&units, "oxynoe");
         assert!(oxynoe

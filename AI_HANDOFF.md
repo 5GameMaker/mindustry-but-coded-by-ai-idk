@@ -2824,3 +2824,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入治疗抑制单位能力运行时`。
   3. 后续补 `Fx.regenSuppressSeek` 延迟粒子、`effectColor/suppress_color_rgba` 表现层、client draw orb/particles、结构化 ability spec / mod patcher。
+
+---
+
+## 85. 最新闭环记录：ShieldRegenFieldAbility / scepter-pulsar-bryde server shield runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `ShieldRegenFieldAbility.java` 与 `UnitTypes` 中 scepter / pulsar / bryde，把护盾回复场接入 `UnitType` content、`UnitComp` ability slot、server same-team unit shield runtime。
+- Java 依据：
+  - `ShieldRegenFieldAbility.update(Unit unit)`：`timer += Time.delta`，达到 `reload` 后遍历 `Units.nearby(unit.team, unit.x, unit.y, range, ...)`；
+  - 对 `other.shield < max` 的同队单位执行 `other.shield = min(other.shield + amount, max)` 与 `other.shieldAlpha = 1f`；
+  - 任一目标实际获得护盾时播放 `applyEffect` / `activeEffect` / `sound`，最后 `timer = 0f`；
+  - Java 参数：`scepter(25,250,60,60)`、`pulsar(20,40,300,60)`、`bryde(20,40,240,60)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `ShieldRegenFieldPulse` 增加 `target_ids`；
+    - 新增 `ShieldRegenFieldAbility::from_descriptor(...)`，支持 `ShieldRegenFieldAbility:amount:max:reload:range[:parentizeEffects]` 与括号形式；
+    - 新增 descriptor 解析测试。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 将 scepter / pulsar / bryde 的裸 `ShieldRegenFieldAbility` 替换为 Java 参数化 descriptor；
+    - 内容覆盖测试断言三个 descriptor 存在。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::update_shield_regen_field_abilities(...)`；
+    - 使用 `AbilityWire.data` 保存 timer，调用方闭包按 ability range 提供同队目标与当前 shield。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 的 playing frame 内调用 `tick_server_shield_regen_field_abilities(1.0)`；
+    - server 对同队、存活、范围内 `server_units`（包含自身）写回 `ShieldComp.shield`，实际增加时设置 `shield_alpha = 1.0` 并刷新组件视图；
+    - 新增 `server_update_ticks_scepter_shield_regen_field_for_nearby_allies`，验证 parent 自身与近同队获得/封顶护盾，远同队和敌队不受影响。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core shield_regen_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_shield_regen_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server shield_regen_field --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入护盾回复单位能力运行时`。
+  3. 后续补 `applyEffect` / `activeEffect` / `sound`、`UnitType.shieldColor`、client local ability tick 与结构化 ability spec / mod patcher。

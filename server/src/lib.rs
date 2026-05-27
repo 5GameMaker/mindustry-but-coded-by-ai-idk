@@ -302,6 +302,7 @@ impl ServerLauncher {
             if let Err(error) = self.tick_server_unit_spawn_abilities(1.0) {
                 self.network_error = Some(error.to_string());
             }
+            self.tick_server_shield_regen_field_abilities(1.0);
             self.tick_server_energy_field_abilities(1.0);
             self.tick_server_status_field_abilities(1.0);
             self.tick_server_suppression_field_abilities(1.0);
@@ -1689,6 +1690,77 @@ impl ServerLauncher {
                         }
                     }
                     target.refresh_component_views();
+                }
+            }
+        }
+
+        pulses
+    }
+
+    fn tick_server_shield_regen_field_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut pulses = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent_snapshot) = self.server_units.get(&parent_id) else {
+                continue;
+            };
+            let parent_team = parent_snapshot.team_id();
+            let parent_x = parent_snapshot.x();
+            let parent_y = parent_snapshot.y();
+            let team_units: Vec<(u32, f32, f32, f32)> = self
+                .server_units
+                .iter()
+                .filter(|(_unit_id, unit)| unit.team_id() == parent_team && !unit.health.dead)
+                .filter_map(|(unit_id, unit)| {
+                    Some((
+                        u32::try_from(*unit_id).ok()?,
+                        unit.x(),
+                        unit.y(),
+                        unit.shield.shield,
+                    ))
+                })
+                .collect();
+
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let shield_pulses =
+                parent.update_shield_regen_field_abilities(delta_ticks, |ability| {
+                    let range2 = ability.range * ability.range;
+                    team_units
+                        .iter()
+                        .copied()
+                        .filter(|(_id, x, y, _shield)| {
+                            let dx = *x - parent_x;
+                            let dy = *y - parent_y;
+                            dx * dx + dy * dy <= range2
+                        })
+                        .map(|(id, _x, _y, shield)| {
+                            (
+                                id,
+                                mindustry_core::mindustry::entities::ShieldRegenFieldTarget {
+                                    shield,
+                                },
+                            )
+                        })
+                        .collect()
+                });
+            pulses += shield_pulses.len();
+
+            for pulse in shield_pulses {
+                for (target_id, shield_after) in pulse.target_ids.into_iter().zip(pulse.shields) {
+                    let Some(target_id) = i32::try_from(target_id).ok() else {
+                        continue;
+                    };
+                    let Some(target) = self.server_units.get_mut(&target_id) else {
+                        continue;
+                    };
+                    if shield_after > target.shield.shield {
+                        target.shield.shield = shield_after;
+                        target.shield.shield_alpha = 1.0;
+                        target.refresh_component_views();
+                    }
                 }
             }
         }
@@ -5888,6 +5960,54 @@ mod tests {
         let enemy = launcher.server_units.get(&12).unwrap();
         assert!((enemy.health.health - (enemy_health_before - 40.0)).abs() < 0.0001);
         assert_eq!(enemy.status.get_duration("electrified"), 60.0 * 6.0);
+    }
+
+    #[test]
+    fn server_update_ticks_scepter_shield_regen_field_for_nearby_allies() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let scepter = launcher
+            .content_loader
+            .unit_by_name("scepter")
+            .unwrap()
+            .clone();
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .unwrap()
+            .clone();
+        let mut parent = UnitComp::new(24, scepter, TeamId(1));
+        parent.set_pos(100.0, 100.0);
+        parent.abilities[0].data = 59.0;
+
+        let mut ally = UnitComp::new(25, dagger.clone(), TeamId(1));
+        ally.set_pos(130.0, 100.0);
+        ally.shield.shield = 240.0;
+        let mut far_ally = UnitComp::new(26, dagger.clone(), TeamId(1));
+        far_ally.set_pos(300.0, 100.0);
+        let mut enemy = UnitComp::new(27, dagger, TeamId(2));
+        enemy.set_pos(120.0, 100.0);
+
+        launcher.server_units.insert(parent.id(), parent);
+        launcher.server_units.insert(ally.id(), ally);
+        launcher.server_units.insert(far_ally.id(), far_ally);
+        launcher.server_units.insert(enemy.id(), enemy);
+
+        launcher.update();
+
+        let parent = launcher.server_units.get(&24).unwrap();
+        assert_eq!(parent.abilities[0].data, 0.0);
+        assert_eq!(parent.shield.shield, 25.0);
+        assert_eq!(parent.shield.shield_alpha, 1.0);
+
+        let ally = launcher.server_units.get(&25).unwrap();
+        assert_eq!(ally.shield.shield, 250.0);
+        assert_eq!(ally.shield.shield_alpha, 1.0);
+        let far_ally = launcher.server_units.get(&26).unwrap();
+        assert_eq!(far_ally.shield.shield, 0.0);
+        let enemy = launcher.server_units.get(&27).unwrap();
+        assert_eq!(enemy.shield.shield, 0.0);
     }
 
     #[test]

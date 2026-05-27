@@ -10,7 +10,8 @@ use crate::mindustry::ai::{PrebuildAiPlanSnapshot, PrebuildAiRequirement};
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
-    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, StatusFieldAbility, StatusFieldPulse,
+    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ShieldRegenFieldAbility,
+    ShieldRegenFieldPulse, ShieldRegenFieldTarget, StatusFieldAbility, StatusFieldPulse,
     SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
@@ -476,6 +477,48 @@ impl UnitComp {
                 targets,
             ) {
                 self.weapons.ammo = pulse.ammo_after.max(0) as f32;
+                pulses.push(pulse);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.timer;
+            }
+        }
+
+        pulses
+    }
+
+    pub fn update_shield_regen_field_abilities<F>(
+        &mut self,
+        delta: f32,
+        mut targets: F,
+    ) -> Vec<ShieldRegenFieldPulse>
+    where
+        F: FnMut(&ShieldRegenFieldAbility) -> Vec<(u32, ShieldRegenFieldTarget)>,
+    {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let mut pulses = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = ShieldRegenFieldAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.timer = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+            let target_entries = targets(&ability);
+            let target_ids = target_entries
+                .iter()
+                .map(|(target_id, _target)| *target_id)
+                .collect::<Vec<_>>();
+            let target_values = target_entries
+                .iter()
+                .map(|(_target_id, target)| *target)
+                .collect::<Vec<_>>();
+
+            if let Some(mut pulse) = ability.update_targets(delta, &target_values) {
+                pulse.target_ids = target_ids;
                 pulses.push(pulse);
             }
 
@@ -1472,6 +1515,32 @@ mod tests {
         assert_eq!(pulses[0].duration, 10.0);
         assert_eq!(pulses[0].target_count, 2);
         assert_eq!(pulses[0].target_ids, vec![1, 2]);
+        assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_shield_regen_field_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["ShieldRegenFieldAbility:25:250:60:60".into()];
+        let mut unit = UnitComp::new(44, unit_type, TeamId(1));
+
+        assert!(unit
+            .update_shield_regen_field_abilities(59.0, |_| {
+                vec![(1, ShieldRegenFieldTarget { shield: 10.0 })]
+            })
+            .is_empty());
+        assert_eq!(unit.abilities[0].data, 59.0);
+
+        let pulses = unit.update_shield_regen_field_abilities(1.0, |_| {
+            vec![
+                (1, ShieldRegenFieldTarget { shield: 10.0 }),
+                (2, ShieldRegenFieldTarget { shield: 250.0 }),
+            ]
+        });
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].target_ids, vec![1, 2]);
+        assert_eq!(pulses[0].shields, vec![35.0, 250.0]);
+        assert!(pulses[0].active_effect);
         assert_eq!(unit.abilities[0].data, 0.0);
     }
 

@@ -4390,3 +4390,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Fx.regenSuppressSeek` 延迟粒子、`effectColor`/`suppress_color_rgba` 表现层与网络 sidecar 尚未接入；
   - building indexer 的精确 footprint/命中半径仍是当前 Rust building center 范围判断，后续需继续对齐 Java `indexer.eachBlock`；
   - client 本地 draw orb/particles、range selection 与结构化 ability spec / mod patcher 仍需继续迁移。
+
+### 12.143 ShieldRegenFieldAbility / scepter-pulsar-bryde 护盾回复场 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `ShieldRegenFieldAbility.java` 与 `UnitTypes` 中 scepter / pulsar / bryde 的参数，把护盾回复场从纯算法接入 `UnitType` content、`UnitComp` ability slot 与 server same-team unit shield runtime。
+- Java 依据：
+  - `ShieldRegenFieldAbility.update(Unit unit)`：`timer += Time.delta`，达到 `reload` 后遍历 `Units.nearby(unit.team, unit.x, unit.y, range, ...)`；
+  - 对 `other.shield < max` 的同队单位执行 `other.shield = min(other.shield + amount, max)` 且 `other.shieldAlpha = 1f`；
+  - 任一目标实际获得护盾时播放 `applyEffect` / `activeEffect` / `sound`，最后 `timer = 0f`；
+  - Java 参数：`scepter(25,250,60,60)`、`pulsar(20,40,300,60)`、`bryde(20,40,240,60)`。
+- Rust 新增/变化：
+  - `ShieldRegenFieldPulse` 增加 `target_ids`，server runtime 可以把按序计算出的 shields 回写到真实单位；
+  - `ShieldRegenFieldAbility::from_descriptor(...)` 支持 `ShieldRegenFieldAbility:amount:max:reload:range[:parentizeEffects]` 与括号形式；
+  - `content/unit_types.rs` 将 scepter / pulsar / bryde 的裸能力名替换为 Java 参数化 descriptor；
+  - `UnitComp::update_shield_regen_field_abilities(...)` 使用 `AbilityWire.data` 存 timer，通过闭包按 ability range 收集目标；
+  - `ServerLauncher::tick_server_shield_regen_field_abilities(...)` 在 playing frame 内收集同队、活着、范围内 `server_units`（包含自身），对目标 `ShieldComp.shield` 与 `shield_alpha` 写回，并刷新组件视图。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core shield_regen_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_shield_regen_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server shield_regen_field --lib`
+- 仍未完成：
+  - `applyEffect` / `activeEffect` / `sound` 的真实 effect packet、audio 与 desktop 表现层尚未接入；
+  - Java `UnitType.shieldColor(other)` 颜色语义当前未进入 effect sidecar；
+  - 普通 ability descriptor 仍是过渡模型，后续需结构化 ability spec / mod patcher。

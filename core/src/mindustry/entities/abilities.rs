@@ -612,6 +612,7 @@ pub struct ShieldRegenFieldTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShieldRegenFieldPulse {
     pub shields: Vec<f32>,
+    pub target_ids: Vec<u32>,
     pub active_effect: bool,
     pub timer: f32,
 }
@@ -654,6 +655,31 @@ impl ShieldRegenFieldAbility {
         }
     }
 
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor
+            .strip_prefix("ShieldRegenFieldAbility:")
+            .or_else(|| {
+                descriptor
+                    .strip_prefix("ShieldRegenFieldAbility(")
+                    .and_then(|rest| rest.strip_suffix(')'))
+            })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let amount = parts.next()?.parse().ok()?;
+        let max = parts.next()?.parse().ok()?;
+        let reload = parts.next()?.parse().ok()?;
+        let range = parts.next()?.parse().ok()?;
+        let mut ability = Self::new(amount, max, reload, range);
+        if let Some(parentize_effects) = parts.next() {
+            ability.parentize_effects = matches!(parentize_effects, "true" | "1" | "parent");
+        }
+        Some(ability)
+    }
+
     pub fn shield_after_pulse(&self, shield: f32) -> f32 {
         if shield < self.max {
             (shield + self.amount).min(self.max)
@@ -688,6 +714,7 @@ impl ShieldRegenFieldAbility {
 
         Some(ShieldRegenFieldPulse {
             shields,
+            target_ids: Vec::new(),
             active_effect: self.applied,
             timer: self.timer,
         })
@@ -2166,11 +2193,30 @@ mod tests {
             .expect("reload threshold should fire a pulse");
 
         assert_eq!(pulse.shields, vec![35.0, 100.0, 100.0]);
+        assert!(pulse.target_ids.is_empty());
         assert!(pulse.active_effect);
         assert!(ability.applied);
         assert_eq!(pulse.timer, 0.0);
         assert_eq!(ability.pulses_per_second(), 6.0);
         assert_eq!(ability.regen_per_second(), 150.0);
+    }
+
+    #[test]
+    fn shield_regen_field_descriptor_parses_java_unit_entries() {
+        let ability =
+            ShieldRegenFieldAbility::from_descriptor("ShieldRegenFieldAbility:25:250:60:60")
+                .expect("scepter descriptor should parse");
+        assert_eq!(ability.amount, 25.0);
+        assert_eq!(ability.max, 250.0);
+        assert_eq!(ability.reload, 60.0);
+        assert_eq!(ability.range, 60.0);
+        assert!(!ability.parentize_effects);
+
+        let parentized =
+            ShieldRegenFieldAbility::from_descriptor("ShieldRegenFieldAbility(20,40,300,60,true)")
+                .expect("parentized descriptor should parse");
+        assert!(parentized.parentize_effects);
+        assert!(ShieldRegenFieldAbility::from_descriptor("RepairFieldAbility").is_none());
     }
 
     #[test]
