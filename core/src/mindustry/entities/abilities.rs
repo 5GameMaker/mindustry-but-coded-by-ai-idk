@@ -893,6 +893,53 @@ impl Default for SuppressionFieldAbility {
 }
 
 impl SuppressionFieldAbility {
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = if descriptor == "SuppressionFieldAbility" {
+            ""
+        } else {
+            descriptor
+                .strip_prefix("SuppressionFieldAbility:")
+                .or_else(|| {
+                    descriptor
+                        .strip_prefix("SuppressionFieldAbility(")
+                        .and_then(|rest| rest.strip_suffix(')'))
+                })?
+        };
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let mut ability = Self::default();
+        if let Some(reload) = parts.next() {
+            ability.reload = reload.parse().ok()?;
+        }
+        if let Some(max_delay) = parts.next() {
+            ability.max_delay = max_delay.parse().ok()?;
+        }
+        if let Some(range) = parts.next() {
+            ability.range = range.parse().ok()?;
+        }
+        if let Some(x) = parts.next() {
+            ability.x = x.parse().ok()?;
+        }
+        if let Some(y) = parts.next() {
+            ability.y = y.parse().ok()?;
+        }
+        if let Some(active) = parts.next() {
+            ability.active = match active {
+                "true" | "1" | "active" => true,
+                "false" | "0" | "inactive" => false,
+                _ => return None,
+            };
+        }
+        if let Some(apply_particle_chance) = parts.next() {
+            ability.apply_particle_chance = apply_particle_chance.parse().ok()?;
+        }
+        Some(ability)
+    }
+
     pub fn update_state(
         &mut self,
         delta: f32,
@@ -2215,6 +2262,30 @@ mod tests {
         assert_eq!(pulse.apply_particle_chance, 13.0);
         assert_eq!(pulse.timer, 0.0);
         assert_eq!(ability.duration_seconds(), 0.5);
+    }
+
+    #[test]
+    fn suppression_field_descriptor_parses_runtime_entries() {
+        let ability = SuppressionFieldAbility::from_descriptor(
+            "SuppressionFieldAbility:480:90:200:0:1:true:13",
+        )
+        .expect("quell descriptor should parse");
+        assert_eq!(ability.reload, 480.0);
+        assert_eq!(ability.max_delay, 90.0);
+        assert_eq!(ability.range, 200.0);
+        assert_eq!(ability.x, 0.0);
+        assert_eq!(ability.y, 1.0);
+        assert!(ability.active);
+        assert_eq!(ability.apply_particle_chance, 13.0);
+
+        let inactive = SuppressionFieldAbility::from_descriptor(
+            "SuppressionFieldAbility(900,90,320,10,-8,false)",
+        )
+        .expect("inactive visual descriptor should parse");
+        assert_eq!(inactive.reload, 900.0);
+        assert_eq!(inactive.range, 320.0);
+        assert!(!inactive.active);
+        assert!(SuppressionFieldAbility::from_descriptor("StatusFieldAbility").is_none());
     }
 
     #[test]

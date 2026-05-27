@@ -2787,3 +2787,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo fmt`、上述局部测试、`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入状态场单位能力运行时`。
   3. 后续补 `applyEffect` / `activeEffect` 的真实 effect packet 或 desktop 表现层、client 本地 ability tick、结构化 ability spec / mod patcher。
+
+---
+
+## 84. 最新闭环记录：SuppressionFieldAbility / server building heal suppression runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `SuppressionFieldAbility.java`、`Damage.applySuppression(...)` 和 `UnitTypes` 中 navanax / quell / disrupt，把治疗抑制场接入 `UnitComp` ability slot 与 server unit→building runtime。
+- Java 依据：
+  - `SuppressionFieldAbility.update(Unit unit)`：`active` 为真时累积 `timer += Time.delta`，达到 `maxDelay` 后按 `x/y` 相对 `unit.rotation - 90f` 旋转求中心，调用 `Damage.applySuppression(unit.team, center, range, reload, maxDelay, ...)`，再 `timer = 0f`；
+  - `Damage.applySuppression(...)` 对范围内敌方建筑调用 `build.applyHealSuppression(reload + 1f, effectColor)`；
+  - `navanax`：默认 `reload=90/maxDelay=90/range=200`，`y=-10`；
+  - `quell`：`reload=480`，`maxDelay=90`，`range=200`，`y=1`；
+  - `disrupt`：主场 `reload=900/range=320/y=10`，两侧还有 `active=false` 的纯视觉副本。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - 新增 `SuppressionFieldAbility::from_descriptor(...)`，支持 `SuppressionFieldAbility:reload:maxDelay:range:x:y:active:applyParticleChance` 与括号形式；
+    - 新增 descriptor 解析测试。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 为 `navanax`、`quell`、`disrupt` 挂载 Java 参数对应 descriptor；
+    - `disrupt` 保留 1 个 active 主场 + 2 个 inactive 视觉副本 descriptor；
+    - 内容覆盖测试断言这些 descriptor 存在。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::update_suppression_field_abilities(...)`；
+    - 使用 `AbilityWire.data` 保存 timer，按单位 transform 返回 `SuppressionFieldPulse`。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 的 playing frame 内调用 `tick_server_suppression_field_abilities(1.0)`；
+    - server 对 pulse 范围内敌方 `runtime.buildings` 调用 `apply_heal_suppression(now, reload + 1)`；
+    - 新增 `server_update_ticks_quell_suppression_field_for_enemy_buildings`，验证近距离敌方建筑被抑制，同队与范围外建筑不受影响。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core suppression_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_suppression_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server suppression_field --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入治疗抑制单位能力运行时`。
+  3. 后续补 `Fx.regenSuppressSeek` 延迟粒子、`effectColor/suppress_color_rgba` 表现层、client draw orb/particles、结构化 ability spec / mod patcher。

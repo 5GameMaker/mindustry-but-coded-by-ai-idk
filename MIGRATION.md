@@ -4367,3 +4367,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `applyEffect` / `activeEffect` 的真实 effect packet 或 desktop 表现层还未接入；当前只保留 active 坐标/参数 pulse 数据；
   - 普通 ability descriptor 仍是过渡模型，后续需要结构化 ability spec / mod patcher；
   - client 本地 ability tick 与 Java↔Rust 视觉 smoke 仍需继续迁移。
+
+### 12.142 SuppressionFieldAbility / navanax-quell-disrupt 治疗抑制 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `SuppressionFieldAbility.java`、`Damage.applySuppression(...)` 与 `UnitTypes` 中 navanax / quell / disrupt 的使用点，把治疗抑制场从纯 pulse 接到 `UnitType` content、`UnitComp` ability slot、server unit→building runtime。
+- Java 依据：
+  - `SuppressionFieldAbility.update(Unit unit)`：`active` 为真时累积 `timer += Time.delta`，达到 `maxDelay` 后按 `x/y` 相对 `unit.rotation - 90f` 旋转求场中心，调用 `Damage.applySuppression(unit.team, center, range, reload, maxDelay, ...)`，随后 `timer = 0f`；
+  - `Damage.applySuppression(...)` 对范围内敌方 building 调用 `build.applyHealSuppression(reload + 1f, effectColor)`；
+  - Java 使用点：`navanax` 默认 `reload/maxDelay/range` 但 `y=-10`；`quell` 设置 `reload=60*8`、`y=1`；`disrupt` 主场 `reload=60*15`、`range=320`、`y=10`，另有两侧 `active=false` 视觉副本。
+- Rust 新增/变化：
+  - `SuppressionFieldAbility::from_descriptor(...)` 支持 `SuppressionFieldAbility:reload:maxDelay:range:x:y:active:applyParticleChance` 与括号形式；
+  - `content/unit_types.rs` 为 `navanax`、`quell`、`disrupt` 挂载 Java 参数对应 descriptor，并保留 disrupt 两个 inactive 视觉副本 descriptor；
+  - `UnitComp::update_suppression_field_abilities(...)` 使用 `AbilityWire.data` 存 timer，按单位 transform 产出 `SuppressionFieldPulse`；
+  - `ServerLauncher::tick_server_suppression_field_abilities(...)` 在 playing frame 内遍历 `server_units`，对 pulse 范围内敌方 `runtime.buildings` 调用 `apply_heal_suppression(now, reload + 1)`；
+  - 新增 server smoke 验证 `quell` 抑制近距离敌方建筑，不影响同队建筑和范围外敌方建筑。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core suppression_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_suppression_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server suppression_field --lib`
+- 仍未完成：
+  - `Fx.regenSuppressSeek` 延迟粒子、`effectColor`/`suppress_color_rgba` 表现层与网络 sidecar 尚未接入；
+  - building indexer 的精确 footprint/命中半径仍是当前 Rust building center 范围判断，后续需继续对齐 Java `indexer.eachBlock`；
+  - client 本地 draw orb/particles、range selection 与结构化 ability spec / mod patcher 仍需继续迁移。

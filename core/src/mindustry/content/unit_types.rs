@@ -459,6 +459,8 @@ pub fn load() -> Vec<UnitType> {
             u.armor = 16.0;
             u.rotate_speed = 1.1;
             u.build_speed = 3.5;
+            u.abilities
+                .push("SuppressionFieldAbility:90:90:200:0:-10:true:13".into());
         }),
         unit(&mut next_id, "alpha", UnitKind::Standard, |u| {
             u.is_enemy = false;
@@ -685,6 +687,8 @@ pub fn load() -> Vec<UnitType> {
             u.target_air = false;
             u.engine_size = 4.8;
             u.engine_offset = 61.0 / 4.0;
+            u.abilities
+                .push("SuppressionFieldAbility:480:90:200:0:1:true:13".into());
         }),
         unit(&mut next_id, "disrupt", UnitKind::Erekir, |u| {
             u.low_altitude = false;
@@ -698,6 +702,12 @@ pub fn load() -> Vec<UnitType> {
             u.target_air = false;
             u.engine_size = 6.0;
             u.engine_offset = 25.25;
+            u.abilities
+                .push("SuppressionFieldAbility:900:90:320:0:10:true:13".into());
+            u.abilities
+                .push("SuppressionFieldAbility:90:90:200:10.75:-8:false:13".into());
+            u.abilities
+                .push("SuppressionFieldAbility:90:90:200:-10.75:-8:false:13".into());
         }),
         unit(&mut next_id, "renale", UnitKind::Neoplasm, |u| {
             u.health = 500.0;
@@ -1196,6 +1206,32 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| entry == "EnergyFieldAbility:40:65:180:1.5:0.5:25"));
+
+        let navanax = by_name(&units, "navanax");
+        assert!(navanax
+            .abilities
+            .iter()
+            .any(|entry| entry == "SuppressionFieldAbility:90:90:200:0:-10:true:13"));
+
+        let quell = by_name(&units, "quell");
+        assert!(quell
+            .abilities
+            .iter()
+            .any(|entry| entry == "SuppressionFieldAbility:480:90:200:0:1:true:13"));
+
+        let disrupt = by_name(&units, "disrupt");
+        assert!(disrupt
+            .abilities
+            .iter()
+            .any(|entry| entry == "SuppressionFieldAbility:900:90:320:0:10:true:13"));
+        assert_eq!(
+            disrupt
+                .abilities
+                .iter()
+                .filter(|entry| entry.starts_with("SuppressionFieldAbility:"))
+                .count(),
+            3
+        );
 
         let flare = by_name(&units, "flare");
         assert_eq!(flare.env_enabled, Env::TERRESTRIAL | Env::SPACE);

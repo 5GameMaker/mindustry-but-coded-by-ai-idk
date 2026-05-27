@@ -304,6 +304,7 @@ impl ServerLauncher {
             }
             self.tick_server_energy_field_abilities(1.0);
             self.tick_server_status_field_abilities(1.0);
+            self.tick_server_suppression_field_abilities(1.0);
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
                 self.network_error = Some(error.to_string());
             }
@@ -1755,6 +1756,44 @@ impl ServerLauncher {
         }
 
         pulses
+    }
+
+    fn tick_server_suppression_field_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let now = self.runtime.state.tick as f32;
+        let mut suppressed_buildings = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent_snapshot) = self.server_units.get(&parent_id) else {
+                continue;
+            };
+            if parent_snapshot.health.dead {
+                continue;
+            }
+            let parent_team = parent_snapshot.team_id();
+
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let suppression_pulses = parent.update_suppression_field_abilities(delta_ticks);
+
+            for pulse in suppression_pulses {
+                let range2 = pulse.range * pulse.range;
+                for building in self.runtime.buildings_mut() {
+                    if building.dead || building.team == parent_team {
+                        continue;
+                    }
+                    let dx = building.x - pulse.x;
+                    let dy = building.y - pulse.y;
+                    if dx * dx + dy * dy <= range2 {
+                        building.apply_heal_suppression(now, pulse.reload + 1.0);
+                        suppressed_buildings += 1;
+                    }
+                }
+            }
+        }
+
+        suppressed_buildings
     }
 
     fn apply_runtime_unit_cargo_loader_spawns(
@@ -5894,6 +5933,57 @@ mod tests {
         assert_eq!(far_ally.status.get_duration("overclock"), 0.0);
         let enemy = launcher.server_units.get(&23).unwrap();
         assert_eq!(enemy.status.get_duration("overclock"), 0.0);
+    }
+
+    #[test]
+    fn server_update_ticks_quell_suppression_field_for_enemy_buildings() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(64, 64);
+
+        let quell = launcher
+            .content_loader
+            .unit_by_name("quell")
+            .unwrap()
+            .clone();
+        let router = launcher.content_loader.block_by_name("router").unwrap();
+        let mut parent = UnitComp::new(30, quell, TeamId(1));
+        parent.set_pos(80.0, 80.0);
+        parent.set_rotation(0.0);
+        parent.abilities[0].data = 89.0;
+
+        let near_enemy_tile = point2_pack(11, 10);
+        let near_same_team_tile = point2_pack(12, 10);
+        let far_enemy_tile = point2_pack(40, 40);
+        launcher.server_units.insert(parent.id(), parent);
+        launcher.runtime.add_building(BuildingComp::new(
+            near_enemy_tile,
+            router.base().clone(),
+            TeamId(2),
+        ));
+        launcher.runtime.add_building(BuildingComp::new(
+            near_same_team_tile,
+            router.base().clone(),
+            TeamId(1),
+        ));
+        launcher.runtime.add_building(BuildingComp::new(
+            far_enemy_tile,
+            router.base().clone(),
+            TeamId(2),
+        ));
+
+        launcher.update();
+
+        let now = launcher.runtime.state.tick as f32;
+        let parent = launcher.server_units.get(&30).unwrap();
+        assert_eq!(parent.abilities[0].data, 0.0);
+        assert!(launcher.runtime.buildings()[0].is_heal_suppressed(now));
+        assert!(!launcher.runtime.buildings()[1].is_heal_suppressed(now));
+        assert!(!launcher.runtime.buildings()[2].is_heal_suppressed(now));
+        assert_eq!(
+            launcher.runtime.buildings()[0].heal_suppression_time,
+            now + 481.0
+        );
     }
 
     #[test]

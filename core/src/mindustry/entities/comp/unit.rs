@@ -11,7 +11,7 @@ use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
     EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, StatusFieldAbility, StatusFieldPulse,
-    UnitSpawnAbility, UnitSpawnPlan,
+    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -516,6 +516,34 @@ impl UnitComp {
                 ability.update_targets(delta, is_shooting, unit_x, unit_y, unit_rotation, ids.len())
             {
                 pulse.target_ids = ids;
+                pulses.push(pulse);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.timer;
+            }
+        }
+
+        pulses
+    }
+
+    pub fn update_suppression_field_abilities(&mut self, delta: f32) -> Vec<SuppressionFieldPulse> {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let unit_x = self.x();
+        let unit_y = self.y();
+        let unit_rotation = self.rotation();
+        let mut pulses = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = SuppressionFieldAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.timer = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+
+            if let Some(pulse) = ability.update_state(delta, unit_x, unit_y, unit_rotation) {
                 pulses.push(pulse);
             }
 
@@ -1444,6 +1472,27 @@ mod tests {
         assert_eq!(pulses[0].duration, 10.0);
         assert_eq!(pulses[0].target_count, 2);
         assert_eq!(pulses[0].target_ids, vec![1, 2]);
+        assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_suppression_field_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["SuppressionFieldAbility:480:90:200:0:1:true:13".into()];
+        let mut unit = UnitComp::new(43, unit_type, TeamId(1));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(0.0);
+
+        assert!(unit.update_suppression_field_abilities(89.0).is_empty());
+        assert_eq!(unit.abilities[0].data, 89.0);
+
+        let pulses = unit.update_suppression_field_abilities(1.0);
+        assert_eq!(pulses.len(), 1);
+        assert!((pulses[0].x - 101.0).abs() < 0.0001);
+        assert!((pulses[0].y - 200.0).abs() < 0.0001);
+        assert_eq!(pulses[0].reload, 480.0);
+        assert_eq!(pulses[0].max_delay, 90.0);
+        assert_eq!(pulses[0].range, 200.0);
         assert_eq!(unit.abilities[0].data, 0.0);
     }
 
