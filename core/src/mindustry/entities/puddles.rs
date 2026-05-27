@@ -310,6 +310,16 @@ pub struct PuddleEntry {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PuddleParticleEffectEvent {
+    pub effect: String,
+    pub x: f32,
+    pub y: f32,
+    /// Java uses `Mathf.range(size)` independently for X/Y, so this is the
+    /// symmetric random offset range around `(x, y)`.
+    pub range: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct PuddleUpdateEvent {
     pub puddle_id: i32,
     pub tile: PuddleTileView,
@@ -320,7 +330,7 @@ pub struct PuddleUpdateEvent {
     pub affect_units: bool,
     pub create_fire: bool,
     pub puddle_on_building: bool,
-    pub particle_effect: Option<String>,
+    pub particle_effect: Option<PuddleParticleEffectEvent>,
     pub liquid_update: bool,
 }
 
@@ -340,6 +350,17 @@ impl PuddleUpdateEvent {
         }
 
         let tile = puddle.tile?;
+        let particle_effect = if plan.particle_effect && liquid.particle_effect != "none" {
+            Some(PuddleParticleEffectEvent {
+                effect: liquid.particle_effect.clone(),
+                x: puddle.x,
+                y: puddle.y,
+                range: (puddle.amount / (MAX_LIQUID / 1.5)).clamp(0.0, 1.0) * 4.0,
+            })
+        } else {
+            None
+        };
+
         Some(Self {
             puddle_id: puddle.id,
             tile: PuddleTileView {
@@ -358,10 +379,7 @@ impl PuddleUpdateEvent {
             affect_units: plan.affect_units,
             create_fire: plan.create_fire,
             puddle_on_building: plan.puddle_on_building,
-            particle_effect: plan
-                .particle_effect
-                .then(|| liquid.particle_effect.clone())
-                .filter(|effect| effect != "none"),
+            particle_effect,
             liquid_update: plan.liquid_update,
         })
     }
@@ -1270,6 +1288,60 @@ mod tests {
         assert_eq!((event.tile.x, event.tile.y), (1, 1));
         assert!(event.tile.build_present);
         assert_eq!(event.liquid.name, "slag");
+    }
+
+    #[test]
+    fn update_all_report_carries_particle_effect_spawn_range_for_non_headless_clients() {
+        let mut liquid = water();
+        liquid.viscosity = 1.0;
+        liquid.has_particle_effect = true;
+        liquid.particle_effect = "puddleSteam".to_string();
+        liquid.particle_spacing = 5.0;
+        let mut puddles = Puddles::new(4, 4);
+        puddles.deposit_at(
+            Some(PuddleTileView::new(1, 2)),
+            liquid.clone(),
+            MAX_LIQUID / 2.0,
+            PuddleDepositContext::default(),
+        );
+        puddles.get_mut(1, 2).unwrap().effect_time = 4.0;
+
+        let report = puddles.update_all_with_passability_report(
+            1.0,
+            false,
+            |_, _, _| true,
+            |_, _| false,
+            |_, _, _| false,
+        );
+
+        let particle = report.events[0]
+            .particle_effect
+            .as_ref()
+            .expect("non-headless puddle should expose liquid particle effect");
+        assert_eq!(particle.effect, "puddleSteam");
+        assert_eq!((particle.x, particle.y), (8.0, 16.0));
+        assert!(
+            (particle.range - 3.0).abs() < 0.0001,
+            "Java uses Mathf.clamp(amount / (maxLiquid / 1.5f)) * 4f before Mathf.range(size)"
+        );
+
+        let mut headless_puddles = Puddles::new(4, 4);
+        headless_puddles.deposit_at(
+            Some(PuddleTileView::new(1, 2)),
+            liquid,
+            MAX_LIQUID / 2.0,
+            PuddleDepositContext::default(),
+        );
+        headless_puddles.get_mut(1, 2).unwrap().effect_time = 4.0;
+        let headless_report = headless_puddles.update_all_with_passability_report(
+            1.0,
+            true,
+            |_, _, _| true,
+            |_, _| false,
+            |_, _, _| false,
+        );
+
+        assert!(headless_report.events[0].particle_effect.is_none());
     }
 
     #[test]

@@ -5142,3 +5142,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `tile.build.puddleOn(self())` 在 Java vanilla base 中是 no-op 且未发现 core override，但 Rust event consumer 仍未显式建模；
   - server `headless=true` 下 `particle_effect` 不会产生事件；客户端/非 headless puddle particle dispatch 后续仍待接入 renderer/effect runtime；
   - ripple effect 仍在 tick 后统一广播，尚未完全保持 Java effect packet 的逐 puddle 发送时机。
+
+### 12.175 Puddle building hook no-op consumer and particle effect payload
+
+- 2026-05-28：继续收紧 Java `PuddleComp.update()` effects-only 分支剩余事件，先闭合 vanilla `tile.build.puddleOn(self())` 的显式消费边界，并把非 headless `particleEffect.at(...)` 事件从裸 effect name 扩展成可供后续客户端/renderer 消费的 payload。
+- Java 依据：
+  - `PuddleComp.update()` 中 `tile.build.puddleOn(self())` 位于 `Fires.create(tile)` 之后、`liquid.update(self())` 之前；
+  - `BuildingComp.puddleOn(Puddle)` 在 v158.1 vanilla core 中是空实现，当前参考仓库未发现 override；
+  - `!headless && liquid.particleEffect != Fx.none` 时，每隔 `liquid.particleSpacing` 执行 `liquid.particleEffect.at(x + Mathf.range(size), y + Mathf.range(size))`，其中 `size = Mathf.clamp(amount / (maxLiquid / 1.5f)) * 4f`。
+- Rust 新增/变化：
+  - `core::entities::puddles::PuddleParticleEffectEvent`：
+    - 记录 `effect`、puddle center `x/y`、以及 Java `Mathf.range(size)` 所需的 symmetric `range`；
+    - `PuddleUpdateEvent::particle_effect` 从 `Option<String>` 升级为 `Option<PuddleParticleEffectEvent>`，避免后续 renderer/client 再反推 Java 的 size 公式。
+  - `server::ServerLauncher::process_server_puddle_on_building(...)`：
+    - 在 per-puddle callback 中显式消费 `puddle_on_building`；
+    - 当前保持 vanilla no-op，不增加 updates、不改变 world/fire/unit 状态；
+    - 预留 mod/future block-specific hook 接入点，且不改变 `PuddleComp.update()` 顺序。
+  - `tick_server_puddles(...)` callback 顺序现在为：
+    1. `affect_units`；
+    2. `create_fire`；
+    3. `puddle_on_building` vanilla no-op；
+    4. `CellLiquid.update` / `liquid_update`。
+- 新增验证：
+  - `update_all_report_carries_particle_effect_spawn_range_for_non_headless_clients`
+    - 非 headless 下验证 particle payload 的 effect name、center、Java range 公式；
+    - headless 下验证不会产生 particle payload。
+  - `server_puddle_on_building_vanilla_hook_is_consumed_as_noop`
+    - 有 building 的水 puddle 触发 `puddle_on_building` 事件；
+    - server 消费后只保留 puddle update 事件计数，不创建 fire、不移除 puddle，符合 vanilla 空 hook。
+- 已跑验证：
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - `particle_effect` 现在已有 renderer/client 所需 payload，但 desktop/client 非 headless effect runtime 尚未把它真正绘制/播放；
+  - ripple effect 仍在 tick 后统一广播，尚未完全保持 Java effect packet 的逐 puddle 发送时机。

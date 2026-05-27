@@ -415,7 +415,8 @@ pub use pattern::{
 pub use predict::{intercept, intercept_positions};
 pub use puddles::{
     react_puddle, PuddleDepositContext, PuddleDepositOutcome, PuddleDepositResult, PuddleEntry,
-    PuddleLiquidInfo, PuddleReactionResult, PuddleTileView, PuddleUpdateEvent, Puddles, MAX_LIQUID,
+    PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleReactionResult, PuddleTileView,
+    PuddleUpdateEvent, Puddles, MAX_LIQUID,
 };
 pub use sized::{EntityPosition, SizedEntity};
 pub use target_priority as TargetPriority;

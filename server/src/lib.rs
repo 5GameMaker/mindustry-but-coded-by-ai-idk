@@ -1848,6 +1848,7 @@ impl ServerLauncher {
                 inline_effect_updates +=
                     self.process_server_puddle_affect_units(event, &mut ripple_effects);
                 inline_effect_updates += self.process_server_puddle_create_fire(event);
+                inline_effect_updates += self.process_server_puddle_on_building(event);
                 let (updates, removed_ids) =
                     self.process_server_puddle_liquid_update(puddles, event, delta_ticks);
                 inline_liquid_updates += updates;
@@ -1950,6 +1951,19 @@ impl ServerLauncher {
             },
         );
         (result != FireCreateResult::Ignored) as usize
+    }
+
+    fn process_server_puddle_on_building(&mut self, event: &PuddleUpdateEvent) -> usize {
+        if !event.puddle_on_building {
+            return 0;
+        }
+
+        // Upstream v158.1 `BuildingComp.puddleOn(Puddle)` is a vanilla no-op
+        // hook and has no core overrides. Keep an explicit consumer so this
+        // branch is not mistaken for an unhandled gameplay effect; mods or
+        // future block-specific behavior can be wired here without changing
+        // `PuddleComp.update` ordering.
+        0
     }
 
     fn process_server_puddle_liquid_update(
@@ -8957,6 +8971,38 @@ mod tests {
                 .contains_key(&super::server_fire_entity_id(1, 1)),
             "client should receive the fire created from the hot puddle/building contact"
         );
+    }
+
+    #[test]
+    fn server_puddle_on_building_vanilla_hook_is_consumed_as_noop() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.world.resize(4, 4);
+        let wall = launcher
+            .content_loader
+            .block_by_name("copper-wall")
+            .unwrap()
+            .base()
+            .clone();
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(point2_pack(1, 1), wall, TeamId(1)));
+        launcher.runtime.server_puddles = Puddles::new(4, 4);
+        let water = launcher.content_loader.liquid_by_name("water").unwrap();
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1)),
+            PuddleLiquidInfo::from(water),
+            40.0,
+            PuddleDepositContext::default(),
+        );
+
+        let updates = launcher.tick_server_puddles(1.0).unwrap();
+
+        assert_eq!(
+            updates, 1,
+            "only the puddle update event itself is counted; Java vanilla BuildingComp.puddleOn(Puddle) has no side effects"
+        );
+        assert!(!launcher.runtime.server_fires.has(1, 1));
+        assert!(launcher.runtime.server_puddles.get(1, 1).is_some());
     }
 
     #[test]

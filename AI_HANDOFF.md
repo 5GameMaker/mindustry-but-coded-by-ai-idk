@@ -3837,3 +3837,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - `puddle_on_building` Java vanilla base 是 no-op 且目前未发现 core override，但 Rust 仍只有 event；
      - `particle_effect` 在 server headless 下不会触发，客户端/非 headless 渲染侧仍未接入；
      - ripple effect 当前仍是 callback 收集、tick 后统一广播，后续如追求 packet 顺序可继续内联发送。
+
+---
+
+## 116. 最新闭环记录：Puddle building hook no-op 与 particle payload
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：闭合 `PuddleComp.update()` 剩余 effects-only 分支中 `tile.build.puddleOn(self())` 的 vanilla no-op 消费边界，并让 `particle_effect` 事件携带 Java `Mathf.range(size)` 所需的 dispatch payload。
+- Java 依据：
+  - `PuddleComp.update()` 顺序：`Units.nearby(...)` → `Fires.create(tile)` → `tile.build.puddleOn(self())` → particle branch/updateTime decrement → `liquid.update(self())`；
+  - `BuildingComp.puddleOn(Puddle)` 在 vanilla core 是空方法，当前参考仓库未发现 override；
+  - particle branch 非 headless 时用 `size = Mathf.clamp(amount / (maxLiquid / 1.5f)) * 4f`，再对 x/y 分别 `Mathf.range(size)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - 新增 `PuddleParticleEffectEvent { effect, x, y, range }`；
+    - `PuddleUpdateEvent::particle_effect` 从 `Option<String>` 改为 `Option<PuddleParticleEffectEvent>`；
+    - `PuddleUpdateEvent::from_plan(...)` 按 Java size 公式生成 range，headless/none effect 仍不产出 payload。
+  - `core/src/mindustry/entities/mod.rs`
+    - re-export `PuddleParticleEffectEvent`。
+  - `server/src/lib.rs`
+    - 新增 `process_server_puddle_on_building(...)`；
+    - `tick_server_puddles(...)` per-puddle callback 顺序变为 `affect_units -> create_fire -> puddle_on_building(no-op) -> CellLiquid/liquid_update`；
+    - 当前 no-op consumer 不产生额外 side effect，符合 Java vanilla base。
+- 新增测试：
+  - `update_all_report_carries_particle_effect_spawn_range_for_non_headless_clients`
+  - `server_puddle_on_building_vanilla_hook_is_consumed_as_noop`
+- 已跑验证：
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`闭合液体坑建筑钩子`；
+  2. 后续欠账：
+     - desktop/client 非 headless renderer/effect runtime 仍未真正消费 `PuddleParticleEffectEvent`；
+     - ripple effect 仍是 callback 收集、tick 后统一广播，后续如追求 packet 顺序可继续内联发送。
