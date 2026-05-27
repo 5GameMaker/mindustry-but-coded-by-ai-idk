@@ -5958,3 +5958,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `smokeAoeCloud` 仍只进入标准 effect primitive/frame data 边界；
   - 真实 desktop renderer 未消费；
   - 完整 `Fx.java` registry 仍待继续迁移。
+
+### 12.201 Arc Scaled.finpow 对齐修正
+
+- 2026-05-28：在继续迁移 `steamCoolSmoke` 前复核 Arc `Scaled.finpow()`，发现此前 Rust 侧按 `fin * fin` 近似，和 Java/Arc 实际语义不一致；本轮先纠正该基础公式，避免后续所有依赖 `e.finpow()` 的 Fx 持续偏移。
+- Java/Arc 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/entities/Effect.java` 中 `EffectContainer` 实现 `Scaled.fin()`；
+  - 本地 `arc-core-4d9760e264.jar` 字节码确认 `arc.math.Scaled.finpow()` 为 `Interp.pow3Out.apply(fin())`；
+  - 等价公式为 `1.0 - (1.0 - fin)^3`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `effect_finpow_from_fin(fin)`；
+    - `standard_effect_draw_plan(...)` 中的 `finpow` 改为 pow3Out 等价公式；
+    - `EffectContainer::finpow()` 改为复用同一 helper；
+    - 更新受影响测试期望：
+      - `Fx.vapor` 在 `fin=0.5` 时 length 从旧近似 `4.75` 改为 Java 等价 `11.625`；
+      - `Fx.smokePuff` 在 `fin=0.5` 时 length 从旧近似 `11.5` 改为 `30.25`；
+      - `Fx.shootSmallSmoke` 在 `fin=0.5` 时 length 从旧近似 `1.5` 改为 `5.25`，并更新 Java probe seeded vector 期望。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo test -p mindustry-core effect_container_fin --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 其它 Arc `Interp` helper 仍需按使用点逐步补齐；
+  - 历史已迁移 Fx 中如还有 `finpow` 派生常量，需要以后继续结合 Java probe 抽样回归。

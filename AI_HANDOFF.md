@@ -4240,3 +4240,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 继续 `missileTrailSmokeSmall` / `missileTrailSmoke`，需要对 `rand.setSeed(b.id*2+i)` 多 pass 粒子和 `Drawf.light` 做可复用建模；
   2. 或先做 `steamCoolSmoke`，需要补 Interp pow2Out/pow3Out 与方向扇区公式。
+
+---
+
+## 127. 最新闭环记录：Arc Scaled.finpow 纠偏
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：纠正 Rust effect 基础时间曲线，保证 `e.finpow()` 与 Java/Arc 一致。
+- Java/Arc 依据：
+  - `EffectContainer` 只实现 `fin()`；
+  - `arc.math.Scaled.finpow()` 字节码为 `Interp.pow3Out.apply(fin())`；
+  - 等价公式：`1.0 - (1.0 - fin)^3`，不是 `fin^2`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `effect_finpow_from_fin(fin)`；
+    - `standard_effect_draw_plan(...)` 的局部 `finpow` 改用 pow3Out；
+    - `EffectContainer::finpow()` 改用同一 helper；
+    - 更新 `vapor/smokePuff/shootSmallSmoke` 相关测试期望；
+    - `shootSmallSmoke` 的 Java probe vector 期望已按 length `5.25` 重算。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo test -p mindustry-core effect_container_fin --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 下一步建议：
+  1. 迁移 `steamCoolSmoke` 时可以直接复用已纠正的 `finpow`，还需补 `Interp.pow2Out` 和 `fout(Interp.pow3Out)`；
+  2. 后续审计其它 `Scaled` 默认方法，避免类似 `finpow/foutpow` 曲线偏差。

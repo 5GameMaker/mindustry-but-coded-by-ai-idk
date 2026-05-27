@@ -432,7 +432,7 @@ pub fn standard_effect_draw_plan(
         (time / lifetime).clamp(0.0, 1.0)
     };
     let fout = 1.0 - fin;
-    let finpow = fin * fin;
+    let finpow = effect_finpow_from_fin(fin);
     let fslope = effect_fslope_from_fin(fin);
     let rocket_smoke_alpha = (fout * 1.6 - rotation.powi(3) * 1.2).clamp(0.0, 1.0);
 
@@ -970,6 +970,10 @@ fn effect_fslope_from_fin(fin: f32) -> f32 {
     (1.0 - (fin.clamp(0.0, 1.0) - 0.5).abs() * 2.0).clamp(0.0, 1.0)
 }
 
+fn effect_finpow_from_fin(fin: f32) -> f32 {
+    1.0 - (1.0 - fin.clamp(0.0, 1.0)).powi(3)
+}
+
 pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
     match name {
         "Color.white" => Some(DecalColor::WHITE),
@@ -1317,7 +1321,7 @@ impl EffectContainer {
     }
 
     pub fn finpow(&self) -> f32 {
-        self.fin().powi(2)
+        effect_finpow_from_fin(self.fin())
     }
 
     pub fn fslope(&self) -> f32 {
@@ -2475,7 +2479,7 @@ mod tests {
         assert_eq!(vapor.alpha, 0.5);
         let vapor_particles = vapor.particles.unwrap();
         assert_eq!(vapor_particles.count, 3);
-        assert_eq!(vapor_particles.length, 4.75);
+        assert_eq!(vapor_particles.length, 11.625);
         assert_eq!(vapor_particles.radius_base, 0.6);
         assert_eq!(vapor_particles.radius_fin_scale, 5.0);
 
@@ -2511,7 +2515,7 @@ mod tests {
         assert_eq!(smoke_puff.input_color, Some(DecalColor::WHITE));
         let smoke_puff_particles = smoke_puff.particles.unwrap();
         assert_eq!(smoke_puff_particles.count, 6);
-        assert_eq!(smoke_puff_particles.length, 11.5);
+        assert_eq!(smoke_puff_particles.length, 30.25);
         assert_eq!(smoke_puff_particles.radius_fout_scale, 3.0);
         assert_eq!(smoke_puff_particles.secondary_vector_scale, 0.5);
         assert_eq!(smoke_puff_particles.secondary_radius_fout_scale, 1.0);
@@ -2536,7 +2540,7 @@ mod tests {
         );
         let shoot_small_smoke_particles = shoot_small_smoke.particles.unwrap();
         assert_eq!(shoot_small_smoke_particles.count, 5);
-        assert_eq!(shoot_small_smoke_particles.length, 1.5);
+        assert_eq!(shoot_small_smoke_particles.length, 5.25);
         assert_eq!(shoot_small_smoke_particles.angle, Some(45.0));
         assert_eq!(shoot_small_smoke_particles.angle_range, 20.0);
         assert_eq!(shoot_small_smoke_particles.radius_fout_scale, 1.5);
@@ -2843,15 +2847,15 @@ mod tests {
         .unwrap();
         let shoot_small_smoke_vectors = shoot_small_smoke.seeded_particle_vectors();
         assert_eq!(shoot_small_smoke_vectors.len(), 5);
-        assert!((shoot_small_smoke_vectors[0].x - 0.09767128).abs() < 0.00001);
-        assert!((shoot_small_smoke_vectors[0].y - 0.17498657).abs() < 0.00001);
-        assert!((shoot_small_smoke_vectors[1].x - 0.43052074).abs() < 0.00001);
-        assert!((shoot_small_smoke_vectors[1].y - 0.30730063).abs() < 0.00001);
+        assert!((shoot_small_smoke_vectors[0].x - 0.34184948).abs() < 0.00001);
+        assert!((shoot_small_smoke_vectors[0].y - 0.61245298).abs() < 0.00001);
+        assert!((shoot_small_smoke_vectors[1].x - 1.5068227).abs() < 0.00001);
+        assert!((shoot_small_smoke_vectors[1].y - 1.0755522).abs() < 0.00001);
         let shoot_small_smoke_circles =
             shoot_small_smoke.expand_seeded_particle_circles(&shoot_small_smoke_vectors);
         assert_eq!(shoot_small_smoke_circles.len(), 5);
-        assert!((shoot_small_smoke_circles[0].center.0 - 0.09767128).abs() < 0.00001);
-        assert!((shoot_small_smoke_circles[0].center.1 - 0.17498657).abs() < 0.00001);
+        assert!((shoot_small_smoke_circles[0].center.0 - 0.34184948).abs() < 0.00001);
+        assert!((shoot_small_smoke_circles[0].center.1 - 0.61245298).abs() < 0.00001);
         assert_eq!(shoot_small_smoke_circles[0].radius, 0.75);
 
         let ripple = standard_effect_draw_plan(
@@ -3105,6 +3109,9 @@ mod tests {
 
         let (container, lifetime) = effect.render_with(params, |container| {
             assert_eq!(container.fin(), 0.5);
+            assert_eq!(container.fout(), 0.5);
+            assert_eq!(container.finpow(), 0.875);
+            assert_eq!(container.fslope(), 1.0);
             container.lifetime = 12.0;
         });
 
