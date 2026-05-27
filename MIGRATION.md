@@ -3636,7 +3636,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `GameRuntime::configure_owned_unit_factory_value(...)`，统一分发 `TypeValue::Int(plan)`、`Content(Unit)`、`Content(UnitCommand)` 与 `Null`，供网络入口直接复用；
   - `ServerLauncher::apply_server_tile_config_packet(...)` 现在会识别 `BlockDef::UnitFactory`，把客户端 `TileConfigCallPacket` 分派到 unit factory value 入口，并把成功变更以 server 形态 `TileConfigCallPacket` 可靠转发给已连接客户端；
   - `DesktopLauncher::sync_tile_config_to_runtime(...)` 现在也会按目标 block kind 分派 tile config：`UnitFactory` 的 `Content(UnitCommand)` / `Null` 会回填客户端 `GameRuntimeUnitBlockState::Factory.command_id`，不再只支持 `UnitCargoUnloadPoint`；
-  - `mindustry::input` 新增 `client_unit_factory_command_config_packet(...)` 与 `client_unit_factory_clear_command_packet(...)`，分别生成 Java `UnitFactory.config(UnitCommand.class, ...)` 与 `configClear` 对应的客户端 `TileConfigCallPacket` 形态；
+  - `mindustry::input` 新增 `client_unit_factory_plan_config_packet(...)`、`client_unit_factory_unit_config_packet(...)`、`client_unit_factory_command_config_packet(...)` 与 `client_unit_factory_clear_command_packet(...)`，分别生成 Java `UnitFactory.config(Integer.class, ...)`、`config(UnitType.class, ...)`、`config(UnitCommand.class, ...)` 与 `configClear` 对应的客户端 `TileConfigCallPacket` 形态；
   - 2026-05-27 继续补 Java `UnitFactoryBuild.senseObject(LAccess.config)`：`GameRuntime::sense_owned_building_object(...)` 在 `LAccess::Config` 且目标为 `UnitFactory` 时读取当前 `UnitFactoryState.current_plan`，返回对应 `TypeValue::Content(ContentType::Unit, unit_id)`；`current_plan == -1` 返回 `TypeValue::Null`；缺失 sidecar 时会从 `BuildingComp.config == Int(plan)` 恢复同等可感知结果；
   - 同步新增 `GameRuntime::sense_owned_building_logic_object(...)`，把 `TypeValue::Content` 转为逻辑对象名（如 `@mono`），为后续真实 processor/link runtime 接入提供非孤立入口；
   - 继续补 Java `UnitFactoryBuild.sense(LAccess.progress/itemCapacity)`：`GameRuntime::sense_owned_building_number(...)` 对 UnitFactory 返回 clamp 后的 `fraction()` 与 `round(itemCapacity * rules.unitCost(team))`，并在无 plan/无 sidecar 时按 Java 空进度语义回退；
@@ -3655,6 +3655,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_unit_factory_configuration_plan_hides_enter_payload_only_standard_commands_like_java`
   - `game_runtime_clears_incompatible_unit_factory_command_when_plan_changes_like_java`
   - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
+  - `client_unit_factory_config_packets_cover_plan_unit_command_and_clear_values`
   - `unit_core_properties_match_upstream_subset` 现在断言 `mono/poly/mega` 的 commands/default command、Payloadc unit 的 payload command，以及普通 core unit 的 Java-style fallback default；
 - 新增 server 回归测试：
   - `server_update_applies_unit_factory_command_tile_config_and_forwards_to_clients`

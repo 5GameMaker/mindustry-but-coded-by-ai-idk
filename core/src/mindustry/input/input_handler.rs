@@ -2647,6 +2647,23 @@ pub fn client_unit_cargo_unload_clear_config_packet(build: &BuildingComp) -> Til
     client_tile_config_packet(build, TypeValue::Null)
 }
 
+pub fn client_unit_factory_plan_config_packet(
+    build: &BuildingComp,
+    plan_index: i32,
+) -> TileConfigCallPacket {
+    client_tile_config_packet(build, TypeValue::Int(plan_index))
+}
+
+pub fn client_unit_factory_unit_config_packet(
+    build: &BuildingComp,
+    unit_id: ContentId,
+) -> TileConfigCallPacket {
+    client_tile_config_packet(
+        build,
+        TypeValue::Content(ContentRef::new(ContentType::Unit, unit_id)),
+    )
+}
+
 pub fn client_unit_factory_command_config_packet(
     build: &BuildingComp,
     command_id: ContentId,
@@ -6716,8 +6733,21 @@ mod tests {
     }
 
     #[test]
-    fn client_unit_factory_command_config_packets_use_unit_command_content_and_clear_null() {
+    fn client_unit_factory_config_packets_cover_plan_unit_command_and_clear_values() {
         let building = BuildingComp::new(point2_pack(8, 9), block(), TeamId(1));
+
+        let plan_packet = client_unit_factory_plan_config_packet(&building, 2);
+        assert_eq!(plan_packet.player, EntityRef::null());
+        assert_eq!(plan_packet.build, BuildingRef::new(point2_pack(8, 9)));
+        assert_eq!(plan_packet.value, TypeValue::Int(2));
+
+        let unit_packet = client_unit_factory_unit_config_packet(&building, 17);
+        assert_eq!(unit_packet.player, EntityRef::null());
+        assert_eq!(unit_packet.build, BuildingRef::new(point2_pack(8, 9)));
+        assert_eq!(
+            unit_packet.value,
+            TypeValue::Content(ContentRef::new(ContentType::Unit, 17))
+        );
 
         let command_packet = client_unit_factory_command_config_packet(&building, 7);
         assert_eq!(command_packet.player, EntityRef::null());
