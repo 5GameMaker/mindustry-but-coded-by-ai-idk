@@ -349,18 +349,38 @@ impl Puddles {
         let keys: Vec<_> = self.puddles.keys().copied().collect();
         let mut removed = Vec::new();
         let mut remove_keys = Vec::new();
+        let mut spread_deposits = Vec::new();
 
         for key in keys {
+            let spread_targets = self.d4_spread_targets(key.0, key.1);
             let Some(entry) = self.puddles.get_mut(&key) else {
                 continue;
             };
+            let source_tile = entry
+                .puddle
+                .tile
+                .map(|tile| PuddleTileView::new(tile.x, tile.y));
+            let liquid = entry.liquid.clone();
             let plan = entry.puddle.update(PuddleUpdateContext {
                 delta,
-                nearby_spread_targets: 0,
+                nearby_spread_targets: spread_targets.len() as i32,
                 registry_matches_self: true,
                 headless,
                 fire_chance_passed: false,
             });
+            if plan.deposited_per_target > 0.0 {
+                for target in spread_targets
+                    .into_iter()
+                    .take(plan.spread_targets.max(0) as usize)
+                {
+                    spread_deposits.push((
+                        target,
+                        source_tile.clone(),
+                        liquid.clone(),
+                        plan.deposited_per_target,
+                    ));
+                }
+            }
             if plan.removed
                 || entry.puddle.removed
                 || entry.puddle.amount <= 0.0
@@ -374,7 +394,30 @@ impl Puddles {
         for key in remove_keys {
             self.puddles.remove(&key);
         }
+        for ((x, y), source, liquid, amount) in spread_deposits {
+            self.deposit(
+                Some(PuddleTileView::new(x, y)),
+                source,
+                liquid,
+                amount,
+                PuddleDepositContext {
+                    initial: false,
+                    ..PuddleDepositContext::default()
+                },
+            );
+        }
         removed
+    }
+
+    fn d4_spread_targets(&self, x: i32, y: i32) -> Vec<(i32, i32)> {
+        [(0, -1), (1, 0), (0, 1), (-1, 0)]
+            .into_iter()
+            .filter_map(|(dx, dy)| {
+                let nx = x + dx;
+                let ny = y + dy;
+                self.in_bounds(nx, ny).then_some((nx, ny))
+            })
+            .collect()
     }
 
     pub fn slurp_matching_liquid(&mut self, x: i32, y: i32, liquid_name: &str, amount: f32) -> f32 {
@@ -730,6 +773,25 @@ mod tests {
 
         assert_eq!(removed, vec![id]);
         assert!(puddles.get(1, 1).is_none());
+    }
+
+    #[test]
+    fn update_all_spreads_overfilled_puddles_to_d4_neighbors() {
+        let tile = PuddleTileView::new(2, 2);
+        let mut puddles = Puddles::new(5, 5);
+        puddles.deposit_at(Some(tile), water(), 70.0, PuddleDepositContext::default());
+
+        let removed = puddles.update_all(1.0, true);
+
+        assert!(removed.is_empty());
+        assert_eq!(puddles.len(), 5);
+        assert!((puddles.get(2, 2).unwrap().amount - 68.7).abs() < 0.0001);
+        for (x, y) in [(2, 1), (3, 2), (2, 3), (1, 2)] {
+            assert!(
+                (puddles.get(x, y).unwrap().amount - 0.3).abs() < 0.0001,
+                "neighbor ({x},{y}) should receive Java d4 spread deposit"
+            );
+        }
     }
 
     #[test]

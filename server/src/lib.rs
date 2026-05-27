@@ -6571,6 +6571,47 @@ mod tests {
     }
 
     #[test]
+    fn server_update_spreads_overfilled_puddle_and_snapshots_neighbors() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6595).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(8, 8);
+        launcher.runtime.server_puddles = Puddles::new(8, 8);
+        let water = launcher.content_loader.liquid_by_name("water").unwrap();
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(2, 2)),
+            PuddleLiquidInfo::from(water),
+            70.0,
+            PuddleDepositContext::default(),
+        );
+
+        launcher.update();
+
+        assert_eq!(launcher.runtime.server_puddles.len(), 5);
+        assert!((launcher.runtime.server_puddles.get(2, 2).unwrap().amount - 68.7).abs() < 0.0001);
+        let snapshot = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|(_connection_id, packet, reliable)| {
+                if !*reliable {
+                    if let PacketKind::EntitySnapshotCallPacket(packet) = packet {
+                        return Some(packet.clone());
+                    }
+                }
+                None
+            })
+            .expect("puddle spread should be broadcast as entity snapshots");
+        assert_eq!(snapshot.amount, 5);
+    }
+
+    #[test]
     fn server_update_ticks_scepter_shield_regen_field_for_nearby_allies() {
         let mut launcher = ServerLauncher::new(Vec::new());
         launcher.runtime.state.set(GameStateState::Playing);

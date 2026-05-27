@@ -3300,3 +3300,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - puddle spread / affect units / fire / particle / ripple 事件；
      - hidden snapshot 对其他 typed entities 的最终 remove 语义（本轮只处理 puddle）；
      - 客户端渲染层真正消费 puddle add/remove 的表现。
+
+---
+
+## 99. 最新闭环记录：Puddles D4 spread runtime and snapshot
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：把 Java `PuddleComp.update()` 中 amount 过高时向 `Geometry.d4` 四邻扩散的行为接入 Rust `Puddles::update_all` 和 server snapshot。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - `update_all(...)` 现在按 in-bounds D4 neighbors 计算 `nearby_spread_targets`；
+    - `PuddleComp::update(...)` 返回 `deposited_per_target` 后，延迟调用 `Puddles::deposit(... initial:false ...)` 写入邻居 puddle；
+    - 新增 `d4_spread_targets(...)`；
+    - 新增 `update_all_spreads_overfilled_puddles_to_d4_neighbors`。
+  - `server/src/lib.rs`
+    - 既有 `tick_server_puddles(1.0)` 自动驱动 spread；
+    - 新增 `server_update_spreads_overfilled_puddle_and_snapshots_neighbors`，验证 server update 后生成 5 个 puddle 且 snapshot amount 为 5。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core update_all_spreads --lib`
+  - `cargo test -p mindustry-server server_update_spreads_overfilled --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入液体坑四向扩散`。
+  3. 后续补：
+     - spread passability 接真实 world block/floor，而不是仅 `in_bounds`；
+     - puddle ripple/particle/fire/building puddleOn 事件；
+     - `liquid.update(self())` hook。

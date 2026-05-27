@@ -4712,3 +4712,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Puddles::update_all` 当前不做 spread 目标扫描、建筑影响、火焰/particle effect 事件，只先闭合蒸发/empty removal；
   - hidden snapshot 对其他 entity typed maps 仍保持原有 mark/sidecar 语义，只有 puddle 在本轮做实际 remove；
   - 后续需要把 puddle update 的 ripple/steam/fire/particle 事件接到 effect/network 层。
+
+### 12.157 Puddles D4 spread runtime and snapshot
+
+- 2026-05-28：继续对照 Java `PuddleComp.update()`，把 amount 超过 `maxLiquid / 1.5` 时向 `Geometry.d4` 四邻扩散的逻辑接入 `Puddles::update_all` 与 server snapshot。
+- Java 依据：
+  - `amount >= maxLiquid / 1.5f` 时计算 `deposited = min((amount - maxLiquid / 1.5f) / 4f, 0.3f * Time.delta)`；
+  - 遍历 `Geometry.d4`，对存在且可通过的四邻 tile 调用 `Puddles.deposit(other, tile, liquid, deposited, false)`；
+  - 原 puddle 扣除 `deposited * targets`。
+- Rust 新增/变化：
+  - `Puddles::update_all(...)` 不再给 `PuddleComp::update(...)` 固定传 `nearby_spread_targets=0`，而是按 in-bounds D4 neighbors 计算 spread targets；
+  - update 后收集 `(target, source, liquid, amount)`，再用 `Puddles::deposit(... initial:false ...)` 创建/合并邻居 puddle，避免遍历时直接二次可变借用；
+  - 新增私有 `Puddles::d4_spread_targets(...)`；
+  - server 已有 `tick_server_puddles(1.0)` 自动驱动 spread，新邻居 puddle 会通过既有 `EntitySnapshotCallPacket` 同步给客户端。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core update_all_spreads --lib`
+  - `cargo test -p mindustry-server server_update_spreads_overfilled --lib`
+- 仍未完成：
+  - 当前 spread passability 仅用 `in_bounds` 近似 Java `other != null && (other.block()==air || liquid.moveThroughBlocks)`，尚未接真实 world block/floor passability；
+  - spread 引发的 ripple/particle/fire/building puddleOn 事件仍未接入；
+  - 液体 update hook `liquid.update(self())` 仍未迁移。
