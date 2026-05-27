@@ -60,6 +60,8 @@ pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
 pub const FX_BALLFIRE_ID: i32 = 131;
 /// Upstream `Fx.freezing` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FREEZING_ID: i32 = 132;
+/// Upstream `Fx.melting` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MELTING_ID: i32 = 133;
 /// Upstream `Fx.wet` id in `mindustry.content.Fx` for v158.1.
 pub const FX_WET_ID: i32 = 134;
 /// Upstream `Fx.muddy` id in `mindustry.content.Fx` for v158.1.
@@ -119,6 +121,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
         "ballfire" => Some(FX_BALLFIRE_ID),
         "freezing" => Some(FX_FREEZING_ID),
+        "melting" => Some(FX_MELTING_ID),
         "wet" => Some(FX_WET_ID),
         "muddy" => Some(FX_MUDDY_ID),
         "sporeSlowed" => Some(FX_SPORE_SLOWED_ID),
@@ -200,6 +203,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         }
         FX_BALLFIRE_ID => Effect::with_lifetime(FX_BALLFIRE_ID, 25.0, DEFAULT_EFFECT_CLIP),
         FX_FREEZING_ID => Effect::with_lifetime(FX_FREEZING_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_MELTING_ID => Effect::with_lifetime(FX_MELTING_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_WET_ID => Effect::with_lifetime(FX_WET_ID, 80.0, DEFAULT_EFFECT_CLIP),
         FX_MUDDY_ID => Effect::with_lifetime(FX_MUDDY_ID, 80.0, DEFAULT_EFFECT_CLIP),
         FX_SPORE_SLOWED_ID => Effect::with_lifetime(FX_SPORE_SLOWED_ID, 40.0, DEFAULT_EFFECT_CLIP),
@@ -1178,6 +1182,45 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_MELTING_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Liquids.slag.color"),
+            color_mid: None,
+            color_to: Some("Color.white"),
+            color_mix: fout / 5.0 + mathf_random_seed_range(state_id as i64, 0.12),
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 1.0 + fin * 3.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.2,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 1.2,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_FREEZING_ID | FX_OILY_ID => {
             let (color_from, radius_fout_scale) = if effect_id == FX_FREEZING_ID {
                 ("Liquids.cryofluid.color", 1.2)
@@ -1601,6 +1644,10 @@ fn interp_pow3_out(value: f32) -> f32 {
     1.0 - (1.0 - value.clamp(0.0, 1.0)).powi(3)
 }
 
+fn mathf_random_seed_range(seed: i64, range: f32) -> f32 {
+    ArcRand::with_seed(seed.wrapping_mul(99_999)).range(range)
+}
+
 pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
     match name {
         "Color.white" => Some(DecalColor::WHITE),
@@ -1609,6 +1656,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Color.darkGray" => Some(DecalColor::from_rgba(0x3f3f3fff)),
         "Liquids.water.color" => Some(DecalColor::from_rgba(0x596ab8ff)),
         "Liquids.cryofluid.color" => Some(DecalColor::from_rgba(0x6ecdecff)),
+        "Liquids.slag.color" => Some(DecalColor::from_rgba(0xffa166ff)),
         "Liquids.oil.color" => Some(DecalColor::from_rgba(0x313131ff)),
         "Pal.water" => Some(DecalColor::from_rgba(0x596ab8ff)),
         "Pal.darkishGray" => Some(DecalColor {
@@ -2920,6 +2968,7 @@ mod tests {
         );
         assert_eq!(standard_effect_id("ballfire"), Some(FX_BALLFIRE_ID));
         assert_eq!(standard_effect_id("freezing"), Some(FX_FREEZING_ID));
+        assert_eq!(standard_effect_id("melting"), Some(FX_MELTING_ID));
         assert_eq!(standard_effect_id("wet"), Some(FX_WET_ID));
         assert_eq!(standard_effect_id("muddy"), Some(FX_MUDDY_ID));
         assert_eq!(standard_effect_id("sporeSlowed"), Some(FX_SPORE_SLOWED_ID));
@@ -2953,6 +3002,12 @@ mod tests {
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
         assert_eq!(standard_effect_id("none"), None);
+    }
+
+    #[test]
+    fn mathf_random_seed_range_matches_arc_seeded_range() {
+        assert!((mathf_random_seed_range(133, 0.12) + 0.085_423_604).abs() < 0.000_001);
+        assert!((mathf_random_seed_range(42, 0.12) + 0.019_490_603).abs() < 0.000_001);
     }
 
     #[test]
@@ -3013,6 +3068,7 @@ mod tests {
         );
         assert_eq!(standard_effect(FX_BALLFIRE_ID).unwrap().lifetime, 25.0);
         assert_eq!(standard_effect(FX_FREEZING_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_MELTING_ID).unwrap().lifetime, 40.0);
         assert_eq!(standard_effect(FX_WET_ID).unwrap().lifetime, 80.0);
         assert_eq!(standard_effect(FX_MUDDY_ID).unwrap().lifetime, 80.0);
         assert_eq!(standard_effect(FX_SPORE_SLOWED_ID).unwrap().lifetime, 40.0);
@@ -3311,6 +3367,31 @@ mod tests {
         assert_eq!(ballfire_particles.length, 5.5);
         assert_eq!(ballfire_particles.radius_base, 0.2);
         assert_eq!(ballfire_particles.radius_fout_scale, 1.5);
+
+        let melting = standard_effect_draw_plan(
+            Some(FX_MELTING_ID as u16),
+            133,
+            0.0,
+            0.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(melting.color_from, Some("Liquids.slag.color"));
+        assert_eq!(melting.color_to, Some("Color.white"));
+        assert!((melting.color_mix - 0.014_576_398).abs() < 0.000_001);
+        assert_eq!(
+            standard_effect_color_symbol("Liquids.slag.color"),
+            Some(DecalColor::from_rgba(0xffa166ff))
+        );
+        let melting_particles = melting.particles.unwrap();
+        assert_eq!(melting_particles.count, 2);
+        assert_eq!(melting_particles.length, 2.5);
+        assert_eq!(melting_particles.radius_base, 0.2);
+        assert_eq!(melting_particles.radius_fout_scale, 1.2);
+        assert_eq!(melting.circle_render_primitives_from_seed().len(), 2);
 
         let freezing = standard_effect_draw_plan(
             Some(FX_FREEZING_ID as u16),

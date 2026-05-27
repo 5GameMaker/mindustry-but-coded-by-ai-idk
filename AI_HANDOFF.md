@@ -4523,3 +4523,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `melting` 暂未迁移，需要先复刻 `Mathf.randomSeedRange(...)` 颜色扰动；
   - `sapped/electrified/overdriven/overclocked` 是 square/poly 类，需新增 primitive；
   - `sporeSlowed` Fx 本体已迁移，但 Java `StatusEffects.sporeSlowed` wiring 后续要单独核对。
+
+---
+
+## 135. 最新闭环记录：Fx.melting 熔融圆形粒子迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `Fx.melting=133`，并补齐 Arc `Mathf.randomSeedRange(...)` 的 Rust 对齐 helper，避免颜色扰动近似实现。
+- Java 依据：
+  - `Fx.java:1550-1556`；
+  - lifetime `40f`；
+  - `Liquids.slag.color -> Color.white`；
+  - `colorMix = fout / 5 + Mathf.randomSeedRange(e.id, 0.12f)`；
+  - `randLenVectors(e.id, 2, 1 + fin * 3, ...)`；
+  - 半径 `0.2 + fout * 1.2`。
+- Arc 语义核对：
+  - `javap` 证实 `Mathf.randomSeedRange(seed, range)` 先 `seed * 99999L` 再 `Rand.setSeed(...)`；
+  - 返回 `(nextFloat() - 0.5f) * range * 2f`；
+  - `jshell` golden：`randomSeedRange(133, 0.12) = -0.085423604`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_MELTING_ID = 133`；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - 新增 `mathf_random_seed_range(seed, range)`；
+    - 新增 `Liquids.slag.color = 0xffa166ff`；
+    - `standard_effect_draw_plan(...)` 新增 `FX_MELTING_ID` 分支；
+    - 测试覆盖 name/id、lifetime、Arc seeded range golden、draw plan 和 primitive 展开。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core mathf_random_seed_range --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+- 下一步建议：
+  1. 继续挑无需新增 primitive 的 `Fill.circle` 类 Fx；
+  2. 对 `sapped/electrified/overdriven/overclocked` 新增 square/poly primitive 后迁移；
+  3. 对 `missileTrailSmoke*` / `artilleryTrailSmoke` 先设计 multi-pass、局部 lifetime、per-particle light/alpha spec。

@@ -6310,3 +6310,48 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `melting` 需要 `Mathf.randomSeedRange(...)` 颜色扰动后再迁移；
   - `sapped/electrified/overdriven/overclocked` 等 square/poly 类效果需要新增 polygon/square primitive；
   - `sporeSlowed` 的 StatusEffect wiring 需后续核对 Java 侧实际使用的是 `Fx.sapped` 还是 `Fx.sporeSlowed`。
+
+### 12.209 Fx.melting 熔融圆形粒子迁移
+
+- 2026-05-28：继续对照 `Fx.java`，迁移 `melting` 标准特效；该效果仍可复用当前 `SeededCircleParticles`，但颜色插值需要先复刻 Arc `Mathf.randomSeedRange(...)` 的 seeded 抖动语义。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1550` 附近：
+    - `melting = new Effect(40f, ...)`；
+    - `color(Liquids.slag.color, Color.white, e.fout() / 5f + Mathf.randomSeedRange(e.id, 0.12f))`；
+    - `randLenVectors(e.id, 2, 1f + e.fin() * 3f, ...)`；
+    - `Fill.circle(..., .2f + e.fout() * 1.2f)`。
+  - 本地 `javap`/`jshell` 核对 Arc：
+    - `Mathf.randomSeedRange(seed, range)` 会使用 `seed * 99999` 调用 `Rand.setSeed(...)`；
+    - 返回 `(nextFloat() - 0.5f) * range * 2f`；
+    - golden：`Mathf.randomSeedRange(133L, 0.12f) = -0.085423604`。
+  - `Liquids.slag.color` 来自 `Liquids.java`：`Color.valueOf("ffa166")`，Rust RGBA 为 `0xffa166ff`。
+  - 本地按 `new Effect` 声明顺序计数：`melting=133`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_MELTING_ID = 133`；
+    - 接入 `standard_effect_id("melting")` 与 `standard_effect(...)`，lifetime `40.0`；
+    - 新增 `mathf_random_seed_range(seed, range)`，复用 `ArcRand` 且对齐 Arc 的 `seed * 99999`；
+    - 新增颜色符号 `Liquids.slag.color`；
+    - `standard_effect_draw_plan(...)` 新增 `melting`：
+      - `color_from = Liquids.slag.color`
+      - `color_to = Color.white`
+      - `color_mix = fout / 5 + randomSeedRange(id, 0.12)`
+      - `count = 2`
+      - `length = 1 + fin * 3`
+      - `radius = 0.2 + fout * 1.2`。
+- 新增/更新验证：
+  - `mathf_random_seed_range_matches_arc_seeded_range` 使用 Java probe golden 锁定 Arc seeded range；
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `melting` name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖颜色、mix、count、length、radius 与 primitive 展开。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core mathf_random_seed_range --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+- 仍未完成：
+  - `sapped/electrified/overdriven/overclocked` 等 square/poly 类效果需要新增 polygon/square primitive；
+  - `missileTrailSmoke*` / `artilleryTrailSmoke` 仍需 multi-pass、局部 lifetime 与 per-particle light/alpha 表达；
+  - 真实 renderer backend 仍需接入这些 primitive 数据。
