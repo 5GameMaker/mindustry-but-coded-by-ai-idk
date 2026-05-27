@@ -10,7 +10,8 @@ use crate::mindustry::ai::{PrebuildAiPlanSnapshot, PrebuildAiRequirement};
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
-    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, UnitSpawnAbility, UnitSpawnPlan,
+    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, StatusFieldAbility, StatusFieldPulse,
+    UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -475,6 +476,46 @@ impl UnitComp {
                 targets,
             ) {
                 self.weapons.ammo = pulse.ammo_after.max(0) as f32;
+                pulses.push(pulse);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.timer;
+            }
+        }
+
+        pulses
+    }
+
+    pub fn update_status_field_abilities<F>(
+        &mut self,
+        delta: f32,
+        mut target_ids: F,
+    ) -> Vec<StatusFieldPulse>
+    where
+        F: FnMut(&StatusFieldAbility) -> Vec<u32>,
+    {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let unit_x = self.x();
+        let unit_y = self.y();
+        let unit_rotation = self.rotation();
+        let is_shooting = self.weapons.is_shooting;
+        let mut pulses = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = StatusFieldAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.timer = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+            let ids = target_ids(&ability);
+
+            if let Some(mut pulse) =
+                ability.update_targets(delta, is_shooting, unit_x, unit_y, unit_rotation, ids.len())
+            {
+                pulse.target_ids = ids;
                 pulses.push(pulse);
             }
 
@@ -1383,6 +1424,26 @@ mod tests {
         assert_eq!(pulses[0].hits[0].id, 7);
         assert_eq!(pulses[0].hits[0].amount, 80.0);
         assert_eq!(unit.weapons.ammo, 1.0);
+        assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_status_field_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["StatusFieldAbility:overclock:10:5:30".into()];
+        let mut unit = UnitComp::new(42, unit_type, TeamId(1));
+
+        assert!(unit
+            .update_status_field_abilities(4.0, |_| vec![1, 2])
+            .is_empty());
+        assert_eq!(unit.abilities[0].data, 4.0);
+
+        let pulses = unit.update_status_field_abilities(1.0, |_| vec![1, 2]);
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].effect, "overclock");
+        assert_eq!(pulses[0].duration, 10.0);
+        assert_eq!(pulses[0].target_count, 2);
+        assert_eq!(pulses[0].target_ids, vec![1, 2]);
         assert_eq!(unit.abilities[0].data, 0.0);
     }
 

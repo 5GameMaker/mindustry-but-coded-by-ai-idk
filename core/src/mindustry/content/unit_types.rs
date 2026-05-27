@@ -430,6 +430,8 @@ pub fn load() -> Vec<UnitType> {
             u.armor = 4.0;
             u.rotate_speed = 4.0;
             u.build_speed = 2.0;
+            u.abilities
+                .push("StatusFieldAbility:overclock:360:360:60".into());
         }),
         unit(&mut next_id, "cyerce", UnitKind::Naval, |u| {
             u.health = 870.0;
@@ -1182,6 +1184,12 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| entry == "LiquidExplodeAbility:neoplasm"));
+
+        let oxynoe = by_name(&units, "oxynoe");
+        assert!(oxynoe
+            .abilities
+            .iter()
+            .any(|entry| entry == "StatusFieldAbility:overclock:360:360:60"));
 
         let aegires = by_name(&units, "aegires");
         assert!(aegires

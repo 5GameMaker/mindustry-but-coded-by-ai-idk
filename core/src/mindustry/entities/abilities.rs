@@ -721,6 +721,7 @@ pub struct StatusFieldPulse {
     pub effect: String,
     pub duration: f32,
     pub target_count: usize,
+    pub target_ids: Vec<u32>,
     pub active_x: f32,
     pub active_y: f32,
     pub active_param: f32,
@@ -773,6 +774,29 @@ impl StatusFieldAbility {
         }
     }
 
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("StatusFieldAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("StatusFieldAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let effect = parts.next()?;
+        let duration = parts.next()?.parse().ok()?;
+        let reload = parts.next()?.parse().ok()?;
+        let range = parts.next()?.parse().ok()?;
+        let mut ability = Self::new(effect, duration, reload, range);
+        if let Some(on_shoot) = parts.next() {
+            ability.on_shoot = matches!(on_shoot, "true" | "1" | "shoot");
+        }
+        Some(ability)
+    }
+
     pub fn update_targets(
         &mut self,
         delta: f32,
@@ -801,6 +825,7 @@ impl StatusFieldAbility {
             effect: self.effect.clone(),
             duration: self.duration,
             target_count,
+            target_ids: Vec::new(),
             active_x: unit_x + offset_x,
             active_y: unit_y + offset_y,
             active_param,
@@ -2129,11 +2154,25 @@ mod tests {
         assert_eq!(pulse.effect, "overdrive");
         assert_eq!(pulse.duration, 120.0);
         assert_eq!(pulse.target_count, 3);
+        assert!(pulse.target_ids.is_empty());
         assert!((pulse.active_x - 8.0).abs() < 0.0001);
         assert!((pulse.active_y - 24.0).abs() < 0.0001);
         assert_eq!(pulse.active_param, 30.0);
         assert_eq!(pulse.timer, 0.0);
         assert_eq!(ability.pulses_per_second(), 6.0);
+    }
+
+    #[test]
+    fn status_field_descriptor_parses_oxynoe_runtime_entry() {
+        let ability =
+            StatusFieldAbility::from_descriptor("StatusFieldAbility:overclock:360:360:60")
+                .expect("oxynoe descriptor should parse");
+        assert_eq!(ability.effect, "overclock");
+        assert_eq!(ability.duration, 360.0);
+        assert_eq!(ability.reload, 360.0);
+        assert_eq!(ability.range, 60.0);
+        assert!(!ability.on_shoot);
+        assert!(StatusFieldAbility::from_descriptor("EnergyFieldAbility").is_none());
     }
 
     #[test]

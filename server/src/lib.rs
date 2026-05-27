@@ -303,6 +303,7 @@ impl ServerLauncher {
                 self.network_error = Some(error.to_string());
             }
             self.tick_server_energy_field_abilities(1.0);
+            self.tick_server_status_field_abilities(1.0);
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
                 self.network_error = Some(error.to_string());
             }
@@ -1686,6 +1687,68 @@ impl ServerLauncher {
                             }
                         }
                     }
+                    target.refresh_component_views();
+                }
+            }
+        }
+
+        pulses
+    }
+
+    fn tick_server_status_field_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut pulses = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent_snapshot) = self.server_units.get(&parent_id) else {
+                continue;
+            };
+            let parent_team = parent_snapshot.team_id();
+            let parent_x = parent_snapshot.x();
+            let parent_y = parent_snapshot.y();
+            let team_units: Vec<(u32, f32, f32)> = self
+                .server_units
+                .iter()
+                .filter(|(_unit_id, unit)| unit.team_id() == parent_team && !unit.health.dead)
+                .filter_map(|(unit_id, unit)| {
+                    Some((u32::try_from(*unit_id).ok()?, unit.x(), unit.y()))
+                })
+                .collect();
+
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let status_pulses = parent.update_status_field_abilities(delta_ticks, |ability| {
+                let range2 = ability.range * ability.range;
+                team_units
+                    .iter()
+                    .copied()
+                    .filter(|(_id, x, y)| {
+                        let dx = *x - parent_x;
+                        let dy = *y - parent_y;
+                        dx * dx + dy * dy <= range2
+                    })
+                    .map(|(id, _x, _y)| id)
+                    .collect()
+            });
+            pulses += status_pulses.len();
+
+            for pulse in status_pulses {
+                let Some(effect) = self
+                    .content_loader
+                    .status_effect_by_name(&pulse.effect)
+                    .cloned()
+                else {
+                    continue;
+                };
+                for target_id in pulse.target_ids {
+                    let Some(target_id) = i32::try_from(target_id).ok() else {
+                        continue;
+                    };
+                    let Some(target) = self.server_units.get_mut(&target_id) else {
+                        continue;
+                    };
+                    target.status.apply(effect.clone(), pulse.duration);
                     target.refresh_component_views();
                 }
             }
@@ -5786,6 +5849,51 @@ mod tests {
         let enemy = launcher.server_units.get(&12).unwrap();
         assert!((enemy.health.health - (enemy_health_before - 40.0)).abs() < 0.0001);
         assert_eq!(enemy.status.get_duration("electrified"), 60.0 * 6.0);
+    }
+
+    #[test]
+    fn server_update_ticks_oxynoe_status_field_for_nearby_allies() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let oxynoe = launcher
+            .content_loader
+            .unit_by_name("oxynoe")
+            .unwrap()
+            .clone();
+        let risso = launcher
+            .content_loader
+            .unit_by_name("risso")
+            .unwrap()
+            .clone();
+        let mut parent = UnitComp::new(20, oxynoe, TeamId(1));
+        parent.set_pos(100.0, 100.0);
+        parent.abilities[0].data = 359.0;
+
+        let mut ally = UnitComp::new(21, risso.clone(), TeamId(1));
+        ally.set_pos(140.0, 100.0);
+        let mut far_ally = UnitComp::new(22, risso.clone(), TeamId(1));
+        far_ally.set_pos(300.0, 100.0);
+        let mut enemy = UnitComp::new(23, risso, TeamId(2));
+        enemy.set_pos(120.0, 100.0);
+
+        launcher.server_units.insert(parent.id(), parent);
+        launcher.server_units.insert(ally.id(), ally);
+        launcher.server_units.insert(far_ally.id(), far_ally);
+        launcher.server_units.insert(enemy.id(), enemy);
+
+        launcher.update();
+
+        let parent = launcher.server_units.get(&20).unwrap();
+        assert_eq!(parent.abilities[0].data, 0.0);
+        assert_eq!(parent.status.get_duration("overclock"), 60.0 * 6.0);
+
+        let ally = launcher.server_units.get(&21).unwrap();
+        assert_eq!(ally.status.get_duration("overclock"), 60.0 * 6.0);
+        let far_ally = launcher.server_units.get(&22).unwrap();
+        assert_eq!(far_ally.status.get_duration("overclock"), 0.0);
+        let enemy = launcher.server_units.get(&23).unwrap();
+        assert_eq!(enemy.status.get_duration("overclock"), 0.0);
     }
 
     #[test]

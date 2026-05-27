@@ -4345,3 +4345,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `hitBuildings` / building privileged / derelict coreCapture / `Damage.findAbsorber(...)` 尚未接入；当前闭环先覆盖真实 server unit↔unit 目标；
   - EnergyField 的 draw arcs、chain lightning/heal effects、shoot sound 等表现层 sidecar/backend 尚未迁移；
   - 普通 ability content 仍是 descriptor 字符串，后续需要结构化 ability spec / mod patcher 支持。
+
+### 12.141 StatusFieldAbility / oxynoe 同队状态场 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `StatusFieldAbility.java` 与 `UnitTypes.oxynoe`，把 Rust 状态场能力从纯 pulse 接到 `UnitComp` ability slot、`StatusComp` 与 server same-team unit runtime。
+- Java 依据：
+  - `StatusFieldAbility.update(Unit unit)`：`timer += Time.delta`，达到 `reload` 且满足 `!onShoot || unit.isShooting` 后，对 `Units.nearby(unit.team, unit.x, unit.y, range, ...)` 内同队单位执行 `other.apply(effect, duration)`；
+  - 同时按 `effectX/effectY` 偏移播放 active effect，最后 `timer = 0f`；
+  - `oxynoe` 参数：`StatusFieldAbility(StatusEffects.overclock, 60f*6, 60f*6f, 60f)`。
+- Rust 新增/变化：
+  - `StatusFieldPulse` 增加 `target_ids`，server runtime 可以把 pulse 直接落到实体；
+  - `StatusFieldAbility::from_descriptor(...)` 支持 `StatusFieldAbility:overclock:360:360:60`；
+  - `content/unit_types.rs` 为 `oxynoe` 挂载上述 descriptor，并在内容测试中锁定；
+  - `UnitComp::update_status_field_abilities(...)` 使用 `AbilityWire.data` 存 timer，通过调用方闭包提供目标 id，并保留 `on_shoot`/active effect 计算语义；
+  - `ServerLauncher::tick_server_status_field_abilities(...)` 在 playing frame 内收集同队、活着、范围内的 `server_units`（包含自身，匹配 Java 未排除 self 的 `Units.nearby` 路径），对 `pulse.target_ids` 逐个执行 `target.status.apply(effect, duration)`。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core status_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server status_field --lib`
+- 仍未完成：
+  - `applyEffect` / `activeEffect` 的真实 effect packet 或 desktop 表现层还未接入；当前只保留 active 坐标/参数 pulse 数据；
+  - 普通 ability descriptor 仍是过渡模型，后续需要结构化 ability spec / mod patcher；
+  - client 本地 ability tick 与 Java↔Rust 视觉 smoke 仍需继续迁移。
