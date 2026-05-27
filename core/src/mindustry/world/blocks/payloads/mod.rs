@@ -1041,6 +1041,32 @@ pub fn payload_unit_sort_key(class_id: u8, unit_bytes: &[u8]) -> Option<PayloadS
     })
 }
 
+pub fn payload_unit_patch_type_id(class_id: u8, unit_bytes: &mut [u8], unit_id: ContentId) -> bool {
+    if unit_bytes.len() < 2 || unit_id < 0 {
+        return false;
+    }
+    let revision = i16::from_be_bytes([unit_bytes[0], unit_bytes[1]]);
+    let Some(tail_after_type) = payload_unit_tail_after_type(class_id, revision) else {
+        return false;
+    };
+    let Some(offset) = unit_bytes.len().checked_sub(tail_after_type + 2) else {
+        return false;
+    };
+    unit_bytes[offset..offset + 2].copy_from_slice(&unit_id.to_be_bytes());
+    true
+}
+
+pub fn payload_ref_patch_unit_type(payload: &mut PayloadRef, unit_id: ContentId) -> bool {
+    let PayloadRef::Unit {
+        class_id,
+        unit_bytes,
+    } = payload
+    else {
+        return false;
+    };
+    payload_unit_patch_type_id(*class_id, unit_bytes, unit_id)
+}
+
 fn payload_unit_tail_after_type(class_id: u8, revision: i16) -> Option<usize> {
     // Mirrors the v158 unit payload schemas consumed by GameRuntime's exact
     // UnitPayload reader. All supported entities write UnitType immediately
@@ -2057,9 +2083,24 @@ mod tests {
         assert_eq!(
             payload_ref_sort_key(&PayloadRef::Unit {
                 class_id: 3,
-                unit_bytes
+                unit_bytes: unit_bytes.clone()
             }),
             unit_key
+        );
+        let before_patch = unit_bytes.clone();
+        assert!(payload_unit_patch_type_id(3, &mut unit_bytes, 43));
+        assert_eq!(
+            payload_unit_sort_key(3, &unit_bytes),
+            Some(PayloadSortKey {
+                content_type: ContentType::Unit.ordinal() as i8,
+                id: 43,
+            })
+        );
+        assert_eq!(unit_bytes.len(), before_patch.len());
+        assert_eq!(&unit_bytes[..unit_offset], &before_patch[..unit_offset]);
+        assert_eq!(
+            &unit_bytes[unit_offset + 2..],
+            &before_patch[unit_offset + 2..]
         );
 
         let mut bytes = Vec::new();

@@ -3550,3 +3550,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
   - `cargo check --workspace`
 - 仍未完成：Reconstructor 只完成接收/入仓，尚未在 runtime tick 中执行 `moveInPayload()`、progress 推进、完成后替换为升级后 UnitPayload、恢复 command/defaultCommand、消费资源与 `UnitCreateEvent`；完整 UnitPayload materialize 仍是 raw sidecar。
+
+### 12.107 Reconstructor 最小 updateTile runtime tick
+
+- 2026-05-27：对照 Java `ReconstructorBuild.updateTile()`，把 `UnitReconstructor` 从“只接收 UnitPayload”推进到 owned runtime tick：会移动 payload 入仓、推进 progress、达到 `constructTime` 后把 payload 内 unit type 替换成升级目标，并接入 `advance_owned_runtime_blocks(...)` 聚合报告，避免停留在独立 helper。
+- Java 依据：
+  - `updateTile()` 中 `payload != null && hasUpgrade(payload.unit.type)` 时先 `moveInPayload()`，到位且 `efficiency > 0` 后 `progress += edelta() * state.rules.unitBuildSpeed(team)`；
+  - `progress >= constructTime` 后执行 `payload.unit = upgrade(payload.unit.type).create(payload.unit.team())`、`progress %= 1f`、`consume()`、触发创建音效/烟雾/事件；
+  - 若当前 payload 不再有可用 upgrade，则走 `moveOutPayload()`，让完成升级后的单位在下一 tick 从该级重构器输出。
+- Rust 新增/变化：
+  - `PayloadRef::Unit` 新增 `payload_unit_patch_type_id(...)` / `payload_ref_patch_unit_type(...)`，复用 v158 UnitPayload tail schema，只原地替换 raw unit body 中 `UnitType` 的 2 字节 id，保持 payload envelope、class id、其余同步字段不变，利于 Java wire 兼容；
+  - 新增 `GameRuntimeUnitReconstructorFrameReport` 与 `GameRuntimeOwnedUnitFrameReport`，`GameRuntimeOwnedFrameReport` 现在包含 `unit.reconstructor`；
+  - 新增 `advance_owned_unit_reconstructors(...)` / ticks 入口，按 `consume_items * rules.unitCost(team)` 检查/消费 building items，并使用 `reconstructor_update(...)` 更新 `progress/speed_scl/time`；
+  - `transfer_payload_output_to_front(...)` 现在也能把 `UnitReconstructor` 作为 payload source，支持重构完成后无后续 upgrade 的 UnitPayload 向前方 payload block / reconstructor 转交。
+- 新增 core 回归测试：
+  - `game_runtime_unit_reconstructor_upgrades_payload_on_tick_like_java`
+  - `game_runtime_owned_runtime_blocks_includes_unit_reconstructor_tick`
+  - `payload_router_match_pick_control_and_serialization_follow_java_shell` 扩展验证 UnitPayload type id patch 只改目标 2 字节。
+- 验证：
+  - `cargo test -p mindustry-core reconstructor`
+  - `cargo test -p mindustry-core payload_router_match_pick_control_and_serialization_follow_java_shell`
+  - `cargo check --workspace`
+- 仍未完成：当前升级完成只 patch raw UnitType id，尚未完整重建 Java `UnitType.create(team)` 后的新 unit health/weapon/mount/controller 默认状态；`command_pos/command_id -> UnitCommand` 写回、`UnitCreateEvent`、create sound、shake、Fx.producesmoke、真实 entity materialize/dump 与 renderer/UI 仍需继续迁移。
