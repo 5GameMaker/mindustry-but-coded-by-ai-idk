@@ -1819,34 +1819,41 @@ impl ServerLauncher {
                 .then_with(|| left_id.cmp(right_id))
         });
 
+        let mut stale_fallback = None;
         for (item_id, amount) in item_entries {
-            let Some((target_tile_pos, _, next_target_index)) =
-                self.find_runtime_unit_cargo_drop_target(item_id, team, target_index, None)
-            else {
+            let targets = self.runtime_unit_cargo_drop_targets(item_id, team, None);
+            if targets.is_empty() {
                 continue;
-            };
+            }
             let item_name = self.content_loader.item(item_id)?.name().to_string();
             let transfer_amount = amount.min(unit_capacity).max(0);
-            if transfer_amount > 0 {
-                return Some((
+            if transfer_amount <= 0 {
+                continue;
+            }
+            for i in 0..targets.len() {
+                let index = (i + target_index) % targets.len();
+                let (target_tile_pos, _, stale) = targets[index];
+                stale_fallback = Some((
                     item_id,
-                    item_name,
+                    item_name.clone(),
                     transfer_amount,
                     target_tile_pos,
-                    next_target_index,
+                    index,
                 ));
+                if !stale {
+                    return Some((item_id, item_name, transfer_amount, target_tile_pos, index));
+                }
             }
         }
-        None
+        stale_fallback
     }
 
-    fn find_runtime_unit_cargo_drop_target(
+    fn runtime_unit_cargo_drop_targets(
         &self,
         item_id: ContentId,
         team: TeamId,
-        offset: usize,
         ignore_tile_pos: Option<i32>,
-    ) -> Option<(i32, usize, usize)> {
+    ) -> Vec<(i32, usize, bool)> {
         let mut targets = Vec::new();
         for (building_index, building) in self.runtime.buildings.iter().enumerate() {
             if building.team != team || Some(building.tile_pos) == ignore_tile_pos {
@@ -1871,6 +1878,17 @@ impl ServerLauncher {
                 targets.push((building.tile_pos, building_index, state.stale));
             }
         }
+        targets
+    }
+
+    fn find_runtime_unit_cargo_drop_target(
+        &self,
+        item_id: ContentId,
+        team: TeamId,
+        offset: usize,
+        ignore_tile_pos: Option<i32>,
+    ) -> Option<(i32, usize, usize)> {
+        let targets = self.runtime_unit_cargo_drop_targets(item_id, team, ignore_tile_pos);
         if targets.is_empty() {
             return None;
         }
@@ -5352,6 +5370,123 @@ mod tests {
                             && packet.build == BuildingRef::new(unload_tile)
                 )
         }));
+    }
+
+    #[test]
+    fn server_update_unit_cargo_pickup_prefers_non_stale_later_item_target() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = launcher
+            .content_loader
+            .item_by_name("lead")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let loader_tile = point2_pack(6, 6);
+        let stale_copper_tile = point2_pack(10, 6);
+        let fresh_lead_tile = point2_pack(12, 6);
+
+        launcher.runtime.state.world.resize(18, 12);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.items.as_mut().unwrap().add(copper, 12);
+        loader_building.items.as_mut().unwrap().add(lead, 8);
+        launcher.runtime.add_building(loader_building);
+        let mut stale_copper_unload =
+            BuildingComp::new(stale_copper_tile, unload_def.base().clone(), TeamId(6));
+        stale_copper_unload
+            .items
+            .as_mut()
+            .unwrap()
+            .add(copper, stale_copper_unload.block.item_capacity);
+        launcher.runtime.add_building(stale_copper_unload);
+        launcher.runtime.add_building(BuildingComp::new(
+            fresh_lead_tile,
+            unload_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                read_unit_id: 7,
+                has_unit: true,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        launcher.runtime.distribution_runtime_states.insert(
+            stale_copper_tile,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: Some(copper as i32),
+                stale_timer: 360.0,
+                stale: true,
+            }),
+        );
+        launcher.runtime.distribution_runtime_states.insert(
+            fresh_lead_tile,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: Some(lead as i32),
+                stale_timer: 0.0,
+                stale: false,
+            }),
+        );
+        let mut cargo_unit = UnitComp::new(
+            7,
+            launcher
+                .content_loader
+                .unit_by_name("manifold")
+                .unwrap()
+                .clone(),
+            TeamId(6),
+        );
+        cargo_unit.set_controller(UnitControllerState::Cargo);
+        launcher.server_units.insert(7, cargo_unit);
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&7).unwrap();
+        assert_eq!(unit.items.item(), Some("lead"));
+        assert_eq!(unit.items.stack.amount, 8);
+        assert_eq!(
+            unit.cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.unload_target_tile_pos),
+            Some(fresh_lead_tile)
+        );
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            12
+        );
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(lead),
+            0
+        );
     }
 
     #[test]
