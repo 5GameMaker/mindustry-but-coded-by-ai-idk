@@ -3197,3 +3197,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - `LiquidRegenAbility` 的 `Fx.neoplasmHeal` effect queue；
      - `LiquidExplodeAbility` 的 Java `Simplex.noise2d` 边缘噪声与真实 floor/env/space/boil 随机上下文；
      - 把当前混合 cargo unit + puddle 的 `server_unit_entity_snapshot_packet` 逐步泛化命名和拆分。
+
+---
+
+## 96. 最新闭环记录：LiquidRegenAbility / neoplasmHeal effect packet and client queue
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：把 `LiquidRegenAbility` 的 `slurpEffect=Fx.neoplasmHeal` 接到服务端 effect packet 与桌面客户端 local effect queue，避免吸液回血只有数值变化没有表现层事件。
+- Java 依据：
+  - `LiquidRegenAbility.update(Unit unit)` 在 healed 后按 `slurpEffectChance` 调用 `slurpEffect.at(..., unit)`；
+  - `Fx.java:1445`：`neoplasmHeal = new Effect(120f, ...)`；
+  - 统计 v158.1 `Fx.java` 中 `neoplasmHeal` 前有 122 个 effect 声明，因此 `neoplasmHeal` effect id 为 `122`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_NEOPLASM_HEAL_ID=122`；
+    - `standard_effect_id("neoplasmHeal") -> Some(122)`。
+  - `core/src/mindustry/entities/mod.rs`
+    - re-export `FX_NEOPLASM_HEAL_ID`。
+  - `server/src/lib.rs`
+    - `tick_server_liquid_regen_abilities(...)` 改为 `io::Result<usize>`；
+    - slurp/heal 成功后按 `slurp_effect != "none" && slurp_effect_chance > 0.0` 发送 `EffectCallPacket2`；
+    - 新增 `broadcast_server_effect_with_data(...)`，写 `EffectCallPacket2 { effect_id, x, y, rotation, color=-1, data=TypeValue::Unit(unit_id) }`；
+    - 更新 `server_update_slurps_neoplasm_puddle_to_regen_renale`，捕获网络包并断言 `neoplasmHeal` effect packet。
+  - `desktop/src/lib.rs`
+    - 新增 effect packet apply cursors；
+    - `DesktopLauncher::update()` 调用 `sync_effect_packets_to_runtime()`；
+    - `sync_effect_packets_to_runtime()` 将 `EffectCallPacket` / `EffectCallPacket2` / `EffectReliableCallPacket` 转入 `runtime.client_local_effect_events`；
+    - 新增 `desktop_launcher_syncs_effect_call_packet2_to_local_effect_queue`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-server slurps_neoplasm --lib`
+  - `cargo test -p mindustry-desktop syncs_effect_call_packet2 --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入新生物吸液回血特效同步`。
+  3. 后续补：
+     - `Mathf.chanceDelta(slurpEffectChance)` 的可复现 RNG/delta 概率；
+     - Java 随机 offset；
+     - effect parent/follow/rotWithParent 在 renderer/EffectState 中的完整语义；
+     - net client effect queue，避免同一 update 间隔多条同类 effect 只保留最后一条。

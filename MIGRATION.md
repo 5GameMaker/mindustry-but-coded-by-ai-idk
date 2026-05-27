@@ -4645,3 +4645,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - puddle removal/evaporation 还没有通过 hidden ids 或 delete snapshot 同步给客户端，后续要防止旧 puddle 残影；
   - `server_unit_entity_snapshot_packet` 仍沿用历史函数名，实际已经混合 cargo unit + puddle，后续可在不破坏调用方时重命名为通用 entity snapshot builder；
   - Java `Simplex.noise2d` 边缘噪声、真实 floor/env/space/boil 随机上下文和 `Fx.neoplasmHeal` 表现层仍待迁移。
+
+### 12.154 LiquidRegenAbility / neoplasmHeal effect packet and client queue
+
+- 2026-05-27：继续对照 v158.1 `LiquidRegenAbility.java` 与 `Fx.java`，把 neoplasm 吸液回血后的 `slurpEffect=Fx.neoplasmHeal` 从 descriptor 推进到服务端网络 effect packet 与桌面客户端本地 effect queue。
+- Java 依据：
+  - `LiquidRegenAbility.update(Unit unit)` 在吸取 puddle 并回血后，`healed && Mathf.chanceDelta(slurpEffectChance)` 时调用 `slurpEffect.at(unit.x + offset, unit.y + offset, unit.rotation, unit)`；
+  - `Fx.neoplasmHeal = new Effect(120f, ...)` 并 `.followParent(true).rotWithParent(true)`；
+  - 按 v158.1 `Fx.java` effect 声明顺序统计，`Fx.neoplasmHeal` 前有 122 个 effect，故 0-based id 为 `122`；同一计数方式已验证 `missileTrailShort=111`。
+- Rust 新增/变化：
+  - `entities/effect.rs` 增加 `FX_NEOPLASM_HEAL_ID=122`，`standard_effect_id("neoplasmHeal")` 返回该 id，并从 `entities/mod.rs` re-export；
+  - `ServerLauncher::tick_server_liquid_regen_abilities(...)` 在同液体 puddle slurp 后，如果 ability 的 `slurp_effect` 非 `none` 且 `slurp_effect_chance>0`，通过 `broadcast_server_effect_with_data(...)` 发送 `EffectCallPacket2`：
+    - effect id 来自 `standard_effect_id("neoplasmHeal")`；
+    - x/y/rotation 使用单位当前 transform；
+    - data 使用 `TypeValue::Unit(unit_id)`，为后续 parent/follow 语义保留关联；
+  - `DesktopLauncher::sync_effect_packets_to_runtime()` 把 `NetClientState` 中收到的 `EffectCallPacket`、`EffectCallPacket2`、`EffectReliableCallPacket` 同步到 `runtime.client_local_effect_events`，避免网络 effect 只停在 net-client telemetry。
+- 新增/更新验证：
+  - `cargo test -p mindustry-server slurps_neoplasm --lib`
+  - `cargo test -p mindustry-desktop syncs_effect_call_packet2 --lib`
+- 仍未完成：
+  - `Mathf.chanceDelta(slurpEffectChance)` 目前只实现 `chance>0` 的最小门控，尚未接可复现 RNG/delta 概率；
+  - Java 的随机 offset `Tmp.v1.rnd(Mathf.random(unit.hitSize/2f))` 暂未实现，当前 effect 位于单位中心；
+  - `followParent(true)` / `rotWithParent(true)` 已通过 `TypeValue::Unit(unit_id)` 保留父实体引用线索，但客户端 renderer/EffectState 还未完整解释 parent 跟随语义；
+  - `DesktopLauncher::sync_effect_packets_to_runtime()` 目前按 NetClientState 的 last packet/counter 同步，若一个 update 间隔内累积多条同类 effect，后续需要从 net 层保留队列而不是只保留最后一条。

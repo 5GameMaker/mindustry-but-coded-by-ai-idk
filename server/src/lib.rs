@@ -25,7 +25,7 @@ use mindustry_core::mindustry::entities::{
         CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
         UnitControllerState,
     },
-    entity_class_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
+    entity_class_id, standard_effect_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
     LiquidExplodeDepositPlan, PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
     UnitCapRules, UnitCapTeam, UnitCapType, UnitSpawnAbility, PUDDLE_CLASS_ID,
 };
@@ -41,17 +41,18 @@ use mindustry_core::mindustry::input::{
     TransferInventoryOutcome, TransferItemToOutcome,
 };
 use mindustry_core::mindustry::io::{
-    type_io, BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef,
+    type_io, BuildPlanWire, ContentPatchSet, EntityRef, TeamId, TypeValue, UnitRef,
 };
 use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, AssemblerDroneSpawnedCallPacket,
     AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
-    DropItemCallPacket, EntitySnapshotCallPacket, LandingPadLandedCallPacket, Net, NetConnection,
-    NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
-    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    TileConfigCallPacket, TransferInventoryCallPacket, UnitBlockSpawnCallPacket,
-    UnitDespawnCallPacket, UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+    DropItemCallPacket, EffectCallPacket, EffectCallPacket2, EntitySnapshotCallPacket,
+    LandingPadLandedCallPacket, Net, NetConnection, NetworkPlayerData, NetworkWorldData,
+    PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, ProviderEvent,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, TileConfigCallPacket, TransferInventoryCallPacket,
+    UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitSpawnCallPacket,
+    UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -304,7 +305,9 @@ impl ServerLauncher {
                 self.network_error = Some(error.to_string());
             }
             self.tick_server_regen_abilities(1.0);
-            self.tick_server_liquid_regen_abilities(1.0);
+            if let Err(error) = self.tick_server_liquid_regen_abilities(1.0) {
+                self.network_error = Some(error.to_string());
+            }
             self.tick_server_force_field_abilities(1.0);
             self.tick_server_shield_arc_abilities(1.0);
             self.tick_server_shield_regen_field_abilities(1.0);
@@ -1724,7 +1727,7 @@ impl ServerLauncher {
         updates
     }
 
-    fn tick_server_liquid_regen_abilities(&mut self, delta_ticks: f32) -> usize {
+    fn tick_server_liquid_regen_abilities(&mut self, delta_ticks: f32) -> io::Result<usize> {
         let unit_ids: Vec<i32> = self.server_units.keys().copied().collect();
         let mut updates = 0;
 
@@ -1742,11 +1745,14 @@ impl ServerLauncher {
 
             let unit_x = unit_snapshot.x();
             let unit_y = unit_snapshot.y();
+            let unit_rotation = unit_snapshot.rotation();
             let hit_size = unit_snapshot.type_info.hit_size;
             let abilities = unit_snapshot.liquid_regen_abilities();
             let mut total_heal = 0.0;
+            let mut slurp_effects = Vec::new();
 
             for ability in abilities {
+                let mut ability_taken = 0.0;
                 for (tile_x, tile_y) in
                     ability.slurp_tiles(unit_x, unit_y, hit_size, TILE_SIZE as f32)
                 {
@@ -1756,7 +1762,14 @@ impl ServerLauncher {
                         &ability.liquid_name,
                         ability.slurp_speed * delta_ticks,
                     );
+                    ability_taken += taken;
                     total_heal += ability.planned_heal_amount(taken);
+                }
+                if ability_taken > 0.0
+                    && ability.slurp_effect != "none"
+                    && ability.slurp_effect_chance > 0.0
+                {
+                    slurp_effects.push(ability.slurp_effect);
                 }
             }
 
@@ -1770,9 +1783,18 @@ impl ServerLauncher {
             unit.health.heal(total_heal);
             unit.refresh_component_views();
             updates += 1;
+            for effect in slurp_effects {
+                self.broadcast_server_effect_with_data(
+                    &effect,
+                    unit_x,
+                    unit_y,
+                    unit_rotation,
+                    TypeValue::Unit(unit_id),
+                )?;
+            }
         }
 
-        updates
+        Ok(updates)
     }
 
     fn tick_server_force_field_abilities(&mut self, delta_ticks: f32) -> usize {
@@ -2614,6 +2636,36 @@ impl ServerLauncher {
         self.net_server
             .net_mut()
             .send(&PacketKind::UnitSpawnCallPacket(packet), false)?;
+        Ok(true)
+    }
+
+    fn broadcast_server_effect_with_data(
+        &mut self,
+        effect: &str,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        data: TypeValue,
+    ) -> io::Result<bool> {
+        if !self.net_server.is_active() {
+            return Ok(false);
+        }
+        let Some(effect_id) = standard_effect_id(effect) else {
+            return Ok(false);
+        };
+        self.net_server.net_mut().send(
+            &PacketKind::EffectCallPacket2(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: effect_id as u16,
+                    x,
+                    y,
+                    rotation,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data,
+            }),
+            false,
+        )?;
         Ok(true)
     }
 
@@ -4000,7 +4052,7 @@ mod tests {
         CargoAiRuntimeState, PayloadComp, PayloadKind, PayloadState, UnitComp, UnitControllerState,
     };
     use mindustry_core::mindustry::entities::{
-        PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
+        standard_effect_id, PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
     };
     use mindustry_core::mindustry::game::{BlockPlan, ExportStat, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
@@ -6397,7 +6449,13 @@ mod tests {
 
     #[test]
     fn server_update_slurps_neoplasm_puddle_to_regen_renale() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
         let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6593).unwrap();
         launcher.runtime.state.set(GameStateState::Playing);
         launcher.runtime.state.world.resize(32, 32);
         launcher.runtime.server_puddles = Puddles::new(32, 32);
@@ -6430,6 +6488,19 @@ mod tests {
             launcher.runtime.server_puddles.get(10, 12).unwrap().amount,
             15.0
         );
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::EffectCallPacket2(packet)
+                        if packet.effect.effect_id
+                            == standard_effect_id("neoplasmHeal").unwrap() as u16
+                            && packet.effect.x == 80.0
+                            && packet.effect.y == 96.0
+                            && packet.data == TypeValue::Unit(37)
+                )
+        }));
     }
 
     #[test]

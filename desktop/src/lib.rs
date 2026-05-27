@@ -24,11 +24,11 @@ use mindustry_core::mindustry::input::input_handler::{
 use mindustry_core::mindustry::io::{
     read_bullet_sync, read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync,
     read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
-    LegacyTeamBlocks, TeamId, Vec2,
+    LegacyTeamBlocks, TeamId, TypeValue, Vec2,
 };
 use mindustry_core::mindustry::net::{
-    ArcNetProvider, Net, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData, PacketKind,
-    StateSnapshotCallPacket,
+    ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
+    NetworkWorldData, PacketKind, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -69,6 +69,9 @@ pub struct DesktopLauncher {
     last_applied_world_update_packets_seen: u64,
     last_applied_tile_config_packets_seen: u64,
     last_applied_command_building_packets_seen: u64,
+    last_applied_effect_packets_seen: u64,
+    last_applied_effect_with_data_packets_seen: u64,
+    last_applied_reliable_effect_packets_seen: u64,
     last_unit_entered_payload_apply_report: Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
     last_tile_config_apply_result: Option<GameRuntimeUnitCargoUnloadConfigureResult>,
     last_unit_factory_tile_config_apply_result: Option<GameRuntimeUnitFactoryConfigureResult>,
@@ -109,6 +112,9 @@ impl DesktopLauncher {
             last_applied_world_update_packets_seen: 0,
             last_applied_tile_config_packets_seen: 0,
             last_applied_command_building_packets_seen: 0,
+            last_applied_effect_packets_seen: 0,
+            last_applied_effect_with_data_packets_seen: 0,
+            last_applied_reliable_effect_packets_seen: 0,
             last_unit_entered_payload_apply_report: None,
             last_tile_config_apply_result: None,
             last_unit_factory_tile_config_apply_result: None,
@@ -137,6 +143,7 @@ impl DesktopLauncher {
         self.sync_world_update_events_to_runtime();
         self.sync_tile_config_to_runtime();
         self.sync_command_building_to_runtime();
+        self.sync_effect_packets_to_runtime();
         let now_millis = current_millis();
         self.sync_remote_player_snapshots_from_runtime();
         self.sync_remote_preview_plan_packets(now_millis);
@@ -704,6 +711,63 @@ impl DesktopLauncher {
         changed
     }
 
+    fn sync_effect_packets_to_runtime(&mut self) -> usize {
+        let (
+            effect_seen,
+            effect,
+            effect_with_data_seen,
+            effect_with_data,
+            reliable_effect_seen,
+            reliable_effect,
+        ) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (
+                state.effect_packets_seen,
+                state.last_effect,
+                state.effect_with_data_packets_seen,
+                state.last_effect_with_data.clone(),
+                state.reliable_effect_packets_seen,
+                state.last_reliable_effect,
+            )
+        };
+
+        let mut queued = 0;
+        if effect_seen != self.last_applied_effect_packets_seen {
+            self.last_applied_effect_packets_seen = effect_seen;
+            if let Some(effect) = effect {
+                self.runtime
+                    .client_local_effect_events
+                    .push(EffectCallPacket2 {
+                        effect,
+                        data: TypeValue::Null,
+                    });
+                queued += 1;
+            }
+        }
+        if effect_with_data_seen != self.last_applied_effect_with_data_packets_seen {
+            self.last_applied_effect_with_data_packets_seen = effect_with_data_seen;
+            if let Some(effect) = effect_with_data {
+                self.runtime.client_local_effect_events.push(effect);
+                queued += 1;
+            }
+        }
+        if reliable_effect_seen != self.last_applied_reliable_effect_packets_seen {
+            self.last_applied_reliable_effect_packets_seen = reliable_effect_seen;
+            if let Some(effect) = reliable_effect {
+                self.runtime
+                    .client_local_effect_events
+                    .push(EffectCallPacket2 {
+                        effect: effect.0,
+                        data: TypeValue::Null,
+                    });
+                queued += 1;
+            }
+        }
+
+        queued
+    }
+
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
         let (
             block_mirror,
@@ -720,6 +784,9 @@ impl DesktopLauncher {
             world_update_packets_seen,
             tile_config_packets_seen,
             command_building_packets_seen,
+            effect_packets_seen,
+            effect_with_data_packets_seen,
+            reliable_effect_packets_seen,
         ) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
@@ -738,6 +805,9 @@ impl DesktopLauncher {
                 state.world_update_packets_seen,
                 state.tile_config_packets_seen,
                 state.command_building_packets_seen,
+                state.effect_packets_seen,
+                state.effect_with_data_packets_seen,
+                state.reliable_effect_packets_seen,
             )
         };
         self.last_applied_block_snapshot_mirror = block_mirror;
@@ -756,6 +826,9 @@ impl DesktopLauncher {
         self.last_applied_world_update_packets_seen = world_update_packets_seen;
         self.last_applied_tile_config_packets_seen = tile_config_packets_seen;
         self.last_applied_command_building_packets_seen = command_building_packets_seen;
+        self.last_applied_effect_packets_seen = effect_packets_seen;
+        self.last_applied_effect_with_data_packets_seen = effect_with_data_packets_seen;
+        self.last_applied_reliable_effect_packets_seen = reliable_effect_packets_seen;
         self.last_unit_entered_payload_apply_report = None;
         self.last_tile_config_apply_result = None;
         self.last_unit_factory_tile_config_apply_result = None;
@@ -778,6 +851,9 @@ impl DesktopLauncher {
         self.last_applied_world_update_packets_seen = 0;
         self.last_applied_tile_config_packets_seen = 0;
         self.last_applied_command_building_packets_seen = 0;
+        self.last_applied_effect_packets_seen = 0;
+        self.last_applied_effect_with_data_packets_seen = 0;
+        self.last_applied_reliable_effect_packets_seen = 0;
         self.last_unit_entered_payload_apply_report = None;
         self.last_tile_config_apply_result = None;
         self.last_unit_factory_tile_config_apply_result = None;
@@ -1379,9 +1455,9 @@ mod tests {
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::net::{
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket,
-        ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket,
-        LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
-        StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, EffectCallPacket,
+        EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
+        NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
         UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
         UnitTetherBlockSpawnedCallPacket,
     };
@@ -2125,6 +2201,37 @@ mod tests {
         assert!(!factory.base.has_payload);
         assert_eq!(factory.current_plan, 0);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_effect_call_packet2_to_local_effect_queue() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let packet = EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: standard_effect_id("neoplasmHeal").unwrap() as u16,
+                x: 80.0,
+                y: 96.0,
+                rotation: 15.0,
+                color: type_io::RgbaColor::new(-1),
+            },
+            data: TypeValue::Unit(37),
+        };
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::EffectCallPacket2(packet.clone()));
+        }
+        launcher.update();
+
+        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
+        assert_eq!(launcher.runtime.client_local_effect_events[0], packet);
+        launcher.update();
+        assert_eq!(
+            launcher.runtime.client_local_effect_events.len(),
+            1,
+            "same last effect packet should not be queued again without a new counter"
+        );
     }
 
     #[test]

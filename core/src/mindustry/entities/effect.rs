@@ -10,11 +10,14 @@ pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
 pub const FX_MISSILE_TRAIL_ID: i32 = 110;
 /// Upstream `Fx.missileTrailShort` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MISSILE_TRAIL_SHORT_ID: i32 = 111;
+/// Upstream `Fx.neoplasmHeal` id in `mindustry.content.Fx` for v158.1.
+pub const FX_NEOPLASM_HEAL_ID: i32 = 122;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
         "missileTrailShort" => Some(FX_MISSILE_TRAIL_SHORT_ID),
+        "neoplasmHeal" => Some(FX_NEOPLASM_HEAL_ID),
         _ => None,
     }
 }
