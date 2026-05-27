@@ -6431,3 +6431,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `bubble=245` 需要 seeded stroked-circle particles（随机位置圆环）；
   - `launchPod=248` 需要 scaled circle + 随机 lineAngle；
   - `healBlock/rotateBlock/lightBlock/overdriveBlockFull` 等需要 square/rect/icon/block data 表达。
+
+### 12.212 Heal/shield stroked circle Fx batch
+
+- 2026-05-28：回到前段 healing/shield 一组纯 `Lines.circle` 效果，迁移无需 triangle/light/line/square 的圆环部分；这些效果可直接映射为 `StrokedCircle`。
+- 本轮迁移：
+  - `healWaveDynamic=70`
+  - `healWave=71`
+  - `heal=72`
+  - `dynamicWave=73`
+  - `shieldWave=74`
+  - `shieldApply=75`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:805` 附近：
+    - `healWaveDynamic = new Effect(22, ...)`，`Pal.heal`，stroke `fout*2`，半径 `4 + finpow*rotation`；
+    - `healWave = new Effect(22, ...)`，`Pal.heal`，半径 `4 + finpow*60`；
+    - `heal = new Effect(11, ...)`，`Pal.heal`，半径 `2 + finpow*7`；
+    - `dynamicWave = new Effect(22, ...)`，`color(e.color, 0.7f)`，半径 `4 + finpow*rotation`；
+    - `shieldWave = new Effect(22, ...)`，`color(e.color, 0.7f)`，半径 `4 + finpow*60`；
+    - `shieldApply = new Effect(11, ...)`，`color(e.color, 0.7f)`，半径 `2 + finpow*7`。
+  - `Pal.heal` 来自 `Pal.java`：`Color.valueOf("98ffa9")`，Rust RGBA 为 `0x98ffa9ff`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 6 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` 与 `standard_effect(...)`；
+    - 新增颜色符号 `Pal.heal`；
+    - `standard_effect_draw_plan(...)` 新增 heal/shield shared `StrokedCircle` 分支；
+    - `dynamicWave/shieldWave/shieldApply` 使用 `input_color=Some(color)` 且 `alpha=0.7` 对齐 Java `color(e.color, 0.7f)`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 6 个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖 radius、stroke、`Pal.heal` 与输入色 alpha。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 仍未完成：
+  - `dynamicSpikes/greenBomb/greenLaserCharge` 等同区域效果包含 triangle/light 或多粒子 light，需后续扩展 primitive；
+  - `disperseTrail/hitBullet*` 包含 lineAngle/scaled/light，不能用单圆环近似；
+  - 这些 primitive 数据后续仍需接入真实 renderer backend。

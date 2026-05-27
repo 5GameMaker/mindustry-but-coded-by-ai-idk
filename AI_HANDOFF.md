@@ -4629,3 +4629,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 若继续做 `bubble=245`，先把 `SeededCircleParticles` 扩展为支持 stroked circle 粒子；
   2. `launchPod=248` 需要 scaled 子时间片与 lineAngle，先不要近似硬塞；
   3. 可以转去补 square primitive，以迁移 `sapped/electrified/overdriven/overclocked/healBlock` 等。
+
+---
+
+## 138. 最新闭环记录：Heal/shield 圆环 Fx 迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移前段 healing/shield 中只使用 `Lines.circle` 的效果，继续复用 `StrokedCircle`。
+- 本轮迁移：
+  - `healWaveDynamic=70`
+  - `healWave=71`
+  - `heal=72`
+  - `dynamicWave=73`
+  - `shieldWave=74`
+  - `shieldApply=75`
+- Java 依据：
+  - `Fx.java:805-829`；
+  - `heal*` 使用 `Pal.heal = 0x98ffa9ff`；
+  - `dynamicWave/shieldWave/shieldApply` 使用输入色，alpha `0.7`；
+  - 半径分别是 `4 + finpow*rotation`、`4 + finpow*60`、`2 + finpow*7`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 6 个 `FX_*` 常量；
+    - 新增 `Pal.heal` 颜色符号；
+    - 接入 metadata/name lookup/draw plan；
+    - `dynamic/shield` 输入色分支设置 `alpha=0.7`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 下一步建议：
+  1. 若继续 Fx，可优先设计 square primitive，解锁 `sapped/electrified/overdriven/overclocked/healBlock`；
+  2. 若做 `bubble`，先扩展 seeded stroked circle particles；
+  3. 避免把 `dynamicSpikes/greenBomb/hitBullet*` 这类含 triangle/light/line 的效果近似硬塞到单圆环。

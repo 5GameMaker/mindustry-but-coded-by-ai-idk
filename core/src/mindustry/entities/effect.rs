@@ -8,6 +8,18 @@ pub const DEFAULT_EFFECT_LAYER: f32 = 110.0;
 pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
 /// Upstream `Fx.smokeAoeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_AOE_CLOUD_ID: i32 = 55;
+/// Upstream `Fx.healWaveDynamic` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HEAL_WAVE_DYNAMIC_ID: i32 = 70;
+/// Upstream `Fx.healWave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HEAL_WAVE_ID: i32 = 71;
+/// Upstream `Fx.heal` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HEAL_ID: i32 = 72;
+/// Upstream `Fx.dynamicWave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DYNAMIC_WAVE_ID: i32 = 73;
+/// Upstream `Fx.shieldWave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHIELD_WAVE_ID: i32 = 74;
+/// Upstream `Fx.shieldApply` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHIELD_APPLY_ID: i32 = 75;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
 /// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -123,6 +135,12 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "unitLandSmall" => Some(FX_UNIT_LAND_SMALL_ID),
         "crawlDust" => Some(FX_CRAWL_DUST_ID),
         "smokeAoeCloud" => Some(FX_SMOKE_AOE_CLOUD_ID),
+        "healWaveDynamic" => Some(FX_HEAL_WAVE_DYNAMIC_ID),
+        "healWave" => Some(FX_HEAL_WAVE_ID),
+        "heal" => Some(FX_HEAL_ID),
+        "dynamicWave" => Some(FX_DYNAMIC_WAVE_ID),
+        "shieldWave" => Some(FX_SHIELD_WAVE_ID),
+        "shieldApply" => Some(FX_SHIELD_APPLY_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
@@ -196,6 +214,14 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_CRAWL_DUST_ID, 35.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
         }
         FX_SMOKE_AOE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_AOE_CLOUD_ID, 180.0, 250.0),
+        FX_HEAL_WAVE_DYNAMIC_ID => {
+            Effect::with_lifetime(FX_HEAL_WAVE_DYNAMIC_ID, 22.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HEAL_WAVE_ID => Effect::with_lifetime(FX_HEAL_WAVE_ID, 22.0, DEFAULT_EFFECT_CLIP),
+        FX_HEAL_ID => Effect::with_lifetime(FX_HEAL_ID, 11.0, DEFAULT_EFFECT_CLIP),
+        FX_DYNAMIC_WAVE_ID => Effect::with_lifetime(FX_DYNAMIC_WAVE_ID, 22.0, DEFAULT_EFFECT_CLIP),
+        FX_SHIELD_WAVE_ID => Effect::with_lifetime(FX_SHIELD_WAVE_ID, 22.0, DEFAULT_EFFECT_CLIP),
+        FX_SHIELD_APPLY_ID => Effect::with_lifetime(FX_SHIELD_APPLY_ID, 11.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
             Effect::with_lifetime(FX_UNIT_ASSEMBLE_ID, 70.0, DEFAULT_EFFECT_CLIP)
@@ -838,6 +864,48 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_HEAL_WAVE_DYNAMIC_ID
+        | FX_HEAL_WAVE_ID
+        | FX_HEAL_ID
+        | FX_DYNAMIC_WAVE_ID
+        | FX_SHIELD_WAVE_ID
+        | FX_SHIELD_APPLY_ID => {
+            let (color_from, input_color, alpha, radius, stroke) = match effect_id {
+                FX_HEAL_WAVE_DYNAMIC_ID => (
+                    Some("Pal.heal"),
+                    None,
+                    1.0,
+                    4.0 + finpow * rotation,
+                    fout * 2.0,
+                ),
+                FX_HEAL_WAVE_ID => (Some("Pal.heal"), None, 1.0, 4.0 + finpow * 60.0, fout * 2.0),
+                FX_HEAL_ID => (Some("Pal.heal"), None, 1.0, 2.0 + finpow * 7.0, fout * 2.0),
+                FX_DYNAMIC_WAVE_ID => (None, Some(color), 0.7, 4.0 + finpow * rotation, fout * 2.0),
+                FX_SHIELD_WAVE_ID => (None, Some(color), 0.7, 4.0 + finpow * 60.0, fout * 2.0),
+                FX_SHIELD_APPLY_ID => (None, Some(color), 0.7, 2.0 + finpow * 7.0, fout * 2.0),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color,
+                color_mul: 1.0,
+                alpha,
+                radius,
+                stroke,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -1792,6 +1860,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.water" => Some(DecalColor::from_rgba(0x596ab8ff)),
         "Pal.accent" => Some(DecalColor::from_rgba(0xffd37fff)),
         "Pal.command" => Some(DecalColor::from_rgba(0xeab678ff)),
+        "Pal.heal" => Some(DecalColor::from_rgba(0x98ffa9ff)),
         "Pal.darkishGray" => Some(DecalColor {
             r: 0.3,
             g: 0.3,
@@ -3067,6 +3136,15 @@ mod tests {
             standard_effect_id("smokeAoeCloud"),
             Some(FX_SMOKE_AOE_CLOUD_ID)
         );
+        assert_eq!(
+            standard_effect_id("healWaveDynamic"),
+            Some(FX_HEAL_WAVE_DYNAMIC_ID)
+        );
+        assert_eq!(standard_effect_id("healWave"), Some(FX_HEAL_WAVE_ID));
+        assert_eq!(standard_effect_id("heal"), Some(FX_HEAL_ID));
+        assert_eq!(standard_effect_id("dynamicWave"), Some(FX_DYNAMIC_WAVE_ID));
+        assert_eq!(standard_effect_id("shieldWave"), Some(FX_SHIELD_WAVE_ID));
+        assert_eq!(standard_effect_id("shieldApply"), Some(FX_SHIELD_APPLY_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
@@ -3211,6 +3289,15 @@ mod tests {
         let smoke_aoe = standard_effect(FX_SMOKE_AOE_CLOUD_ID).unwrap();
         assert_eq!(smoke_aoe.lifetime, 180.0);
         assert_eq!(smoke_aoe.clip, 250.0);
+        assert_eq!(
+            standard_effect(FX_HEAL_WAVE_DYNAMIC_ID).unwrap().lifetime,
+            22.0
+        );
+        assert_eq!(standard_effect(FX_HEAL_WAVE_ID).unwrap().lifetime, 22.0);
+        assert_eq!(standard_effect(FX_HEAL_ID).unwrap().lifetime, 11.0);
+        assert_eq!(standard_effect(FX_DYNAMIC_WAVE_ID).unwrap().lifetime, 22.0);
+        assert_eq!(standard_effect(FX_SHIELD_WAVE_ID).unwrap().lifetime, 22.0);
+        assert_eq!(standard_effect(FX_SHIELD_APPLY_ID).unwrap().lifetime, 11.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
@@ -3362,6 +3449,100 @@ mod tests {
         assert_eq!(trail.input_color, Some(DecalColor::WHITE));
         assert_eq!(trail.radius, 2.0);
         assert_eq!(trail.layer, Layer::BULLET - 0.001);
+
+        let heal_wave_dynamic = standard_effect_draw_plan(
+            Some(FX_HEAL_WAVE_DYNAMIC_ID as u16),
+            70,
+            1.0,
+            2.0,
+            40.0,
+            11.0,
+            22.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            heal_wave_dynamic.kind,
+            StandardEffectDrawKind::StrokedCircle
+        );
+        assert_eq!(heal_wave_dynamic.color_from, Some("Pal.heal"));
+        assert_eq!(heal_wave_dynamic.radius, 39.0);
+        assert_eq!(heal_wave_dynamic.stroke, 1.0);
+
+        let heal_wave = standard_effect_draw_plan(
+            Some(FX_HEAL_WAVE_ID as u16),
+            71,
+            1.0,
+            2.0,
+            0.0,
+            11.0,
+            22.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(heal_wave.radius, 56.5);
+        assert_eq!(heal_wave.stroke, 1.0);
+
+        let heal = standard_effect_draw_plan(
+            Some(FX_HEAL_ID as u16),
+            72,
+            1.0,
+            2.0,
+            0.0,
+            5.5,
+            11.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(heal.radius, 8.125);
+        assert_eq!(heal.stroke, 1.0);
+
+        let shield_color = DecalColor::from_rgba(0xabcdefcc);
+        let dynamic_wave = standard_effect_draw_plan(
+            Some(FX_DYNAMIC_WAVE_ID as u16),
+            73,
+            1.0,
+            2.0,
+            40.0,
+            11.0,
+            22.0,
+            shield_color,
+        )
+        .unwrap();
+        assert_eq!(dynamic_wave.input_color, Some(shield_color));
+        assert_eq!(dynamic_wave.alpha, 0.7);
+        assert_eq!(dynamic_wave.radius, 39.0);
+        assert_eq!(dynamic_wave.stroke, 1.0);
+
+        let shield_wave = standard_effect_draw_plan(
+            Some(FX_SHIELD_WAVE_ID as u16),
+            74,
+            1.0,
+            2.0,
+            0.0,
+            11.0,
+            22.0,
+            shield_color,
+        )
+        .unwrap();
+        assert_eq!(shield_wave.input_color, Some(shield_color));
+        assert_eq!(shield_wave.alpha, 0.7);
+        assert_eq!(shield_wave.radius, 56.5);
+
+        let shield_apply = standard_effect_draw_plan(
+            Some(FX_SHIELD_APPLY_ID as u16),
+            75,
+            1.0,
+            2.0,
+            0.0,
+            5.5,
+            11.0,
+            shield_color,
+        )
+        .unwrap();
+        assert_eq!(shield_apply.input_color, Some(shield_color));
+        assert_eq!(shield_apply.alpha, 0.7);
+        assert_eq!(shield_apply.radius, 8.125);
 
         let hit_liquid = standard_effect_draw_plan(
             Some(FX_HIT_LIQUID_ID as u16),
