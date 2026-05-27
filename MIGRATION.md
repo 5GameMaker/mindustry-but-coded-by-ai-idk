@@ -4151,5 +4151,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --check`
 - 仍未完成：
   - server 侧 drone 移动是最小可玩近似，尚未完整迁移 Java `AIController.moveTo(targetPos, 1f, 3f)` 的完整加速度/避障/朝向细节；
-  - `UnitAssembler.spawned()` 中输出 unit 尝试投递到 `commandPos` 目标建筑的 payload 逻辑仍需继续接入；
+  - `UnitAssembler.spawned()` 中输出 unit 依据 `unit.buildOn()` 投递到出生点建筑的 payload 逻辑仍需继续接入；注意 Java `commandPos` 只写入新 unit 的 command controller，不参与选择 payload 目标建筑；
   - `AssemblerAI` 的完整 controller runtime state 尚未独立实体化，当前以 helper + server movement + snapshot sidecar 实现最小闭环。
+
+### 12.133 UnitAssembler.spawned 输出 unit 的 buildOn payload 投递
+
+- 2026-05-27：继续对照 v158.1 `UnitAssemblerBuild.spawned()`，把组装完成后的输出 unit 从“总是落入 server unit 列表”的过渡实现推进到 Java `UnitPayload` 投递语义。
+- Java 依据：
+  - `plan.unit.create(team)` 创建输出单位；
+  - 若 `unit.isCommandable() && commandPos != null`，只把 `commandPos` 写入新 unit 的 command controller；
+  - `unit.set(spawn.x + range, spawn.y + range)` 与 `unit.rotation = rotdeg()` 后，通过 `unit.buildOn()` 查找输出 unit 当前所在建筑；
+  - 若该建筑同队且 `acceptPayload(targetBuild, payload)` 成功，则调用 `handlePayload(targetBuild, payload)`；否则非 client 侧才 `unit.add()` 并 `Units.notifyUnitSpawn(unit)`；
+  - Java 这里传给 `acceptPayload/handlePayload` 的 source 是 `targetBuild` 本身，即 self-source payload 语义。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_runtime_unit_assembler_spawns(...)` 在创建输出 `UnitComp` 与 command controller 后，先调用 `try_deliver_runtime_spawned_unit_payload(...)`；
+  - `try_deliver_runtime_spawned_unit_payload(...)` 通过 `server_unit_build_on_tile_pos(...)` 查找输出 unit 的 `buildOn` 目标建筑，复用 `unit_entered_payload(...)` 与 `GameRuntime::attach_unit_payload_to_building(...)` 完成 accept/handle 语义，并可靠广播 `UnitEnteredPayloadCallPacket`；
+  - 若 payload 投递成功，输出 unit 不再插入 `server_units`；若失败，保持原有 `server_units.insert(...)` 路径，等价 Java fallback `unit.add()`；
+  - `server_unit_build_on_tile_pos(...)` 增加 `footprint_tiles(...)` fallback，覆盖多格 payload 建筑 footprint 上的 `unit.buildOn()` 场景。
+- 新增验证：
+  - `cargo test -p mindustry-server server_launcher_unit_assembler_spawn_delivers_payload_to_build_on_target --lib`
+  - `cargo test -p mindustry-server assembler --lib`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+- 仍未完成：
+  - `UnitAssembler.spawned()` 的 `createSound`、`Fx.unitAssemble`、`Events.fire(new UnitCreateEvent(unit, this))` 与 `Units.notifyUnitSpawn(unit)` 仍需继续对照 Rust 现有 sound/effect/event/network 机制接入；
+  - output unit 的 `Mathf.range(0.001f)` 微扰目前未建模，后续若碰撞/buildOn 精度需求出现，应迁移为可复现的极小随机偏移；
+  - `UnitPayload` 内完整 unit 状态序列化/客户端表现仍需继续沿真实 payload/network/client 链路补齐。

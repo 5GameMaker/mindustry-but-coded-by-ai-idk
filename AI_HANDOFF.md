@@ -2476,5 +2476,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo fmt --check`
 - 当前仍需继续：
   1. `tick_runtime_unit_assembler_ai()` 是最小可玩近似，后续需更贴近 Java `AIController.moveTo(targetPos, 1f, 3f)` 的加速度/避障/旋转细节；
-  2. 继续迁移 `UnitAssembler.spawned()` 的输出 unit 投递到 `commandPos` 目标建筑 payload 逻辑；
+  2. 继续迁移 `UnitAssembler.spawned()` 的输出 unit 依据 `unit.buildOn()` 投递到出生点建筑 payload 逻辑；注意 `commandPos` 只写入新 unit 的 command controller，不用于选择 payload 目标建筑；
   3. 继续把 `AssemblerAI` 从 helper 进一步实体化为正式 controller runtime state，避免长期依赖 snapshot sidecar。
+
+---
+
+## 75. 最新闭环记录：UnitAssembler.spawned 输出 unit 的 buildOn payload 投递
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `UnitAssembler.java` 的 `UnitAssemblerBuild.spawned()`，把组装完成的输出 unit 接入真实 payload 目标建筑，而不是无条件作为普通 server unit 落地。
+- Java 依据：
+  - `commandPos` 只在 `unit.isCommandable()` 时写入输出 unit 的 command controller；
+  - payload 目标来自 `unit.buildOn()`，即输出 unit 当前出生点所在建筑；
+  - 目标建筑同队且 `acceptPayload(targetBuild, payload)` 成功时调用 `handlePayload(targetBuild, payload)`；这里 source/target 都是 `targetBuild`；
+  - payload 投递失败且非 client 时才 `unit.add()` / `Units.notifyUnitSpawn(unit)`。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - `apply_runtime_unit_assembler_spawns(...)` 创建 output `UnitComp` 后先尝试 `try_deliver_runtime_spawned_unit_payload(...)`；
+    - payload 成功则不插入 `server_units`，失败才保留旧的 `server_units.insert(...)`；
+    - `try_deliver_runtime_spawned_unit_payload(...)` 复用 `unit_entered_payload(...)` 与 `runtime.attach_unit_payload_to_building(...)`，成功后广播 `UnitEnteredPayloadCallPacket`；
+    - `server_unit_build_on_tile_pos(...)` 增加 `footprint_tiles(...)` fallback，以覆盖多格 payload building 的 footprint。
+- 已跑：
+  - `cargo test -p mindustry-server server_launcher_unit_assembler_spawn_delivers_payload_to_build_on_target --lib`
+  - `cargo test -p mindustry-server assembler --lib`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `UnitAssembler.spawned()` 剩余副作用：`createSound`、`Fx.unitAssemble`、`Events.fire(new UnitCreateEvent(unit, this))`、`Units.notifyUnitSpawn(unit)`；
+  2. 在 Rust 现有 sound/effect/event/network 包中寻找可复用 call packet 或事件分发入口，不要把副作用停留成孤立 helper；
+  3. `AssemblerAI` 仍需从 helper + snapshot sidecar 继续实体化为正式 controller runtime state；
+  4. 每个闭环继续按：对照 Java → 接入 runtime/server/client/network → 测试 → 更新本文档与 `MIGRATION.md` → 中文 commit → push `origin main`。

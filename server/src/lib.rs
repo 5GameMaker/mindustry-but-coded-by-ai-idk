@@ -61,7 +61,7 @@ use mindustry_core::mindustry::world::blocks::units::{
     unit_assembler_drone_spawned, unit_assembler_drone_target,
 };
 use mindustry_core::mindustry::world::meta::BuildVisibility;
-use mindustry_core::mindustry::world::point2_pack;
+use mindustry_core::mindustry::world::{footprint_tiles, point2_pack};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
 use std::{
@@ -1630,11 +1630,47 @@ impl ServerLauncher {
                     ..type_io::CommandWire::default()
                 }));
             }
-            self.server_units.insert(unit_id, unit);
+            if !self.try_deliver_runtime_spawned_unit_payload(&unit)? {
+                self.server_units.insert(unit_id, unit);
+            }
             applied += 1;
         }
 
         Ok(applied)
+    }
+
+    fn try_deliver_runtime_spawned_unit_payload(&mut self, unit: &UnitComp) -> io::Result<bool> {
+        let Some(build_tile_pos) = self.server_unit_build_on_tile_pos(unit) else {
+            return Ok(false);
+        };
+        let Some(building_snapshot) = self
+            .runtime
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == build_tile_pos)
+            .cloned()
+        else {
+            return Ok(false);
+        };
+
+        let outcome = unit_entered_payload(Some(unit), Some(&building_snapshot));
+        if !outcome.accepted {
+            return Ok(false);
+        }
+        if !self
+            .runtime
+            .attach_unit_payload_to_building(&self.content_loader, build_tile_pos, unit)
+        {
+            return Ok(false);
+        }
+
+        if let Some(packet) = outcome.packet.as_ref() {
+            self.net_server.net_mut().send(
+                &PacketKind::UnitEnteredPayloadCallPacket(packet.clone()),
+                true,
+            )?;
+        }
+        Ok(true)
     }
 
     fn apply_runtime_unit_assembler_drone_spawns(
@@ -2578,6 +2614,8 @@ impl ServerLauncher {
     }
 
     fn server_unit_build_on_tile_pos(&self, unit: &UnitComp) -> Option<i32> {
+        let tile_x = World::to_tile(unit.x());
+        let tile_y = World::to_tile(unit.y());
         self.runtime
             .state
             .world
@@ -2589,6 +2627,16 @@ impl ServerLauncher {
                     .buildings
                     .iter()
                     .find(|building| building.tile_pos == tile_pos)
+                    .map(|building| building.tile_pos)
+            })
+            .or_else(|| {
+                self.runtime
+                    .buildings
+                    .iter()
+                    .find(|building| {
+                        footprint_tiles(building.tile_x(), building.tile_y(), building.block.size)
+                            .contains(&(tile_x, tile_y))
+                    })
                     .map(|building| building.tile_pos)
             })
     }
@@ -5374,6 +5422,125 @@ mod tests {
                     packet,
                     PacketKind::AssemblerUnitSpawnedCallPacket(packet)
                         if packet.tile == Some(assembler_tile)
+                )
+        }));
+    }
+
+    #[test]
+    fn server_launcher_unit_assembler_spawn_delivers_payload_to_build_on_target() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6587).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(24, 24);
+
+        let assembler_def = launcher
+            .content_loader
+            .block_by_name("tank-assembler")
+            .unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let assembler_block = assembler_block.clone();
+        let plan = &assembler_block.plans[0];
+        let plan_unit_name = plan.unit.clone();
+        let assembler_tile = point2_pack(8, 8);
+        let stell = launcher.content_loader.unit_by_name("stell").unwrap();
+        let large_wall = launcher
+            .content_loader
+            .block_by_name("tungsten-wall-large")
+            .unwrap();
+        launcher.runtime.add_building(BuildingComp::new(
+            assembler_tile,
+            assembler_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.buildings[0].enabled = true;
+        if let Some(power) = launcher.runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+        let expected_spawn_x = launcher.runtime.buildings()[0].x
+            + TILE_SIZE as f32 * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+        let expected_spawn_y = launcher.runtime.buildings()[0].y;
+        let spawn_tile = point2_pack(
+            mindustry_core::mindustry::core::World::to_tile(expected_spawn_x),
+            mindustry_core::mindustry::core::World::to_tile(expected_spawn_y),
+        );
+
+        let payload_driver_def = launcher
+            .content_loader
+            .block_by_name("large-payload-mass-driver")
+            .unwrap();
+        launcher.runtime.add_building(BuildingComp::new(
+            spawn_tile,
+            payload_driver_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.buildings[1].enabled = true;
+
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 4);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        launcher.runtime.unit_runtime_states.insert(
+            assembler_tile,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 1.0 - 1.0 / plan.time,
+                    blocks,
+                    command_pos: Some(Vec2::new(96.0, 128.0)),
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+        seed_server_assembler_drones_in_position(&mut launcher, assembler_tile, &assembler_block);
+
+        for _ in 0..120 {
+            launcher.update();
+        }
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            launcher.runtime.unit_runtime_states.get(&assembler_tile)
+        else {
+            panic!("assembler sidecar should remain present");
+        };
+        assert_eq!(assembler.progress, 0.0);
+        assert_eq!(assembler.blocks.total(), 0);
+        assert!(!launcher
+            .server_units
+            .values()
+            .any(|unit| unit.type_info.name() == plan_unit_name));
+        let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
+            launcher.runtime.payload_runtime_states.get(&spawn_tile)
+        else {
+            panic!("build_on payload mass driver should receive assembler unit payload");
+        };
+        assert!(common.payload.is_some());
+        assert!(driver.loaded);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::AssemblerUnitSpawnedCallPacket(packet)
+                        if packet.tile == Some(assembler_tile)
+                )
+        }));
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitEnteredPayloadCallPacket(packet)
+                        if packet.build.tile_pos == Some(spawn_tile)
                 )
         }));
     }
