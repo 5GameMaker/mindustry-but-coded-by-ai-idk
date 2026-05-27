@@ -3388,3 +3388,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server`
   - `cargo check --workspace`
 - 仍未完成：`server_units` 仍是 launcher mirror，不是完整 entity group；目标 unit 被移除后尚未同步 entity hidden/remove snapshot，也未保存完整 `UnitPayload` sync bytes；真实 target lookup 应最终接入 world/entity groups 与 Java `Groups.unit`，并移除 bootstrap 距离 fallback。
+
+### 12.98 Server DropItem 权威 unit stack 清空与广播
+
+- 2026-05-27：把 `DropItemCallPacket` 从 input helper 推进到 server 事件循环，形成 `DropItemCallPacket -> input_handler::drop_item(...) -> server_units item stack clear -> DropItemCallPacket broadcast` 的最小权威闭环。
+- Java 依据：
+  - `InputHandler.dropItem(Player player, float angle)` 在 server 侧要求玩家和单位存在，若单位 stack 为空则抛出 validate；成功时播放 `Fx.dropItem` 并 `unit.clearItem()`；
+  - 该 remote 为 `targets = Loc.client, called = Loc.server`，因此 Rust server 消费客户端请求后需要把成功结果转发给客户端。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_new_network_server_events()` 新增 `PacketKind::DropItemCallPacket` 分支；
+  - 新增 drop-item 统计与 `last_runtime_drop_item_outcome`；
+  - `apply_server_drop_item_packet(...)` 用连接 id 绑定 player/unit，不信任客户端隐式 player，调用 `drop_item(DropItemContext { local_player: false }, ...)` 清空 `server_units[connection_id].items.stack.amount`；
+  - 成功后可靠广播 `DropItemCallPacket`，为后续客户端 effect/UI 消费保留出站包；
+  - 新增 server 测试覆盖单位物品栈清空、previous item/amount outcome、统计字段和可靠广播。
+- 验证：
+  - `cargo test -p mindustry-server server_launcher_applies_drop_item_packet_to_unit_stack_and_broadcasts_drop_item`
+  - `cargo test -p mindustry-server`
+  - `cargo check --workspace`
+- 仍未完成：客户端收到 `DropItemCallPacket` 后尚未能定位具体 player/unit 来清空 typed unit mirror；`Fx.dropItem` 视觉效果还没有接入 desktop renderer；server 侧仍依赖 `server_units` launcher mirror，后续要接入真实 player unit lifecycle 和 validate/admin 事件流。
