@@ -70,6 +70,16 @@ pub const FX_MUDDY_ID: i32 = 135;
 pub const FX_SPORE_SLOWED_ID: i32 = 138;
 /// Upstream `Fx.oily` id in `mindustry.content.Fx` for v158.1.
 pub const FX_OILY_ID: i32 = 139;
+/// Upstream `Fx.shockwave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOCKWAVE_ID: i32 = 143;
+/// Upstream `Fx.shockwaveSmaller` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOCKWAVE_SMALLER_ID: i32 = 144;
+/// Upstream `Fx.bigShockwave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_BIG_SHOCKWAVE_ID: i32 = 145;
+/// Upstream `Fx.spawnShockwave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SPAWN_SHOCKWAVE_ID: i32 = 146;
+/// Upstream `Fx.podLandShockwave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_POD_LAND_SHOCKWAVE_ID: i32 = 147;
 /// Upstream `Fx.blockExplosionSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_BLOCK_EXPLOSION_SMOKE_ID: i32 = 152;
 /// Upstream `Fx.steamCoolSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -126,6 +136,11 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "muddy" => Some(FX_MUDDY_ID),
         "sporeSlowed" => Some(FX_SPORE_SLOWED_ID),
         "oily" => Some(FX_OILY_ID),
+        "shockwave" => Some(FX_SHOCKWAVE_ID),
+        "shockwaveSmaller" => Some(FX_SHOCKWAVE_SMALLER_ID),
+        "bigShockwave" => Some(FX_BIG_SHOCKWAVE_ID),
+        "spawnShockwave" => Some(FX_SPAWN_SHOCKWAVE_ID),
+        "podLandShockwave" => Some(FX_POD_LAND_SHOCKWAVE_ID),
         "blockExplosionSmoke" => Some(FX_BLOCK_EXPLOSION_SMOKE_ID),
         "steamCoolSmoke" => Some(FX_STEAM_COOL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
@@ -208,6 +223,11 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_MUDDY_ID => Effect::with_lifetime(FX_MUDDY_ID, 80.0, DEFAULT_EFFECT_CLIP),
         FX_SPORE_SLOWED_ID => Effect::with_lifetime(FX_SPORE_SLOWED_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_OILY_ID => Effect::with_lifetime(FX_OILY_ID, 42.0, DEFAULT_EFFECT_CLIP),
+        FX_SHOCKWAVE_ID => Effect::with_lifetime(FX_SHOCKWAVE_ID, 10.0, 80.0),
+        FX_SHOCKWAVE_SMALLER_ID => Effect::with_lifetime(FX_SHOCKWAVE_SMALLER_ID, 9.0, 80.0),
+        FX_BIG_SHOCKWAVE_ID => Effect::with_lifetime(FX_BIG_SHOCKWAVE_ID, 10.0, 80.0),
+        FX_SPAWN_SHOCKWAVE_ID => Effect::with_lifetime(FX_SPAWN_SHOCKWAVE_ID, 20.0, 400.0),
+        FX_POD_LAND_SHOCKWAVE_ID => Effect::with_lifetime(FX_POD_LAND_SHOCKWAVE_ID, 12.0, 80.0),
         FX_BLOCK_EXPLOSION_SMOKE_ID => {
             Effect::with_lifetime(FX_BLOCK_EXPLOSION_SMOKE_ID, 30.0, DEFAULT_EFFECT_CLIP)
         }
@@ -1296,6 +1316,64 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_SHOCKWAVE_ID
+        | FX_SHOCKWAVE_SMALLER_ID
+        | FX_BIG_SHOCKWAVE_ID
+        | FX_SPAWN_SHOCKWAVE_ID
+        | FX_POD_LAND_SHOCKWAVE_ID => {
+            let (color_from, color_to, color_mix, radius, stroke) = match effect_id {
+                FX_SHOCKWAVE_ID => (
+                    "Color.white",
+                    Some("Color.lightGray"),
+                    fin,
+                    fin * 28.0,
+                    fout * 2.0 + 0.2,
+                ),
+                FX_SHOCKWAVE_SMALLER_ID => (
+                    "Color.white",
+                    Some("Color.lightGray"),
+                    fin,
+                    fin * 22.0,
+                    fout * 2.0 + 0.2,
+                ),
+                FX_BIG_SHOCKWAVE_ID => (
+                    "Color.white",
+                    Some("Color.lightGray"),
+                    fin,
+                    fin * 50.0,
+                    fout * 3.0,
+                ),
+                FX_SPAWN_SHOCKWAVE_ID => (
+                    "Color.white",
+                    Some("Color.lightGray"),
+                    fin,
+                    fin * (rotation + 50.0),
+                    fout * 3.0 + 0.5,
+                ),
+                FX_POD_LAND_SHOCKWAVE_ID => ("Pal.accent", None, 0.0, fin * 26.0, fout * 2.0 + 0.2),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some(color_from),
+                color_mid: None,
+                color_to,
+                color_mix,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius,
+                stroke,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_BLOCK_EXPLOSION_SMOKE_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -1659,6 +1737,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Liquids.slag.color" => Some(DecalColor::from_rgba(0xffa166ff)),
         "Liquids.oil.color" => Some(DecalColor::from_rgba(0x313131ff)),
         "Pal.water" => Some(DecalColor::from_rgba(0x596ab8ff)),
+        "Pal.accent" => Some(DecalColor::from_rgba(0xffd37fff)),
         "Pal.darkishGray" => Some(DecalColor {
             r: 0.3,
             g: 0.3,
@@ -2973,6 +3052,23 @@ mod tests {
         assert_eq!(standard_effect_id("muddy"), Some(FX_MUDDY_ID));
         assert_eq!(standard_effect_id("sporeSlowed"), Some(FX_SPORE_SLOWED_ID));
         assert_eq!(standard_effect_id("oily"), Some(FX_OILY_ID));
+        assert_eq!(standard_effect_id("shockwave"), Some(FX_SHOCKWAVE_ID));
+        assert_eq!(
+            standard_effect_id("shockwaveSmaller"),
+            Some(FX_SHOCKWAVE_SMALLER_ID)
+        );
+        assert_eq!(
+            standard_effect_id("bigShockwave"),
+            Some(FX_BIG_SHOCKWAVE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("spawnShockwave"),
+            Some(FX_SPAWN_SHOCKWAVE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("podLandShockwave"),
+            Some(FX_POD_LAND_SHOCKWAVE_ID)
+        );
         assert_eq!(
             standard_effect_id("blockExplosionSmoke"),
             Some(FX_BLOCK_EXPLOSION_SMOKE_ID)
@@ -3073,6 +3169,22 @@ mod tests {
         assert_eq!(standard_effect(FX_MUDDY_ID).unwrap().lifetime, 80.0);
         assert_eq!(standard_effect(FX_SPORE_SLOWED_ID).unwrap().lifetime, 40.0);
         assert_eq!(standard_effect(FX_OILY_ID).unwrap().lifetime, 42.0);
+        assert_eq!(standard_effect(FX_SHOCKWAVE_ID).unwrap().lifetime, 10.0);
+        assert_eq!(standard_effect(FX_SHOCKWAVE_ID).unwrap().clip, 80.0);
+        assert_eq!(
+            standard_effect(FX_SHOCKWAVE_SMALLER_ID).unwrap().lifetime,
+            9.0
+        );
+        assert_eq!(standard_effect(FX_BIG_SHOCKWAVE_ID).unwrap().lifetime, 10.0);
+        assert_eq!(
+            standard_effect(FX_SPAWN_SHOCKWAVE_ID).unwrap().lifetime,
+            20.0
+        );
+        assert_eq!(standard_effect(FX_SPAWN_SHOCKWAVE_ID).unwrap().clip, 400.0);
+        assert_eq!(
+            standard_effect(FX_POD_LAND_SHOCKWAVE_ID).unwrap().lifetime,
+            12.0
+        );
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
         assert_eq!(
             standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
@@ -3194,6 +3306,86 @@ mod tests {
         assert_eq!(hit_liquid_particles.angle_range, 60.0);
         assert_eq!(hit_liquid_particles.radius_fout_scale, 2.0);
         assert_eq!(hit_liquid.circle_render_primitives_from_seed().len(), 5);
+
+        let shockwave = standard_effect_draw_plan(
+            Some(FX_SHOCKWAVE_ID as u16),
+            143,
+            3.0,
+            4.0,
+            0.0,
+            5.0,
+            10.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shockwave.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(shockwave.color_from, Some("Color.white"));
+        assert_eq!(shockwave.color_to, Some("Color.lightGray"));
+        assert_eq!(shockwave.color_mix, 0.5);
+        assert_eq!(shockwave.radius, 14.0);
+        assert_eq!(shockwave.stroke, 1.2);
+
+        let shockwave_smaller = standard_effect_draw_plan(
+            Some(FX_SHOCKWAVE_SMALLER_ID as u16),
+            144,
+            3.0,
+            4.0,
+            0.0,
+            4.5,
+            9.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shockwave_smaller.radius, 11.0);
+        assert_eq!(shockwave_smaller.stroke, 1.2);
+
+        let big_shockwave = standard_effect_draw_plan(
+            Some(FX_BIG_SHOCKWAVE_ID as u16),
+            145,
+            3.0,
+            4.0,
+            0.0,
+            5.0,
+            10.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(big_shockwave.radius, 25.0);
+        assert_eq!(big_shockwave.stroke, 1.5);
+
+        let spawn_shockwave = standard_effect_draw_plan(
+            Some(FX_SPAWN_SHOCKWAVE_ID as u16),
+            146,
+            3.0,
+            4.0,
+            30.0,
+            10.0,
+            20.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(spawn_shockwave.radius, 40.0);
+        assert_eq!(spawn_shockwave.stroke, 2.0);
+
+        let pod_land_shockwave = standard_effect_draw_plan(
+            Some(FX_POD_LAND_SHOCKWAVE_ID as u16),
+            147,
+            3.0,
+            4.0,
+            0.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(pod_land_shockwave.color_from, Some("Pal.accent"));
+        assert_eq!(pod_land_shockwave.color_to, None);
+        assert_eq!(
+            pod_land_shockwave.resolved_draw_color(),
+            standard_effect_color_symbol("Pal.accent")
+        );
+        assert_eq!(pod_land_shockwave.radius, 13.0);
+        assert_eq!(pod_land_shockwave.stroke, 1.2);
 
         let ripple = standard_effect_draw_plan(
             Some(FX_RIPPLE_ID as u16),

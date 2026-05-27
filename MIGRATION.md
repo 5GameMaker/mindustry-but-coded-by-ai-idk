@@ -6355,3 +6355,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `sapped/electrified/overdriven/overclocked` 等 square/poly 类效果需要新增 polygon/square primitive；
   - `missileTrailSmoke*` / `artilleryTrailSmoke` 仍需 multi-pass、局部 lifetime 与 per-particle light/alpha 表达；
   - 真实 renderer backend 仍需接入这些 primitive 数据。
+
+### 12.210 Shockwave stroked circle Fx batch
+
+- 2026-05-28：继续对照 `Fx.java`，迁移一组只依赖 `Lines.circle` 的 shockwave 圆环效果；这些效果可直接映射到当前 `StandardEffectDrawKind::StrokedCircle`，不需要新增 line/poly/square primitive。
+- 本轮迁移：
+  - `shockwave=143`
+  - `shockwaveSmaller=144`
+  - `bigShockwave=145`
+  - `spawnShockwave=146`
+  - `podLandShockwave=147`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1625` 附近：
+    - `shockwave = new Effect(10f, 80f, ...)`，`Color.white -> Color.lightGray`，stroke `fout*2+0.2`，半径 `fin*28`；
+    - `shockwaveSmaller = new Effect(9f, 80f, ...)`，半径 `fin*22`；
+    - `bigShockwave = new Effect(10f, 80f, ...)`，stroke `fout*3`，半径 `fin*50`；
+    - `spawnShockwave = new Effect(20f, 400f, ...)`，stroke `fout*3+0.5`，半径 `fin*(rotation+50)`；
+    - `podLandShockwave = new Effect(12f, 80f, ...)`，`Pal.accent`，stroke `fout*2+0.2`，半径 `fin*26`。
+  - `Pal.accent` 来自 `Pal.java`：`Color.valueOf("ffd37f")`，Rust RGBA 为 `0xffd37fff`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增上述 5 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` 与 `standard_effect(...)`，保留 Java lifetime/clip；
+    - 新增颜色符号 `Pal.accent`；
+    - `standard_effect_draw_plan(...)` 新增 shared shockwave 分支，统一输出 `StrokedCircle`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 5 个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime/clip；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖 radius、stroke、颜色插值、`Pal.accent` resolved color。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 仍未完成：
+  - `dropItem` 需要 sprite/rect item data 渲染；
+  - `sapped/electrified/overdriven/overclocked` 需要 square primitive；
+  - `explosion/dynamicExplosion/reactorExplosion/impactReactorExplosion` 需要 scaled、多 pass、line/light 组合后再迁移。

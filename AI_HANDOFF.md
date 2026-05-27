@@ -4560,3 +4560,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续挑无需新增 primitive 的 `Fill.circle` 类 Fx；
   2. 对 `sapped/electrified/overdriven/overclocked` 新增 square/poly primitive 后迁移；
   3. 对 `missileTrailSmoke*` / `artilleryTrailSmoke` 先设计 multi-pass、局部 lifetime、per-particle light/alpha spec。
+
+---
+
+## 136. 最新闭环记录：Shockwave 圆环 Fx 批量迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移只使用 `Lines.circle` 的 shockwave 圆环效果，直接复用 Rust 已有 `StrokedCircle` primitive。
+- 本轮迁移：
+  - `shockwave=143`
+  - `shockwaveSmaller=144`
+  - `bigShockwave=145`
+  - `spawnShockwave=146`
+  - `podLandShockwave=147`
+- Java 依据：
+  - `Fx.java:1625-1647`；
+  - `shockwave/shockwaveSmaller/bigShockwave/spawnShockwave` 均为 `Color.white -> Color.lightGray` 圆环；
+  - `spawnShockwave` 的半径依赖 `rotation + 50`；
+  - `podLandShockwave` 使用 `Pal.accent = 0xffd37fff`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 5 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - 新增 `Pal.accent` 颜色符号；
+    - `standard_effect_draw_plan(...)` 新增 shared `StrokedCircle` 分支；
+    - 测试覆盖 id、lifetime、clip、radius、stroke、颜色插值和 `Pal.accent`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 下一步建议：
+  1. 可继续迁移 `launchAccelerator=246`、`launch=247`、`healWaveMend=249`、`overdriveWave=250` 这类后段纯 `Lines.circle` Fx；
+  2. 若要处理当前相邻的 `sapped/electrified/overdriven/overclocked`，需先新增 square primitive；
+  3. `bubble=245` 是随机位置圆环，建议等 seeded stroked-circle particles 能力补齐后再做。
