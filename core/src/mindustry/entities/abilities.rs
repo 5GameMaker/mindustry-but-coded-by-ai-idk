@@ -393,6 +393,34 @@ impl ForceFieldAbility {
         }
     }
 
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("ForceFieldAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("ForceFieldAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let radius = parts.next()?.parse().ok()?;
+        let regen = parts.next()?.parse().ok()?;
+        let max = parts.next()?.parse().ok()?;
+        let cooldown = parts.next()?.parse().ok()?;
+        let sides = parts.next().map(str::parse).transpose().ok()?.unwrap_or(6);
+        let rotation = parts
+            .next()
+            .map(str::parse)
+            .transpose()
+            .ok()?
+            .unwrap_or(0.0);
+        Some(Self::with_polygon(
+            radius, regen, max, cooldown, sides, rotation,
+        ))
+    }
+
     pub fn created_shield(&self) -> f32 {
         self.max
     }
@@ -2141,6 +2169,27 @@ mod tests {
         assert!((update.radius_scale - 0.06).abs() < 0.0001);
         assert!((active.real_radius() - 3.6).abs() < 0.0001);
         assert_eq!(active.created_shield(), 200.0);
+    }
+
+    #[test]
+    fn force_field_descriptor_parses_java_unit_entries() {
+        let ability = ForceFieldAbility::from_descriptor("ForceFieldAbility:60:0.4:500:360")
+            .expect("quasar descriptor should parse");
+        assert_eq!(ability.radius, 60.0);
+        assert_eq!(ability.regen, 0.4);
+        assert_eq!(ability.max, 500.0);
+        assert_eq!(ability.cooldown, 360.0);
+        assert_eq!(ability.sides, 6);
+        assert_eq!(ability.rotation, 0.0);
+
+        let oct = ForceFieldAbility::from_descriptor("ForceFieldAbility(140,4,7000,480,8,0)")
+            .expect("oct descriptor should parse");
+        assert_eq!(oct.radius, 140.0);
+        assert_eq!(oct.regen, 4.0);
+        assert_eq!(oct.max, 7000.0);
+        assert_eq!(oct.cooldown, 480.0);
+        assert_eq!(oct.sides, 8);
+        assert!(ForceFieldAbility::from_descriptor("RepairFieldAbility").is_none());
     }
 
     #[test]

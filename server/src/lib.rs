@@ -302,6 +302,7 @@ impl ServerLauncher {
             if let Err(error) = self.tick_server_unit_spawn_abilities(1.0) {
                 self.network_error = Some(error.to_string());
             }
+            self.tick_server_force_field_abilities(1.0);
             self.tick_server_shield_regen_field_abilities(1.0);
             self.tick_server_repair_field_abilities(1.0);
             self.tick_server_energy_field_abilities(1.0);
@@ -1696,6 +1697,24 @@ impl ServerLauncher {
         }
 
         pulses
+    }
+
+    fn tick_server_force_field_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut updates = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let force_updates = parent.update_force_field_abilities(delta_ticks);
+            if !force_updates.is_empty() {
+                parent.refresh_component_views();
+            }
+            updates += force_updates.len();
+        }
+
+        updates
     }
 
     fn tick_server_shield_regen_field_abilities(&mut self, delta_ticks: f32) -> usize {
@@ -6037,6 +6056,28 @@ mod tests {
         let enemy = launcher.server_units.get(&12).unwrap();
         assert!((enemy.health.health - (enemy_health_before - 40.0)).abs() < 0.0001);
         assert_eq!(enemy.status.get_duration("electrified"), 60.0 * 6.0);
+    }
+
+    #[test]
+    fn server_update_ticks_quasar_force_field_regen() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let quasar = launcher
+            .content_loader
+            .unit_by_name("quasar")
+            .unwrap()
+            .clone();
+        let mut parent = UnitComp::new(32, quasar, TeamId(1));
+        assert_eq!(parent.shield.shield, 500.0);
+        parent.shield.shield = 400.0;
+
+        launcher.server_units.insert(parent.id(), parent);
+        launcher.update();
+
+        let parent = launcher.server_units.get(&32).unwrap();
+        assert!((parent.shield.shield - 400.4).abs() < 0.0001);
+        assert!(parent.abilities[0].data > 0.0);
     }
 
     #[test]

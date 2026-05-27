@@ -4439,3 +4439,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `healEffect` / `activeEffect` / `sound` 的真实 effect packet、audio 与 desktop 表现层尚未接入；
   - building repair / repair command AI 的交互路径不在本闭环内；
   - 普通 ability descriptor 仍是过渡模型，后续需结构化 ability spec / mod patcher。
+
+### 12.145 ForceFieldAbility / quasar-oct 护盾创建与回复 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `ForceFieldAbility.java` 与 `UnitTypes` 中 quasar / oct 的参数，把力场护盾从纯算法接入 `UnitType` content、`UnitComp` created/update hook 与 server unit shield runtime。
+- Java 依据：
+  - `created(Unit unit)`：`unit.shield = max`；
+  - `update(Unit unit)`：护盾刚破时扣除 `cooldown * regen`，随后按 `Time.delta * regen` 回复到 max 附近；`alpha` 衰减，`radiusScale` 随 active shield 向 1 插值；
+  - 护盾为正时扫描敌方 absorbable bullets，命中正多边形内则 `b.absorb()` 并按 `b.type().shieldDamage(b)` 扣盾；
+  - Java 参数：`quasar(60,0.4,500,360)`、`oct(140,4,7000,480,8,0)`。
+- Rust 新增/变化：
+  - `ForceFieldAbility::from_descriptor(...)` 支持 `ForceFieldAbility:radius:regen:max:cooldown[:sides[:rotation]]` 与括号形式；
+  - `content/unit_types.rs` 将 quasar 的裸能力名替换为参数化 descriptor，并为 oct 补上 Java ForceField descriptor（保留 RepairField descriptor）；
+  - `UnitComp::new(...)` 调用 `apply_created_force_field_abilities()`，对含 ForceField descriptor 的 unit 初始化 `ShieldComp.shield = max`；
+  - `UnitComp::update_force_field_abilities(...)` 使用 `AbilityWire.data` 保存 `radius_scale`（负值作为已初始化但破盾/无半径 sentinel），并把 `ForceFieldAbility::update_state(...)` 写回 `ShieldComp.shield`；
+  - `ServerLauncher::tick_server_force_field_abilities(...)` 在 playing frame 内 tick `server_units` 的 ForceField 状态，保证 quasar/oct 在 server runtime 中拥有真实护盾值与 regen。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core force_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_force_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server force_field --lib`
+- 仍未完成：
+  - server/global bullet list 尚未接入 ForceField 的 absorb/扣盾闭环；当前已保留纯算法 `absorb_bullet(...)` 测试，后续需要接到真实 bullet runtime；
+  - `Fx.shieldBreak` / `Fx.absorb`、hit/break sound、shield draw polygon 与 bars 表现层尚未迁移；
+  - `AbilityWire.data` 目前只暂存 `radius_scale`/sentinel，完整结构化 ability runtime state 后续需替代该过渡编码。

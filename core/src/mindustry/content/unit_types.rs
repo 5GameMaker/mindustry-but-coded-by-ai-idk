@@ -135,7 +135,7 @@ pub fn load() -> Vec<UnitType> {
             u.hit_size = 13.0;
             u.mine_speed = 4.0;
             u.draw_shields = false;
-            u.abilities.push("ForceFieldAbility".into());
+            u.abilities.push("ForceFieldAbility:60:0.4:500:360".into());
         }),
         unit(&mut next_id, "vela", UnitKind::Standard, |u| {
             u.hit_size = 24.0;
@@ -382,6 +382,8 @@ pub fn load() -> Vec<UnitType> {
             u.build_speed = 4.0;
             u.low_altitude = true;
             u.ammo_capacity = 1;
+            u.abilities
+                .push("ForceFieldAbility:140:4:7000:480:8:0".into());
             u.abilities.push("RepairFieldAbility:130:120:140".into());
         }),
         unit(&mut next_id, "risso", UnitKind::Naval, |u| {
@@ -1235,7 +1237,17 @@ mod tests {
         assert!(oct
             .abilities
             .iter()
+            .any(|entry| entry == "ForceFieldAbility:140:4:7000:480:8:0"));
+        assert!(oct
+            .abilities
+            .iter()
             .any(|entry| entry == "RepairFieldAbility:130:120:140"));
+
+        let quasar = by_name(&units, "quasar");
+        assert!(quasar
+            .abilities
+            .iter()
+            .any(|entry| entry == "ForceFieldAbility:60:0.4:500:360"));
 
         let oxynoe = by_name(&units, "oxynoe");
         assert!(oxynoe

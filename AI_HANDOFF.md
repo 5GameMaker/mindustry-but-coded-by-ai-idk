@@ -2898,3 +2898,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入单位治疗场能力运行时`。
   3. 后续补 `healEffect` / `activeEffect` / `sound` 表现层、client local ability tick、结构化 ability spec / mod patcher。
+
+---
+
+## 87. 最新闭环记录：ForceFieldAbility / quasar-oct server shield created+regen runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `ForceFieldAbility.java` 与 `UnitTypes` 中 quasar / oct，把 ForceField 的 created shield 与 per-tick shield regen 接入 `UnitType` content、`UnitComp` hook、server unit shield runtime。
+- Java 依据：
+  - `created(Unit unit)`：`unit.shield = max`；
+  - `update(Unit unit)`：护盾刚破时扣除 `cooldown * regen`，随后按 `Time.delta * regen` 回复；`alpha` 衰减，`radiusScale` 随 active shield 向 1 插值；
+  - 护盾为正时扫描敌方 absorbable bullets，命中正多边形内则 `b.absorb()` 并按 `b.type().shieldDamage(b)` 扣盾；
+  - Java 参数：`quasar(60,0.4,500,360)`、`oct(140,4,7000,480,8,0)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - 新增 `ForceFieldAbility::from_descriptor(...)`，支持 `ForceFieldAbility:radius:regen:max:cooldown[:sides[:rotation]]` 与括号形式；
+    - 新增 descriptor 解析测试；既有 `absorb_bullet(...)` 纯算法测试仍保留。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 将 quasar 的裸 `ForceFieldAbility` 替换为 `ForceFieldAbility:60:0.4:500:360`；
+    - 为 oct 补上 `ForceFieldAbility:140:4:7000:480:8:0`，并保留 `RepairFieldAbility:130:120:140`；
+    - 内容覆盖测试断言 quasar/oct descriptor 存在。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `UnitComp::new(...)` 调用 `apply_created_force_field_abilities()`，初始化 ForceField unit 的 `ShieldComp.shield = max`；
+    - 新增 `UnitComp::update_force_field_abilities(...)`，使用 `AbilityWire.data` 保存 `radius_scale`（负值作为已初始化但破盾/无半径 sentinel），并把 `ForceFieldUpdate.shield` 写回 `ShieldComp.shield`。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 的 playing frame 内调用 `tick_server_force_field_abilities(1.0)`；
+    - 新增 `server_update_ticks_quasar_force_field_regen`，验证 quasar 创建即有 500 shield，server tick 后按 0.4/tick 回复并写入 ability runtime slot。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core force_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_force_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server force_field --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入力场护盾单位能力运行时`。
+  3. 后续必须补真实 bullet runtime 的 absorb/扣盾闭环、shield break/absorb effects 与 sound、结构化 ability runtime state（替代 `AbilityWire.data` sentinel）。

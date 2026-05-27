@@ -10,10 +10,10 @@ use crate::mindustry::ai::{PrebuildAiPlanSnapshot, PrebuildAiRequirement};
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
-    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, RepairFieldAbility, RepairFieldPulse,
-    RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
-    StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse,
-    UnitSpawnAbility, UnitSpawnPlan,
+    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility, ForceFieldUpdate,
+    RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldRegenFieldAbility,
+    ShieldRegenFieldPulse, ShieldRegenFieldTarget, StatusFieldAbility, StatusFieldPulse,
+    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -321,6 +321,7 @@ impl UnitComp {
         unit.set_type(type_info);
         unit.health.health = unit.health.max_health;
         unit.shield.health = unit.health.health;
+        unit.apply_created_force_field_abilities();
         unit.refresh_component_views();
         unit
     }
@@ -343,6 +344,14 @@ impl UnitComp {
 
     pub fn team_id(&self) -> TeamId {
         self.team.team
+    }
+
+    fn apply_created_force_field_abilities(&mut self) {
+        for descriptor in &self.type_info.abilities {
+            if let Some(ability) = ForceFieldAbility::from_descriptor(descriptor) {
+                self.shield.shield = self.shield.shield.max(ability.created_shield());
+            }
+        }
     }
 
     pub fn set_pos(&mut self, x: f32, y: f32) {
@@ -398,6 +407,44 @@ impl UnitComp {
 
         self.type_info = type_info;
         self.refresh_component_views();
+    }
+
+    pub fn update_force_field_abilities(&mut self, delta: f32) -> Vec<ForceFieldUpdate> {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let mut updates = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = ForceFieldAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            let wire_data = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+            let initialized = wire_data != 0.0 || self.shield.shield != 0.0;
+            if !initialized {
+                self.shield.shield = ability.created_shield();
+            }
+
+            ability.radius_scale = wire_data.max(0.0);
+            ability.was_broken = wire_data < 0.0 || (self.shield.shield <= 0.0 && wire_data <= 0.0);
+            let update = ability.update_state(self.shield.shield, delta);
+            self.shield.shield = update.shield;
+            if update.shield > 0.0 {
+                self.shield.shield_alpha = self.shield.shield_alpha.max(update.alpha);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = if update.shield > 0.0 {
+                    update.radius_scale
+                } else {
+                    -1.0
+                };
+            }
+            updates.push(update);
+        }
+
+        updates
     }
 
     pub fn update_unit_spawn_abilities<F>(
@@ -1632,6 +1679,25 @@ mod tests {
         assert_eq!(pulses[0].heals, vec![10.0, 10.0]);
         assert!(pulses[0].active_effect);
         assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_force_field_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["ForceFieldAbility:60:0.4:500:360".into()];
+        let mut unit = UnitComp::new(46, unit_type, TeamId(1));
+
+        assert_eq!(unit.shield.shield, 500.0);
+        let updates = unit.update_force_field_abilities(1.0);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].shield, 500.0);
+        assert!(unit.abilities[0].data > 0.0);
+
+        unit.shield.shield = 400.0;
+        let updates = unit.update_force_field_abilities(1.0);
+        assert_eq!(updates.len(), 1);
+        assert!((updates[0].shield - 400.4).abs() < 0.0001);
+        assert!((unit.shield.shield - 400.4).abs() < 0.0001);
     }
 
     #[test]
