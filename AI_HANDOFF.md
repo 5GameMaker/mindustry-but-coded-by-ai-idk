@@ -3552,3 +3552,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - `Events.fire(Trigger.neoplasmReact)` 等价事件；
      - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
      - 统一迁移 `Geometry.d4/d4c` 常量。
+
+---
+
+## 107. 最新闭环记录：CellLiquid.update neoplasmReact trigger runtime 记录
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：补齐 Java `CellLiquid.update()` 中 `reacted && this == Liquids.neoplasm -> Events.fire(Trigger.neoplasmReact)` 的 Rust 事件源记录。
+- Java 依据：
+  - `EventType.Trigger.neoplasmReact`；
+  - `CellLiquid.update(Puddle)` 只要任一 neoplasm spread/reaction 分支发生 reacted 就 fire；
+  - `GameService.trigger(Trigger.neoplasmReact, neoplasmWater)` 将其映射到事件型成就 `neoplasmWater`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeTriggerEvent { trigger, campaign }`；
+    - 新增 `GameRuntime::note_trigger_event(Trigger)`；
+    - `trigger_events` 加入 `GameRuntime` 并在 runtime sidecar 清理时清空。
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 对 CellLiquid 三类 reacted 分支（邻接 building 吸收、current-building damage/spread、nearby puddle 吸收/替换）汇总 `reacted`；
+    - 当 liquid 是 `neoplasm` 时记录 `Trigger::NeoplasmReact`；
+    - 扩展邻接 puddle 替换测试，在 campaign sector 下断言 runtime trigger event 被记录。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id --lib`
+  - `cargo test -p mindustry-core trigger_plan_maps_java_game_service_triggers --lib`
+- 当前仍需继续：
+  1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`记录新生物反应触发事件`。
+  3. 后续补：
+     - 把 `GameRuntime.trigger_events` 自动应用到 `DefaultGameService` / 平台 achievement service；
+     - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
+     - 统一迁移 `Geometry.d4/d4c` 常量。

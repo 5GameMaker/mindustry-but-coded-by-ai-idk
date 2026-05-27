@@ -35,7 +35,7 @@ use crate::mindustry::{
         entity_class_id, entity_class_kind, standard_effect_id, EntityClassKind, Fires,
         PuddleLiquidInfo, Puddles, FX_UNIT_ASSEMBLE_ID,
     },
-    game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo},
+    game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo, Trigger},
     input::input_handler::ItemRemoveStackPlan,
     io::{
         type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
@@ -1524,6 +1524,12 @@ pub struct GameRuntimeUnitCreateEvent {
     pub spawner_unit_id: Option<i32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameRuntimeTriggerEvent {
+    pub trigger: Trigger,
+    pub campaign: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeLiquidBlockState {
     Bridge(LiquidBridgeState),
@@ -2582,6 +2588,7 @@ pub struct GameRuntime {
     pub storage_linked_cores: BTreeMap<i32, i32>,
     pub item_taken_events: Vec<GameRuntimeItemTakenEvent>,
     pub unit_create_events: Vec<GameRuntimeUnitCreateEvent>,
+    pub trigger_events: Vec<GameRuntimeTriggerEvent>,
     pub server_puddles: Puddles,
     pub server_fires: Fires,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
@@ -2657,6 +2664,7 @@ impl GameRuntime {
             storage_linked_cores: BTreeMap::new(),
             item_taken_events: Vec::new(),
             unit_create_events: Vec::new(),
+            trigger_events: Vec::new(),
             server_puddles: Puddles::default(),
             server_fires: Fires::default(),
             liquid_runtime_states: BTreeMap::new(),
@@ -2728,6 +2736,15 @@ impl GameRuntime {
         }
 
         self.unit_create_events.push(event.clone());
+        event
+    }
+
+    pub fn note_trigger_event(&mut self, trigger: Trigger) -> GameRuntimeTriggerEvent {
+        let event = GameRuntimeTriggerEvent {
+            trigger,
+            campaign: self.state.is_campaign(),
+        };
+        self.trigger_events.push(event);
         event
     }
 
@@ -9717,6 +9734,7 @@ impl GameRuntime {
         self.storage_linked_cores.clear();
         self.item_taken_events.clear();
         self.unit_create_events.clear();
+        self.trigger_events.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
         self.campaign_runtime_states.clear();

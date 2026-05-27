@@ -30,7 +30,7 @@ use mindustry_core::mindustry::entities::{
     PuddleLiquidInfo, PuddleTileView, Puddles, UnitCapRules, UnitCapTeam, UnitCapType,
     UnitSpawnAbility, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
 };
-use mindustry_core::mindustry::game::vanilla_teams;
+use mindustry_core::mindustry::game::{vanilla_teams, Trigger};
 use mindustry_core::mindustry::input::{
     drop_item, payload_dropped, picked_build_payload, picked_unit_payload, request_build_payload,
     request_drop_payload, request_item, request_unit_payload, take_items, transfer_inventory,
@@ -1917,6 +1917,7 @@ impl ServerLauncher {
             if scaling <= 0.0 {
                 continue;
             }
+            let mut reacted = false;
 
             for (dx, dy) in [
                 (0, -1),
@@ -1959,6 +1960,7 @@ impl ServerLauncher {
                     event.liquid.clone(),
                     amount * event.liquid.cell_spread_conversion,
                 ));
+                reacted = true;
                 updates += 1;
             }
 
@@ -1999,6 +2001,7 @@ impl ServerLauncher {
                                     event.liquid.cell_spread_damage * delta_ticks * scaling,
                                     Self::current_millis() as f32,
                                 );
+                                reacted = true;
                                 updates += 1;
                             }
                         }
@@ -2014,9 +2017,14 @@ impl ServerLauncher {
                 delta_ticks,
             );
             if absorb_report.absorbed > 0 {
+                reacted = true;
                 updates += absorb_report.absorbed;
             }
             cell_removed_ids.extend(absorb_report.removed_ids);
+            if reacted && event.liquid.name == "neoplasm" {
+                self.runtime.note_trigger_event(Trigger::NeoplasmReact);
+                updates += 1;
+            }
         }
         for (tile, source, liquid, amount) in cell_deposits {
             self.runtime.server_puddles.deposit(
@@ -4375,7 +4383,7 @@ mod tests {
         standard_effect_id, FireRules, FireTile, Fires, PuddleDepositContext, PuddleLiquidInfo,
         PuddleTileView, Puddles,
     };
-    use mindustry_core::mindustry::game::{BlockPlan, ExportStat, TEAM_SHARDED};
+    use mindustry_core::mindustry::game::{BlockPlan, ExportStat, Trigger, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
     use mindustry_core::mindustry::io::{
         BuildPlanWire, BuildingRef, EntityRef, Point2, TeamId, TypeValue, UnitRef, Vec2,
@@ -9034,6 +9042,7 @@ mod tests {
         launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
         launcher.net_server.open(6598).unwrap();
         launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.set_sector(Some(Sector::new(42)));
         launcher.runtime.state.world.resize(4, 4);
         launcher.runtime.server_puddles = Puddles::new(4, 4);
         let neoplasm = launcher.content_loader.liquid_by_name("neoplasm").unwrap();
@@ -9073,6 +9082,11 @@ mod tests {
                 >= mindustry_core::mindustry::entities::puddles::MAX_LIQUID / 3.0,
             "replacement deposit should use at least maxLiquid / 3 like Java CellLiquid.update"
         );
+        assert!(launcher
+            .runtime
+            .trigger_events
+            .iter()
+            .any(|event| { event.trigger == Trigger::NeoplasmReact && event.campaign }));
         let sent = sent.lock().unwrap();
         assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
             !*reliable

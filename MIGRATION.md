@@ -4876,7 +4876,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core cell_liquid_absorbs --lib`
   - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id --lib`
 - 仍未完成：
-  - `Events.fire(Trigger.neoplasmReact)` 还没有 Rust event bus 等价物；
+  - building 吸收 deposit 与 nearby puddle 吸收之间的执行顺序仍是 Rust 现有批处理近似，后续如出现 parity 差异需进一步收紧到 Java 单 puddle update 顺序；
+  - `Geometry.d4/d4c` 仍是局部显式数组，后续应统一迁移 Geometry 常量。
+
+### 12.165 CellLiquid.update neoplasmReact trigger runtime record
+
+- 2026-05-28：对照 Java `Events.fire(Trigger.neoplasmReact)`，把 neoplasm 反应事件从“GameService 映射已存在但没人触发”推进到 server/runtime 事件记录链。
+- Java 依据：
+  - `EventType.Trigger.neoplasmReact` 是普通 trigger enum；
+  - `CellLiquid.update(Puddle)` 在任意分支发生 `reacted` 且当前液体是 `Liquids.neoplasm` 时触发；
+  - `GameService` 中 `trigger(Trigger.neoplasmReact, neoplasmWater)` 将其映射为事件型成就 `neoplasmWater`。
+- Rust 新增/变化：
+  - `GameRuntimeTriggerEvent { trigger, campaign }` 与 `GameRuntime::note_trigger_event(...)`：以现有 runtime event-vector 风格记录 trigger，并保留 `GameState::is_campaign()` 快照；
+  - `GameRuntime::clear_runtime_sidecars(...)` 同步清理 `trigger_events`，避免换图/重载后复用旧 trigger；
+  - `ServerLauncher::tick_server_puddles(...)` 在 CellLiquid building 吸收、current-building damage/spread、nearby puddle 吸收/替换任一分支发生反应，且 liquid name 为 `neoplasm` 时记录 `Trigger::NeoplasmReact`；
+  - 现有 `GameServiceState::trigger_plan(...)` 已验证 `Trigger::NeoplasmReact -> Achievement::NeoplasmWater`，本轮把事件源接到 runtime 记录点。
+- 新增/更新验证：
+  - 扩展 `server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id`：设置 campaign sector，触发 neoplasm-water 邻接 puddle 反应后断言 `runtime.trigger_events` 包含 campaign `Trigger::NeoplasmReact`；
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id --lib`
+  - `cargo test -p mindustry-core trigger_plan_maps_java_game_service_triggers --lib`
+- 仍未完成：
+  - runtime `trigger_events` 还未自动流入 `DefaultGameService`/平台成就服务；目前先闭合“事件源 → runtime trigger → 已有 GameService trigger_plan 映射”的可验证链路；
   - building 吸收 deposit 与 nearby puddle 吸收之间的执行顺序仍是 Rust 现有批处理近似，后续如出现 parity 差异需进一步收紧到 Java 单 puddle update 顺序；
   - `Geometry.d4/d4c` 仍是局部显式数组，后续应统一迁移 Geometry 常量。
 
