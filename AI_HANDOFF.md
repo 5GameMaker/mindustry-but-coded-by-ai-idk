@@ -4084,3 +4084,47 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `standard_effect_color_symbol(...)` 只覆盖当前已迁移 Fx 所需颜色，不是完整 `Pal.java`/Arc `Color` registry；
   3. 完整 `Fx.java` renderer 仍待继续逐项迁移；
   4. 如果要引入 `winit/wgpu/pixels/sdl2` 等新外部后端依赖，需要按当前开发规则先确认；未确认前优先继续做无依赖 primitive/runtime 接入。
+
+---
+
+## 123. 最新闭环记录：render frame 边界、更多简单 Fx、单位镜像清空
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 已推送提交：
+  - `e01904c 暴露桌面特效渲染帧数据`
+  - `32ff250 扩展简单标准特效绘制计划`
+  - `3846f94 补齐单位镜像清空回归`
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopStandardEffectRenderFrame`；
+    - 新增 `DesktopLauncher::standard_effect_render_frame()`，统一暴露 draw/circle/light 三组标准 effect 帧缓存；
+    - 单位 item mirror 回归：`item=None` 会把 typed `UnitComp.items.stack` 清成空；
+    - 单位 payload mirror 回归：`payload_count=0` 会把 typed `UnitComp.payload.payloads` 清空。
+  - `core/src/mindustry/entities/effect.rs`
+    - 扩展 7 个不需要新 kind 的简单 Fx：
+      - `fallSmoke=29`
+      - `rocketSmoke=31`
+      - `rocketSmokeLarge=32`
+      - `magmasmoke=33`
+      - `burning=117`
+      - `fireHit=120`
+      - `blastsmoke=226`
+    - 接入 `standard_effect_id(...)`、`standard_effect(...)`、`standard_effect_draw_plan(...)`；
+    - 复用 `FilledCircle` / `SeededCircleParticles` 和现有 primitive 链路。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-desktop fire_light --lib`
+  - `cargo test -p mindustry-desktop unit_item_mirror --lib`
+  - `cargo test -p mindustry-desktop unit_payload_mirror --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `Fx.java` 仍远未完整，下一批可继续做 `smokePuff/shootSmallSmoke/steamCoolSmoke/artilleryTrailSmoke` 等需要小幅新增 kind/overload 的 renderer；
+  2. 真实 desktop 2D/GPU backend 尚未接入；当前只到 frame data/primitive；
+  3. payload mirror 仍只是 kind/count 近似，不携带真实 payload 内容；
+  4. `Fx.ripple` id 仍沿用既有 `243`，完整 content id 审计时需要统一确认。
