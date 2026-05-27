@@ -7668,19 +7668,23 @@ impl GameRuntime {
                 if owner_index == index || owner_index >= self.buildings.len() {
                     return None;
                 }
+                let drop_without_merge =
+                    self.linked_core_index_for_storage(content, index).is_some();
                 let entries: Vec<_> = self.buildings[index].items.as_ref()?.each().collect();
-                (!entries.is_empty()).then_some((index, owner_index, entries))
+                (!entries.is_empty()).then_some((index, owner_index, entries, drop_without_merge))
             })
             .collect();
 
         let mut merged = 0;
-        for (from_index, owner_index, entries) in moves {
-            for (item_id, amount) in entries {
-                if amount <= 0 {
-                    continue;
-                }
-                if let Some(owner_items) = self.buildings[owner_index].items.as_mut() {
-                    owner_items.add(item_id, amount);
+        for (from_index, owner_index, entries, drop_without_merge) in moves {
+            if !drop_without_merge {
+                for (item_id, amount) in entries {
+                    if amount <= 0 {
+                        continue;
+                    }
+                    if let Some(owner_items) = self.buildings[owner_index].items.as_mut() {
+                        owner_items.add(item_id, amount);
+                    }
                 }
             }
             if let Some(items) = self.buildings[from_index].items.as_mut() {
@@ -32535,6 +32539,46 @@ mod tests {
             core_capacity + 1
         );
         assert_eq!(runtime.buildings[2].items.as_ref().unwrap().get(copper), 0);
+    }
+
+    #[test]
+    fn game_runtime_linked_storage_items_are_not_merged_into_core_like_v158_1() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let container_def = content.block_by_name("container").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let core_tile = point2_pack(3, 6);
+        let linked_storage_tile = point2_pack(5, 6);
+        let core_building = BuildingComp::new(core_tile, core_def.base().clone(), TeamId(6));
+        let mut linked_storage_building =
+            BuildingComp::new(linked_storage_tile, container_def.base().clone(), TeamId(6));
+        linked_storage_building
+            .items
+            .as_mut()
+            .unwrap()
+            .add(copper, 3);
+        linked_storage_building.items.as_mut().unwrap().add(lead, 2);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(core_building);
+        runtime.add_building(linked_storage_building);
+
+        assert_eq!(runtime.refresh_owned_storage_core_links(&content), 1);
+        assert_eq!(
+            runtime.storage_linked_cores.get(&linked_storage_tile),
+            Some(&core_tile)
+        );
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(copper), 0);
+        assert_eq!(runtime.buildings[0].items.as_ref().unwrap().get(lead), 0);
+        assert_eq!(runtime.buildings[1].items.as_ref().unwrap().total(), 0);
     }
 
     #[test]

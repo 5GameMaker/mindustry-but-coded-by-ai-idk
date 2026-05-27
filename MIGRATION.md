@@ -4066,3 +4066,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core assembler_drone_spawned_packet --lib`
   - `cargo test -p mindustry-desktop syncs_assembler_drone_spawned --lib`
 - 仍未完成：需要继续对照 v158.1 与 v158 的差异，逐项检查新增/变更 Java 文件；assembler drone 的真实 `AssemblerAI.targetPos/targetAngle/inPosition()` 仍待接入。
+
+### 12.129 v158.1 CoreBlock linked storage item 合并变更
+
+- 2026-05-27：对照 `v158..v158.1` 的 `CoreBlock.java` 变更，修正 Rust linked storage 刷新时的旧 item 处理。
+- Java 依据：
+  - `CoreBuild.updateProximity()` 在 v158.1 中移除了 `if(t.items != items){ items.add(t.items); }`；
+  - linked storage 现在直接 `t.items = items` 并设置 `linkedCore`，不会把被链接 storage 原本持有的 item 累加到 core。
+- Rust 新增/变化：
+  - `merge_owned_core_and_linked_storage_items(...)` 仍保留同队多个 core 的 canonical owner 合并；
+  - 对 `storage_linked_cores` 里的普通 storage，则清空其旧 item module，但不再把旧 item 加到 core，匹配 v158.1 行为；
+  - 新测试锁定 linked storage 预存 copper/lead 后刷新链接不会污染 core items。
+- 新增验证：
+  - `cargo test -p mindustry-core linked_storage_items_are_not_merged --lib`
+  - `cargo test -p mindustry-core same_team_cores_share --lib`
+- 仍未完成：`LandingPad.java`、`UI.showFollowUpMenu(...)`、`HudFragment` 的 v158.1 UI/显示差异仍需继续对照；其中 UI 类差异不应误改 runtime。
