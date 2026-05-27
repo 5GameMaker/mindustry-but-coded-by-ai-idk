@@ -5536,3 +5536,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - draw plan 仍需接到真实 GPU/2D backend；
   - 当前只覆盖 4 个高频 Fx，完整 `Fx.java` renderer 仍待逐项迁移；
   - 颜色名如 `Pal.darkishGray` 仍是符号计划，后续 renderer/asset layer 需要解析成实际颜色。
+
+### 12.187 Desktop frame cache for standard local effect draw plans
+
+- 2026-05-28：将上一节手动收集的标准本地 effect draw plan 接入 `DesktopLauncher::update()`，让桌面客户端每帧自动生成可供后续 2D/GPU backend 消费的 effect render frame 数据。
+- Rust 新增/变化：
+  - `DesktopLauncher` 新增公开帧缓存：
+    - `standard_local_effect_draw_plans: Vec<StandardEffectDrawPlan>`；
+  - `update()` 在 local effect materialize + tick 后调用 `collect_standard_local_effect_draw_plans_for_render()` 并写入该缓存；
+  - 世界卸载 / snapshot cursor 清理时同步清空该缓存；
+  - move-effect 测试现在断言 `missileTrailShort` 会在 update 后生成 `FilledCircle` draw plan。
+- 新增/更新验证：
+  - `desktop_launcher_ticks_elude_move_effect_to_local_effect_queue` 增加帧级 draw plan 断言。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop standard_effect_draw --lib`
+  - `cargo test -p mindustry-desktop ticks_elude --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 该缓存还没有交给真实窗口/图形 backend 绘制；
+  - server snapshot effect 与更多 Fx 的 draw plan 仍需扩展。

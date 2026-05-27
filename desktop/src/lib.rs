@@ -55,6 +55,7 @@ pub struct DesktopLauncher {
     pub player: PlayerComp,
     pub remote_players: BTreeMap<i32, PlayerComp>,
     pub other_player_preview_overlays: Vec<OtherPlayerPreviewOverlayPlan>,
+    pub standard_local_effect_draw_plans: Vec<StandardEffectDrawPlan>,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -100,6 +101,7 @@ impl DesktopLauncher {
             player: PlayerComp::default(),
             remote_players: BTreeMap::new(),
             other_player_preview_overlays: Vec::new(),
+            standard_local_effect_draw_plans: Vec::new(),
             connect_target,
             connect_error: None,
             args,
@@ -172,6 +174,8 @@ impl DesktopLauncher {
         self.puddle_particle_rand_state = puddle_particle_rand_state;
         self.materialize_local_effect_events_for_render();
         self.tick_local_effect_states_for_render(1.0);
+        self.standard_local_effect_draw_plans =
+            self.collect_standard_local_effect_draw_plans_for_render();
     }
 
     pub fn materialize_local_effect_events_for_render(&mut self) -> usize {
@@ -273,6 +277,7 @@ impl DesktopLauncher {
                     self.player = PlayerComp::default();
                     self.remote_players.clear();
                     self.other_player_preview_overlays.clear();
+                    self.standard_local_effect_draw_plans.clear();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
                     self.last_runtime_map_load_report = None;
@@ -969,6 +974,7 @@ impl DesktopLauncher {
         self.last_command_building_apply_report = None;
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
+        self.standard_local_effect_draw_plans.clear();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -2476,6 +2482,10 @@ mod tests {
                 .lifetime,
             60.0
         );
+
+        launcher.standard_local_effect_draw_plans = plans;
+        launcher.clear_snapshot_apply_cursors();
+        assert!(launcher.standard_local_effect_draw_plans.is_empty());
     }
 
     #[test]
@@ -2585,6 +2595,16 @@ mod tests {
         assert_eq!(effect.lifetime, 22.0);
         assert_eq!(effect.effect_clip, 50.0);
         assert_eq!(effect.data, TypeValue::Null);
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 1);
+        let plan = &launcher.standard_local_effect_draw_plans[0];
+        assert_eq!(plan.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(
+            plan.effect_id,
+            standard_effect_id("missileTrailShort").unwrap()
+        );
+        assert!((plan.center.0 - 93.0).abs() < 0.0001);
+        assert!((plan.center.1 - 200.0).abs() < 0.0001);
+        assert!((plan.radius - (3.0 * 21.0 / 22.0)).abs() < 0.0001);
     }
 
     #[test]
