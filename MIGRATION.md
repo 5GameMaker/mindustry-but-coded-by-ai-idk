@@ -3732,6 +3732,9 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 新增 server-level smoke，证明 unit cargo 不是孤立 helper，而是由真实 `ServerLauncher::update()` 经 `advance_owned_runtime_blocks(...).item_transport` 驱动并缓存到 `last_runtime_item_transport_report`：
   - `server_update_drives_owned_unit_cargo_loader_from_launcher_runtime`
   - `server_update_drives_owned_unit_cargo_unload_stale_from_launcher_runtime`
+- 2026-05-27：继续把 loader spawn 从纯计数推进到最小 server 物化/同步链路。`ServerLauncher::update()` 会在 owned runtime tick 前记录尚未持有 unit 的 `unit-cargo-loader` tile，tick 后按新完成的 loader 创建 server-side `manifold` `UnitComp`，写回 `UnitCargoLoaderState.read_unit_id`，并在网络已开启时可靠广播 `UnitTetherBlockSpawnedCallPacket { tile, id }`：
+  - 新增 `server_update_broadcasts_unit_tether_block_spawned_for_owned_unit_cargo_loader`
+  - 这仍是最小 server sidecar，尚未把 `BuildingTetherComp` 正式并入 `UnitComp`，也未补客户端 apply packet 后回填 loader state。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-server unit_cargo --lib`

@@ -1,8 +1,11 @@
 pub mod server_control;
 
-use mindustry_core::mindustry::content::blocks::{BlockDef, EffectBlockKind, StorageBlockKind};
+use mindustry_core::mindustry::content::blocks::{
+    BlockDef, DistributionBlockKind, EffectBlockKind, StorageBlockKind,
+};
 use mindustry_core::mindustry::core::game_runtime::{
-    GameRuntimePayloadBlockState, GameRuntimePowerNodeConfigResult,
+    GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
+    GameRuntimePowerNodeConfigResult,
 };
 use mindustry_core::mindustry::core::net_server::{
     PlayerPreviewPlanSource, PLAN_PREVIEW_SYNC_INTERVAL_MS,
@@ -37,7 +40,7 @@ use mindustry_core::mindustry::net::{
     NetConnection, NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
     PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
     RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    TransferInventoryCallPacket,
+    TransferInventoryCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -54,6 +57,8 @@ use std::{
     io,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+const SERVER_RUNTIME_UNIT_ID_START: i32 = 1_000_000;
 
 #[derive(Debug, Clone)]
 pub struct ServerLauncher {
@@ -223,7 +228,16 @@ impl ServerLauncher {
         if let Err(error) = self.tick_server_unit_entered_payloads() {
             self.network_error = Some(error.to_string());
         }
+        let unit_cargo_loader_spawn_candidates =
+            self.runtime_unit_cargo_loader_spawn_candidate_tiles();
         if let Some(report) = self.update_runtime_owned_blocks(1.0 / 60.0) {
+            if report.item_transport.unit_cargo_loader_built_units > 0 {
+                if let Err(error) =
+                    self.apply_runtime_unit_cargo_loader_spawns(&unit_cargo_loader_spawn_candidates)
+                {
+                    self.network_error = Some(error.to_string());
+                }
+            }
             self.last_runtime_item_transport_report = Some(report.item_transport);
             self.last_runtime_payload_report = Some(report.payload);
             self.last_runtime_effect_report = Some(report.effect);
@@ -1142,6 +1156,121 @@ impl ServerLauncher {
                 applied += 1;
             }
         }
+        Ok(applied)
+    }
+
+    fn runtime_unit_cargo_loader_spawn_candidate_tiles(&self) -> Vec<i32> {
+        self.runtime
+            .buildings
+            .iter()
+            .filter_map(|building| {
+                let Some(BlockDef::Distribution(distribution)) =
+                    self.content_loader.block(building.block.id)
+                else {
+                    return None;
+                };
+                if distribution.kind != DistributionBlockKind::UnitCargoLoader {
+                    return None;
+                }
+
+                let has_unit = matches!(
+                    self.runtime
+                        .distribution_runtime_states
+                        .get(&building.tile_pos),
+                    Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state))
+                        if state.has_unit
+                );
+                (!has_unit).then_some(building.tile_pos)
+            })
+            .collect()
+    }
+
+    fn runtime_unit_cargo_loader_has_unit(&self, tile_pos: i32) -> bool {
+        matches!(
+            self.runtime.distribution_runtime_states.get(&tile_pos),
+            Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) if state.has_unit
+        )
+    }
+
+    fn next_server_runtime_unit_id(&self) -> i32 {
+        let server_max = self
+            .server_units
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or(SERVER_RUNTIME_UNIT_ID_START - 1);
+        let cargo_loader_max = self
+            .runtime
+            .distribution_runtime_states
+            .values()
+            .filter_map(|state| match state {
+                GameRuntimeDistributionBlockState::UnitCargoLoader(state)
+                    if state.read_unit_id >= 0 =>
+                {
+                    Some(state.read_unit_id)
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(SERVER_RUNTIME_UNIT_ID_START - 1);
+
+        server_max
+            .max(cargo_loader_max)
+            .max(SERVER_RUNTIME_UNIT_ID_START - 1)
+            .saturating_add(1)
+    }
+
+    fn apply_runtime_unit_cargo_loader_spawns(
+        &mut self,
+        candidate_tiles: &[i32],
+    ) -> io::Result<usize> {
+        let spawned_tiles: Vec<_> = candidate_tiles
+            .iter()
+            .copied()
+            .filter(|tile_pos| self.runtime_unit_cargo_loader_has_unit(*tile_pos))
+            .collect();
+        let Some(unit_type) = self.content_loader.unit_by_name("manifold").cloned() else {
+            return Ok(0);
+        };
+
+        let mut applied = 0;
+        for tile_pos in spawned_tiles {
+            let Some(building) = self
+                .runtime
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == tile_pos)
+                .cloned()
+            else {
+                continue;
+            };
+
+            let unit_id = self.next_server_runtime_unit_id();
+            let mut unit = UnitComp::new(unit_id, unit_type.clone(), building.team);
+            unit.set_pos(building.x, building.y);
+            unit.set_rotation(90.0);
+            self.server_units.insert(unit_id, unit);
+
+            if let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) =
+                self.runtime.distribution_runtime_states.get_mut(&tile_pos)
+            {
+                state.read_unit_id = unit_id;
+            }
+
+            if self.net_server.is_active() {
+                self.net_server.net_mut().send(
+                    &PacketKind::UnitTetherBlockSpawnedCallPacket(
+                        UnitTetherBlockSpawnedCallPacket {
+                            tile: Some(tile_pos),
+                            id: unit_id,
+                        },
+                    ),
+                    true,
+                )?;
+            }
+            applied += 1;
+        }
+
         Ok(applied)
     }
 
@@ -4157,6 +4286,72 @@ mod tests {
         assert!(state.has_unit);
         assert_eq!(state.build_progress, 0.0);
         assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_broadcasts_unit_tether_block_spawned_for_owned_unit_cargo_loader() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6580).unwrap();
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let BlockDef::Distribution(loader_block) = loader_def else {
+            panic!("unit-cargo-loader should be a distribution block");
+        };
+        let loader_tile = point2_pack(6, 6);
+
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.runtime.add_building(BuildingComp::new(
+            loader_tile,
+            loader_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                build_progress: 1.0 - 1.0 / loader_block.unit_build_time,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) = launcher
+            .runtime
+            .distribution_runtime_states
+            .get(&loader_tile)
+        else {
+            panic!("unit cargo loader state should remain present");
+        };
+        let spawned_id = state.read_unit_id;
+        assert!(spawned_id >= super::SERVER_RUNTIME_UNIT_ID_START);
+        let spawned_unit = launcher
+            .server_units
+            .get(&spawned_id)
+            .expect("server update should materialize spawned manifold unit");
+        assert_eq!(spawned_unit.type_info.name(), "manifold");
+        assert_eq!(spawned_unit.team_id(), TeamId(6));
+        assert_eq!(spawned_unit.x(), launcher.runtime.buildings()[0].x);
+        assert_eq!(spawned_unit.y(), launcher.runtime.buildings()[0].y);
+        assert_eq!(spawned_unit.rotation(), 90.0);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitTetherBlockSpawnedCallPacket(packet)
+                        if packet.tile == Some(loader_tile) && packet.id == spawned_id
+                )
+        }));
     }
 
     #[test]
