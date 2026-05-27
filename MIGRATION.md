@@ -3616,7 +3616,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
   - `cargo check --workspace`
-- 仍未完成：当前 UnitFactory runtime 尚未完整实现 Java `canSetCommand()`/命令合法性过滤、`team.activateUnitFactories()` 的精确 team rule、创建 sound/effect/event、同 tick moveOut 后立即再生产的 Java 顺序，以及完整 UI/config/logic sense 行为。
+- 仍未完成：当前 UnitFactory runtime 尚未完整实现 `team.activateUnitFactories()` 的精确 team rule、创建 sound/effect/event、同 tick moveOut 后立即再生产的 Java 顺序，以及真实客户端 UI 渲染按钮接入。
 
 ### 12.110 UnitFactory 配置入口接入
 
@@ -3640,6 +3640,8 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 2026-05-27 继续补 Java `UnitFactoryBuild.senseObject(LAccess.config)`：`GameRuntime::sense_owned_building_object(...)` 在 `LAccess::Config` 且目标为 `UnitFactory` 时读取当前 `UnitFactoryState.current_plan`，返回对应 `TypeValue::Content(ContentType::Unit, unit_id)`；`current_plan == -1` 返回 `TypeValue::Null`；缺失 sidecar 时会从 `BuildingComp.config == Int(plan)` 恢复同等可感知结果；
   - 同步新增 `GameRuntime::sense_owned_building_logic_object(...)`，把 `TypeValue::Content` 转为逻辑对象名（如 `@mono`），为后续真实 processor/link runtime 接入提供非孤立入口；
   - 继续补 Java `UnitFactoryBuild.sense(LAccess.progress/itemCapacity)`：`GameRuntime::sense_owned_building_number(...)` 对 UnitFactory 返回 clamp 后的 `fraction()` 与 `round(itemCapacity * rules.unitCost(team))`，并在无 plan/无 sidecar 时按 Java 空进度语义回退；
+  - 2026-05-27 继续补 Java `UnitFactoryBuild.buildConfiguration()` / `getPlanConfigs()` / `canSetCommand()` 的 runtime 候选计划：新增 `GameRuntimeUnitFactoryConfigurationPlan`、`GameRuntimeUnitFactoryConfigUnitOption`、`GameRuntimeUnitFactoryConfigCommandOption` 与 `GameRuntime::unit_factory_configuration_plan(...)`，同一个 helper 同时输出 UI 可见单位候选（`unlockedNow && !isBanned`）、`getPlanConfigs()` 候选（只排除 banned）、当前输出单位的 command 按钮候选、默认命令选中态、显式命令选中态，以及 Java 默认 `selectionRows/selectionColumns` 与 command columns；
+  - 新增 `GameRuntime::unit_factory_can_set_command(...)`，按 Java 规则要求 `commands.len() > 1 && allowChangeCommands`，并隐藏“仅 `move + enterPayload`”的标准单位命令行；该 helper 只负责展示/候选判断，真实配置仍走 `configure_owned_unit_factory_value(...) -> configure_owned_unit_factory_*`，避免做成孤立 UI 数据模块；
   - 该入口直接修改真实 runtime sidecar 与 building config，后续可继续接入 `TileConfigCallPacket`/输入处理，而不是独立 helper。
 - 新增 core 回归测试：
   - `game_runtime_configures_unit_factory_plan_and_clears_progress_like_java`
@@ -3648,6 +3650,9 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_configures_unit_factory_value_for_plan_unit_command_and_clear`
   - `game_runtime_senses_unit_factory_config_as_current_plan_unit_like_java`
   - `game_runtime_senses_unit_factory_progress_and_item_capacity_like_java`
+  - `game_runtime_unit_factory_configuration_plan_filters_unlocked_unbanned_units_like_java`
+  - `game_runtime_unit_factory_configuration_plan_lists_changeable_commands_like_java`
+  - `game_runtime_unit_factory_configuration_plan_hides_enter_payload_only_standard_commands_like_java`
   - `game_runtime_clears_incompatible_unit_factory_command_when_plan_changes_like_java`
   - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
   - `unit_core_properties_match_upstream_subset` 现在断言 `mono/poly/mega` 的 commands/default command、Payloadc unit 的 payload command，以及普通 core unit 的 Java-style fallback default；

@@ -44,7 +44,7 @@ use crate::mindustry::{
         NetworkPlayerSyncData, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
         UnitTetherBlockSpawnedCallPacket,
     },
-    r#type::{PayloadKey, PayloadSeq, WeatherState},
+    r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
     world::block::Block,
     world::blocks::campaign::{
@@ -2122,6 +2122,49 @@ impl GameRuntimeUnitFactoryConfigureResult {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeUnitFactoryConfigUnitOption {
+    pub plan_index: i32,
+    pub unit_id: ContentId,
+    pub unit_name: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeUnitFactoryConfigCommandOption {
+    pub command_id: ContentId,
+    pub command_name: String,
+    pub selected: bool,
+    pub default_selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeUnitFactoryConfigurationPlan {
+    pub tile_pos: i32,
+    pub configurable: bool,
+    pub current_plan: Option<i32>,
+    /// Java `UnitFactoryBuild.buildConfiguration()` visible unit buttons:
+    /// `plan.unit.unlockedNow() && !plan.unit.isBanned()`.
+    pub unit_options: Vec<GameRuntimeUnitFactoryConfigUnitOption>,
+    /// Java `UnitFactory.getPlanConfigs()` candidates: only `!plan.unit.isBanned()`.
+    pub plan_config_options: Vec<GameRuntimeUnitFactoryConfigUnitOption>,
+    /// Java command buttons for the current output unit when `canSetCommand()` is true.
+    pub command_options: Vec<GameRuntimeUnitFactoryConfigCommandOption>,
+    pub selection_rows: i32,
+    pub selection_columns: i32,
+    pub command_columns: i32,
+}
+
+impl GameRuntimeUnitFactoryConfigurationPlan {
+    pub fn has_visible_units(&self) -> bool {
+        !self.unit_options.is_empty()
+    }
+
+    pub fn has_command_options(&self) -> bool {
+        !self.command_options.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameRuntimeUnitCargoUnloadConfigureResult {
     Configured,
@@ -3984,6 +4027,127 @@ impl GameRuntime {
 
     pub fn export_network_map_snapshot(&self, content: &ContentLoader) -> LegacyShortChunkMap {
         export_network_map_snapshot_from_parts(self, content)
+    }
+
+    pub fn unit_factory_can_set_command(unit: &UnitType) -> bool {
+        unit.allow_change_commands
+            && unit.commands.len() > 1
+            && !(unit.commands.len() == 2
+                && unit
+                    .commands
+                    .get(1)
+                    .is_some_and(|command| command == "enterPayload"))
+    }
+
+    pub fn unit_factory_configuration_plan(
+        &self,
+        content: &ContentLoader,
+        tile_pos: i32,
+    ) -> Option<GameRuntimeUnitFactoryConfigurationPlan> {
+        let building = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)?;
+        let BlockDef::UnitFactory(factory_block) = content.block(building.block.id)? else {
+            return None;
+        };
+
+        let current_plan_value = self
+            .unit_runtime_states
+            .get(&tile_pos)
+            .and_then(|state| match state {
+                GameRuntimeUnitBlockState::Factory { factory, .. } => Some(factory.current_plan),
+                _ => None,
+            })
+            .or_else(|| match building.config_value() {
+                type_io::TypeValue::Int(plan) => Some(plan),
+                type_io::TypeValue::Null => Some(-1),
+                _ => None,
+            })
+            .unwrap_or(-1);
+        let current_plan = (current_plan_value >= 0).then_some(current_plan_value);
+        let explicit_command_id =
+            self.unit_runtime_states
+                .get(&tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Factory { factory, .. } => {
+                        factory.command_id.map(|command| command as ContentId)
+                    }
+                    _ => None,
+                });
+
+        let mut plan = GameRuntimeUnitFactoryConfigurationPlan {
+            tile_pos,
+            configurable: factory_block.configurable,
+            current_plan,
+            unit_options: Vec::new(),
+            plan_config_options: Vec::new(),
+            command_options: Vec::new(),
+            selection_rows: factory_block.base.selection_rows,
+            selection_columns: factory_block.base.selection_columns,
+            command_columns: 0,
+        };
+        if !factory_block.configurable {
+            return Some(plan);
+        }
+
+        for (index, unit_plan) in factory_block.plans.iter().enumerate() {
+            let Some(unit) = content.unit_by_name(&unit_plan.unit) else {
+                continue;
+            };
+            if self.state.rules.is_unit_banned(unit.name()) {
+                continue;
+            }
+
+            let option = GameRuntimeUnitFactoryConfigUnitOption {
+                plan_index: index as i32,
+                unit_id: unit.id(),
+                unit_name: unit.name().to_string(),
+                selected: current_plan == Some(index as i32),
+            };
+            plan.plan_config_options.push(option.clone());
+            if Self::unit_unlocked_now(&self.state.rules, unit) {
+                plan.unit_options.push(option);
+            }
+        }
+
+        if !plan.unit_options.is_empty() {
+            if let Some(unit) = current_plan
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(|index| factory_block.plans.get(index))
+                .and_then(|unit_plan| content.unit_by_name(&unit_plan.unit))
+                .filter(|unit| Self::unit_factory_can_set_command(unit))
+            {
+                let default_command_id = Self::unit_default_command_id(content, unit);
+                for command_name in &unit.commands {
+                    let command = content.unit_command_by_name(command_name).or_else(|| {
+                        command_name
+                            .strip_suffix("Command")
+                            .and_then(|name| content.unit_command_by_name(name))
+                    });
+                    let Some(command) = command else {
+                        continue;
+                    };
+                    let command_id = command.id();
+                    let default_selected = default_command_id == Some(command_id);
+                    plan.command_options
+                        .push(GameRuntimeUnitFactoryConfigCommandOption {
+                            command_id,
+                            command_name: command.name().to_string(),
+                            selected: explicit_command_id == Some(command_id)
+                                || (explicit_command_id.is_none() && default_selected),
+                            default_selected,
+                        });
+                }
+
+                if !plan.command_options.is_empty() {
+                    let max_columns = factory_block.base.selection_columns.max(2);
+                    plan.command_columns = (plan.unit_options.len() as i32).clamp(2, max_columns);
+                }
+            }
+        }
+
+        Some(plan)
     }
 
     pub fn configure_owned_unit_factory_plan(
@@ -21096,6 +21260,194 @@ mod tests {
             panic!("preconfigured unit factory should initialize its sidecar");
         };
         assert_eq!(factory.current_plan, 0);
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_configuration_plan_filters_unlocked_unbanned_units_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let mono = content.unit_by_name("mono").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let tile_pos = point2_pack(20, 15);
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.researched.insert("mono".into());
+        let mut building = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(2));
+        building.config = Some(TypeValue::Int(1));
+        runtime.add_building(building);
+
+        let plan = runtime
+            .unit_factory_configuration_plan(&content, tile_pos)
+            .expect("air factory should expose configuration plan");
+        assert_eq!(plan.current_plan, Some(1));
+        assert_eq!(plan.selection_rows, 5);
+        assert_eq!(plan.selection_columns, 4);
+        assert_eq!(
+            plan.unit_options
+                .iter()
+                .map(|option| (option.plan_index, option.unit_id, option.unit_name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(1, mono.id(), "mono")]
+        );
+        assert_eq!(plan.unit_options[0].selected, true);
+        assert_eq!(
+            plan.plan_config_options
+                .iter()
+                .map(|option| (option.plan_index, option.unit_id, option.unit_name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(0, flare.id(), "flare"), (1, mono.id(), "mono")]
+        );
+
+        runtime.state.rules.banned_units.insert("mono".into());
+        let banned_plan = runtime
+            .unit_factory_configuration_plan(&content, tile_pos)
+            .expect(
+                "air factory should still expose configuration plan when selected unit is banned",
+            );
+        assert!(banned_plan.unit_options.is_empty());
+        assert_eq!(
+            banned_plan
+                .plan_config_options
+                .iter()
+                .map(|option| (option.plan_index, option.unit_id, option.unit_name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(0, flare.id(), "flare")]
+        );
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_configuration_plan_lists_changeable_commands_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let mono = content.unit_by_name("mono").unwrap();
+        let move_command = content.unit_command_by_name("move").unwrap();
+        let enter_payload = content.unit_command_by_name("enterPayload").unwrap();
+        let mine = content.unit_command_by_name("mine").unwrap();
+        let tile_pos = point2_pack(21, 15);
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.researched.insert("mono".into());
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 1,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let plan = runtime
+            .unit_factory_configuration_plan(&content, tile_pos)
+            .expect("air factory should expose configuration plan");
+        assert_eq!(plan.current_plan, Some(1));
+        assert_eq!(plan.unit_options[0].unit_id, mono.id());
+        assert_eq!(plan.command_columns, 2);
+        assert_eq!(
+            plan.command_options
+                .iter()
+                .map(|option| (
+                    option.command_id,
+                    option.command_name.as_str(),
+                    option.selected,
+                    option.default_selected
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (move_command.id(), "move", false, false),
+                (enter_payload.id(), "enterPayload", false, false),
+                (mine.id(), "mine", true, true),
+            ]
+        );
+
+        let GameRuntimeUnitBlockState::Factory { factory, .. } =
+            runtime.unit_runtime_states.get_mut(&tile_pos).unwrap()
+        else {
+            panic!("unit factory sidecar should stay a factory");
+        };
+        factory.command_id = Some(move_command.id() as u8);
+        let explicit_plan = runtime
+            .unit_factory_configuration_plan(&content, tile_pos)
+            .expect("air factory should expose explicit command selection");
+        assert_eq!(
+            explicit_plan
+                .command_options
+                .iter()
+                .map(|option| (
+                    option.command_name.as_str(),
+                    option.selected,
+                    option.default_selected
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("move", true, false),
+                ("enterPayload", false, false),
+                ("mine", false, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_configuration_plan_hides_enter_payload_only_standard_commands_like_java(
+    ) {
+        let mut content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap().base().clone();
+        for unit in &mut content.catalog_mut().units {
+            match unit.name() {
+                "flare" => {
+                    unit.commands = vec!["move".into(), "enterPayload".into()];
+                    unit.default_command = Some("move".into());
+                    unit.allow_change_commands = true;
+                }
+                "mono" => {
+                    unit.commands = vec!["move".into(), "enterPayload".into(), "mine".into()];
+                    unit.default_command = Some("mine".into());
+                    unit.allow_change_commands = false;
+                }
+                _ => {}
+            }
+        }
+        let tile_pos = point2_pack(22, 15);
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.researched.insert("flare".into());
+        runtime.add_building(BuildingComp::new(tile_pos, factory_def, TeamId(2)));
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let flare_plan = runtime
+            .unit_factory_configuration_plan(&content, tile_pos)
+            .expect("air factory should expose flare configuration plan");
+        assert!(flare_plan.command_options.is_empty());
+        assert!(!GameRuntime::unit_factory_can_set_command(
+            content.unit_by_name("flare").unwrap()
+        ));
+
+        let GameRuntimeUnitBlockState::Factory { factory, .. } =
+            runtime.unit_runtime_states.get_mut(&tile_pos).unwrap()
+        else {
+            panic!("unit factory sidecar should stay a factory");
+        };
+        factory.current_plan = 1;
+        runtime.state.rules.researched.insert("mono".into());
+        let mono_plan = runtime
+            .unit_factory_configuration_plan(&content, tile_pos)
+            .expect("air factory should expose mono configuration plan");
+        assert!(mono_plan.command_options.is_empty());
+        assert!(!GameRuntime::unit_factory_can_set_command(
+            content.unit_by_name("mono").unwrap()
+        ));
     }
 
     #[test]
