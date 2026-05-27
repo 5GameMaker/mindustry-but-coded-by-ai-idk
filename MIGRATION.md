@@ -3949,3 +3949,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --check`
   - `cargo check -p mindustry-core`
 - 仍未完成：当前广播只覆盖已迁移的 factory/reconstructor payload transfer 成功路径；尚未覆盖未来完整 world dump/entity materialize、assembler 专属 spawn 包、以及 Java↔Rust 真实联机 smoke。
+
+### 12.122 Reconstructor 队伍激活延迟门控
+
+- 2026-05-27：对照 Java `ReconstructorBuild.status()` / `shouldConsume()`，把重构器生产进度接入 `team.activateUnitFactories()` 等价规则，避免 Rust Reconstructor 在队伍激活延迟内提前推进升级。
+- Java 依据：
+  - `status()` 在 `!team.activateUnitFactories()` 时返回 inactive；
+  - `shouldConsume()` 要求 `constructing && enabled && team.activateUnitFactories()`；
+  - payload 无可用 upgrade 时仍可走输出/转交路径，真正被门控的是资源消耗与进度推进。
+- Rust 新增/变化：
+  - `GameRuntimeUnitReconstructorFrameReport` 新增 `inactive_reconstructors`；
+  - `advance_owned_unit_reconstructors_ticks(...)` 现在读取 `Rules::unit_factory_active(team, tick)`，未激活时保持 move-in/out 行为但将 `effective_efficiency` 置零，不推进 `progress`、不升级、不消耗 items；
+  - 该行为与已迁移的 UnitFactory 激活延迟口径保持一致。
+- 新增验证：
+  - `cargo test -p mindustry-core reconstructor_respects_team_activation_delay --lib`
+  - `cargo fmt --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+- 仍未完成：Reconstructor 的完整消费系统 rollback/UI efficiency、create sound/effect/event 以及真实 Java↔Rust smoke 仍需继续迁移。

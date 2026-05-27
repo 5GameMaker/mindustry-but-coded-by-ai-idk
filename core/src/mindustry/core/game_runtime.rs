@@ -1982,6 +1982,7 @@ pub struct GameRuntimeUnitReconstructorFrameReport {
     pub visited_buildings: usize,
     pub reconstructor_candidates: usize,
     pub updated_reconstructors: usize,
+    pub inactive_reconstructors: usize,
     pub moved_in_payloads: usize,
     pub moved_out_payloads: usize,
     pub arrived_output_payloads: usize,
@@ -18612,6 +18613,10 @@ impl GameRuntime {
                 scaled_item_requirements(&reconstructor_block.consume_items, unit_cost);
             let has_required_items = building_has_items(&self.buildings[index], &item_requirements);
             let unit_build_speed = self.state.rules.unit_build_speed(team.0 as usize);
+            let team_activates_factories = self
+                .state
+                .rules
+                .unit_factory_active(team.0 as usize, self.state.tick);
 
             let target_upgrade = self
                 .unit_runtime_states
@@ -18701,7 +18706,14 @@ impl GameRuntime {
                     report.moved_in_payloads += 1;
                 }
 
-                let effective_efficiency = if has_required_items { efficiency } else { 0.0 };
+                if !team_activates_factories {
+                    report.inactive_reconstructors += 1;
+                }
+                let effective_efficiency = if has_required_items && team_activates_factories {
+                    efficiency
+                } else {
+                    0.0
+                };
                 let upgraded = reconstructor_update(
                     reconstructor,
                     true,
@@ -22648,6 +22660,76 @@ mod tests {
             runtime.sense_owned_building_number(&content, tile_pos, LAccess::ItemCapacity),
             Some((reconstructor_block.base.item_capacity as f32 * 1.5).round() as f64)
         );
+    }
+
+    #[test]
+    fn game_runtime_reconstructor_respects_team_activation_delay_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mono = content.unit_by_name("mono").unwrap().clone();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let BlockDef::UnitReconstructor(reconstructor_block) = reconstructor_def else {
+            panic!("additive-reconstructor should be a unit reconstructor");
+        };
+        let tile_pos = point2_pack(19, 17);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 24);
+        runtime
+            .state
+            .rules
+            .teams
+            .get_or_insert(2)
+            .unit_factory_activation_delay = 120.0;
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(2),
+        ));
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &reconstructor_block.consume_items {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+        let mut unit = UnitComp::new(8921, mono, TeamId(2));
+        unit.set_pos(runtime.buildings[0].x, runtime.buildings[0].y);
+        assert!(runtime.attach_unit_payload_to_building(&content, tile_pos, &unit));
+        {
+            let Some(GameRuntimeUnitBlockState::Reconstructor {
+                common,
+                reconstructor,
+            }) = runtime.unit_runtime_states.get_mut(&tile_pos)
+            else {
+                panic!("reconstructor sidecar should exist after payload attach");
+            };
+            common.pay_vector = Vec2::ZERO;
+            reconstructor.base.progress = 0.0;
+        }
+
+        let inactive_report = runtime
+            .advance_owned_unit_reconstructors(&content, 1.0)
+            .expect("playing runtime should advance one reconstructor frame");
+        assert_eq!(runtime.state.tick, 60.0);
+        assert_eq!(inactive_report.reconstructor_candidates, 1);
+        assert_eq!(inactive_report.inactive_reconstructors, 1);
+        assert_eq!(inactive_report.upgraded_payloads, 0);
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor sidecar should remain present while inactive");
+        };
+        assert_eq!(reconstructor.base.progress, 0.0);
+
+        let active_report = runtime
+            .advance_owned_unit_reconstructors(&content, 1.0)
+            .expect("playing runtime should advance second reconstructor frame");
+        assert_eq!(runtime.state.tick, 120.0);
+        assert_eq!(active_report.inactive_reconstructors, 0);
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor sidecar should remain present after activation");
+        };
+        assert!(reconstructor.base.progress > 0.0);
     }
 
     #[test]
