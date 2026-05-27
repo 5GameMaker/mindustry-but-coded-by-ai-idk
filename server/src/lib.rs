@@ -24,6 +24,7 @@ use mindustry_core::mindustry::entities::{
         CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
         UnitControllerState,
     },
+    entity_class_id,
 };
 use mindustry_core::mindustry::input::{
     drop_item, payload_dropped, picked_build_payload, picked_unit_payload, request_build_payload,
@@ -35,14 +36,16 @@ use mindustry_core::mindustry::input::{
     RequestUnitPayloadOutcome, TakeItemsOutcome, TransferInventoryContext,
     TransferInventoryOutcome, TransferItemToOutcome,
 };
-use mindustry_core::mindustry::io::{BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef};
+use mindustry_core::mindustry::io::{
+    type_io, BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef,
+};
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, DropItemCallPacket, Net,
-    NetConnection, NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
-    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    TileConfigCallPacket, TransferInventoryCallPacket, UnitDespawnCallPacket,
-    UnitTetherBlockSpawnedCallPacket,
+    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, DropItemCallPacket,
+    EntitySnapshotCallPacket, Net, NetConnection, NetworkPlayerData, NetworkWorldData, PacketKind,
+    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, ProviderEvent,
+    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    RequestUnitPayloadCallPacket, TileConfigCallPacket, TransferInventoryCallPacket,
+    UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -252,6 +255,9 @@ impl ServerLauncher {
                 }
             }
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) = self.broadcast_server_unit_entity_snapshots() {
                 self.network_error = Some(error.to_string());
             }
             self.last_runtime_item_transport_report = Some(report.item_transport);
@@ -1390,6 +1396,42 @@ impl ServerLauncher {
         }
 
         Ok(applied)
+    }
+
+    fn broadcast_server_unit_entity_snapshots(&mut self) -> io::Result<usize> {
+        if !self.net_server.is_active() {
+            return Ok(0);
+        }
+        let packet = self.server_unit_entity_snapshot_packet()?;
+        if packet.amount <= 0 {
+            return Ok(0);
+        }
+        self.net_server
+            .net_mut()
+            .send(&PacketKind::EntitySnapshotCallPacket(packet), false)?;
+        Ok(1)
+    }
+
+    fn server_unit_entity_snapshot_packet(&self) -> io::Result<EntitySnapshotCallPacket> {
+        let mut data = Vec::new();
+        let mut amount: i16 = 0;
+        for unit in self
+            .server_units
+            .values()
+            .filter(|unit| unit.controller.is_cargo())
+        {
+            let Some(type_id) = entity_class_id(unit.type_info.name()) else {
+                continue;
+            };
+            if amount == i16::MAX {
+                break;
+            }
+            data.extend_from_slice(&unit.id().to_be_bytes());
+            data.push(type_id);
+            type_io::write_unit_sync(&mut data, &self.content_loader, &unit.to_sync_wire())?;
+            amount += 1;
+        }
+        Ok(EntitySnapshotCallPacket { amount, data })
     }
 
     fn tick_runtime_unit_cargo_ai(&mut self) -> io::Result<usize> {
@@ -5370,6 +5412,32 @@ mod tests {
                             && packet.build == BuildingRef::new(unload_tile)
                 )
         }));
+        let snapshot_packet = sent
+            .iter()
+            .rev()
+            .find_map(|(_connection_id, packet, reliable)| {
+                if !*reliable {
+                    if let PacketKind::EntitySnapshotCallPacket(packet) = packet {
+                        return Some(packet.clone());
+                    }
+                }
+                None
+            })
+            .expect("server update should broadcast cargo unit entity snapshot");
+        let mut client_runtime = GameRuntime::default();
+        let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
+            &launcher.content_loader,
+            snapshot_packet.amount,
+            &snapshot_packet.data,
+        );
+        assert_eq!(report.entity_typed_records_applied, 1);
+        let client_unit = client_runtime
+            .client_unit_snapshot_entities
+            .get(&7)
+            .unwrap();
+        assert_eq!(client_unit.x(), launcher.runtime.buildings()[1].x);
+        assert_eq!(client_unit.y(), launcher.runtime.buildings()[1].y);
+        assert_eq!(client_unit.items.stack.amount, 0);
     }
 
     #[test]

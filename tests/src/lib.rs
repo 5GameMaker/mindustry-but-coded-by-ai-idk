@@ -710,6 +710,17 @@ fn real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime(
         desktop_unit.items.stack.amount, 0,
         "cargo unit should have unloaded all mirrored copper; {last_status}"
     );
+    let server_unload_building = server
+        .runtime
+        .buildings()
+        .iter()
+        .find(|building| building.tile_pos == unload_tile)
+        .expect("server unload point should exist");
+    assert_eq!(
+        (desktop_unit.x(), desktop_unit.y()),
+        (server_unload_building.x, server_unload_building.y),
+        "desktop cargo unit should apply server entity snapshot position; {last_status}"
+    );
     let desktop_unload_amount = desktop
         .runtime
         .buildings()

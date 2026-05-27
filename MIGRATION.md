@@ -3761,6 +3761,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 2026-05-27：继续对照 Java `CargoAI.updateMovement()`，把 cargo unit 的 server-side 状态机从“每 tick 即时找点并转移”推进到带目标记忆、`dropSpacing`、`emptyWaitTime` 与重配置防护的最小等价实现。`CargoAiRuntimeState` 新增 `drop_timer`；`ServerLauncher::tick_runtime_unit_cargo_ai_for_loader(...)` 现在会保留当前 `unload_target_tile_pos`，目标被重新配置/拆除/换队时只清目标不清货物；目标满载时按 `dropSpacing = 90` 累计 `no_dest_timer`，超过 `emptyWaitTime = 120` 后用 `targetIndex` 轮转到下一个同物品 unload point。真实转移仍复用 `transfer_item_to(...)` 与 network packet，因此继续接在 server/runtime/entity/network 链路上。
 - 2026-05-27：把 Java `BuildingTetherComp.update()` 从独立 helper 推进到 cargo unit 的正式实体生命周期。`BuildingTetherRef` 现在携带 `tile_pos`，`UnitComp` 新增 `building_tether`；server 生成 cargo `manifold` 与 client materialize tether packet 时都会写入同队有效 building tether。`ServerLauncher::tick_runtime_unit_cargo_ai_for_loader(...)` 每 tick 用 loader live building 刷新 tether ref，并通过 `BuildingTetherComp::update()` 判断 despawn，因此 loader 被拆、失效或换队都会走统一 `UnitDespawnCallPacket` 链路，而不是只靠散落的 team 特判。
 - 2026-05-27：继续补 Java `CargoAI.findAnyTarget(...)` 的 stale 优先级语义。Rust 现在把 drop target 枚举抽成 `runtime_unit_cargo_drop_targets(...)`；空载 pickup 规划会先按 loader 库存降序扫描物品，但不会因为第一个物品只有 stale unload 点就立即停下，而是继续寻找后续物品的非 stale 目标，只有所有候选都没有非 stale 目标时才 fallback 到最后一个 stale target。新增回归覆盖 copper 库存更多但 unload stale、lead 库存更少但 unload fresh 时选择 lead。
+- 2026-05-27：把 server cargo unit 的位置/状态同步接到现有 Java-like `EntitySnapshotCallPacket` 链路。`ServerLauncher::update()` 在 cargo AI tick 后会把 authoritative cargo `UnitComp::to_sync_wire()` 编入 unit entity snapshot 并非可靠广播；desktop 侧复用既有 `NetClient.entity_snapshot_mirrors -> DesktopLauncher::apply_client_entity_snapshot_packet_with_content(...) -> GameRuntime::apply_client_unit_sync_wire(...)`，真实 server→desktop cargo transfer smoke 现在断言客户端 materialized `manifold` 的位置跟随 server unload 点，而不再只依赖 item mirror。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_despawn --lib`（本轮通过 1/1）
@@ -3771,7 +3772,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server tethered_unit --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-server unit_cargo --lib`（本轮通过 9/9）
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`（本轮通过）
-  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过）
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过，含 cargo unit entity snapshot 位置同步断言）
   - `cargo test -p mindustry-core unit_tether_block_spawned --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-desktop unit_cargo --lib`（本轮通过 1/1）
