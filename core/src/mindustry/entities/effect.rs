@@ -99,7 +99,15 @@ pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_BLAST_SMOKE_ID: i32 = 226;
 /// Upstream `Fx.ripple` id in `mindustry.content.Fx` for v158.1.
-pub const FX_RIPPLE_ID: i32 = 243;
+pub const FX_RIPPLE_ID: i32 = 244;
+/// Upstream `Fx.launchAccelerator` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LAUNCH_ACCELERATOR_ID: i32 = 246;
+/// Upstream `Fx.launch` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LAUNCH_ID: i32 = 247;
+/// Upstream `Fx.healWaveMend` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HEAL_WAVE_MEND_ID: i32 = 249;
+/// Upstream `Fx.overdriveWave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_OVERDRIVE_WAVE_ID: i32 = 250;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
@@ -151,6 +159,10 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
+        "launchAccelerator" => Some(FX_LAUNCH_ACCELERATOR_ID),
+        "launch" => Some(FX_LAUNCH_ID),
+        "healWaveMend" => Some(FX_HEAL_WAVE_MEND_ID),
+        "overdriveWave" => Some(FX_OVERDRIVE_WAVE_ID),
         _ => None,
     }
 }
@@ -251,6 +263,16 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
             Effect::with_lifetime(FX_RIPPLE_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
+        }
+        FX_LAUNCH_ACCELERATOR_ID => {
+            Effect::with_lifetime(FX_LAUNCH_ACCELERATOR_ID, 22.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_LAUNCH_ID => Effect::with_lifetime(FX_LAUNCH_ID, 28.0, DEFAULT_EFFECT_CLIP),
+        FX_HEAL_WAVE_MEND_ID => {
+            Effect::with_lifetime(FX_HEAL_WAVE_MEND_ID, 40.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_OVERDRIVE_WAVE_ID => {
+            Effect::with_lifetime(FX_OVERDRIVE_WAVE_ID, 50.0, DEFAULT_EFFECT_CLIP)
         }
         _ => return None,
     };
@@ -1682,6 +1704,37 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_LAUNCH_ACCELERATOR_ID | FX_LAUNCH_ID | FX_HEAL_WAVE_MEND_ID | FX_OVERDRIVE_WAVE_ID => {
+            let (color_from, input_color, radius, stroke) = match effect_id {
+                FX_LAUNCH_ACCELERATOR_ID => {
+                    (Some("Pal.accent"), None, 4.0 + finpow * 160.0, fout * 2.0)
+                }
+                FX_LAUNCH_ID => (Some("Pal.command"), None, 4.0 + finpow * 120.0, fout * 2.0),
+                FX_HEAL_WAVE_MEND_ID => (None, Some(color), finpow * rotation, fout * 2.0),
+                FX_OVERDRIVE_WAVE_ID => (None, Some(color), finpow * rotation, fout),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius,
+                stroke,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_RIPPLE_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -1738,6 +1791,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Liquids.oil.color" => Some(DecalColor::from_rgba(0x313131ff)),
         "Pal.water" => Some(DecalColor::from_rgba(0x596ab8ff)),
         "Pal.accent" => Some(DecalColor::from_rgba(0xffd37fff)),
+        "Pal.command" => Some(DecalColor::from_rgba(0xeab678ff)),
         "Pal.darkishGray" => Some(DecalColor {
             r: 0.3,
             g: 0.3,
@@ -3097,6 +3151,19 @@ mod tests {
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
+        assert_eq!(
+            standard_effect_id("launchAccelerator"),
+            Some(FX_LAUNCH_ACCELERATOR_ID)
+        );
+        assert_eq!(standard_effect_id("launch"), Some(FX_LAUNCH_ID));
+        assert_eq!(
+            standard_effect_id("healWaveMend"),
+            Some(FX_HEAL_WAVE_MEND_ID)
+        );
+        assert_eq!(
+            standard_effect_id("overdriveWave"),
+            Some(FX_OVERDRIVE_WAVE_ID)
+        );
         assert_eq!(standard_effect_id("none"), None);
     }
 
@@ -3230,6 +3297,19 @@ mod tests {
         let ripple = standard_effect(FX_RIPPLE_ID).unwrap();
         assert_eq!(ripple.lifetime, 30.0);
         assert_eq!(ripple.layer, crate::mindustry::graphics::Layer::DEBRIS);
+        assert_eq!(
+            standard_effect(FX_LAUNCH_ACCELERATOR_ID).unwrap().lifetime,
+            22.0
+        );
+        assert_eq!(standard_effect(FX_LAUNCH_ID).unwrap().lifetime, 28.0);
+        assert_eq!(
+            standard_effect(FX_HEAL_WAVE_MEND_ID).unwrap().lifetime,
+            40.0
+        );
+        assert_eq!(
+            standard_effect(FX_OVERDRIVE_WAVE_ID).unwrap().lifetime,
+            50.0
+        );
         assert!(standard_effect_by_name("none").is_none());
         assert!(standard_effect(-1).is_none());
     }
@@ -3402,6 +3482,76 @@ mod tests {
         assert_eq!(ripple.color_mul, 1.5);
         assert!((ripple.radius - 6.0).abs() < 0.0001);
         assert!((ripple.stroke - 1.05).abs() < 0.0001);
+
+        let launch_accelerator = standard_effect_draw_plan(
+            Some(FX_LAUNCH_ACCELERATOR_ID as u16),
+            246,
+            3.0,
+            4.0,
+            0.0,
+            11.0,
+            22.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            launch_accelerator.kind,
+            StandardEffectDrawKind::StrokedCircle
+        );
+        assert_eq!(launch_accelerator.color_from, Some("Pal.accent"));
+        assert_eq!(launch_accelerator.radius, 144.0);
+        assert_eq!(launch_accelerator.stroke, 1.0);
+
+        let launch = standard_effect_draw_plan(
+            Some(FX_LAUNCH_ID as u16),
+            247,
+            3.0,
+            4.0,
+            0.0,
+            14.0,
+            28.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(launch.color_from, Some("Pal.command"));
+        assert_eq!(
+            launch.resolved_draw_color(),
+            standard_effect_color_symbol("Pal.command")
+        );
+        assert_eq!(launch.radius, 109.0);
+        assert_eq!(launch.stroke, 1.0);
+
+        let input_color = DecalColor::from_rgba(0x123456ff);
+        let heal_wave_mend = standard_effect_draw_plan(
+            Some(FX_HEAL_WAVE_MEND_ID as u16),
+            249,
+            3.0,
+            4.0,
+            32.0,
+            20.0,
+            40.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(heal_wave_mend.input_color, Some(input_color));
+        assert_eq!(heal_wave_mend.radius, 28.0);
+        assert_eq!(heal_wave_mend.stroke, 1.0);
+
+        let overdrive_wave = standard_effect_draw_plan(
+            Some(FX_OVERDRIVE_WAVE_ID as u16),
+            250,
+            3.0,
+            4.0,
+            32.0,
+            25.0,
+            50.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(overdrive_wave.input_color, Some(input_color));
+        assert_eq!(overdrive_wave.radius, 28.0);
+        assert_eq!(overdrive_wave.stroke, 0.5);
+
         assert!(
             standard_effect_draw_plan(None, 0, 0.0, 0.0, 0.0, 0.0, 1.0, DecalColor::WHITE)
                 .is_none()

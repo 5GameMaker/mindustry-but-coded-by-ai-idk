@@ -4594,3 +4594,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 可继续迁移 `launchAccelerator=246`、`launch=247`、`healWaveMend=249`、`overdriveWave=250` 这类后段纯 `Lines.circle` Fx；
   2. 若要处理当前相邻的 `sapped/electrified/overdriven/overclocked`，需先新增 square primitive；
   3. `bubble=245` 是随机位置圆环，建议等 seeded stroked-circle particles 能力补齐后再做。
+
+---
+
+## 137. 最新闭环记录：Launch/heal/overdrive 圆环 Fx 迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：继续迁移后段纯 `Lines.circle` Fx，并修正 `ripple` 的 Java 声明顺序 ID。
+- 本轮迁移/修正：
+  - `ripple=244`（此前 Rust 常量是 `243`，本轮按 `Fx.java` `new Effect` 顺序修正）
+  - `launchAccelerator=246`
+  - `launch=247`
+  - `healWaveMend=249`
+  - `overdriveWave=250`
+- Java 依据：
+  - `Fx.java:2720-2772`；
+  - `launchAccelerator`：`Pal.accent`，stroke `fout*2`，半径 `4 + finpow*160`；
+  - `launch`：`Pal.command`，stroke `fout*2`，半径 `4 + finpow*120`；
+  - `healWaveMend`：输入颜色，stroke `fout*2`，半径 `finpow*rotation`；
+  - `overdriveWave`：输入颜色，stroke `fout`，半径 `finpow*rotation`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 修正 `FX_RIPPLE_ID`；
+    - 新增 4 个 `FX_*` 常量；
+    - 新增 `Pal.command = 0xeab678ff`；
+    - 接入 metadata/name lookup/draw plan；
+    - `healWaveMend/overdriveWave` 走 `input_color`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 下一步建议：
+  1. 若继续做 `bubble=245`，先把 `SeededCircleParticles` 扩展为支持 stroked circle 粒子；
+  2. `launchPod=248` 需要 scaled 子时间片与 lineAngle，先不要近似硬塞；
+  3. 可以转去补 square primitive，以迁移 `sapped/electrified/overdriven/overclocked/healBlock` 等。

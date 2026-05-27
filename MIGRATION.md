@@ -6392,3 +6392,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `dropItem` 需要 sprite/rect item data 渲染；
   - `sapped/electrified/overdriven/overclocked` 需要 square primitive；
   - `explosion/dynamicExplosion/reactorExplosion/impactReactorExplosion` 需要 scaled、多 pass、line/light 组合后再迁移。
+
+### 12.211 Launch/heal/overdrive stroked circle Fx batch
+
+- 2026-05-28：继续迁移后段只依赖 `Lines.circle` 的标准 Fx，并顺手修正 `Fx.ripple` 的声明顺序 ID：本地脚本按 `Fx.java` 中 `new Effect` 声明顺序（含 `none=0`）核对，`ripple=244`，此前 Rust 常量 `243` 偏小 1。
+- 本轮迁移/修正：
+  - `ripple=244`（修正常量）
+  - `launchAccelerator=246`
+  - `launch=247`
+  - `healWaveMend=249`
+  - `overdriveWave=250`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2720` 附近：
+    - `ripple = new Effect(30, ...)`，实际声明顺序 ID `244`；
+    - `launchAccelerator = new Effect(22, ...)`，`Pal.accent`，stroke `fout*2`，半径 `4 + finpow*160`；
+    - `launch = new Effect(28, ...)`，`Pal.command`，stroke `fout*2`，半径 `4 + finpow*120`；
+    - `healWaveMend = new Effect(40, ...)`，`color(e.color)`，stroke `fout*2`，半径 `finpow*rotation`；
+    - `overdriveWave = new Effect(50, ...)`，`color(e.color)`，stroke `fout`，半径 `finpow*rotation`。
+  - `Pal.command` 来自 `Pal.java`：`Color.valueOf("eab678")`，Rust RGBA 为 `0xeab678ff`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 修正 `FX_RIPPLE_ID = 244`；
+    - 新增 4 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` 与 `standard_effect(...)`；
+    - 新增颜色符号 `Pal.command`；
+    - `standard_effect_draw_plan(...)` 新增 launch/heal/overdrive shared `StrokedCircle` 分支；
+    - `healWaveMend/overdriveWave` 使用 `input_color=Some(color)` 对齐 Java `color(e.color)`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖新增 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖 radius、stroke、`Pal.command` 和 input color。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 仍未完成：
+  - `bubble=245` 需要 seeded stroked-circle particles（随机位置圆环）；
+  - `launchPod=248` 需要 scaled circle + 随机 lineAngle；
+  - `healBlock/rotateBlock/lightBlock/overdriveBlockFull` 等需要 square/rect/icon/block data 表达。
