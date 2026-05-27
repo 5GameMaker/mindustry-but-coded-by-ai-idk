@@ -5610,3 +5610,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 还缺 Java `Angles.randLenVectors` 的 deterministic vector 生成器，因此当前展开层需要调用方传入向量；
   - 桌面端仍未建立真实窗口/2D backend 来消费这些 circle primitives；
   - 光照 primitive 仍保留在 `StandardEffectDrawPlan` 上，尚未统一拆成可排序的 backend draw command。
+
+### 12.190 Arc Rand / Angles.randLenVectors compatible particle vectors
+
+- 2026-05-28：补齐上一节留下的最大缺口：在 Rust effect 层实现与 Arc `Rand` / `Angles.randLenVectors(...)` 对齐的 deterministic seeded particle vector 生成器，使标准 Fx 粒子 plan 能自己生成 Java 等价随机向量并展开为 circle primitives。
+- Java/Arc 依据：
+  - Mindustry v158.1 使用 Arc artifact：`com.github.Anuken.Arc:arc-core:4d9760e264`；
+  - 通过本地 Gradle cache 中 `arc-core-4d9760e264.jar` 的 `javap` 反汇编确认：
+    - `Angles.randLenVectors(long, int, float, Floatc2)`：`rand.setSeed(seed)` 后每个粒子取 `rand.random(360f)` 和 `rand.random(length)`；
+    - `Angles.randLenVectors(long, float fin, int amount, float length, ParticleConsumer)`：每点先取 `rand.nextFloat()`，长度为 `length * local * fin`，回调局部 `fin = fin * local`、`fout = (1f - fin) * local`；
+    - `Rand` 使用 murmurHash3 seed 初始化、xorshift128+ 风格 `nextLong()`，`nextFloat()` 取 `nextLong() >>> 40`；
+    - `Vec2.trns` 走 `Mathf.sin/cos` 查表而不是标准库精确三角函数。
+- Rust 新增/变化：
+  - `StandardEffectParticleSpec::seeded_vectors()`：根据 `seed/count/progress/length` 生成 Java 等价 `StandardEffectParticleVector`；
+  - `StandardEffectDrawPlan::seeded_particle_vectors()` 与 `expand_seeded_particle_circles_from_seed()`：让 plan 可从自身 seed 直接生成并展开 circle primitives；
+  - 私有 `ArcRand` 复刻 Arc `Rand` 的 murmurHash3 + `nextLong/nextFloat/random(float)`；
+  - 私有 `mathf_sin/cos` 复刻 Arc `Mathf` 16384 长度 sin table 采样，用于匹配 `Vec2.trns`；
+  - 测试使用本地 Arc jar probe 得到的 Java 输出作为固定期望值，覆盖 seed `42` 的固定 `randLenVectors` 与 seed `47` 的 progressive `smokeCloud` overload。
+- 新增/更新验证：
+  - `standard_effect_particle_plan_expands_to_circle_primitives` 增加 Java-derived seeded vector 断言。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 还需要把 circle/light primitives 接入桌面真实 2D backend；
+  - 当前只覆盖已迁移的标准 Fx 子集，完整 `Fx.java` renderer 仍需继续逐项迁移；
+  - `Angles.randLenVectors` 其他 overload（cone/random offset 等）待后续迁移到更多 Fx 时继续补齐。

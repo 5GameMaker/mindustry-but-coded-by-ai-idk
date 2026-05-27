@@ -161,6 +161,12 @@ pub struct StandardEffectDrawPlan {
 }
 
 impl StandardEffectDrawPlan {
+    pub fn seeded_particle_vectors(&self) -> Vec<StandardEffectParticleVector> {
+        self.particles
+            .map(|particles| particles.seeded_vectors())
+            .unwrap_or_default()
+    }
+
     pub fn expand_seeded_particle_circles(
         &self,
         vectors: &[StandardEffectParticleVector],
@@ -198,6 +204,38 @@ impl StandardEffectDrawPlan {
                 }
             })
             .collect()
+    }
+
+    pub fn expand_seeded_particle_circles_from_seed(&self) -> Vec<StandardEffectCirclePrimitive> {
+        let vectors = self.seeded_particle_vectors();
+        self.expand_seeded_particle_circles(&vectors)
+    }
+}
+
+impl StandardEffectParticleSpec {
+    pub fn seeded_vectors(&self) -> Vec<StandardEffectParticleVector> {
+        let mut rand = ArcRand::with_seed(self.seed as i64);
+        let count = self.count as usize;
+        let mut vectors = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            let (x, y, fin, fout) = if let Some(progress) = self.progress {
+                let local = rand.next_float();
+                let angle = rand.random(360.0);
+                let length = self.length * local * progress;
+                let (x, y) = trns(angle, length);
+                (x, y, progress * local, (1.0 - progress) * local)
+            } else {
+                let angle = rand.random(360.0);
+                let length = rand.random(self.length);
+                let (x, y) = trns(angle, length);
+                (x, y, self.fin, self.fout)
+            };
+
+            vectors.push(StandardEffectParticleVector { x, y, fin, fout });
+        }
+
+        vectors
     }
 }
 
@@ -444,6 +482,82 @@ pub fn standard_effect_draw_plan(
 
 fn effect_fslope_from_fin(fin: f32) -> f32 {
     (1.0 - (fin.clamp(0.0, 1.0) - 0.5).abs() * 2.0).clamp(0.0, 1.0)
+}
+
+fn trns(angle_degrees: f32, length: f32) -> (f32, f32) {
+    let radians = angle_degrees * 0.017453292;
+    (mathf_cos(radians) * length, mathf_sin(radians) * length)
+}
+
+fn mathf_sin(radians: f32) -> f32 {
+    mathf_sin_table(((radians * 2607.5945) as i32 & 16383) as usize)
+}
+
+fn mathf_cos(radians: f32) -> f32 {
+    mathf_sin_table((((radians + 1.5707964) * 2607.5945) as i32 & 16383) as usize)
+}
+
+fn mathf_sin_table(index: usize) -> f32 {
+    match index & 16383 {
+        0 | 8192 => 0.0,
+        4096 => 1.0,
+        12288 => -1.0,
+        index => {
+            let angle = (((index as f32 + 0.5) / 16384.0) * 6.2831855) as f64;
+            angle.sin() as f32
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ArcRand {
+    seed0: u64,
+    seed1: u64,
+}
+
+impl ArcRand {
+    fn with_seed(seed: i64) -> Self {
+        let mut rand = Self { seed0: 0, seed1: 0 };
+        rand.set_seed(seed);
+        rand
+    }
+
+    fn set_seed(&mut self, seed: i64) {
+        let seed = if seed == 0 {
+            0x8000_0000_0000_0000
+        } else {
+            seed as u64
+        };
+        let hashed = murmur_hash3(seed);
+        self.seed0 = hashed;
+        self.seed1 = murmur_hash3(hashed);
+    }
+
+    fn next_long(&mut self) -> u64 {
+        let mut seed0 = self.seed0;
+        let seed1 = self.seed1;
+        self.seed0 = seed1;
+        seed0 ^= seed0 << 23;
+        self.seed1 = seed0 ^ seed1 ^ (seed0 >> 17) ^ (seed1 >> 26);
+        self.seed1.wrapping_add(seed1)
+    }
+
+    fn next_float(&mut self) -> f32 {
+        ((self.next_long() >> 40) as f64 * (1.0 / (1u64 << 24) as f64)) as f32
+    }
+
+    fn random(&mut self, range: f32) -> f32 {
+        self.next_float() * range
+    }
+}
+
+fn murmur_hash3(mut value: u64) -> u64 {
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    value ^= value >> 33;
+    value
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1872,6 +1986,21 @@ mod tests {
         assert_eq!(fire_circles[1].center, (7.0, 24.0));
         assert_eq!(fire_circles[1].radius, 1.7);
 
+        let seeded_fire_vectors = fire.seeded_particle_vectors();
+        assert_eq!(seeded_fire_vectors.len(), 2);
+        assert!(
+            (seeded_fire_vectors[0].x - 2.0617113).abs() < 0.00001,
+            "{seeded_fire_vectors:?}"
+        );
+        assert!((seeded_fire_vectors[0].y - 5.4725294).abs() < 0.00001);
+        assert!((seeded_fire_vectors[1].x - 0.56237954).abs() < 0.00001);
+        assert!((seeded_fire_vectors[1].y - 0.88172233).abs() < 0.00001);
+        let seeded_fire_circles = fire.expand_seeded_particle_circles_from_seed();
+        assert_eq!(seeded_fire_circles.len(), 2);
+        assert!((seeded_fire_circles[0].center.0 - 12.061711).abs() < 0.00001);
+        assert!((seeded_fire_circles[0].center.1 - 25.472529).abs() < 0.00001);
+        assert_eq!(seeded_fire_circles[0].radius, 1.7);
+
         let cloud = standard_effect_draw_plan(
             Some(FX_SMOKE_CLOUD_ID as u16),
             47,
@@ -1904,6 +2033,17 @@ mod tests {
         assert_eq!(cloud_circles[1].center, (7.0, 8.0));
         assert_eq!(cloud_circles[1].radius, 0.5);
         assert_eq!(cloud_circles[1].alpha, 0.0);
+
+        let seeded_cloud_vectors = cloud.seeded_particle_vectors();
+        assert_eq!(seeded_cloud_vectors.len(), 30);
+        assert!((seeded_cloud_vectors[0].x + 1.9581623).abs() < 0.00001);
+        assert!((seeded_cloud_vectors[0].y + 0.15539533).abs() < 0.00001);
+        assert!((seeded_cloud_vectors[0].fin - 0.06547728).abs() < 0.00001);
+        assert!((seeded_cloud_vectors[0].fout - 0.06547728).abs() < 0.00001);
+        assert!((seeded_cloud_vectors[1].x - 0.50366443).abs() < 0.00001);
+        assert!((seeded_cloud_vectors[1].y - 2.8928096).abs() < 0.00001);
+        assert!((seeded_cloud_vectors[1].fin - 0.09787762).abs() < 0.00001);
+        assert!((seeded_cloud_vectors[1].fout - 0.09787762).abs() < 0.00001);
 
         let ripple = standard_effect_draw_plan(
             Some(FX_RIPPLE_ID as u16),
