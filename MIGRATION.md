@@ -3621,11 +3621,13 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - Java 依据：
   - `config(Integer)` 在 `!configurable` 时直接返回；plan 越界或负数会把 `currentPlan` 置为 `-1`，plan 变化时清零 `progress`；
   - `config(UnitType)` 会按 `plans.indexOf(p -> p.unit == val)` 映射 plan，未命中时等价清空当前 plan；
+  - plan/unit 变化后，如果 `command != null` 且新 `unit()` 为空或 `!unit.commands.contains(command)`，Java 会把 `command` 清空，避免旧命令继承到不支持该命令的新造单位；
   - `config()` 返回当前 plan integer，联机/回滚侧需要保存为 Java-like tile config。
 - Rust 新增/变化：
   - 新增 `GameRuntimeUnitFactoryConfigureResult`，区分 `Configured / Cleared / MissingBuilding / MissingRuntimeState / NotUnitFactory / NotConfigurable / UnknownUnit / UnknownCommand / UnsupportedValue`，并提供 `changed()` 供 server 分发判断；
   - 新增 `GameRuntime::configure_owned_unit_factory_plan(...)`，按 tile 找 building，懒创建 `GameRuntimeUnitBlockState::Factory`，调用 `unit_factory_configure_plan(...)`，并把 `BuildingComp.config` 写成 `TypeValue::Int(current_plan)` 或清空；
   - 新增 `GameRuntime::configure_owned_unit_factory_unit(...)`，按 `ContentId` 映射到 factory plan；未命中当前 factory plans 时清空 plan，且先检查 block 是否为可配置 UnitFactory，贴近 Java `if(!configurable) return` 的顺序；
+  - `configure_owned_unit_factory_plan(...)` 现在会在切换到无效 plan 或切换到已填充 `UnitType.commands` 且不包含当前 `UnitCommand` 的目标 unit 时清空 `command_id`；在当前 unit commands 列表仍未完整迁移/为空时保守保留命令，避免因为内容基线缺口提前清掉合法配置；
   - 新增 `GameRuntime::configure_owned_unit_factory_command(...)`，实现 Java `config(UnitCommand.class, ...)` / `configClear(...)`：只写 `UnitFactoryState.command_id` 或清空命令，不修改 `current_plan`、`progress` 或 `BuildingComp.config`（Java `config()` 仍返回当前 plan）；
   - 新增 `GameRuntime::configure_owned_unit_factory_value(...)`，统一分发 `TypeValue::Int(plan)`、`Content(Unit)`、`Content(UnitCommand)` 与 `Null`，供网络入口直接复用；
   - `ServerLauncher::apply_server_tile_config_packet(...)` 现在会识别 `BlockDef::UnitFactory`，把客户端 `TileConfigCallPacket` 分派到 unit factory value 入口，并把成功变更以 server 形态 `TileConfigCallPacket` 可靠转发给已连接客户端；
@@ -3637,6 +3639,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_configures_unit_factory_by_unit_id_like_java_unit_config`
   - `game_runtime_configures_unit_factory_command_and_clear_like_java`
   - `game_runtime_configures_unit_factory_value_for_plan_unit_command_and_clear`
+  - `game_runtime_clears_incompatible_unit_factory_command_when_plan_changes_like_java`
   - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
 - 新增 server 回归测试：
   - `server_update_applies_unit_factory_command_tile_config_and_forwards_to_clients`
@@ -3649,7 +3652,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop unit_factory --lib`
   - `cargo test -p mindustry-core client_unit_factory --lib`
   - `cargo check --workspace`
-- 仍未完成：`command` 是否属于目标 unit `commands` 的过滤、`UnitType.init()` 自动命令列表、真实 desktop UI 选择表、logic `senseObject(LAccess.config)` 仍需后续闭环。
+- 仍未完成：`UnitType.init()` 自动命令列表尚未完整填充，因此 command 合法性过滤目前只在目标 unit 的 `commands` 列表非空时严格执行；真实 desktop UI 选择表、logic `senseObject(LAccess.config)` 仍需后续闭环。
 
 ### 12.111 UnitAssembler 最小 owned runtime tick
 

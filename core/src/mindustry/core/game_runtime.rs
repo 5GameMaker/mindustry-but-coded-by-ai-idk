@@ -18,6 +18,7 @@ use crate::mindustry::{
         EffectBlockKind, LegacyBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind,
         PayloadLoaderBlockData, PayloadLoaderBlockKind, PayloadMassDriverBlockData, PowerBlockKind,
         ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
+        UnitFactoryBlockData,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -3965,7 +3966,20 @@ impl GameRuntime {
         };
 
         let requested = plan.unwrap_or(-1);
-        unit_factory_configure_plan(factory, requested, factory_block.plans.len(), true);
+        let command_valid_for_next_unit = factory.command_id.map_or(true, |command_id| {
+            Self::unit_factory_command_valid_for_plan(
+                content,
+                factory_block,
+                requested,
+                command_id as ContentId,
+            )
+        });
+        unit_factory_configure_plan(
+            factory,
+            requested,
+            factory_block.plans.len(),
+            command_valid_for_next_unit,
+        );
         self.buildings[index].config = (factory.current_plan != -1)
             .then_some(crate::mindustry::io::TypeValue::Int(factory.current_plan));
         if factory.current_plan == -1 {
@@ -3973,6 +3987,31 @@ impl GameRuntime {
         } else {
             GameRuntimeUnitFactoryConfigureResult::Configured
         }
+    }
+
+    fn unit_factory_command_valid_for_plan(
+        content: &ContentLoader,
+        factory_block: &UnitFactoryBlockData,
+        requested: i32,
+        command_id: ContentId,
+    ) -> bool {
+        let Some(plan) = usize::try_from(requested)
+            .ok()
+            .and_then(|index| factory_block.plans.get(index))
+        else {
+            return false;
+        };
+        let Some(command) = content.unit_command(command_id) else {
+            return false;
+        };
+        let Some(unit) = content.unit_by_name(&plan.unit) else {
+            return false;
+        };
+        unit.commands.is_empty()
+            || unit
+                .commands
+                .iter()
+                .any(|allowed| allowed.as_str() == command.name())
     }
 
     pub fn configure_owned_unit_factory_unit(
@@ -20551,6 +20590,97 @@ mod tests {
             ),
             GameRuntimeUnitFactoryConfigureResult::UnsupportedValue
         );
+    }
+
+    #[test]
+    fn game_runtime_clears_incompatible_unit_factory_command_when_plan_changes_like_java() {
+        let mut content = ContentLoader::create_base_content().unwrap();
+        let factory_block = content.block_by_name("air-factory").unwrap().base().clone();
+        let move_id = content.unit_command_by_name("move").unwrap().id();
+        let mine_id = content.unit_command_by_name("mine").unwrap().id();
+        for unit in &mut content.catalog_mut().units {
+            match unit.name() {
+                "flare" => unit.commands = vec!["move".into()],
+                "mono" => unit.commands = vec!["mine".into()],
+                _ => {}
+            }
+        }
+        let tile_pos = point2_pack(15, 14);
+        let mut runtime = GameRuntime::default();
+        let mut building = BuildingComp::new(tile_pos, factory_block, TeamId(2));
+        building.config = Some(TypeValue::Int(0));
+        runtime.add_building(building);
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    command_id: Some(move_id as u8),
+                    base: UnitBlockState {
+                        progress: 7.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_plan(&content, tile_pos, Some(1)),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after plan config");
+        };
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(factory.command_id, None);
+        assert_eq!(factory.base.progress, 0.0);
+
+        {
+            let GameRuntimeUnitBlockState::Factory { factory, .. } =
+                runtime.unit_runtime_states.get_mut(&tile_pos).unwrap()
+            else {
+                panic!("unit factory sidecar should stay a factory");
+            };
+            factory.current_plan = 0;
+            factory.command_id = Some(mine_id as u8);
+            factory.base.progress = 11.0;
+        }
+        assert_eq!(
+            runtime.configure_owned_unit_factory_plan(&content, tile_pos, Some(1)),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after compatible command config");
+        };
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(factory.command_id, Some(mine_id as u8));
+        assert_eq!(factory.base.progress, 0.0);
+
+        {
+            let GameRuntimeUnitBlockState::Factory { factory, .. } =
+                runtime.unit_runtime_states.get_mut(&tile_pos).unwrap()
+            else {
+                panic!("unit factory sidecar should stay a factory");
+            };
+            factory.command_id = Some(mine_id as u8);
+        }
+        assert_eq!(
+            runtime.configure_owned_unit_factory_plan(&content, tile_pos, Some(99)),
+            GameRuntimeUnitFactoryConfigureResult::Cleared
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after invalid plan clear");
+        };
+        assert_eq!(factory.current_plan, -1);
+        assert_eq!(factory.command_id, None);
     }
 
     #[test]
