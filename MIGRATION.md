@@ -5046,6 +5046,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core puddle --lib`
   - `cargo test -p mindustry-server puddle --lib`
 - 仍未完成：
-  - Java remove/swap 与 Rust `HashMap` remove 延迟之间仍可能在复杂 replacement 场景产生顺序差异；
+  - 基础 remove 即时清理已在 12.172 继续收紧，但 Java `EntityGroup.remove` 的 swap/index 修正与 Rust `HashMap` 仍不完全同构；
   - `CellLiquid.update` 仍在 server report 后统一处理，尚未完全 inline 到每个 puddle update 末尾；
   - `puddle_on_building`/`particle_effect` event 的真实 consumer 仍需后续迁移或确认 Java vanilla no-op/headless 条件。
+
+### 12.172 Puddles remove is immediate before later same-tick deposits
+
+- 2026-05-28：继续收紧 Java `PuddleComp.remove()` / `Puddles.remove(tile)` 的即时 tile registry 语义。
+- Java 依据：
+  - `PuddleComp.update()` 在 `amount <= 0f` 时立即 `remove()` 并返回；
+  - `PuddleComp.remove()` 替换为 `Puddles.remove(tile)`，会立即 `world.tiles.setPuddle(tile.array(), null)`；
+  - 因此同 tick 后续其他 puddle 的 `Puddles.deposit(...)` 打到该 tile 时应看到 `get(tile) == null`，从而创建新 puddle，而不是写入即将删除的旧 puddle `accepting`。
+- Rust 新增/变化：
+  - `Puddles::update_all_with_passability_report(...)` 不再把 removed puddle 延迟到整轮末尾清理；
+  - 当 `PuddleComp.update(...)` 返回 removed/amount<=0/liquid missing 后，立即从 `self.puddles` 删除对应 tile，并继续处理后续 queue；
+  - 新增 `update_all_removes_empty_puddle_before_later_same_tick_deposit`：
+    - 先创建低量 water puddle，使其本 tick 先被删除；
+    - 再创建后续 overfilled source，使其同 tick spread 到已清空 tile；
+    - 断言旧 id 被报告 removed，tile 上出现新 id puddle，且新 puddle 因 12.171 的动态 append 在同 tick 蒸发到 `0.2`。
+- 已跑验证：
+  - `cargo test -p mindustry-core update_all_removes_empty_puddle_before_later_same_tick_deposit --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+- 仍未完成：
+  - Rust `HashMap` tile registry 与 Java `EntityGroup.remove` 的 swap/index 修正仍不完全同构，复杂“删除非当前 index + append replacement”场景后续还需更多回归；
+  - `CellLiquid.update` 仍未 inline 到单个 puddle update 末尾。

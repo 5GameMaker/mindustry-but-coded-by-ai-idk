@@ -3734,6 +3734,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo fmt --check`、`git diff --check`；
   2. 中文提交并推送 `origin main`，建议标题：`追加新建液体坑同帧更新`；
   3. 后续欠账：
-     - Java remove/swap 与 Rust `HashMap` 延迟 remove 的复杂顺序；
+     - Java remove/swap 与 Rust `HashMap` 延迟 remove 的复杂顺序已在下一闭环先处理基础即时清理；
      - `CellLiquid.update` 仍未 inline 到单 puddle update 末尾；
      - `puddle_on_building`/`particle_effect` event consumer 仍需继续确认和接入。
+
+---
+
+## 113. 最新闭环记录：Puddles remove 对后续同帧 deposit 立即可见
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：对照 Java `PuddleComp.remove()` / `Puddles.remove(tile)`，让低量 puddle 被移除后立即清空 tile registry，避免后续同 tick deposit 写入一个即将删除的旧 puddle。
+- Java 依据：
+  - `PuddleComp.update()` 中 `amount <= 0f` 立即 `remove()`；
+  - `PuddleComp.remove()` 实际执行 `Puddles.remove(tile)`；
+  - `Puddles.remove(tile)` 立即 `world.tiles.setPuddle(tile.array(), null)`；
+  - 后续 `Puddles.deposit(...)` 命中同 tile 时应看到无 puddle 并创建新实体。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - `update_all_with_passability_report(...)` 移除整轮末尾 `remove_keys` 延迟清理；
+    - 单个 puddle update 判定 removed 后立即 `self.puddles.remove(&key)` 并继续后续 queue；
+    - 新增 `update_all_removes_empty_puddle_before_later_same_tick_deposit`，覆盖“低量 puddle 先删、后续 source 同帧 spread 到该 tile 创建 replacement”的场景。
+- 已跑验证：
+  - `cargo test -p mindustry-core update_all_removes_empty_puddle_before_later_same_tick_deposit --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+- 当前仍需继续：
+  1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo fmt --check`、`git diff --check`；
+  2. 中文提交并推送 `origin main`，建议标题：`即时清理移除液体坑`；
+  3. 后续欠账：
+     - `CellLiquid.update` 仍是 report 后统一处理，不是 Java 单 puddle update 末尾 inline；
+     - Java `EntityGroup.remove` swap/index 行为与 Rust tile-keyed map 仍有复杂边界差异。

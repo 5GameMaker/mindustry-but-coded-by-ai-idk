@@ -470,7 +470,6 @@ impl Puddles {
             .collect();
         keys.sort_by_key(|(id, key)| (*id, *key));
         let mut report = PuddleUpdateReport::default();
-        let mut remove_keys = Vec::new();
 
         let mut processed_ids = HashSet::new();
         let mut index = 0;
@@ -482,6 +481,7 @@ impl Puddles {
             }
             let spread_targets = self.d4_spread_targets(key.0, key.1, &mut passable);
             let mut entry_spread_deposits = Vec::new();
+            let mut removed_id = None;
             {
                 let Some(entry) = self.puddles.get_mut(&key) else {
                     continue;
@@ -522,9 +522,13 @@ impl Puddles {
                     || entry.puddle.amount <= 0.0
                     || entry.puddle.liquid.is_none()
                 {
-                    report.removed_ids.push(entry.puddle.id);
-                    remove_keys.push(key);
+                    removed_id = Some(entry.puddle.id);
                 }
+            }
+            if let Some(id) = removed_id {
+                report.removed_ids.push(id);
+                self.puddles.remove(&key);
+                continue;
             }
             for ((x, y), source, liquid, amount) in entry_spread_deposits {
                 let result = self.deposit(
@@ -549,9 +553,6 @@ impl Puddles {
             }
         }
 
-        for key in remove_keys {
-            self.puddles.remove(&key);
-        }
         report
     }
 
@@ -1138,6 +1139,36 @@ mod tests {
 
         assert_eq!(removed, vec![id]);
         assert!(puddles.get(1, 1).is_none());
+    }
+
+    #[test]
+    fn update_all_removes_empty_puddle_before_later_same_tick_deposit() {
+        let mut puddles = Puddles::new(5, 5);
+        puddles.deposit_at(
+            Some(PuddleTileView::new(2, 1)),
+            water(),
+            0.05,
+            PuddleDepositContext::default(),
+        );
+        let removed_id = puddles.get(2, 1).unwrap().id;
+        puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1)),
+            water(),
+            70.0,
+            PuddleDepositContext::default(),
+        );
+
+        let removed = puddles.update_all(1.0, true);
+
+        assert_eq!(removed, vec![removed_id]);
+        let replaced = puddles
+            .get(2, 1)
+            .expect("later same-tick spread deposit should create a replacement puddle");
+        assert_ne!(replaced.id, removed_id);
+        assert!(
+            (replaced.amount - 0.2).abs() < 0.0001,
+            "Java clears the old tile puddle immediately, so later same-tick deposit creates and updates a new puddle"
+        );
     }
 
     #[test]
