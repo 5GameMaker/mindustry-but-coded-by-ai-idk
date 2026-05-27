@@ -5,7 +5,7 @@
 //! such as tile-config rollback packets.
 
 use crate::mindustry::ai::{unit_command::UnitCommand, unit_stance::UnitStance};
-use crate::mindustry::ctype::Content;
+use crate::mindustry::ctype::{Content, ContentId, ContentType};
 use crate::mindustry::entities::comp::{
     building::{BuildingConfigChange, BuildingConfigRollback},
     player::PlayerUnitState,
@@ -13,7 +13,7 @@ use crate::mindustry::entities::comp::{
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::game::{BlockPlan as TeamBlockPlan, Teams};
-use crate::mindustry::io::type_io::CommandWire;
+use crate::mindustry::io::type_io::{CommandWire, ContentRef};
 use crate::mindustry::io::Point2;
 use crate::mindustry::io::{BuildingRef, EntityRef, TeamId, TypeValue, UnitRef, Vec2};
 use crate::mindustry::net::{
@@ -2631,6 +2631,20 @@ where
 
 pub fn client_tile_config_packet(build: &BuildingComp, value: TypeValue) -> TileConfigCallPacket {
     TileConfigCallPacket::client(BuildingRef::new(build.tile_pos), value)
+}
+
+pub fn client_unit_cargo_unload_item_config_packet(
+    build: &BuildingComp,
+    item_id: ContentId,
+) -> TileConfigCallPacket {
+    client_tile_config_packet(
+        build,
+        TypeValue::Content(ContentRef::new(ContentType::Item, item_id)),
+    )
+}
+
+pub fn client_unit_cargo_unload_clear_config_packet(build: &BuildingComp) -> TileConfigCallPacket {
+    client_tile_config_packet(build, TypeValue::Null)
 }
 
 pub fn rotate_block<F, A>(
@@ -6667,6 +6681,24 @@ mod tests {
         assert_eq!(packet.player, EntityRef::null());
         assert_eq!(packet.build, BuildingRef::new(point2_pack(8, 9)));
         assert_eq!(packet.value, TypeValue::String("cfg".into()));
+    }
+
+    #[test]
+    fn client_unit_cargo_unload_config_packets_use_item_content_and_clear_null() {
+        let building = BuildingComp::new(point2_pack(8, 9), block(), TeamId(1));
+
+        let item_packet = client_unit_cargo_unload_item_config_packet(&building, 3);
+        assert_eq!(item_packet.player, EntityRef::null());
+        assert_eq!(item_packet.build, BuildingRef::new(point2_pack(8, 9)));
+        assert_eq!(
+            item_packet.value,
+            TypeValue::Content(ContentRef::new(ContentType::Item, 3))
+        );
+
+        let clear_packet = client_unit_cargo_unload_clear_config_packet(&building);
+        assert_eq!(clear_packet.player, EntityRef::null());
+        assert_eq!(clear_packet.build, BuildingRef::new(point2_pack(8, 9)));
+        assert_eq!(clear_packet.value, TypeValue::Null);
     }
 
     #[test]
