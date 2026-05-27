@@ -162,11 +162,11 @@ use crate::mindustry::{
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        reconstructor_accept_payload, reconstructor_update, write_reconstructor_state,
-        write_repair_turret_state, write_unit_assembler_state, write_unit_cargo_loader_state,
-        write_unit_cargo_unload_state, write_unit_factory_state, ReconstructorState,
-        RepairTurretState, UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState,
-        UnitFactoryState,
+        reconstructor_accept_payload, reconstructor_update, unit_factory_update,
+        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
+        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
+        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -1891,6 +1891,20 @@ pub struct GameRuntimeOwnedPayloadFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeUnitFactoryFrameReport {
+    pub visited_buildings: usize,
+    pub factory_candidates: usize,
+    pub updated_factories: usize,
+    pub produced_unit_payloads: usize,
+    pub consumed_item_batches: usize,
+    pub moved_out_payloads: usize,
+    pub arrived_output_payloads: usize,
+    pub transferred_payloads: usize,
+    pub invalid_plans: usize,
+    pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeUnitReconstructorFrameReport {
     pub visited_buildings: usize,
     pub reconstructor_candidates: usize,
@@ -1907,6 +1921,7 @@ pub struct GameRuntimeUnitReconstructorFrameReport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeOwnedUnitFrameReport {
+    pub factory: GameRuntimeUnitFactoryFrameReport,
     pub reconstructor: GameRuntimeUnitReconstructorFrameReport,
 }
 
@@ -3398,6 +3413,10 @@ impl GameRuntime {
             return false;
         };
         let state = match block {
+            BlockDef::UnitFactory(_) => Some(GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState::default(),
+            }),
             BlockDef::UnitReconstructor(_) => Some(GameRuntimeUnitBlockState::Reconstructor {
                 common: PayloadBlockBuildState::default(),
                 reconstructor: ReconstructorState::default(),
@@ -15264,6 +15283,7 @@ impl GameRuntime {
             Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) => conveyor.item.as_ref(),
             Some(GameRuntimePayloadBlockState::Router { conveyor, .. }) => conveyor.item.as_ref(),
             _ => match self.unit_runtime_states.get(&source_tile_pos) {
+                Some(GameRuntimeUnitBlockState::Factory { common, .. }) => common.payload.as_ref(),
                 Some(GameRuntimeUnitBlockState::Reconstructor { common, .. }) => {
                     common.payload.as_ref()
                 }
@@ -15411,6 +15431,11 @@ impl GameRuntime {
                 self.unit_runtime_states
                     .get_mut(&source_tile_pos)
                     .and_then(|state| match state {
+                        GameRuntimeUnitBlockState::Factory { common, factory } => {
+                            let payload = common.payload.take()?;
+                            factory.base.has_payload = false;
+                            Some((payload, common.pay_rotation))
+                        }
                         GameRuntimeUnitBlockState::Reconstructor {
                             common,
                             reconstructor,
@@ -15710,14 +15735,24 @@ impl GameRuntime {
                         }
                     }
                     _ => {
-                        if let Some(GameRuntimeUnitBlockState::Reconstructor {
-                            common,
-                            reconstructor,
-                        }) = self.unit_runtime_states.get_mut(&source_tile_pos)
-                        {
-                            if common.payload.is_none() {
-                                common.payload = Some(payload);
-                                reconstructor.base.has_payload = true;
+                        if let Some(state) = self.unit_runtime_states.get_mut(&source_tile_pos) {
+                            match state {
+                                GameRuntimeUnitBlockState::Factory { common, factory } => {
+                                    if common.payload.is_none() {
+                                        common.payload = Some(payload);
+                                        factory.base.has_payload = true;
+                                    }
+                                }
+                                GameRuntimeUnitBlockState::Reconstructor {
+                                    common,
+                                    reconstructor,
+                                } => {
+                                    if common.payload.is_none() {
+                                        common.payload = Some(payload);
+                                        reconstructor.base.has_payload = true;
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -16060,6 +16095,213 @@ impl GameRuntime {
             class_id: UNIT_ENTITY_CLASS_ID,
             unit_bytes,
         })
+    }
+
+    pub fn advance_owned_unit_factories(
+        &mut self,
+        content: &ContentLoader,
+        delta_seconds: f32,
+    ) -> Option<GameRuntimeUnitFactoryFrameReport> {
+        self.consume_world_load_events_and_reset_sidecars();
+
+        let advanced = self.state.advance_game_update_frame(delta_seconds);
+        if !advanced.advanced {
+            return None;
+        }
+
+        self.refresh_owned_building_update_permissions(content);
+
+        let frame_delta = advanced.delta_ticks as f32;
+        for building in self.buildings.iter_mut() {
+            let can_overdrive = content
+                .block(building.block.id)
+                .map(BlockDef::can_overdrive)
+                .unwrap_or(false);
+            building.advance_update_timing(frame_delta, can_overdrive);
+        }
+
+        Some(self.advance_owned_unit_factories_ticks(content, frame_delta))
+    }
+
+    fn advance_owned_unit_factories_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeUnitFactoryFrameReport {
+        let mut report = GameRuntimeUnitFactoryFrameReport::default();
+        let mut pending_payload_moves = Vec::new();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, enabled, efficiency, time_scale, rotation, rotdeg, team, x, y) = {
+                let building = &self.buildings[index];
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.enabled,
+                    building.efficiency,
+                    building.time_scale,
+                    building.rotation,
+                    building.rotdeg(),
+                    building.team,
+                    building.x,
+                    building.y,
+                )
+            };
+
+            let Some(BlockDef::UnitFactory(factory_block)) = content.block(block_id) else {
+                continue;
+            };
+            report.factory_candidates += 1;
+
+            if !enabled {
+                continue;
+            }
+
+            if !self.unit_runtime_states.contains_key(&tile_pos) {
+                let building = self.buildings[index].clone();
+                if !self.ensure_unit_state_for_building(content, &building) {
+                    report.missing_runtime_states += 1;
+                    continue;
+                }
+            }
+
+            let trns = factory_block.base.size / 2 + 1;
+            let (dx, dy) = autotiler_direction(rotation);
+            let target_tile_pos = self
+                .state
+                .world
+                .build(
+                    point2_x(tile_pos) as i32 + dx * trns,
+                    point2_y(tile_pos) as i32 + dy * trns,
+                )
+                .map(|target| target.tile_pos);
+
+            let unit_cost = self.state.rules.unit_cost(team.0 as usize);
+            let unit_build_speed = self.state.rules.unit_build_speed(team.0 as usize);
+
+            let current_plan = self
+                .unit_runtime_states
+                .get(&tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Factory { factory, .. } => {
+                        Some(factory.current_plan)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(-1);
+            let plan = (current_plan >= 0)
+                .then(|| factory_block.plans.get(current_plan as usize))
+                .flatten();
+            let plan_unit = plan.and_then(|plan| content.unit_by_name(&plan.unit));
+            let plan_requirements = plan
+                .map(|plan| scaled_item_requirements(&plan.requirements, unit_cost))
+                .unwrap_or_default();
+            let has_required_items = building_has_items(&self.buildings[index], &plan_requirements);
+            let plan_time = plan.map(|plan| plan.time).unwrap_or(0.0);
+            let plan_banned = plan_unit
+                .map(|unit| self.state.rules.is_unit_banned(unit.name()))
+                .unwrap_or(false);
+
+            let mut consume_items = false;
+            {
+                let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+                    self.unit_runtime_states.get_mut(&tile_pos)
+                else {
+                    report.missing_runtime_states += 1;
+                    continue;
+                };
+
+                factory.base.has_payload = common.payload.is_some();
+                if common.payload.is_some() {
+                    report.moved_out_payloads += 1;
+                    let arrived = payload_block_move_out_step(
+                        common,
+                        rotdeg,
+                        factory_block.base.size,
+                        TILE_SIZE as f32,
+                        DEFAULT_PAYLOAD_SPEED,
+                        DEFAULT_PAYLOAD_ROTATE_SPEED,
+                        frame_delta * time_scale,
+                    );
+                    if arrived {
+                        report.arrived_output_payloads += 1;
+                        if let Some(target_tile_pos) = target_tile_pos {
+                            pending_payload_moves.push((tile_pos, target_tile_pos));
+                        }
+                    }
+                }
+
+                let effective_efficiency = if common.payload.is_none() && has_required_items {
+                    efficiency
+                } else {
+                    0.0
+                };
+                let update = unit_factory_update(
+                    factory,
+                    factory_block.configurable,
+                    factory_block.plans.len(),
+                    effective_efficiency,
+                    frame_delta * time_scale * effective_efficiency,
+                    unit_build_speed,
+                    plan_time,
+                    plan_banned,
+                );
+                report.updated_factories += 1;
+                if update.current_plan == -1 && current_plan != -1 {
+                    report.invalid_plans += 1;
+                }
+
+                if update.created_unit {
+                    let Some(unit_type) = plan_unit else {
+                        factory.base.has_payload = common.payload.is_some();
+                        report.invalid_plans += 1;
+                        continue;
+                    };
+                    let mut unit = UnitComp::new(0, unit_type.clone(), team);
+                    unit.set_pos(x, y);
+                    unit.set_rotation(rotdeg);
+                    if let Some(mut payload) = Self::unit_payload_ref_from_unit(content, &unit) {
+                        let command_id = factory
+                            .command_id
+                            .map(|id| id as ContentId)
+                            .or_else(|| Self::unit_default_command_id(content, unit_type));
+                        if command_id.is_some() || factory.command_pos.is_some() {
+                            let _ = Self::payload_ref_patch_unit_controller(
+                                &mut payload,
+                                &type_io::ControllerWire::Command(type_io::CommandWire {
+                                    target_pos: factory.command_pos,
+                                    command_id,
+                                    ..type_io::CommandWire::new()
+                                }),
+                            );
+                        }
+                        common.payload = Some(payload);
+                        common.pay_vector = PayloadVec2::ZERO;
+                        common.pay_rotation = rotdeg;
+                        factory.base.has_payload = true;
+                        consume_items = !plan_requirements.is_empty();
+                        report.produced_unit_payloads += 1;
+                    } else {
+                        factory.base.has_payload = common.payload.is_some();
+                        report.invalid_plans += 1;
+                    }
+                }
+            }
+
+            if consume_items {
+                consume_building_items(&mut self.buildings[index], &plan_requirements);
+                report.consumed_item_batches += 1;
+            }
+        }
+
+        for (source_tile_pos, target_tile_pos) in pending_payload_moves {
+            if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
+                report.transferred_payloads += 1;
+            }
+        }
+
+        report
     }
 
     pub fn advance_owned_unit_reconstructors(
@@ -16522,6 +16764,7 @@ impl GameRuntime {
             void: self.advance_owned_payload_voids_ticks(content, frame.delta),
         };
         let unit = GameRuntimeOwnedUnitFrameReport {
+            factory: self.advance_owned_unit_factories_ticks(content, frame.delta),
             reconstructor: self.advance_owned_unit_reconstructors_ticks(content, frame.delta),
         };
 
@@ -16629,7 +16872,7 @@ mod tests {
             blocks::units::{
                 write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
                 write_unit_cargo_loader_state, write_unit_cargo_unload_state,
-                write_unit_factory_state, RepairTurretState, UnitAssemblerState,
+                write_unit_factory_state, RepairTurretState, UnitAssemblerState, UnitBlockState,
                 UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
             },
             blocks::{write_construct_block_state, ConstructAccumulatorEntry, ConstructBlockState},
@@ -18694,6 +18937,164 @@ mod tests {
         assert!(common.payload.is_none());
         assert!(!reconstructor.base.has_payload);
         assert!(!reconstructor.constructing);
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_produces_configured_unit_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let plan = &factory_block.plans[0];
+        let tile_pos = point2_pack(6, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(24, 24);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &plan.requirements {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: plan.time - 1.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap()
+            .unit
+            .factory;
+
+        assert_eq!(report.factory_candidates, 1);
+        assert_eq!(report.produced_unit_payloads, 1);
+        assert_eq!(report.consumed_item_batches, 1);
+        let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should remain present");
+        };
+        assert!(factory.base.has_payload);
+        assert_eq!(
+            payload_ref_sort_key(common.payload.as_ref().unwrap())
+                .unwrap()
+                .id,
+            flare.id()
+        );
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_outputs_payload_to_front_conveyor() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let conveyor_def = content.block_by_name("payload-conveyor").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let BlockDef::Payload(conveyor_block) = conveyor_def else {
+            panic!("payload-conveyor should be a payload block");
+        };
+        let plan = &factory_block.plans[0];
+        let factory_tile = point2_pack(6, 16);
+        let conveyor_tile = point2_pack(
+            6 + factory_block.base.size / 2 + 1 + (conveyor_block.base.size - 1) / 2,
+            16,
+        );
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(24, 24);
+        let mut factory_building =
+            BuildingComp::new(factory_tile, factory_def.base().clone(), TeamId(2));
+        factory_building.set_rotation(0);
+        runtime.add_building(factory_building);
+        runtime.add_building(BuildingComp::new(
+            conveyor_tile,
+            conveyor_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.payload_runtime_states.insert(
+            conveyor_tile,
+            GameRuntimePayloadBlockState::Conveyor(PayloadConveyorState::default()),
+        );
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &plan.requirements {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+        runtime.unit_runtime_states.insert(
+            factory_tile,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: plan.time - 1.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let produced = runtime.advance_owned_unit_factories(&content, 1.0).unwrap();
+        assert_eq!(produced.produced_unit_payloads, 1);
+        let moved = runtime.advance_owned_unit_factories(&content, 1.0).unwrap();
+
+        assert_eq!(moved.arrived_output_payloads, 1);
+        assert_eq!(moved.transferred_payloads, 1);
+        let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+            runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("unit factory sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!factory.base.has_payload);
+        let Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) =
+            runtime.payload_runtime_states.get(&conveyor_tile)
+        else {
+            panic!("front payload conveyor should keep sidecar");
+        };
+        assert_eq!(
+            payload_ref_sort_key(conveyor.item.as_ref().unwrap())
+                .unwrap()
+                .id,
+            flare.id()
+        );
     }
 
     #[test]
