@@ -6206,3 +6206,51 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 真实 renderer backend 仍未接入；
   - `blockExplosionSmoke` 之前的复杂 explosion/smoke line/light 组合仍需后续新增 line/light per-particle 表达。
+
+### 12.207 Debris/unit dust circle Fx batch
+
+- 2026-05-28：继续扫描 `Fx.java` 中无需新增 line/poly/light primitive 的圆形粒子效果，批量迁移 debris/unit dust 一组：
+  - `breakProp`
+  - `unitDrop`
+  - `unitLand`
+  - `unitDust`
+  - `unitLandSmall`
+  - `crawlDust`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:378` 附近：
+    - `breakProp = new Effect(23, ...)`，`Layer.debris`，输入色 `*1.1`，`count=6`，`length=19*finpow*max(rotation,1)`，半径 `0.3+fout*3.5*scl`；
+    - `unitDrop = new Effect(30, ...)`，`Layer.debris`，`Pal.lightishGray`，`count=9`，`length=3+20*finpow`，半径 `0.4+fout*4`；
+    - `unitLand = new Effect(30, ...)`，`Layer.debris`，输入色 `*1.1`，`count=6`，`length=17*finpow`，半径 `0.3+fout*4`；
+    - `unitDust = new Effect(30, ...)`，`Layer.debris`，输入色 `*1.3`，`count=3`，`length=8*finpow`，`angle=rotation`、`range=30`，半径 `0.3+fout*3`；
+    - `unitLandSmall = new Effect(30, ...)`，`Layer.debris`，输入色 `*1.1`，`count=(int)(6*rotation)`，`length=12*finpow*rotation`，半径 `0.1+fout*3`；
+    - `crawlDust = new Effect(35, ...)`，`Layer.debris`，输入色 `*1.6`，`count=2`，`length=10*finpow`，半径 `0.3+fslope*4`。
+  - 本地按 `new Effect` 声明顺序计数：
+    - `breakProp=37`
+    - `unitDrop=38`
+    - `unitLand=39`
+    - `unitDust=40`
+    - `unitLandSmall=41`
+    - `crawlDust=43`
+  - `Pal.lightishGray` 来自 `Pal.java`：`a2a2a2`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增上述 6 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` 与 `standard_effect(...)`，并设置 `Layer::DEBRIS`；
+    - `standard_effect_color_symbol(...)` 新增 `Pal.lightishGray`；
+    - `standard_effect_draw_plan(...)` 新增共享分支，按 effect id 参数化 color、color_mul、count、length、angle/range、radius_base/fout/fslope scale。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 6 个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime/layer；
+  - `standard_effect_draw_plan_covers_simple_smoke_and_fire_variants` 覆盖关键 draw plan 参数。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 renderer backend 仍未接入；
+  - `unitPickup/landShock` 等线框/poly 类 debris Fx 需要新增线/多边形 primitive 后再迁移。

@@ -18,6 +18,18 @@ pub const FX_ROCKET_SMOKE_ID: i32 = 31;
 pub const FX_ROCKET_SMOKE_LARGE_ID: i32 = 32;
 /// Upstream `Fx.magmasmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MAGMA_SMOKE_ID: i32 = 33;
+/// Upstream `Fx.breakProp` id in `mindustry.content.Fx` for v158.1.
+pub const FX_BREAK_PROP_ID: i32 = 37;
+/// Upstream `Fx.unitDrop` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_DROP_ID: i32 = 38;
+/// Upstream `Fx.unitLand` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_LAND_ID: i32 = 39;
+/// Upstream `Fx.unitDust` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_DUST_ID: i32 = 40;
+/// Upstream `Fx.unitLandSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_LAND_SMALL_ID: i32 = 41;
+/// Upstream `Fx.crawlDust` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CRAWL_DUST_ID: i32 = 43;
 /// Upstream `Fx.hitLiquid` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_LIQUID_ID: i32 = 85;
 /// Upstream `Fx.missileTrail` id in `mindustry.content.Fx` for v158.1.
@@ -72,6 +84,12 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "rocketSmoke" => Some(FX_ROCKET_SMOKE_ID),
         "rocketSmokeLarge" => Some(FX_ROCKET_SMOKE_LARGE_ID),
         "magmasmoke" => Some(FX_MAGMA_SMOKE_ID),
+        "breakProp" => Some(FX_BREAK_PROP_ID),
+        "unitDrop" => Some(FX_UNIT_DROP_ID),
+        "unitLand" => Some(FX_UNIT_LAND_ID),
+        "unitDust" => Some(FX_UNIT_DUST_ID),
+        "unitLandSmall" => Some(FX_UNIT_LAND_SMALL_ID),
+        "crawlDust" => Some(FX_CRAWL_DUST_ID),
         "smokeAoeCloud" => Some(FX_SMOKE_AOE_CLOUD_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
@@ -110,6 +128,25 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_ROCKET_SMOKE_LARGE_ID, 220.0, DEFAULT_EFFECT_CLIP)
         }
         FX_MAGMA_SMOKE_ID => Effect::with_lifetime(FX_MAGMA_SMOKE_ID, 110.0, DEFAULT_EFFECT_CLIP),
+        FX_BREAK_PROP_ID => {
+            Effect::with_lifetime(FX_BREAK_PROP_ID, 23.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
+        }
+        FX_UNIT_DROP_ID => {
+            Effect::with_lifetime(FX_UNIT_DROP_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
+        }
+        FX_UNIT_LAND_ID => {
+            Effect::with_lifetime(FX_UNIT_LAND_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
+        }
+        FX_UNIT_DUST_ID => {
+            Effect::with_lifetime(FX_UNIT_DUST_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
+        }
+        FX_UNIT_LAND_SMALL_ID => {
+            Effect::with_lifetime(FX_UNIT_LAND_SMALL_ID, 30.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::DEBRIS)
+        }
+        FX_CRAWL_DUST_ID => {
+            Effect::with_lifetime(FX_CRAWL_DUST_ID, 35.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
+        }
         FX_SMOKE_AOE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_AOE_CLOUD_ID, 180.0, 250.0),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
@@ -557,6 +594,141 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_BREAK_PROP_ID
+        | FX_UNIT_DROP_ID
+        | FX_UNIT_LAND_ID
+        | FX_UNIT_DUST_ID
+        | FX_UNIT_LAND_SMALL_ID
+        | FX_CRAWL_DUST_ID => {
+            let break_scl = rotation.max(1.0);
+            let unit_land_small_count = (6.0 * rotation).max(0.0) as u16;
+            let (
+                color_from,
+                input_color,
+                color_mul,
+                count,
+                angle,
+                angle_range,
+                length,
+                radius_base,
+                radius_fout_scale,
+                radius_fslope_scale,
+            ) = match effect_id {
+                FX_BREAK_PROP_ID => (
+                    None,
+                    Some(color),
+                    1.1,
+                    6,
+                    None,
+                    0.0,
+                    19.0 * finpow * break_scl,
+                    0.3,
+                    3.5 * break_scl,
+                    0.0,
+                ),
+                FX_UNIT_DROP_ID => (
+                    Some("Pal.lightishGray"),
+                    None,
+                    1.0,
+                    9,
+                    None,
+                    0.0,
+                    3.0 + 20.0 * finpow,
+                    0.4,
+                    4.0,
+                    0.0,
+                ),
+                FX_UNIT_LAND_ID => (
+                    None,
+                    Some(color),
+                    1.1,
+                    6,
+                    None,
+                    0.0,
+                    17.0 * finpow,
+                    0.3,
+                    4.0,
+                    0.0,
+                ),
+                FX_UNIT_DUST_ID => (
+                    None,
+                    Some(color),
+                    1.3,
+                    3,
+                    Some(rotation),
+                    30.0,
+                    8.0 * finpow,
+                    0.3,
+                    3.0,
+                    0.0,
+                ),
+                FX_UNIT_LAND_SMALL_ID => (
+                    None,
+                    Some(color),
+                    1.1,
+                    unit_land_small_count,
+                    None,
+                    0.0,
+                    12.0 * finpow * rotation,
+                    0.1,
+                    3.0,
+                    0.0,
+                ),
+                FX_CRAWL_DUST_ID => (
+                    None,
+                    Some(color),
+                    1.6,
+                    2,
+                    None,
+                    0.0,
+                    10.0 * finpow,
+                    0.3,
+                    0.0,
+                    4.0,
+                ),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededCircleParticles,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color,
+                color_mul,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: 0.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count,
+                    progress: None,
+                    angle,
+                    angle_range,
+                    length,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale,
+                    radius_fslope_scale,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SMOKE_AOE_CLOUD_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -1304,6 +1476,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
             b: 0.3,
             a: 1.0,
         }),
+        "Pal.lightishGray" => Some(DecalColor::from_rgba(0xa2a2a2ff)),
         "Pal.lighterOrange" => Some(DecalColor::from_rgba(0xf6e096ff)),
         "Pal.lightOrange" => Some(DecalColor::from_rgba(0xf68021ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
@@ -2557,6 +2730,15 @@ mod tests {
             Some(FX_ROCKET_SMOKE_LARGE_ID)
         );
         assert_eq!(standard_effect_id("magmasmoke"), Some(FX_MAGMA_SMOKE_ID));
+        assert_eq!(standard_effect_id("breakProp"), Some(FX_BREAK_PROP_ID));
+        assert_eq!(standard_effect_id("unitDrop"), Some(FX_UNIT_DROP_ID));
+        assert_eq!(standard_effect_id("unitLand"), Some(FX_UNIT_LAND_ID));
+        assert_eq!(standard_effect_id("unitDust"), Some(FX_UNIT_DUST_ID));
+        assert_eq!(
+            standard_effect_id("unitLandSmall"),
+            Some(FX_UNIT_LAND_SMALL_ID)
+        );
+        assert_eq!(standard_effect_id("crawlDust"), Some(FX_CRAWL_DUST_ID));
         assert_eq!(
             standard_effect_id("smokeAoeCloud"),
             Some(FX_SMOKE_AOE_CLOUD_ID)
@@ -2640,6 +2822,25 @@ mod tests {
             220.0
         );
         assert_eq!(standard_effect(FX_MAGMA_SMOKE_ID).unwrap().lifetime, 110.0);
+        let break_prop = standard_effect(FX_BREAK_PROP_ID).unwrap();
+        assert_eq!(break_prop.lifetime, 23.0);
+        assert_eq!(break_prop.layer, Layer::DEBRIS);
+        assert_eq!(standard_effect(FX_UNIT_DROP_ID).unwrap().lifetime, 30.0);
+        assert_eq!(standard_effect(FX_UNIT_LAND_ID).unwrap().lifetime, 30.0);
+        assert_eq!(standard_effect(FX_UNIT_DUST_ID).unwrap().lifetime, 30.0);
+        assert_eq!(
+            standard_effect(FX_UNIT_LAND_SMALL_ID).unwrap().lifetime,
+            30.0
+        );
+        assert_eq!(standard_effect(FX_CRAWL_DUST_ID).unwrap().lifetime, 35.0);
+        assert_eq!(
+            standard_effect(FX_UNIT_DROP_ID).unwrap().layer,
+            Layer::DEBRIS
+        );
+        assert_eq!(
+            standard_effect(FX_CRAWL_DUST_ID).unwrap().layer,
+            Layer::DEBRIS
+        );
         let smoke_aoe = standard_effect(FX_SMOKE_AOE_CLOUD_ID).unwrap();
         assert_eq!(smoke_aoe.lifetime, 180.0);
         assert_eq!(smoke_aoe.clip, 250.0);
@@ -3173,6 +3374,116 @@ mod tests {
         .unwrap();
         assert_eq!(magma.kind, StandardEffectDrawKind::FilledCircle);
         assert_eq!(magma.radius, 6.0);
+
+        let break_prop = standard_effect_draw_plan(
+            Some(FX_BREAK_PROP_ID as u16),
+            37,
+            0.0,
+            0.0,
+            2.0,
+            11.5,
+            23.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(break_prop.layer, Layer::DEBRIS);
+        assert_eq!(break_prop.input_color, Some(DecalColor::WHITE));
+        assert_eq!(break_prop.color_mul, 1.1);
+        let break_prop_particles = break_prop.particles.unwrap();
+        assert_eq!(break_prop_particles.count, 6);
+        assert_eq!(break_prop_particles.length, 33.25);
+        assert_eq!(break_prop_particles.radius_base, 0.3);
+        assert_eq!(break_prop_particles.radius_fout_scale, 7.0);
+
+        let unit_drop = standard_effect_draw_plan(
+            Some(FX_UNIT_DROP_ID as u16),
+            38,
+            0.0,
+            0.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(unit_drop.color_from, Some("Pal.lightishGray"));
+        let unit_drop_particles = unit_drop.particles.unwrap();
+        assert_eq!(unit_drop_particles.count, 9);
+        assert_eq!(unit_drop_particles.length, 20.5);
+        assert_eq!(unit_drop_particles.radius_base, 0.4);
+        assert_eq!(unit_drop_particles.radius_fout_scale, 4.0);
+
+        let unit_land = standard_effect_draw_plan(
+            Some(FX_UNIT_LAND_ID as u16),
+            39,
+            0.0,
+            0.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(unit_land.color_mul, 1.1);
+        let unit_land_particles = unit_land.particles.unwrap();
+        assert_eq!(unit_land_particles.count, 6);
+        assert_eq!(unit_land_particles.length, 14.875);
+        assert_eq!(unit_land_particles.radius_base, 0.3);
+        assert_eq!(unit_land_particles.radius_fout_scale, 4.0);
+
+        let unit_dust = standard_effect_draw_plan(
+            Some(FX_UNIT_DUST_ID as u16),
+            40,
+            0.0,
+            0.0,
+            45.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(unit_dust.color_mul, 1.3);
+        let unit_dust_particles = unit_dust.particles.unwrap();
+        assert_eq!(unit_dust_particles.count, 3);
+        assert_eq!(unit_dust_particles.length, 7.0);
+        assert_eq!(unit_dust_particles.angle, Some(45.0));
+        assert_eq!(unit_dust_particles.angle_range, 30.0);
+        assert_eq!(unit_dust_particles.radius_fout_scale, 3.0);
+
+        let unit_land_small = standard_effect_draw_plan(
+            Some(FX_UNIT_LAND_SMALL_ID as u16),
+            41,
+            0.0,
+            0.0,
+            2.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let unit_land_small_particles = unit_land_small.particles.unwrap();
+        assert_eq!(unit_land_small_particles.count, 12);
+        assert_eq!(unit_land_small_particles.length, 21.0);
+        assert_eq!(unit_land_small_particles.radius_base, 0.1);
+        assert_eq!(unit_land_small_particles.radius_fout_scale, 3.0);
+
+        let crawl_dust = standard_effect_draw_plan(
+            Some(FX_CRAWL_DUST_ID as u16),
+            43,
+            0.0,
+            0.0,
+            0.0,
+            17.5,
+            35.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(crawl_dust.color_mul, 1.6);
+        let crawl_dust_particles = crawl_dust.particles.unwrap();
+        assert_eq!(crawl_dust_particles.count, 2);
+        assert_eq!(crawl_dust_particles.length, 8.75);
+        assert_eq!(crawl_dust_particles.radius_base, 0.3);
+        assert_eq!(crawl_dust_particles.radius_fslope_scale, 4.0);
 
         let smoke_aoe = standard_effect_draw_plan(
             Some(FX_SMOKE_AOE_CLOUD_ID as u16),

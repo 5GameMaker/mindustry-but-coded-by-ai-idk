@@ -4444,3 +4444,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 继续找纯 `Fill.circle` 且无需 line/poly/light 的 Fx；
   2. 对复杂 explosion/trail 类，先设计 line/per-particle light/multi-pass spec。
+
+---
+
+## 133. 最新闭环记录：Debris/unit dust 圆粒子 Fx 批量迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移无需新增 primitive 的 debris/unit dust 圆粒子效果：
+  - `breakProp=37`
+  - `unitDrop=38`
+  - `unitLand=39`
+  - `unitDust=40`
+  - `unitLandSmall=41`
+  - `crawlDust=43`
+- Java 依据：
+  - `Fx.java:378-427`；
+  - 这批都 `.layer(Layer.debris)`；
+  - 均可表达为 `SeededCircleParticles`；
+  - `unitDrop` 需要 `Pal.lightishGray = 0xa2a2a2ff`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 6 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - 设置 `Layer::DEBRIS`；
+    - 新增 `Pal.lightishGray`；
+    - `standard_effect_draw_plan(...)` 新增共享分支，参数化 color/color_mul/count/length/radius/angle。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续挑简单 `Fill.circle` Fx；
+  2. 对 `unitPickup/landShock` 等 line/poly 类先补 primitive；
+  3. 对 `missileTrailSmoke*` 先补 multi-pass/per-particle-light spec。
