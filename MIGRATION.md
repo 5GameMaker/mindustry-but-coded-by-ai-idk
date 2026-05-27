@@ -3929,4 +3929,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop unit_block_spawn_packet --lib`
   - `cargo fmt --check`
   - `cargo check -p mindustry-core`
-- 仍未完成：Rust 服务端在自身 `moveOutPayload()/dumpPayload()` 成功时还没有权威广播 `UnitBlockSpawnCallPacket`；后续需要把 owned runtime 的输出报告接到 server lifecycle broadcast，并补 Java↔Rust smoke。
+- 仍未完成：本节先完成 Java/Rust 服务端到 Rust 客户端的接收端回填；Rust 服务端广播在后续 12.121 继续接入，真实 Java↔Rust smoke 仍需补。
+
+### 12.121 UnitBlockSpawn 服务端广播
+
+- 2026-05-27：继续打通 Java `UnitBuild.dumpPayload() -> Call.unitBlockSpawn(tile)` 方向，把 Rust owned runtime 的 unit block payload 输出结果上报给 server launcher，并广播 `UnitBlockSpawnCallPacket`。
+- Java 依据：
+  - `UnitBuild.dumpPayload()` 仅在 payload 成功 dump 后触发 `Call.unitBlockSpawn(tile)`；
+  - 接收端 `spawned()` 复位 progress/payload，配置与命令字段保持不变。
+- Rust 新增/变化：
+  - `GameRuntimeUnitFactoryFrameReport` / `GameRuntimeUnitReconstructorFrameReport` 新增 `spawned_tiles`，只在 payload 成功转交到前方目标时记录 tile；
+  - `ServerLauncher::update()` 收集 factory/reconstructor `spawned_tiles` 并调用 `broadcast_runtime_unit_block_spawns(...)`；
+  - 新增 server 广播 helper，对重复 tile 去重后发送可靠 `UnitBlockSpawnCallPacket`；
+  - 这使 Rust server 自身运行 UnitFactory/Reconstructor 输出 payload 时，也能通知 Rust/Java 客户端清理对应 unit block 状态。
+- 新增验证：
+  - `cargo test -p mindustry-core unit_factory_outputs_payload_to_front_conveyor --lib`
+  - `cargo test -p mindustry-core reconstructor_outputs_upgraded_payload_to_front_conveyor --lib`
+  - `cargo test -p mindustry-server unit_block_spawn_when_unit_factory_payload_dumps --lib`
+  - `cargo fmt --check`
+  - `cargo check -p mindustry-core`
+- 仍未完成：当前广播只覆盖已迁移的 factory/reconstructor payload transfer 成功路径；尚未覆盖未来完整 world dump/entity materialize、assembler 专属 spawn 包、以及 Java↔Rust 真实联机 smoke。

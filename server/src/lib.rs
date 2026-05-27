@@ -45,7 +45,8 @@ use mindustry_core::mindustry::net::{
     NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
     ProviderEvent, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
     RequestItemCallPacket, RequestUnitPayloadCallPacket, TileConfigCallPacket,
-    TransferInventoryCallPacket, UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+    TransferInventoryCallPacket, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
+    UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -58,7 +59,7 @@ use mindustry_core::mindustry::world::point2_pack;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -257,6 +258,17 @@ impl ServerLauncher {
                 {
                     self.network_error = Some(error.to_string());
                 }
+            }
+            let unit_block_spawn_tiles: Vec<i32> = report
+                .unit
+                .factory
+                .spawned_tiles
+                .iter()
+                .chain(report.unit.reconstructor.spawned_tiles.iter())
+                .copied()
+                .collect();
+            if let Err(error) = self.broadcast_runtime_unit_block_spawns(&unit_block_spawn_tiles) {
+                self.network_error = Some(error.to_string());
             }
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
                 self.network_error = Some(error.to_string());
@@ -1519,6 +1531,38 @@ impl ServerLauncher {
         }
 
         Ok(applied)
+    }
+
+    fn broadcast_runtime_unit_block_spawns(&mut self, tile_positions: &[i32]) -> io::Result<usize> {
+        if tile_positions.is_empty() || !self.net_server.is_active() {
+            return Ok(0);
+        }
+
+        let mut sent = 0;
+        let mut first_error = None;
+        let mut seen = BTreeSet::new();
+        for tile_pos in tile_positions {
+            if !seen.insert(*tile_pos) {
+                continue;
+            }
+            let packet = PacketKind::UnitBlockSpawnCallPacket(UnitBlockSpawnCallPacket {
+                tile: Some(*tile_pos),
+            });
+            match self.net_server.net_mut().send(&packet, true) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
     }
 
     fn broadcast_server_unit_entity_snapshots(&mut self) -> io::Result<usize> {
@@ -4719,6 +4763,98 @@ mod tests {
                     )
             }));
         }
+    }
+
+    #[test]
+    fn server_update_broadcasts_unit_block_spawn_when_unit_factory_payload_dumps() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6585).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(24, 24);
+
+        let factory_def = launcher
+            .content_loader
+            .block_by_name("air-factory")
+            .unwrap();
+        let conveyor_def = launcher
+            .content_loader
+            .block_by_name("payload-conveyor")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let BlockDef::Payload(conveyor_block) = conveyor_def else {
+            panic!("payload-conveyor should be a payload block");
+        };
+        let factory_tile = point2_pack(8, 8);
+        let conveyor_tile = point2_pack(
+            8 + factory_block.base.size / 2 + 1 + (conveyor_block.base.size - 1) / 2,
+            8,
+        );
+        let mut factory_building =
+            BuildingComp::new(factory_tile, factory_def.base().clone(), TeamId(6));
+        factory_building.set_rotation(0);
+        launcher.runtime.add_building(factory_building);
+        launcher.runtime.add_building(BuildingComp::new(
+            conveyor_tile,
+            conveyor_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.payload_runtime_states.insert(
+            conveyor_tile,
+            GameRuntimePayloadBlockState::Conveyor(PayloadConveyorState::default()),
+        );
+        let mut common = PayloadBlockBuildState {
+            payload: Some(PayloadRef::Block {
+                block: router_def.base().id,
+                version: 0,
+                build_bytes: Vec::new(),
+            }),
+            ..PayloadBlockBuildState::default()
+        };
+        common.pay_vector.x = 12.0;
+        common.pay_vector.y = 0.0;
+        launcher.runtime.unit_runtime_states.insert(
+            factory_tile,
+            GameRuntimeUnitBlockState::Factory {
+                common,
+                factory: UnitFactoryState {
+                    current_plan: -1,
+                    base: UnitBlockState {
+                        has_payload: true,
+                        progress: 4.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+            launcher.runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("factory sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!factory.base.has_payload);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitBlockSpawnCallPacket(packet)
+                        if packet.tile == Some(factory_tile)
+                )
+        }));
     }
 
     #[test]

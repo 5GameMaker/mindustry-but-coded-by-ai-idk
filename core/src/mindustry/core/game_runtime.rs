@@ -1945,7 +1945,7 @@ pub struct GameRuntimeOwnedPayloadFrameReport {
     pub void: GameRuntimePayloadVoidFrameReport,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameRuntimeUnitFactoryFrameReport {
     pub visited_buildings: usize,
     pub factory_candidates: usize,
@@ -1956,6 +1956,7 @@ pub struct GameRuntimeUnitFactoryFrameReport {
     pub moved_out_payloads: usize,
     pub arrived_output_payloads: usize,
     pub transferred_payloads: usize,
+    pub spawned_tiles: Vec<i32>,
     pub invalid_plans: usize,
     pub missing_runtime_states: usize,
 }
@@ -1976,7 +1977,7 @@ impl GameRuntimeCommandBuildingReport {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameRuntimeUnitReconstructorFrameReport {
     pub visited_buildings: usize,
     pub reconstructor_candidates: usize,
@@ -1985,6 +1986,7 @@ pub struct GameRuntimeUnitReconstructorFrameReport {
     pub moved_out_payloads: usize,
     pub arrived_output_payloads: usize,
     pub transferred_payloads: usize,
+    pub spawned_tiles: Vec<i32>,
     pub upgraded_payloads: usize,
     pub consumed_item_batches: usize,
     pub invalid_payloads: usize,
@@ -2018,7 +2020,7 @@ pub struct GameRuntimeUnitAssemblerModuleFrameReport {
     pub missing_runtime_states: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameRuntimeOwnedUnitFrameReport {
     pub factory: GameRuntimeUnitFactoryFrameReport,
     pub reconstructor: GameRuntimeUnitReconstructorFrameReport,
@@ -17994,6 +17996,7 @@ impl GameRuntime {
                 if let Some(target_tile_pos) = target_tile_pos {
                     if self.transfer_payload_output_to_front(content, tile_pos, target_tile_pos) {
                         report.transferred_payloads += 1;
+                        report.spawned_tiles.push(tile_pos);
                     }
                 }
             }
@@ -18754,6 +18757,7 @@ impl GameRuntime {
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
             if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
                 report.transferred_payloads += 1;
+                report.spawned_tiles.push(source_tile_pos);
             }
         }
 
@@ -22706,6 +22710,7 @@ mod tests {
 
         assert_eq!(moved.arrived_output_payloads, 1);
         assert_eq!(moved.transferred_payloads, 1);
+        assert_eq!(moved.spawned_tiles, vec![factory_tile]);
         let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
             runtime.unit_runtime_states.get(&factory_tile)
         else {
@@ -22795,6 +22800,7 @@ mod tests {
         let report = runtime.advance_owned_unit_factories(&content, 1.0).unwrap();
         assert_eq!(report.arrived_output_payloads, 1);
         assert_eq!(report.transferred_payloads, 1);
+        assert_eq!(report.spawned_tiles, vec![factory_tile]);
         assert_eq!(report.produced_unit_payloads, 1);
         assert_eq!(report.consumed_item_batches, 1);
 
@@ -24150,6 +24156,7 @@ mod tests {
 
         assert_eq!(moved_out.arrived_output_payloads, 1);
         assert_eq!(moved_out.transferred_payloads, 1);
+        assert_eq!(moved_out.spawned_tiles, vec![reconstructor_tile]);
         let Some(GameRuntimeUnitBlockState::Reconstructor {
             common,
             reconstructor,
