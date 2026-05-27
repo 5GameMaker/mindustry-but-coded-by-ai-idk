@@ -10,9 +10,10 @@ use crate::mindustry::ai::{PrebuildAiPlanSnapshot, PrebuildAiRequirement};
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
-    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ShieldRegenFieldAbility,
-    ShieldRegenFieldPulse, ShieldRegenFieldTarget, StatusFieldAbility, StatusFieldPulse,
-    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
+    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, RepairFieldAbility, RepairFieldPulse,
+    RepairFieldTarget, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
+    StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse,
+    UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -504,6 +505,48 @@ impl UnitComp {
 
         for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
             let Some(mut ability) = ShieldRegenFieldAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.timer = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+            let target_entries = targets(&ability);
+            let target_ids = target_entries
+                .iter()
+                .map(|(target_id, _target)| *target_id)
+                .collect::<Vec<_>>();
+            let target_values = target_entries
+                .iter()
+                .map(|(_target_id, target)| *target)
+                .collect::<Vec<_>>();
+
+            if let Some(mut pulse) = ability.update_targets(delta, &target_values) {
+                pulse.target_ids = target_ids;
+                pulses.push(pulse);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.timer;
+            }
+        }
+
+        pulses
+    }
+
+    pub fn update_repair_field_abilities<F>(
+        &mut self,
+        delta: f32,
+        mut targets: F,
+    ) -> Vec<RepairFieldPulse>
+    where
+        F: FnMut(&RepairFieldAbility) -> Vec<(u32, RepairFieldTarget)>,
+    {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let mut pulses = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = RepairFieldAbility::from_descriptor(descriptor) else {
                 continue;
             };
             ability.timer = self.abilities.get(index).map_or(0.0, |wire| wire.data);
@@ -1540,6 +1583,53 @@ mod tests {
         assert_eq!(pulses.len(), 1);
         assert_eq!(pulses[0].target_ids, vec![1, 2]);
         assert_eq!(pulses[0].shields, vec![35.0, 250.0]);
+        assert!(pulses[0].active_effect);
+        assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_repair_field_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["RepairFieldAbility:10:240:60".into()];
+        let mut unit = UnitComp::new(45, unit_type, TeamId(1));
+
+        assert!(unit
+            .update_repair_field_abilities(239.0, |_| {
+                vec![(
+                    1,
+                    RepairFieldTarget {
+                        damaged: true,
+                        max_health: 100.0,
+                        same_type: false,
+                    },
+                )]
+            })
+            .is_empty());
+        assert_eq!(unit.abilities[0].data, 239.0);
+
+        let pulses = unit.update_repair_field_abilities(1.0, |_| {
+            vec![
+                (
+                    1,
+                    RepairFieldTarget {
+                        damaged: true,
+                        max_health: 100.0,
+                        same_type: false,
+                    },
+                ),
+                (
+                    2,
+                    RepairFieldTarget {
+                        damaged: false,
+                        max_health: 100.0,
+                        same_type: true,
+                    },
+                ),
+            ]
+        });
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].target_ids, vec![1, 2]);
+        assert_eq!(pulses[0].heals, vec![10.0, 10.0]);
         assert!(pulses[0].active_effect);
         assert_eq!(unit.abilities[0].data, 0.0);
     }

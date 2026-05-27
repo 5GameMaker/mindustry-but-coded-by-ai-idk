@@ -98,7 +98,7 @@ pub fn load() -> Vec<UnitType> {
             u.build_speed = 0.3;
             u.armor = 1.0;
             u.ammo_type = "power:1000".into();
-            u.abilities.push("RepairFieldAbility".into());
+            u.abilities.push("RepairFieldAbility:10:240:60".into());
         }),
         unit(&mut next_id, "pulsar", UnitKind::Standard, |u| {
             u.can_boost = true;
@@ -337,6 +337,7 @@ pub fn load() -> Vec<UnitType> {
             u.mine_tier = 2;
             u.mine_speed = 3.5;
             u.default_command = Some("rebuild".into());
+            u.abilities.push("RepairFieldAbility:5:480:50".into());
         }),
         unit(&mut next_id, "mega", UnitKind::Standard, |u| {
             u.mine_tier = 3;
@@ -381,6 +382,7 @@ pub fn load() -> Vec<UnitType> {
             u.build_speed = 4.0;
             u.low_altitude = true;
             u.ammo_capacity = 1;
+            u.abilities.push("RepairFieldAbility:130:120:140".into());
         }),
         unit(&mut next_id, "risso", UnitKind::Naval, |u| {
             u.speed = 1.1;
@@ -1216,6 +1218,24 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| entry == "ShieldRegenFieldAbility:20:40:240:60"));
+
+        let nova = by_name(&units, "nova");
+        assert!(nova
+            .abilities
+            .iter()
+            .any(|entry| entry == "RepairFieldAbility:10:240:60"));
+
+        let poly = by_name(&units, "poly");
+        assert!(poly
+            .abilities
+            .iter()
+            .any(|entry| entry == "RepairFieldAbility:5:480:50"));
+
+        let oct = by_name(&units, "oct");
+        assert!(oct
+            .abilities
+            .iter()
+            .any(|entry| entry == "RepairFieldAbility:130:120:140"));
 
         let oxynoe = by_name(&units, "oxynoe");
         assert!(oxynoe

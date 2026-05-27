@@ -4414,3 +4414,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `applyEffect` / `activeEffect` / `sound` 的真实 effect packet、audio 与 desktop 表现层尚未接入；
   - Java `UnitType.shieldColor(other)` 颜色语义当前未进入 effect sidecar；
   - 普通 ability descriptor 仍是过渡模型，后续需结构化 ability spec / mod patcher。
+
+### 12.144 RepairFieldAbility / nova-poly-oct 单位治疗场 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `RepairFieldAbility.java` 与 `UnitTypes` 中 nova / poly / oct 的参数，把单位治疗场从纯算法接入 `UnitType` content、`UnitComp` ability slot 与 server same-team unit health runtime。
+- Java 依据：
+  - `RepairFieldAbility.update(Unit unit)`：`timer += Time.delta`，达到 `reload` 后遍历 `Units.nearby(unit.team, unit.x, unit.y, range, ...)`；
+  - 若目标 `other.damaged()`，播放 `healEffect` 并设置 `wasHealed = true`；
+  - 对范围内同队目标执行 `other.heal((amount + healPercent / 100f * other.maxHealth()) * healMult)`，同类型目标使用 `sameTypeHealMult`；
+  - 任一目标受治疗时播放 `activeEffect` / `sound`，最后 `timer = 0f`；
+  - Java 参数：`nova(10,240,60)`、`poly(5,480,50)`、`oct(130,120,140)`。
+- Rust 新增/变化：
+  - `RepairFieldPulse` 增加 `target_ids`，server runtime 可以把 heals 按序回写到真实单位；
+  - `RepairFieldAbility::from_descriptor(...)` 支持 `RepairFieldAbility:amount:reload:range[:healPercent[:sameTypeHealMult[:parentizeEffects]]]` 与括号形式；
+  - `content/unit_types.rs` 将 nova 的裸能力名替换为参数化 descriptor，并为 poly / oct 补上 Java 里的 RepairFieldAbility；
+  - `UnitComp::update_repair_field_abilities(...)` 使用 `AbilityWire.data` 存 timer，通过闭包按 ability range 收集同队目标；
+  - `ServerLauncher::tick_server_repair_field_abilities(...)` 在 playing frame 内收集同队、活着、范围内 `server_units`（包含自身），对目标 `HealthComp` 执行 heal 并调用 `heal_mark(...)`。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core repair_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_repair_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server repair_field --lib`
+- 仍未完成：
+  - `healEffect` / `activeEffect` / `sound` 的真实 effect packet、audio 与 desktop 表现层尚未接入；
+  - building repair / repair command AI 的交互路径不在本闭环内；
+  - 普通 ability descriptor 仍是过渡模型，后续需结构化 ability spec / mod patcher。

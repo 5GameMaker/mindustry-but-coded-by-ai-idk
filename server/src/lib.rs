@@ -303,6 +303,7 @@ impl ServerLauncher {
                 self.network_error = Some(error.to_string());
             }
             self.tick_server_shield_regen_field_abilities(1.0);
+            self.tick_server_repair_field_abilities(1.0);
             self.tick_server_energy_field_abilities(1.0);
             self.tick_server_status_field_abilities(1.0);
             self.tick_server_suppression_field_abilities(1.0);
@@ -1761,6 +1762,82 @@ impl ServerLauncher {
                         target.shield.shield_alpha = 1.0;
                         target.refresh_component_views();
                     }
+                }
+            }
+        }
+
+        pulses
+    }
+
+    fn tick_server_repair_field_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut pulses = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent_snapshot) = self.server_units.get(&parent_id) else {
+                continue;
+            };
+            let parent_team = parent_snapshot.team_id();
+            let parent_type_id = parent_snapshot.type_info.id();
+            let parent_x = parent_snapshot.x();
+            let parent_y = parent_snapshot.y();
+            let team_units: Vec<(u32, f32, f32, bool, f32, bool)> = self
+                .server_units
+                .iter()
+                .filter(|(_unit_id, unit)| unit.team_id() == parent_team && !unit.health.dead)
+                .filter_map(|(unit_id, unit)| {
+                    Some((
+                        u32::try_from(*unit_id).ok()?,
+                        unit.x(),
+                        unit.y(),
+                        unit.health.damaged(),
+                        unit.health.max_health,
+                        unit.type_info.id() == parent_type_id,
+                    ))
+                })
+                .collect();
+
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let repair_pulses = parent.update_repair_field_abilities(delta_ticks, |ability| {
+                let range2 = ability.range * ability.range;
+                team_units
+                    .iter()
+                    .copied()
+                    .filter(|(_id, x, y, _damaged, _max_health, _same_type)| {
+                        let dx = *x - parent_x;
+                        let dy = *y - parent_y;
+                        dx * dx + dy * dy <= range2
+                    })
+                    .map(|(id, _x, _y, damaged, max_health, same_type)| {
+                        (
+                            id,
+                            mindustry_core::mindustry::entities::RepairFieldTarget {
+                                damaged,
+                                max_health,
+                                same_type,
+                            },
+                        )
+                    })
+                    .collect()
+            });
+            pulses += repair_pulses.len();
+
+            for pulse in repair_pulses {
+                for (target_id, heal_amount) in pulse.target_ids.into_iter().zip(pulse.heals) {
+                    if heal_amount <= 0.0 {
+                        continue;
+                    }
+                    let Some(target_id) = i32::try_from(target_id).ok() else {
+                        continue;
+                    };
+                    let Some(target) = self.server_units.get_mut(&target_id) else {
+                        continue;
+                    };
+                    target.heal_mark(heal_amount);
+                    target.health.heal(heal_amount);
+                    target.refresh_component_views();
                 }
             }
         }
@@ -6008,6 +6085,59 @@ mod tests {
         assert_eq!(far_ally.shield.shield, 0.0);
         let enemy = launcher.server_units.get(&27).unwrap();
         assert_eq!(enemy.shield.shield, 0.0);
+    }
+
+    #[test]
+    fn server_update_ticks_nova_repair_field_for_nearby_allies() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let nova = launcher
+            .content_loader
+            .unit_by_name("nova")
+            .unwrap()
+            .clone();
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .unwrap()
+            .clone();
+        let mut parent = UnitComp::new(28, nova, TeamId(1));
+        parent.set_pos(100.0, 100.0);
+        parent.health.damage(30.0);
+        parent.abilities[0].data = 239.0;
+
+        let mut ally = UnitComp::new(29, dagger.clone(), TeamId(1));
+        ally.set_pos(130.0, 100.0);
+        ally.health.damage(50.0);
+        let mut far_ally = UnitComp::new(30, dagger.clone(), TeamId(1));
+        far_ally.set_pos(300.0, 100.0);
+        far_ally.health.damage(50.0);
+        let mut enemy = UnitComp::new(31, dagger, TeamId(2));
+        enemy.set_pos(120.0, 100.0);
+        enemy.health.damage(50.0);
+
+        launcher.server_units.insert(parent.id(), parent);
+        launcher.server_units.insert(ally.id(), ally);
+        launcher.server_units.insert(far_ally.id(), far_ally);
+        launcher.server_units.insert(enemy.id(), enemy);
+
+        launcher.update();
+
+        let parent = launcher.server_units.get(&28).unwrap();
+        assert_eq!(parent.abilities[0].data, 0.0);
+        assert_eq!(parent.health.health, 100.0);
+        assert!(parent.was_healed);
+
+        let ally = launcher.server_units.get(&29).unwrap();
+        assert_eq!(ally.health.health, 110.0);
+        assert!(ally.was_healed);
+        let far_ally = launcher.server_units.get(&30).unwrap();
+        assert_eq!(far_ally.health.health, 100.0);
+        assert!(!far_ally.was_healed);
+        let enemy = launcher.server_units.get(&31).unwrap();
+        assert_eq!(enemy.health.health, 100.0);
+        assert!(!enemy.was_healed);
     }
 
     #[test]

@@ -492,6 +492,7 @@ pub struct RepairFieldTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepairFieldPulse {
     pub heals: Vec<f32>,
+    pub target_ids: Vec<u32>,
     pub active_effect: bool,
     pub timer: f32,
 }
@@ -546,6 +547,41 @@ impl RepairFieldAbility {
         }
     }
 
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("RepairFieldAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("RepairFieldAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let amount = parts.next()?.parse().ok()?;
+        let reload = parts.next()?.parse().ok()?;
+        let range = parts.next()?.parse().ok()?;
+        let heal_percent = parts
+            .next()
+            .map(str::parse)
+            .transpose()
+            .ok()?
+            .unwrap_or(0.0);
+        let same_type_heal_mult = parts
+            .next()
+            .map(str::parse)
+            .transpose()
+            .ok()?
+            .unwrap_or(1.0);
+        let mut ability = Self::with_percent(amount, reload, range, heal_percent);
+        ability.same_type_heal_mult = same_type_heal_mult;
+        if let Some(parentize_effects) = parts.next() {
+            ability.parentize_effects = matches!(parentize_effects, "true" | "1" | "parent");
+        }
+        Some(ability)
+    }
+
     pub fn heal_amount_for(&self, target: RepairFieldTarget) -> f32 {
         let heal_mult = if target.same_type {
             self.same_type_heal_mult
@@ -576,6 +612,7 @@ impl RepairFieldAbility {
 
         Some(RepairFieldPulse {
             heals,
+            target_ids: Vec::new(),
             active_effect: self.was_healed,
             timer: self.timer,
         })
@@ -2152,11 +2189,31 @@ mod tests {
             .expect("reload threshold should fire a pulse");
 
         assert_eq!(pulse.heals, vec![9.0, 28.0]);
+        assert!(pulse.target_ids.is_empty());
         assert!(pulse.active_effect);
         assert_eq!(pulse.timer, 0.0);
         assert!(ability.was_healed);
         assert_eq!(ability.repairs_per_second(), 24.0);
         assert_eq!(ability.repair_percent_per_second(), 30.0);
+    }
+
+    #[test]
+    fn repair_field_descriptor_parses_java_unit_entries() {
+        let ability = RepairFieldAbility::from_descriptor("RepairFieldAbility:10:240:60")
+            .expect("nova descriptor should parse");
+        assert_eq!(ability.amount, 10.0);
+        assert_eq!(ability.reload, 240.0);
+        assert_eq!(ability.range, 60.0);
+        assert_eq!(ability.heal_percent, 0.0);
+        assert_eq!(ability.same_type_heal_mult, 1.0);
+
+        let parentized =
+            RepairFieldAbility::from_descriptor("RepairFieldAbility(5,480,50,2,0.5,true)")
+                .expect("extended descriptor should parse");
+        assert_eq!(parentized.heal_percent, 2.0);
+        assert_eq!(parentized.same_type_heal_mult, 0.5);
+        assert!(parentized.parentize_effects);
+        assert!(RepairFieldAbility::from_descriptor("ShieldRegenFieldAbility").is_none());
     }
 
     #[test]

@@ -2860,3 +2860,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入护盾回复单位能力运行时`。
   3. 后续补 `applyEffect` / `activeEffect` / `sound`、`UnitType.shieldColor`、client local ability tick 与结构化 ability spec / mod patcher。
+
+---
+
+## 86. 最新闭环记录：RepairFieldAbility / nova-poly-oct server health runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `RepairFieldAbility.java` 与 `UnitTypes` 中 nova / poly / oct，把单位治疗场接入 `UnitType` content、`UnitComp` ability slot、server same-team unit health runtime。
+- Java 依据：
+  - `RepairFieldAbility.update(Unit unit)`：`timer += Time.delta`，达到 `reload` 后遍历 `Units.nearby(unit.team, unit.x, unit.y, range, ...)`；
+  - 若目标 `other.damaged()`，播放 `healEffect` 并设置 `wasHealed = true`；
+  - 对范围内同队目标执行 `other.heal((amount + healPercent / 100f * other.maxHealth()) * healMult)`，同类型目标使用 `sameTypeHealMult`；
+  - 任一目标受治疗时播放 `activeEffect` / `sound`，最后 `timer = 0f`；
+  - Java 参数：`nova(10,240,60)`、`poly(5,480,50)`、`oct(130,120,140)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `RepairFieldPulse` 增加 `target_ids`；
+    - 新增 `RepairFieldAbility::from_descriptor(...)`，支持 `RepairFieldAbility:amount:reload:range[:healPercent[:sameTypeHealMult[:parentizeEffects]]]` 与括号形式；
+    - 新增 descriptor 解析测试。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 将 nova 的裸 `RepairFieldAbility` 替换为 `RepairFieldAbility:10:240:60`；
+    - 为 poly / oct 补上 `RepairFieldAbility:5:480:50` 与 `RepairFieldAbility:130:120:140`；
+    - 内容覆盖测试断言三者存在。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::update_repair_field_abilities(...)`；
+    - 使用 `AbilityWire.data` 保存 timer，调用方闭包按 ability range 提供同队目标、damaged/maxHealth/sameType。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 的 playing frame 内调用 `tick_server_repair_field_abilities(1.0)`；
+    - server 对同队、存活、范围内 `server_units`（包含自身）执行 `heal_mark(...)` 与 `HealthComp::heal(...)`，然后刷新组件视图；
+    - 新增 `server_update_ticks_nova_repair_field_for_nearby_allies`，验证 parent 自身与近同队获得治疗，远同队和敌队不受影响。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core repair_field --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_repair_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server repair_field --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入单位治疗场能力运行时`。
+  3. 后续补 `healEffect` / `activeEffect` / `sound` 表现层、client local ability tick、结构化 ability spec / mod patcher。
