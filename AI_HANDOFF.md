@@ -4128,3 +4128,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 真实 desktop 2D/GPU backend 尚未接入；当前只到 frame data/primitive；
   3. payload mirror 仍只是 kind/count 近似，不携带真实 payload 内容；
   4. `Fx.ripple` id 仍沿用既有 `243`，完整 content id 审计时需要统一确认。
+
+---
+
+## 124. 最新闭环记录：Fx.smokePuff 双圆粒子迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `Fx.smokePuff`，并让现有标准 effect primitive 链路能表达 Java 中“每个随机向量绘制主/副两枚圆”的 renderer 形态。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1814` 附近；
+  - `new Effect(30, ...)`；
+  - `color(e.color)`；
+  - `randLenVectors(e.id, 6, 4f + 30f * e.finpow(), ...)`；
+  - 主圆：`Fill.circle(e.x + x, e.y + y, e.fout() * 3f)`；
+  - 副圆：`Fill.circle(e.x + x / 2f, e.y + y / 2f, e.fout())`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SMOKE_PUFF_ID = 154`；
+    - 接入 `standard_effect_id("smokePuff")`；
+    - 接入 `standard_effect(FX_SMOKE_PUFF_ID)`，lifetime `30.0`；
+    - `StandardEffectParticleSpec` 新增 secondary circle 参数；
+    - `expand_seeded_particle_circles(...)` 支持每个 vector 生成主圆 + 可选副圆；
+    - `standard_effect_draw_plan(...)` 新增 `smokePuff`：
+      - `count=6`
+      - `length=4.0 + 30.0 * finpow`
+      - 主圆半径 `3.0 * fout`
+      - 副圆 offset scale `0.5`
+      - 副圆半径 `1.0 * fout`
+      - 颜色使用 packet/local effect 输入色 `e.color`。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 注意事项：
+  - 这次没有改动真实 renderer backend；仍是无依赖 primitive/data 边界；
+  - `Fx.ripple` id 仍沿用既有 `243`，完整 content id 审计时需要统一；
+  - 子代理只读审计建议下一批优先迁移：`shootSmallSmoke`、`smokeAoeCloud`、`missileTrailSmokeSmall`、`missileTrailSmoke`、`neoplasmSplat`。

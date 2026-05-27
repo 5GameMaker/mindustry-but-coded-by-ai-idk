@@ -38,6 +38,8 @@ pub const FX_STEAM_ID: i32 = 123;
 pub const FX_VAPOR_ID: i32 = 128;
 /// Upstream `Fx.fireballsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
+/// Upstream `Fx.smokePuff` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SMOKE_PUFF_ID: i32 = 154;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -64,6 +66,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "steam" => Some(FX_STEAM_ID),
         "vapor" => Some(FX_VAPOR_ID),
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
+        "smokePuff" => Some(FX_SMOKE_PUFF_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -108,6 +111,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_FIREBALL_SMOKE_ID => {
             Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SMOKE_PUFF_ID => Effect::with_lifetime(FX_SMOKE_PUFF_ID, 30.0, DEFAULT_EFFECT_CLIP),
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -152,6 +156,11 @@ pub struct StandardEffectParticleSpec {
     pub radius_fin_scale: f32,
     pub radius_fout_scale: f32,
     pub radius_fslope_scale: f32,
+    pub secondary_vector_scale: f32,
+    pub secondary_radius_base: f32,
+    pub secondary_radius_fin_scale: f32,
+    pub secondary_radius_fout_scale: f32,
+    pub secondary_radius_fslope_scale: f32,
     pub alpha_midpoint: bool,
 }
 
@@ -224,35 +233,62 @@ impl StandardEffectDrawPlan {
             return Vec::new();
         };
 
-        vectors
-            .iter()
-            .take(particles.count as usize)
-            .map(|vector| {
-                let (fin, fout, fslope) = if particles.progress.is_some() {
-                    (
-                        vector.fin.clamp(0.0, 1.0),
-                        vector.fout.clamp(0.0, 1.0),
-                        effect_fslope_from_fin(vector.fin),
-                    )
+        let has_secondary_circle = particles.secondary_vector_scale != 0.0
+            || particles.secondary_radius_base != 0.0
+            || particles.secondary_radius_fin_scale != 0.0
+            || particles.secondary_radius_fout_scale != 0.0
+            || particles.secondary_radius_fslope_scale != 0.0;
+        let mut circles = Vec::with_capacity(
+            particles.count as usize
+                * if has_secondary_circle {
+                    2_usize
                 } else {
-                    (particles.fin, particles.fout, particles.fslope)
-                };
-                let radius = particles.radius_base
-                    + particles.radius_fin_scale * fin
-                    + particles.radius_fout_scale * fout
-                    + particles.radius_fslope_scale * fslope;
-                let alpha = if particles.alpha_midpoint {
-                    self.alpha * effect_fslope_from_fin(fin)
-                } else {
-                    self.alpha
-                };
-                StandardEffectCirclePrimitive {
-                    center: (self.center.0 + vector.x, self.center.1 + vector.y),
+                    1_usize
+                },
+        );
+
+        for vector in vectors.iter().take(particles.count as usize) {
+            let (fin, fout, fslope) = if particles.progress.is_some() {
+                (
+                    vector.fin.clamp(0.0, 1.0),
+                    vector.fout.clamp(0.0, 1.0),
+                    effect_fslope_from_fin(vector.fin),
+                )
+            } else {
+                (particles.fin, particles.fout, particles.fslope)
+            };
+            let radius = particles.radius_base
+                + particles.radius_fin_scale * fin
+                + particles.radius_fout_scale * fout
+                + particles.radius_fslope_scale * fslope;
+            let alpha = if particles.alpha_midpoint {
+                self.alpha * effect_fslope_from_fin(fin)
+            } else {
+                self.alpha
+            };
+            circles.push(StandardEffectCirclePrimitive {
+                center: (self.center.0 + vector.x, self.center.1 + vector.y),
+                radius,
+                alpha,
+            });
+
+            if has_secondary_circle {
+                let radius = particles.secondary_radius_base
+                    + particles.secondary_radius_fin_scale * fin
+                    + particles.secondary_radius_fout_scale * fout
+                    + particles.secondary_radius_fslope_scale * fslope;
+                circles.push(StandardEffectCirclePrimitive {
+                    center: (
+                        self.center.0 + vector.x * particles.secondary_vector_scale,
+                        self.center.1 + vector.y * particles.secondary_vector_scale,
+                    ),
                     radius,
                     alpha,
-                }
-            })
-            .collect()
+                });
+            }
+        }
+
+        circles
     }
 
     pub fn expand_seeded_particle_circles_from_seed(&self) -> Vec<StandardEffectCirclePrimitive> {
@@ -505,6 +541,11 @@ pub fn standard_effect_draw_plan(
                     1.4
                 },
                 radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
             light_color: None,
@@ -536,6 +577,11 @@ pub fn standard_effect_draw_plan(
                 radius_fin_scale: 0.0,
                 radius_fout_scale: 0.0,
                 radius_fslope_scale: 1.5,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
             light_color: Some("Pal.lightFlame"),
@@ -571,6 +617,11 @@ pub fn standard_effect_draw_plan(
                 radius_fin_scale: 0.0,
                 radius_fout_scale: 0.0,
                 radius_fslope_scale: 1.5,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
             light_color: None,
@@ -602,6 +653,11 @@ pub fn standard_effect_draw_plan(
                 radius_fin_scale: 5.0,
                 radius_fout_scale: 0.0,
                 radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
             light_color: None,
@@ -633,6 +689,47 @@ pub fn standard_effect_draw_plan(
                 radius_fin_scale: 0.0,
                 radius_fout_scale: 1.5,
                 radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_SMOKE_PUFF_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 6,
+                progress: None,
+                length: 4.0 + 30.0 * finpow,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 3.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.5,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 1.0,
+                secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
             light_color: None,
@@ -664,6 +761,11 @@ pub fn standard_effect_draw_plan(
                 radius_fin_scale: 0.0,
                 radius_fout_scale: 4.0,
                 radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: true,
             }),
             light_color: None,
@@ -695,6 +797,11 @@ pub fn standard_effect_draw_plan(
                 radius_fin_scale: 0.0,
                 radius_fout_scale: 3.0,
                 radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
             light_color: None,
@@ -2005,6 +2112,7 @@ mod tests {
             standard_effect_id("fireballsmoke"),
             Some(FX_FIREBALL_SMOKE_ID)
         );
+        assert_eq!(standard_effect_id("smokePuff"), Some(FX_SMOKE_PUFF_ID));
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -2029,6 +2137,7 @@ mod tests {
         assert_eq!(standard_effect(FX_MAGMA_SMOKE_ID).unwrap().lifetime, 110.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
+        assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
@@ -2223,6 +2332,25 @@ mod tests {
         assert_eq!(fireball_particles.length, 5.5);
         assert_eq!(fireball_particles.radius_base, 0.2);
         assert_eq!(fireball_particles.radius_fout_scale, 1.5);
+
+        let smoke_puff = standard_effect_draw_plan(
+            Some(FX_SMOKE_PUFF_ID as u16),
+            154,
+            1.0,
+            2.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(smoke_puff.input_color, Some(DecalColor::WHITE));
+        let smoke_puff_particles = smoke_puff.particles.unwrap();
+        assert_eq!(smoke_puff_particles.count, 6);
+        assert_eq!(smoke_puff_particles.length, 11.5);
+        assert_eq!(smoke_puff_particles.radius_fout_scale, 3.0);
+        assert_eq!(smoke_puff_particles.secondary_vector_scale, 0.5);
+        assert_eq!(smoke_puff_particles.secondary_radius_fout_scale, 1.0);
 
         let cloud = standard_effect_draw_plan(
             Some(FX_SMOKE_CLOUD_ID as u16),
@@ -2455,6 +2583,40 @@ mod tests {
         assert!((seeded_cloud_vectors[1].y - 2.8928096).abs() < 0.00001);
         assert!((seeded_cloud_vectors[1].fin - 0.09787762).abs() < 0.00001);
         assert!((seeded_cloud_vectors[1].fout - 0.09787762).abs() < 0.00001);
+
+        let smoke_puff = standard_effect_draw_plan(
+            Some(FX_SMOKE_PUFF_ID as u16),
+            154,
+            3.0,
+            4.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let smoke_puff_circles = smoke_puff.expand_seeded_particle_circles(&[
+            StandardEffectParticleVector {
+                x: 4.0,
+                y: 6.0,
+                fin: 0.5,
+                fout: 0.5,
+            },
+            StandardEffectParticleVector {
+                x: -2.0,
+                y: 8.0,
+                fin: 0.5,
+                fout: 0.5,
+            },
+        ]);
+        assert_eq!(smoke_puff_circles.len(), 4);
+        assert_eq!(smoke_puff_circles[0].center, (7.0, 10.0));
+        assert_eq!(smoke_puff_circles[0].radius, 1.5);
+        assert_eq!(smoke_puff_circles[1].center, (5.0, 7.0));
+        assert_eq!(smoke_puff_circles[1].radius, 0.5);
+        assert_eq!(smoke_puff_circles[2].center, (1.0, 12.0));
+        assert_eq!(smoke_puff_circles[3].center, (2.0, 8.0));
+        assert_eq!(smoke_puff.circle_render_primitives_from_seed().len(), 12);
 
         let ripple = standard_effect_draw_plan(
             Some(FX_RIPPLE_ID as u16),

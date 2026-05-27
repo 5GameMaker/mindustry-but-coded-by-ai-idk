@@ -5820,3 +5820,49 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 当前 payload mirror 仍只保留 kind/count 近似，未携带真实 build/unit payload 内容；
   - item/payload mirror 移除 map entry 时是否应同步清 typed runtime 仍需结合 Java 真实 packet 生命周期继续确认。
+
+### 12.198 Fx.smokePuff 双圆粒子绘制计划
+
+- 2026-05-28：继续对照 `Fx.java`，迁移 `smokePuff` 标准特效；这是首个“每个 `randLenVectors` 向量展开为两个圆”的标准 Fx，因此同步扩展了现有 `SeededCircleParticles` primitive 展开能力。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1814` 附近：
+    - `smokePuff = new Effect(30, e -> { ... })`；
+    - `color(e.color)`；
+    - `randLenVectors(e.id, 6, 4f + 30f * e.finpow(), ...)`；
+    - 每个向量绘制两枚 `Fill.circle`：主圆 `e.x + x, e.y + y, e.fout() * 3f`，副圆 `e.x + x / 2f, e.y + y / 2f, e.fout()`。
+  - 本地按 `new Effect` 声明顺序计数，`smokePuff` 为 `id=154`；`Fx.ripple` 的完整 id 审计仍保留既有待办。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SMOKE_PUFF_ID = 154`；
+    - `standard_effect_id("smokePuff")`、`standard_effect(FX_SMOKE_PUFF_ID)` 接入，lifetime 为 `30.0`、clip 沿用 `DEFAULT_EFFECT_CLIP`、layer 沿用默认层；
+    - `StandardEffectParticleSpec` 新增 secondary circle 参数：
+      - `secondary_vector_scale`
+      - `secondary_radius_base`
+      - `secondary_radius_fin_scale`
+      - `secondary_radius_fout_scale`
+      - `secondary_radius_fslope_scale`
+    - `StandardEffectDrawPlan::expand_seeded_particle_circles(...)` 现在可在每个 seeded vector 后追加副圆 primitive；
+    - `standard_effect_draw_plan(...)` 新增 `smokePuff`：
+      - `input_color = Some(color)`；
+      - `count = 6`；
+      - `length = 4.0 + 30.0 * finpow`；
+      - 主圆半径 `3.0 * fout`；
+      - 副圆位置缩放 `0.5`，半径 `1.0 * fout`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `smokePuff` name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖 draw plan 字段；
+  - `standard_effect_particle_plan_expands_to_circle_primitives` 覆盖双圆展开与 seeded render primitive 数量。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - `Fx.java` 仍未完整迁移；
+  - `smokePuff` 已进入 primitive/data 边界，但真实 desktop 2D/GPU 绘制 backend 尚未接入；
+  - 下一批适合继续迁移：`shootSmallSmoke`、`smokeAoeCloud`、`missileTrailSmokeSmall`、`missileTrailSmoke`、`neoplasmSplat`。
