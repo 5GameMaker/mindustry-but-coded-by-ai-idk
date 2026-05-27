@@ -4258,3 +4258,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `spawner_unit_id` 还未接入 `UnitSpawnAbility` 等 unit-spawner 路径；
   - `GameServiceUnitCreatePlan` 已补齐 player/default team 语义，但还未从真实 runtime event 自动应用到 `DefaultGameService` / achievement backend；
   - Java↔Rust 联机 smoke 仍需后续验证 `AssemblerUnitSpawnedCallPacket`、`UnitSpawnCallPacket`、UnitCreateEvent 统计 sidecar 在同一帧组合下不丢失。
+
+### 12.137 UnitFactory / Reconstructor UnitCreateEvent 接入
+
+- 2026-05-27：继续沿 `UnitCreateEvent` 统一入口迁移，把 Java `UnitFactory` 与 `Reconstructor` 的单位创建/升级完成事件接到 Rust owned runtime，而不是只让 UnitAssembler 计数。
+- Java 依据：
+  - `UnitFactoryBuild.updateTile()` 在 `progress >= plan.time` 后创建 `plan.unit`、写入 command、生成 `UnitPayload`、`consume()`，随后 `Events.fire(new UnitCreateEvent(payload.unit, this))`；
+  - `ReconstructorBuild.updateTile()` 在 `progress >= constructTime` 后把 `payload.unit` 替换为升级后 unit、写入 command、播放效果、`consume()`，随后 `Events.fire(new UnitCreateEvent(payload.unit, this))`。
+- Rust 新增/变化：
+  - `advance_owned_unit_factories_ticks(...)` 在真实生成 unit payload 且完成 item consume 后调用 `note_unit_create_event(None, unit_name, team, Some(factory_tile), None)`；
+  - `advance_owned_unit_reconstructors_ticks(...)` 在 payload unit type/controller patch 成功、完成 consume 后调用同一 `note_unit_create_event(...)`；
+  - Reconstructor 的 target upgrade 解析现在同时保留升级后 unit name，避免用 content id 反查时丢失事件统计名称；
+  - 现有 UnitFactory/Reconstructor owned runtime 测试扩展断言 `unit_create_events`、`state.stats.units_created` 与 campaign `units_produced`。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core game_runtime_unit_factory_outputs_payload_to_front_conveyor --lib`
+  - `cargo test -p mindustry-core game_runtime_unit_reconstructor_upgrades_payload_on_tick_like_java --lib`
+- 仍未完成：
+  - `PayloadSource` 的 unit 配置分支仍需接入 UnitCreateEvent；block 配置分支不应发 UnitCreateEvent；
+  - `UnitSpawnAbility` 仍需接入 `spawner_unit_id` 非空的 UnitCreateEvent 路径；
+  - `UnitFactory` / `Reconstructor` 的 createSound pitch、shake/effect、完整 service/achievement bridge 仍需后续继续补齐。

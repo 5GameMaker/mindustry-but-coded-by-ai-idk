@@ -18693,6 +18693,7 @@ impl GameRuntime {
 
             let mut consume_items = false;
             let mut arrived_output = false;
+            let mut created_unit_name = None;
             {
                 let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
                     self.unit_runtime_states.get_mut(&tile_pos)
@@ -18793,6 +18794,7 @@ impl GameRuntime {
                         factory.base.has_payload = true;
                         consume_items = !plan_requirements.is_empty();
                         report.produced_unit_payloads += 1;
+                        created_unit_name = Some(unit_type.name().to_string());
                     } else {
                         factory.base.has_payload = common.payload.is_some();
                         report.invalid_plans += 1;
@@ -18803,6 +18805,9 @@ impl GameRuntime {
             if consume_items {
                 consume_building_items(&mut self.buildings[index], &plan_requirements);
                 report.consumed_item_batches += 1;
+            }
+            if let Some(unit_name) = created_unit_name {
+                self.note_unit_create_event(None, unit_name, team, Some(tile_pos), None);
             }
         }
 
@@ -19440,6 +19445,7 @@ impl GameRuntime {
                             {
                                 Some((
                                     to.base.mappable.base.id,
+                                    to.name().to_string(),
                                     reconstructor
                                         .command_id
                                         .map(|id| id as ContentId)
@@ -19453,6 +19459,7 @@ impl GameRuntime {
                 });
 
             let mut consume_items = false;
+            let mut upgraded_unit_name = None;
             {
                 let Some(GameRuntimeUnitBlockState::Reconstructor {
                     common,
@@ -19531,26 +19538,28 @@ impl GameRuntime {
                     let patched = common
                         .payload
                         .as_mut()
-                        .zip(target_upgrade)
-                        .map(|(payload, (unit_id, command_id, command_pos))| {
-                            let type_patched = payload_ref_patch_unit_type(payload, unit_id);
+                        .zip(target_upgrade.as_ref())
+                        .map(|(payload, (unit_id, unit_name, command_id, command_pos))| {
+                            let type_patched = payload_ref_patch_unit_type(payload, *unit_id);
                             let controller_patched =
                                 if command_id.is_some() || command_pos.is_some() {
                                     Self::payload_ref_patch_unit_controller(
                                         payload,
                                         &type_io::ControllerWire::Command(type_io::CommandWire {
-                                            target_pos: command_pos,
-                                            command_id,
+                                            target_pos: *command_pos,
+                                            command_id: *command_id,
                                             ..type_io::CommandWire::new()
                                         }),
                                     )
                                 } else {
                                     true
                                 };
-                            type_patched && controller_patched
+                            (type_patched && controller_patched, unit_name.clone())
                         })
-                        .unwrap_or(false);
+                        .unwrap_or((false, String::new()));
+                    let (patched, unit_name) = patched;
                     if patched {
+                        upgraded_unit_name = Some(unit_name);
                         report.upgraded_payloads += 1;
                         consume_items = !item_requirements.is_empty();
                     } else {
@@ -19564,6 +19573,9 @@ impl GameRuntime {
             if consume_items {
                 consume_building_items(&mut self.buildings[index], &item_requirements);
                 report.consumed_item_batches += 1;
+            }
+            if let Some(unit_name) = upgraded_unit_name {
+                self.note_unit_create_event(None, unit_name, team, Some(tile_pos), None);
             }
         }
 
@@ -23605,6 +23617,8 @@ mod tests {
             16,
         );
         let mut runtime = GameRuntime::default();
+        runtime.state.rules.default_team = 2;
+        runtime.state.set_sector(Some(Sector::new(23)));
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(24, 24);
         let mut factory_building =
@@ -23642,6 +23656,15 @@ mod tests {
 
         let produced = runtime.advance_owned_unit_factories(&content, 1.0).unwrap();
         assert_eq!(produced.produced_unit_payloads, 1);
+        assert_eq!(runtime.unit_create_events.len(), 1);
+        assert_eq!(runtime.unit_create_events[0].unit_name, flare.name());
+        assert_eq!(runtime.unit_create_events[0].team, TeamId(2));
+        assert_eq!(
+            runtime.unit_create_events[0].spawner_tile,
+            Some(factory_tile)
+        );
+        assert_eq!(runtime.state.stats.units_created, 1);
+        assert_eq!(runtime.campaign_stats.get_unit_produced(flare.name()), 1);
         let moved = runtime.advance_owned_unit_factories(&content, 1.0).unwrap();
 
         assert_eq!(moved.arrived_output_payloads, 1);
@@ -23766,6 +23789,8 @@ mod tests {
         };
         let tile_pos = point2_pack(18, 10);
         let mut runtime = GameRuntime::default();
+        runtime.state.rules.default_team = 3;
+        runtime.state.set_sector(Some(Sector::new(24)));
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(32, 24);
         runtime.add_building(BuildingComp::new(
@@ -23802,6 +23827,12 @@ mod tests {
         assert_eq!(report.reconstructor_candidates, 1);
         assert_eq!(report.upgraded_payloads, 1);
         assert_eq!(report.invalid_payloads, 0);
+        assert_eq!(runtime.unit_create_events.len(), 1);
+        assert_eq!(runtime.unit_create_events[0].unit_name, horizon.name());
+        assert_eq!(runtime.unit_create_events[0].team, TeamId(3));
+        assert_eq!(runtime.unit_create_events[0].spawner_tile, Some(tile_pos));
+        assert_eq!(runtime.state.stats.units_created, 1);
+        assert_eq!(runtime.campaign_stats.get_unit_produced(horizon.name()), 1);
         let Some(GameRuntimeUnitBlockState::Reconstructor {
             common,
             reconstructor,

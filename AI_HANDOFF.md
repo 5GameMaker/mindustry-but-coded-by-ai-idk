@@ -2605,3 +2605,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 后续把 `unit_create_events` drain/bridge 到正式事件 bus / platform service runtime；目前只是 runtime sidecar + stats。
   3. 继续把同一个 `note_unit_create_event(...)` 接到 `UnitFactory`、`Reconstructor`、`PayloadSource`、`UnitSpawnAbility`，避免只有 assembler 计数。
   4. `spawner_unit_id` 后续给 `UnitSpawnAbility` 等 unit-spawner 路径补齐。
+
+---
+
+## 79. 最新闭环记录：UnitFactory / Reconstructor UnitCreateEvent
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：把 `UnitCreateEvent` 的统一统计入口从 UnitAssembler 扩展到 Java 也会发事件的 `UnitFactory` 和 `Reconstructor`。
+- Java 依据：
+  - `UnitFactoryBuild.updateTile()`：创建 `plan.unit`、写 command、生成 `UnitPayload`、`consume()` 后 `Events.fire(new UnitCreateEvent(payload.unit, this))`；
+  - `ReconstructorBuild.updateTile()`：升级 payload unit、写 command、效果、`consume()` 后 `Events.fire(new UnitCreateEvent(payload.unit, this))`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `advance_owned_unit_factories_ticks(...)` 在 payload 成功生成并 consume 后调用 `note_unit_create_event(None, unit_name, team, Some(factory_tile), None)`；
+    - `advance_owned_unit_reconstructors_ticks(...)` 在 payload patch 成功并 consume 后调用同一入口；
+    - Reconstructor target upgrade tuple 增加升级后 unit name，用于事件统计；
+    - 扩展 `game_runtime_unit_factory_outputs_payload_to_front_conveyor` 与 `game_runtime_unit_reconstructor_upgrades_payload_on_tick_like_java`，断言 sidecar、`units_created`、`campaign_stats.units_produced`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_unit_factory_outputs_payload_to_front_conveyor --lib`
+  - `cargo test -p mindustry-core game_runtime_unit_reconstructor_upgrades_payload_on_tick_like_java --lib`
+- 当前仍需继续：
+  1. 跑 `cargo check -p mindustry-core`、`cargo fmt --check`、`git diff --check` 后中文提交并推送。
+  2. 下一闭环优先做 `PayloadSource` 的 unit payload 分支：只在配置为 unit 时发 UnitCreateEvent，配置为 block 时不能发。
+  3. `UnitSpawnAbility` 最后接，那里需要 `spawner_unit_id` 非空，并且不属于 block owned tick 路径。
