@@ -9845,6 +9845,24 @@ mod tests {
     }
 
     #[test]
+    fn unit_entered_payload_packet_uses_java_field_order() {
+        let unit_entered_payload = UnitEnteredPayloadCallPacket {
+            unit: UnitRef::Unit { id: 92 },
+            build: BuildingRef::new(crate::mindustry::world::point2_pack(5, 6)),
+        };
+        let mut bytes = Vec::new();
+        unit_entered_payload.write_to(&mut bytes).unwrap();
+        let mut expected = vec![2];
+        expected.extend_from_slice(&92i32.to_be_bytes());
+        expected.extend_from_slice(&crate::mindustry::world::point2_pack(5, 6).to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            UnitEnteredPayloadCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            unit_entered_payload
+        );
+    }
+
+    #[test]
     fn registered_manifest_keeps_upstream_base_packet_ids_stable() {
         let ids: Vec<_> = registered_packet_manifest()
             .iter()

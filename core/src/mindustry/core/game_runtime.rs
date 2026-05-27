@@ -29,15 +29,15 @@ use crate::mindustry::{
             LaunchCoreBlock, LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp,
             PuddleTile, UnitComp, WorldLabelComp,
         },
-        entity_class_kind, EntityClassKind, PuddleLiquidInfo,
+        entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
     game::CoreInfo,
     input::input_handler::ItemRemoveStackPlan,
     io::{
-        type_io, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
-        BuildingRef, LegacyShortChunkMap, TeamId,
+        type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
+        LegacyShortChunkMap, TeamId, UnitRef,
     },
-    net::NetworkPlayerSyncData,
+    net::{NetworkPlayerSyncData, UnitEnteredPayloadCallPacket},
     r#type::{PayloadSeq, WeatherState},
     vars::TILE_SIZE,
     world::block::Block,
@@ -1255,6 +1255,17 @@ pub struct GameRuntimeClientSnapshotApplyReport {
     pub hidden_missing_entities: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeClientUnitEnteredPayloadApplyReport {
+    pub unit_id: Option<i32>,
+    pub build_tile_pos: Option<i32>,
+    pub unit_found: bool,
+    pub building_found: bool,
+    pub team_matched: bool,
+    pub unit_removed: bool,
+    pub payload_attached: bool,
+}
+
 impl GameRuntimeClientSnapshotApplyReport {
     pub fn merge(&mut self, other: Self) {
         self.block_records_seen += other.block_records_seen;
@@ -2264,6 +2275,9 @@ pub struct GameRuntime {
     pub client_weather_snapshot_entities: BTreeMap<i32, WeatherState>,
     pub client_world_label_snapshot_entities: BTreeMap<i32, WorldLabelComp>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
+    pub client_unit_entered_payload_packets_applied: usize,
+    pub last_client_unit_entered_payload_report:
+        Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
 }
 
 impl Default for GameRuntime {
@@ -2328,6 +2342,8 @@ impl GameRuntime {
             client_weather_snapshot_entities: BTreeMap::new(),
             client_world_label_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
+            client_unit_entered_payload_packets_applied: 0,
+            last_client_unit_entered_payload_report: None,
         }
     }
 
@@ -3082,6 +3098,247 @@ impl GameRuntime {
             }),
         );
         true
+    }
+
+    pub fn apply_client_unit_entered_payload_packet(
+        &mut self,
+        content: &ContentLoader,
+        packet: &UnitEnteredPayloadCallPacket,
+    ) -> GameRuntimeClientUnitEnteredPayloadApplyReport {
+        let mut report = GameRuntimeClientUnitEnteredPayloadApplyReport {
+            build_tile_pos: packet.build.tile_pos,
+            ..GameRuntimeClientUnitEnteredPayloadApplyReport::default()
+        };
+        let UnitRef::Unit { id: unit_id } = packet.unit else {
+            self.last_client_unit_entered_payload_report = Some(report);
+            return report;
+        };
+        report.unit_id = Some(unit_id);
+
+        let Some(build_tile_pos) = packet.build.tile_pos else {
+            self.last_client_unit_entered_payload_report = Some(report);
+            return report;
+        };
+
+        let Some(building_index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == build_tile_pos)
+        else {
+            self.last_client_unit_entered_payload_report = Some(report);
+            return report;
+        };
+        report.building_found = true;
+
+        let Some(unit_snapshot) = self.client_unit_snapshot_entities.get(&unit_id).cloned() else {
+            self.last_client_unit_entered_payload_report = Some(report);
+            return report;
+        };
+        report.unit_found = true;
+
+        let building = self.buildings[building_index].clone();
+        if unit_snapshot.team_id() != building.team {
+            self.last_client_unit_entered_payload_report = Some(report);
+            return report;
+        }
+        report.team_matched = true;
+
+        let Some(payload) = Self::client_unit_payload_ref_from_unit(&unit_snapshot) else {
+            self.last_client_unit_entered_payload_report = Some(report);
+            return report;
+        };
+
+        if let Some(mut removed_unit) = self.client_unit_snapshot_entities.remove(&unit_id) {
+            removed_unit.remove(true);
+            report.unit_removed = true;
+        }
+        if let Some(record) = self.client_entity_snapshot_records.get_mut(&unit_id) {
+            record.hidden = true;
+        }
+        self.client_hidden_entity_ids.insert(unit_id);
+
+        if self.ensure_client_payload_state_for_building(content, &building) {
+            report.payload_attached = self.attach_client_unit_payload_to_building_state(
+                &building,
+                &unit_snapshot,
+                payload,
+            );
+        }
+
+        if report.payload_attached {
+            self.client_unit_entered_payload_packets_applied += 1;
+        }
+        self.last_client_unit_entered_payload_report = Some(report);
+        report
+    }
+
+    fn client_unit_payload_ref_from_unit(unit: &UnitComp) -> Option<PayloadRef> {
+        Some(PayloadRef::Unit {
+            class_id: entity_class_id(unit.type_info.name())?,
+            unit_bytes: Vec::new(),
+        })
+    }
+
+    fn ensure_client_payload_state_for_building(
+        &mut self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> bool {
+        if self.payload_runtime_states.contains_key(&building.tile_pos) {
+            return true;
+        }
+
+        let Some(block) = content.block(building.block.id) else {
+            return false;
+        };
+        let state = match block {
+            BlockDef::PayloadMassDriver(_) => Some(GameRuntimePayloadBlockState::MassDriver {
+                common: PayloadBlockBuildState::default(),
+                driver: PayloadMassDriverState::default(),
+            }),
+            BlockDef::PayloadLoader(loader) if loader.accepts_payload => {
+                Some(GameRuntimePayloadBlockState::Loader {
+                    common: PayloadBlockBuildState::default(),
+                    loader: PayloadLoaderState::default(),
+                })
+            }
+            BlockDef::PayloadDeconstructor(_) => {
+                Some(GameRuntimePayloadBlockState::Deconstructor {
+                    common: PayloadBlockBuildState::default(),
+                    deconstructor: PayloadDeconstructorState::default(),
+                })
+            }
+            BlockDef::PayloadConstructor(_) => Some(GameRuntimePayloadBlockState::Constructor {
+                common: PayloadBlockBuildState::default(),
+                producer: BlockProducerState::default(),
+                recipe: None,
+            }),
+            BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadSource => {
+                Some(GameRuntimePayloadBlockState::Source {
+                    common: PayloadBlockBuildState::default(),
+                    source: PayloadSourceState::default(),
+                })
+            }
+            BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadVoid => Some(
+                GameRuntimePayloadBlockState::Void(PayloadBlockBuildState::default()),
+            ),
+            _ => None,
+        };
+        let Some(state) = state else {
+            return false;
+        };
+        self.payload_runtime_states.insert(building.tile_pos, state);
+        true
+    }
+
+    fn attach_client_unit_payload_to_building_state(
+        &mut self,
+        building: &BuildingComp,
+        unit: &UnitComp,
+        payload: PayloadRef,
+    ) -> bool {
+        let build_pos = PayloadVec2 {
+            x: building.x,
+            y: building.y,
+        };
+        let source_pos = PayloadVec2 {
+            x: unit.x(),
+            y: unit.y(),
+        };
+        let size = building.block.size;
+        let rotation = unit.rotation();
+        let Some(state) = self.payload_runtime_states.get_mut(&building.tile_pos) else {
+            return false;
+        };
+        match state {
+            GameRuntimePayloadBlockState::MassDriver { common, driver }
+                if common.payload.is_none() =>
+            {
+                payload_block_handle_payload(
+                    common,
+                    payload,
+                    build_pos,
+                    source_pos,
+                    rotation,
+                    size,
+                    TILE_SIZE as f32,
+                );
+                driver.loaded = true;
+                true
+            }
+            GameRuntimePayloadBlockState::Loader { common, loader } if common.payload.is_none() => {
+                payload_block_handle_payload(
+                    common,
+                    payload,
+                    build_pos,
+                    source_pos,
+                    rotation,
+                    size,
+                    TILE_SIZE as f32,
+                );
+                loader.has_payload = true;
+                loader.exporting = false;
+                true
+            }
+            GameRuntimePayloadBlockState::Deconstructor {
+                common,
+                deconstructor,
+            } if common.payload.is_none() => {
+                payload_block_handle_payload(
+                    common,
+                    payload,
+                    build_pos,
+                    source_pos,
+                    rotation,
+                    size,
+                    TILE_SIZE as f32,
+                );
+                deconstructor.has_payload = true;
+                deconstructor.accum = None;
+                true
+            }
+            GameRuntimePayloadBlockState::Constructor {
+                common, producer, ..
+            } if common.payload.is_none() => {
+                payload_block_handle_payload(
+                    common,
+                    payload,
+                    build_pos,
+                    source_pos,
+                    rotation,
+                    size,
+                    TILE_SIZE as f32,
+                );
+                producer.has_payload = true;
+                true
+            }
+            GameRuntimePayloadBlockState::Source { common, source } if common.payload.is_none() => {
+                payload_block_handle_payload(
+                    common,
+                    payload,
+                    build_pos,
+                    source_pos,
+                    rotation,
+                    size,
+                    TILE_SIZE as f32,
+                );
+                source.has_payload = true;
+                true
+            }
+            GameRuntimePayloadBlockState::Void(common) if common.payload.is_none() => {
+                payload_block_handle_payload(
+                    common,
+                    payload,
+                    build_pos,
+                    source_pos,
+                    rotation,
+                    size,
+                    TILE_SIZE as f32,
+                );
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn apply_client_hidden_snapshot_ids(
@@ -17450,6 +17707,81 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_applies_client_unit_entered_payload_packet_to_payload_building() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let loader_block = content.block_by_name("payload-loader").unwrap();
+        let tile_pos = point2_pack(9, 10);
+        let mut runtime = GameRuntime::default();
+        runtime.buildings.push(BuildingComp::new(
+            tile_pos,
+            loader_block.base().clone(),
+            TeamId(3),
+        ));
+        let mut unit = UnitComp::new(5151, flare, TeamId(3));
+        unit.set_pos(12.0, 16.0);
+        unit.set_rotation(135.0);
+        runtime
+            .client_unit_snapshot_entities
+            .insert(unit.id(), unit);
+        runtime.client_entity_snapshot_records.insert(
+            5151,
+            GameRuntimeClientEntitySnapshotRecord {
+                entity_id: 5151,
+                type_id: 3,
+                sync_bytes: vec![1, 2, 3],
+                hidden: false,
+            },
+        );
+
+        let report = runtime.apply_client_unit_entered_payload_packet(
+            &content,
+            &UnitEnteredPayloadCallPacket {
+                unit: UnitRef::Unit { id: 5151 },
+                build: BuildingRef::new(tile_pos),
+            },
+        );
+
+        assert_eq!(report.unit_id, Some(5151));
+        assert_eq!(report.build_tile_pos, Some(tile_pos));
+        assert!(report.unit_found);
+        assert!(report.building_found);
+        assert!(report.team_matched);
+        assert!(report.unit_removed);
+        assert!(report.payload_attached);
+        assert_eq!(runtime.client_unit_entered_payload_packets_applied, 1);
+        assert_eq!(
+            runtime.last_client_unit_entered_payload_report,
+            Some(report)
+        );
+        assert!(!runtime.client_unit_snapshot_entities.contains_key(&5151));
+        assert!(runtime.client_hidden_entity_ids.contains(&5151));
+        assert!(
+            runtime
+                .client_entity_snapshot_records
+                .get(&5151)
+                .unwrap()
+                .hidden
+        );
+
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload-loader should receive a runtime payload state");
+        };
+        assert!(loader.has_payload);
+        assert!(!loader.exporting);
+        assert!(matches!(
+            common.payload,
+            Some(PayloadRef::Unit {
+                class_id: 3,
+                ref unit_bytes
+            }) if unit_bytes.is_empty()
+        ));
+        assert_eq!(common.pay_rotation, 135.0);
+    }
+
+    #[test]
     fn game_runtime_applies_multi_unit_entity_snapshot_packet_with_content() {
         let content = ContentLoader::create_base_content().unwrap();
         let dagger = content.unit_by_name("dagger").unwrap();
@@ -24801,10 +25133,8 @@ mod tests {
             .id;
         let source_tile = point2_pack(4, 4);
         let target_tile = point2_pack(12, 4);
-        let source_building =
-            BuildingComp::new(source_tile, driver_def.base().clone(), TeamId(6));
-        let target_building =
-            BuildingComp::new(target_tile, driver_def.base().clone(), TeamId(6));
+        let source_building = BuildingComp::new(source_tile, driver_def.base().clone(), TeamId(6));
+        let target_building = BuildingComp::new(target_tile, driver_def.base().clone(), TeamId(6));
 
         let mut runtime = GameRuntime::default();
         runtime.state.set(GameStateState::Playing);

@@ -3406,3 +3406,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_launcher_ -- --test-threads=1`
   - `cargo check --workspace`
 - 仍未完成：客户端 typed unit mirror 需要通过后续 authoritative snapshot/明确事件来看到清空结果；`Fx.dropItem` 视觉效果还没有接入 desktop renderer；server 侧仍依赖 `server_units` launcher mirror，后续要接入真实 player unit lifecycle、entity snapshot 和 validate/admin 事件流。
+
+### 12.99 Client UnitEnteredPayload 运行态消费
+
+- 2026-05-27：把 `UnitEnteredPayloadCallPacket` 从 NetClient 记录层推进到 desktop/runtime 消费层，形成 `NetClient last_unit_entered_payload -> DesktopLauncher::sync_unit_entered_payload_to_runtime() -> GameRuntime::apply_client_unit_entered_payload_packet(...)` 的最小客户端运行态闭环。
+- Java 依据：
+  - `InputHandler.unitEnteredPayload(Unit unit, Building build)`：同队校验后 `unit.remove()`，构造 `UnitPayload`，若 `build.acceptPayload(...)` 成功则 `build.handlePayload(...)`；
+  - `CommandAI` 在非 client 侧确认 `unit.type.allowedInPayloads`、`unit.buildOn()` 与 `build.acceptPayload(...)` 后调用 `Call.unitEnteredPayload(unit, build)`。
+- Rust 新增/变化：
+  - `GameRuntimeClientUnitEnteredPayloadApplyReport` 记录 unit/build 是否存在、队伍是否匹配、unit 是否移除、payload 是否挂载；
+  - `GameRuntime::apply_client_unit_entered_payload_packet(...)` 会从 `client_unit_snapshot_entities` 移除目标 unit、标记 raw sidecar hidden、写入 `client_hidden_entity_ids`，并把 placeholder `PayloadRef::Unit { class_id, unit_bytes: [] }` 挂到 payload-loader/constructor/deconstructor/mass-driver/source/void 的 runtime common payload；
+  - `DesktopLauncher` 增加 `sync_unit_entered_payload_to_runtime()`，按 `unit_entered_payload_packets_seen` 游标去重消费 NetClient 最新包；
+  - `UnitEnteredPayloadCallPacket` 增加 wire roundtrip 测试，锁定 `UnitRef -> BuildingRef` 字段顺序。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
+  - `cargo test -p mindustry-core unit_entered_payload_packet_uses_java_field_order`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
+  - `cargo check --workspace`
+- 仍未完成：payload 中的 unit 仍是 class id + 空 bytes placeholder，尚未写入完整 Java `UnitPayload` unit serialization；server 侧还缺从真实 CommandAI / unit buildOn runtime 触发并广播 `UnitEnteredPayloadCallPacket` 的整体链路；客户端 `Fx.unitDrop`/渲染效果尚未接入。
