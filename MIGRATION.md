@@ -3747,6 +3747,9 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `game_runtime_configures_unit_cargo_unload_point_item_value`
   - 新增 `server_update_applies_unit_cargo_unload_tile_config_and_forwards_to_clients`
   - 新增 `desktop_launcher_syncs_unit_cargo_unload_tile_config_packet_to_runtime`
+- 2026-05-27：补齐 `UnitCargoLoader` 构建对真实资源门控的最小接入。loader tick 现在会读取 owned power graph 写回的 `power.status`，并按 `consumeLiquid(nitrogen, 10f / 60f)` 的 Java 配置用现有 liquid consumer helper 计算有效效率；缺电或缺 nitrogen 时不推进 `buildProgress`，资源满足时按 `edelta` 推进并消耗 nitrogen。真实 server->desktop tether spawn smoke 已补充 power-source/nitrogen 基线，避免只靠手写 `building.efficiency` 通过。
+  - 新增 `game_runtime_unit_cargo_loader_stalls_without_power_or_nitrogen`
+  - 调整 `game_runtime_owned_runtime_blocks_advances_unit_cargo_loader_build`、server unit cargo loader smoke 与真实联机 smoke 使用 power-source + nitrogen 复现 Java consume 链。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_tether_block_spawned`
@@ -3756,4 +3759,4 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`
   - `cargo fmt --check`
   - `cargo check --workspace`
-- 仍未完成：server-side `BuildingTetherComp` 正式并入 `UnitComp`/Groups.unit 生命周期、loader 液体/电力 consume 精确联动、unload config 的 UI 选择表/rollback 权限细节、真实 cargo unit AI 往返装卸与 Java 客户端/服务端更完整联机兼容仍待补。
+- 仍未完成：server-side `BuildingTetherComp` 正式并入 `UnitComp`/Groups.unit 生命周期、loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的 UI 选择表/rollback 权限细节、真实 cargo unit AI 往返装卸与 Java 客户端/服务端更完整联机兼容仍待补。

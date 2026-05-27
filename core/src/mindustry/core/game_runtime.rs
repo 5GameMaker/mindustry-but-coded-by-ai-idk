@@ -175,6 +175,7 @@ use crate::mindustry::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
         ConstructBlockState,
     },
+    world::consumers::{consume_liquids_efficiency, consume_power_efficiency, LiquidStackSpec},
     world::meta::BlockFlag,
     world::{
         footprint_tiles, get_edges, point2_pack, point2_x, point2_y, raycast_until, Tile, TimeItem,
@@ -10259,7 +10260,7 @@ impl GameRuntime {
         let mut stale_points = 0;
 
         for index in 0..self.buildings.len() {
-            let (tile_pos, block_id, enabled, efficiency, time_scale) = {
+            let (tile_pos, block_id, enabled, efficiency, time_scale, power_status) = {
                 let building = &self.buildings[index];
                 (
                     building.tile_pos,
@@ -10267,6 +10268,11 @@ impl GameRuntime {
                     building.enabled,
                     building.efficiency,
                     building.time_scale,
+                    building
+                        .power
+                        .as_ref()
+                        .map(|power| power.status)
+                        .unwrap_or(1.0),
                 )
             };
             let Some(BlockDef::Distribution(distribution)) = content.block(block_id) else {
@@ -10294,6 +10300,48 @@ impl GameRuntime {
                             }
                         }
                     };
+                    let should_consume = !state.has_unit;
+                    let power_efficiency = if self.buildings[index].block.consumes_power
+                        && distribution.consume_power > 0.0
+                    {
+                        consume_power_efficiency(power_status).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let liquid_specs: Vec<_> = distribution
+                        .consume_liquids
+                        .iter()
+                        .map(|liquid| LiquidStackSpec {
+                            liquid_id: liquid.liquid,
+                            amount: liquid.amount,
+                        })
+                        .collect();
+                    let liquid_efficiency = if liquid_specs.is_empty() {
+                        1.0
+                    } else {
+                        self.buildings[index]
+                            .liquids
+                            .as_ref()
+                            .map_or(0.0, |liquids| {
+                                consume_liquids_efficiency(
+                                    &liquid_specs,
+                                    frame_delta * time_scale,
+                                    1.0,
+                                    1.0,
+                                    |liquid_id| liquids.get(liquid_id),
+                                )
+                                .clamp(0.0, 1.0)
+                            })
+                    };
+                    let effective_efficiency = if enabled {
+                        efficiency
+                            .min(power_efficiency)
+                            .min(liquid_efficiency)
+                            .max(0.0)
+                    } else {
+                        0.0
+                    };
+                    let edelta = frame_delta * time_scale * effective_efficiency;
                     let can_create = enabled
                         && content
                             .unit_by_name("manifold")
@@ -10301,12 +10349,17 @@ impl GameRuntime {
                             .unwrap_or(false);
                     let spawned = unit_cargo_loader_update(
                         state,
-                        if enabled { efficiency } else { 0.0 },
+                        effective_efficiency,
                         can_create,
-                        frame_delta * time_scale * efficiency,
+                        edelta,
                         frame_delta * time_scale,
                         distribution.unit_build_time,
                     );
+                    if should_consume && edelta > 0.0 && !distribution.consume_liquids.is_empty() {
+                        let liquid_requirements =
+                            scaled_liquid_requirements(&distribution.consume_liquids, edelta);
+                        consume_building_liquids(&mut self.buildings[index], &liquid_requirements);
+                    }
                     if spawned {
                         unit_cargo_loader_spawned(state, 0, false);
                         state.has_unit = true;
@@ -20895,10 +20948,13 @@ mod tests {
     fn game_runtime_owned_runtime_blocks_advances_unit_cargo_loader_build() {
         let content = ContentLoader::create_base_content().unwrap();
         let loader_def = content.block_by_name("unit-cargo-loader").unwrap();
+        let power_source_def = content.block_by_name("power-source").unwrap();
+        let nitrogen = content.liquid_by_name("nitrogen").unwrap();
         let BlockDef::Distribution(loader_block) = loader_def else {
             panic!("unit-cargo-loader should be a distribution block");
         };
         let tile_pos = point2_pack(18, 18);
+        let power_source_pos = point2_pack(20, 18);
         let mut runtime = GameRuntime::default();
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(32, 32);
@@ -20907,8 +20963,16 @@ mod tests {
             loader_def.base().clone(),
             TeamId(4),
         ));
+        runtime.add_building(BuildingComp::new(
+            power_source_pos,
+            power_source_def.base().clone(),
+            TeamId(4),
+        ));
         if let Some(power) = runtime.buildings[0].power.as_mut() {
             power.status = 1.0;
+        }
+        if let Some(liquids) = runtime.buildings[0].liquids.as_mut() {
+            liquids.set(nitrogen.base.mappable.base.id, 20.0);
         }
         runtime.distribution_runtime_states.insert(
             tile_pos,
@@ -20947,6 +21011,100 @@ mod tests {
         };
         assert!(state.has_unit);
         assert_eq!(state.build_progress, 0.0);
+        assert!(
+            runtime.buildings[0]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(nitrogen.base.mappable.base.id)
+                < 20.0
+        );
+    }
+
+    #[test]
+    fn game_runtime_unit_cargo_loader_stalls_without_power_or_nitrogen() {
+        fn run_case(has_power_source: bool, nitrogen_amount: f32) -> (usize, f32, f32) {
+            let content = ContentLoader::create_base_content().unwrap();
+            let loader_def = content.block_by_name("unit-cargo-loader").unwrap();
+            let power_source_def = content.block_by_name("power-source").unwrap();
+            let nitrogen = content.liquid_by_name("nitrogen").unwrap();
+            let BlockDef::Distribution(loader_block) = loader_def else {
+                panic!("unit-cargo-loader should be a distribution block");
+            };
+            let tile_pos = point2_pack(18, 18);
+            let power_source_pos = point2_pack(20, 18);
+            let mut runtime = GameRuntime::default();
+            runtime.state.set(GameStateState::Playing);
+            runtime.state.world.resize(32, 32);
+            runtime.add_building(BuildingComp::new(
+                tile_pos,
+                loader_def.base().clone(),
+                TeamId(4),
+            ));
+            if has_power_source {
+                runtime.add_building(BuildingComp::new(
+                    power_source_pos,
+                    power_source_def.base().clone(),
+                    TeamId(4),
+                ));
+            }
+            if let Some(liquids) = runtime.buildings[0].liquids.as_mut() {
+                liquids.set(nitrogen.base.mappable.base.id, nitrogen_amount);
+            }
+            runtime.distribution_runtime_states.insert(
+                tile_pos,
+                GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                    build_progress: 1.0 - 1.0 / loader_block.unit_build_time,
+                    ..UnitCargoLoaderState::default()
+                }),
+            );
+
+            let mut bullets = Vec::new();
+            let mut units = Vec::new();
+            let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+            let mut suppressed = |_: &BuildingComp| false;
+            let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+            let mut spark_random = |_: &UnitComp| 1.0;
+            let report = runtime
+                .advance_owned_runtime_blocks(
+                    &content,
+                    1.0,
+                    owned_noop_resources(
+                        &mut bullets,
+                        &mut units,
+                        &mut bullet_type,
+                        &mut suppressed,
+                        &mut force_coolant,
+                        &mut spark_random,
+                    ),
+                )
+                .unwrap();
+            let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) =
+                runtime.distribution_runtime_states.get(&tile_pos)
+            else {
+                panic!("unit cargo loader state should remain present");
+            };
+            (
+                report.item_transport.unit_cargo_loader_built_units,
+                state.build_progress,
+                runtime.buildings[0]
+                    .liquids
+                    .as_ref()
+                    .unwrap()
+                    .get(nitrogen.base.mappable.base.id),
+            )
+        }
+
+        let (_, initial_progress, _) = run_case(false, 0.0);
+        let (no_power_built, no_power_progress, no_power_nitrogen) = run_case(false, 20.0);
+        assert_eq!(no_power_built, 0);
+        assert_eq!(no_power_progress, initial_progress);
+        assert_eq!(no_power_nitrogen, 20.0);
+
+        let (no_liquid_built, no_liquid_progress, no_liquid_nitrogen) = run_case(true, 0.0);
+        assert_eq!(no_liquid_built, 0);
+        assert_eq!(no_liquid_progress, initial_progress);
+        assert_eq!(no_liquid_nitrogen, 0.0);
     }
 
     #[test]

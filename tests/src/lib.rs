@@ -375,20 +375,44 @@ fn real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime() 
         port.to_string(),
     ]);
     let loader_tile = point2_pack(4, 4);
+    let power_source_tile = point2_pack(6, 4);
     let loader_def = server
         .content_loader
         .block_by_name("unit-cargo-loader")
         .expect("base content should include unit-cargo-loader");
+    let power_source_def = server
+        .content_loader
+        .block_by_name("power-source")
+        .expect("base content should include power-source");
     let BlockDef::Distribution(loader_block) = loader_def else {
         panic!("unit-cargo-loader should be a distribution block");
     };
     let loader_base = loader_def.base().clone();
     let unit_build_time = loader_block.unit_build_time;
+    let nitrogen = server
+        .content_loader
+        .liquid_by_name("nitrogen")
+        .unwrap()
+        .base
+        .mappable
+        .base
+        .id;
 
     server.runtime.state.world.resize(12, 12);
     server
         .runtime
         .add_building(BuildingComp::new(loader_tile, loader_base, TeamId(6)));
+    server.runtime.add_building(BuildingComp::new(
+        power_source_tile,
+        power_source_def.base().clone(),
+        TeamId(6),
+    ));
+    if let Some(power) = server.runtime.buildings[0].power.as_mut() {
+        power.status = 1.0;
+    }
+    if let Some(liquids) = server.runtime.buildings[0].liquids.as_mut() {
+        liquids.set(nitrogen, 20.0);
+    }
     server.runtime.distribution_runtime_states.insert(
         loader_tile,
         GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState::default()),

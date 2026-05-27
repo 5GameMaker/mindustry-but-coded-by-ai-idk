@@ -4474,10 +4474,23 @@ mod tests {
             .content_loader
             .block_by_name("unit-cargo-loader")
             .unwrap();
+        let power_source_def = launcher
+            .content_loader
+            .block_by_name("power-source")
+            .unwrap();
         let BlockDef::Distribution(loader_block) = loader_def else {
             panic!("unit-cargo-loader should be a distribution block");
         };
+        let nitrogen = launcher
+            .content_loader
+            .liquid_by_name("nitrogen")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
         let loader_tile = point2_pack(6, 6);
+        let power_source_tile = point2_pack(8, 6);
 
         launcher.runtime.state.world.resize(16, 16);
         launcher.runtime.add_building(BuildingComp::new(
@@ -4485,6 +4498,17 @@ mod tests {
             loader_def.base().clone(),
             TeamId(6),
         ));
+        launcher.runtime.add_building(BuildingComp::new(
+            power_source_tile,
+            power_source_def.base().clone(),
+            TeamId(6),
+        ));
+        if let Some(power) = launcher.runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+        if let Some(liquids) = launcher.runtime.buildings[0].liquids.as_mut() {
+            liquids.set(nitrogen, 20.0);
+        }
         launcher.runtime.distribution_runtime_states.insert(
             loader_tile,
             GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
@@ -4526,10 +4550,23 @@ mod tests {
             .content_loader
             .block_by_name("unit-cargo-loader")
             .unwrap();
+        let power_source_def = launcher
+            .content_loader
+            .block_by_name("power-source")
+            .unwrap();
         let BlockDef::Distribution(loader_block) = loader_def else {
             panic!("unit-cargo-loader should be a distribution block");
         };
+        let nitrogen = launcher
+            .content_loader
+            .liquid_by_name("nitrogen")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
         let loader_tile = point2_pack(6, 6);
+        let power_source_tile = point2_pack(8, 6);
 
         launcher.runtime.state.world.resize(16, 16);
         launcher.runtime.add_building(BuildingComp::new(
@@ -4537,6 +4574,17 @@ mod tests {
             loader_def.base().clone(),
             TeamId(6),
         ));
+        launcher.runtime.add_building(BuildingComp::new(
+            power_source_tile,
+            power_source_def.base().clone(),
+            TeamId(6),
+        ));
+        if let Some(power) = launcher.runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+        if let Some(liquids) = launcher.runtime.buildings[0].liquids.as_mut() {
+            liquids.set(nitrogen, 20.0);
+        }
         launcher.runtime.distribution_runtime_states.insert(
             loader_tile,
             GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
