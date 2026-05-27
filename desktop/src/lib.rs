@@ -59,6 +59,7 @@ pub struct DesktopLauncher {
     last_applied_unit_item_mirrors: BTreeMap<i32, ClientUnitItemMirror>,
     last_applied_unit_payload_mirrors: BTreeMap<i32, ClientUnitPayloadMirror>,
     last_applied_unit_entered_payload_packets_seen: u64,
+    last_applied_unit_tether_block_spawned_packets_seen: u64,
     last_unit_entered_payload_apply_report: Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
@@ -88,6 +89,7 @@ impl DesktopLauncher {
             last_applied_unit_item_mirrors: BTreeMap::new(),
             last_applied_unit_payload_mirrors: BTreeMap::new(),
             last_applied_unit_entered_payload_packets_seen: 0,
+            last_applied_unit_tether_block_spawned_packets_seen: 0,
             last_unit_entered_payload_apply_report: None,
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
@@ -105,6 +107,7 @@ impl DesktopLauncher {
         self.sync_unit_item_mirrors_to_runtime();
         self.sync_unit_payload_mirrors_to_runtime();
         self.sync_unit_entered_payload_to_runtime();
+        self.sync_unit_tether_block_spawned_to_runtime();
         let now_millis = current_millis();
         self.sync_remote_player_snapshots_from_runtime();
         self.sync_remote_preview_plan_packets(now_millis);
@@ -373,6 +376,31 @@ impl DesktopLauncher {
         applied
     }
 
+    fn sync_unit_tether_block_spawned_to_runtime(&mut self) -> bool {
+        if self.last_applied_world_data.is_none() {
+            return false;
+        }
+
+        let (seen, packet) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (
+                state.unit_tether_block_spawned_packets_seen,
+                state.last_unit_tether_block_spawned.clone(),
+            )
+        };
+        if seen == self.last_applied_unit_tether_block_spawned_packets_seen {
+            return false;
+        }
+        self.last_applied_unit_tether_block_spawned_packets_seen = seen;
+
+        let Some(packet) = packet else {
+            return false;
+        };
+        self.runtime
+            .apply_client_unit_tether_block_spawned_packet(&self.content_loader, &packet)
+    }
+
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
         let (
             block_mirror,
@@ -382,6 +410,7 @@ impl DesktopLauncher {
             unit_item_mirrors,
             unit_payload_mirrors,
             unit_entered_payload_packets_seen,
+            unit_tether_block_spawned_packets_seen,
         ) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
@@ -393,6 +422,7 @@ impl DesktopLauncher {
                 state.unit_item_mirrors.clone(),
                 state.unit_payload_mirrors.clone(),
                 state.unit_entered_payload_packets_seen,
+                state.unit_tether_block_spawned_packets_seen,
             )
         };
         self.last_applied_block_snapshot_mirror = block_mirror;
@@ -403,6 +433,8 @@ impl DesktopLauncher {
         self.last_applied_unit_item_mirrors = unit_item_mirrors;
         self.last_applied_unit_payload_mirrors = unit_payload_mirrors;
         self.last_applied_unit_entered_payload_packets_seen = unit_entered_payload_packets_seen;
+        self.last_applied_unit_tether_block_spawned_packets_seen =
+            unit_tether_block_spawned_packets_seen;
         self.last_unit_entered_payload_apply_report = None;
     }
 
@@ -415,6 +447,7 @@ impl DesktopLauncher {
         self.last_applied_unit_item_mirrors.clear();
         self.last_applied_unit_payload_mirrors.clear();
         self.last_applied_unit_entered_payload_packets_seen = 0;
+        self.last_applied_unit_tether_block_spawned_packets_seen = 0;
         self.last_unit_entered_payload_apply_report = None;
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
@@ -986,7 +1019,9 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 #[cfg(test)]
 mod tests {
     use super::{run, DesktopLauncher};
-    use mindustry_core::mindustry::core::game_runtime::GameRuntimePayloadBlockState;
+    use mindustry_core::mindustry::core::game_runtime::{
+        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
+    };
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
         ClientEntitySnapshotRecordMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
@@ -1008,6 +1043,7 @@ mod tests {
     use mindustry_core::mindustry::net::{
         ClientPlanSnapshotReceivedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
         NetworkWorldData, StateSnapshotCallPacket, UnitEnteredPayloadCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -1023,6 +1059,7 @@ mod tests {
         },
         r#type::ItemStack,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
+        world::blocks::units::UnitCargoLoaderState,
     };
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
@@ -1510,6 +1547,65 @@ mod tests {
                 ref unit_bytes
             }) if !unit_bytes.is_empty()
         ));
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_tether_block_spawned_packet_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(7, 7);
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            loader_def.base().clone(),
+            TeamId(4),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            tile_pos,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                build_progress: 0.5,
+                has_unit: false,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitTetherBlockSpawnedCallPacket(
+                UnitTetherBlockSpawnedCallPacket {
+                    tile: Some(tile_pos),
+                    id: 9901,
+                },
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) =
+            launcher.runtime.distribution_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit cargo loader state should remain present");
+        };
+        assert_eq!(state.read_unit_id, 9901);
+        assert_eq!(state.build_progress, 0.0);
+        assert!(!state.has_unit);
+        assert_eq!(
+            launcher
+                .runtime
+                .client_unit_tether_block_spawned_packets_applied,
+            1
+        );
     }
 
     #[test]

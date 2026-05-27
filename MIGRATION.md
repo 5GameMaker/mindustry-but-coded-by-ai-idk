@@ -3735,8 +3735,14 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 2026-05-27：继续把 loader spawn 从纯计数推进到最小 server 物化/同步链路。`ServerLauncher::update()` 会在 owned runtime tick 前记录尚未持有 unit 的 `unit-cargo-loader` tile，tick 后按新完成的 loader 创建 server-side `manifold` `UnitComp`，写回 `UnitCargoLoaderState.read_unit_id`，并在网络已开启时可靠广播 `UnitTetherBlockSpawnedCallPacket { tile, id }`：
   - 新增 `server_update_broadcasts_unit_tether_block_spawned_for_owned_unit_cargo_loader`
   - 这仍是最小 server sidecar，尚未把 `BuildingTetherComp` 正式并入 `UnitComp`，也未补客户端 apply packet 后回填 loader state。
+- 2026-05-27：补上客户端半链路。`NetClient` 现在专门记录 `UnitTetherBlockSpawnedCallPacket` 与 seen cursor；`DesktopLauncher::update()` 通过 `sync_unit_tether_block_spawned_to_runtime()` 把 packet 桥接到 `GameRuntime::apply_client_unit_tether_block_spawned_packet(...)`，对客户端 runtime 中的 `UnitCargoLoaderState` 执行 Java `spawned(id)` 等价行为（清 `build_progress`、写 `read_unit_id`，不伪造本地 unit 对象）：
+  - 新增 `game_runtime_applies_client_unit_tether_block_spawned_packet_to_unit_cargo_loader`
+  - 新增 `update_records_unit_tether_block_spawned_packet_for_runtime_bridge`
+  - 新增 `desktop_launcher_syncs_unit_tether_block_spawned_packet_to_runtime`
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
+  - `cargo test -p mindustry-core unit_tether_block_spawned`
+  - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`
   - `cargo test -p mindustry-server unit_cargo --lib`
   - `cargo check --workspace`
 - 仍未完成：真实 manifold unit 创建/加入 world/BuildingTether、`Call.unitTetherBlockSpawned` 联机同步、loader 液体/电力 consume 精确联动、unload `dumpAccumulate()` 真实向邻接方块输出、unload item config 的 `TileConfigCallPacket` 分发与 UI 行为仍待补。

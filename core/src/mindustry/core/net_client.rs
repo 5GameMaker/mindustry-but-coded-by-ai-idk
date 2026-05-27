@@ -38,7 +38,8 @@ use crate::mindustry::net::{
     TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
     TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
     UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
-    UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
+    UnitTetherBlockSpawnedCallPacket, UpdateMarkerCallPacket, UpdateMarkerTextCallPacket,
+    UpdateMarkerTextureCallPacket,
 };
 use crate::mindustry::vars::MAX_PLAYER_PREVIEW_PLANS;
 use crate::mindustry::world::blocks::defense::{
@@ -581,6 +582,9 @@ pub struct NetClientState {
     pub last_unit_lifecycle_packet: Option<PacketKind>,
     pub last_unit_lifecycle_packet_at: Option<Instant>,
     pub unit_lifecycle_packets_seen: u64,
+    pub last_unit_tether_block_spawned: Option<UnitTetherBlockSpawnedCallPacket>,
+    pub last_unit_tether_block_spawned_at: Option<Instant>,
+    pub unit_tether_block_spawned_packets_seen: u64,
     pub last_marker_packet: Option<PacketKind>,
     pub last_marker_packet_at: Option<Instant>,
     pub marker_packets_seen: u64,
@@ -872,6 +876,10 @@ impl fmt::Debug for NetClientState {
             .field(
                 "unit_lifecycle_packets_seen",
                 &self.unit_lifecycle_packets_seen,
+            )
+            .field(
+                "unit_tether_block_spawned_packets_seen",
+                &self.unit_tether_block_spawned_packets_seen,
             )
             .field("marker_packets_seen", &self.marker_packets_seen)
             .field("marker_mirrors", &self.marker_mirrors)
@@ -1168,6 +1176,17 @@ impl NetClientState {
         self.unit_lifecycle_packets_seen = self.unit_lifecycle_packets_seen.saturating_add(1);
         self.last_unit_lifecycle_packet = Some(packet.clone());
         self.last_unit_lifecycle_packet_at = Some(Instant::now());
+    }
+
+    fn record_unit_tether_block_spawned_packet(
+        &mut self,
+        packet: &UnitTetherBlockSpawnedCallPacket,
+    ) {
+        self.unit_tether_block_spawned_packets_seen = self
+            .unit_tether_block_spawned_packets_seen
+            .saturating_add(1);
+        self.last_unit_tether_block_spawned = Some(packet.clone());
+        self.last_unit_tether_block_spawned_at = Some(Instant::now());
     }
 
     fn record_marker_packet(&mut self, packet: &PacketKind) {
@@ -3088,10 +3107,16 @@ impl NetClient {
                     | PacketKind::UnitEnvDeathCallPacket(_)
                     | PacketKind::UnitSafeDeathCallPacket(_)
                     | PacketKind::UnitSpawnCallPacket(_)
-                    | PacketKind::UnitTetherBlockSpawnedCallPacket(_)
                     | PacketKind::AssemblerDroneSpawnedCallPacket(_)
                     | PacketKind::AssemblerUnitSpawnedCallPacket(_) => {
                         state.record_unit_lifecycle_packet(&packet);
+                        (false, false)
+                    }
+                    PacketKind::UnitTetherBlockSpawnedCallPacket(packet) => {
+                        state.record_unit_tether_block_spawned_packet(&packet);
+                        state.record_unit_lifecycle_packet(
+                            &PacketKind::UnitTetherBlockSpawnedCallPacket(packet.clone()),
+                        );
                         (false, false)
                     }
                     PacketKind::CreateMarkerCallPacket(_)
@@ -3657,9 +3682,9 @@ mod tests {
         TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
         TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, UpdateMarkerCallPacket,
-        UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket, WarningToastCallPacket,
-        WorldDataBeginCallPacket,
+        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
+        WarningToastCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -4221,6 +4246,32 @@ mod tests {
             Some(PacketKind::GameOverCallPacket(_))
         ));
         assert!(state.last_campaign_event_packet_at.is_some());
+    }
+
+    #[test]
+    fn update_records_unit_tether_block_spawned_packet_for_runtime_bridge() {
+        let client = NetClient::default();
+        let packet = UnitTetherBlockSpawnedCallPacket {
+            tile: Some(point2_pack(4, 4)),
+            id: 77,
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitTetherBlockSpawnedCallPacket(
+                packet.clone(),
+            ));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.unit_lifecycle_packets_seen, 1);
+        assert_eq!(state.unit_tether_block_spawned_packets_seen, 1);
+        assert_eq!(state.last_unit_tether_block_spawned.as_ref(), Some(&packet));
+        assert!(state.last_unit_tether_block_spawned_at.is_some());
     }
 
     #[test]

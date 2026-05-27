@@ -37,7 +37,7 @@ use crate::mindustry::{
         type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
         LegacyShortChunkMap, TeamId, UnitRef,
     },
-    net::{NetworkPlayerSyncData, UnitEnteredPayloadCallPacket},
+    net::{NetworkPlayerSyncData, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket},
     r#type::{PayloadKey, PayloadSeq, WeatherState},
     vars::TILE_SIZE,
     world::block::Block,
@@ -2416,6 +2416,7 @@ pub struct GameRuntime {
     pub client_world_label_snapshot_entities: BTreeMap<i32, WorldLabelComp>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
     pub client_unit_entered_payload_packets_applied: usize,
+    pub client_unit_tether_block_spawned_packets_applied: usize,
     pub last_client_unit_entered_payload_report:
         Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
 }
@@ -2483,6 +2484,7 @@ impl GameRuntime {
             client_world_label_snapshot_entities: BTreeMap::new(),
             client_hidden_entity_ids: BTreeSet::new(),
             client_unit_entered_payload_packets_applied: 0,
+            client_unit_tether_block_spawned_packets_applied: 0,
             last_client_unit_entered_payload_report: None,
         }
     }
@@ -3237,6 +3239,56 @@ impl GameRuntime {
                 size: 0.0,
             }),
         );
+        true
+    }
+
+    pub fn apply_client_unit_tether_block_spawned_packet(
+        &mut self,
+        content: &ContentLoader,
+        packet: &UnitTetherBlockSpawnedCallPacket,
+    ) -> bool {
+        let Some(tile_pos) = packet.tile else {
+            return false;
+        };
+        if packet.id < 0 {
+            return false;
+        }
+
+        let Some(building) = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+        else {
+            return false;
+        };
+        let Some(BlockDef::Distribution(distribution)) = content.block(building.block.id) else {
+            return false;
+        };
+        if distribution.kind != DistributionBlockKind::UnitCargoLoader {
+            return false;
+        }
+
+        let entry = self
+            .distribution_runtime_states
+            .entry(tile_pos)
+            .or_insert_with(|| {
+                GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState::default())
+            });
+        let state = match entry {
+            GameRuntimeDistributionBlockState::UnitCargoLoader(state) => state,
+            _ => {
+                *entry = GameRuntimeDistributionBlockState::UnitCargoLoader(
+                    UnitCargoLoaderState::default(),
+                );
+                match entry {
+                    GameRuntimeDistributionBlockState::UnitCargoLoader(state) => state,
+                    _ => unreachable!(),
+                }
+            }
+        };
+
+        unit_cargo_loader_spawned(state, packet.id, true);
+        self.client_unit_tether_block_spawned_packets_applied += 1;
         true
     }
 
@@ -20817,6 +20869,46 @@ mod tests {
             panic!("unit cargo unload state should remain present");
         };
         assert!(state.stale);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_tether_block_spawned_packet_to_unit_cargo_loader() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("unit-cargo-loader").unwrap();
+        let tile_pos = point2_pack(18, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            loader_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime.distribution_runtime_states.insert(
+            tile_pos,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                build_progress: 0.75,
+                has_unit: false,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+
+        assert!(runtime.apply_client_unit_tether_block_spawned_packet(
+            &content,
+            &UnitTetherBlockSpawnedCallPacket {
+                tile: Some(tile_pos),
+                id: 77,
+            },
+        ));
+
+        let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) =
+            runtime.distribution_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit cargo loader state should remain present");
+        };
+        assert_eq!(state.read_unit_id, 77);
+        assert_eq!(state.build_progress, 0.0);
+        assert!(!state.has_unit);
+        assert_eq!(runtime.client_unit_tether_block_spawned_packets_applied, 1);
     }
 
     #[test]
