@@ -33,25 +33,26 @@ use crate::mindustry::{
         },
         entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
-    game::CoreInfo,
+    game::{CoreInfo, SectorInfo},
     input::input_handler::ItemRemoveStackPlan,
     io::{
         type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
-        LegacyShortChunkMap, TeamId, UnitRef,
+        LegacyShortChunkMap, TeamId, TypeValue, UnitRef,
     },
     logic::{LAccess, LVarValue},
     net::{
-        AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket, NetworkPlayerSyncData,
-        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket,
+        LandingPadLandedCallPacket, NetworkPlayerSyncData, UnitBlockSpawnCallPacket,
+        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
     world::block::Block,
     world::blocks::campaign::{
-        read_accelerator_state, read_landing_pad_state, read_launch_pad_state,
-        write_accelerator_state, write_landing_pad_state, write_launch_pad_state, AcceleratorState,
-        LandingPadState, LaunchPadState,
+        landing_pad_handle_landing, landing_pad_ready_to_queue, landing_pad_update_arrival,
+        landing_pad_update_cooldown, read_accelerator_state, read_landing_pad_state,
+        read_launch_pad_state, write_accelerator_state, write_landing_pad_state,
+        write_launch_pad_state, AcceleratorState, LandingPadState, LaunchPadState,
     },
     world::blocks::defense::turrets::{
         continuous_turret_read_child, continuous_turret_write_child, item_turret_read_ammo,
@@ -2033,11 +2034,31 @@ pub struct GameRuntimeOwnedUnitFrameReport {
     pub assembler_module: GameRuntimeUnitAssemblerModuleFrameReport,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameRuntimeLandingPadFrameReport {
+    pub visited_buildings: usize,
+    pub landing_pad_candidates: usize,
+    pub updated_pads: usize,
+    pub queued_pads: usize,
+    pub pruned_waiting_pads: usize,
+    pub landed_tiles: Vec<i32>,
+    pub finished_arrivals: usize,
+    pub imported_items: usize,
+    pub dumped_items: usize,
+    pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GameRuntimeOwnedCampaignFrameReport {
+    pub landing_pad: GameRuntimeLandingPadFrameReport,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GameRuntimeOwnedFrameReport {
     pub item_transport: GameRuntimeOwnedItemTransportFrameReport,
     pub payload: GameRuntimeOwnedPayloadFrameReport,
     pub unit: GameRuntimeOwnedUnitFrameReport,
+    pub campaign: GameRuntimeOwnedCampaignFrameReport,
     pub effect: EffectBlockFrameBatchReport,
 }
 
@@ -2548,6 +2569,7 @@ pub struct GameRuntime {
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
     pub campaign_runtime_states: BTreeMap<i32, GameRuntimeCampaignBlockState>,
+    pub landing_pad_waiting: BTreeMap<i16, Vec<i32>>,
     pub sandbox_runtime_states: BTreeMap<i32, GameRuntimeSandboxBlockState>,
     pub legacy_runtime_states: BTreeMap<i32, GameRuntimeLegacyBlockState>,
     pub unit_runtime_states: BTreeMap<i32, GameRuntimeUnitBlockState>,
@@ -2616,6 +2638,7 @@ impl GameRuntime {
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
             campaign_runtime_states: BTreeMap::new(),
+            landing_pad_waiting: BTreeMap::new(),
             sandbox_runtime_states: BTreeMap::new(),
             legacy_runtime_states: BTreeMap::new(),
             unit_runtime_states: BTreeMap::new(),
@@ -3648,6 +3671,17 @@ impl GameRuntime {
         true
     }
 
+    pub fn apply_client_landing_pad_landed_packet(
+        &mut self,
+        content: &ContentLoader,
+        packet: &LandingPadLandedCallPacket,
+    ) -> bool {
+        let Some(tile_pos) = packet.tile else {
+            return false;
+        };
+        self.start_landing_pad_landing(content, tile_pos)
+    }
+
     pub fn apply_client_unit_despawn_packet(&mut self, packet: &UnitDespawnCallPacket) -> bool {
         let UnitRef::Unit { id } = packet.unit else {
             return false;
@@ -3830,6 +3864,42 @@ impl GameRuntime {
         type_io::write_f32(&mut unit_bytes, sync.x).ok()?;
         type_io::write_f32(&mut unit_bytes, sync.y).ok()?;
         Some(unit_bytes)
+    }
+
+    fn ensure_campaign_state_for_building(
+        &mut self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> bool {
+        if self
+            .campaign_runtime_states
+            .contains_key(&building.tile_pos)
+        {
+            return true;
+        }
+
+        let Some(BlockDef::Campaign(campaign)) = content.block(building.block.id) else {
+            return false;
+        };
+        let state = match campaign.kind {
+            CampaignBlockKind::LaunchPad | CampaignBlockKind::AdvancedLaunchPad => Some(
+                GameRuntimeCampaignBlockState::LaunchPad(LaunchPadState::default()),
+            ),
+            CampaignBlockKind::LandingPad => {
+                let mut state = LandingPadState::default();
+                state.config = Self::landing_pad_config_from_building(building);
+                Some(GameRuntimeCampaignBlockState::LandingPad(state))
+            }
+            CampaignBlockKind::Accelerator => Some(GameRuntimeCampaignBlockState::Accelerator(
+                AcceleratorState::default(),
+            )),
+        };
+        let Some(state) = state else {
+            return false;
+        };
+        self.campaign_runtime_states
+            .insert(building.tile_pos, state);
+        true
     }
 
     fn ensure_payload_state_for_building(
@@ -5856,6 +5926,9 @@ impl GameRuntime {
         self.liquid_runtime_states.remove(&removed.tile_pos);
         self.logic_runtime_states.remove(&removed.tile_pos);
         self.campaign_runtime_states.remove(&removed.tile_pos);
+        for pads in self.landing_pad_waiting.values_mut() {
+            pads.retain(|tile_pos| *tile_pos != removed.tile_pos);
+        }
         self.sandbox_runtime_states.remove(&removed.tile_pos);
         self.legacy_runtime_states.remove(&removed.tile_pos);
         self.unit_runtime_states.remove(&removed.tile_pos);
@@ -9460,6 +9533,7 @@ impl GameRuntime {
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
         self.campaign_runtime_states.clear();
+        self.landing_pad_waiting.clear();
         self.sandbox_runtime_states.clear();
         self.legacy_runtime_states.clear();
         self.unit_runtime_states.clear();
@@ -9498,6 +9572,409 @@ impl GameRuntime {
             }
         }
         disabled
+    }
+
+    fn landing_pad_config_from_building(building: &BuildingComp) -> Option<i16> {
+        match building.config_value() {
+            TypeValue::Content(content) if content.content_type == ContentType::Item => {
+                Some(content.id)
+            }
+            TypeValue::Int(id) if (0..=i16::MAX as i32).contains(&id) => Some(id as i16),
+            _ => None,
+        }
+    }
+
+    fn landing_pad_config_for_tile(&self, tile_pos: i32) -> Option<i16> {
+        self.campaign_runtime_states
+            .get(&tile_pos)
+            .and_then(|state| match state {
+                GameRuntimeCampaignBlockState::LandingPad(state) => state.config,
+                _ => None,
+            })
+            .or_else(|| {
+                self.buildings
+                    .iter()
+                    .find(|building| building.tile_pos == tile_pos)
+                    .and_then(Self::landing_pad_config_from_building)
+            })
+    }
+
+    fn landing_pad_priority_for_tile(&self, tile_pos: i32) -> Option<i32> {
+        self.campaign_runtime_states
+            .get(&tile_pos)
+            .and_then(|state| match state {
+                GameRuntimeCampaignBlockState::LandingPad(state) => Some(state.priority),
+                _ => None,
+            })
+    }
+
+    fn set_landing_pad_priority(&mut self, tile_pos: i32, priority: i32) -> bool {
+        let Some(GameRuntimeCampaignBlockState::LandingPad(state)) =
+            self.campaign_runtime_states.get_mut(&tile_pos)
+        else {
+            return false;
+        };
+        state.priority = priority;
+        true
+    }
+
+    fn landing_pad_item_capacity(content: &ContentLoader) -> i32 {
+        content
+            .block_by_name("landing-pad")
+            .and_then(|block| match block {
+                BlockDef::Campaign(campaign) if campaign.kind == CampaignBlockKind::LandingPad => {
+                    Some(campaign.base.item_capacity)
+                }
+                _ => None,
+            })
+            .unwrap_or(100)
+            .max(1)
+    }
+
+    fn sector_info_import_rate(info: &SectorInfo, item_id: ContentId, item_name: &str) -> f32 {
+        info.import_rate_cache
+            .as_ref()
+            .and_then(|cache| cache.get(item_id as usize))
+            .copied()
+            .unwrap_or_else(|| info.imports.get(item_name).map_or(0.0, |stat| stat.mean))
+    }
+
+    fn update_landing_pad_sector_import_timers(
+        info: &mut SectorInfo,
+        content: &ContentLoader,
+        item_capacity: i32,
+        frame_delta: f32,
+    ) -> usize {
+        let item_capacity = item_capacity.max(1) as f32;
+        let delta = if frame_delta.is_finite() {
+            frame_delta.max(0.0)
+        } else {
+            0.0
+        };
+        let mut updated = 0;
+        for item in content.items() {
+            let item_id = item.base.mappable.base.id;
+            let item_name = item.name();
+            let import_rate = Self::sector_info_import_rate(info, item_id, item_name);
+            let timer = info
+                .import_cooldown_timers
+                .entry(item_name.to_string())
+                .or_insert(0.0);
+            if import_rate > 0.0 {
+                *timer += import_rate / 60.0 / item_capacity * delta;
+            } else {
+                *timer = 0.0;
+            }
+            updated += 1;
+        }
+        updated
+    }
+
+    fn update_landing_pad_import_timers(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> usize {
+        if !self.state.is_campaign() {
+            return 0;
+        }
+        let item_capacity = Self::landing_pad_item_capacity(content);
+        let mut updated = 0;
+        if let Some(sector) = self.state.rules.sector.as_mut() {
+            updated += Self::update_landing_pad_sector_import_timers(
+                &mut sector.info,
+                content,
+                item_capacity,
+                frame_delta,
+            );
+        }
+        if let Some(sector) = self.state.sector.as_mut() {
+            updated += Self::update_landing_pad_sector_import_timers(
+                &mut sector.info,
+                content,
+                item_capacity,
+                frame_delta,
+            );
+        }
+        updated
+    }
+
+    fn landing_pad_import_status(
+        &self,
+        content: &ContentLoader,
+        item_id: ContentId,
+    ) -> (bool, f32) {
+        let Some(item) = content.item(item_id) else {
+            return (false, 0.0);
+        };
+        let Some(info) = self
+            .state
+            .rules
+            .sector
+            .as_ref()
+            .or(self.state.sector.as_ref())
+            .map(|sector| &sector.info)
+        else {
+            return (false, 0.0);
+        };
+        let item_name = item.name();
+        (
+            Self::sector_info_import_rate(info, item_id, item_name) > 0.0,
+            info.import_cooldown_timers
+                .get(item_name)
+                .copied()
+                .unwrap_or(0.0),
+        )
+    }
+
+    fn note_campaign_landing_pad_import(
+        &mut self,
+        content: &ContentLoader,
+        item_id: ContentId,
+        amount: i32,
+    ) {
+        if amount <= 0 || !self.state.is_campaign() {
+            return;
+        }
+        let Some(item_name) = content.item(item_id).map(|item| item.name().to_string()) else {
+            return;
+        };
+        if let Some(sector) = self.state.rules.sector.as_mut() {
+            sector.info.handle_production(item_name.clone(), amount);
+            sector.info.handle_item_import(item_name.clone(), amount);
+        }
+        if let Some(sector) = self.state.sector.as_mut() {
+            sector.info.handle_production(item_name.clone(), amount);
+            sector.info.handle_item_import(item_name, amount);
+        }
+    }
+
+    fn start_landing_pad_landing(&mut self, content: &ContentLoader, tile_pos: i32) -> bool {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return false;
+        };
+        let building = self.buildings[index].clone();
+        if !self.ensure_campaign_state_for_building(content, &building) {
+            return false;
+        }
+        let config = Self::landing_pad_config_from_building(&building);
+        let Some(GameRuntimeCampaignBlockState::LandingPad(state)) =
+            self.campaign_runtime_states.get_mut(&tile_pos)
+        else {
+            return false;
+        };
+        if let Some(config) = config {
+            state.config = Some(config);
+        }
+        landing_pad_handle_landing(state)
+    }
+
+    fn process_landing_pad_waiting_queue(
+        &mut self,
+        content: &ContentLoader,
+        report: &mut GameRuntimeLandingPadFrameReport,
+    ) {
+        let waiting = std::mem::take(&mut self.landing_pad_waiting);
+        for (item_id, mut pads) in waiting {
+            let before = pads.len();
+            // v158.1 changed Java to prune mismatched configs before checking size,
+            // so stale pads cannot be selected or crash an empty post-prune queue.
+            pads.retain(|tile_pos| self.landing_pad_config_for_tile(*tile_pos) == Some(item_id));
+            report.pruned_waiting_pads += before.saturating_sub(pads.len());
+            if pads.is_empty() {
+                continue;
+            }
+
+            pads.sort_by_key(|tile_pos| {
+                self.landing_pad_priority_for_tile(*tile_pos)
+                    .unwrap_or(i32::MAX)
+            });
+            let first = pads[0];
+            let head = *pads.last().unwrap_or(&first);
+
+            if self.start_landing_pad_landing(content, first) {
+                report.landed_tiles.push(first);
+            }
+
+            if first != head {
+                if let (Some(first_priority), Some(head_priority)) = (
+                    self.landing_pad_priority_for_tile(first),
+                    self.landing_pad_priority_for_tile(head),
+                ) {
+                    self.set_landing_pad_priority(first, head_priority);
+                    self.set_landing_pad_priority(head, first_priority);
+                }
+            }
+        }
+    }
+
+    pub fn advance_owned_landing_pads_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeLandingPadFrameReport {
+        let mut report = GameRuntimeLandingPadFrameReport::default();
+        let frame_delta = if frame_delta.is_finite() {
+            frame_delta.max(0.0)
+        } else {
+            0.0
+        };
+
+        self.update_landing_pad_import_timers(content, frame_delta);
+        self.process_landing_pad_waiting_queue(content, &mut report);
+
+        for index in 0..self.buildings.len() {
+            report.visited_buildings += 1;
+            let Some(BlockDef::Campaign(campaign)) =
+                content.block(self.buildings[index].block.id).cloned()
+            else {
+                continue;
+            };
+            if campaign.kind != CampaignBlockKind::LandingPad {
+                continue;
+            }
+            report.landing_pad_candidates += 1;
+            if !self.buildings[index].enabled {
+                continue;
+            }
+
+            let tile_pos = self.buildings[index].tile_pos;
+            let building = self.buildings[index].clone();
+            if !self.ensure_campaign_state_for_building(content, &building) {
+                report.missing_runtime_states += 1;
+                continue;
+            }
+
+            let time_scale = self.buildings[index].time_scale.max(0.0);
+            let scaled_delta = frame_delta * time_scale;
+            let is_fake = self.buildings[index].team.0 as i32 != self.state.rules.default_team
+                || !self.state.is_campaign();
+            let is_campaign_non_legacy = self.state.is_campaign();
+
+            if let Some(config) = Self::landing_pad_config_from_building(&building) {
+                if let Some(GameRuntimeCampaignBlockState::LandingPad(state)) =
+                    self.campaign_runtime_states.get_mut(&tile_pos)
+                {
+                    state.config = Some(config);
+                }
+            }
+
+            let mut arrival = None;
+            if let Some(GameRuntimeCampaignBlockState::LandingPad(state)) =
+                self.campaign_runtime_states.get_mut(&tile_pos)
+            {
+                if state.arriving.is_some() {
+                    arrival = Some(landing_pad_update_arrival(
+                        state,
+                        campaign.arrival_duration.max(0.000001),
+                        campaign.consume_liquid_amount.max(0.0),
+                        campaign.base.item_capacity,
+                        scaled_delta,
+                    ));
+                }
+            }
+
+            if let Some(step) = arrival {
+                if step.removed_liquid > 0.0 {
+                    if let (Some(liquid), Some(liquids)) = (
+                        campaign.consume_liquid,
+                        self.buildings[index].liquids.as_mut(),
+                    ) {
+                        liquids.remove(liquid.liquid, step.removed_liquid);
+                    }
+                }
+                if let Some(item_id) = step.finished_item {
+                    if let Some(items) = self.buildings[index].items.as_mut() {
+                        items.set(item_id, step.produced_amount);
+                    }
+                    if !is_fake {
+                        self.note_campaign_landing_pad_import(
+                            content,
+                            item_id,
+                            step.produced_amount,
+                        );
+                    }
+                    report.finished_arrivals += 1;
+                    report.imported_items += step.produced_amount.max(0) as usize;
+                }
+            }
+
+            if self.buildings[index]
+                .items
+                .as_ref()
+                .is_some_and(|items| items.total() > 0)
+            {
+                report.dumped_items +=
+                    self.dump_accumulated_items_from_building(content, index, 1, scaled_delta);
+            }
+
+            if let Some(GameRuntimeCampaignBlockState::LandingPad(state)) =
+                self.campaign_runtime_states.get_mut(&tile_pos)
+            {
+                if state.arriving.is_none() {
+                    landing_pad_update_cooldown(
+                        state,
+                        campaign.cooldown_time.max(0.000001),
+                        scaled_delta,
+                    );
+                }
+            }
+
+            let (config, cooldown, arriving) = match self.campaign_runtime_states.get(&tile_pos) {
+                Some(GameRuntimeCampaignBlockState::LandingPad(state)) => {
+                    (state.config, state.cooldown, state.arriving)
+                }
+                _ => {
+                    report.missing_runtime_states += 1;
+                    continue;
+                }
+            };
+            let Some(config) = config else {
+                report.updated_pads += 1;
+                continue;
+            };
+
+            let total_items = self.buildings[index]
+                .items
+                .as_ref()
+                .map_or(0, |items| items.total());
+            let (import_rate_positive, import_cooldown) =
+                self.landing_pad_import_status(content, config);
+            let ready_state = LandingPadState {
+                config: Some(config),
+                cooldown,
+                arriving,
+                ..LandingPadState::default()
+            };
+            if landing_pad_ready_to_queue(
+                &ready_state,
+                self.buildings[index].efficiency,
+                total_items,
+                is_fake,
+                is_campaign_non_legacy,
+                import_rate_positive,
+                import_cooldown,
+            ) {
+                if is_fake {
+                    if self.start_landing_pad_landing(content, tile_pos) {
+                        report.landed_tiles.push(tile_pos);
+                    }
+                } else {
+                    let pads = self.landing_pad_waiting.entry(config).or_default();
+                    if !pads.contains(&tile_pos) {
+                        pads.push(tile_pos);
+                        report.queued_pads += 1;
+                    }
+                }
+            }
+            report.updated_pads += 1;
+        }
+
+        report
     }
 
     /// Consumes pending world-load lifecycle markers and resets tile-position keyed
@@ -19122,6 +19599,9 @@ impl GameRuntime {
             assembler_module: self.advance_owned_unit_assembler_modules_ticks(content, frame.delta),
             assembler: self.advance_owned_unit_assemblers_ticks(content, frame.delta),
         };
+        let campaign = GameRuntimeOwnedCampaignFrameReport {
+            landing_pad: self.advance_owned_landing_pads_ticks(content, frame.delta),
+        };
 
         let mut batch_resources = EffectBlockFrameBatchResources {
             fog_control: Some(&mut self.state.fog_control),
@@ -19146,6 +19626,7 @@ impl GameRuntime {
             item_transport,
             payload,
             unit,
+            campaign,
             effect,
         })
     }
@@ -19162,6 +19643,7 @@ mod tests {
             units::BuildPlan, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
             FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
+        game::ExportStat,
         io::{
             BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId,
             TypeValue, Vec2 as IoVec2,
@@ -27933,6 +28415,201 @@ mod tests {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn game_runtime_landing_pad_waiting_queue_prunes_mismatched_config_like_v158_1() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let landing_def = content.block_by_name("landing-pad").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let stale_tile = point2_pack(4, 4);
+        let valid_tile = point2_pack(12, 4);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(24, 12);
+        runtime.state.set_sector(Some(Sector::new(7)));
+        let team = TeamId(runtime.state.rules.default_team as u8);
+        runtime.add_building(BuildingComp::new(
+            stale_tile,
+            landing_def.base().clone(),
+            team,
+        ));
+        runtime.add_building(BuildingComp::new(
+            valid_tile,
+            landing_def.base().clone(),
+            team,
+        ));
+        runtime.campaign_runtime_states.insert(
+            stale_tile,
+            GameRuntimeCampaignBlockState::LandingPad(LandingPadState {
+                config: Some(lead),
+                priority: 0,
+                ..LandingPadState::default()
+            }),
+        );
+        runtime.campaign_runtime_states.insert(
+            valid_tile,
+            GameRuntimeCampaignBlockState::LandingPad(LandingPadState {
+                config: Some(copper),
+                priority: 10,
+                ..LandingPadState::default()
+            }),
+        );
+        runtime
+            .landing_pad_waiting
+            .insert(copper, vec![stale_tile, valid_tile]);
+
+        let report = runtime.advance_owned_landing_pads_ticks(&content, 1.0);
+
+        assert_eq!(report.pruned_waiting_pads, 1);
+        assert_eq!(report.landed_tiles, vec![valid_tile]);
+        assert!(runtime.landing_pad_waiting.is_empty());
+        assert_eq!(
+            runtime.campaign_runtime_states.get(&stale_tile),
+            Some(&GameRuntimeCampaignBlockState::LandingPad(
+                LandingPadState {
+                    config: Some(lead),
+                    priority: 0,
+                    ..LandingPadState::default()
+                }
+            ))
+        );
+        match runtime.campaign_runtime_states.get(&valid_tile) {
+            Some(GameRuntimeCampaignBlockState::LandingPad(state)) => {
+                assert_eq!(state.config, Some(copper));
+                assert_eq!(state.cooldown, 1.0);
+                assert_eq!(state.arriving, Some(copper));
+                assert!(state.arriving_timer > 0.0);
+            }
+            other => panic!("valid landing pad state missing: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn game_runtime_landing_pad_queues_campaign_import_and_lands_next_tick() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let landing_def = content.block_by_name("landing-pad").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = point2_pack(6, 6);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.state.set_sector(Some(Sector::new(8)));
+        if let Some(sector) = runtime.state.rules.sector.as_mut() {
+            sector.info.imports.insert(
+                "copper".into(),
+                ExportStat {
+                    mean: 6000.0,
+                    ..ExportStat::default()
+                },
+            );
+            sector
+                .info
+                .import_cooldown_timers
+                .insert("copper".into(), 1.0);
+        }
+        if let Some(sector) = runtime.state.sector.as_mut() {
+            sector.info.imports.insert(
+                "copper".into(),
+                ExportStat {
+                    mean: 6000.0,
+                    ..ExportStat::default()
+                },
+            );
+            sector
+                .info
+                .import_cooldown_timers
+                .insert("copper".into(), 1.0);
+        }
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            landing_def.base().clone(),
+            TeamId(runtime.state.rules.default_team as u8),
+        ));
+        runtime.campaign_runtime_states.insert(
+            tile_pos,
+            GameRuntimeCampaignBlockState::LandingPad(LandingPadState {
+                config: Some(copper),
+                ..LandingPadState::default()
+            }),
+        );
+
+        let queued = runtime.advance_owned_landing_pads_ticks(&content, 1.0);
+        assert_eq!(queued.queued_pads, 1);
+        assert_eq!(
+            runtime.landing_pad_waiting.get(&copper),
+            Some(&vec![tile_pos])
+        );
+
+        let landed = runtime.advance_owned_landing_pads_ticks(&content, 1.0);
+        assert_eq!(landed.landed_tiles, vec![tile_pos]);
+        match runtime.campaign_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeCampaignBlockState::LandingPad(state)) => {
+                assert_eq!(state.arriving, Some(copper));
+                assert_eq!(state.cooldown, 1.0);
+            }
+            other => panic!("landing pad state missing: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn game_runtime_applies_client_landing_pad_landed_packet_to_runtime_state() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let landing_def = content.block_by_name("landing-pad").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = point2_pack(7, 7);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(16, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            landing_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime.campaign_runtime_states.insert(
+            tile_pos,
+            GameRuntimeCampaignBlockState::LandingPad(LandingPadState {
+                config: Some(copper),
+                ..LandingPadState::default()
+            }),
+        );
+
+        assert!(runtime.apply_client_landing_pad_landed_packet(
+            &content,
+            &crate::mindustry::net::LandingPadLandedCallPacket {
+                tile: Some(tile_pos),
+            },
+        ));
+        assert!(!runtime.apply_client_landing_pad_landed_packet(
+            &content,
+            &crate::mindustry::net::LandingPadLandedCallPacket { tile: None },
+        ));
+        match runtime.campaign_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeCampaignBlockState::LandingPad(state)) => {
+                assert_eq!(state.cooldown, 1.0);
+                assert_eq!(state.arriving, Some(copper));
+            }
+            other => panic!("landing pad state missing: {other:?}"),
+        }
     }
 
     fn exported_unit_state_revision(block_def: &BlockDef, state: &GameRuntimeUnitBlockState) -> u8 {

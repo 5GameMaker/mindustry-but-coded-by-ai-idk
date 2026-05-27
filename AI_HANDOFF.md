@@ -2393,3 +2393,49 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 在 `GameRuntime` 中维护真实 `PowerGraphRuntime` 集合/索引，把 building proximity 刷新、删除、pickup 与 graph lifecycle 串起来。
   2. 继续减少 power graph helper 孤岛，把 runtime 接到 world/building 主调用链。
+
+---
+
+## 72. 最新闭环记录：v158.1 LandingPad waiting queue 运行时接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 目标：同步 Java `LandingPad.java` 在 v158.1 的 waiting queue 剪枝顺序，并接入 core/server/desktop 主链路，而不是只做孤立 helper。
+- Java 依据：
+  - `waiting.each((item, pads) -> { pads.removeAll(l -> l.config != item); if(pads.size > 0){ ... } })`
+  - 剪枝必须发生在 size 判断之前；剪枝后为空不能 sort/first/Call。
+- Rust 主改动：
+  - `GameRuntime::landing_pad_waiting: BTreeMap<i16, Vec<i32>>`；
+  - `advance_owned_landing_pads_ticks(...)`：更新 import cooldown、剪枝 stale config、选中 landing pad、驱动 arrival/liquid removal/item import/dump；
+  - `GameRuntimeOwnedFrameReport.campaign.landing_pad`；
+  - server 对 `landed_tiles` 广播 `LandingPadLandedCallPacket`；
+  - desktop 新增 `sync_world_update_events_to_runtime()`，从 `NetClientState.last_world_update_packet` 回放 `LandingPadLandedCallPacket` 到 `GameRuntime::apply_client_landing_pad_landed_packet(...)`。
+- 已跑：
+  - `cargo test -p mindustry-core landing_pad --lib`
+  - `cargo test -p mindustry-server landing_pad --lib`
+  - `cargo test -p mindustry-desktop landing_pad --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续处理 v158.1 剩余 `UI.java` / `HudFragment.java` UI 差异；没有 Rust UI 层时只记录缺口，不要误改 runtime。
+  2. 继续 UnitAssembler 深水区：`AssemblerAI.targetPos/targetAngle/inPosition()`、UnitPayload 投递目标建筑、effect/sound/event、Java↔Rust smoke。
+
+---
+
+## 73. 最新只读记录：v158.1 UI / HudFragment 差异
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用。
+- 结论：`UI.java` 与 `HudFragment.java` 的 v158.1 差异均属于 UI/HUD 表现层；Rust 当前没有完整 `HudFragment` 对应模块，不要为了这些差异修改 `GameRuntime`。
+- Java 差异：
+  - `UI.showFollowUpMenu(...)`：callback 后若 `!state.isGame()` 则隐藏当前 menu/dialog；
+  - `HudFragment`：sidebar 背景/颜色、health/shield/payload/ammo bar、status effect icon found 判定、无限时长 tooltip。
+- Rust 当前相关路径：
+  - `core/src/mindustry/ui/dialogs/*`
+  - `core/src/mindustry/ui/displayable.rs`
+  - `core/src/mindustry/input/desktop_input.rs`
+  - `core/src/mindustry/input/mobile_input.rs`
+- 下一步建议：
+  1. 后续补 dialog stack/follow-up menu 时迁移 `!state.isGame() -> hide()`；
+  2. 后续补 HUD renderer 时再迁移 `HudFragment` 绘制与 tooltip 差异；
+  3. 目前继续主线 runtime/network/content 迁移，不要把 UI 差异写入 gameplay 层。

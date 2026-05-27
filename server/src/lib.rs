@@ -43,12 +43,12 @@ use mindustry_core::mindustry::io::{
 use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, AssemblerDroneSpawnedCallPacket,
     AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
-    DropItemCallPacket, EntitySnapshotCallPacket, Net, NetConnection, NetworkPlayerData,
-    NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-    ProviderEvent, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, TileConfigCallPacket,
-    TransferInventoryCallPacket, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
-    UnitTetherBlockSpawnedCallPacket,
+    DropItemCallPacket, EntitySnapshotCallPacket, LandingPadLandedCallPacket, Net, NetConnection,
+    NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    TileConfigCallPacket, TransferInventoryCallPacket, UnitBlockSpawnCallPacket,
+    UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -281,6 +281,11 @@ impl ServerLauncher {
             }
             if let Err(error) =
                 self.broadcast_runtime_assembler_unit_spawns(&report.unit.assembler.spawned_tiles)
+            {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) =
+                self.broadcast_runtime_landing_pad_landed(&report.campaign.landing_pad.landed_tiles)
             {
                 self.network_error = Some(error.to_string());
             }
@@ -1795,6 +1800,41 @@ impl ServerLauncher {
         }
     }
 
+    fn broadcast_runtime_landing_pad_landed(
+        &mut self,
+        tile_positions: &[i32],
+    ) -> io::Result<usize> {
+        if tile_positions.is_empty() || !self.net_server.is_active() {
+            return Ok(0);
+        }
+
+        let mut sent = 0;
+        let mut first_error = None;
+        let mut seen = BTreeSet::new();
+        for tile_pos in tile_positions {
+            if !seen.insert(*tile_pos) {
+                continue;
+            }
+            let packet = PacketKind::LandingPadLandedCallPacket(LandingPadLandedCallPacket {
+                tile: Some(*tile_pos),
+            });
+            match self.net_server.net_mut().send(&packet, true) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
+    }
+
     fn broadcast_server_unit_entity_snapshots(&mut self) -> io::Result<usize> {
         if !self.net_server.is_active() {
             return Ok(0);
@@ -3111,10 +3151,10 @@ mod tests {
     };
     use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::game_runtime::{
-        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
-        GameRuntimePowerNodeBatchLinkReport, GameRuntimePowerNodeConfigResult,
-        GameRuntimePowerNodeLinkResult, GameRuntimeUnitBlockState,
-        GameRuntimeUnitCargoUnloadConfigureResult,
+        GameRuntimeCampaignBlockState, GameRuntimeDistributionBlockState,
+        GameRuntimePayloadBlockState, GameRuntimePowerNodeBatchLinkReport,
+        GameRuntimePowerNodeConfigResult, GameRuntimePowerNodeLinkResult,
+        GameRuntimeUnitBlockState, GameRuntimeUnitCargoUnloadConfigureResult,
     };
     use mindustry_core::mindustry::core::{
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
@@ -3125,7 +3165,7 @@ mod tests {
         BuildingComp, BuildingTetherAction, BuildingTetherRef, CargoAiRuntimeState, PayloadComp,
         PayloadKind, PayloadState, UnitComp, UnitControllerState,
     };
-    use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
+    use mindustry_core::mindustry::game::{BlockPlan, ExportStat, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
     use mindustry_core::mindustry::io::{
         BuildPlanWire, BuildingRef, EntityRef, Point2, TeamId, TypeValue, UnitRef, Vec2,
@@ -3140,6 +3180,7 @@ mod tests {
     };
     use mindustry_core::mindustry::r#type::{PayloadKey, PayloadSeq, Sector};
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
+    use mindustry_core::mindustry::world::blocks::campaign::LandingPadState;
     use mindustry_core::mindustry::world::blocks::payloads::{
         payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
         PayloadConveyorState, PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState,
@@ -5269,6 +5310,97 @@ mod tests {
                     packet,
                     PacketKind::AssemblerDroneSpawnedCallPacket(packet)
                         if packet.tile == Some(assembler_tile) && packet.id == drone_id
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_broadcasts_landing_pad_landed_packet_when_waiting_pad_selected() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6588).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(24, 24);
+        launcher.runtime.state.set_sector(Some(Sector::new(13)));
+
+        let landing_def = launcher
+            .content_loader
+            .block_by_name("landing-pad")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        if let Some(sector) = launcher.runtime.state.rules.sector.as_mut() {
+            sector.info.imports.insert(
+                "copper".into(),
+                ExportStat {
+                    mean: 6000.0,
+                    ..ExportStat::default()
+                },
+            );
+            sector
+                .info
+                .import_cooldown_timers
+                .insert("copper".into(), 1.0);
+        }
+        if let Some(sector) = launcher.runtime.state.sector.as_mut() {
+            sector.info.imports.insert(
+                "copper".into(),
+                ExportStat {
+                    mean: 6000.0,
+                    ..ExportStat::default()
+                },
+            );
+            sector
+                .info
+                .import_cooldown_timers
+                .insert("copper".into(), 1.0);
+        }
+
+        let tile_pos = point2_pack(10, 9);
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            landing_def.base().clone(),
+            TeamId(launcher.runtime.state.rules.default_team as u8),
+        ));
+        launcher.runtime.campaign_runtime_states.insert(
+            tile_pos,
+            GameRuntimeCampaignBlockState::LandingPad(LandingPadState {
+                config: Some(copper),
+                ..LandingPadState::default()
+            }),
+        );
+        launcher
+            .runtime
+            .landing_pad_waiting
+            .insert(copper, vec![tile_pos]);
+
+        launcher.update();
+
+        let Some(GameRuntimeCampaignBlockState::LandingPad(state)) =
+            launcher.runtime.campaign_runtime_states.get(&tile_pos)
+        else {
+            panic!("landing pad state should remain present");
+        };
+        assert_eq!(state.arriving, Some(copper));
+        assert_eq!(state.cooldown, 1.0);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::LandingPadLandedCallPacket(packet)
+                        if packet.tile == Some(tile_pos)
                 )
         }));
     }

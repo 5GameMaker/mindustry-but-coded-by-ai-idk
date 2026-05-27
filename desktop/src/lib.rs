@@ -65,6 +65,7 @@ pub struct DesktopLauncher {
     last_applied_unit_entered_payload_packets_seen: u64,
     last_applied_unit_tether_block_spawned_packets_seen: u64,
     last_applied_unit_lifecycle_packets_seen: u64,
+    last_applied_world_update_packets_seen: u64,
     last_applied_tile_config_packets_seen: u64,
     last_applied_command_building_packets_seen: u64,
     last_unit_entered_payload_apply_report: Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
@@ -103,6 +104,7 @@ impl DesktopLauncher {
             last_applied_unit_entered_payload_packets_seen: 0,
             last_applied_unit_tether_block_spawned_packets_seen: 0,
             last_applied_unit_lifecycle_packets_seen: 0,
+            last_applied_world_update_packets_seen: 0,
             last_applied_tile_config_packets_seen: 0,
             last_applied_command_building_packets_seen: 0,
             last_unit_entered_payload_apply_report: None,
@@ -129,6 +131,7 @@ impl DesktopLauncher {
         self.sync_unit_entered_payload_to_runtime();
         self.sync_unit_tether_block_spawned_to_runtime();
         self.sync_unit_lifecycle_to_runtime();
+        self.sync_world_update_events_to_runtime();
         self.sync_tile_config_to_runtime();
         self.sync_command_building_to_runtime();
         let now_millis = current_millis();
@@ -493,6 +496,35 @@ impl DesktopLauncher {
         }
     }
 
+    fn sync_world_update_events_to_runtime(&mut self) -> bool {
+        if self.last_applied_world_data.is_none() {
+            return false;
+        }
+
+        let (seen, packet) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (
+                state.world_update_packets_seen,
+                state.last_world_update_packet.clone(),
+            )
+        };
+        if seen == self.last_applied_world_update_packets_seen {
+            return false;
+        }
+        self.last_applied_world_update_packets_seen = seen;
+
+        let Some(packet) = packet else {
+            return false;
+        };
+        match packet {
+            PacketKind::LandingPadLandedCallPacket(packet) => self
+                .runtime
+                .apply_client_landing_pad_landed_packet(&self.content_loader, &packet),
+            _ => false,
+        }
+    }
+
     fn sync_tile_config_to_runtime(&mut self) -> bool {
         if self.last_applied_world_data.is_none() {
             return false;
@@ -655,6 +687,7 @@ impl DesktopLauncher {
             unit_entered_payload_packets_seen,
             unit_tether_block_spawned_packets_seen,
             unit_lifecycle_packets_seen,
+            world_update_packets_seen,
             tile_config_packets_seen,
             command_building_packets_seen,
         ) = {
@@ -671,6 +704,7 @@ impl DesktopLauncher {
                 state.unit_entered_payload_packets_seen,
                 state.unit_tether_block_spawned_packets_seen,
                 state.unit_lifecycle_packets_seen,
+                state.world_update_packets_seen,
                 state.tile_config_packets_seen,
                 state.command_building_packets_seen,
             )
@@ -687,6 +721,7 @@ impl DesktopLauncher {
         self.last_applied_unit_tether_block_spawned_packets_seen =
             unit_tether_block_spawned_packets_seen;
         self.last_applied_unit_lifecycle_packets_seen = unit_lifecycle_packets_seen;
+        self.last_applied_world_update_packets_seen = world_update_packets_seen;
         self.last_applied_tile_config_packets_seen = tile_config_packets_seen;
         self.last_applied_command_building_packets_seen = command_building_packets_seen;
         self.last_unit_entered_payload_apply_report = None;
@@ -708,6 +743,7 @@ impl DesktopLauncher {
         self.last_applied_unit_entered_payload_packets_seen = 0;
         self.last_applied_unit_tether_block_spawned_packets_seen = 0;
         self.last_applied_unit_lifecycle_packets_seen = 0;
+        self.last_applied_world_update_packets_seen = 0;
         self.last_applied_tile_config_packets_seen = 0;
         self.last_applied_command_building_packets_seen = 0;
         self.last_unit_entered_payload_apply_report = None;
@@ -1286,9 +1322,10 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{run, DesktopLauncher};
     use mindustry_core::mindustry::core::game_runtime::{
-        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
-        GameRuntimeReconstructorConfigureResult, GameRuntimeUnitBlockState,
-        GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
+        GameRuntimeCampaignBlockState, GameRuntimeDistributionBlockState,
+        GameRuntimePayloadBlockState, GameRuntimeReconstructorConfigureResult,
+        GameRuntimeUnitBlockState, GameRuntimeUnitCargoUnloadConfigureResult,
+        GameRuntimeUnitFactoryConfigureResult,
     };
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
@@ -1310,10 +1347,10 @@ mod tests {
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::net::{
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket,
-        ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, NetworkPlayerData,
-        NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket,
-        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket,
+        LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
+        StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
+        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -1331,6 +1368,7 @@ mod tests {
             TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
         },
         r#type::{ItemStack, PayloadKey, PayloadSeq},
+        world::blocks::campaign::LandingPadState,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
             ReconstructorState, UnitAssemblerState, UnitBlockState, UnitCargoLoaderState,
@@ -2201,6 +2239,65 @@ mod tests {
         );
         assert_eq!(tether.update(), BuildingTetherAction::Keep);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_landing_pad_landed_packet_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(11, 7);
+        let landing_def = launcher
+            .content_loader
+            .block_by_name("landing-pad")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            landing_def.base().clone(),
+            TeamId(4),
+        ));
+        launcher.runtime.campaign_runtime_states.insert(
+            tile_pos,
+            GameRuntimeCampaignBlockState::LandingPad(LandingPadState {
+                config: Some(copper),
+                ..LandingPadState::default()
+            }),
+        );
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::LandingPadLandedCallPacket(
+                LandingPadLandedCallPacket {
+                    tile: Some(tile_pos),
+                },
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeCampaignBlockState::LandingPad(state)) =
+            launcher.runtime.campaign_runtime_states.get(&tile_pos)
+        else {
+            panic!("landing pad state should remain present");
+        };
+        assert_eq!(state.cooldown, 1.0);
+        assert_eq!(state.arriving, Some(copper));
+        assert_eq!(launcher.last_applied_world_update_packets_seen, 1);
     }
 
     #[test]

@@ -4081,3 +4081,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core linked_storage_items_are_not_merged --lib`
   - `cargo test -p mindustry-core same_team_cores_share --lib`
 - 仍未完成：`LandingPad.java`、`UI.showFollowUpMenu(...)`、`HudFragment` 的 v158.1 UI/显示差异仍需继续对照；其中 UI 类差异不应误改 runtime。
+
+### 12.130 v158.1 LandingPad waiting queue 剪枝与联机事件回放
+
+- 2026-05-27：对照 `v158..v158.1` 的 `LandingPad.java` 变更，把 landing pad waiting queue 从纯 codec/helper 推进到 Rust owned runtime、server broadcast 与 desktop client replay。
+- Java 依据：
+  - v158.1 将 `pads.removeAll(l -> l.config != item)` 移到 `if(pads.size > 0)` 之前；
+  - 旧配置不匹配的 landing pad 必须先从 waiting 队列剪掉，剪枝后为空则不能再 sort/first/Call；
+  - 非 fake campaign landing pad 满足 import cooldown 后排入下一帧 waiting；被选中后调用 `Call.landingPadLanded(tile)` 并交换优先级。
+- Rust 新增/变化：
+  - `GameRuntime::landing_pad_waiting` 按 item id 保存 runtime-only waiting queue，并在 world reset/building remove 时清理；
+  - `advance_owned_landing_pads_ticks(...)` 接入真实 building list：更新 import cooldown、先剪枝 stale config，再选择 landing pad、驱动 arrival/liquid removal/item import/dump；
+  - `GameRuntimeOwnedFrameReport` 新增 `campaign.landing_pad`；
+  - `ServerLauncher::update()` 对 `report.campaign.landing_pad.landed_tiles` 可靠广播 `LandingPadLandedCallPacket`；
+  - `DesktopLauncher::sync_world_update_events_to_runtime()` 从 `NetClientState.last_world_update_packet` 消费 `LandingPadLandedCallPacket`，调用 `GameRuntime::apply_client_landing_pad_landed_packet(...)` 回放到本地 landing pad sidecar。
+- 新增验证：
+  - `cargo test -p mindustry-core landing_pad --lib`
+  - `cargo test -p mindustry-server landing_pad --lib`
+  - `cargo test -p mindustry-desktop landing_pad --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：LandingPad 的完整 UI 配置表、手动 import 按钮、粒子/音效/shake 仍未迁移；`UI.showFollowUpMenu(...)` 与 `HudFragment` 的 v158.1 UI/显示差异待继续只读确认并记录或接入 UI 层。
+
+### 12.131 v158.1 UI.showFollowUpMenu / HudFragment UI 差异记录
+
+- 2026-05-27：只读对照 `v158..v158.1` 的 `UI.java` 与 `HudFragment.java`，确认变更属于 UI/HUD 表现层，当前 Rust 不应误改 `GameRuntime`。
+- Java 依据：
+  - `UI.showFollowUpMenu(...)` 在 callback 后，如果 `!state.isGame()`，会 `myself.hide()`；这是 dialog/menu 生命周期语义；
+  - `HudFragment.java` 调整 sidebar 背景/颜色、health/shield/payload/ammo bar 绘制、status effect 图标存在性判断与超大持续时间 `∞` tooltip；这是 HUD 渲染语义。
+- Rust 当前状态：
+  - 现有 UI 主要是 `core/src/mindustry/ui/dialogs/*`、`ui/displayable.rs`、`input/desktop_input.rs` / `input/mobile_input.rs`；
+  - 尚无对应 Java `HudFragment` 的完整 HUD fragment 渲染层；
+  - 因此暂不把 `HudFragment` 差异落入 runtime，避免把显示层缺口误变成 gameplay 行为。
+- 后续接入建议：
+  - 若后续补齐 follow-up menu/dialog stack，需在非 game state 回调后自动 hide；
+  - 若后续补齐 HUD renderer，再迁移 sidebar bar 绘制、status icon found 判定和无限时长显示。
