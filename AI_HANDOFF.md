@@ -3904,3 +3904,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - `standard_effect_id(...)` 仍只覆盖少量已迁移内置 Fx，需要继续迁移完整 Fx registry；
      - desktop/client 仍缺真正 drain/render `client_local_effect_events` 的 renderer pass；
      - 非 headless client puddle tick 主循环仍需接入 `queue_client_puddle_particle_effects(...)`。
+
+---
+
+## 118. 最新闭环记录：Desktop 本地 effect 渲染 drain 边界
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：在 117 已把 puddle particle payload 接入 `client_local_effect_events` 后，为 desktop 侧提供一个明确可测的 renderer 消费边界。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::drain_local_effect_events_for_render(...)`；
+    - 通过 `std::mem::take` drain `runtime.client_local_effect_events`；
+    - 暂不自动放进 `update()`，避免破坏既有同步测试和调用方可观察队列状态。
+- 新增测试：
+  - `desktop_launcher_drains_local_effect_events_for_render`
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_drains_local_effect_events_for_render --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`接入桌面本地特效输出`；
+  2. 后续欠账：
+     - 真正图形 renderer 仍未迁移；
+     - `EffectRegistry`、完整 Fx id/name 映射、`EffectStateComp::draw_with(...)` 到实际绘制命令仍需后续接入；
+     - 非 headless client puddle tick 主循环仍需自动调用 `queue_client_puddle_particle_effects(...)`。

@@ -5208,3 +5208,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `standard_effect_id(...)` 当前只覆盖已迁移的少量内置 Fx；完整 vanilla/mod effect registry 仍需后续迁移，否则部分 particle effect payload 会被安全跳过；
   - desktop 侧仍缺真正绘制/消费 `client_local_effect_events` 的 renderer pass；
   - 仍需把未来的非 headless client puddle tick 主循环接到 `queue_client_puddle_particle_effects(...)`。
+
+### 12.177 Desktop local effect render drain seam
+
+- 2026-05-28：为 12.176 接入的 `client_local_effect_events` 增加 desktop 侧显式 drain seam，使本地 effect 队列具备被后续 renderer pass 消费的稳定入口。
+- Java 依据：
+  - Java `Effect.at(...)` 最终进入客户端本地 effect 显示链，而不是长期滞留在网络/事件队列；
+  - 当前 Rust desktop 尚无真实 renderer，因此先提供可测试的 drain 边界，避免本地 effect 队列只能积压。
+- Rust 新增/变化：
+  - `desktop::DesktopLauncher::drain_local_effect_events_for_render(...)`
+    - 使用 `std::mem::take` 取出 `runtime.client_local_effect_events`；
+    - 返回 `Vec<EffectCallPacket2>` 给未来 renderer pass；
+    - 不在 `update()` 中自动 drain，避免破坏现有网络同步/本地 effect 测试对队列可观察性的假设。
+- 新增验证：
+  - `desktop_launcher_drains_local_effect_events_for_render`
+    - 手动塞入本地 effect；
+    - drain 后返回该 effect，并确认 runtime 队列清空；
+    - 第二次 drain 返回空。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_drains_local_effect_events_for_render --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - desktop 仍缺真正图形 renderer；当前 drain seam 只保证 effect packet 能从 runtime 队列进入渲染边界；
+  - `EffectRegistry` / 完整 Fx id 映射与 `EffectStateComp::draw_with(...)` 的真实绘制链仍待迁移。

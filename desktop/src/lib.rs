@@ -157,6 +157,10 @@ impl DesktopLauncher {
         self.runtime.tick_client_move_effect_abilities(1.0, false);
     }
 
+    pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
+        std::mem::take(&mut self.runtime.client_local_effect_events)
+    }
+
     pub fn connect_from_args(&mut self) {
         let Some(target) = self.connect_target.clone() else {
             return;
@@ -2297,6 +2301,31 @@ mod tests {
             1,
             "same last effect packet should not be queued again without a new counter"
         );
+    }
+
+    #[test]
+    fn desktop_launcher_drains_local_effect_events_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let packet = EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: standard_effect_id("ripple").unwrap() as u16,
+                x: 8.0,
+                y: 16.0,
+                rotation: 0.0,
+                color: type_io::RgbaColor::new(-1),
+            },
+            data: TypeValue::Null,
+        };
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(packet.clone());
+
+        let drained = launcher.drain_local_effect_events_for_render();
+
+        assert_eq!(drained, vec![packet]);
+        assert!(launcher.runtime.client_local_effect_events.is_empty());
+        assert!(launcher.drain_local_effect_events_for_render().is_empty());
     }
 
     #[test]
