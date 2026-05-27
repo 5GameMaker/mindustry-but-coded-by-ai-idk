@@ -141,6 +141,8 @@ impl DesktopLauncher {
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
         self.sync_snapshot_mirrors();
+        self.runtime
+            .update_client_effect_snapshot_parent_transforms();
         self.sync_building_storage_mirrors_to_runtime();
         self.sync_unit_item_mirrors_to_runtime();
         self.sync_unit_payload_mirrors_to_runtime();

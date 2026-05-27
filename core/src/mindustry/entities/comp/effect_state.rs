@@ -1,8 +1,12 @@
 //! Effect state component mirroring upstream
 //! `mindustry.entities.comp.EffectStateComp`.
 
+use super::{
+    child::{ChildComp, ChildParent},
+    decal::DecalColor,
+};
 use crate::mindustry::{
-    entities::{comp::DecalColor, Effect},
+    entities::Effect,
     io::{EffectStateSyncWire, TypeValue},
 };
 
@@ -93,6 +97,29 @@ impl EffectStateComp {
         self.time >= self.lifetime
     }
 
+    pub fn update_parent_transform(&mut self, parent: Option<ChildParent>) -> bool {
+        if self.parent_id.is_none() {
+            return false;
+        }
+        let Some(parent) = parent else {
+            return false;
+        };
+
+        let mut child = ChildComp::new(self.x, self.y, self.rotation);
+        child.parent = Some(parent);
+        child.rot_with_parent = self.rot_with_parent;
+        child.offset_x = self.offset_x;
+        child.offset_y = self.offset_y;
+        child.offset_pos = self.offset_pos;
+        child.offset_rot = self.offset_rot;
+        child.update();
+
+        self.x = child.x;
+        self.y = child.y;
+        self.rotation = child.rotation;
+        true
+    }
+
     pub fn clip_size(&self) -> f32 {
         self.effect_clip
     }
@@ -180,6 +207,37 @@ mod tests {
         state.tick(1.75);
         assert_eq!(state.time, 3.0);
         assert!(state.is_expired());
+    }
+
+    #[test]
+    fn effect_state_updates_parent_transform_like_child_component() {
+        let mut state = EffectStateComp::new(3);
+        state.parent_id = Some(99);
+        state.rot_with_parent = true;
+        state.offset_x = 2.0;
+        state.offset_y = 0.0;
+        state.offset_pos = 0.0;
+        state.offset_rot = 15.0;
+        state.x = 0.0;
+        state.y = 0.0;
+        state.rotation = 0.0;
+
+        assert!(state.update_parent_transform(Some(ChildParent {
+            x: 10.0,
+            y: 20.0,
+            rotation: Some(90.0),
+        })));
+
+        assert!((state.x - 10.0).abs() < 0.0001);
+        assert!((state.y - 22.0).abs() < 0.0001);
+        assert_eq!(state.rotation, 105.0);
+
+        state.parent_id = None;
+        assert!(!state.update_parent_transform(Some(ChildParent {
+            x: 0.0,
+            y: 0.0,
+            rotation: Some(0.0),
+        })));
     }
 
     #[test]

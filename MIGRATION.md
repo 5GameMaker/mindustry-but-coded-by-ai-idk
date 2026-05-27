@@ -5451,3 +5451,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ripple` 的动态 lifetime `30f * rotation` 还未挂到真实 renderer callback；
   - 这仍是覆盖当前高频 Fx 的过渡表，不是完整 `Fx.java` registry；
   - 真实 GPU renderer 仍未消费 `draw_local_effect_states_for_render(...)`。
+
+### 12.184 EffectState parent-follow transform pass
+
+- 2026-05-28：补齐 `EffectStateComp` 的父实体跟随更新，使服务端 snapshot 下发的 `parent_id/offset/rot_with_parent` 不再只是保存在 state 中，而是能按 Java `ChildComp` 语义更新 effect 坐标与旋转。
+- Java 依据：
+  - `core/src/mindustry/entities/comp/EffectStateComp.java` 继承/组合 generated entity 中的 child/lifetime 行为；
+  - `core/src/mindustry/entities/Effect.java` 创建 effect 时会写入 `parent` 与 `rotWithParent`。
+- Rust 新增/变化：
+  - `EffectStateComp::update_parent_transform(parent)` 复用 Rust `ChildComp` 的 offset/rotation 公式；
+  - `GameRuntime::update_client_effect_snapshot_parent_transforms()` 从 `client_unit_snapshot_entities` 与 `client_bullet_snapshot_entities` 收集父实体 transform，并更新 `client_effect_snapshot_entities`；
+  - `DesktopLauncher::update()` 在 snapshot mirror 同步后调用该 pass，让客户端 effect snapshot 在渲染前跟随父实体。
+- 新增验证：
+  - `effect_state_updates_parent_transform_like_child_component`
+  - `game_runtime_updates_effect_snapshot_parent_transform_from_unit_parent`
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core effect_state --lib`
+  - `cargo test -p mindustry-core game_runtime_updates_effect_snapshot_parent_transform_from_unit_parent --lib`
+  - `cargo test -p mindustry-desktop --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 本地 `EffectCallPacket2` 当前没有 parent id 字段，仍只能对 snapshot effect 做 parent-follow；
+  - 还未覆盖 player/building 作为 parent 的通用 resolver；
+  - 真正 renderer 仍未消费更新后的 effect state。

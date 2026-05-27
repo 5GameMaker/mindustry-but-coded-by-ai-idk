@@ -28,9 +28,9 @@ use crate::mindustry::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
             BuildingComp, BuildingTetherComp, BuildingTetherRef, BulletComp, CargoAiRuntimeState,
-            DecalComp, DecalRegion, EffectRenderInput, EffectStateComp, FireComp, LaunchCoreBlock,
-            LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile,
-            UnitComp, UnitControllerState, WorldLabelComp,
+            ChildParent, DecalComp, DecalRegion, EffectRenderInput, EffectStateComp, FireComp,
+            LaunchCoreBlock, LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp,
+            PuddleTile, UnitComp, UnitControllerState, WorldLabelComp,
         },
         entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
         EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
@@ -3298,6 +3298,41 @@ impl GameRuntime {
         let effect_def = standard_effect(sync.effect_id as i32);
         effect.apply_sync_wire(sync, effect_def.as_ref());
         true
+    }
+
+    pub fn update_client_effect_snapshot_parent_transforms(&mut self) -> usize {
+        let mut parents = BTreeMap::new();
+        for (id, unit) in &self.client_unit_snapshot_entities {
+            parents.insert(
+                *id,
+                ChildParent {
+                    x: unit.x(),
+                    y: unit.y(),
+                    rotation: Some(unit.rotation()),
+                },
+            );
+        }
+        for (id, bullet) in &self.client_bullet_snapshot_entities {
+            parents.insert(
+                *id,
+                ChildParent {
+                    x: bullet.x,
+                    y: bullet.y,
+                    rotation: Some(bullet.rotation()),
+                },
+            );
+        }
+
+        let mut updated = 0;
+        for effect in self.client_effect_snapshot_entities.values_mut() {
+            let parent = effect
+                .parent_id
+                .and_then(|parent_id| parents.get(&parent_id).copied());
+            if effect.update_parent_transform(parent) {
+                updated += 1;
+            }
+        }
+        updated
     }
 
     pub fn apply_client_decal_sync_wire(
@@ -21682,6 +21717,33 @@ mod tests {
         assert_eq!(effect.time, 2.0);
         assert_eq!(effect.x, 12.0);
         assert_eq!(effect.y, 24.0);
+    }
+
+    #[test]
+    fn game_runtime_updates_effect_snapshot_parent_transform_from_unit_parent() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let stell = content.unit_by_name("stell").unwrap().clone();
+        let mut unit = UnitComp::new(9100, stell, TeamId(1));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(90.0);
+
+        let mut effect = EffectStateComp::new(9200);
+        effect.parent_id = Some(9100);
+        effect.rot_with_parent = true;
+        effect.offset_x = 2.0;
+        effect.offset_y = 0.0;
+        effect.offset_pos = 0.0;
+        effect.offset_rot = 15.0;
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(9100, unit);
+        runtime.client_effect_snapshot_entities.insert(9200, effect);
+
+        assert_eq!(runtime.update_client_effect_snapshot_parent_transforms(), 1);
+        let effect = runtime.client_effect_snapshot_entities.get(&9200).unwrap();
+        assert!((effect.x - 100.0).abs() < 0.0001);
+        assert!((effect.y - 202.0).abs() < 0.0001);
+        assert_eq!(effect.rotation, 105.0);
     }
 
     #[test]
