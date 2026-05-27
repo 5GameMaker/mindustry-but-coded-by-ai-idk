@@ -38,6 +38,10 @@ pub const FX_NEOPLASM_HEAL_ID: i32 = 122;
 pub const FX_STEAM_ID: i32 = 123;
 /// Upstream `Fx.vapor` id in `mindustry.content.Fx` for v158.1.
 pub const FX_VAPOR_ID: i32 = 128;
+/// Upstream `Fx.corrosionVapor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CORROSION_VAPOR_ID: i32 = 127;
+/// Upstream `Fx.vaporSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_VAPOR_SMALL_ID: i32 = 129;
 /// Upstream `Fx.fireballsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
 /// Upstream `Fx.steamCoolSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -77,7 +81,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "fireSmoke" => Some(FX_FIRE_SMOKE_ID),
         "neoplasmHeal" => Some(FX_NEOPLASM_HEAL_ID),
         "steam" => Some(FX_STEAM_ID),
+        "corrosionVapor" => Some(FX_CORROSION_VAPOR_ID),
         "vapor" => Some(FX_VAPOR_ID),
+        "vaporSmall" => Some(FX_VAPOR_SMALL_ID),
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
         "steamCoolSmoke" => Some(FX_STEAM_COOL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
@@ -126,7 +132,11 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
                 .layer(Layer::BULLET - 2.0)
         }
         FX_STEAM_ID => Effect::with_lifetime(FX_STEAM_ID, 35.0, DEFAULT_EFFECT_CLIP),
+        FX_CORROSION_VAPOR_ID => {
+            Effect::with_lifetime(FX_CORROSION_VAPOR_ID, 50.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_VAPOR_ID => Effect::with_lifetime(FX_VAPOR_ID, 110.0, DEFAULT_EFFECT_CLIP),
+        FX_VAPOR_SMALL_ID => Effect::with_lifetime(FX_VAPOR_SMALL_ID, 50.0, DEFAULT_EFFECT_CLIP),
         FX_FIREBALL_SMOKE_ID => {
             Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
@@ -771,6 +781,45 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_CORROSION_VAPOR_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: interp_pow2_out(fslope) * 0.5,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 8.0 + finpow * 3.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 3.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_VAPOR_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -797,6 +846,45 @@ pub fn standard_effect_draw_plan(
                 fslope,
                 radius_base: 0.6,
                 radius_fin_scale: 5.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_VAPOR_SMALL_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: fout,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 4,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 2.0 + finpow * 5.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 1.0,
+                radius_fin_scale: 4.0,
                 radius_fout_scale: 0.0,
                 radius_fslope_scale: 0.0,
                 secondary_vector_scale: 0.0,
@@ -2450,7 +2538,12 @@ mod tests {
             Some(FX_NEOPLASM_HEAL_ID)
         );
         assert_eq!(standard_effect_id("steam"), Some(FX_STEAM_ID));
+        assert_eq!(
+            standard_effect_id("corrosionVapor"),
+            Some(FX_CORROSION_VAPOR_ID)
+        );
         assert_eq!(standard_effect_id("vapor"), Some(FX_VAPOR_ID));
+        assert_eq!(standard_effect_id("vaporSmall"), Some(FX_VAPOR_SMALL_ID));
         assert_eq!(
             standard_effect_id("fireballsmoke"),
             Some(FX_FIREBALL_SMOKE_ID)
@@ -2508,6 +2601,11 @@ mod tests {
             standard_effect(FX_STEAM_COOL_SMOKE_ID).unwrap().lifetime,
             35.0
         );
+        assert_eq!(
+            standard_effect(FX_CORROSION_VAPOR_ID).unwrap().lifetime,
+            50.0
+        );
+        assert_eq!(standard_effect(FX_VAPOR_SMALL_ID).unwrap().lifetime, 50.0);
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
         assert_eq!(
             standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
@@ -2709,6 +2807,24 @@ mod tests {
         assert_eq!(steam.color_from, Some("Color.lightGray"));
         assert_eq!(steam.particles.unwrap().count, 2);
 
+        let corrosion = standard_effect_draw_plan(
+            Some(FX_CORROSION_VAPOR_ID as u16),
+            127,
+            0.0,
+            0.0,
+            0.0,
+            25.0,
+            50.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(corrosion.input_color, Some(DecalColor::WHITE));
+        assert_eq!(corrosion.alpha, 0.5);
+        let corrosion_particles = corrosion.particles.unwrap();
+        assert_eq!(corrosion_particles.count, 2);
+        assert_eq!(corrosion_particles.length, 10.625);
+        assert_eq!(corrosion_particles.radius_base, 3.0);
+
         let vapor = standard_effect_draw_plan(
             Some(FX_VAPOR_ID as u16),
             45,
@@ -2727,6 +2843,25 @@ mod tests {
         assert_eq!(vapor_particles.length, 11.625);
         assert_eq!(vapor_particles.radius_base, 0.6);
         assert_eq!(vapor_particles.radius_fin_scale, 5.0);
+
+        let vapor_small = standard_effect_draw_plan(
+            Some(FX_VAPOR_SMALL_ID as u16),
+            129,
+            0.0,
+            0.0,
+            0.0,
+            25.0,
+            50.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(vapor_small.input_color, Some(DecalColor::WHITE));
+        assert_eq!(vapor_small.alpha, 0.5);
+        let vapor_small_particles = vapor_small.particles.unwrap();
+        assert_eq!(vapor_small_particles.count, 4);
+        assert_eq!(vapor_small_particles.length, 6.375);
+        assert_eq!(vapor_small_particles.radius_base, 1.0);
+        assert_eq!(vapor_small_particles.radius_fin_scale, 4.0);
 
         let fireball = standard_effect_draw_plan(
             Some(FX_FIREBALL_SMOKE_ID as u16),

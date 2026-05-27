@@ -6123,3 +6123,47 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `missileTrailSmoke/missileTrailSmokeSmall` 需要多 pass 粒子、`Scaled.scaled(...)` 局部 lifetime、`Interp.pow10Out/pow5Out` 和 per-particle light；
   - 真实 renderer backend 仍未接入。
+
+### 12.205 Fx.corrosionVapor / Fx.vaporSmall 迁移
+
+- 2026-05-28：继续对照 `Fx.java`，迁移与既有 `vapor` 同构的 `corrosionVapor` 和 `vaporSmall`；两者均可复用当前 `SeededCircleParticles`、`finpow` 与 alpha helper，无需新增 primitive 类型。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1498` 附近：
+    - `corrosionVapor = new Effect(50f, ...)`
+    - `color(e.color)`
+    - `alpha(Interp.pow2Out.apply(e.fslope()) * 0.5f)`
+    - `randLenVectors(e.id, 2, 8f + e.finpow() * 3f, ...)`
+    - 半径 `3f`
+  - `Fx.java:1516` 附近：
+    - `vaporSmall = new Effect(50f, ...)`
+    - `color(e.color)`
+    - `alpha(e.fout())`
+    - `randLenVectors(e.id, 4, 2f + e.finpow() * 5f, ...)`
+    - 半径 `1f + e.fin() * 4f`
+  - 本地按 `new Effect` 声明顺序计数：
+    - `corrosionVapor=127`
+    - `vapor=128`
+    - `vaporSmall=129`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_CORROSION_VAPOR_ID = 127`、`FX_VAPOR_SMALL_ID = 129`；
+    - 接入 `standard_effect_id(...)` 与 `standard_effect(...)`，lifetime 均为 `50.0`；
+    - `standard_effect_draw_plan(...)` 新增：
+      - `corrosionVapor`：`alpha=pow2Out(fslope)*0.5`、`count=2`、`length=8+finpow*3`、`radius_base=3`；
+      - `vaporSmall`：`alpha=fout`、`count=4`、`length=2+finpow*5`、`radius_base=1`、`radius_fin_scale=4`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖两个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖两个 draw plan。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `corrosionVapor/vaporSmall` 仍只到 primitive data 边界，真实 renderer backend 未接入；
+  - 完整 vapor/corrosion 相关 Fx 仍需继续对照 `Fx.java`。

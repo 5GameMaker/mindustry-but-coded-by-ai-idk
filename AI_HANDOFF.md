@@ -4379,3 +4379,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 注意：
   - `missileTrailSmoke*` 已核对但仍未迁移，因为需要多 pass、scaled lifetime、pow10/pow5、per-particle light；
   - 不要用单一 `SeededCircleParticles` 近似它们，后续应先设计专用 multi-pass spec。
+
+---
+
+## 131. 最新闭环记录：Fx.corrosionVapor / Fx.vaporSmall 迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐 `vapor` 邻近的 `corrosionVapor` 与 `vaporSmall` 标准 effect metadata/draw plan。
+- Java 依据：
+  - `Fx.java:1498-1524`；
+  - ids：
+    - `corrosionVapor=127`
+    - `vaporSmall=129`
+  - lifetimes 均为 `50f`；
+  - `corrosionVapor`：`alpha=pow2Out(fslope)*0.5`、`count=2`、`length=8+finpow*3`、半径 `3`；
+  - `vaporSmall`：`alpha=fout`、`count=4`、`length=2+finpow*5`、半径 `1+fin*4`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_CORROSION_VAPOR_ID` / `FX_VAPOR_SMALL_ID`；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - `standard_effect_draw_plan(...)` 新增两个 `SeededCircleParticles` 分支；
+    - 测试覆盖 id、lifetime、alpha、count、length、radius 字段。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续挑选无需新 primitive 的 `Fill.circle` 类 Fx；
+  2. 或设计 `missileTrailSmoke*` 的 multi-pass trail spec，避免近似。
