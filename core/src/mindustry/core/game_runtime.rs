@@ -43,7 +43,8 @@ use crate::mindustry::{
     net::{
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket,
         LandingPadLandedCallPacket, NetworkPlayerSyncData, UnitBlockSpawnCallPacket,
-        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -3671,6 +3672,23 @@ impl GameRuntime {
             }
         }
         true
+    }
+
+    pub fn apply_client_unit_spawn_packet(
+        &mut self,
+        content: &ContentLoader,
+        packet: &UnitSpawnCallPacket,
+    ) -> bool {
+        if packet.container.unit_id < 0 {
+            return false;
+        }
+        if entity_class_kind(packet.container.unit_type_id) != Some(EntityClassKind::Unit) {
+            return false;
+        }
+        let Some(sync) = read_client_unit_sync_exact(content, &packet.container.sync) else {
+            return false;
+        };
+        self.apply_client_unit_sync_wire(content, packet.container.unit_id, &sync)
     }
 
     pub fn apply_client_landing_pad_landed_packet(
@@ -25202,6 +25220,40 @@ mod tests {
                 id: -1,
             },
         ));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_spawn_packet_sync_container() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let stell = content.unit_by_name("stell").unwrap().clone();
+        let mut unit = UnitComp::new(5151, stell, TeamId(6));
+        unit.set_pos(144.0, 96.0);
+        unit.set_rotation(180.0);
+        let mut sync = Vec::new();
+        type_io::write_unit_sync(&mut sync, &content, &unit.to_sync_wire()).unwrap();
+        let packet = UnitSpawnCallPacket {
+            container: type_io::UnitSyncContainer::new(
+                unit.id(),
+                entity_class_id(unit.type_info.name()).unwrap(),
+                sync,
+            ),
+        };
+
+        let mut runtime = GameRuntime::default();
+        assert!(runtime.apply_client_unit_spawn_packet(&content, &packet));
+        let spawned = runtime
+            .client_unit_snapshot_entities
+            .get(&5151)
+            .expect("unit spawn packet should materialize unit snapshot");
+        assert_eq!(spawned.type_info.name(), "stell");
+        assert_eq!(spawned.team_id(), TeamId(6));
+        assert_eq!(spawned.x(), 144.0);
+        assert_eq!(spawned.y(), 96.0);
+        assert_eq!(spawned.rotation(), 180.0);
+
+        let mut invalid = packet.clone();
+        invalid.container.unit_type_id = crate::mindustry::entities::BULLET_CLASS_ID;
+        assert!(!runtime.apply_client_unit_spawn_packet(&content, &invalid));
     }
 
     #[test]

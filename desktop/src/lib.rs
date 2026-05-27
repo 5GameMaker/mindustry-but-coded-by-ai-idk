@@ -65,6 +65,7 @@ pub struct DesktopLauncher {
     last_applied_unit_entered_payload_packets_seen: u64,
     last_applied_unit_tether_block_spawned_packets_seen: u64,
     last_applied_unit_lifecycle_packets_seen: u64,
+    last_applied_unit_spawn_packet_count: usize,
     last_applied_world_update_packets_seen: u64,
     last_applied_tile_config_packets_seen: u64,
     last_applied_command_building_packets_seen: u64,
@@ -104,6 +105,7 @@ impl DesktopLauncher {
             last_applied_unit_entered_payload_packets_seen: 0,
             last_applied_unit_tether_block_spawned_packets_seen: 0,
             last_applied_unit_lifecycle_packets_seen: 0,
+            last_applied_unit_spawn_packet_count: 0,
             last_applied_world_update_packets_seen: 0,
             last_applied_tile_config_packets_seen: 0,
             last_applied_command_building_packets_seen: 0,
@@ -131,6 +133,7 @@ impl DesktopLauncher {
         self.sync_unit_entered_payload_to_runtime();
         self.sync_unit_tether_block_spawned_to_runtime();
         self.sync_unit_lifecycle_to_runtime();
+        self.sync_unit_spawn_packets_to_runtime();
         self.sync_world_update_events_to_runtime();
         self.sync_tile_config_to_runtime();
         self.sync_command_building_to_runtime();
@@ -496,6 +499,31 @@ impl DesktopLauncher {
         }
     }
 
+    fn sync_unit_spawn_packets_to_runtime(&mut self) -> bool {
+        if self.last_applied_world_data.is_none() {
+            return false;
+        }
+
+        let packets = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.unit_spawn_packets.clone()
+        };
+        if packets.len() == self.last_applied_unit_spawn_packet_count {
+            return false;
+        }
+
+        let start = self.last_applied_unit_spawn_packet_count.min(packets.len());
+        self.last_applied_unit_spawn_packet_count = packets.len();
+        let mut applied = false;
+        for packet in packets.iter().skip(start) {
+            applied |= self
+                .runtime
+                .apply_client_unit_spawn_packet(&self.content_loader, packet);
+        }
+        applied
+    }
+
     fn sync_world_update_events_to_runtime(&mut self) -> bool {
         if self.last_applied_world_data.is_none() {
             return false;
@@ -687,6 +715,7 @@ impl DesktopLauncher {
             unit_entered_payload_packets_seen,
             unit_tether_block_spawned_packets_seen,
             unit_lifecycle_packets_seen,
+            unit_spawn_packet_count,
             world_update_packets_seen,
             tile_config_packets_seen,
             command_building_packets_seen,
@@ -704,6 +733,7 @@ impl DesktopLauncher {
                 state.unit_entered_payload_packets_seen,
                 state.unit_tether_block_spawned_packets_seen,
                 state.unit_lifecycle_packets_seen,
+                state.unit_spawn_packets.len(),
                 state.world_update_packets_seen,
                 state.tile_config_packets_seen,
                 state.command_building_packets_seen,
@@ -721,6 +751,7 @@ impl DesktopLauncher {
         self.last_applied_unit_tether_block_spawned_packets_seen =
             unit_tether_block_spawned_packets_seen;
         self.last_applied_unit_lifecycle_packets_seen = unit_lifecycle_packets_seen;
+        self.last_applied_unit_spawn_packet_count = unit_spawn_packet_count;
         self.last_applied_world_update_packets_seen = world_update_packets_seen;
         self.last_applied_tile_config_packets_seen = tile_config_packets_seen;
         self.last_applied_command_building_packets_seen = command_building_packets_seen;
@@ -1350,7 +1381,8 @@ mod tests {
         ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket,
         LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
         StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
-        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -1358,8 +1390,9 @@ mod tests {
                 BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, UnitComp,
                 UnitControllerState,
             },
-            PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
-            PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
+            entity_class_id, PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
+            FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
+            WORLD_LABEL_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -2159,6 +2192,88 @@ mod tests {
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(9, 7);
+        let assembler_def = launcher
+            .content_loader
+            .block_by_name("tank-assembler")
+            .unwrap();
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+        launcher.runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 1.2,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        let stell = launcher
+            .content_loader
+            .unit_by_name("stell")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(2027, stell, TeamId(4));
+        unit.set_pos(144.0, 96.0);
+        unit.set_rotation(0.0);
+        let mut sync = Vec::new();
+        type_io::write_unit_sync(&mut sync, &launcher.content_loader, &unit.to_sync_wire())
+            .unwrap();
+        let unit_spawn = UnitSpawnCallPacket {
+            container: type_io::UnitSyncContainer::new(
+                unit.id(),
+                entity_class_id(unit.type_info.name()).unwrap(),
+                sync,
+            ),
+        };
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::AssemblerUnitSpawnedCallPacket(
+                AssemblerUnitSpawnedCallPacket {
+                    tile: Some(tile_pos),
+                },
+            ));
+            net.handle_client_received(PacketKind::UnitSpawnCallPacket(unit_spawn));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit assembler state should remain present");
+        };
+        assert_eq!(assembler.progress, 0.0);
+        let spawned = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&2027)
+            .expect("desktop should apply unit spawn sync container");
+        assert_eq!(spawned.type_info.name(), "stell");
+        assert_eq!(spawned.x(), 144.0);
+        assert_eq!(spawned.y(), 96.0);
+        assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+        assert_eq!(launcher.last_applied_unit_spawn_packet_count, 1);
     }
 
     #[test]

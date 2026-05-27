@@ -4174,6 +4174,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-server`
   - `cargo fmt --check`
 - 仍未完成：
-  - `UnitAssembler.spawned()` 的 `createSound`、`Fx.unitAssemble`、`Events.fire(new UnitCreateEvent(unit, this))` 与 `Units.notifyUnitSpawn(unit)` 仍需继续对照 Rust 现有 sound/effect/event/network 机制接入；
+  - `UnitAssembler.spawned()` 的 `createSound`、`Fx.unitAssemble` 与 `Events.fire(new UnitCreateEvent(unit, this))` 仍需继续对照 Rust 现有 sound/effect/event/network 机制接入；fallback `Units.notifyUnitSpawn(unit)` 已在下一节接入；
   - output unit 的 `Mathf.range(0.001f)` 微扰目前未建模，后续若碰撞/buildOn 精度需求出现，应迁移为可复现的极小随机偏移；
   - `UnitPayload` 内完整 unit 状态序列化/客户端表现仍需继续沿真实 payload/network/client 链路补齐。
+
+### 12.134 UnitAssembler.spawned fallback `Units.notifyUnitSpawn` 联机同步
+
+- 2026-05-27：继续对照 Java `UnitAssemblerBuild.spawned()` 中 payload 投递失败后的 `unit.add(); Units.notifyUnitSpawn(unit);`，把 Rust server/client 联机侧从“只等下一次 entity snapshot”推进到 Java 的即时 `UnitSpawnCallPacket` 语义。
+- Java 依据：
+  - `Units.notifyUnitSpawn(Unit unit)` 仅在 `net.server()` 时调用 `Call.unitSpawn(new UnitSyncContainer(unit))`；
+  - `unitSpawn` 是 server→client、unreliable、low priority，用于让客户端无需等待 snapshot 就立即看到新 unit；
+  - 该调用只发生在输出 unit 未被 `targetBuild.handlePayload(...)` 吃入时；payload 成功时不会通知普通 unit spawn。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_runtime_unit_assembler_spawns(...)` 在 `try_deliver_runtime_spawned_unit_payload(...)` 失败后，先广播 `UnitSpawnCallPacket`，再把 unit 放入 `server_units`；
+  - 新增 `server_unit_spawn_packet(...)`：使用 Java class id (`entity_class_id`) + `UnitComp::to_sync_wire()` 生成 `type_io::UnitSyncContainer`；
+  - `GameRuntime::apply_client_unit_spawn_packet(...)` 可从 `UnitSpawnCallPacket` 解码 `UnitSyncWire` 并 materialize/update `client_unit_snapshot_entities`；
+  - `NetClientState` 将 `UnitSpawnCallPacket` 单独保存到 `unit_spawn_packets`，不再把它覆盖到 `last_unit_lifecycle_packet`，避免同帧 `AssemblerUnitSpawnedCallPacket -> UnitSpawnCallPacket` 时客户端漏掉 assembler state reset；
+  - `DesktopLauncher` 新增 unit spawn packet cursor，先回放 assembler/drone/unit lifecycle，再按顺序回放 unit spawn sync container。
+- 新增验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_spawn_packet_sync_container --lib`
+  - `cargo test -p mindustry-core update_records_unit_spawn_separately_from_lifecycle_tail --lib`
+  - `cargo test -p mindustry-server server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned --lib`
+- 仍未完成：
+  - `createSound.at(...)` 与 `Fx.unitAssemble.at(...)` 的 sound/effect packet 仍需继续接入；
+  - `Events.fire(new UnitCreateEvent(unit, this))` 目前仍未映射到 Rust campaign stats/event bus；
+  - unit spawn 只完成即时 sync container 回放，后续仍需继续检查 Java 客户端 `UnitSyncContainer` 读取时的完整 `add()` 副作用。

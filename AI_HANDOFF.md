@@ -2503,7 +2503,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo fmt --check`
   - `git diff --check`
 - 下一步建议：
-  1. 继续 `UnitAssembler.spawned()` 剩余副作用：`createSound`、`Fx.unitAssemble`、`Events.fire(new UnitCreateEvent(unit, this))`、`Units.notifyUnitSpawn(unit)`；
+  1. 继续 `UnitAssembler.spawned()` 剩余副作用：`createSound`、`Fx.unitAssemble`、`Events.fire(new UnitCreateEvent(unit, this))`；fallback `Units.notifyUnitSpawn(unit)` 已由第 76 节接入；
   2. 在 Rust 现有 sound/effect/event/network 包中寻找可复用 call packet 或事件分发入口，不要把副作用停留成孤立 helper；
   3. `AssemblerAI` 仍需从 helper + snapshot sidecar 继续实体化为正式 controller runtime state；
   4. 每个闭环继续按：对照 Java → 接入 runtime/server/client/network → 测试 → 更新本文档与 `MIGRATION.md` → 中文 commit → push `origin main`。
+
+---
+
+## 76. 最新闭环记录：UnitAssembler.spawned fallback UnitSpawn 同步
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：迁移 `UnitAssemblerBuild.spawned()` 中 payload 投递失败后的 `Units.notifyUnitSpawn(unit)`，保证 Rust 客户端不必等下一次 snapshot 就能看到 assembler 输出 unit。
+- Java 依据：
+  - `Units.notifyUnitSpawn(unit)` 在 server 侧发送 `Call.unitSpawn(new UnitSyncContainer(unit))`；
+  - `unitSpawn` 是 server→client、unreliable、low priority；
+  - 该分支只在 `targetBuild == null`、不同队或 `acceptPayload/handlePayload` 失败时执行，payload 成功时不发送普通 unit spawn。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - `apply_runtime_unit_assembler_spawns(...)` 在 payload 投递失败时广播 `UnitSpawnCallPacket`，随后将 unit 插入 `server_units`；
+    - `server_unit_spawn_packet(...)` 用 `entity_class_id(unit.type_info.name())` 与 `UnitComp::to_sync_wire()` 生成 `type_io::UnitSyncContainer`；
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `apply_client_unit_spawn_packet(...)` 验证 class id 是 Unit，严格解码 `UnitSyncWire`，并复用 `apply_client_unit_sync_wire(...)` materialize/update `client_unit_snapshot_entities`；
+  - `core/src/mindustry/core/net_client.rs`
+    - `UnitSpawnCallPacket` 进入独立 `unit_spawn_packets` 队列，不再覆盖 `last_unit_lifecycle_packet`，避免同帧 `AssemblerUnitSpawnedCallPacket` 被覆盖；
+  - `desktop/src/lib.rs`
+    - 新增 `last_applied_unit_spawn_packet_count` cursor；
+    - `update()` 先同步 unit lifecycle，再回放 unit spawn packets，让 assembler state reset 与 output unit materialize 同时成立。
+- 已跑：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_spawn_packet_sync_container --lib`
+  - `cargo test -p mindustry-core update_records_unit_spawn_separately_from_lifecycle_tail --lib`
+  - `cargo test -p mindustry-server server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned --lib`
+- 下一步建议：
+  1. 继续 `createSound.at(spawn.x, spawn.y, 1f + Mathf.range(0.06f), createSoundVolume)`：查 Rust `SoundAtCallPacket`/sound id registry，接 server broadcast 与 net client/desktop mirror；
+  2. 继续 `Fx.unitAssemble.at(spawn.x, spawn.y, rotdeg() - 90f, plan.unit)`：优先确认是否应走 `EffectCallPacket2`（effect + unit type data）或已有 effect runtime；
+  3. 继续 `Events.fire(new UnitCreateEvent(unit, this))`：先找 Rust campaign stats/event 侧可接入口，不要只写孤立计数 helper。

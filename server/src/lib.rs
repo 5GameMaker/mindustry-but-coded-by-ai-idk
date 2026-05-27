@@ -48,7 +48,7 @@ use mindustry_core::mindustry::net::{
     PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
     RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
     TileConfigCallPacket, TransferInventoryCallPacket, UnitBlockSpawnCallPacket,
-    UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+    UnitDespawnCallPacket, UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -1631,6 +1631,7 @@ impl ServerLauncher {
                 }));
             }
             if !self.try_deliver_runtime_spawned_unit_payload(&unit)? {
+                self.broadcast_server_unit_spawn(&unit)?;
                 self.server_units.insert(unit_id, unit);
             }
             applied += 1;
@@ -1956,6 +1957,30 @@ impl ServerLauncher {
         } else {
             Ok(sent)
         }
+    }
+
+    fn broadcast_server_unit_spawn(&mut self, unit: &UnitComp) -> io::Result<bool> {
+        if !self.net_server.is_active() {
+            return Ok(false);
+        }
+        let Some(packet) = self.server_unit_spawn_packet(unit)? else {
+            return Ok(false);
+        };
+        self.net_server
+            .net_mut()
+            .send(&PacketKind::UnitSpawnCallPacket(packet), false)?;
+        Ok(true)
+    }
+
+    fn server_unit_spawn_packet(&self, unit: &UnitComp) -> io::Result<Option<UnitSpawnCallPacket>> {
+        let Some(unit_type_id) = entity_class_id(unit.type_info.name()) else {
+            return Ok(None);
+        };
+        let mut sync = Vec::new();
+        type_io::write_unit_sync(&mut sync, &self.content_loader, &unit.to_sync_wire())?;
+        Ok(Some(UnitSpawnCallPacket {
+            container: type_io::UnitSyncContainer::new(unit.id(), unit_type_id, sync),
+        }))
     }
 
     fn broadcast_server_unit_entity_snapshots(&mut self) -> io::Result<usize> {
@@ -5422,6 +5447,14 @@ mod tests {
                     packet,
                     PacketKind::AssemblerUnitSpawnedCallPacket(packet)
                         if packet.tile == Some(assembler_tile)
+                )
+        }));
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitSpawnCallPacket(packet)
+                        if packet.container.unit_id == spawned_unit.id()
                 )
         }));
     }

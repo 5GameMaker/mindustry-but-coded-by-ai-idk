@@ -37,7 +37,7 @@ use crate::mindustry::net::{
     TakeItemsCallPacket, TextInputResultCallPacket, TileConfigCallPacket, TileTapCallPacket,
     TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
     TransferItemToCallPacket, TransferItemToUnitCallPacket, UnitBuildingControlSelectCallPacket,
-    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket,
+    UnitClearCallPacket, UnitControlCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
     UnitTetherBlockSpawnedCallPacket, UpdateMarkerCallPacket, UpdateMarkerTextCallPacket,
     UpdateMarkerTextureCallPacket,
 };
@@ -582,6 +582,7 @@ pub struct NetClientState {
     pub last_unit_lifecycle_packet: Option<PacketKind>,
     pub last_unit_lifecycle_packet_at: Option<Instant>,
     pub unit_lifecycle_packets_seen: u64,
+    pub unit_spawn_packets: Vec<UnitSpawnCallPacket>,
     pub last_unit_tether_block_spawned: Option<UnitTetherBlockSpawnedCallPacket>,
     pub last_unit_tether_block_spawned_at: Option<Instant>,
     pub unit_tether_block_spawned_packets_seen: u64,
@@ -877,6 +878,7 @@ impl fmt::Debug for NetClientState {
                 "unit_lifecycle_packets_seen",
                 &self.unit_lifecycle_packets_seen,
             )
+            .field("unit_spawn_packets_len", &self.unit_spawn_packets.len())
             .field(
                 "unit_tether_block_spawned_packets_seen",
                 &self.unit_tether_block_spawned_packets_seen,
@@ -1176,6 +1178,10 @@ impl NetClientState {
         self.unit_lifecycle_packets_seen = self.unit_lifecycle_packets_seen.saturating_add(1);
         self.last_unit_lifecycle_packet = Some(packet.clone());
         self.last_unit_lifecycle_packet_at = Some(Instant::now());
+    }
+
+    fn record_unit_spawn_packet(&mut self, packet: &UnitSpawnCallPacket) {
+        self.unit_spawn_packets.push(packet.clone());
     }
 
     fn record_unit_tether_block_spawned_packet(
@@ -3099,6 +3105,10 @@ impl NetClient {
                         state.record_world_update_packet(&packet);
                         (false, false)
                     }
+                    PacketKind::UnitSpawnCallPacket(packet) => {
+                        state.record_unit_spawn_packet(packet);
+                        (false, false)
+                    }
                     PacketKind::UnitBlockSpawnCallPacket(_)
                     | PacketKind::UnitCapDeathCallPacket(_)
                     | PacketKind::UnitDeathCallPacket(_)
@@ -3106,7 +3116,6 @@ impl NetClient {
                     | PacketKind::UnitDestroyCallPacket(_)
                     | PacketKind::UnitEnvDeathCallPacket(_)
                     | PacketKind::UnitSafeDeathCallPacket(_)
-                    | PacketKind::UnitSpawnCallPacket(_)
                     | PacketKind::AssemblerDroneSpawnedCallPacket(_)
                     | PacketKind::AssemblerUnitSpawnedCallPacket(_) => {
                         state.record_unit_lifecycle_packet(&packet);
@@ -3649,10 +3658,10 @@ mod tests {
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue, Vec2};
     use crate::mindustry::logic::LMarkerControl;
     use crate::mindustry::net::{
-        write_minimal_world_data, AnnounceCallPacket, AutoDoorToggleCallPacket,
-        BlockSnapshotCallPacket, BuildDestroyedCallPacket, BuildHealthUpdateCallPacket,
-        BuildingControlSelectCallPacket, ClearItemsCallPacket, ClearLiquidsCallPacket,
-        ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
+        write_minimal_world_data, AnnounceCallPacket, AssemblerUnitSpawnedCallPacket,
+        AutoDoorToggleCallPacket, BlockSnapshotCallPacket, BuildDestroyedCallPacket,
+        BuildHealthUpdateCallPacket, BuildingControlSelectCallPacket, ClearItemsCallPacket,
+        ClearLiquidsCallPacket, ClearObjectivesCallPacket, ClientPlanSnapshotCallPacket,
         ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
         CommandUnitsCallPacket, CompleteObjectiveCallPacket, Connect, ConnectCallPacket,
         ConstructFinishCallPacket, CopyToClipboardCallPacket, CreateBulletCallPacket,
@@ -3682,9 +3691,9 @@ mod tests {
         TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
         TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
-        UpdateMarkerCallPacket, UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket,
-        WarningToastCallPacket, WorldDataBeginCallPacket,
+        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
+        UnitTetherBlockSpawnedCallPacket, UpdateMarkerCallPacket, UpdateMarkerTextCallPacket,
+        UpdateMarkerTextureCallPacket, WarningToastCallPacket, WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -4272,6 +4281,42 @@ mod tests {
         assert_eq!(state.unit_tether_block_spawned_packets_seen, 1);
         assert_eq!(state.last_unit_tether_block_spawned.as_ref(), Some(&packet));
         assert!(state.last_unit_tether_block_spawned_at.is_some());
+    }
+
+    #[test]
+    fn update_records_unit_spawn_separately_from_lifecycle_tail() {
+        let client = NetClient::default();
+        let assembler_packet = AssemblerUnitSpawnedCallPacket {
+            tile: Some(point2_pack(4, 4)),
+        };
+        let unit_spawn = UnitSpawnCallPacket {
+            container: crate::mindustry::io::UnitSyncContainer::new(
+                99,
+                crate::mindustry::entities::entity_class_id("stell").unwrap(),
+                vec![0xaa, 0xbb],
+            ),
+        };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::AssemblerUnitSpawnedCallPacket(
+                assembler_packet.clone(),
+            ));
+            net.handle_client_received(PacketKind::UnitSpawnCallPacket(unit_spawn.clone()));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.unit_lifecycle_packets_seen, 1);
+        assert!(matches!(
+            state.last_unit_lifecycle_packet.as_ref(),
+            Some(PacketKind::AssemblerUnitSpawnedCallPacket(packet))
+                if packet == &assembler_packet
+        ));
+        assert_eq!(state.unit_spawn_packets, vec![unit_spawn]);
     }
 
     #[test]
