@@ -3099,3 +3099,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入移动特效客户端队列`。
   3. 后续补可复现 RNG、chance/random offset、fog/player team 可见性、`parentizeEffects` parent 语义与完整 `Fx` registry。
+
+---
+
+## 93. 最新闭环记录：LiquidExplodeAbility / neoplasm death puddle runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `LiquidExplodeAbility.java` 与 `NeoplasmUnitType.java`，把 neoplasm 单位死亡洒落 `neoplasm` 液体接入 server death lifecycle 与 `Puddles` runtime。
+- Java 依据：
+  - `LiquidExplodeAbility.death(Unit unit)` 按 `unit.tileX()/tileY()` 与 `hitSize/tilesize` 半径遍历 tile；
+  - 命中区域内调用 `Puddles.deposit(tile, liquid, amount * scaling)`；
+  - neoplasm preset 设置 `liquid = Liquids.neoplasm`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `LiquidExplodeAbility` 默认 liquid 改为 Java 默认 `water`；
+    - 新增 `LiquidExplodeDepositPlan`；
+    - 新增 `LiquidExplodeAbility::from_descriptor(...)` 与 `deposit_plans(...)`；
+    - 新增 descriptor/计划测试。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::liquid_explode_ability_deposit_plans()`，死亡时从 unit ability descriptor 产出洒液计划。
+  - `core/src/mindustry/entities/puddles.rs`
+    - 给 `Puddles` 增加 `width()/height()`，便于 server runtime 根据 world 尺寸初始化 puddle grid。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `server_puddles: Puddles`。
+  - `server/src/lib.rs`
+    - `apply_server_unit_death_abilities()` 在移除 dead unit 后调用 `apply_server_liquid_explode_deposits(...)`；
+    - 新增 `server_update_deposits_neoplasm_when_renale_dies`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core liquid_explode --lib`
+  - `cargo test -p mindustry-core unit_component_plans_liquid_explode --lib`
+  - `cargo test -p mindustry-server neoplasm_when_renale_dies --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入新生物死亡洒液运行时`。
+  3. 后续补 Java `Simplex.noise2d` 边缘噪声、server puddle entity snapshot 广播到 desktop、真实 floor/env/space/boil 随机上下文，再接 `LiquidRegenAbility` slurp puddle 回血。

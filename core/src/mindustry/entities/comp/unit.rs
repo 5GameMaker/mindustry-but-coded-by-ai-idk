@@ -11,11 +11,11 @@ use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
     EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility, ForceFieldUpdate,
-    MoveEffectAbility, MoveEffectPlan, RegenAbility, RepairFieldAbility, RepairFieldPulse,
-    RepairFieldTarget, ShieldArcAbility, ShieldArcUpdate, ShieldRegenFieldAbility,
-    ShieldRegenFieldPulse, ShieldRegenFieldTarget, SpawnDeathAbility, SpawnDeathSpawnPlan,
-    StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse,
-    UnitSpawnAbility, UnitSpawnPlan,
+    LiquidExplodeAbility, LiquidExplodeDepositPlan, MoveEffectAbility, MoveEffectPlan,
+    RegenAbility, RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldArcAbility,
+    ShieldArcUpdate, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
+    SpawnDeathAbility, SpawnDeathSpawnPlan, StatusFieldAbility, StatusFieldPulse,
+    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -621,6 +621,17 @@ impl UnitComp {
                         ability.planned_spawn(unit_rotation, angle, 1.0, 0.0),
                     )
                 })
+            })
+            .collect()
+    }
+
+    pub fn liquid_explode_ability_deposit_plans(&self) -> Vec<LiquidExplodeDepositPlan> {
+        self.type_info
+            .abilities
+            .iter()
+            .filter_map(|descriptor| LiquidExplodeAbility::from_descriptor(descriptor))
+            .flat_map(|ability| {
+                ability.deposit_plans(self.x(), self.y(), self.type_info.hit_size, TILE_SIZE)
             })
             .collect()
     }
@@ -1865,6 +1876,21 @@ mod tests {
         assert!((plans[0].1.offset_x - 11.0).abs() < 0.0001);
         assert!(plans[0].1.offset_y.abs() < 0.0001);
         assert_eq!(plans[0].1.rotation, 0.0);
+    }
+
+    #[test]
+    fn unit_component_plans_liquid_explode_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.hit_size = 9.0;
+        unit_type.abilities = vec!["LiquidExplodeAbility:neoplasm".into()];
+        let mut unit = UnitComp::new(51, unit_type, TeamId(1));
+        unit.set_pos(80.0, 96.0);
+
+        let plans = unit.liquid_explode_ability_deposit_plans();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].liquid_name, "neoplasm");
+        assert_eq!((plans[0].tile_x, plans[0].tile_y), (10, 12));
+        assert_eq!(plans[0].amount, 600.0);
     }
 
     #[test]

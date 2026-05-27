@@ -25,8 +25,9 @@ use mindustry_core::mindustry::entities::{
         CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
         UnitControllerState,
     },
-    entity_class_id, units_can_create, EnergyFieldAction, EnergyFieldTarget, UnitCapRules,
-    UnitCapTeam, UnitCapType, UnitSpawnAbility,
+    entity_class_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
+    LiquidExplodeDepositPlan, PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
+    UnitCapRules, UnitCapTeam, UnitCapType, UnitSpawnAbility,
 };
 use mindustry_core::mindustry::game::vanilla_teams;
 use mindustry_core::mindustry::input::{
@@ -2022,6 +2023,9 @@ impl ServerLauncher {
                 )?;
             }
 
+            let liquid_deposit_plans = parent.liquid_explode_ability_deposit_plans();
+            self.apply_server_liquid_explode_deposits(&liquid_deposit_plans);
+
             for (unit_name, plan) in parent.spawn_death_ability_plans() {
                 let Some(unit_type) = self.content_loader.unit_by_name(&unit_name).cloned() else {
                     continue;
@@ -2045,6 +2049,44 @@ impl ServerLauncher {
         }
 
         Ok(spawned)
+    }
+
+    fn apply_server_liquid_explode_deposits(
+        &mut self,
+        plans: &[LiquidExplodeDepositPlan],
+    ) -> usize {
+        if plans.is_empty() {
+            return 0;
+        }
+
+        let width = self.runtime.state.world.width() as i32;
+        let height = self.runtime.state.world.height() as i32;
+        if self.runtime.server_puddles.width() != width
+            || self.runtime.server_puddles.height() != height
+        {
+            self.runtime.server_puddles = Puddles::new(width, height);
+        }
+
+        let mut applied = 0;
+        for plan in plans {
+            let Some(liquid) = self.content_loader.liquid_by_name(&plan.liquid_name) else {
+                continue;
+            };
+            let result = self.runtime.server_puddles.deposit_at(
+                Some(PuddleTileView::new(plan.tile_x, plan.tile_y)),
+                PuddleLiquidInfo::from(liquid),
+                plan.amount,
+                PuddleDepositContext {
+                    time: self.runtime.state.tick as f32,
+                    ..PuddleDepositContext::default()
+                },
+            );
+            if result.amount > 0.0 || result.accepting > 0.0 || result.added != 0.0 {
+                applied += 1;
+            }
+        }
+
+        applied
     }
 
     fn apply_runtime_unit_cargo_loader_spawns(
@@ -6239,6 +6281,34 @@ mod tests {
         let expected = damaged + unit.health.max_health * (1.0 / (70.0 * 60.0));
         assert!((unit.health.health - expected).abs() < 0.0001);
         assert!(unit.was_healed);
+    }
+
+    #[test]
+    fn server_update_deposits_neoplasm_when_renale_dies() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(32, 32);
+
+        let renale = launcher
+            .content_loader
+            .unit_by_name("renale")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(36, renale, TeamId(1));
+        unit.set_pos(80.0, 96.0);
+        unit.health.kill();
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&36));
+        let entry = launcher
+            .runtime
+            .server_puddles
+            .get_entry(10, 12)
+            .expect("renale death should deposit neoplasm on its tile");
+        assert_eq!(entry.puddle.amount, 70.0);
+        assert_eq!(entry.liquid.name, "neoplasm");
     }
 
     #[test]

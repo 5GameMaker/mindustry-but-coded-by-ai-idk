@@ -291,11 +291,19 @@ pub struct LiquidExplodeAbility {
     pub noise_scl: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiquidExplodeDepositPlan {
+    pub liquid_name: String,
+    pub tile_x: i32,
+    pub tile_y: i32,
+    pub amount: f32,
+}
+
 impl Default for LiquidExplodeAbility {
     fn default() -> Self {
         Self {
             base: BasicAbility::default(),
-            liquid_name: String::new(),
+            liquid_name: "water".into(),
             amount: 120.0,
             rad_amount_scale: 5.0,
             rad_scale: 1.0,
@@ -306,6 +314,47 @@ impl Default for LiquidExplodeAbility {
 }
 
 impl LiquidExplodeAbility {
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = if descriptor == "LiquidExplodeAbility" {
+            ""
+        } else {
+            descriptor
+                .strip_prefix("LiquidExplodeAbility:")
+                .or_else(|| {
+                    descriptor
+                        .strip_prefix("LiquidExplodeAbility(")
+                        .and_then(|rest| rest.strip_suffix(')'))
+                })?
+        };
+        let mut ability = Self::default();
+        if args.is_empty() {
+            return Some(ability);
+        }
+
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+        ability.liquid_name = parts.next()?.to_string();
+        if let Some(amount) = parts.next() {
+            ability.amount = amount.parse().ok()?;
+        }
+        if let Some(rad_amount_scale) = parts.next() {
+            ability.rad_amount_scale = rad_amount_scale.parse().ok()?;
+        }
+        if let Some(rad_scale) = parts.next() {
+            ability.rad_scale = rad_scale.parse().ok()?;
+        }
+        if let Some(noise_mag) = parts.next() {
+            ability.noise_mag = noise_mag.parse().ok()?;
+        }
+        if let Some(noise_scl) = parts.next() {
+            ability.noise_scl = noise_scl.parse().ok()?;
+        }
+        Some(ability)
+    }
+
     pub fn planned_radius(&self, hit_size: f32, tile_size: f32) -> i32 {
         ((hit_size / tile_size) * self.rad_scale).max(1.0) as i32
     }
@@ -318,6 +367,42 @@ impl LiquidExplodeAbility {
         let radius = radius.max(1) as f32;
         let scaling = (1.0 - distance_from_center / radius).max(0.0) * self.rad_amount_scale;
         self.amount * scaling
+    }
+
+    pub fn deposit_plans(
+        &self,
+        unit_x: f32,
+        unit_y: f32,
+        hit_size: f32,
+        tile_size: f32,
+    ) -> Vec<LiquidExplodeDepositPlan> {
+        let radius = self.planned_radius(hit_size, tile_size);
+        let tile_size = tile_size.max(0.0001);
+        let center_x = (unit_x / tile_size).floor() as i32;
+        let center_y = (unit_y / tile_size).floor() as i32;
+        let mut plans = Vec::new();
+
+        for ox in -radius..=radius {
+            for oy in -radius..=radius {
+                let dist2 = ox * ox + oy * oy;
+                if dist2 > radius * radius {
+                    continue;
+                }
+                let distance = (dist2 as f32).sqrt();
+                let amount = self.planned_deposit_amount(distance, radius);
+                if amount <= 0.0 {
+                    continue;
+                }
+                plans.push(LiquidExplodeDepositPlan {
+                    liquid_name: self.liquid_name.clone(),
+                    tile_x: center_x + ox,
+                    tile_y: center_y + oy,
+                    amount,
+                });
+            }
+        }
+
+        plans
     }
 }
 
@@ -2319,6 +2404,21 @@ mod tests {
         assert!((ability.planned_noise_radius(13.0) - 2.0).abs() < 0.0001);
         assert!((ability.planned_deposit_amount(0.0, 6) - 600.0).abs() < 0.0001);
         assert!((ability.planned_deposit_amount(3.0, 6) - 300.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn liquid_explode_descriptor_and_deposit_plans_cover_neoplasm_entry() {
+        let ability = LiquidExplodeAbility::from_descriptor("LiquidExplodeAbility:neoplasm")
+            .expect("neoplasm liquid explode descriptor should parse");
+        assert_eq!(ability.liquid_name, "neoplasm");
+        assert_eq!(ability.amount, 120.0);
+
+        let plans = ability.deposit_plans(80.0, 96.0, 9.0, 8.0);
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].liquid_name, "neoplasm");
+        assert_eq!((plans[0].tile_x, plans[0].tile_y), (10, 12));
+        assert_eq!(plans[0].amount, 600.0);
+        assert!(LiquidExplodeAbility::from_descriptor("RepairFieldAbility").is_none());
     }
 
     #[test]

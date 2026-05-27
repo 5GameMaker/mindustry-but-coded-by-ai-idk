@@ -313,6 +313,14 @@ impl Puddles {
         self.puddles.len()
     }
 
+    pub fn width(&self) -> i32 {
+        self.width
+    }
+
+    pub fn height(&self) -> i32 {
+        self.height
+    }
+
     pub fn is_empty(&self) -> bool {
         self.puddles.is_empty()
     }

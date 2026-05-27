@@ -298,12 +298,13 @@ pub fn entity_class_kind(id: u8) -> Option<EntityClassKind> {
 pub use abilities::{
     Ability, ArmorPlateAbility, ArmorPlateUpdate, BasicAbility, EnergyFieldAbility,
     EnergyFieldAction, EnergyFieldHit, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility,
-    ForceFieldHit, ForceFieldUpdate, LiquidExplodeAbility, LiquidRegenAbility, MoveEffectAbility,
-    MoveEffectPlan, MoveLightningAbility, MoveLightningPlan, RegenAbility, RepairFieldAbility,
-    RepairFieldPulse, RepairFieldTarget, ShieldArcAbility, ShieldArcHit, ShieldArcHitAction,
-    ShieldArcUpdate, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
-    SpawnDeathAbility, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
-    SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
+    ForceFieldHit, ForceFieldUpdate, LiquidExplodeAbility, LiquidExplodeDepositPlan,
+    LiquidRegenAbility, MoveEffectAbility, MoveEffectPlan, MoveLightningAbility, MoveLightningPlan,
+    RegenAbility, RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldArcAbility,
+    ShieldArcHit, ShieldArcHitAction, ShieldArcUpdate, ShieldRegenFieldAbility,
+    ShieldRegenFieldPulse, ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility,
+    StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility,
+    UnitSpawnPlan,
 };
 pub use bullet::{
     bomb_bullet_type, empty_bullet_type, explosion_bullet_type, missile_bullet_type,

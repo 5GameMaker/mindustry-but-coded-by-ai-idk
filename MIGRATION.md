@@ -4577,3 +4577,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `chance > 0`、随机 range offset、`rangeLengthMin/Max` 与 fog/player team 判断仍是最小入口，尚未接可复现 RNG 与真实客户端可见性；
   - `parentizeEffects` 的 parent entity 语义尚未通过 effect packet/data 表达；
   - 仅登记 `missileTrail` / `missileTrailShort` 最小 effect id 映射，后续需要系统化迁移 `Fx` registry 与表现参数。
+
+### 12.151 LiquidExplodeAbility / neoplasm 死亡洒液 runtime 接入
+
+- 2026-05-27：对照 v158.1 `LiquidExplodeAbility.java` 与 `NeoplasmUnitType.java`，把 neoplasm preset 的死亡洒落液体从纯 helper 接入 `UnitComp` death plan、server dead-unit lifecycle 与 `Puddles` runtime。
+- Java 依据：
+  - `LiquidExplodeAbility.death(Unit unit)` 在单位死亡时取 `unit.tileX()/tileY()`；
+  - 半径 `rad = max((int)(unit.hitSize / tilesize * radScale), 1)`；
+  - 遍历半径内 tile，按距离与 `radAmountScale` 计算 `amount * scaling`，并调用 `Puddles.deposit(tile, liquid, amount * scaling)`；
+  - `NeoplasmUnitType` 使用 `liquid = Liquids.neoplasm`，其余参数保持默认：`amount=120`、`radAmountScale=5`、`radScale=1`。
+- Rust 新增/变化：
+  - `LiquidExplodeAbility::from_descriptor(...)` 支持 `LiquidExplodeAbility:liquid[:amount[:radAmountScale[:radScale[:noiseMag[:noiseScl]]]]]`；
+  - `LiquidExplodeAbility::deposit_plans(...)` 生成 tile/amount 计划；当前先使用确定性圆形半径与距离衰减，未接 Java `Simplex.noise2d` 边缘噪声；
+  - `UnitComp::liquid_explode_ability_deposit_plans()` 从 unit descriptor 在死亡链路中产出 `LiquidExplodeDepositPlan`；
+  - `GameRuntime` 增加 `server_puddles: Puddles`，作为 server-side puddle runtime 的最小承载点；
+  - `ServerLauncher::apply_server_unit_death_abilities()` 在移除 dead unit 后调用 `apply_server_liquid_explode_deposits(...)`，通过 `Puddles::deposit_at(...)` 写入真实 puddle runtime。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core liquid_explode --lib`
+  - `cargo test -p mindustry-core unit_component_plans_liquid_explode --lib`
+  - `cargo test -p mindustry-server neoplasm_when_renale_dies --lib`
+- 仍未完成：
+  - Java `Simplex.noise2d` 边缘噪声尚未迁移；当前 deterministic circle 对 renale 最小半径闭环等价到中心 puddle，但 latum 大半径边缘会少噪声细节；
+  - server puddle 尚未进入 `EntitySnapshotCallPacket` 广播与 desktop typed runtime 同步；当前先接入 server death lifecycle 与 `Puddles` 数据结构；
+  - 液体反应、space/boil 概率分支目前沿 `Puddles` helper 的上下文默认值，后续需接真实 map floor/env 与可复现随机源。
