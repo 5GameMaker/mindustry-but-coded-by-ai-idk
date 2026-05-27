@@ -4907,12 +4907,12 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 条件：`spreadDamage > 0 && puddle.tile.build != null && puddle.tile.build.liquids != null && puddle.tile.build.liquids.get(spreadTarget) > 0.0001f`；
   - `amountSpread = min(build.liquids.get(spreadTarget) * spreadConversion, maxSpread * Time.delta) / 2f`；
   - 对 `Geometry.d4` 执行 `Puddles.deposit(puddle.tile, other, puddle.liquid, amountSpread)`；
-  - 对当前 building 造成 `spreadDamage * Time.delta * scaling` 伤害；该分支本身不移除 current building 中的 spreadTarget 液体。
+  - 对当前 building 造成 `spreadDamage * Time.delta * scaling` 伤害；damage/spread 分支本身不移除 current building 中的 spreadTarget 液体，但前置 `Geometry.d4c` 吸收分支会覆盖 center tile。
 - Rust 验证：
   - 新增 `server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread`：
     - 在 neoplasm puddle 所在 tile 放置带 water 的 `liquid-router`；
     - tick 后断言 building health 下降；
-    - 断言 building water 未被该分支移除；
+    - 断言 building water 会因 `Geometry.d4c` 的 center tile 吸收而下降；
     - 断言 source puddle 通过 same-liquid deposit 的 `accepting` 接收到 `amountSpread`。
 - 已跑验证：
   - `cargo test -p mindustry-server server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread --lib`
@@ -4920,3 +4920,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Events.fire(Trigger.neoplasmReact)` 还没有 Rust event bus 等价物；
   - building 吸收 deposit 与 nearby puddle 吸收之间的执行顺序仍是 Rust 现有批处理近似，后续如出现 parity 差异需进一步收紧到 Java 单 puddle update 顺序；
   - `Geometry.d4/d4c` 仍是局部显式数组，后续应统一迁移 Geometry 常量。
+
+### 12.166 Arc Geometry.d4/d4c neighbor constants
+
+- 2026-05-28：用本地 Gradle Arc jar 验证 `arc.math.geom.Geometry` 方向数组：
+  - `d4 = [(1,0), (0,1), (-1,0), (0,-1)]`；
+  - `d4c = [(1,0), (0,1), (-1,0), (0,-1), (0,0)]`；
+  - 这确认此前把 `d4c` 近似为四邻+四对角是错误的，且漏掉了 center tile。
+- Rust 新增/变化：
+  - `world::build` 新增并导出 `ORTHOGONAL_WITH_CENTER_NEIGHBORS`，与既有 `ORTHOGONAL_NEIGHBORS` 共同作为 Java `Geometry.d4/d4c` 的共享常量；
+  - `Puddles::d4_spread_targets(...)` 与 `Puddles::absorb_neighbor_target_puddles(...)` 改用 `ORTHOGONAL_NEIGHBORS`；
+  - `ServerLauncher::tick_server_puddles(...)` 的 CellLiquid 周边 building 吸收改用 `ORTHOGONAL_WITH_CENTER_NEIGHBORS`，因此 current tile building 会先按 Java d4c 参与 target-liquid 吸收，再进入 damage/spread 分支；
+  - current-building damage/spread 测试同步收紧：water 应下降，source accepting 至少包含 d4c center 转换沉积。
+- 新增/更新验证：
+  - `orthogonal_neighbor_constants_match_arc_geometry_d4_and_d4c`
+  - `server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread`
+- 仍未完成：
+  - 其他散落在 AI/pathfinder/block runtime 的私有 D4 常量尚未统一替换；本轮先修正 Puddles/CellLiquid 主链路，避免扩大改动面。

@@ -66,7 +66,9 @@ use mindustry_core::mindustry::world::blocks::units::{
     unit_assembler_drone_spawned, unit_assembler_drone_target,
 };
 use mindustry_core::mindustry::world::meta::BuildVisibility;
-use mindustry_core::mindustry::world::{footprint_tiles, point2_pack};
+use mindustry_core::mindustry::world::{
+    footprint_tiles, point2_pack, ORTHOGONAL_NEIGHBORS, ORTHOGONAL_WITH_CENTER_NEIGHBORS,
+};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
 use std::{
@@ -1919,18 +1921,9 @@ impl ServerLauncher {
             }
             let mut reacted = false;
 
-            for (dx, dy) in [
-                (0, -1),
-                (1, 0),
-                (0, 1),
-                (-1, 0),
-                (-1, -1),
-                (1, -1),
-                (1, 1),
-                (-1, 1),
-            ] {
-                let nx = event.tile.x + dx;
-                let ny = event.tile.y + dy;
+            for point in ORTHOGONAL_WITH_CENTER_NEIGHBORS {
+                let nx = event.tile.x + point.x;
+                let ny = event.tile.y + point.y;
                 let Some(build_ref) = self.runtime.state.world.build(nx, ny) else {
                     continue;
                 };
@@ -1985,13 +1978,13 @@ impl ServerLauncher {
                                     * event.liquid.cell_spread_conversion)
                                     .min(event.liquid.cell_max_spread * delta_ticks)
                                     / 2.0;
-                                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                                for point in ORTHOGONAL_NEIGHBORS {
                                     cell_deposits.push((
                                         PuddleTileView::new(event.tile.x, event.tile.y)
                                             .with_build(building.team.0 as i32),
                                         Some(PuddleTileView::new(
-                                            event.tile.x + dx,
-                                            event.tile.y + dy,
+                                            event.tile.x + point.x,
+                                            event.tile.y + point.y,
                                         )),
                                         event.liquid.clone(),
                                         amount_spread,
@@ -9151,13 +9144,13 @@ mod tests {
             "CellLiquid.update should damage the building underneath when it contains spreadTarget"
         );
         assert!(
-            building.liquids.as_ref().unwrap().get(water_id) >= 9.999,
-            "current-building damage branch should not remove spreadTarget liquid"
+            building.liquids.as_ref().unwrap().get(water_id) < 10.0,
+            "Geometry.d4c includes the center tile, so CellLiquid.update should remove a scaled portion of current-building spreadTarget before the damage branch"
         );
         let source = launcher.runtime.server_puddles.get(1, 1).unwrap();
         assert!(
-            source.accepting >= 0.37,
-            "CellLiquid.update should re-deposit amountSpread onto the source puddle through accepting"
+            source.accepting >= 0.85,
+            "CellLiquid.update should re-deposit converted center absorption and amountSpread onto the source puddle through accepting"
         );
     }
 

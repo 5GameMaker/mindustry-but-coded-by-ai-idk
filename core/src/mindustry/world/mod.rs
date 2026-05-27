@@ -21,6 +21,7 @@ pub use block::{Block, BlockId, CacheLayer};
 pub use build::{
     check_no_unit_overlap, contacts_ground, contacts_shallows, footprint_tiles, placement_bounds,
     satisfies_water_requirement, valid_break, BuildBounds, ORTHOGONAL_NEIGHBORS,
+    ORTHOGONAL_WITH_CENTER_NEIGHBORS,
 };
 pub use cached_tile::CachedTile;
 pub use color_mapper::{ColorMapper, BLACK_AIR_RGBA};

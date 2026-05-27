@@ -10,6 +10,14 @@ pub const ORTHOGONAL_NEIGHBORS: [Point2; 4] = [
     Point2 { x: 0, y: -1 },
 ];
 
+pub const ORTHOGONAL_WITH_CENTER_NEIGHBORS: [Point2; 5] = [
+    Point2 { x: 1, y: 0 },
+    Point2 { x: 0, y: 1 },
+    Point2 { x: -1, y: 0 },
+    Point2 { x: 0, y: -1 },
+    Point2 { x: 0, y: 0 },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BuildBounds {
     pub x: f32,
@@ -119,6 +127,29 @@ pub fn footprint_tiles(center_x: i32, center_y: i32, block_size: i32) -> Vec<(i3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orthogonal_neighbor_constants_match_arc_geometry_d4_and_d4c() {
+        assert_eq!(
+            ORTHOGONAL_NEIGHBORS,
+            [
+                Point2 { x: 1, y: 0 },
+                Point2 { x: 0, y: 1 },
+                Point2 { x: -1, y: 0 },
+                Point2 { x: 0, y: -1 },
+            ]
+        );
+        assert_eq!(
+            ORTHOGONAL_WITH_CENTER_NEIGHBORS,
+            [
+                Point2 { x: 1, y: 0 },
+                Point2 { x: 0, y: 1 },
+                Point2 { x: -1, y: 0 },
+                Point2 { x: 0, y: -1 },
+                Point2 { x: 0, y: 0 },
+            ]
+        );
+    }
 
     #[test]
     fn placement_bounds_and_unit_overlap_match_java_formula() {

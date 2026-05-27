@@ -5,6 +5,7 @@ use crate::mindustry::entities::comp::{
 };
 use crate::mindustry::r#type::{CellLiquid, Liquid};
 use crate::mindustry::vars::TILE_SIZE;
+use crate::mindustry::world::ORTHOGONAL_NEIGHBORS;
 
 pub const MAX_LIQUID: f32 = PuddleComp::MAX_LIQUID;
 
@@ -540,11 +541,11 @@ impl Puddles {
         let Some(entry) = self.puddles.get(&(x, y)) else {
             return Vec::new();
         };
-        [(0, -1), (1, 0), (0, 1), (-1, 0)]
+        ORTHOGONAL_NEIGHBORS
             .into_iter()
-            .filter_map(|(dx, dy)| {
-                let nx = x + dx;
-                let ny = y + dy;
+            .filter_map(|point| {
+                let nx = x + point.x;
+                let ny = y + point.y;
                 (self.in_bounds(nx, ny) && passable(nx, ny, &entry.liquid)).then_some((nx, ny))
             })
             .collect()
@@ -598,8 +599,8 @@ impl Puddles {
             })
             .unwrap_or_else(|| PuddleTileView::new(x, y));
 
-        for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
-            let neighbor_key = (x + dx, y + dy);
+        for point in ORTHOGONAL_NEIGHBORS {
+            let neighbor_key = (x + point.x, y + point.y);
             if !self.in_bounds(neighbor_key.0, neighbor_key.1) {
                 continue;
             }

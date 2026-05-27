@@ -3542,7 +3542,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - Rust 主改动：
   - `server/src/lib.rs`
     - 新增 `server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread`；
-    - 测试构造 neoplasm puddle + 同 tile 带 water 的 `liquid-router`，断言 building health 下降、water 未移除、source puddle accepting 接收 `amountSpread`。
+    - 测试构造 neoplasm puddle + 同 tile 带 water 的 `liquid-router`，断言 building health 下降、water 因 `Geometry.d4c` center 吸收而下降、source puddle accepting 接收转换沉积/`amountSpread`。
 - 已跑验证：
   - `cargo test -p mindustry-server server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread --lib`
 - 当前仍需继续：
@@ -3582,3 +3582,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - 把 `GameRuntime.trigger_events` 自动应用到 `DefaultGameService` / 平台 achievement service；
      - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
      - 统一迁移 `Geometry.d4/d4c` 常量。
+
+---
+
+## 108. 最新闭环记录：Arc Geometry.d4/d4c 常量对齐
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：修正并集中 Rust 侧 CellLiquid/Puddles 使用的 Java `Geometry.d4/d4c` 方向集合，尤其是 `d4c` 不是“八邻域”，而是“四邻 + center”。
+- 本地验证：
+  - 使用 Gradle 缓存 `arc-core-4d9760e264.jar` 直接运行小 Java 程序打印：
+    - `Geometry.d4 = (1,0),(0,1),(-1,0),(0,-1)`；
+    - `Geometry.d4c = (1,0),(0,1),(-1,0),(0,-1),(0,0)`。
+- Rust 主改动：
+  - `core/src/mindustry/world/build.rs`
+    - 新增 `ORTHOGONAL_WITH_CENTER_NEIGHBORS`；
+    - 新增 `orthogonal_neighbor_constants_match_arc_geometry_d4_and_d4c`。
+  - `core/src/mindustry/entities/puddles.rs`
+    - D4 spread 与 nearby target puddle 吸收改用 `ORTHOGONAL_NEIGHBORS`。
+  - `server/src/lib.rs`
+    - CellLiquid 周边 building 吸收改用 `ORTHOGONAL_WITH_CENTER_NEIGHBORS`；
+    - current-building 测试更新为断言 water 会因 d4c center 吸收而下降，source accepting 至少包含 center 转换沉积。
+- 当前仍需继续：
+  1. 跑验证：`cargo test -p mindustry-core orthogonal_neighbor_constants_match_arc_geometry_d4_and_d4c --lib`、`cargo test -p mindustry-server server_puddle_cell_liquid_update --lib`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`对齐液体坑邻接方向常量`。
+  3. 后续补：
+     - 其他散落 AI/pathfinder/block runtime 的私有 D4 常量可逐步统一；
+     - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
+     - 把 `GameRuntime.trigger_events` 自动应用到 `DefaultGameService` / 平台 achievement service。
