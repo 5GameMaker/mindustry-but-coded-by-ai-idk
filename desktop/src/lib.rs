@@ -1,7 +1,7 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::game_runtime::GameRuntimeClientSnapshotApplyReport;
 use mindustry_core::mindustry::core::net_client::{
-    ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror,
+    ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
 };
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
@@ -53,6 +53,7 @@ pub struct DesktopLauncher {
     last_applied_block_snapshot_mirror: Option<ClientBlockSnapshotMirror>,
     last_applied_entity_snapshot_mirror_count: usize,
     last_applied_hidden_snapshot_mirror: Option<ClientHiddenSnapshotMirror>,
+    last_applied_unit_item_mirrors: BTreeMap<i32, ClientUnitItemMirror>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
     last_applied_client_plan_snapshot_received_count: usize,
@@ -78,6 +79,7 @@ impl DesktopLauncher {
             last_applied_block_snapshot_mirror: None,
             last_applied_entity_snapshot_mirror_count: 0,
             last_applied_hidden_snapshot_mirror: None,
+            last_applied_unit_item_mirrors: BTreeMap::new(),
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
             last_applied_client_plan_snapshot_received_count: 0,
@@ -91,6 +93,7 @@ impl DesktopLauncher {
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
         self.sync_snapshot_mirrors();
+        self.sync_unit_item_mirrors_to_runtime();
         let now_millis = current_millis();
         self.sync_remote_player_snapshots_from_runtime();
         self.sync_remote_preview_plan_packets(now_millis);
@@ -267,8 +270,38 @@ impl DesktopLauncher {
         }
     }
 
+    fn sync_unit_item_mirrors_to_runtime(&mut self) -> usize {
+        if self.last_applied_world_data.is_none() {
+            return 0;
+        }
+
+        let mirrors = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.unit_item_mirrors.clone()
+        };
+        self.last_applied_unit_item_mirrors
+            .retain(|unit_id, _| mirrors.contains_key(unit_id));
+
+        let mut applied = 0;
+        for (unit_id, mirror) in mirrors {
+            if self.last_applied_unit_item_mirrors.get(&unit_id) == Some(&mirror) {
+                continue;
+            }
+            if self.runtime.apply_client_unit_item_mirror(
+                unit_id,
+                mirror.item.as_deref(),
+                mirror.amount,
+            ) {
+                self.last_applied_unit_item_mirrors.insert(unit_id, mirror);
+                applied += 1;
+            }
+        }
+        applied
+    }
+
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
-        let (block_mirror, entity_count, hidden_mirror, preview_plan_count) = {
+        let (block_mirror, entity_count, hidden_mirror, preview_plan_count, unit_item_mirrors) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
             (
@@ -276,6 +309,7 @@ impl DesktopLauncher {
                 state.entity_snapshot_mirrors.len(),
                 state.last_hidden_snapshot_mirror.clone(),
                 state.client_plan_snapshot_received_packets.len(),
+                state.unit_item_mirrors.clone(),
             )
         };
         self.last_applied_block_snapshot_mirror = block_mirror;
@@ -283,6 +317,7 @@ impl DesktopLauncher {
         self.last_applied_hidden_snapshot_mirror = hidden_mirror;
         self.last_client_snapshot_apply_report = None;
         self.last_applied_client_plan_snapshot_received_count = preview_plan_count;
+        self.last_applied_unit_item_mirrors = unit_item_mirrors;
     }
 
     fn clear_snapshot_apply_cursors(&mut self) {
@@ -291,6 +326,7 @@ impl DesktopLauncher {
         self.last_applied_hidden_snapshot_mirror = None;
         self.last_client_snapshot_apply_report = None;
         self.last_applied_client_plan_snapshot_received_count = 0;
+        self.last_applied_unit_item_mirrors.clear();
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
     }
@@ -864,7 +900,7 @@ mod tests {
     use mindustry_core::mindustry::core::game_runtime::GameRuntimePayloadBlockState;
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
-        ClientEntitySnapshotRecordMirror, ClientHiddenSnapshotMirror,
+        ClientEntitySnapshotRecordMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
     };
     use mindustry_core::mindustry::core::{
         GameRuntime, GameRuntimeNetworkContext, WorldLoadEventKind,
@@ -885,9 +921,9 @@ mod tests {
     };
     use mindustry_core::mindustry::{
         entities::{
-            comp::BuildingComp, PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
-            FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
-            WORLD_LABEL_CLASS_ID,
+            comp::{BuildingComp, UnitComp},
+            PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
+            PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -1174,6 +1210,68 @@ mod tests {
                 .unit_command(last_command_id)
                 .cloned()
         );
+    }
+
+    #[test]
+    fn desktop_launcher_applies_unit_item_mirror_to_runtime_unit_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let flare = launcher
+            .content_loader
+            .unit_by_name("flare")
+            .unwrap()
+            .clone();
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(8801, UnitComp::new(8801, flare, TeamId(4)));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.unit_item_mirrors.insert(
+                8801,
+                ClientUnitItemMirror {
+                    item: Some("copper".into()),
+                    amount: 3,
+                    take_items_packets_seen: 1,
+                    ..ClientUnitItemMirror::default()
+                },
+            );
+        }
+        launcher.update();
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&8801)
+            .unwrap();
+        assert_eq!(unit.items.stack.item.as_deref(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 3);
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            let mirror = state.unit_item_mirrors.get_mut(&8801).unwrap();
+            mirror.item = Some("lead".into());
+            mirror.amount = 5;
+            mirror.take_items_packets_seen = 2;
+        }
+        launcher.update();
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&8801)
+            .unwrap();
+        assert_eq!(unit.items.stack.item.as_deref(), Some("lead"));
+        assert_eq!(unit.items.stack.amount, 5);
     }
 
     #[test]

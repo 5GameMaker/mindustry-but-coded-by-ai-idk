@@ -3335,3 +3335,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core update_records_server_forwarded_inventory_payload_and_unit_packets`
   - `cargo check --workspace`
 - 仍未完成：当前单位 item mirror 仍是 NetClient sidecar，尚未与 `GameRuntime.client_unit_snapshot_entities` 的 typed `UnitComp.items.stack` 双向合并；`TransferItemToUnitCallPacket.to` 是泛型 `EntityRef`/`Itemsc`，后续需要用 entity snapshot type 信息区分 Unit/Building，并把 item transfer effect 的视觉/音效回放接到 desktop renderer。
+
+### 12.95 Desktop/GameRuntime 消费客户端单位物品 mirror
+
+- 2026-05-27：把 12.94 新增的 `NetClientState.unit_item_mirrors` 从独立 sidecar 推进到 desktop/runtime 消费链，开始同步到真实 typed client unit snapshot entity 的 `UnitComp.items.stack`。
+- Java 依据：
+  - Java 客户端收到 `takeItems`、`transferItemTo`、`transferItemToUnit` 后最终改变的是单位/Itemsc 的实际物品栈，而不是只保留一个调试包记录；
+  - Rust desktop 已经通过 entity snapshot 维护 `GameRuntime.client_unit_snapshot_entities`，因此 NetClient sidecar 应在 unit snapshot materialize 后回放到该 typed runtime entity。
+- Rust 新增/变化：
+  - `GameRuntime::apply_client_unit_item_mirror(...)` 新增最小应用点：按 entity id 查找 `client_unit_snapshot_entities`，将 mirror 中的 item/amount 写入 `UnitComp.items.stack`，并按单位 item capacity clamp；
+  - `DesktopLauncher` 新增 `last_applied_unit_item_mirrors` 游标与 `sync_unit_item_mirrors_to_runtime()`，在每帧 snapshot 同步后把有变化的 unit item mirror 应用到 runtime；
+  - 如果 sidecar 先于 typed unit snapshot 到达，desktop 不会把它标记为已应用，后续 unit snapshot materialize 后仍会重试；world reset 时会重置游标，避免旧地图 sidecar 污染新 runtime；
+  - 新增 core/desktop 测试覆盖 mirror 写入 `UnitComp.items.stack`、capacity clamp、缺失 unit 拒绝以及 desktop update 链路。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_item_mirror_to_typed_unit`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_item_mirror_to_runtime_unit_snapshot`
+  - `cargo check --workspace`
+- 仍未完成：payload sidecar 尚未接入 typed `PayloadComp`；unit item mirror 仍依赖 packet sidecar 的“最后可观察值”，尚未用 packet timestamp/snapshot sequence 解决 snapshot 与 remote-call 乱序；`TransferItemToUnitCallPacket.to` 仍需结合 entity class 判断是否是 Unit/Building/其他 Itemsc，视觉 transfer effect 也还没有进入 renderer。

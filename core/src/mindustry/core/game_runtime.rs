@@ -3021,6 +3021,24 @@ impl GameRuntime {
         true
     }
 
+    pub fn apply_client_unit_item_mirror(
+        &mut self,
+        entity_id: i32,
+        item: Option<&str>,
+        amount: i32,
+    ) -> bool {
+        let Some(unit) = self.client_unit_snapshot_entities.get_mut(&entity_id) else {
+            return false;
+        };
+        unit.items.stack.item = item.map(str::to_string);
+        unit.items.stack.amount = if item.is_some() {
+            amount.clamp(0, unit.items.item_capacity())
+        } else {
+            0
+        };
+        true
+    }
+
     pub fn apply_client_hidden_snapshot_ids(
         &mut self,
         ids: &[i32],
@@ -17318,6 +17336,33 @@ mod tests {
                 .handle_sync_hidden_calls,
             1
         );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_item_mirror_to_typed_unit() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let mut runtime = GameRuntime::default();
+        runtime
+            .client_unit_snapshot_entities
+            .insert(4243, UnitComp::new(4243, flare, TeamId(3)));
+
+        assert!(runtime.apply_client_unit_item_mirror(4243, Some("copper"), 4));
+        let unit = runtime.client_unit_snapshot_entities.get(&4243).unwrap();
+        assert_eq!(unit.items.stack.item.as_deref(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 4);
+
+        assert!(runtime.apply_client_unit_item_mirror(4243, Some("lead"), i32::MAX));
+        let unit = runtime.client_unit_snapshot_entities.get(&4243).unwrap();
+        assert_eq!(unit.items.stack.item.as_deref(), Some("lead"));
+        assert_eq!(unit.items.stack.amount, unit.items.item_capacity());
+
+        assert!(runtime.apply_client_unit_item_mirror(4243, None, 7));
+        let unit = runtime.client_unit_snapshot_entities.get(&4243).unwrap();
+        assert_eq!(unit.items.stack.item, None);
+        assert_eq!(unit.items.stack.amount, 0);
+
+        assert!(!runtime.apply_client_unit_item_mirror(9999, Some("copper"), 1));
     }
 
     #[test]
