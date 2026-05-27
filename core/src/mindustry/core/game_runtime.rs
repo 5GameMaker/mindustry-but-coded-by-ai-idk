@@ -160,14 +160,15 @@ use crate::mindustry::{
         write_core_state, write_unloader_sort_item, ContainerStat, CoreBuildState,
     },
     world::blocks::units::{
-        read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
-        read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        reconstructor_accept_payload, reconstructor_update, unit_assembler_accept_payload,
-        unit_assembler_spawned, unit_assembler_update_progress, unit_factory_configure_plan,
-        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
-        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
-        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
-        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+        assembler_module_transfer_payload, read_reconstructor_state, read_repair_turret_state,
+        read_unit_assembler_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
+        read_unit_factory_state, reconstructor_accept_payload, reconstructor_update,
+        unit_assembler_accept_payload, unit_assembler_spawned, unit_assembler_update_progress,
+        unit_factory_configure_plan, unit_factory_update, write_reconstructor_state,
+        write_repair_turret_state, write_unit_assembler_state, write_unit_cargo_loader_state,
+        write_unit_cargo_unload_state, write_unit_factory_state, ReconstructorState,
+        RepairTurretState, UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState,
+        UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -1975,10 +1976,22 @@ pub struct GameRuntimeUnitAssemblerFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeUnitAssemblerModuleFrameReport {
+    pub visited_buildings: usize,
+    pub module_candidates: usize,
+    pub linked_modules: usize,
+    pub moved_in_payloads: usize,
+    pub transferred_payloads: usize,
+    pub missing_links: usize,
+    pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeOwnedUnitFrameReport {
     pub factory: GameRuntimeUnitFactoryFrameReport,
     pub reconstructor: GameRuntimeUnitReconstructorFrameReport,
     pub assembler: GameRuntimeUnitAssemblerFrameReport,
+    pub assembler_module: GameRuntimeUnitAssemblerModuleFrameReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -16611,6 +16624,178 @@ impl GameRuntime {
         }
     }
 
+    fn relative_direction(from_x: f32, from_y: f32, to_x: f32, to_y: f32) -> i32 {
+        let dx = to_x - from_x;
+        let dy = to_y - from_y;
+        if dx.abs() >= dy.abs() && dx.abs() > f32::EPSILON {
+            if dx > 0.0 {
+                0
+            } else {
+                2
+            }
+        } else if dy.abs() > f32::EPSILON {
+            if dy > 0.0 {
+                1
+            } else {
+                3
+            }
+        } else {
+            0
+        }
+    }
+
+    fn assembler_module_fits(
+        assembler_building: &BuildingComp,
+        assembler_block: &crate::mindustry::content::blocks::UnitAssemblerBlockData,
+        module_building: &BuildingComp,
+    ) -> bool {
+        let tile_size = TILE_SIZE as f32;
+        let (adx, ady) = autotiler_direction(assembler_building.rotation);
+        let spawn_x = assembler_building.x
+            + adx as f32
+                * tile_size
+                * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+        let spawn_y = assembler_building.y
+            + ady as f32
+                * tile_size
+                * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+
+        if Self::relative_direction(module_building.x, module_building.y, spawn_x, spawn_y)
+            != module_building.rotation.rem_euclid(4)
+        {
+            return false;
+        }
+
+        let (mdx, mdy) = autotiler_direction(module_building.rotation);
+        let module_probe_x = module_building.x
+            + mdx as f32 * (module_building.block.size as f32 / 2.0 + 0.5) * tile_size;
+        let module_probe_y = module_building.y
+            + mdy as f32 * (module_building.block.size as f32 / 2.0 + 0.5) * tile_size;
+        let dst = (module_probe_x - spawn_x)
+            .abs()
+            .max((module_probe_y - spawn_y).abs());
+        let expected = tile_size * assembler_block.area_size as f32 / 2.0 - tile_size / 2.0;
+        (dst - expected).abs() <= tile_size / 2.0
+    }
+
+    fn find_owned_unit_assembler_link_for_module(
+        &self,
+        content: &ContentLoader,
+        module_index: usize,
+    ) -> Option<usize> {
+        let module = &self.buildings[module_index];
+        self.buildings
+            .iter()
+            .enumerate()
+            .find_map(|(index, building)| {
+                if index == module_index || building.team != module.team {
+                    return None;
+                }
+                let Some(BlockDef::UnitAssembler(assembler_block)) =
+                    content.block(building.block.id)
+                else {
+                    return None;
+                };
+                Self::assembler_module_fits(building, assembler_block, module).then_some(index)
+            })
+    }
+
+    fn advance_owned_unit_assembler_modules_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeUnitAssemblerModuleFrameReport {
+        let mut report = GameRuntimeUnitAssemblerModuleFrameReport::default();
+        let mut pending_transfers = Vec::new();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, enabled, efficiency, time_scale, rotdeg) = {
+                let building = &self.buildings[index];
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.enabled,
+                    building.efficiency,
+                    building.time_scale,
+                    building.rotdeg(),
+                )
+            };
+
+            let Some(BlockDef::UnitAssemblerModule(module_block)) = content.block(block_id) else {
+                continue;
+            };
+            report.module_candidates += 1;
+
+            if !self.unit_runtime_states.contains_key(&tile_pos) {
+                let building = self.buildings[index].clone();
+                if !self.ensure_unit_state_for_building(content, &building) {
+                    report.missing_runtime_states += 1;
+                    continue;
+                }
+            }
+
+            let Some(link_index) = self.find_owned_unit_assembler_link_for_module(content, index)
+            else {
+                report.missing_links += 1;
+                continue;
+            };
+            report.linked_modules += 1;
+            let link_tile_pos = self.buildings[link_index].tile_pos;
+            let link_was_occupied = self
+                .unit_runtime_states
+                .get(&link_tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Assembler { assembler, .. } => {
+                        Some(assembler.was_occupied)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(false);
+
+            let moved_in = {
+                let Some(GameRuntimeUnitBlockState::AssemblerModule(common)) =
+                    self.unit_runtime_states.get_mut(&tile_pos)
+                else {
+                    report.missing_runtime_states += 1;
+                    continue;
+                };
+                payload_block_move_in(
+                    common,
+                    true,
+                    module_block.rotate,
+                    rotdeg,
+                    module_block.payload_speed,
+                    module_block.payload_rotate_speed,
+                    frame_delta * time_scale,
+                )
+            };
+            if moved_in {
+                report.moved_in_payloads += 1;
+            }
+            if assembler_module_transfer_payload(
+                moved_in,
+                true,
+                true,
+                link_was_occupied,
+                true,
+                if enabled { efficiency } else { 0.0 },
+            ) {
+                pending_transfers.push((tile_pos, link_tile_pos));
+            }
+        }
+
+        for (source_tile_pos, target_tile_pos) in pending_transfers {
+            if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
+                report.transferred_payloads += 1;
+            }
+        }
+
+        report
+    }
+
     fn advance_owned_unit_assemblers_ticks(
         &mut self,
         content: &ContentLoader,
@@ -17252,6 +17437,7 @@ impl GameRuntime {
         let unit = GameRuntimeOwnedUnitFrameReport {
             factory: self.advance_owned_unit_factories_ticks(content, frame.delta),
             reconstructor: self.advance_owned_unit_reconstructors_ticks(content, frame.delta),
+            assembler_module: self.advance_owned_unit_assembler_modules_ticks(content, frame.delta),
             assembler: self.advance_owned_unit_assemblers_ticks(content, frame.delta),
         };
 
@@ -20111,6 +20297,133 @@ mod tests {
         };
         assert!(common.payload.is_none());
         assert!(!source.has_payload);
+        let Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) =
+            runtime.unit_runtime_states.get(&assembler_tile)
+        else {
+            panic!("unit assembler sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(assembler.progress, 0.0);
+        assert_eq!(assembler.blocks.total(), 0);
+    }
+
+    #[test]
+    fn game_runtime_assembler_module_transfers_payload_into_linked_assembler() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let module_def = content.block_by_name("basic-assembler-module").unwrap();
+        let stell = content.unit_by_name("stell").unwrap().clone();
+        let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let plan = &assembler_block.plans[0];
+        let assembler_tile = point2_pack(10, 10);
+        let mut assembler_building =
+            BuildingComp::new(assembler_tile, assembler_def.base().clone(), TeamId(4));
+        assembler_building.set_rotation(0);
+        if let Some(power) = assembler_building.power.as_mut() {
+            power.status = 1.0;
+        }
+        let mut module_building = None;
+        'search: for x in 0..32 {
+            for y in 0..32 {
+                let tile = point2_pack(x, y);
+                if tile == assembler_tile {
+                    continue;
+                }
+                for rotation in 0..4 {
+                    let mut candidate =
+                        BuildingComp::new(tile, module_def.base().clone(), TeamId(4));
+                    candidate.set_rotation(rotation);
+                    if GameRuntime::assembler_module_fits(
+                        &assembler_building,
+                        assembler_block,
+                        &candidate,
+                    ) {
+                        module_building = Some(candidate);
+                        break 'search;
+                    }
+                }
+            }
+        }
+        let mut module_building =
+            module_building.expect("test map should contain a fitting assembler module position");
+        if let Some(power) = module_building.power.as_mut() {
+            power.status = 1.0;
+        }
+        let module_tile = module_building.tile_pos;
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(40, 40);
+        runtime.add_building(assembler_building);
+        runtime.add_building(module_building);
+
+        let mut stell_unit = UnitComp::new(6602, stell.clone(), TeamId(4));
+        stell_unit.set_pos(runtime.buildings[1].x, runtime.buildings[1].y);
+        let stell_payload = GameRuntime::unit_payload_ref_from_unit(&content, &stell_unit)
+            .expect("stell should serialize as a unit payload");
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 3);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        runtime.unit_runtime_states.insert(
+            assembler_tile,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 1.0 - 1.0 / plan.time,
+                    blocks,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+        runtime.unit_runtime_states.insert(
+            module_tile,
+            GameRuntimeUnitBlockState::AssemblerModule(PayloadBlockBuildState {
+                payload: Some(stell_payload),
+                pay_vector: Vec2::ZERO,
+                pay_rotation: runtime.buildings[1].rotdeg(),
+                carried: false,
+            }),
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(report.unit.assembler_module.module_candidates, 1);
+        assert_eq!(report.unit.assembler_module.linked_modules, 1);
+        assert_eq!(report.unit.assembler_module.moved_in_payloads, 1);
+        assert_eq!(report.unit.assembler_module.transferred_payloads, 1);
+        assert_eq!(report.unit.assembler.moved_in_payloads, 1);
+        assert_eq!(report.unit.assembler.completed_units, 1);
+        let Some(GameRuntimeUnitBlockState::AssemblerModule(common)) =
+            runtime.unit_runtime_states.get(&module_tile)
+        else {
+            panic!("assembler module sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
         let Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) =
             runtime.unit_runtime_states.get(&assembler_tile)
         else {

@@ -3673,3 +3673,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unit_assembler`
   - `cargo check --workspace`
 - 仍未完成：`UnitAssemblerModule.findLink()` 的空间搜索/链接维护、module 自身每帧 moveIn 后触发 `transfer_payload_output_to_front`、assembler payload slot 非空时 module 同类 payload 的覆盖/合并细节、最终 unit 实体落地与网络 `Call.assemblerUnitSpawned/assemblerDroneSpawned` 仍需补。
+
+### 12.113 UnitAssemblerModule 最小链接与转运 tick
+
+- 2026-05-27：对照 Java `UnitAssemblerModuleBuild.findLink()` / `updateTile()`，把 `basic-assembler-module` 从仅有 terminal payload common 状态推进到 owned runtime 中能寻找相邻 `UnitAssembler` 并转运 payload 的最小闭环。
+- Java 依据：
+  - `findLink()` 通过 `getLink(team, tile.x, tile.y, rotation)` 找同队 `BlockFlag.unitAssembler`，并调用 assembler 的 `moduleFits(...)`；
+  - `updateTile()` 在 `moveInPayload()` 成功、link 仍匹配、`!link.wasOccupied`、`link.acceptPayload(this,payload)` 且 `efficiency > 0` 时，把 payload 交给 link 的 `yeetPayload(payload)` 并清空自身 payload；
+  - `moduleFits(...)` 以 assembler spawn rect、module rotation、areaSize 边界为几何约束。
+- Rust 新增/变化：
+  - 新增 `GameRuntimeUnitAssemblerModuleFrameReport`，并把 `GameRuntimeOwnedUnitFrameReport` 扩展出 `assembler_module`；
+  - 新增 `assembler_module_fits(...)` 与 `find_owned_unit_assembler_link_for_module(...)`，按同队 assembler、module rotation、assembler area 边界寻找 link；由于当前 Rust `BuildingComp` 中心坐标模型仍在迁移中，几何判定使用半 tile 容差以匹配现有 world/tile 表示；
+  - 新增 `advance_owned_unit_assembler_modules_ticks(...)`，在 `advance_owned_runtime_blocks` 中先于 assembler tick 执行：module payload 到达后复用 `assembler_module_transfer_payload(...)` 与 `transfer_payload_output_to_front(...)` 进入 linked assembler common payload；
+  - `transfer_payload_output_to_front(...)` 的 source take/restore 已支持 `GameRuntimeUnitBlockState::AssemblerModule(common)`，确保转运失败时 payload 可回滚回 module。
+- 新增 core 回归测试：
+  - `game_runtime_assembler_module_transfers_payload_into_linked_assembler`：自动搜索一个 fits 的 module 位置，验证 module 中的 `stell` UnitPayload 同帧进入 linked `tank-assembler`、由 assembler tick 转入 `blocks` 并完成一次组装消费。
+- 验证：
+  - `cargo test -p mindustry-core assembler_module`
+  - `cargo test -p mindustry-core unit_assembler`
+  - `cargo check --workspace`
+- 仍未完成：`UnitAssemblerBuild.modules` 持久列表、tier 连续性由 module 集合自动驱动 `currentTier`、严格 Java 坐标/offset 级 `moduleFits`、module link 的 world.tileChanges cache、被拆除时 removeModule、assembler payload slot 非空且同类 module payload 的精确合并行为仍需补。
