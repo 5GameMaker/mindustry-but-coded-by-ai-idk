@@ -1290,6 +1290,29 @@ impl UnitSpawnAbility {
         }
     }
 
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("UnitSpawnAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("UnitSpawnAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let unit = parts.next()?;
+        let spawn_time = parts.next()?.parse().ok()?;
+        let spawn_x = parts.next()?.parse().ok()?;
+        let spawn_y = parts.next()?.parse().ok()?;
+        let mut ability = Self::new(unit, spawn_time, spawn_x, spawn_y);
+        if let Some(parentize_effects) = parts.next() {
+            ability.parentize_effects = matches!(parentize_effects, "true" | "1" | "parent");
+        }
+        Some(ability)
+    }
+
     pub fn update_state(
         &mut self,
         delta: f32,
@@ -2257,6 +2280,24 @@ mod tests {
         assert_eq!(plan.rotation, 90.0);
         assert_eq!(plan.timer, 0.0);
         assert_eq!(ability.build_time_seconds(), 10.0 / 60.0);
+    }
+
+    #[test]
+    fn unit_spawn_descriptor_parses_runtime_ability_entries() {
+        let ability = UnitSpawnAbility::from_descriptor("UnitSpawnAbility:flare:60:2:-4:true")
+            .expect("colon descriptor should parse");
+        assert_eq!(ability.unit, "flare");
+        assert_eq!(ability.spawn_time, 60.0);
+        assert_eq!(ability.spawn_x, 2.0);
+        assert_eq!(ability.spawn_y, -4.0);
+        assert!(ability.parentize_effects);
+
+        let call_style = UnitSpawnAbility::from_descriptor("UnitSpawnAbility(mono, 30, 0, 8)")
+            .expect("call-style descriptor should parse");
+        assert_eq!(call_style.unit, "mono");
+        assert_eq!(call_style.spawn_time, 30.0);
+        assert_eq!(call_style.spawn_y, 8.0);
+        assert!(UnitSpawnAbility::from_descriptor("RepairFieldAbility").is_none());
     }
 
     #[test]

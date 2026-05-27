@@ -2651,3 +2651,66 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑 `cargo check -p mindustry-core`、`cargo fmt --check`、`git diff --check` 后中文提交并推送。
   2. 下一步处理 `UnitSpawnAbility`，这是 `spawner_unit_id` 非空的 UnitCreateEvent，不要硬塞进 block runtime helper。
   3. 后续把 `unit_create_events` bridge 到正式 event bus / `DefaultGameService` / achievement backend。
+
+---
+
+## 81. 最新闭环记录：UnitSpawnAbility 单位产子接入真实 UnitComp/server 链路
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已 fetch 并确认 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：迁移 `UnitSpawnAbility.update(Unit unit)` 的单位产子主链路：父单位 ability timer → `Units.canCreate` → 子单位创建 → `UnitCreateEvent(u, null, parent)` → server `UnitSpawnCallPacket`。
+- Java 依据：
+  - `UnitSpawnAbility.java:45-60`：累积 `Time.delta * unitBuildSpeed`，到点且 `Units.canCreate` 后创建子单位、设置位置/旋转、触发 `UnitCreateEvent(u, null, unit)`，非 client 端 `u.add(); Units.notifyUnitSpawn(u)`，再清零 timer。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `UnitSpawnAbility::from_descriptor(...)` 支持 `UnitSpawnAbility:unit:spawnTime:spawnX:spawnY[:parentize]` 与 `UnitSpawnAbility(unit, spawnTime, spawnX, spawnY)`；
+    - 新增 descriptor 解析测试。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `UnitComp::update_unit_spawn_abilities(...)` 从 `type_info.abilities` 找 `UnitSpawnAbility` descriptor；
+    - 用 `AbilityWire.data` 存 timer，同步 Java cap 阻塞时 timer 保持 ready 的行为；
+    - 返回真实 `UnitSpawnPlan`，不直接碰全局 runtime/network。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 在 owned runtime frame 内调用 `tick_server_unit_spawn_abilities(1.0)`；
+    - server 对 `server_units` 的父单位逐个 tick unit spawn ability；
+    - 用 `units_can_create(...)` 按当前 `server_units` 统计同 team/type 数量，结合 rules cap / banned unit 判断；
+    - 产子成功后创建 `UnitComp`、`unit.add()`、记录 `note_unit_create_event(Some(child_id), unit, team, None, Some(parent_id))`，并复用 `broadcast_server_unit_spawn(...)` 发送 `UnitSpawnCallPacket`。
+- 已跑验证：
+  - `cargo test -p mindustry-core unit_spawn --lib`
+  - `cargo test -p mindustry-server unit_spawn_ability --lib`
+- 当前仍需继续：
+  1. 跑全量收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`，然后中文提交并推送 `origin main`。
+  2. 后续将普通 `UnitType.abilities: Vec<String>` 升级为结构化 ability content / mod patcher 表达，避免 descriptor 长期作为正式模型。
+  3. 继续接 Java client 本地 ability tick / draw construct preview / `spawnEffect.at(...)` 表现层，以及 `unit_create_events` 到正式 event bus / service backend 的 bridge。
+  4. 下一个迁移候选可按探索结果继续：`EnergyFieldAbility`、`ShieldArcAbility`、`MoveEffectAbility`、`StatusFieldAbility`、`SuppressionFieldAbility`，优先选择能接入真实 runtime 的闭环。
+
+---
+
+## 81. 最新闭环记录：UnitSpawnAbility 单位产子 runtime / UnitCreateEvent
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已 fetch 确认 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `UnitSpawnAbility.update(Unit unit)`，把既有 Rust `UnitSpawnAbility` 从纯 plan/单测接入真实 `UnitComp` ability slot、server update、`UnitCreateEvent(spawnerUnit)` 与 `UnitSpawnCallPacket`。
+- Java 依据：
+  - `timer += Time.delta * state.rules.unitBuildSpeed(unit.team)`；
+  - 到达 `spawnTime` 且 `Units.canCreate(...)` 时，按父单位旋转偏移创建子单位；
+  - `Events.fire(new UnitCreateEvent(u, null, unit))`；
+  - 非 client 端 `u.add(); Units.notifyUnitSpawn(u)`，随后 `timer = 0f`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `UnitSpawnAbility::from_descriptor(...)` 支持 `UnitSpawnAbility:unit:spawnTime:spawnX:spawnY[:parentize]` 与 `UnitSpawnAbility(unit, spawnTime, spawnX, spawnY)`，适配当前 `UnitType.abilities: Vec<String>` 过渡模型；
+    - 新增 descriptor parse 测试。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::update_unit_spawn_abilities(...)`；
+    - 从 `AbilityWire.data` 读取/写回 timer，按父单位 `x/y/rotation` 产出 `UnitSpawnPlan`；
+    - cap 阻止时 timer 保持 ready，cap 放开后 `delta=0` 也能产子，匹配 Java。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 在 playing frame 的 owned runtime update 后调用 `tick_server_unit_spawn_abilities(1.0)`；
+    - server 侧按 `server_units` 当前同 team/type 数量 + `units_can_create(...)` 判断是否允许创建；
+    - 创建子 `UnitComp` 后记录 `note_unit_create_event(Some(child_id), unit, team, None, Some(parent_id))`，随后 `unit.add()`、复用 `broadcast_server_unit_spawn(...)` 与现有 `UnitSpawnCallPacket`；
+    - 新增 `server_update_ticks_unit_spawn_ability_and_broadcasts_spawned_unit`，验证实体落地、packet、`spawner_unit_id`、`units_created` 与 campaign `units_produced`。
+- 已跑验证：
+  - `cargo test -p mindustry-core unit_spawn --lib`
+  - `cargo test -p mindustry-server unit_spawn_ability --lib`
+- 下一步：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 更新提交并推送 `origin main`，中文提交标题建议：`接入单位产子能力运行时`。
+  3. 后续候选：优先从 `EnergyFieldAbility` / `ShieldArcAbility` / `StatusFieldAbility` 继续做真实 entity ability runtime 闭环；不要把能力继续做成孤立纯 helper。
+  4. 长期欠账：普通 `UnitType.abilities` 需要结构化 content/mod patcher，`spawnEffect/draw` 表现层和 `unit_create_events` → 正式 event bus/service bridge 仍未完成。

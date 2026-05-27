@@ -9,6 +9,7 @@
 use crate::mindustry::ai::{PrebuildAiPlanSnapshot, PrebuildAiRequirement};
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
+use crate::mindustry::entities::abilities::{UnitSpawnAbility, UnitSpawnPlan};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
 use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamData};
@@ -392,6 +393,51 @@ impl UnitComp {
 
         self.type_info = type_info;
         self.refresh_component_views();
+    }
+
+    pub fn update_unit_spawn_abilities<F>(
+        &mut self,
+        delta: f32,
+        unit_build_speed: f32,
+        mut can_create: F,
+    ) -> Vec<UnitSpawnPlan>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let parent_x = self.x();
+        let parent_y = self.y();
+        let parent_rotation = self.rotation();
+        let mut plans = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = UnitSpawnAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.timer = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+            let reaches_spawn_time = ability.timer + delta * unit_build_speed >= ability.spawn_time;
+            let allowed = reaches_spawn_time && can_create(&ability.unit);
+
+            if let Some(plan) = ability.update_state(
+                delta,
+                unit_build_speed,
+                allowed,
+                parent_x,
+                parent_y,
+                parent_rotation,
+            ) {
+                plans.push(plan);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.timer;
+            }
+        }
+
+        plans
     }
 
     pub fn refresh_component_views(&mut self) {
@@ -1222,6 +1268,42 @@ mod tests {
 
         assert_eq!(unit.health.max_health, 200.0);
         assert_eq!(unit.weapons.mounts.len(), 2);
+    }
+
+    #[test]
+    fn unit_component_ticks_unit_spawn_ability_from_runtime_ability_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["UnitSpawnAbility:flare:10:2:4".into()];
+        let mut unit = UnitComp::new(42, unit_type, TeamId(1));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(90.0);
+
+        let plans = unit.update_unit_spawn_abilities(4.0, 2.0, |_| true);
+        assert!(plans.is_empty());
+        assert_eq!(unit.abilities[0].data, 8.0);
+
+        let plans = unit.update_unit_spawn_abilities(1.0, 2.0, |unit_name| unit_name == "flare");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].unit, "flare");
+        assert!((plans[0].x - 102.0).abs() < 0.0001);
+        assert!((plans[0].y - 204.0).abs() < 0.0001);
+        assert_eq!(plans[0].rotation, 90.0);
+        assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_keeps_unit_spawn_timer_ready_when_creation_is_blocked() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["UnitSpawnAbility:mono:5:0:0".into()];
+        let mut unit = UnitComp::new(42, unit_type, TeamId(1));
+
+        let blocked = unit.update_unit_spawn_abilities(5.0, 1.0, |_| false);
+        assert!(blocked.is_empty());
+        assert_eq!(unit.abilities[0].data, 5.0);
+
+        let spawned = unit.update_unit_spawn_abilities(0.0, 1.0, |unit_name| unit_name == "mono");
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(unit.abilities[0].data, 0.0);
     }
 
     #[test]

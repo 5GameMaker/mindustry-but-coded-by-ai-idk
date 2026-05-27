@@ -4296,3 +4296,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `UnitSpawnAbility` 的 `UnitCreateEvent(u, null, unit)` 尚未迁移；这条路径需要 `spawner_unit_id` 非空，落点应在 unit/entity ability runtime，而不是 block owned tick；
   - `unit_create_events` 到正式 event bus / `DefaultGameService` / achievement backend 的 bridge 仍未完成；
   - PayloadSource 的其他表现层细节与 Java 完整 sandbox UI 配置仍需后续继续对照。
+
+### 12.139 UnitSpawnAbility 单位产子 runtime / UnitCreateEvent 接入
+
+- 2026-05-27：继续对照 v158.1 `UnitSpawnAbility.update(Unit unit)`，把 Rust 既有的 `UnitSpawnAbility` 纯 plan 从单测层接到真实 `UnitComp` ability slot 与 server update 链路；该闭环不走 block-owned tick，避免把 unit-spawner 做成孤立 helper。
+- Java 依据：
+  - `timer += Time.delta * state.rules.unitBuildSpeed(unit.team)`；
+  - `timer >= spawnTime && Units.canCreate(unit.team, this.unit)` 时，按父单位旋转计算 `spawnX/spawnY` 偏移；
+  - 创建子单位、设置位置/旋转，先 `Events.fire(new UnitCreateEvent(u, null, unit))`；
+  - 非 client 端再 `u.add(); Units.notifyUnitSpawn(u)`，最后 `timer = 0f`。
+- Rust 新增/变化：
+  - `UnitSpawnAbility::from_descriptor(...)` 支持 runtime ability 字符串描述（例如 `UnitSpawnAbility:flare:60:0:0` 与 `UnitSpawnAbility(flare,60,0,0)`），用于当前 `UnitType.abilities: Vec<String>` 过渡内容模型；
+  - `UnitComp::update_unit_spawn_abilities(...)` 现在从 `AbilityWire.data` 读取/写回 timer，按父单位 transform 调用 `UnitSpawnAbility::update_state(...)`，并在单位 cap 阻止时保留 ready timer，匹配 Java 等待语义；
+  - `ServerLauncher::update()` 在同一 playing frame 内调用 `tick_server_unit_spawn_abilities(1.0)`，对 `server_units` 中的父单位逐个 tick ability；
+  - 服务端产子时复用现有 `UnitSpawnCallPacket` / `broadcast_server_unit_spawn(...)`，创建的子单位进入 `server_units`，不新增专用网络包；
+  - 产子成功时调用 `note_unit_create_event(Some(child_id), unit_name, team, None, Some(parent_id))`，覆盖 Java `new UnitCreateEvent(u, null, unit)` 的 `spawnerUnit` 语义；
+  - `Units.canCreate` 对应 Rust `units_can_create(...)`，server 侧按当前 `server_units` 统计同 team/type 数量，并考虑 rules/team cap 与 banned unit。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core unit_spawn --lib`
+  - `cargo test -p mindustry-server unit_spawn_ability --lib`
+- 仍未完成：
+  - 普通 `UnitType.abilities` 仍是字符串描述，后续需要完整结构化 ability content / mod patcher 支持，避免长期依赖描述字符串；
+  - Java client 本地 ability tick / draw 预览 / `spawnEffect.at(...)` 的完整表现层仍未迁移；当前 server 已能即时广播子单位；
+  - `unit_create_events` 到正式 event bus / `DefaultGameService` / achievement backend 的 bridge 仍未完成。

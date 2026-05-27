@@ -25,8 +25,9 @@ use mindustry_core::mindustry::entities::{
         CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
         UnitControllerState,
     },
-    entity_class_id,
+    entity_class_id, units_can_create, UnitCapRules, UnitCapTeam, UnitCapType, UnitSpawnAbility,
 };
+use mindustry_core::mindustry::game::vanilla_teams;
 use mindustry_core::mindustry::input::{
     drop_item, payload_dropped, picked_build_payload, picked_unit_payload, request_build_payload,
     request_drop_payload, request_item, request_unit_payload, take_items, transfer_inventory,
@@ -295,6 +296,9 @@ impl ServerLauncher {
             if let Err(error) =
                 self.apply_runtime_unit_assembler_spawns(&report.unit.assembler.spawned_tiles)
             {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) = self.tick_server_unit_spawn_abilities(1.0) {
                 self.network_error = Some(error.to_string());
             }
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
@@ -1494,6 +1498,120 @@ impl ServerLauncher {
             .max(cargo_loader_max)
             .max(SERVER_RUNTIME_UNIT_ID_START - 1)
             .saturating_add(1)
+    }
+
+    fn tick_server_unit_spawn_abilities(&mut self, delta_ticks: f32) -> io::Result<usize> {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let team_registry = vanilla_teams();
+        let mut spawned = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent_snapshot) = self.server_units.get(&parent_id) else {
+                continue;
+            };
+            let team = parent_snapshot.team_id();
+            let unit_build_speed = self.runtime.state.rules.unit_build_speed(team.0 as usize);
+            let cap_rules = UnitCapRules {
+                wave_team: TeamId(self.runtime.state.rules.wave_team.clamp(0, u8::MAX as i32) as u8),
+                pvp: self.runtime.state.rules.pvp,
+                campaign: self.runtime.state.is_campaign(),
+                disable_unit_cap: self.runtime.state.rules.disable_unit_cap,
+                unit_cap_variable: self.runtime.state.rules.unit_cap_variable,
+                unit_cap: self.runtime.state.rules.unit_cap,
+            };
+            let team_data_unit_cap = self
+                .runtime
+                .state
+                .teams
+                .get_or_null(team.0)
+                .map_or(0, |data| data.unit_cap);
+            let ignore_unit_cap = team_registry.get(team.0 as i32).ignore_unit_cap;
+            let mut spawn_targets: BTreeMap<String, (ContentId, bool, bool, i32)> = BTreeMap::new();
+
+            for descriptor in &parent_snapshot.type_info.abilities {
+                let Some(ability) = UnitSpawnAbility::from_descriptor(descriptor) else {
+                    continue;
+                };
+                if spawn_targets.contains_key(&ability.unit) {
+                    continue;
+                }
+                if let Some(unit_type) = self.content_loader.unit_by_name(&ability.unit) {
+                    let unit_type_id = unit_type.id();
+                    let type_count = self
+                        .server_units
+                        .values()
+                        .filter(|unit| {
+                            unit.team_id() == team && unit.type_info.id() == unit_type_id
+                        })
+                        .count()
+                        .min(i32::MAX as usize) as i32;
+                    spawn_targets.insert(
+                        ability.unit,
+                        (
+                            unit_type_id,
+                            unit_type.use_unit_cap,
+                            self.runtime.state.rules.is_unit_banned(unit_type.name()),
+                            type_count,
+                        ),
+                    );
+                }
+            }
+
+            let mut pending_counts: BTreeMap<ContentId, i32> = BTreeMap::new();
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let plans =
+                parent.update_unit_spawn_abilities(delta_ticks, unit_build_speed, |unit_name| {
+                    let Some((unit_type_id, use_unit_cap, banned, base_count)) =
+                        spawn_targets.get(unit_name)
+                    else {
+                        return false;
+                    };
+                    let type_count =
+                        *base_count + pending_counts.get(unit_type_id).copied().unwrap_or(0);
+                    let can_create = units_can_create(
+                        UnitCapTeam {
+                            team,
+                            ignore_unit_cap,
+                            data_unit_cap: team_data_unit_cap,
+                            type_count,
+                        },
+                        UnitCapType {
+                            use_unit_cap: *use_unit_cap,
+                            banned: *banned,
+                        },
+                        cap_rules,
+                    );
+                    if can_create {
+                        *pending_counts.entry(*unit_type_id).or_insert(0) += 1;
+                    }
+                    can_create
+                });
+
+            for plan in plans {
+                let Some(unit_type) = self.content_loader.unit_by_name(&plan.unit).cloned() else {
+                    continue;
+                };
+                let unit_id = self.next_server_runtime_unit_id();
+                let mut unit = UnitComp::new(unit_id, unit_type, team);
+                unit.set_pos(plan.x, plan.y);
+                unit.set_rotation(plan.rotation);
+                self.runtime.note_unit_create_event(
+                    Some(unit_id),
+                    plan.unit,
+                    team,
+                    None,
+                    Some(parent_id),
+                );
+                unit.add();
+                self.broadcast_server_unit_spawn(&unit)?;
+                self.server_units.insert(unit_id, unit);
+                spawned += 1;
+            }
+        }
+
+        Ok(spawned)
     }
 
     fn apply_runtime_unit_cargo_loader_spawns(
@@ -3338,7 +3456,7 @@ mod tests {
         RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
         TileConfigCallPacket, TransferInventoryCallPacket,
     };
-    use mindustry_core::mindustry::r#type::{PayloadKey, PayloadSeq, Sector};
+    use mindustry_core::mindustry::r#type::{PayloadKey, PayloadSeq, Sector, UnitType};
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
     use mindustry_core::mindustry::world::blocks::autotiler_direction;
     use mindustry_core::mindustry::world::blocks::campaign::LandingPadState;
@@ -5470,6 +5588,69 @@ mod tests {
                         if packet.tile == Some(assembler_tile)
                 )
         }));
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitSpawnCallPacket(packet)
+                        if packet.container.unit_id == spawned_unit.id()
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_ticks_unit_spawn_ability_and_broadcasts_spawned_unit() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6592).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.rules.disable_unit_cap = true;
+        launcher.runtime.state.set_sector(Some(Sector::new(22)));
+
+        let mut carrier_type = UnitType::new(9000, "unit-spawn-carrier");
+        carrier_type
+            .abilities
+            .push("UnitSpawnAbility:flare:1:2:4".into());
+        let mut carrier = UnitComp::new(7, carrier_type, TeamId(1));
+        carrier.set_pos(100.0, 200.0);
+        carrier.set_rotation(90.0);
+        launcher.server_units.insert(7, carrier);
+
+        launcher.update();
+
+        let spawned_unit = launcher
+            .server_units
+            .values()
+            .find(|unit| unit.id() != 7 && unit.type_info.name() == "flare")
+            .expect("UnitSpawnAbility should materialize child unit server-side");
+        assert_eq!(spawned_unit.team_id(), TeamId(1));
+        assert!((spawned_unit.x() - 102.0).abs() < 0.0001);
+        assert!((spawned_unit.y() - 204.0).abs() < 0.0001);
+        assert_eq!(spawned_unit.rotation(), 90.0);
+
+        assert_eq!(launcher.runtime.unit_create_events.len(), 1);
+        assert_eq!(
+            launcher.runtime.unit_create_events[0].unit_id,
+            Some(spawned_unit.id())
+        );
+        assert_eq!(launcher.runtime.unit_create_events[0].unit_name, "flare");
+        assert_eq!(launcher.runtime.unit_create_events[0].team, TeamId(1));
+        assert_eq!(launcher.runtime.unit_create_events[0].spawner_tile, None);
+        assert_eq!(
+            launcher.runtime.unit_create_events[0].spawner_unit_id,
+            Some(7)
+        );
+        assert_eq!(launcher.runtime.state.stats.units_created, 1);
+        assert_eq!(
+            launcher.runtime.campaign_stats.get_unit_produced("flare"),
+            1
+        );
+
+        let sent = sent.lock().unwrap();
         assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
             !*reliable
                 && matches!(
