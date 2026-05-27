@@ -3393,3 +3393,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - `tile.build.puddleOn(self())` 的真实 building consumer；
      - `CellLiquid.update(Puddle)`，尤其 neoplasm 从周边 building/puddle 吸收 spreadTarget、伤害 building、触发 neoplasmReact；
      - 起火概率从稳定 hash 替换为 Java 等价 RNG/delta。
+
+---
+
+## 102. 最新闭环记录：Fx.ripple standard effect id
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：为下一步接 `PuddleComp.update()` 的单位踩液体 `Fx.ripple` 分支补齐标准 effect id。
+- Java 依据：
+  - `Effect` id 按 `all.size` 顺序分配；
+  - `Fx.ripple` 在 v158.1 `Fx.java` 中是第 244 个声明，0-based id 为 `243`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_RIPPLE_ID = 243`；
+    - `standard_effect_id("ripple") -> Some(FX_RIPPLE_ID)`；
+    - 顺手补 `standard_effect_id("unitAssemble") -> Some(FX_UNIT_ASSEMBLE_ID)`；
+    - 新增 `standard_effect_ids_include_puddle_ripple_dependencies`。
+  - `core/src/mindustry/entities/mod.rs`
+    - re-export `FX_RIPPLE_ID`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core standard_effect_ids_include_puddle_ripple_dependencies --lib`
+- 当前仍需继续：
+  1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入液体坑波纹效果编号`。
+  3. 后续补：
+     - `PuddleUpdateEvent.affect_units` 的 server consumer；
+     - 单位矩形查询、grounded/hovering 过滤、liquid status apply 120 tick；
+     - 移动单位 `Fx.ripple` effect packet/local queue；
+     - `tile.build.puddleOn` 与 `CellLiquid.update`。

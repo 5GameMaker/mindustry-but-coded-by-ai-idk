@@ -12,12 +12,16 @@ pub const FX_MISSILE_TRAIL_ID: i32 = 110;
 pub const FX_MISSILE_TRAIL_SHORT_ID: i32 = 111;
 /// Upstream `Fx.neoplasmHeal` id in `mindustry.content.Fx` for v158.1.
 pub const FX_NEOPLASM_HEAL_ID: i32 = 122;
+/// Upstream `Fx.ripple` id in `mindustry.content.Fx` for v158.1.
+pub const FX_RIPPLE_ID: i32 = 243;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
+        "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
         "missileTrailShort" => Some(FX_MISSILE_TRAIL_SHORT_ID),
         "neoplasmHeal" => Some(FX_NEOPLASM_HEAL_ID),
+        "ripple" => Some(FX_RIPPLE_ID),
         _ => None,
     }
 }
@@ -1153,6 +1157,28 @@ pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standard_effect_ids_include_puddle_ripple_dependencies() {
+        assert_eq!(
+            standard_effect_id("unitAssemble"),
+            Some(FX_UNIT_ASSEMBLE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("missileTrail"),
+            Some(FX_MISSILE_TRAIL_ID)
+        );
+        assert_eq!(
+            standard_effect_id("missileTrailShort"),
+            Some(FX_MISSILE_TRAIL_SHORT_ID)
+        );
+        assert_eq!(
+            standard_effect_id("neoplasmHeal"),
+            Some(FX_NEOPLASM_HEAL_ID)
+        );
+        assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
+        assert_eq!(standard_effect_id("none"), None);
+    }
 
     #[test]
     fn effect_defaults_and_builder_methods_match_java_shape() {

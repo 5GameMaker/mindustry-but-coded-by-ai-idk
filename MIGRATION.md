@@ -4781,3 +4781,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `tile.build.puddleOn(self())` 还没有对应 Rust building consumer；
   - `liquid.update(self())` 只保留事件链入口，`CellLiquid.update()` 的 neoplasm 扩散/伤害逻辑仍待迁移；
   - 起火概率当前为稳定 hash 近似，后续要接 Java `Mathf.chance(0.5)` 等价 RNG/delta 语义。
+
+### 12.160 Fx.ripple standard effect id
+
+- 2026-05-28：为后续接入 `PuddleComp.update()` 的单位踩液体波纹分支，先补齐 v158.1 `Fx.ripple` 的标准 effect id 映射。
+- Java 依据：
+  - `Effect` 构造时使用 `this.id = all.size`；
+  - `Fx.java` 中 `ripple = new Effect(30, ...)` 前共有 243 个 effect 声明，因此 `Fx.ripple` 的 0-based id 为 `243`。
+- Rust 新增/变化：
+  - `entities/effect.rs` 增加 `FX_RIPPLE_ID = 243`；
+  - `standard_effect_id("ripple")` 返回 `Some(243)`；
+  - 顺手补上已有常量 `FX_UNIT_ASSEMBLE_ID` 的 `standard_effect_id("unitAssemble")` 映射；
+  - `entities/mod.rs` re-export `FX_RIPPLE_ID`。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core standard_effect_ids_include_puddle_ripple_dependencies --lib`
+- 仍未完成：
+  - Puddle 对单位的 `Fx.ripple.at(unit.x, unit.y, unit.type.rippleScale, liquid.color)` 网络/本地 effect 发送尚未接入；
+  - 仍需补 `Units.nearby`、单位 hitbox overlap、grounded/hovering 判定与 liquid status apply。
