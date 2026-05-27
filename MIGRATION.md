@@ -3526,4 +3526,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
   - `cargo test -p mindustry-server server_launcher_update_applies_enter_payload_command_to_payload_building_and_broadcasts_packet`
   - `cargo check --workspace`
-- 仍未完成：Deconstructor 仍缺 Java `unit.type.getTotalRequirements().length > 0` 的真实需求表，Reconstructor 这类非 payload block 的 UnitPayload 接收路径尚未迁移；后续需要补 UnitType requirements 与更多 block-specific `acceptUnitPayload/acceptPayload`。
+- 仍未完成：Deconstructor 仍缺 Java `unit.type.getTotalRequirements().length > 0` 的真实需求表；后续需要补 UnitType requirements 与更多 block-specific `acceptUnitPayload/acceptPayload`。
+
+### 12.106 Reconstructor 接入 UnitPayload 接收链
+
+- 2026-05-27：对照 Java `ReconstructorBuild.acceptUnitPayload(...)` / `acceptPayload(...)`，把 `UnitReconstructor` 这类非 `PayloadBlock` 的 UnitPayload 接收接入 `GameRuntime`，避免 UnitPayload 只能进入 payload-family sidecar。
+- Java 依据：
+  - `acceptPayload(source, payload)` 要求当前 payload 为空、`enabled || source == this`、来源不是输出侧、payload 是 `UnitPayload`、存在 `from -> to` upgrade、目标未 banned 且已解锁/AI；
+  - `InputHandler.unitEnteredPayload(...)` 调用 `build.acceptPayload(build, new UnitPayload(unit))` 后再 `build.handlePayload(...)`；
+  - `PayloadSource/Conveyor` 等外部来源转交给 Reconstructor 时仍必须遵守非输出侧输入限制。
+- Rust 新增/变化：
+  - 新增 `ensure_unit_state_for_building(...)`，为 `BlockDef::UnitReconstructor` 懒创建 `GameRuntimeUnitBlockState::Reconstructor { common, reconstructor }`；
+  - `attach_unit_payload_to_building(...)` 现在会把 `UnitReconstructor` 分流到 `unit_runtime_states`，并复用 `PayloadBlockBuildState` common 保存真实 `PayloadRef::Unit`；
+  - `transfer_payload_output_to_front(...)` 新增 Reconstructor 目标，`PayloadSource(unit)` / conveyor/router 输出到前方 Reconstructor 时可进入 unit sidecar；
+  - 接收校验复用 `reconstructor_accept_payload(...)`，upgrade 关系来自内容注册表；`rules.banned_units` 会拒收目标升级单位。当前在 `rules.researched` 为空时按“host research mirror 尚未知”临时视作已解锁，后续接入完整 campaign/tech unlock 后需要收紧。
+- 新增 core 回归测试：
+  - `game_runtime_attaches_unit_payload_to_reconstructor_like_java`
+  - `game_runtime_rejects_banned_reconstructor_unit_payload_like_java`
+  - `game_runtime_payload_source_moves_unit_payload_into_reconstructor`
+- 验证：
+  - `cargo test -p mindustry-core reconstructor`
+  - `cargo test -p mindustry-core game_runtime_payload_source_moves_unit_payload_into_front_payload_conveyor`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
+  - `cargo check --workspace`
+- 仍未完成：Reconstructor 只完成接收/入仓，尚未在 runtime tick 中执行 `moveInPayload()`、progress 推进、完成后替换为升级后 UnitPayload、恢复 command/defaultCommand、消费资源与 `UnitCreateEvent`；完整 UnitPayload materialize 仍是 raw sidecar。

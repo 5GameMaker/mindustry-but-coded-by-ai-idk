@@ -161,10 +161,10 @@ use crate::mindustry::{
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
-        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
-        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        reconstructor_accept_payload, write_reconstructor_state, write_repair_turret_state,
+        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
+        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
+        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -3188,8 +3188,18 @@ impl GameRuntime {
         let Some(block) = content.block(building.block.id) else {
             return false;
         };
-        self.ensure_payload_state_for_building(content, &building)
-            && self.attach_unit_payload_to_building_state(block, &building, unit, payload)
+        match block {
+            BlockDef::UnitReconstructor(_) => {
+                self.ensure_unit_state_for_building(content, &building)
+                    && self.attach_unit_payload_to_unit_building_state(
+                        content, block, &building, unit, payload,
+                    )
+            }
+            _ => {
+                self.ensure_payload_state_for_building(content, &building)
+                    && self.attach_unit_payload_to_building_state(block, &building, unit, payload)
+            }
+        }
     }
 
     fn unit_payload_ref_from_unit(content: &ContentLoader, unit: &UnitComp) -> Option<PayloadRef> {
@@ -3334,6 +3344,32 @@ impl GameRuntime {
         true
     }
 
+    fn ensure_unit_state_for_building(
+        &mut self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> bool {
+        if self.unit_runtime_states.contains_key(&building.tile_pos) {
+            return true;
+        }
+
+        let Some(block) = content.block(building.block.id) else {
+            return false;
+        };
+        let state = match block {
+            BlockDef::UnitReconstructor(_) => Some(GameRuntimeUnitBlockState::Reconstructor {
+                common: PayloadBlockBuildState::default(),
+                reconstructor: ReconstructorState::default(),
+            }),
+            _ => None,
+        };
+        let Some(state) = state else {
+            return false;
+        };
+        self.unit_runtime_states.insert(building.tile_pos, state);
+        true
+    }
+
     fn attach_unit_payload_to_building_state(
         &mut self,
         block: &BlockDef,
@@ -3470,6 +3506,68 @@ impl GameRuntime {
                     size,
                     TILE_SIZE as f32,
                 );
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn attach_unit_payload_to_unit_building_state(
+        &mut self,
+        content: &ContentLoader,
+        block: &BlockDef,
+        building: &BuildingComp,
+        unit: &UnitComp,
+        payload: PayloadRef,
+    ) -> bool {
+        let build_pos = PayloadVec2 {
+            x: building.x,
+            y: building.y,
+        };
+        let source_pos = PayloadVec2 {
+            x: unit.x(),
+            y: unit.y(),
+        };
+        let rotation = unit.rotation();
+        let size = building.block.size;
+        let accepts = match (block, self.unit_runtime_states.get(&building.tile_pos)) {
+            (
+                BlockDef::UnitReconstructor(reconstructor_block),
+                Some(GameRuntimeUnitBlockState::Reconstructor { common, .. }),
+            ) => Self::reconstructor_accepts_payload_ref_with_rules(
+                content,
+                &self.state.rules,
+                reconstructor_block,
+                building.team,
+                common.payload.is_none(),
+                true,
+                true,
+                &payload,
+            ),
+            _ => false,
+        };
+        if !accepts {
+            return false;
+        };
+        match (block, self.unit_runtime_states.get_mut(&building.tile_pos)) {
+            (
+                BlockDef::UnitReconstructor(_),
+                Some(GameRuntimeUnitBlockState::Reconstructor {
+                    common,
+                    reconstructor,
+                }),
+            ) => {
+                payload_block_handle_payload(
+                    common,
+                    payload,
+                    build_pos,
+                    source_pos,
+                    rotation,
+                    size,
+                    TILE_SIZE as f32,
+                );
+                reconstructor.base.has_payload = true;
+                reconstructor.constructing = true;
                 true
             }
             _ => false,
@@ -14523,6 +14621,70 @@ impl GameRuntime {
         )
     }
 
+    fn payload_ref_unit_type<'a>(
+        content: &'a ContentLoader,
+        payload: &PayloadRef,
+    ) -> Option<&'a crate::mindustry::r#type::UnitType> {
+        payload_ref_sort_key(payload)
+            .filter(|key| key.content_type == ContentType::Unit.ordinal() as i8)
+            .and_then(|key| content.unit(key.id))
+    }
+
+    fn reconstructor_upgrade_for_payload<'a>(
+        content: &'a ContentLoader,
+        reconstructor: &'a crate::mindustry::content::blocks::UnitReconstructorBlockData,
+        payload: &PayloadRef,
+    ) -> Option<(
+        &'a crate::mindustry::r#type::UnitType,
+        &'a crate::mindustry::r#type::UnitType,
+    )> {
+        let from = Self::payload_ref_unit_type(content, payload)?;
+        let upgrade = reconstructor
+            .upgrades
+            .iter()
+            .find(|upgrade| upgrade.from == from.name())?;
+        let to = content.unit_by_name(&upgrade.to)?;
+        Some((from, to))
+    }
+
+    fn reconstructor_upgrade_unlocked_now(
+        rules: &crate::mindustry::game::Rules,
+        unit: &crate::mindustry::r#type::UnitType,
+    ) -> bool {
+        unit.base.unlocked()
+            || rules.researched.contains(unit.name())
+            || rules.editor
+            || rules.infinite_resources
+            // Until the campaign/host research mirror is fully migrated, an empty
+            // rules.researched set means "unknown", not "everything locked".
+            || rules.researched.is_empty()
+    }
+
+    fn reconstructor_accepts_payload_ref_with_rules(
+        content: &ContentLoader,
+        rules: &crate::mindustry::game::Rules,
+        reconstructor_block: &crate::mindustry::content::blocks::UnitReconstructorBlockData,
+        _team: TeamId,
+        payload_empty: bool,
+        enabled_or_self_source: bool,
+        source_not_output_side: bool,
+        payload: &PayloadRef,
+    ) -> bool {
+        let Some((_from, upgrade)) =
+            Self::reconstructor_upgrade_for_payload(content, reconstructor_block, payload)
+        else {
+            return false;
+        };
+        reconstructor_accept_payload(
+            payload_empty,
+            enabled_or_self_source,
+            source_not_output_side,
+            true,
+            Self::reconstructor_upgrade_unlocked_now(rules, upgrade),
+            rules.is_unit_banned(upgrade.name()),
+        )
+    }
+
     fn payload_deconstructor_pay_rotation_step(current: f32, delta: f32) -> f32 {
         let target = 90.0_f32;
         let mut angle_delta = (target - current).rem_euclid(360.0);
@@ -14921,6 +15083,7 @@ impl GameRuntime {
             Deconstructor {
                 max_payload_size: f32,
             },
+            Reconstructor,
         }
 
         if source_tile_pos == target_tile_pos {
@@ -14978,8 +15141,16 @@ impl GameRuntime {
                     max_payload_size: deconstructor_block.max_payload_size,
                 }
             }
+            Some(BlockDef::UnitReconstructor(_)) => TargetKind::Reconstructor,
             _ => return false,
         };
+
+        if matches!(target_kind, TargetKind::Reconstructor) {
+            let target_building = self.buildings[target_index].clone();
+            if !self.ensure_unit_state_for_building(content, &target_building) {
+                return false;
+            }
+        }
 
         let source_payload = match self.payload_runtime_states.get(&source_tile_pos) {
             Some(GameRuntimePayloadBlockState::Source { common, .. })
@@ -15052,6 +15223,32 @@ impl GameRuntime {
                 deconstructor,
                 source_payload,
             ),
+            (TargetKind::Reconstructor, _) => {
+                let Some(BlockDef::UnitReconstructor(reconstructor_block)) =
+                    content.block(self.buildings[target_index].block.id)
+                else {
+                    return false;
+                };
+                let source_not_output_side = Self::building_source_not_output_side(
+                    &self.buildings[target_index],
+                    &self.buildings[source_index],
+                );
+                match self.unit_runtime_states.get(&target_tile_pos) {
+                    Some(GameRuntimeUnitBlockState::Reconstructor { common, .. }) => {
+                        Self::reconstructor_accepts_payload_ref_with_rules(
+                            content,
+                            &self.state.rules,
+                            reconstructor_block,
+                            self.buildings[target_index].team,
+                            common.payload.is_none(),
+                            self.buildings[target_index].enabled,
+                            source_not_output_side,
+                            source_payload,
+                        )
+                    }
+                    _ => false,
+                }
+            }
             _ => false,
         };
         if !target_accepts {
@@ -15291,6 +15488,57 @@ impl GameRuntime {
                 *smooth_rot = target_rotdeg;
                 true
             }
+            (TargetKind::Reconstructor, _) => {
+                let Some(BlockDef::UnitReconstructor(reconstructor_block)) =
+                    content.block(self.buildings[target_index].block.id)
+                else {
+                    return false;
+                };
+                let source_not_output_side = Self::building_source_not_output_side(
+                    &self.buildings[target_index],
+                    &self.buildings[source_index],
+                );
+                let target_team = self.buildings[target_index].team;
+                let target_enabled = self.buildings[target_index].enabled;
+                let reconstructor_accepts = payload
+                    .as_ref()
+                    .map(|payload| {
+                        Self::reconstructor_accepts_payload_ref_with_rules(
+                            content,
+                            &self.state.rules,
+                            reconstructor_block,
+                            target_team,
+                            true,
+                            target_enabled,
+                            source_not_output_side,
+                            payload,
+                        )
+                    })
+                    .unwrap_or(false);
+                let Some(GameRuntimeUnitBlockState::Reconstructor {
+                    common,
+                    reconstructor,
+                }) = self.unit_runtime_states.get_mut(&target_tile_pos)
+                else {
+                    return false;
+                };
+                if common.payload.is_none() && reconstructor_accepts {
+                    payload_block_handle_payload(
+                        common,
+                        payload.take().expect("payload should be present"),
+                        target_pos,
+                        source_pos,
+                        payload_rotation,
+                        target_size,
+                        TILE_SIZE as f32,
+                    );
+                    reconstructor.base.has_payload = true;
+                    reconstructor.constructing = true;
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         };
 
@@ -15360,6 +15608,30 @@ impl GameRuntime {
                 .map(|unit| unit.hit_size / TILE_SIZE as f32 <= payload_limit)
                 .unwrap_or(false),
         }
+    }
+
+    fn building_source_not_output_side(target: &BuildingComp, source: &BuildingComp) -> bool {
+        if target.tile_pos == source.tile_pos {
+            return true;
+        }
+        let dx = source.tile_x() - target.tile_x();
+        let dy = source.tile_y() - target.tile_y();
+        let source_side = if dx.abs() >= dy.abs() && dx != 0 {
+            if dx > 0 {
+                0
+            } else {
+                2
+            }
+        } else if dy != 0 {
+            if dy > 0 {
+                1
+            } else {
+                3
+            }
+        } else {
+            return true;
+        };
+        source_side != target.rotation.rem_euclid(4)
     }
 
     fn payload_angle_between(from: PayloadVec2, to: PayloadVec2) -> f32 {
@@ -17978,6 +18250,75 @@ mod tests {
             }) if !unit_bytes.is_empty()
         ));
         assert_eq!(conveyor.item_rotation, 0.0);
+    }
+
+    #[test]
+    fn game_runtime_attaches_unit_payload_to_reconstructor_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let reconstructor_block = content.block_by_name("additive-reconstructor").unwrap();
+        let tile_pos = point2_pack(15, 10);
+        let mut runtime = GameRuntime::default();
+        runtime.buildings.push(BuildingComp::new(
+            tile_pos,
+            reconstructor_block.base().clone(),
+            TeamId(3),
+        ));
+        let mut unit = UnitComp::new(5454, flare, TeamId(3));
+        unit.set_pos(120.0, 80.0);
+        unit.set_rotation(225.0);
+
+        assert!(runtime.attach_unit_payload_to_building(&content, tile_pos, &unit));
+        assert!(!runtime.payload_runtime_states.contains_key(&tile_pos));
+        let Some(GameRuntimeUnitBlockState::Reconstructor {
+            common,
+            reconstructor,
+        }) = runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor should receive entered unit payload in unit sidecar");
+        };
+        assert!(reconstructor.base.has_payload);
+        assert!(reconstructor.constructing);
+        assert_eq!(common.pay_rotation, 225.0);
+        assert!(matches!(
+            common.payload,
+            Some(PayloadRef::Unit {
+                class_id: 3,
+                ref unit_bytes
+            }) if !unit_bytes.is_empty()
+        ));
+    }
+
+    #[test]
+    fn game_runtime_rejects_banned_reconstructor_unit_payload_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let reconstructor_block = content.block_by_name("additive-reconstructor").unwrap();
+        let tile_pos = point2_pack(16, 10);
+        let mut runtime = GameRuntime::default();
+        runtime
+            .state
+            .rules
+            .banned_units
+            .insert("horizon".to_string());
+        runtime.buildings.push(BuildingComp::new(
+            tile_pos,
+            reconstructor_block.base().clone(),
+            TeamId(3),
+        ));
+        let unit = UnitComp::new(5555, flare, TeamId(3));
+
+        assert!(!runtime.attach_unit_payload_to_building(&content, tile_pos, &unit));
+        let Some(GameRuntimeUnitBlockState::Reconstructor {
+            common,
+            reconstructor,
+        }) = runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor sidecar should be initialized for rejected payload");
+        };
+        assert!(common.payload.is_none());
+        assert!(!reconstructor.base.has_payload);
+        assert!(!reconstructor.constructing);
     }
 
     #[test]
@@ -23719,6 +24060,76 @@ mod tests {
         );
         assert_eq!(conveyor.step_accepted, 1);
         assert_eq!(conveyor.item_rotation, 0.0);
+    }
+
+    #[test]
+    fn game_runtime_payload_source_moves_unit_payload_into_reconstructor() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let source_tile = point2_pack(4, 4);
+        let trns = source_def.base().size / 2 + 1;
+        let reconstructor_center_x = 4 + trns + (reconstructor_def.base().size - 1) / 2;
+        let reconstructor_tile = point2_pack(reconstructor_center_x, 4);
+        let mut source_building =
+            BuildingComp::new(source_tile, source_def.base().clone(), TeamId(6));
+        source_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(14, 10);
+        runtime.add_building(source_building);
+        runtime.add_building(BuildingComp::new(
+            reconstructor_tile,
+            reconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState {
+                    unit: Some(flare.id()),
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+
+        let report = runtime
+            .advance_owned_payload_sources(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.spawned_unit_payloads, 1);
+        assert_eq!(report.arrived_output_payloads, 1);
+        assert_eq!(report.transferred_payloads, 1);
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!source.has_payload);
+
+        let Some(GameRuntimeUnitBlockState::Reconstructor {
+            common,
+            reconstructor,
+        }) = runtime.unit_runtime_states.get(&reconstructor_tile)
+        else {
+            panic!("reconstructor unit sidecar should be created during transfer");
+        };
+        assert!(reconstructor.base.has_payload);
+        assert!(reconstructor.constructing);
+        assert!(matches!(
+            common.payload.as_ref(),
+            Some(PayloadRef::Unit { class_id: 3, .. })
+        ));
+        assert_eq!(
+            payload_ref_sort_key(common.payload.as_ref().unwrap())
+                .unwrap()
+                .id,
+            flare.id()
+        );
     }
 
     #[test]
