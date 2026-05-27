@@ -483,6 +483,9 @@ impl DesktopLauncher {
             PacketKind::AssemblerUnitSpawnedCallPacket(packet) => self
                 .runtime
                 .apply_client_assembler_unit_spawned_packet(&self.content_loader, &packet),
+            PacketKind::AssemblerDroneSpawnedCallPacket(packet) => self
+                .runtime
+                .apply_client_assembler_drone_spawned_packet(&self.content_loader, &packet),
             PacketKind::UnitDespawnCallPacket(packet) => {
                 self.runtime.apply_client_unit_despawn_packet(&packet)
             }
@@ -1306,10 +1309,11 @@ mod tests {
     };
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::net::{
-        AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotReceivedCallPacket,
-        CommandBuildingCallPacket, NetworkPlayerData, NetworkPlayerSyncData, NetworkWorldData,
-        StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
-        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, NetworkPlayerData,
+        NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket,
+        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -2113,6 +2117,62 @@ mod tests {
         };
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
+        assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_assembler_drone_spawned_packet_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(10, 7);
+        let assembler_def = launcher
+            .content_loader
+            .block_by_name("tank-assembler")
+            .unwrap();
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+        launcher.runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    drone_progress: 0.8,
+                    read_unit_ids: vec![33],
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::AssemblerDroneSpawnedCallPacket(
+                AssemblerDroneSpawnedCallPacket {
+                    tile: Some(tile_pos),
+                    id: 88,
+                },
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit assembler state should remain present");
+        };
+        assert_eq!(assembler.drone_progress, 0.0);
+        assert_eq!(assembler.read_unit_ids, vec![33, 88]);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
     }
 

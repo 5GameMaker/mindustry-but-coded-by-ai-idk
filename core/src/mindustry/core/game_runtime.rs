@@ -41,8 +41,9 @@ use crate::mindustry::{
     },
     logic::{LAccess, LVarValue},
     net::{
-        AssemblerUnitSpawnedCallPacket, NetworkPlayerSyncData, UnitBlockSpawnCallPacket,
-        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket, NetworkPlayerSyncData,
+        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -170,15 +171,15 @@ use crate::mindustry::{
         read_unit_assembler_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
         read_unit_factory_state, reconstructor_accept_item, reconstructor_accept_payload,
         reconstructor_fraction, reconstructor_maximum_accepted, reconstructor_update,
-        unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_spawned,
-        unit_assembler_update_progress, unit_block_spawned, unit_cargo_loader_accept_item,
-        unit_cargo_loader_spawned, unit_cargo_loader_update, unit_cargo_unload_update,
-        unit_factory_accept_item, unit_factory_configure_plan, unit_factory_fraction,
-        unit_factory_maximum_accepted, unit_factory_update, write_reconstructor_state,
-        write_repair_turret_state, write_unit_assembler_state, write_unit_cargo_loader_state,
-        write_unit_cargo_unload_state, write_unit_factory_state, ReconstructorState,
-        RepairTurretState, UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState,
-        UnitFactoryState,
+        unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_drone_spawned,
+        unit_assembler_spawned, unit_assembler_update_progress, unit_block_spawned,
+        unit_cargo_loader_accept_item, unit_cargo_loader_spawned, unit_cargo_loader_update,
+        unit_cargo_unload_update, unit_factory_accept_item, unit_factory_configure_plan,
+        unit_factory_fraction, unit_factory_maximum_accepted, unit_factory_update,
+        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
+        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
+        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -3576,6 +3577,35 @@ impl GameRuntime {
         };
         unit_assembler_spawned(assembler);
         true
+    }
+
+    pub fn apply_client_assembler_drone_spawned_packet(
+        &mut self,
+        content: &ContentLoader,
+        packet: &AssemblerDroneSpawnedCallPacket,
+    ) -> bool {
+        let Some(tile_pos) = packet.tile else {
+            return false;
+        };
+
+        let Some(building) = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .cloned()
+        else {
+            return false;
+        };
+        if !self.ensure_unit_state_for_building(content, &building) {
+            return false;
+        }
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            self.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            return false;
+        };
+        unit_assembler_drone_spawned(assembler, packet.id, true)
     }
 
     pub fn apply_client_unit_despawn_packet(&mut self, packet: &UnitDespawnCallPacket) -> bool {
@@ -24334,6 +24364,67 @@ mod tests {
         assert!(!runtime.apply_client_assembler_unit_spawned_packet(
             &content,
             &AssemblerUnitSpawnedCallPacket { tile: None },
+        ));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_assembler_drone_spawned_packet_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let tile_pos = point2_pack(18, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    drone_progress: 0.75,
+                    read_unit_ids: vec![11],
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        assert!(runtime.apply_client_assembler_drone_spawned_packet(
+            &content,
+            &AssemblerDroneSpawnedCallPacket {
+                tile: Some(tile_pos),
+                id: 77,
+            },
+        ));
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("assembler sidecar should remain present after assemblerDroneSpawned");
+        };
+        assert_eq!(assembler.drone_progress, 0.0);
+        assert_eq!(assembler.read_unit_ids, vec![11, 77]);
+
+        assert!(runtime.apply_client_assembler_drone_spawned_packet(
+            &content,
+            &AssemblerDroneSpawnedCallPacket {
+                tile: Some(tile_pos),
+                id: 77,
+            },
+        ));
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("assembler sidecar should remain present after duplicate drone packet");
+        };
+        assert_eq!(assembler.read_unit_ids, vec![11, 77]);
+        assert!(!runtime.apply_client_assembler_drone_spawned_packet(
+            &content,
+            &AssemblerDroneSpawnedCallPacket {
+                tile: Some(tile_pos),
+                id: -1,
+            },
         ));
     }
 

@@ -4017,3 +4017,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 新增验证：
   - `cargo test -p mindustry-server assembler_unit_spawn_packet --lib`
 - 仍未完成：Java `spawned()` 中“先包装成 `UnitPayload` 并尝试投递给目标建筑”的分支、`Units.notifyUnitSpawn`、create sound/effect/event、真实 AssemblerDrone/AssemblerAI/BuildingTether 与 Java↔Rust smoke 仍需继续迁移。
+
+### 12.126 AssemblerDroneSpawned 客户端回放
+
+- 2026-05-27：对照 Java `Call.assemblerDroneSpawned(tile, id)` / `UnitAssemblerBuild.droneSpawned(id)`，把 Rust client/desktop 端的 drone spawned 生命周期包从“只记录 last packet”推进到 UnitAssembler runtime sidecar。
+- Java 依据：
+  - `droneSpawned(int id)` 会播放 spawn effect、将 `droneProgress = 0f`；
+  - 客户端收到时把 id 加入 `whenSyncedUnits`，等待后续 `Groups.unit.getByID(id)` 同步成真实 drone；
+  - 这是后续真实 `AssemblerAI` / `BuildingTetherComp` 接回 UnitAssembler 进度倍率前的必要同步入口。
+- Rust 新增/变化：
+  - `unit_assembler_drone_spawned(...)` 复位 `UnitAssemblerState.drone_progress`，并在 client 回放时把有效 id 去重追加到 `read_unit_ids`；
+  - `GameRuntime::apply_client_assembler_drone_spawned_packet(...)` 定位 tile 对应 UnitAssembler sidecar 并应用上述状态变更；
+  - `DesktopLauncher::sync_unit_lifecycle_to_runtime()` 现在消费 `AssemblerDroneSpawnedCallPacket`。
+- 新增验证：
+  - `cargo test -p mindustry-core assembler_drone_spawned_packet --lib`
+  - `cargo test -p mindustry-desktop syncs_assembler_drone_spawned --lib`
+- 仍未完成：Rust server 尚未真实创建 assembly drone 并广播 `AssemblerDroneSpawnedCallPacket`；`read_unit_ids` 仍未接入完整 `client_unit_snapshot_entities` / `AssemblerAI` in-position 计算。

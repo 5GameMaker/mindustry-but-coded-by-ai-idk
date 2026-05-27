@@ -648,6 +648,21 @@ pub fn unit_assembler_spawned(state: &mut UnitAssemblerState) {
     state.blocks.clear();
 }
 
+pub fn unit_assembler_drone_spawned(
+    state: &mut UnitAssemblerState,
+    id: i32,
+    net_client: bool,
+) -> bool {
+    if id < 0 {
+        return false;
+    }
+    state.drone_progress = 0.0;
+    if net_client && !state.read_unit_ids.contains(&id) {
+        state.read_unit_ids.push(id);
+    }
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UnitCargoLoaderState {
     pub read_unit_id: i32,
