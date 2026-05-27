@@ -21,18 +21,20 @@ use mindustry_core::mindustry::entities::{
     },
 };
 use mindustry_core::mindustry::input::{
-    payload_dropped, picked_build_payload, request_build_payload, request_drop_payload,
-    request_item, take_items, transfer_inventory, transfer_item_to, BuildPayloadPickupKind,
-    PayloadDroppedOutcome, PickedBuildPayloadOutcome, RequestBuildPayloadContext,
-    RequestBuildPayloadOutcome, RequestDropPayloadContext, RequestDropPayloadOutcome,
-    RequestItemContext, RequestItemOutcome, TakeItemsOutcome, TransferInventoryContext,
-    TransferInventoryOutcome, TransferItemToOutcome,
+    payload_dropped, picked_build_payload, picked_unit_payload, request_build_payload,
+    request_drop_payload, request_item, request_unit_payload, take_items, transfer_inventory,
+    transfer_item_to, BuildPayloadPickupKind, PayloadDroppedOutcome, PickedBuildPayloadOutcome,
+    PickedUnitPayloadOutcome, RequestBuildPayloadContext, RequestBuildPayloadOutcome,
+    RequestDropPayloadContext, RequestDropPayloadOutcome, RequestItemContext, RequestItemOutcome,
+    RequestUnitPayloadContext, RequestUnitPayloadOutcome, TakeItemsOutcome,
+    TransferInventoryContext, TransferInventoryOutcome, TransferItemToOutcome,
 };
 use mindustry_core::mindustry::io::{BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef};
 use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, Net, NetConnection,
-    NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, ProviderEvent,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
+    NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
     TransferInventoryCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
@@ -90,6 +92,12 @@ pub struct ServerLauncher {
     pub runtime_picked_build_payload_packets_sent: usize,
     pub last_runtime_request_build_payload_outcome: Option<RequestBuildPayloadOutcome>,
     pub last_runtime_picked_build_payload_outcome: Option<PickedBuildPayloadOutcome>,
+    pub runtime_request_unit_payload_packets_seen: usize,
+    pub runtime_request_unit_payload_packets_accepted: usize,
+    pub runtime_request_unit_payload_packets_rejected: usize,
+    pub runtime_picked_unit_payload_packets_sent: usize,
+    pub last_runtime_request_unit_payload_outcome: Option<RequestUnitPayloadOutcome>,
+    pub last_runtime_picked_unit_payload_outcome: Option<PickedUnitPayloadOutcome>,
     pub server_preview_plan_packets_applied: usize,
     pub next_server_preview_broadcast_at: Option<Instant>,
     pub server_preview_broadcasts_sent: usize,
@@ -146,6 +154,12 @@ impl ServerLauncher {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: Some(
                 Instant::now() + Duration::from_millis(PLAN_PREVIEW_SYNC_INTERVAL_MS as u64),
@@ -322,6 +336,26 @@ impl ServerLauncher {
                         Err(error) => {
                             self.network_error = Some(error.to_string());
                             self.runtime_request_build_payload_packets_rejected += 1;
+                            continue;
+                        }
+                    }
+                }
+                ProviderEvent::ServerPacket {
+                    connection_id,
+                    packet: PacketKind::RequestUnitPayloadCallPacket(packet),
+                } => {
+                    self.runtime_request_unit_payload_packets_seen += 1;
+                    match self.apply_server_request_unit_payload_packet(connection_id, &packet) {
+                        Ok(true) => {
+                            changed += 1;
+                            self.runtime_request_unit_payload_packets_accepted += 1;
+                        }
+                        Ok(false) => {
+                            self.runtime_request_unit_payload_packets_rejected += 1;
+                        }
+                        Err(error) => {
+                            self.network_error = Some(error.to_string());
+                            self.runtime_request_unit_payload_packets_rejected += 1;
                             continue;
                         }
                     }
@@ -840,6 +874,113 @@ impl ServerLauncher {
         Ok(true)
     }
 
+    fn apply_server_request_unit_payload_packet(
+        &mut self,
+        connection_id: i32,
+        packet: &RequestUnitPayloadCallPacket,
+    ) -> io::Result<bool> {
+        if connection_id < 0 {
+            return Ok(false);
+        }
+        self.sync_server_preview_players_from_connections();
+
+        let source_connection = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state.connection_states.get(&connection_id).cloned()
+        };
+        let Some(source_connection) = source_connection else {
+            return Ok(false);
+        };
+        if !Self::connection_can_receive_preview(&source_connection) {
+            return Ok(false);
+        }
+
+        let UnitRef::Unit { id: target_id } = packet.target else {
+            return Ok(false);
+        };
+        if target_id == connection_id {
+            return Ok(false);
+        }
+
+        let Some(unit_type) = self.default_server_unit_type() else {
+            return Ok(false);
+        };
+        let player_snapshot = {
+            let player = self
+                .server_preview_players
+                .entry(connection_id)
+                .or_insert_with(|| PlayerComp::new(source_connection.team));
+            player.id = connection_id;
+            player.team = source_connection.team;
+            player.name = source_connection.name.clone();
+            player.color = source_connection.color as u32;
+            player.locale = source_connection.locale.clone();
+            player.con = Some(source_connection.clone());
+            player.set_unit_state(PlayerUnitState::unit(connection_id));
+            player.clone()
+        };
+        self.server_units
+            .entry(connection_id)
+            .or_insert_with(|| UnitComp::new(connection_id, unit_type, source_connection.team));
+
+        let Some(unit_snapshot) = self.server_units.get(&connection_id).cloned() else {
+            return Ok(false);
+        };
+        let Some(target_snapshot) = self.server_units.get(&target_id).cloned() else {
+            return Ok(false);
+        };
+
+        let request_outcome = request_unit_payload(
+            RequestUnitPayloadContext {
+                player: Some(EntityRef::new(connection_id)),
+                within_range: Self::unit_payload_target_within_range(
+                    &unit_snapshot,
+                    &target_snapshot,
+                ),
+            },
+            Some(&player_snapshot),
+            Some(&unit_snapshot),
+            Some(&target_snapshot),
+            !target_snapshot.controller.is_player(),
+            target_snapshot.type_info.allowed_in_payloads,
+        );
+        self.last_runtime_request_unit_payload_outcome = Some(request_outcome.clone());
+        if !request_outcome.accepted {
+            self.last_runtime_picked_unit_payload_outcome = None;
+            return Ok(false);
+        }
+
+        let Some(planned_packet) = request_outcome.packet.as_ref() else {
+            self.last_runtime_picked_unit_payload_outcome = None;
+            return Ok(false);
+        };
+        let picked_outcome =
+            picked_unit_payload(Some(planned_packet.unit), Some(planned_packet.target));
+        if !picked_outcome.accepted {
+            self.last_runtime_picked_unit_payload_outcome = Some(picked_outcome);
+            return Ok(false);
+        }
+        let Some(picked_packet) = picked_outcome.packet.as_ref() else {
+            self.last_runtime_picked_unit_payload_outcome = Some(picked_outcome);
+            return Ok(false);
+        };
+        let picked_packet = *picked_packet;
+
+        if !self.apply_picked_unit_payload_to_server_unit(&picked_packet) {
+            self.last_runtime_picked_unit_payload_outcome = None;
+            return Ok(false);
+        }
+
+        self.net_server.net_mut().send(
+            &PacketKind::PickedUnitPayloadCallPacket(picked_packet),
+            true,
+        )?;
+        self.runtime_picked_unit_payload_packets_sent += 1;
+        self.last_runtime_picked_unit_payload_outcome = Some(picked_outcome);
+        Ok(true)
+    }
+
     fn default_server_unit_type(&self) -> Option<UnitType> {
         self.content_loader
             .unit_by_name("alpha")
@@ -865,6 +1006,16 @@ impl ServerLauncher {
         let range = TILE_SIZE as f32 * build.block.size as f32 * 1.2 + TILE_SIZE as f32 * 5.0;
         let dx = player.x - build.x;
         let dy = player.y - build.y;
+        dx * dx + dy * dy <= range * range
+    }
+
+    fn unit_payload_target_within_range(unit: &UnitComp, target: &UnitComp) -> bool {
+        if unit.x().abs() <= f32::EPSILON && unit.y().abs() <= f32::EPSILON {
+            return true;
+        }
+        let range = unit.type_info.hit_size * 2.0 + target.type_info.hit_size * 2.0;
+        let dx = target.x() - unit.x();
+        let dy = target.y() - unit.y();
         dx * dx + dy * dy <= range * range
     }
 
@@ -1060,6 +1211,51 @@ impl ServerLauncher {
             kind: PayloadKind::Build,
             size: removed.block.size as f32 * TILE_SIZE as f32,
         });
+        true
+    }
+
+    fn apply_picked_unit_payload_to_server_unit(
+        &mut self,
+        packet: &PickedUnitPayloadCallPacket,
+    ) -> bool {
+        let UnitRef::Unit { id: unit_id } = packet.unit else {
+            return false;
+        };
+        let UnitRef::Unit { id: target_id } = packet.target else {
+            return false;
+        };
+        if unit_id == target_id {
+            return false;
+        }
+
+        let Some(target) = self.server_units.get(&target_id) else {
+            return false;
+        };
+        let target_payload = PayloadState {
+            kind: PayloadKind::Unit,
+            size: target.type_info.hit_size,
+        };
+        if !self
+            .server_units
+            .get(&unit_id)
+            .and_then(|unit| unit.payload.as_ref())
+            .is_some_and(|payload| payload.can_pickup_payload(&target_payload))
+        {
+            return false;
+        }
+
+        let Some(removed_target) = self.server_units.remove(&target_id) else {
+            return false;
+        };
+        let Some(unit) = self.server_units.get_mut(&unit_id) else {
+            self.server_units.insert(target_id, removed_target);
+            return false;
+        };
+        let Some(payload) = unit.payload.as_mut() else {
+            self.server_units.insert(target_id, removed_target);
+            return false;
+        };
+        payload.add_payload(target_payload);
         true
     }
 
@@ -1385,7 +1581,7 @@ mod tests {
         ConnectPacket, DoneCallback, Host, HostCallback, Net, NetConnection, NetProvider,
         NetworkWorldData, PacketKind, PacketSerializer, ProviderEvent,
         RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-        TileConfigCallPacket, TransferInventoryCallPacket,
+        RequestUnitPayloadCallPacket, TileConfigCallPacket, TransferInventoryCallPacket,
     };
     use mindustry_core::mindustry::r#type::Sector;
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
@@ -1911,11 +2107,98 @@ mod tests {
         assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
             *reliable
                 && matches!(
+                        packet,
+                        PacketKind::PayloadDroppedCallPacket(packet)
+                            if packet.unit == UnitRef::Unit { id: 7 }
+                                && packet.x == drop_outcome.clamped_x
+                                && packet.y == drop_outcome.clamped_y
+                )
+        }));
+    }
+
+    #[test]
+    fn server_launcher_applies_request_unit_payload_packet_to_target_unit_and_broadcasts_pickup() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6576).unwrap();
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let mut carrier_type = launcher
+            .content_loader
+            .unit_by_name("alpha")
+            .unwrap()
+            .clone();
+        carrier_type.payload_capacity = 512.0;
+        carrier_type.pickup_units = true;
+        let mut carrier = UnitComp::new(7, carrier_type, default_team);
+        carrier.set_pos(0.0, 0.0);
+        carrier.payload = Some(PayloadComp::new(default_team, 512.0));
+        carrier.payload.as_mut().unwrap().pickup_units = true;
+        launcher.server_units.insert(7, carrier);
+
+        let mut target_type = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .unwrap()
+            .clone();
+        target_type.allowed_in_payloads = true;
+        let target_size = target_type.hit_size;
+        let mut target = UnitComp::new(8, target_type, default_team);
+        target.set_pos(4.0, 0.0);
+        launcher.server_units.insert(8, target);
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            let mut connection = NetConnection::new("127.0.0.1:7016");
+            connection.has_connected = true;
+            connection.player_added = true;
+            connection.team = default_team;
+            connection.name = "rust-client".into();
+            state.connection_states.insert(7, connection);
+            state.events.push(ProviderEvent::ServerPacket {
+                connection_id: 7,
+                packet: PacketKind::RequestUnitPayloadCallPacket(RequestUnitPayloadCallPacket {
+                    player: EntityRef::null(),
+                    target: UnitRef::Unit { id: 8 },
+                }),
+            });
+        }
+
+        let changed = launcher.apply_new_network_server_events();
+
+        assert_eq!(changed, 1);
+        assert_eq!(launcher.runtime_request_unit_payload_packets_seen, 1);
+        assert_eq!(launcher.runtime_request_unit_payload_packets_accepted, 1);
+        assert_eq!(launcher.runtime_request_unit_payload_packets_rejected, 0);
+        assert_eq!(launcher.runtime_picked_unit_payload_packets_sent, 1);
+        assert!(launcher
+            .last_runtime_request_unit_payload_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.accepted));
+        assert!(launcher
+            .last_runtime_picked_unit_payload_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.accepted));
+        assert!(!launcher.server_units.contains_key(&8));
+        let carrier = launcher.server_units.get(&7).unwrap();
+        let payloads = &carrier.payload.as_ref().unwrap().payloads;
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].kind, PayloadKind::Unit);
+        assert_eq!(payloads[0].size, target_size);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
                     packet,
-                    PacketKind::PayloadDroppedCallPacket(packet)
+                    PacketKind::PickedUnitPayloadCallPacket(packet)
                         if packet.unit == UnitRef::Unit { id: 7 }
-                            && packet.x == drop_outcome.clamped_x
-                            && packet.y == drop_outcome.clamped_y
+                            && packet.target == UnitRef::Unit { id: 8 }
                 )
         }));
     }
@@ -2174,6 +2457,12 @@ mod tests {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2270,6 +2559,12 @@ mod tests {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2449,6 +2744,12 @@ mod tests {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2618,6 +2919,12 @@ mod tests {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2724,6 +3031,12 @@ mod tests {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2842,6 +3155,12 @@ mod tests {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,
@@ -2979,6 +3298,12 @@ mod tests {
             runtime_picked_build_payload_packets_sent: 0,
             last_runtime_request_build_payload_outcome: None,
             last_runtime_picked_build_payload_outcome: None,
+            runtime_request_unit_payload_packets_seen: 0,
+            runtime_request_unit_payload_packets_accepted: 0,
+            runtime_request_unit_payload_packets_rejected: 0,
+            runtime_picked_unit_payload_packets_sent: 0,
+            last_runtime_request_unit_payload_outcome: None,
+            last_runtime_picked_unit_payload_outcome: None,
             server_preview_plan_packets_applied: 0,
             next_server_preview_broadcast_at: None,
             server_preview_broadcasts_sent: 0,

@@ -3369,3 +3369,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_payload_mirror_to_runtime_unit_snapshot`
   - `cargo check --workspace`
 - 仍未完成：当前 typed payload 仍是 count/类型占位，尚未保留完整 `BuildPayload` building bytes、`UnitPayload` entity id/sync bytes、真实 payload size 与落地碰撞；packet sidecar 与 entity snapshot 的乱序仍需引入 sequence/timestamp 或 authoritative snapshot 合并策略。
+
+### 12.97 Server RequestUnitPayload → PickedUnitPayload 权威 runtime 桥接
+
+- 2026-05-27：补齐 payload 单位拾取的 server 权威闭环，把 `RequestUnitPayloadCallPacket` 从 server 事件流接到 `input_handler::request_unit_payload(...)`、`server_units` 的 `PayloadComp.add_payload(Unit)` 和 `PickedUnitPayloadCallPacket` 可靠广播。
+- Java 依据：
+  - `InputHandler.requestUnitPayload(Player player, Unit target)` 要求玩家单位实现 `Payloadc`、目标是 AI、目标 grounded、`pay.canPickup(target)` 且目标在 `unit.type.hitSize * 2 + target.type.hitSize * 2` 范围内；
+  - `InputHandler.pickedUnitPayload(Unit unit, Unit target)` 成功时 `pay.pickup(target)`，否则当载体不是 Payloadc 但 target 存在时移除 target。
+- Rust 新增/变化：
+  - `ServerLauncher::apply_new_network_server_events()` 新增 `PacketKind::RequestUnitPayloadCallPacket` 分支；
+  - 新增 request-unit-payload / picked-unit-payload 统计与 last outcome 字段；
+  - `apply_server_request_unit_payload_packet(...)` 复用连接状态、server preview player 和 `server_units` mirror，不信任 client payload 内的 `player` 字段，只使用连接 id 绑定当前 player/unit；
+  - `unit_payload_target_within_range(...)` 复刻 Java hitSize 范围公式，并保留零位 bootstrap fallback，避免实体位置同步未完成前全量误拒；
+  - `apply_picked_unit_payload_to_server_unit(...)` 从 `server_units` 移除目标 unit，并把 `PayloadState { kind: Unit, size: target.hit_size }` 加入载体单位 payload；
+  - 新增 server 测试覆盖 target 移除、载体 payload 追加、统计字段和可靠 `PickedUnitPayloadCallPacket` 广播。
+- 验证：
+  - `cargo test -p mindustry-server server_launcher_applies_request_unit_payload_packet_to_target_unit_and_broadcasts_pickup`
+  - `cargo test -p mindustry-server`
+  - `cargo check --workspace`
+- 仍未完成：`server_units` 仍是 launcher mirror，不是完整 entity group；目标 unit 被移除后尚未同步 entity hidden/remove snapshot，也未保存完整 `UnitPayload` sync bytes；真实 target lookup 应最终接入 world/entity groups 与 Java `Groups.unit`，并移除 bootstrap 距离 fallback。
