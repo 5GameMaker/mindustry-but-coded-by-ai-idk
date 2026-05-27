@@ -3566,6 +3566,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 新增 core 回归测试：
   - `game_runtime_unit_reconstructor_upgrades_payload_on_tick_like_java`
   - `game_runtime_owned_runtime_blocks_includes_unit_reconstructor_tick`
+  - `game_runtime_reconstructor_outputs_upgraded_payload_to_front_conveyor`
   - `payload_router_match_pick_control_and_serialization_follow_java_shell` 扩展验证 UnitPayload type id patch 只改目标 2 字节。
 - 验证：
   - `cargo test -p mindustry-core reconstructor`

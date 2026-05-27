@@ -18740,6 +18740,100 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_reconstructor_outputs_upgraded_payload_to_front_conveyor() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let horizon = content.unit_by_name("horizon").unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let conveyor_def = content.block_by_name("payload-conveyor").unwrap();
+        let BlockDef::UnitReconstructor(reconstructor_block) = reconstructor_def else {
+            panic!("additive-reconstructor should be a unit reconstructor");
+        };
+        let BlockDef::Payload(conveyor_block) = conveyor_def else {
+            panic!("payload-conveyor should be a payload block");
+        };
+        let reconstructor_tile = point2_pack(8, 10);
+        let conveyor_tile = point2_pack(
+            8 + reconstructor_block.base.size / 2 + 1 + (conveyor_block.base.size - 1) / 2,
+            10,
+        );
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 24);
+        let mut reconstructor_building = BuildingComp::new(
+            reconstructor_tile,
+            reconstructor_def.base().clone(),
+            TeamId(3),
+        );
+        reconstructor_building.set_rotation(0);
+        runtime.add_building(reconstructor_building);
+        runtime.add_building(BuildingComp::new(
+            conveyor_tile,
+            conveyor_def.base().clone(),
+            TeamId(3),
+        ));
+        runtime.payload_runtime_states.insert(
+            conveyor_tile,
+            GameRuntimePayloadBlockState::Conveyor(PayloadConveyorState::default()),
+        );
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &reconstructor_block.consume_items {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+        let mut unit = UnitComp::new(5588, flare, TeamId(3));
+        unit.set_pos(runtime.buildings[0].x, runtime.buildings[0].y);
+        assert!(runtime.attach_unit_payload_to_building(&content, reconstructor_tile, &unit));
+        {
+            let Some(GameRuntimeUnitBlockState::Reconstructor {
+                common,
+                reconstructor,
+            }) = runtime.unit_runtime_states.get_mut(&reconstructor_tile)
+            else {
+                panic!("reconstructor should have unit sidecar");
+            };
+            common.pay_vector = Vec2::ZERO;
+            reconstructor.base.progress = reconstructor_block.construct_time - 1.0;
+        }
+
+        let upgraded = runtime
+            .advance_owned_unit_reconstructors(&content, 1.0)
+            .unwrap();
+        assert_eq!(upgraded.upgraded_payloads, 1);
+        let moved_out = runtime
+            .advance_owned_unit_reconstructors(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(moved_out.arrived_output_payloads, 1);
+        assert_eq!(moved_out.transferred_payloads, 1);
+        let Some(GameRuntimeUnitBlockState::Reconstructor {
+            common,
+            reconstructor,
+        }) = runtime.unit_runtime_states.get(&reconstructor_tile)
+        else {
+            panic!("reconstructor sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!reconstructor.base.has_payload);
+        let Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) =
+            runtime.payload_runtime_states.get(&conveyor_tile)
+        else {
+            panic!("front payload conveyor should keep sidecar");
+        };
+        assert_eq!(
+            payload_ref_sort_key(conveyor.item.as_ref().unwrap())
+                .unwrap()
+                .id,
+            horizon.id()
+        );
+        assert!(GameRuntime::payload_ref_fits_payload_limit(
+            &content,
+            conveyor.item.as_ref().unwrap(),
+            conveyor_block.payload_limit
+        ));
+    }
+
+    #[test]
     fn game_runtime_applies_multi_unit_entity_snapshot_packet_with_content() {
         let content = ContentLoader::create_base_content().unwrap();
         let dagger = content.unit_by_name("dagger").unwrap();
