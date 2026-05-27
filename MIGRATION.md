@@ -5477,3 +5477,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 本地 `EffectCallPacket2` 当前没有 parent id 字段，仍只能对 snapshot effect 做 parent-follow；
   - 还未覆盖 player/building 作为 parent 的通用 resolver；
   - 真正 renderer 仍未消费更新后的 effect state。
+
+### 12.185 Ripple render-time lifetime rule
+
+- 2026-05-28：补齐当前标准 Fx 表中最明显的 render-time lifetime 差异：Java `Fx.ripple` 在 renderer 内执行 `e.lifetime = 30f * e.rotation`。
+- Rust 新增/变化：
+  - `standard_effect_render_lifetime(effect_id, rotation, current)`：
+    - `Fx.ripple` 返回 `30.0 * rotation`；
+    - 其他效果返回当前 lifetime；
+  - `DesktopLauncher::draw_standard_local_effect_states_for_render()` 使用上述 helper 作为标准本地 effect draw callback，继续复用 `EffectStateComp::draw_with(...)` 的 lifetime 回写路径。
+- 新增验证：
+  - `standard_effect_render_lifetime_applies_ripple_dynamic_rotation_rule`
+  - `desktop_launcher_standard_effect_draw_updates_ripple_lifetime`
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_render_lifetime --lib`
+  - `cargo test -p mindustry-desktop standard_effect_draw --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 这仍只更新 lifetime，没有产生真实 GPU draw command；
+  - 其他 `Fx.java` renderer 内的视觉几何/颜色/随机粒子仍未完整迁移。

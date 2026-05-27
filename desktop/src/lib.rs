@@ -15,8 +15,8 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, standard_effect, EffectRenderInput, EntityClassKind, PlayerComp,
-    PlayerUnitSwitchContext, PLAYER_CLASS_ID,
+    entity_class_kind, standard_effect, standard_effect_render_lifetime, EffectRenderInput,
+    EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -189,6 +189,12 @@ impl DesktopLauncher {
         F: FnMut(EffectRenderInput<'_>) -> f32,
     {
         self.runtime.draw_client_local_effect_entities(render)
+    }
+
+    pub fn draw_standard_local_effect_states_for_render(&mut self) -> usize {
+        self.draw_local_effect_states_for_render(|input| {
+            standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
+        })
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -2402,6 +2408,46 @@ mod tests {
         assert_eq!(drained, vec![packet]);
         assert!(launcher.runtime.client_local_effect_events.is_empty());
         assert!(launcher.drain_local_effect_events_for_render().is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_standard_effect_draw_updates_ripple_lifetime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("ripple").unwrap() as u16,
+                    x: 8.0,
+                    y: 16.0,
+                    rotation: 2.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        assert_eq!(launcher.materialize_local_effect_events_for_render(), 1);
+        assert_eq!(
+            launcher
+                .runtime
+                .client_local_effect_entities
+                .get(&-1)
+                .unwrap()
+                .lifetime,
+            30.0
+        );
+
+        assert_eq!(launcher.draw_standard_local_effect_states_for_render(), 1);
+        assert_eq!(
+            launcher
+                .runtime
+                .client_local_effect_entities
+                .get(&-1)
+                .unwrap()
+                .lifetime,
+            60.0
+        );
     }
 
     #[test]

@@ -92,6 +92,16 @@ pub fn standard_effect_by_name(name: &str) -> Option<Effect> {
     standard_effect_id(name).and_then(standard_effect)
 }
 
+pub fn standard_effect_render_lifetime(effect_id: Option<u16>, rotation: f32, current: f32) -> f32 {
+    match effect_id.map(i32::from) {
+        // Java `Fx.ripple` sets `e.lifetime = 30f * e.rotation` inside the
+        // renderer, so it must be applied during `EffectStateComp::draw_with`
+        // rather than at static metadata lookup time.
+        Some(FX_RIPPLE_ID) => 30.0 * rotation,
+        _ => current,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
     pub id: i32,
@@ -1292,6 +1302,19 @@ mod tests {
         assert_eq!(ripple.layer, crate::mindustry::graphics::Layer::DEBRIS);
         assert!(standard_effect_by_name("none").is_none());
         assert!(standard_effect(-1).is_none());
+    }
+
+    #[test]
+    fn standard_effect_render_lifetime_applies_ripple_dynamic_rotation_rule() {
+        assert_eq!(
+            standard_effect_render_lifetime(Some(FX_RIPPLE_ID as u16), 2.5, 30.0),
+            75.0
+        );
+        assert_eq!(
+            standard_effect_render_lifetime(Some(FX_SMOKE_ID as u16), 2.5, 100.0),
+            100.0
+        );
+        assert_eq!(standard_effect_render_lifetime(None, 2.5, 10.0), 10.0);
     }
 
     #[test]
