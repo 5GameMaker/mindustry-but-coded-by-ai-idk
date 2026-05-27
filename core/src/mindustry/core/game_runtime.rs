@@ -3179,17 +3179,19 @@ impl GameRuntime {
         if unit.team_id() != building.team {
             return false;
         }
-        let Some(payload) = Self::unit_payload_ref_from_unit(unit) else {
+        let Some(payload) = Self::unit_payload_ref_from_unit(content, unit) else {
             return false;
         };
         self.ensure_payload_state_for_building(content, &building)
             && self.attach_unit_payload_to_building_state(&building, unit, payload)
     }
 
-    fn unit_payload_ref_from_unit(unit: &UnitComp) -> Option<PayloadRef> {
+    fn unit_payload_ref_from_unit(content: &ContentLoader, unit: &UnitComp) -> Option<PayloadRef> {
+        let mut unit_bytes = Vec::new();
+        type_io::write_unit_sync(&mut unit_bytes, content, &unit.to_sync_wire()).ok()?;
         Some(PayloadRef::Unit {
             class_id: entity_class_id(unit.type_info.name())?,
-            unit_bytes: Vec::new(),
+            unit_bytes,
         })
     }
 
@@ -17790,7 +17792,7 @@ mod tests {
             Some(PayloadRef::Unit {
                 class_id: 3,
                 ref unit_bytes
-            }) if unit_bytes.is_empty()
+            }) if !unit_bytes.is_empty()
         ));
         assert_eq!(common.pay_rotation, 135.0);
     }

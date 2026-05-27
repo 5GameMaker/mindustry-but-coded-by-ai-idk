@@ -3415,7 +3415,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `CommandAI` 在非 client 侧确认 `unit.type.allowedInPayloads`、`unit.buildOn()` 与 `build.acceptPayload(...)` 后调用 `Call.unitEnteredPayload(unit, build)`。
 - Rust 新增/变化：
   - `GameRuntimeClientUnitEnteredPayloadApplyReport` 记录 unit/build 是否存在、队伍是否匹配、unit 是否移除、payload 是否挂载；
-  - `GameRuntime::apply_client_unit_entered_payload_packet(...)` 会从 `client_unit_snapshot_entities` 移除目标 unit、标记 raw sidecar hidden、写入 `client_hidden_entity_ids`，并把 placeholder `PayloadRef::Unit { class_id, unit_bytes: [] }` 挂到 payload-loader/constructor/deconstructor/mass-driver/source/void 的 runtime common payload；
+  - `GameRuntime::apply_client_unit_entered_payload_packet(...)` 会从 `client_unit_snapshot_entities` 移除目标 unit、标记 raw sidecar hidden、写入 `client_hidden_entity_ids`，并把 `PayloadRef::Unit { class_id, unit_bytes }` 挂到 payload-loader/constructor/deconstructor/mass-driver/source/void 的 runtime common payload；
   - `DesktopLauncher` 增加 `sync_unit_entered_payload_to_runtime()`，按 `unit_entered_payload_packets_seen` 游标去重消费 NetClient 最新包；
   - `UnitEnteredPayloadCallPacket` 增加 wire roundtrip 测试，锁定 `UnitRef -> BuildingRef` 字段顺序。
 - 验证：
@@ -3423,7 +3423,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unit_entered_payload_packet_uses_java_field_order`
   - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
   - `cargo check --workspace`
-- 仍未完成：payload 中的 unit 仍是 class id + 空 bytes placeholder，尚未写入完整 Java `UnitPayload` unit serialization；客户端 `Fx.unitDrop`/渲染效果尚未接入；server 侧还需要从真实 CommandAI / unit buildOn runtime 自动触发。
+- 仍未完成：payload 中的 unit 已从空 bytes 升级到最小同步字节，但尚未写入完整 Java `UnitPayload` full unit serialization；客户端 `Fx.unitDrop`/渲染效果尚未接入；server 侧还需要从真实 CommandAI / unit buildOn runtime 自动触发。
 
 ### 12.100 Server UnitEnteredPayload 广播入口
 
@@ -3434,9 +3434,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - Rust 新增/变化：
   - `GameRuntime::attach_unit_payload_to_building(...)` 提取为通用 payload 挂载入口，client/server 可复用；
   - `ServerLauncher::apply_server_unit_entered_payload(...)` 读取 `server_units` 与 `runtime.buildings`，调用 `unit_entered_payload(...)`，成功后通过通用 runtime payload 挂载入口写入目标 payload building，移除 `server_units[unit_id]`，并可靠广播 `UnitEnteredPayloadCallPacket`；
-  - 新增 server 测试覆盖 runtime payload-loader 接收 placeholder `PayloadRef::Unit`、server unit 移除和 reliable 出站包。
+  - 新增 server 测试覆盖 runtime payload-loader 接收 `PayloadRef::Unit`、server unit 移除和 reliable 出站包。
 - 验证：
   - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
   - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
   - `cargo check --workspace`
-- 仍未完成：该入口目前由测试/后续 AI 直接调用，尚未接到真实 `CommandAI` tick、unit `buildOn()` 检测和 `allowedInPayloads` 行为链；payload unit bytes 仍是 placeholder。
+- 仍未完成：该入口目前由测试/后续 AI 直接调用，尚未接到真实 `CommandAI` tick、unit `buildOn()` 检测和 `allowedInPayloads` 行为链；payload unit bytes 仍只是 `UnitSyncWire` subset，不是完整 Java `UnitPayload` full serialization。
+
+### 12.101 UnitEnteredPayload 写入 UnitSyncWire payload bytes
+
+- 2026-05-27：把 `UnitEnteredPayload` 运行态 payload 中的 unit body 从空 bytes placeholder 提升为 `UnitSyncWire` 子集字节，避免客户端/服务端 payload sidecar 只能保存 class id 而丢失单位同步字段。
+- Java 依据：
+  - `InputHandler.unitEnteredPayload(...)` 构造 `new UnitPayload(unit)` 后交给 building `handlePayload(...)`，Java 完整路径最终应保留 payload 内 unit 的实体序列化；
+  - 当前 Rust 仍未完成 Java `UnitPayload` full serialization，本节只先用已迁移的 `UnitComp::to_sync_wire()` 与 `type_io::write_unit_sync(...)` 提供可复用的最小单位同步 body。
+- Rust 新增/变化：
+  - `GameRuntime::unit_payload_ref_from_unit(content, unit)` 现在会把 `UnitComp::to_sync_wire()` 写入 `unit_bytes`，再生成 `PayloadRef::Unit { class_id, unit_bytes }`；
+  - client `apply_client_unit_entered_payload_packet(...)` 与 server `apply_server_unit_entered_payload(...)` 共用该路径，因此 desktop/server 断言均改为 payload unit bytes 非空；
+  - 这一步仍保持 raw sidecar 过渡语义，不把 `PayloadRef::Unit` 立即 materialize 成完整 unit entity，避免在 full payload serializer 完成前误删字段。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
+  - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
+  - `cargo check --workspace`
+- 仍未完成：需要继续迁移 Java `Payload`/`UnitPayload` 的完整 write/read 与 TypeIO payload 读写路径，后续才能把 payload 内 unit 从 `UnitSyncWire` subset 升级为 Java 兼容 full unit body，并接入真实实体恢复、渲染和 save/load。

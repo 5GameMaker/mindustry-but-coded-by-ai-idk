@@ -1508,7 +1508,7 @@ mod tests {
             Some(PayloadRef::Unit {
                 class_id: 3,
                 ref unit_bytes
-            }) if unit_bytes.is_empty()
+            }) if !unit_bytes.is_empty()
         ));
     }
 
