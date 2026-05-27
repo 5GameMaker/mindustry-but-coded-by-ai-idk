@@ -1826,6 +1826,8 @@ impl ServerLauncher {
         );
         let mut cell_removed_ids = Vec::new();
         let mut inline_liquid_updates = 0;
+        let mut inline_effect_updates = 0;
+        let mut ripple_effects = Vec::new();
         let report = puddles.update_all_with_passability_report_and_event_handler(
             delta_ticks,
             true,
@@ -1843,6 +1845,9 @@ impl ServerLauncher {
                 hash & 1 == 0
             },
             |puddles, event| {
+                inline_effect_updates +=
+                    self.process_server_puddle_affect_units(event, &mut ripple_effects);
+                inline_effect_updates += self.process_server_puddle_create_fire(event);
                 let (updates, removed_ids) =
                     self.process_server_puddle_liquid_update(puddles, event, delta_ticks);
                 inline_liquid_updates += updates;
@@ -1858,78 +1863,9 @@ impl ServerLauncher {
         self.runtime.server_puddles = puddles;
         let mut updates = report.events.len();
         updates += inline_liquid_updates;
-        let mut ripple_effects = Vec::new();
-        for event in &report.events {
-            if !event.affect_units {
-                continue;
-            }
-            let status_effect = event
-                .liquid
-                .effect
-                .as_deref()
-                .filter(|effect| *effect != "none")
-                .and_then(|effect| self.content_loader.status_effect_by_name(effect))
-                .cloned();
-            let size = (event.amount
-                / (mindustry_core::mindustry::entities::puddles::MAX_LIQUID / 1.5))
-                .clamp(0.0, 1.0)
-                * 10.0;
-            let rect_x = event.x - size / 2.0;
-            let rect_y = event.y - size / 2.0;
-            for unit in self.server_units.values_mut() {
-                if unit.health.dead || !unit.is_grounded() || unit.type_info.hovering {
-                    continue;
-                }
-                let hit_size = unit.hitbox.hit_size;
-                let unit_x = unit.x() - hit_size / 2.0;
-                let unit_y = unit.y() - hit_size / 2.0;
-                let overlaps = rect_x < unit_x + hit_size
-                    && rect_x + size > unit_x
-                    && rect_y < unit_y + hit_size
-                    && rect_y + size > unit_y;
-                if !overlaps {
-                    continue;
-                }
-                if let Some(status_effect) = status_effect.clone() {
-                    unit.status.apply(status_effect, 60.0 * 2.0);
-                    unit.refresh_component_views();
-                    updates += 1;
-                }
-                let velocity_len2 =
-                    unit.vel.vel.x * unit.vel.vel.x + unit.vel.vel.y * unit.vel.vel.y;
-                if velocity_len2 > 0.1 * 0.1 {
-                    ripple_effects.push((
-                        unit.x(),
-                        unit.y(),
-                        unit.type_info.ripple_scale,
-                        event.liquid.color_rgba,
-                    ));
-                }
-            }
-        }
+        updates += inline_effect_updates;
         for (x, y, rotation, color) in ripple_effects {
             if self.broadcast_server_effect_colored("ripple", x, y, rotation, color)? {
-                updates += 1;
-            }
-        }
-        for event in report.events {
-            if !event.create_fire {
-                continue;
-            }
-            let result = self.runtime.server_fires.create(
-                Some(FireTile {
-                    x: event.tile.x,
-                    y: event.tile.y,
-                    build_present: event.tile.build_present,
-                    flammability: 0.0,
-                }),
-                FireRules {
-                    net_client: false,
-                    fire_enabled: self.runtime.state.rules.fire,
-                    has_oxygen: true,
-                },
-            );
-            if result != FireCreateResult::Ignored {
                 updates += 1;
             }
         }
@@ -1941,6 +1877,79 @@ impl ServerLauncher {
             updates += removed_ids.len();
         }
         Ok(updates)
+    }
+
+    fn process_server_puddle_affect_units(
+        &mut self,
+        event: &PuddleUpdateEvent,
+        ripple_effects: &mut Vec<(f32, f32, f32, u32)>,
+    ) -> usize {
+        if !event.affect_units {
+            return 0;
+        }
+        let status_effect = event
+            .liquid
+            .effect
+            .as_deref()
+            .filter(|effect| *effect != "none")
+            .and_then(|effect| self.content_loader.status_effect_by_name(effect))
+            .cloned();
+        let size = (event.amount / mindustry_core::mindustry::entities::puddles::MAX_LIQUID * 1.5)
+            .clamp(0.0, 1.0)
+            * 10.0;
+        let rect_x = event.x - size / 2.0;
+        let rect_y = event.y - size / 2.0;
+        let mut updates = 0;
+        for unit in self.server_units.values_mut() {
+            if unit.health.dead || !unit.is_grounded() || unit.type_info.hovering {
+                continue;
+            }
+            let hit_size = unit.hitbox.hit_size;
+            let unit_x = unit.x() - hit_size / 2.0;
+            let unit_y = unit.y() - hit_size / 2.0;
+            let overlaps = rect_x < unit_x + hit_size
+                && rect_x + size > unit_x
+                && rect_y < unit_y + hit_size
+                && rect_y + size > unit_y;
+            if !overlaps {
+                continue;
+            }
+            if let Some(status_effect) = status_effect.clone() {
+                unit.status.apply(status_effect, 60.0 * 2.0);
+                unit.refresh_component_views();
+                updates += 1;
+            }
+            let velocity_len2 = unit.vel.vel.x * unit.vel.vel.x + unit.vel.vel.y * unit.vel.vel.y;
+            if velocity_len2 > 0.1 * 0.1 {
+                ripple_effects.push((
+                    unit.x(),
+                    unit.y(),
+                    unit.type_info.ripple_scale,
+                    event.liquid.color_rgba,
+                ));
+            }
+        }
+        updates
+    }
+
+    fn process_server_puddle_create_fire(&mut self, event: &PuddleUpdateEvent) -> usize {
+        if !event.create_fire {
+            return 0;
+        }
+        let result = self.runtime.server_fires.create(
+            Some(FireTile {
+                x: event.tile.x,
+                y: event.tile.y,
+                build_present: event.tile.build_present,
+                flammability: 0.0,
+            }),
+            FireRules {
+                net_client: false,
+                fire_enabled: self.runtime.state.rules.fire,
+                has_oxygen: true,
+            },
+        );
+        (result != FireCreateResult::Ignored) as usize
     }
 
     fn process_server_puddle_liquid_update(

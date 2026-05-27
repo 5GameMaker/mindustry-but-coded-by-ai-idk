@@ -5107,5 +5107,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --check`
   - `git diff --check`
 - 仍未完成：
-  - `affect_units/create_fire/puddle_on_building/particle_effect` 仍未全部搬进同一个 per-puddle callback 消费顺序；当前最关键的 `CellLiquid.update` 时机已收紧；
+  - `affect_units/create_fire` 已在 12.174 继续搬进 per-puddle callback；`puddle_on_building/particle_effect` 仍需后续确认/接入；
   - callback 当前用 touched tile keys 重新入队，后续如果更多 liquid/update side-effect 会触达非 D4 tile，需要扩展 touched 范围或由具体 consumer 精确返回。
+
+### 12.174 Server puddle effects-only affect_units/create_fire inline ordering
+
+- 2026-05-28：继续收紧 Java `PuddleComp.update()` effects-only 分支顺序，把 server 侧单位液体状态/ripple 和热液体起火从整轮后批处理搬入 per-puddle callback。
+- Java 依据：
+  - `PuddleComp.update()` 在 `amount >= maxLiquid / 2f && updateTime <= 0f` 时先执行 `Units.nearby(...)`；
+  - 随后若 `liquid.temperature > 0.7f && tile.build != null && Mathf.chance(0.5)`，立即 `Fires.create(tile)`；
+  - `tile.build.puddleOn(self())` 之后，最后才进入 `liquid.update(self())`；
+  - 因此 `affect_units` 与 `create_fire` 至少应早于同 puddle 的 `CellLiquid.update`。
+- Rust 新增/变化：
+  - `server::ServerLauncher::process_server_puddle_affect_units(...)`：
+    - 从旧 batch loop 提取；
+    - 继续按 Java 矩形 overlap、grounded/non-hovering、status duration 120 tick、moving ripple 条件执行；
+    - ripple 网络 effect 仍先收集，tick 后统一广播，避免在 callback 内嵌套网络发送。
+  - `server::ServerLauncher::process_server_puddle_create_fire(...)`：
+    - 从旧 batch `create_fire` loop 提取；
+    - 在 per-puddle callback 中先于 `process_server_puddle_liquid_update(...)` 调用。
+  - `tick_server_puddles(...)` 现在 per-puddle callback 顺序为：
+    1. `affect_units`；
+    2. `create_fire`；
+    3. `CellLiquid.update` / `liquid_update`。
+  - 旧的整轮后 `affect_units` 与 `create_fire` batch loops 已移除，避免重复应用。
+- 已跑验证：
+  - `cargo test -p mindustry-server puddle --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - `tile.build.puddleOn(self())` 在 Java vanilla base 中是 no-op 且未发现 core override，但 Rust event consumer 仍未显式建模；
+  - server `headless=true` 下 `particle_effect` 不会产生事件；客户端/非 headless puddle particle dispatch 后续仍待接入 renderer/effect runtime；
+  - ripple effect 仍在 tick 后统一广播，尚未完全保持 Java effect packet 的逐 puddle 发送时机。

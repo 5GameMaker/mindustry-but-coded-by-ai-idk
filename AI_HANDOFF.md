@@ -3804,5 +3804,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. 中文提交并推送 `origin main`，建议标题：`内联新生物液体更新时机`；
   2. 后续欠账：
-     - `affect_units/create_fire/puddle_on_building/particle_effect` 仍未完全搬到 per-puddle callback 的 Java 顺序中；
+     - `affect_units/create_fire` 已在下一闭环继续搬到 per-puddle callback；`puddle_on_building/particle_effect` 仍未完全接入；
      - touched tile keys 当前覆盖 center+D4，后续更多 liquid side-effect 若触达更远范围要扩展。
+
+---
+
+## 115. 最新闭环记录：Puddle effects-only 单位状态与起火 inline 顺序
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：继续把 Java `PuddleComp.update()` effects-only 分支迁入 per-puddle callback，避免 server 侧 `affect_units/create_fire` 仍在整轮后批处理。
+- Java 依据：
+  - effects-only 分支内先 `Units.nearby(...)`；
+  - 然后热液体 + building 概率 `Fires.create(tile)`；
+  - 然后 `tile.build.puddleOn(self())`；
+  - 最后才会走到 `liquid.update(self())`。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - 新增 `process_server_puddle_affect_units(...)`，从旧 batch loop 提取单位 status/ripple 逻辑；
+    - 新增 `process_server_puddle_create_fire(...)`，从旧 batch create_fire loop 提取 fire 创建逻辑；
+    - `tick_server_puddles(...)` 的 per-puddle callback 顺序变为 `affect_units -> create_fire -> CellLiquid/liquid_update`；
+    - 删除旧的整轮后 `affect_units` 和 `create_fire` batch loops，避免重复应用。
+- 已跑验证：
+  - `cargo test -p mindustry-server puddle --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`内联液体坑效果分支`；
+  2. 后续欠账：
+     - `puddle_on_building` Java vanilla base 是 no-op 且目前未发现 core override，但 Rust 仍只有 event；
+     - `particle_effect` 在 server headless 下不会触发，客户端/非 headless 渲染侧仍未接入；
+     - ripple effect 当前仍是 callback 收集、tick 后统一广播，后续如追求 packet 顺序可继续内联发送。
