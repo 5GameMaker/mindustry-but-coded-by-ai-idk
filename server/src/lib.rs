@@ -60,6 +60,8 @@ use std::{
 };
 
 const SERVER_RUNTIME_UNIT_ID_START: i32 = 1_000_000;
+const CARGO_AI_EMPTY_WAIT_TIME: f32 = 60.0 * 2.0;
+const CARGO_AI_DROP_SPACING: f32 = 60.0 * 1.5;
 
 #[derive(Debug, Clone)]
 pub struct ServerLauncher {
@@ -1488,6 +1490,7 @@ impl ServerLauncher {
                 cargo.item_target = Some(item_name.clone());
                 cargo.target_index = next_target_index;
                 cargo.no_dest_timer = 0.0;
+                cargo.drop_timer = CARGO_AI_DROP_SPACING;
             }
 
             let outcome = take_items(
@@ -1550,38 +1553,125 @@ impl ServerLauncher {
             return Ok(0);
         };
 
-        let target_index = unit_snapshot
+        let cargo_snapshot = unit_snapshot
             .cargo_ai
-            .as_ref()
-            .map(|state| state.target_index)
-            .unwrap_or(0);
-        let Some((target_tile_pos, target_building_index, next_target_index)) =
-            self.find_runtime_unit_cargo_drop_target(item_id, loader_team, target_index, None)
-        else {
-            if let Some(unit) = self.server_units.get_mut(&unit_id) {
-                unit.items.clear_item();
-                if let Some(cargo) = unit.cargo_ai.as_mut() {
-                    cargo.unload_target_tile_pos = None;
-                    cargo.item_target = None;
+            .clone()
+            .unwrap_or_else(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+        let (target_tile_pos, target_building_index, target_index_for_state) =
+            if let Some(existing_target_tile_pos) = cargo_snapshot.unload_target_tile_pos {
+                let Some(target_building_index) = self.runtime_unit_cargo_drop_target_for_tile(
+                    item_id,
+                    loader_team,
+                    existing_target_tile_pos,
+                ) else {
+                    if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                        let cargo = unit
+                            .cargo_ai
+                            .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+                        cargo.unload_target_tile_pos = None;
+                        cargo.item_target = None;
+                        cargo.no_dest_timer = 0.0;
+                    }
+                    return Ok(0);
+                };
+                (
+                    existing_target_tile_pos,
+                    target_building_index,
+                    cargo_snapshot.target_index,
+                )
+            } else {
+                let Some((target_tile_pos, _target_building_index, next_target_index)) =
+                    self.find_runtime_unit_cargo_drop_target(item_id, loader_team, 0, None)
+                else {
+                    if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                        unit.items.clear_item();
+                        if let Some(cargo) = unit.cargo_ai.as_mut() {
+                            cargo.unload_target_tile_pos = None;
+                            cargo.item_target = None;
+                            cargo.no_dest_timer = 0.0;
+                            cargo.drop_timer = CARGO_AI_DROP_SPACING;
+                        }
+                    }
+                    return Ok(0);
+                };
+                if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                    let cargo = unit
+                        .cargo_ai
+                        .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+                    cargo.tether_tile_pos = Some(loader_tile_pos);
+                    cargo.unload_target_tile_pos = Some(target_tile_pos);
+                    cargo.item_target = Some(item_name.clone());
+                    cargo.target_index = next_target_index;
                     cargo.no_dest_timer = 0.0;
                 }
+                return Ok(0);
+            };
+
+        let drop_ready = if let Some(unit) = self.server_units.get_mut(&unit_id) {
+            let cargo = unit
+                .cargo_ai
+                .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+            cargo.tether_tile_pos = Some(loader_tile_pos);
+            cargo.unload_target_tile_pos = Some(target_tile_pos);
+            cargo.item_target = Some(item_name.clone());
+            cargo.drop_timer += 1.0;
+            if cargo.drop_timer + f32::EPSILON < CARGO_AI_DROP_SPACING {
+                false
+            } else {
+                cargo.drop_timer = 0.0;
+                true
             }
-            return Ok(0);
+        } else {
+            false
         };
+        if !drop_ready {
+            return Ok(0);
+        }
 
         let accepted_amount = {
             let target = &self.runtime.buildings[target_building_index];
             Self::building_accept_stack_amount(target, item_id, unit_snapshot.items.stack.amount)
         };
         if accepted_amount <= 0 {
+            let mut retarget_from_index = None;
             if let Some(unit) = self.server_units.get_mut(&unit_id) {
                 let cargo = unit
                     .cargo_ai
                     .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
                 cargo.unload_target_tile_pos = Some(target_tile_pos);
                 cargo.item_target = Some(item_name);
-                cargo.no_dest_timer += 1.0;
-                cargo.target_index = next_target_index;
+                cargo.no_dest_timer += CARGO_AI_DROP_SPACING;
+                if cargo.no_dest_timer >= CARGO_AI_EMPTY_WAIT_TIME {
+                    retarget_from_index = Some(cargo.target_index);
+                }
+            }
+            if let Some(target_index) = retarget_from_index {
+                if let Some((next_tile_pos, _, next_target_index)) = self
+                    .find_runtime_unit_cargo_drop_target(item_id, loader_team, target_index, None)
+                {
+                    if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                        let cargo = unit
+                            .cargo_ai
+                            .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+                        cargo.unload_target_tile_pos = Some(next_tile_pos);
+                        cargo.item_target = Some(
+                            self.content_loader
+                                .item(item_id)
+                                .map(|item| item.name().to_string())
+                                .unwrap_or_default(),
+                        );
+                        cargo.target_index = next_target_index;
+                        cargo.no_dest_timer = 0.0;
+                    }
+                } else if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                    unit.items.clear_item();
+                    if let Some(cargo) = unit.cargo_ai.as_mut() {
+                        cargo.unload_target_tile_pos = None;
+                        cargo.item_target = None;
+                        cargo.no_dest_timer = 0.0;
+                        cargo.drop_timer = CARGO_AI_DROP_SPACING;
+                    }
+                }
             }
             return Ok(0);
         }
@@ -1597,7 +1687,7 @@ impl ServerLauncher {
                 .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
             cargo.unload_target_tile_pos = Some(target_tile_pos);
             cargo.item_target = Some(item_name.clone());
-            cargo.target_index = next_target_index;
+            cargo.target_index = target_index_for_state;
             cargo.no_dest_timer = 0.0;
         }
 
@@ -1636,11 +1726,43 @@ impl ServerLauncher {
                     self.runtime_transfer_item_to_packets_sent += 1;
                 }
             }
+            let mut retarget_after_transfer_from_index = None;
             if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                let cargo = unit
+                    .cargo_ai
+                    .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
                 if unit.items.stack.amount == 0 {
+                    cargo.unload_target_tile_pos = None;
+                    cargo.item_target = None;
+                    cargo.no_dest_timer = 0.0;
+                    cargo.drop_timer = CARGO_AI_DROP_SPACING;
+                } else {
+                    cargo.no_dest_timer += CARGO_AI_DROP_SPACING;
+                    if cargo.no_dest_timer >= CARGO_AI_EMPTY_WAIT_TIME {
+                        retarget_after_transfer_from_index = Some(cargo.target_index);
+                        cargo.no_dest_timer = 0.0;
+                    }
+                }
+            }
+            if let Some(target_index) = retarget_after_transfer_from_index {
+                if let Some((next_tile_pos, _, next_target_index)) = self
+                    .find_runtime_unit_cargo_drop_target(item_id, loader_team, target_index, None)
+                {
+                    if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                        let cargo = unit
+                            .cargo_ai
+                            .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+                        cargo.unload_target_tile_pos = Some(next_tile_pos);
+                        cargo.item_target = Some(item_name.clone());
+                        cargo.target_index = next_target_index;
+                    }
+                } else if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                    unit.items.clear_item();
                     if let Some(cargo) = unit.cargo_ai.as_mut() {
                         cargo.unload_target_tile_pos = None;
                         cargo.item_target = None;
+                        cargo.no_dest_timer = 0.0;
+                        cargo.drop_timer = CARGO_AI_DROP_SPACING;
                     }
                 }
             }
@@ -1742,6 +1864,41 @@ impl ServerLauncher {
 
         let (tile_pos, building_index, _) = targets[0];
         Some((tile_pos, building_index, 0))
+    }
+
+    fn runtime_unit_cargo_drop_target_for_tile(
+        &self,
+        item_id: ContentId,
+        team: TeamId,
+        tile_pos: i32,
+    ) -> Option<usize> {
+        let building_index = self
+            .runtime
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)?;
+        let building = &self.runtime.buildings[building_index];
+        if building.team != team || !building.is_valid() {
+            return None;
+        }
+        let Some(BlockDef::Distribution(distribution)) =
+            self.content_loader.block(building.block.id)
+        else {
+            return None;
+        };
+        if distribution.kind != DistributionBlockKind::UnitCargoUnloadPoint {
+            return None;
+        }
+        let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) =
+            self.runtime.distribution_runtime_states.get(&tile_pos)
+        else {
+            return None;
+        };
+        if state.item_id == Some(item_id as i32) {
+            Some(building_index)
+        } else {
+            None
+        }
     }
 
     fn clear_runtime_unit_cargo_loader_state(&mut self, tile_pos: i32) {
@@ -2405,7 +2562,7 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::ServerLauncher;
+    use super::{ServerLauncher, CARGO_AI_DROP_SPACING};
     use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
@@ -2418,7 +2575,8 @@ mod tests {
     };
     use mindustry_core::mindustry::ctype::{Content, ContentType};
     use mindustry_core::mindustry::entities::comp::{
-        BuildingComp, PayloadComp, PayloadKind, PayloadState, UnitComp, UnitControllerState,
+        BuildingComp, CargoAiRuntimeState, PayloadComp, PayloadKind, PayloadState, UnitComp,
+        UnitControllerState,
     };
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
@@ -5154,6 +5312,213 @@ mod tests {
                             && packet.build == BuildingRef::new(unload_tile)
                 )
         }));
+    }
+
+    #[test]
+    fn server_update_keeps_unit_cargo_item_when_unload_target_is_reconfigured() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6583).unwrap();
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let loader_tile = point2_pack(6, 6);
+        let unload_tile = point2_pack(10, 6);
+
+        launcher.runtime.state.world.resize(18, 12);
+        launcher.runtime.add_building(BuildingComp::new(
+            loader_tile,
+            loader_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.add_building(BuildingComp::new(
+            unload_tile,
+            unload_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                read_unit_id: 7,
+                has_unit: true,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        launcher.runtime.distribution_runtime_states.insert(
+            unload_tile,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: None,
+                stale_timer: 0.0,
+                stale: false,
+            }),
+        );
+        let mut cargo_unit = UnitComp::new(
+            7,
+            launcher
+                .content_loader
+                .unit_by_name("manifold")
+                .unwrap()
+                .clone(),
+            TeamId(6),
+        );
+        cargo_unit.set_controller(UnitControllerState::Cargo);
+        cargo_unit.items.add_item_amount("copper", 5);
+        cargo_unit.cargo_ai = Some(CargoAiRuntimeState {
+            tether_tile_pos: Some(loader_tile),
+            unload_target_tile_pos: Some(unload_tile),
+            item_target: Some("copper".into()),
+            no_dest_timer: 0.0,
+            drop_timer: CARGO_AI_DROP_SPACING,
+            target_index: 0,
+        });
+        launcher.server_units.insert(7, cargo_unit);
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&7).unwrap();
+        assert_eq!(unit.items.item(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 5);
+        assert_eq!(
+            unit.cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.unload_target_tile_pos),
+            None
+        );
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().all(|(_connection_id, packet, _reliable)| {
+            !matches!(packet, PacketKind::TransferItemToCallPacket(_))
+        }));
+    }
+
+    #[test]
+    fn server_update_switches_full_unit_cargo_unload_target_after_empty_wait_time() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let loader_tile = point2_pack(6, 6);
+        let full_unload_tile = point2_pack(10, 6);
+        let next_unload_tile = point2_pack(12, 6);
+
+        launcher.runtime.state.world.resize(18, 12);
+        launcher.runtime.add_building(BuildingComp::new(
+            loader_tile,
+            loader_def.base().clone(),
+            TeamId(6),
+        ));
+        let mut full_unload =
+            BuildingComp::new(full_unload_tile, unload_def.base().clone(), TeamId(6));
+        let full_capacity = full_unload.block.item_capacity;
+        full_unload
+            .items
+            .as_mut()
+            .unwrap()
+            .add(copper, full_capacity);
+        launcher.runtime.add_building(full_unload);
+        launcher.runtime.add_building(BuildingComp::new(
+            next_unload_tile,
+            unload_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                read_unit_id: 7,
+                has_unit: true,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        for tile in [full_unload_tile, next_unload_tile] {
+            launcher.runtime.distribution_runtime_states.insert(
+                tile,
+                GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                    item_id: Some(copper as i32),
+                    stale_timer: 0.0,
+                    stale: false,
+                }),
+            );
+        }
+        let mut cargo_unit = UnitComp::new(
+            7,
+            launcher
+                .content_loader
+                .unit_by_name("manifold")
+                .unwrap()
+                .clone(),
+            TeamId(6),
+        );
+        cargo_unit.set_controller(UnitControllerState::Cargo);
+        cargo_unit.items.add_item_amount("copper", 12);
+        cargo_unit.cargo_ai = Some(CargoAiRuntimeState {
+            tether_tile_pos: Some(loader_tile),
+            unload_target_tile_pos: Some(full_unload_tile),
+            item_target: Some("copper".into()),
+            no_dest_timer: 0.0,
+            drop_timer: CARGO_AI_DROP_SPACING,
+            target_index: 0,
+        });
+        launcher.server_units.insert(7, cargo_unit);
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+        assert_eq!(
+            launcher
+                .server_units
+                .get(&7)
+                .unwrap()
+                .cargo_ai
+                .as_ref()
+                .unwrap()
+                .no_dest_timer,
+            CARGO_AI_DROP_SPACING
+        );
+
+        for _ in 0..CARGO_AI_DROP_SPACING as usize {
+            launcher.update();
+        }
+
+        let unit = launcher.server_units.get(&7).unwrap();
+        assert_eq!(unit.items.item(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 12);
+        assert_eq!(
+            unit.cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.unload_target_tile_pos),
+            Some(next_unload_tile)
+        );
+        assert_eq!(
+            launcher.runtime.buildings()[2]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            0
+        );
     }
 
     #[test]

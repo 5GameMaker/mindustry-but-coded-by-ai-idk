@@ -173,6 +173,7 @@ pub struct CargoAiRuntimeState {
     pub unload_target_tile_pos: Option<i32>,
     pub item_target: Option<String>,
     pub no_dest_timer: f32,
+    pub drop_timer: f32,
     pub target_index: usize,
 }
 
@@ -192,6 +193,7 @@ impl Default for CargoAiRuntimeState {
             unload_target_tile_pos: None,
             item_target: None,
             no_dest_timer: 0.0,
+            drop_timer: 90.0,
             target_index: 0,
         }
     }
