@@ -3743,12 +3743,17 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `desktop_launcher_syncs_unit_tether_block_spawned_packet_to_runtime`
 - 2026-05-27：新增真实联机 smoke `real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime`，用真实 `ServerLauncher -> ArcNetProvider -> DesktopLauncher` 链路验证：server owned runtime 里的 `unit-cargo-loader` 完成构建后创建 server-side `manifold`，可靠发出 `UnitTetherBlockSpawnedCallPacket`，desktop `NetClient` 收到并由 `DesktopLauncher` 桥接到客户端 runtime，最终 `UnitCargoLoaderState.read_unit_id` 与 server 侧生成 id 对齐。
 - 2026-05-27：补齐 `UnitCargoUnloadPoint.dumpAccumulate()` 的真实运行链路。owned runtime 中 unload point 现在会按 Java `BuildingComp.dumpAccumulate()` 语义累积 `dump_accum`，通过既有邻接输出/acceptItem 路径把物品倒入相邻 router/storage/distribution 等目标；只要成功 dump 就清 `staleTimer/stale`，并通过 `unit_cargo_unload_dumped_items` 上报。server smoke 已验证该行为可由 `ServerLauncher::update()` 驱动，不是孤立 helper。
+- 2026-05-27：补齐 `UnitCargoUnloadPoint` 的 item config 最小联机链路。`GameRuntime::configure_owned_unit_cargo_unload_value(...)` 现在接受 `TypeValue::Content(Item)` / `TypeValue::Null`，同步更新 building `config` 与 `UnitCargoUnloadPointState.item_id`；`ServerLauncher` 会把客户端 `TileConfigCallPacket` 分派到该 runtime 入口，并可靠转发 server 形态 `TileConfigCallPacket` 给已连接客户端；`DesktopLauncher` 会消费 `NetClient` 记录的 tile config 包并回填客户端 runtime。
+  - 新增 `game_runtime_configures_unit_cargo_unload_point_item_value`
+  - 新增 `server_update_applies_unit_cargo_unload_tile_config_and_forwards_to_clients`
+  - 新增 `desktop_launcher_syncs_unit_cargo_unload_tile_config_packet_to_runtime`
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_tether_block_spawned`
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`
+  - `cargo test -p mindustry-desktop unit_cargo --lib`
   - `cargo test -p mindustry-server unit_cargo --lib`
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`
   - `cargo fmt --check`
   - `cargo check --workspace`
-- 仍未完成：server-side `BuildingTetherComp` 正式并入 `UnitComp`/Groups.unit 生命周期、loader 液体/电力 consume 精确联动、unload item config 的 `TileConfigCallPacket` 分发与 UI 行为、真实 cargo unit AI 往返装卸与 Java 客户端/服务端更完整联机兼容仍待补。
+- 仍未完成：server-side `BuildingTetherComp` 正式并入 `UnitComp`/Groups.unit 生命周期、loader 液体/电力 consume 精确联动、unload config 的 UI 选择表/rollback 权限细节、真实 cargo unit AI 往返装卸与 Java 客户端/服务端更完整联机兼容仍待补。

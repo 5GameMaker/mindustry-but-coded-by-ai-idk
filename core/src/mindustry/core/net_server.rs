@@ -995,6 +995,26 @@ impl NetServer {
         result
     }
 
+    pub fn send_tile_config(
+        &self,
+        connection_id: i32,
+        packet: TileConfigCallPacket,
+    ) -> io::Result<()> {
+        let packet_kind = PacketKind::TileConfigCallPacket(packet);
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet_kind, true)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let now = Instant::now();
+        state.last_updated_at = Some(now);
+        if result.is_ok() {
+            Self::record_connection_sent(&mut state, connection_id, "TileConfigCallPacket", true);
+        }
+        result
+    }
+
     pub fn handle_tile_config_authority<F>(
         &self,
         connection_id: Option<i32>,

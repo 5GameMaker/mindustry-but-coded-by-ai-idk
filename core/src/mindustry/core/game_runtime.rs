@@ -2092,6 +2092,23 @@ pub enum GameRuntimeUnitFactoryConfigureResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimeUnitCargoUnloadConfigureResult {
+    Configured,
+    Cleared,
+    MissingBuilding,
+    NotUnitCargoUnload,
+    NotConfigurable,
+    UnknownItem,
+    UnsupportedValue,
+}
+
+impl GameRuntimeUnitCargoUnloadConfigureResult {
+    pub fn changed(self) -> bool {
+        matches!(self, Self::Configured | Self::Cleared)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameRuntimePayloadSourceConfig {
     Block(ContentId),
     Unit(ContentId),
@@ -3911,6 +3928,93 @@ impl GameRuntime {
             return self.configure_owned_unit_factory_plan(content, tile_pos, None);
         }
         self.configure_owned_unit_factory_plan(content, tile_pos, Some(plan))
+    }
+
+    pub fn configure_owned_unit_cargo_unload_item(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        item: Option<ContentId>,
+    ) -> GameRuntimeUnitCargoUnloadConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimeUnitCargoUnloadConfigureResult::MissingBuilding;
+        };
+        let unload_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::UnitCargoUnloadPoint =>
+            {
+                distribution
+            }
+            Some(_) | None => return GameRuntimeUnitCargoUnloadConfigureResult::NotUnitCargoUnload,
+        };
+        if !unload_block.configurable {
+            return GameRuntimeUnitCargoUnloadConfigureResult::NotConfigurable;
+        }
+        if item.is_some_and(|item_id| content.item(item_id).is_none()) {
+            return GameRuntimeUnitCargoUnloadConfigureResult::UnknownItem;
+        }
+
+        let entry = self
+            .distribution_runtime_states
+            .entry(tile_pos)
+            .or_insert_with(|| {
+                GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                    item_id: None,
+                    stale_timer: 0.0,
+                    stale: false,
+                })
+            });
+        let state = match entry {
+            GameRuntimeDistributionBlockState::UnitCargoUnload(state) => state,
+            _ => {
+                *entry =
+                    GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                        item_id: None,
+                        stale_timer: 0.0,
+                        stale: false,
+                    });
+                match entry {
+                    GameRuntimeDistributionBlockState::UnitCargoUnload(state) => state,
+                    _ => unreachable!(),
+                }
+            }
+        };
+
+        state.item_id = item.map(i32::from);
+        self.buildings[index].config = item.map(|item_id| {
+            type_io::TypeValue::Content(type_io::ContentRef::new(ContentType::Item, item_id))
+        });
+        if item.is_some() {
+            GameRuntimeUnitCargoUnloadConfigureResult::Configured
+        } else {
+            GameRuntimeUnitCargoUnloadConfigureResult::Cleared
+        }
+    }
+
+    pub fn configure_owned_unit_cargo_unload_value(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        value: &type_io::TypeValue,
+    ) -> GameRuntimeUnitCargoUnloadConfigureResult {
+        match value {
+            type_io::TypeValue::Null => {
+                self.configure_owned_unit_cargo_unload_item(content, tile_pos, None)
+            }
+            type_io::TypeValue::Content(content_ref)
+                if content_ref.content_type == ContentType::Item =>
+            {
+                self.configure_owned_unit_cargo_unload_item(content, tile_pos, Some(content_ref.id))
+            }
+            type_io::TypeValue::Content(_) => {
+                GameRuntimeUnitCargoUnloadConfigureResult::UnknownItem
+            }
+            _ => GameRuntimeUnitCargoUnloadConfigureResult::UnsupportedValue,
+        }
     }
 
     pub fn configure_owned_payload_constructor(
@@ -21006,6 +21110,81 @@ mod tests {
         };
         assert!(!state.stale);
         assert_eq!(state.stale_timer, 0.0);
+    }
+
+    #[test]
+    fn game_runtime_configures_unit_cargo_unload_point_item_value() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unload_def = content.block_by_name("unit-cargo-unload-point").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content.item_by_name("copper").unwrap();
+        let unload_tile = point2_pack(20, 18);
+        let router_tile = point2_pack(22, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            unload_tile,
+            unload_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime.add_building(BuildingComp::new(
+            router_tile,
+            router_def.base().clone(),
+            TeamId(4),
+        ));
+
+        let item_value = TypeValue::Content(type_io::ContentRef::new(
+            ContentType::Item,
+            copper.base.mappable.base.id,
+        ));
+        assert_eq!(
+            runtime.configure_owned_unit_cargo_unload_value(&content, unload_tile, &item_value),
+            GameRuntimeUnitCargoUnloadConfigureResult::Configured
+        );
+        assert_eq!(runtime.buildings[0].config, Some(item_value.clone()));
+        let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) =
+            runtime.distribution_runtime_states.get(&unload_tile)
+        else {
+            panic!("unit cargo unload state should be created by config");
+        };
+        assert_eq!(state.item_id, Some(copper.base.mappable.base.id as i32));
+
+        assert_eq!(
+            runtime.configure_owned_unit_cargo_unload_value(
+                &content,
+                unload_tile,
+                &TypeValue::Null
+            ),
+            GameRuntimeUnitCargoUnloadConfigureResult::Cleared
+        );
+        assert_eq!(runtime.buildings[0].config, None);
+        let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) =
+            runtime.distribution_runtime_states.get(&unload_tile)
+        else {
+            panic!("unit cargo unload state should remain present after clear");
+        };
+        assert_eq!(state.item_id, None);
+
+        assert_eq!(
+            runtime.configure_owned_unit_cargo_unload_value(&content, router_tile, &item_value),
+            GameRuntimeUnitCargoUnloadConfigureResult::NotUnitCargoUnload
+        );
+        assert_eq!(
+            runtime.configure_owned_unit_cargo_unload_value(
+                &content,
+                unload_tile,
+                &TypeValue::Content(type_io::ContentRef::new(ContentType::Block, 0))
+            ),
+            GameRuntimeUnitCargoUnloadConfigureResult::UnknownItem
+        );
+        assert_eq!(
+            runtime.configure_owned_unit_cargo_unload_value(
+                &content,
+                unload_tile,
+                &TypeValue::Int(7)
+            ),
+            GameRuntimeUnitCargoUnloadConfigureResult::UnsupportedValue
+        );
     }
 
     #[test]

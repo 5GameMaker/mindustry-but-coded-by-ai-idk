@@ -5,7 +5,7 @@ use mindustry_core::mindustry::content::blocks::{
 };
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
-    GameRuntimePowerNodeConfigResult,
+    GameRuntimePowerNodeConfigResult, GameRuntimeUnitCargoUnloadConfigureResult,
 };
 use mindustry_core::mindustry::core::net_server::{
     PlayerPreviewPlanSource, PLAN_PREVIEW_SYNC_INTERVAL_MS,
@@ -40,7 +40,7 @@ use mindustry_core::mindustry::net::{
     NetConnection, NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
     PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
     RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    TransferInventoryCallPacket, UnitTetherBlockSpawnedCallPacket,
+    TileConfigCallPacket, TransferInventoryCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -73,6 +73,11 @@ pub struct ServerLauncher {
     pub last_runtime_power_node_config_result: Option<GameRuntimePowerNodeConfigResult>,
     pub runtime_power_node_config_packets_seen: usize,
     pub runtime_power_node_config_packets_changed: usize,
+    pub last_runtime_unit_cargo_unload_config_result:
+        Option<GameRuntimeUnitCargoUnloadConfigureResult>,
+    pub runtime_unit_cargo_unload_config_packets_seen: usize,
+    pub runtime_unit_cargo_unload_config_packets_changed: usize,
+    pub runtime_unit_cargo_unload_config_packets_forwarded: usize,
     pub server_preview_players: BTreeMap<i32, PlayerComp>,
     pub server_units: BTreeMap<i32, UnitComp>,
     pub runtime_request_item_packets_seen: usize,
@@ -140,6 +145,10 @@ impl ServerLauncher {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
@@ -272,24 +281,15 @@ impl ServerLauncher {
         for event in events {
             match event {
                 ProviderEvent::ServerPacket {
+                    connection_id,
                     packet: PacketKind::TileConfigCallPacket(packet),
-                    ..
-                } => {
-                    let Some(source_tile_pos) = packet.build.tile_pos else {
-                        continue;
-                    };
-                    let result = self.runtime.configure_owned_power_node_value(
-                        &self.content_loader,
-                        source_tile_pos,
-                        &packet.value,
-                    );
-                    self.runtime_power_node_config_packets_seen += 1;
-                    if result.changed() {
-                        changed += 1;
-                        self.runtime_power_node_config_packets_changed += 1;
+                } => match self.apply_server_tile_config_packet(connection_id, &packet) {
+                    Ok(true) => changed += 1,
+                    Ok(false) => {}
+                    Err(error) => {
+                        self.network_error = Some(error.to_string());
                     }
-                    self.last_runtime_power_node_config_result = Some(result);
-                }
+                },
                 ProviderEvent::ServerPacket {
                     connection_id,
                     packet: PacketKind::RequestItemCallPacket(packet),
@@ -434,6 +434,107 @@ impl ServerLauncher {
             }
         }
         changed
+    }
+
+    fn apply_server_tile_config_packet(
+        &mut self,
+        connection_id: i32,
+        packet: &TileConfigCallPacket,
+    ) -> io::Result<bool> {
+        let Some(source_tile_pos) = packet.build.tile_pos else {
+            return Ok(false);
+        };
+
+        let is_unit_cargo_unload = self
+            .runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == source_tile_pos)
+            .and_then(|building| self.content_loader.block(building.block.id))
+            .is_some_and(|block| {
+                matches!(
+                    block,
+                    BlockDef::Distribution(distribution)
+                        if distribution.kind == DistributionBlockKind::UnitCargoUnloadPoint
+                )
+            });
+
+        if is_unit_cargo_unload {
+            let result = self.runtime.configure_owned_unit_cargo_unload_value(
+                &self.content_loader,
+                source_tile_pos,
+                &packet.value,
+            );
+            self.runtime_unit_cargo_unload_config_packets_seen += 1;
+            self.last_runtime_unit_cargo_unload_config_result = Some(result);
+            if result.changed() {
+                self.runtime_unit_cargo_unload_config_packets_changed += 1;
+                self.runtime_unit_cargo_unload_config_packets_forwarded +=
+                    self.broadcast_runtime_unit_cargo_unload_config(connection_id, packet)?;
+            }
+            return Ok(result.changed());
+        }
+
+        let result = self.runtime.configure_owned_power_node_value(
+            &self.content_loader,
+            source_tile_pos,
+            &packet.value,
+        );
+        self.runtime_power_node_config_packets_seen += 1;
+        if result.changed() {
+            self.runtime_power_node_config_packets_changed += 1;
+        }
+        self.last_runtime_power_node_config_result = Some(result);
+        Ok(result.changed())
+    }
+
+    fn broadcast_runtime_unit_cargo_unload_config(
+        &mut self,
+        source_connection_id: i32,
+        packet: &TileConfigCallPacket,
+    ) -> io::Result<usize> {
+        let player = if source_connection_id >= 0 {
+            EntityRef::new(source_connection_id)
+        } else {
+            EntityRef::null()
+        };
+        let build = packet.build;
+        let value = packet.value.clone();
+        let targets = self.connected_runtime_tile_config_targets();
+        let mut sent = 0;
+        let mut first_error = None;
+        for target in targets {
+            let server_packet = TileConfigCallPacket::server(player, build, value.clone());
+            match self.net_server.send_tile_config(target, server_packet) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
+    }
+
+    fn connected_runtime_tile_config_targets(&self) -> Vec<i32> {
+        let state = self.net_server.state();
+        let state = state.lock().expect("NetServerState mutex poisoned");
+        state
+            .connection_states
+            .iter()
+            .filter_map(|(connection_id, connection)| {
+                (connection.has_connected
+                    && connection.player_added
+                    && !connection.kicked
+                    && !connection.has_disconnected)
+                    .then_some(*connection_id)
+            })
+            .collect()
     }
 
     fn apply_server_request_item_packet(
@@ -1913,7 +2014,7 @@ mod tests {
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
         GameRuntimePowerNodeBatchLinkReport, GameRuntimePowerNodeConfigResult,
-        GameRuntimePowerNodeLinkResult,
+        GameRuntimePowerNodeLinkResult, GameRuntimeUnitCargoUnloadConfigureResult,
     };
     use mindustry_core::mindustry::core::{
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
@@ -3056,6 +3157,10 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
@@ -3163,6 +3268,10 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
@@ -3336,6 +3445,101 @@ mod tests {
     }
 
     #[test]
+    fn server_update_applies_unit_cargo_unload_tile_config_and_forwards_to_clients() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6581).unwrap();
+
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unload_tile = point2_pack(7, 6);
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.runtime.add_building(BuildingComp::new(
+            unload_tile,
+            unload_def.base().clone(),
+            TeamId(6),
+        ));
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            for connection_id in [10, 11] {
+                let mut connection = NetConnection::new(format!("127.0.0.1:{connection_id}"));
+                connection.has_connected = true;
+                connection.player_added = true;
+                connection.team = TeamId(6);
+                state.connection_states.insert(connection_id, connection);
+            }
+        }
+
+        let value = TypeValue::Content(mindustry_core::mindustry::io::type_io::ContentRef::new(
+            ContentType::Item,
+            copper,
+        ));
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(10),
+                true,
+                PacketKind::TileConfigCallPacket(TileConfigCallPacket::client(
+                    BuildingRef::new(unload_tile),
+                    value.clone(),
+                )),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        assert_eq!(
+            launcher.last_runtime_unit_cargo_unload_config_result,
+            Some(GameRuntimeUnitCargoUnloadConfigureResult::Configured)
+        );
+        assert_eq!(launcher.runtime_unit_cargo_unload_config_packets_seen, 1);
+        assert_eq!(launcher.runtime_unit_cargo_unload_config_packets_changed, 1);
+        assert_eq!(
+            launcher.runtime_unit_cargo_unload_config_packets_forwarded,
+            2
+        );
+        assert_eq!(launcher.runtime.buildings()[0].config, Some(value.clone()));
+        let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) = launcher
+            .runtime
+            .distribution_runtime_states
+            .get(&unload_tile)
+        else {
+            panic!("unit cargo unload state should be configured");
+        };
+        assert_eq!(state.item_id, Some(copper as i32));
+
+        let sent = sent.lock().unwrap();
+        for connection_id in [10, 11] {
+            assert!(sent.iter().any(|(target, packet, reliable)| {
+                *target == connection_id
+                    && *reliable
+                    && matches!(
+                        packet,
+                        PacketKind::TileConfigCallPacket(packet)
+                            if packet.player == EntityRef::new(10)
+                                && packet.build == BuildingRef::new(unload_tile)
+                                && packet.value == value
+                    )
+            }));
+        }
+    }
+
+    #[test]
     fn server_update_records_client_plan_snapshot_and_broadcasts_preview_to_teammates() {
         let sent_packets = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
@@ -3353,6 +3557,10 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
@@ -3533,6 +3741,10 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
@@ -3650,6 +3862,10 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
@@ -3779,6 +3995,10 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
@@ -3927,6 +4147,10 @@ mod tests {
             last_runtime_power_node_config_result: None,
             runtime_power_node_config_packets_seen: 0,
             runtime_power_node_config_packets_changed: 0,
+            last_runtime_unit_cargo_unload_config_result: None,
+            runtime_unit_cargo_unload_config_packets_seen: 0,
+            runtime_unit_cargo_unload_config_packets_changed: 0,
+            runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,

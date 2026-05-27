@@ -1,6 +1,7 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeClientSnapshotApplyReport, GameRuntimeClientUnitEnteredPayloadApplyReport,
+    GameRuntimeUnitCargoUnloadConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
@@ -60,7 +61,9 @@ pub struct DesktopLauncher {
     last_applied_unit_payload_mirrors: BTreeMap<i32, ClientUnitPayloadMirror>,
     last_applied_unit_entered_payload_packets_seen: u64,
     last_applied_unit_tether_block_spawned_packets_seen: u64,
+    last_applied_tile_config_packets_seen: u64,
     last_unit_entered_payload_apply_report: Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
+    last_tile_config_apply_result: Option<GameRuntimeUnitCargoUnloadConfigureResult>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
     last_applied_client_plan_snapshot_received_count: usize,
@@ -90,7 +93,9 @@ impl DesktopLauncher {
             last_applied_unit_payload_mirrors: BTreeMap::new(),
             last_applied_unit_entered_payload_packets_seen: 0,
             last_applied_unit_tether_block_spawned_packets_seen: 0,
+            last_applied_tile_config_packets_seen: 0,
             last_unit_entered_payload_apply_report: None,
+            last_tile_config_apply_result: None,
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
             last_applied_client_plan_snapshot_received_count: 0,
@@ -108,6 +113,7 @@ impl DesktopLauncher {
         self.sync_unit_payload_mirrors_to_runtime();
         self.sync_unit_entered_payload_to_runtime();
         self.sync_unit_tether_block_spawned_to_runtime();
+        self.sync_tile_config_to_runtime();
         let now_millis = current_millis();
         self.sync_remote_player_snapshots_from_runtime();
         self.sync_remote_preview_plan_packets(now_millis);
@@ -401,6 +407,43 @@ impl DesktopLauncher {
             .apply_client_unit_tether_block_spawned_packet(&self.content_loader, &packet)
     }
 
+    fn sync_tile_config_to_runtime(&mut self) -> bool {
+        if self.last_applied_world_data.is_none() {
+            return false;
+        }
+
+        let (seen, packet) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (
+                state.tile_config_packets_seen,
+                state.last_tile_config.clone(),
+            )
+        };
+        if seen == self.last_applied_tile_config_packets_seen {
+            return false;
+        }
+        self.last_applied_tile_config_packets_seen = seen;
+
+        let Some(packet) = packet else {
+            self.last_tile_config_apply_result = None;
+            return false;
+        };
+        let Some(tile_pos) = packet.build.tile_pos else {
+            self.last_tile_config_apply_result =
+                Some(GameRuntimeUnitCargoUnloadConfigureResult::MissingBuilding);
+            return false;
+        };
+        let result = self.runtime.configure_owned_unit_cargo_unload_value(
+            &self.content_loader,
+            tile_pos,
+            &packet.value,
+        );
+        let changed = result.changed();
+        self.last_tile_config_apply_result = Some(result);
+        changed
+    }
+
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
         let (
             block_mirror,
@@ -411,6 +454,7 @@ impl DesktopLauncher {
             unit_payload_mirrors,
             unit_entered_payload_packets_seen,
             unit_tether_block_spawned_packets_seen,
+            tile_config_packets_seen,
         ) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
@@ -423,6 +467,7 @@ impl DesktopLauncher {
                 state.unit_payload_mirrors.clone(),
                 state.unit_entered_payload_packets_seen,
                 state.unit_tether_block_spawned_packets_seen,
+                state.tile_config_packets_seen,
             )
         };
         self.last_applied_block_snapshot_mirror = block_mirror;
@@ -435,7 +480,9 @@ impl DesktopLauncher {
         self.last_applied_unit_entered_payload_packets_seen = unit_entered_payload_packets_seen;
         self.last_applied_unit_tether_block_spawned_packets_seen =
             unit_tether_block_spawned_packets_seen;
+        self.last_applied_tile_config_packets_seen = tile_config_packets_seen;
         self.last_unit_entered_payload_apply_report = None;
+        self.last_tile_config_apply_result = None;
     }
 
     fn clear_snapshot_apply_cursors(&mut self) {
@@ -448,7 +495,9 @@ impl DesktopLauncher {
         self.last_applied_unit_payload_mirrors.clear();
         self.last_applied_unit_entered_payload_packets_seen = 0;
         self.last_applied_unit_tether_block_spawned_packets_seen = 0;
+        self.last_applied_tile_config_packets_seen = 0;
         self.last_unit_entered_payload_apply_report = None;
+        self.last_tile_config_apply_result = None;
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
     }
@@ -1021,6 +1070,7 @@ mod tests {
     use super::{run, DesktopLauncher};
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
+        GameRuntimeUnitCargoUnloadConfigureResult,
     };
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
@@ -1042,8 +1092,8 @@ mod tests {
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::net::{
         ClientPlanSnapshotReceivedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
-        NetworkWorldData, StateSnapshotCallPacket, UnitEnteredPayloadCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket,
+        UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -1059,7 +1109,7 @@ mod tests {
         },
         r#type::ItemStack,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
-        world::blocks::units::UnitCargoLoaderState,
+        world::blocks::units::{UnitCargoLoaderState, UnitCargoUnloadPointState},
     };
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
@@ -1605,6 +1655,72 @@ mod tests {
                 .runtime
                 .client_unit_tether_block_spawned_packets_applied,
             1
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_cargo_unload_tile_config_packet_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(7, 7);
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            unload_def.base().clone(),
+            TeamId(4),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            tile_pos,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: None,
+                stale_timer: 0.0,
+                stale: false,
+            }),
+        );
+
+        let value = TypeValue::Content(type_io::ContentRef::new(ContentType::Item, copper));
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::TileConfigCallPacket(
+                TileConfigCallPacket::server(
+                    mindustry_core::mindustry::io::EntityRef::new(42),
+                    BuildingRef::new(tile_pos),
+                    value.clone(),
+                ),
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) =
+            launcher.runtime.distribution_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit cargo unload state should remain present");
+        };
+        assert_eq!(state.item_id, Some(copper as i32));
+        assert_eq!(launcher.runtime.buildings()[0].config, Some(value));
+        assert_eq!(
+            launcher.last_tile_config_apply_result,
+            Some(GameRuntimeUnitCargoUnloadConfigureResult::Configured)
         );
     }
 
