@@ -4227,3 +4227,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `createSound.at(...)` 的 `Mathf.range(0.06f)` pitch 随机目前以确定性 `1.0` 记录，后续接入客户端 RNG/audio backend 时应恢复 Java pitch range；
   - runtime sidecar 已记录 sound/effect 数据，但最终 renderer/audio backend 播放还需继续接 desktop 实际表现层；
   - `Events.fire(new UnitCreateEvent(unit, this))` 仍待迁移到 Rust campaign stats/event bus。
+
+### 12.136 UnitAssembler.spawned UnitCreateEvent 与单位创建统计
+
+- 2026-05-27：继续对照 v158.1 `UnitAssemblerBuild.spawned()` 末尾 `Events.fire(new UnitCreateEvent(unit, this))`，把 Rust UnitAssembler 完成事件从“只 reset/生成 unit/记录 sound-effect”推进到 Java `Logic` 与 `GameService` 的单位创建统计语义。
+- Java 依据：
+  - `EventType.UnitCreateEvent` 携带 `unit`、可空 `spawner` 与可空 `spawnerUnit`；
+  - `Logic` 监听 `UnitCreateEvent`：当 `e.unit.team == state.rules.defaultTeam` 时 `state.stats.unitsCreated++`；若 `state.isCampaign() && !net.client()`，则 `state.getPlanet().stats().unitsProduced.increment(e.unit.type)`；
+  - `GameService` 还会在 campaign 中更新 `SStat.unitTypesBuilt`、`buildT5`，并对 `e.unit.team() == player.team()` 增加 `SStat.unitsBuilt`。
+- Rust 新增/变化：
+  - `GameRuntimeUnitCreateEvent` 记录 `unit_id`、`unit_name`、`team`、`spawner_tile`、`spawner_unit_id`，作为后续事件 bus / service bridge 的 sidecar；
+  - `GameRuntime` 新增 `campaign_stats: CampaignStats` 与 `unit_create_events`；
+  - `GameRuntime::note_unit_create_event(...)` 统一执行 Java `Logic` 等价副作用：
+    - default team unit 增加 `state.stats.units_created`；
+    - campaign 且权威端（offline/server，非 net client）增加 `campaign_stats.units_produced[unit]`；
+    - 同时保留事件 sidecar；
+  - `advance_owned_unit_assemblers_ticks(...)` 在 assembler 完成并 reset 后记录 UnitCreateEvent，覆盖 server/offline owned runtime；
+  - `apply_client_assembler_unit_spawned_packet(...)` 在客户端回放 `AssemblerUnitSpawnedCallPacket` 时也记录本地 UnitCreateEvent；客户端只增加 `units_created`，不写 campaign planet stats；
+  - world reset 清理 `unit_create_events`，避免跨地图 stale event；
+  - `GameServiceUnitCreateSnapshot` 增加 `player_team_unit`，`GameServiceUnitCreatePlan` 增加 `stat_additions`，`unit_create_plan(...)` 现在能表达 Java `SStat.unitsBuilt.add()` 与 default-team `unitTypesBuilt/buildT5` 的分离语义；
+  - `server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes` 现在同时验证 server runtime 的 UnitCreateEvent sidecar、`units_created` 与 campaign `units_produced`。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core assembler_unit_spawned --lib`
+  - `cargo test -p mindustry-core game_runtime_owned_runtime_blocks_includes_unit_assembler_tick_like_java --lib`
+  - `cargo test -p mindustry-core unit_create_plan --lib`
+  - `cargo test -p mindustry-server server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes --lib`
+- 仍未完成：
+  - `unit_create_events` 目前是 runtime sidecar，尚未统一 drain/bridge 到正式事件 bus、desktop UI 或 platform service runtime；
+  - `UnitFactory`、`Reconstructor`、`PayloadSource`、`UnitSpawnAbility` 的 `UnitCreateEvent` 发射点还需逐个接入同一个 `note_unit_create_event(...)`，避免“只有 assembler 计数”的不一致；
+  - `spawner_unit_id` 还未接入 `UnitSpawnAbility` 等 unit-spawner 路径；
+  - `GameServiceUnitCreatePlan` 已补齐 player/default team 语义，但还未从真实 runtime event 自动应用到 `DefaultGameService` / achievement backend；
+  - Java↔Rust 联机 smoke 仍需后续验证 `AssemblerUnitSpawnedCallPacket`、`UnitSpawnCallPacket`、UnitCreateEvent 统计 sidecar 在同一帧组合下不丢失。

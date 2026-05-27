@@ -5360,6 +5360,8 @@ mod tests {
         launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
         launcher.net_server.open(6586).unwrap();
         launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.rules.default_team = 6;
+        launcher.runtime.state.set_sector(Some(Sector::new(21)));
         launcher.runtime.state.world.resize(24, 24);
 
         let assembler_def = launcher
@@ -5425,6 +5427,25 @@ mod tests {
         };
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
+        assert_eq!(launcher.runtime.unit_create_events.len(), 1);
+        assert_eq!(launcher.runtime.unit_create_events[0].unit_id, None);
+        assert_eq!(
+            launcher.runtime.unit_create_events[0].unit_name,
+            plan_unit_name
+        );
+        assert_eq!(launcher.runtime.unit_create_events[0].team, TeamId(6));
+        assert_eq!(
+            launcher.runtime.unit_create_events[0].spawner_tile,
+            Some(assembler_tile)
+        );
+        assert_eq!(launcher.runtime.state.stats.units_created, 1);
+        assert_eq!(
+            launcher
+                .runtime
+                .campaign_stats
+                .get_unit_produced(&plan_unit_name),
+            1
+        );
 
         let spawned_unit = launcher
             .server_units

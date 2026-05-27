@@ -2570,3 +2570,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 `client_local_sound_at_events` / `client_local_effect_events` 接到 desktop 实际播放/渲染层，当前只是 runtime sidecar；
   2. 恢复 Java `1f + Mathf.range(0.06f)` 的客户端 pitch 随机；
   3. 继续迁移 `Events.fire(new UnitCreateEvent(unit, this))` 到 Rust campaign stats/event bus。
+
+---
+
+## 78. 最新闭环记录：UnitAssembler.spawned UnitCreateEvent / 创建统计
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：迁移 `UnitAssemblerBuild.spawned()` 末尾 `Events.fire(new UnitCreateEvent(unit, this))` 的最小真实语义，不新增独立孤岛模块。
+- Java 依据：
+  - `EventType.UnitCreateEvent`：`unit`、`spawner`、`spawnerUnit`；
+  - `Logic`：default team unit 增加 `state.stats.unitsCreated`；campaign 且非 net client 时增加 planet `unitsProduced`；
+  - `GameService`：campaign default team 更新 `unitTypesBuilt` / `buildT5`，player team 增加 `SStat.unitsBuilt`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitCreateEvent`；
+    - `GameRuntime` 新增 `campaign_stats: CampaignStats` 与 `unit_create_events`；
+    - 新增 `note_unit_create_event(...)`：default team 增加 `state.stats.units_created`；campaign 且 offline/server 权威端增加 `campaign_stats.units_produced`；记录 sidecar；
+    - `advance_owned_unit_assemblers_ticks(...)` 在 assembler 完成后调用；
+    - `apply_client_assembler_unit_spawned_packet(...)` 在 client 回放时调用，但 client 不写 campaign stats；
+    - world reset 清理 `unit_create_events`。
+  - `core/src/mindustry/service/game_service.rs`
+    - `GameServiceUnitCreateSnapshot` 增加 `player_team_unit`；
+    - `GameServiceUnitCreatePlan` 增加 `stat_additions`；
+    - `unit_create_plan(...)` 能区分 Java 的 default-team `unitTypesBuilt/buildT5` 与 player-team `SStat.unitsBuilt`。
+  - `server/src/lib.rs`
+    - 更新 assembler 完成测试，验证 server runtime 侧 `unit_create_events`、`state.stats.units_created` 与 `campaign_stats.units_produced`。
+- 已跑验证：
+  - `cargo test -p mindustry-core assembler_unit_spawned --lib`
+  - `cargo test -p mindustry-core game_runtime_owned_runtime_blocks_includes_unit_assembler_tick_like_java --lib`
+  - `cargo test -p mindustry-core unit_create_plan --lib`
+  - `cargo test -p mindustry-server server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes --lib`
+- 当前仍需继续：
+  1. 跑 `cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check` 后提交推送。
+  2. 后续把 `unit_create_events` drain/bridge 到正式事件 bus / platform service runtime；目前只是 runtime sidecar + stats。
+  3. 继续把同一个 `note_unit_create_event(...)` 接到 `UnitFactory`、`Reconstructor`、`PayloadSource`、`UnitSpawnAbility`，避免只有 assembler 计数。
+  4. `spawner_unit_id` 后续给 `UnitSpawnAbility` 等 unit-spawner 路径补齐。

@@ -136,6 +136,7 @@ impl GameServiceBlockBuildPlan {
 pub struct GameServiceUnitCreateSnapshot {
     pub campaign: bool,
     pub default_team_unit: bool,
+    pub player_team_unit: bool,
     pub unit_name: String,
     pub visible_unit_names: Vec<String>,
 }
@@ -145,6 +146,7 @@ impl GameServiceUnitCreateSnapshot {
         Self {
             campaign: true,
             default_team_unit: true,
+            player_team_unit: true,
             unit_name: unit_name.into(),
             visible_unit_names: Vec::new(),
         }
@@ -153,6 +155,7 @@ impl GameServiceUnitCreateSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameServiceUnitCreatePlan {
+    pub stat_additions: Vec<SStat>,
     pub stat_max_updates: Vec<(SStat, i32)>,
     pub achievements: BTreeSet<Achievement>,
     pub saved_built_sets: bool,
@@ -653,6 +656,10 @@ impl GameServiceState {
         snapshot: GameServiceUnitCreateSnapshot,
     ) -> GameServiceUnitCreatePlan {
         let mut plan = GameServiceUnitCreatePlan::default();
+        if snapshot.campaign && snapshot.player_team_unit {
+            plan.stat_additions.push(SStat::UnitsBuilt);
+        }
+
         if !snapshot.campaign || !snapshot.default_team_unit {
             return plan;
         }
@@ -1505,6 +1512,7 @@ mod tests {
 
         let plan = state.unit_create_plan(snapshot);
 
+        assert_eq!(plan.stat_additions, vec![SStat::UnitsBuilt]);
         assert_eq!(plan.stat_max_updates, vec![(SStat::UnitTypesBuilt, 1)]);
         assert!(plan.achievements.contains(&Achievement::BuildT5));
         assert!(plan.saved_built_sets);
@@ -1524,10 +1532,26 @@ mod tests {
 
         let mut snapshot = GameServiceUnitCreateSnapshot::default_team("dagger");
         snapshot.default_team_unit = false;
+        snapshot.player_team_unit = false;
         assert_eq!(
             state.unit_create_plan(snapshot),
             GameServiceUnitCreatePlan::default()
         );
+    }
+
+    #[test]
+    fn unit_create_plan_counts_player_team_units_separately_like_java_service() {
+        let mut state = GameServiceState::default();
+        let mut snapshot = GameServiceUnitCreateSnapshot::default_team("dagger");
+        snapshot.default_team_unit = false;
+        snapshot.player_team_unit = true;
+
+        let plan = state.unit_create_plan(snapshot);
+
+        assert_eq!(plan.stat_additions, vec![SStat::UnitsBuilt]);
+        assert!(plan.stat_max_updates.is_empty());
+        assert!(plan.achievements.is_empty());
+        assert!(!plan.saved_built_sets);
     }
 
     #[test]

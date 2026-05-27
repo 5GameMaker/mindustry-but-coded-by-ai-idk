@@ -34,7 +34,7 @@ use crate::mindustry::{
         },
         entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo, FX_UNIT_ASSEMBLE_ID,
     },
-    game::{CoreInfo, SectorInfo},
+    game::{CampaignStats, CoreInfo, SectorInfo},
     input::input_handler::ItemRemoveStackPlan,
     io::{
         type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
@@ -1514,6 +1514,15 @@ pub struct GameRuntimeItemTakenEvent {
     pub item: ContentId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeUnitCreateEvent {
+    pub unit_id: Option<i32>,
+    pub unit_name: String,
+    pub team: TeamId,
+    pub spawner_tile: Option<i32>,
+    pub spawner_unit_id: Option<i32>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameRuntimeLiquidBlockState {
     Bridge(LiquidBridgeState),
@@ -2540,6 +2549,7 @@ impl GameRuntimeNetworkContext {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntime {
     pub state: GameState,
+    pub campaign_stats: CampaignStats,
     pub network_context: GameRuntimeNetworkContext,
     pub buildings: Vec<BuildingComp>,
     pub effect_runtime_store: EffectBlockRuntimeStateStore,
@@ -2570,6 +2580,7 @@ pub struct GameRuntime {
     pub storage_runtime_states: BTreeMap<i32, GameRuntimeStorageBlockState>,
     pub storage_linked_cores: BTreeMap<i32, i32>,
     pub item_taken_events: Vec<GameRuntimeItemTakenEvent>,
+    pub unit_create_events: Vec<GameRuntimeUnitCreateEvent>,
     pub liquid_runtime_states: BTreeMap<i32, GameRuntimeLiquidBlockState>,
     pub logic_runtime_states: BTreeMap<i32, GameRuntimeLogicBlockState>,
     pub campaign_runtime_states: BTreeMap<i32, GameRuntimeCampaignBlockState>,
@@ -2611,6 +2622,7 @@ impl GameRuntime {
     pub fn new(state: GameState) -> Self {
         Self {
             state,
+            campaign_stats: CampaignStats::default(),
             network_context: GameRuntimeNetworkContext::offline(),
             buildings: Vec::new(),
             effect_runtime_store: EffectBlockRuntimeStateStore::new(),
@@ -2641,6 +2653,7 @@ impl GameRuntime {
             storage_runtime_states: BTreeMap::new(),
             storage_linked_cores: BTreeMap::new(),
             item_taken_events: Vec::new(),
+            unit_create_events: Vec::new(),
             liquid_runtime_states: BTreeMap::new(),
             logic_runtime_states: BTreeMap::new(),
             campaign_runtime_states: BTreeMap::new(),
@@ -2682,6 +2695,35 @@ impl GameRuntime {
 
     pub fn set_network_context(&mut self, network_context: GameRuntimeNetworkContext) {
         self.network_context = network_context;
+    }
+
+    pub fn note_unit_create_event(
+        &mut self,
+        unit_id: Option<i32>,
+        unit_name: impl Into<String>,
+        team: TeamId,
+        spawner_tile: Option<i32>,
+        spawner_unit_id: Option<i32>,
+    ) -> GameRuntimeUnitCreateEvent {
+        let unit_name = unit_name.into();
+        let event = GameRuntimeUnitCreateEvent {
+            unit_id,
+            unit_name: unit_name.clone(),
+            team,
+            spawner_tile,
+            spawner_unit_id,
+        };
+
+        if team.0 as i32 == self.state.rules.default_team {
+            self.state.stats.units_created += 1;
+
+            if self.state.is_campaign() && self.network_context.core_handle_item_authoritative() {
+                self.campaign_stats.add_unit_produced(unit_name, 1);
+            }
+        }
+
+        self.unit_create_events.push(event.clone());
+        event
     }
 
     pub fn note_client_block_snapshot_parse_error(
@@ -3616,6 +3658,10 @@ impl GameRuntime {
                 _ => None,
             })
             .unwrap_or(0);
+        let created_unit_name = assembler_block
+            .plans
+            .get(current_tier.min(assembler_block.plans.len().saturating_sub(1)))
+            .map(|plan| plan.unit.clone());
         self.queue_client_assembler_unit_spawn_aftereffects(
             content,
             &building,
@@ -3629,6 +3675,9 @@ impl GameRuntime {
             return false;
         };
         unit_assembler_spawned(assembler);
+        if let Some(unit_name) = created_unit_name {
+            self.note_unit_create_event(None, unit_name, building.team, Some(tile_pos), None);
+        }
         true
     }
 
@@ -9622,6 +9671,7 @@ impl GameRuntime {
         self.storage_runtime_states.clear();
         self.storage_linked_cores.clear();
         self.item_taken_events.clear();
+        self.unit_create_events.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
         self.campaign_runtime_states.clear();
@@ -19089,6 +19139,7 @@ impl GameRuntime {
                 report.invalid_plans += 1;
                 continue;
             };
+            let created_unit_name = plan.unit.clone();
 
             let plan_unit = content.unit_by_name(&plan.unit);
             let can_create = plan_unit
@@ -19259,6 +19310,7 @@ impl GameRuntime {
             }
 
             if completed_unit {
+                self.note_unit_create_event(None, created_unit_name, team, Some(tile_pos), None);
                 report.completed_units += 1;
                 report.spawned_tiles.push(tile_pos);
                 if consumed_payloads {
@@ -23928,6 +23980,8 @@ mod tests {
         let plan = &assembler_block.plans[0];
         let tile_pos = point2_pack(12, 18);
         let mut runtime = GameRuntime::default();
+        runtime.state.rules.default_team = 4;
+        runtime.state.set_sector(Some(Sector::new(12)));
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(32, 32);
         runtime.add_building(BuildingComp::new(
@@ -24000,6 +24054,13 @@ mod tests {
         assert_eq!(report.unit.assembler.completed_units, 1);
         assert_eq!(report.unit.assembler.consumed_payload_batches, 1);
         assert_eq!(report.unit.assembler.missing_requirements, 0);
+        assert_eq!(runtime.unit_create_events.len(), 1);
+        assert_eq!(runtime.unit_create_events[0].unit_id, None);
+        assert_eq!(runtime.unit_create_events[0].unit_name, plan.unit);
+        assert_eq!(runtime.unit_create_events[0].team, TeamId(4));
+        assert_eq!(runtime.unit_create_events[0].spawner_tile, Some(tile_pos));
+        assert_eq!(runtime.state.stats.units_created, 1);
+        assert_eq!(runtime.campaign_stats.get_unit_produced(&plan.unit), 1);
         let Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) =
             runtime.unit_runtime_states.get(&tile_pos)
         else {
@@ -25165,6 +25226,9 @@ mod tests {
         let router = content.block_by_name("router").unwrap();
         let tile_pos = point2_pack(17, 18);
         let mut runtime = GameRuntime::default();
+        runtime.set_network_context(GameRuntimeNetworkContext::client());
+        runtime.state.rules.default_team = 4;
+        runtime.state.set_sector(Some(Sector::new(5)));
         runtime.state.world.resize(32, 32);
         runtime.add_building(BuildingComp::new(
             tile_pos,
@@ -25203,6 +25267,21 @@ mod tests {
         else {
             panic!("assembler sidecar should remain present after assemblerUnitSpawned");
         };
+        assert_eq!(runtime.unit_create_events.len(), 1);
+        assert_eq!(runtime.unit_create_events[0].unit_id, None);
+        assert_eq!(
+            runtime.unit_create_events[0].unit_name,
+            assembler_block.plans[0].unit
+        );
+        assert_eq!(runtime.unit_create_events[0].team, TeamId(4));
+        assert_eq!(runtime.unit_create_events[0].spawner_tile, Some(tile_pos));
+        assert_eq!(runtime.state.stats.units_created, 1);
+        assert_eq!(
+            runtime
+                .campaign_stats
+                .get_unit_produced(&assembler_block.plans[0].unit),
+            0
+        );
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
         assert_eq!(assembler.command_pos, Some(IoVec2::new(14.0, 15.0)));
