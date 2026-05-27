@@ -1893,6 +1893,7 @@ impl ServerLauncher {
             }
         }
         let mut cell_deposits = Vec::new();
+        let mut cell_removed_ids = Vec::new();
         for event in &report.events {
             if !event.liquid_update {
                 continue;
@@ -1900,6 +1901,9 @@ impl ServerLauncher {
             let Some(target_name) = event.liquid.reaction_target.as_deref() else {
                 continue;
             };
+            if !self.runtime.state.rules.fire {
+                continue;
+            }
             let Some(target_liquid_id) = self
                 .content_loader
                 .liquid_by_name(target_name)
@@ -1959,43 +1963,60 @@ impl ServerLauncher {
             }
 
             if event.liquid.cell_spread_damage > 0.0 {
-                let Some(build_ref) = self.runtime.state.world.build(event.tile.x, event.tile.y)
-                else {
-                    continue;
-                };
-                let Some(building) = self
+                let build_tile_pos = self
                     .runtime
-                    .buildings
-                    .iter_mut()
-                    .find(|building| building.tile_pos == build_ref.tile_pos)
-                else {
-                    continue;
-                };
-                let Some(liquids) = building.liquids.as_mut() else {
-                    continue;
-                };
-                let available = liquids.get(target_liquid_id);
-                if available <= 0.0001 {
-                    continue;
+                    .state
+                    .world
+                    .build(event.tile.x, event.tile.y)
+                    .map(|build_ref| build_ref.tile_pos);
+                if let Some(build_tile_pos) = build_tile_pos {
+                    if let Some(building) = self
+                        .runtime
+                        .buildings
+                        .iter_mut()
+                        .find(|building| building.tile_pos == build_tile_pos)
+                    {
+                        if let Some(liquids) = building.liquids.as_mut() {
+                            let available = liquids.get(target_liquid_id);
+                            if available > 0.0001 {
+                                let amount_spread = (available
+                                    * event.liquid.cell_spread_conversion)
+                                    .min(event.liquid.cell_max_spread * delta_ticks)
+                                    / 2.0;
+                                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                                    cell_deposits.push((
+                                        PuddleTileView::new(event.tile.x, event.tile.y)
+                                            .with_build(building.team.0 as i32),
+                                        Some(PuddleTileView::new(
+                                            event.tile.x + dx,
+                                            event.tile.y + dy,
+                                        )),
+                                        event.liquid.clone(),
+                                        amount_spread,
+                                    ));
+                                }
+                                building.damage(
+                                    event.liquid.cell_spread_damage * delta_ticks * scaling,
+                                    Self::current_millis() as f32,
+                                );
+                                updates += 1;
+                            }
+                        }
+                    }
                 }
-                let amount_spread = (available * event.liquid.cell_spread_conversion)
-                    .min(event.liquid.cell_max_spread * delta_ticks)
-                    / 2.0;
-                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
-                    cell_deposits.push((
-                        PuddleTileView::new(event.tile.x, event.tile.y)
-                            .with_build(building.team.0 as i32),
-                        Some(PuddleTileView::new(event.tile.x + dx, event.tile.y + dy)),
-                        event.liquid.clone(),
-                        amount_spread,
-                    ));
-                }
-                building.damage(
-                    event.liquid.cell_spread_damage * delta_ticks * scaling,
-                    Self::current_millis() as f32,
-                );
-                updates += 1;
             }
+
+            let absorb_report = self.runtime.server_puddles.absorb_neighbor_target_puddles(
+                event.tile.x,
+                event.tile.y,
+                &event.liquid,
+                event.amount,
+                delta_ticks,
+            );
+            if absorb_report.absorbed > 0 {
+                updates += absorb_report.absorbed;
+            }
+            cell_removed_ids.extend(absorb_report.removed_ids);
         }
         for (tile, source, liquid, amount) in cell_deposits {
             self.runtime.server_puddles.deposit(
@@ -2028,9 +2049,11 @@ impl ServerLauncher {
             }
         }
 
-        if !report.removed_ids.is_empty() {
-            self.broadcast_server_hidden_snapshot(&report.removed_ids)?;
-            updates += report.removed_ids.len();
+        let mut removed_ids = report.removed_ids;
+        removed_ids.extend(cell_removed_ids);
+        if !removed_ids.is_empty() {
+            self.broadcast_server_hidden_snapshot(&removed_ids)?;
+            updates += removed_ids.len();
         }
         Ok(updates)
     }
@@ -8999,6 +9022,66 @@ mod tests {
             neoplasm_puddle.puddle.amount + neoplasm_puddle.puddle.accepting > 1.1,
             "absorbed water should be converted by CellLiquid spreadConversion and accepted by the target puddle"
         );
+    }
+
+    #[test]
+    fn server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(free_local_port()).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(4, 4);
+        launcher.runtime.server_puddles = Puddles::new(4, 4);
+        let neoplasm = launcher.content_loader.liquid_by_name("neoplasm").unwrap();
+        let water = launcher.content_loader.liquid_by_name("water").unwrap();
+        let neoplasm_info = PuddleLiquidInfo::from(neoplasm);
+        assert_eq!(neoplasm_info.reaction_target.as_deref(), Some("water"));
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1)),
+            neoplasm_info,
+            70.0,
+            PuddleDepositContext::default(),
+        );
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(2, 1)),
+            PuddleLiquidInfo::from(water),
+            20.0,
+            PuddleDepositContext::default(),
+        );
+        let water_puddle_id = launcher.runtime.server_puddles.get(2, 1).unwrap().id;
+
+        launcher.tick_server_puddles(1.0).unwrap();
+
+        let source = launcher.runtime.server_puddles.get_entry(1, 1).unwrap();
+        assert_eq!(source.liquid.name, "neoplasm");
+        assert!(
+            source.puddle.amount > 70.0,
+            "CellLiquid.update should add absorbed neighbor puddle amount to the source puddle"
+        );
+        let replacement = launcher
+            .runtime
+            .server_puddles
+            .get_entry(2, 1)
+            .expect("low-residue target puddle should be replaced by neoplasm");
+        assert_eq!(replacement.liquid.name, "neoplasm");
+        assert!(
+            replacement.puddle.amount
+                >= mindustry_core::mindustry::entities::puddles::MAX_LIQUID / 3.0,
+            "replacement deposit should use at least maxLiquid / 3 like Java CellLiquid.update"
+        );
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::HiddenSnapshotCallPacket(packet)
+                        if packet.ids.contains(&water_puddle_id)
+                )
+        }));
     }
 
     #[test]

@@ -372,6 +372,14 @@ pub struct PuddleUpdateReport {
     pub events: Vec<PuddleUpdateEvent>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PuddleCellAbsorbReport {
+    pub removed_ids: Vec<i32>,
+    pub absorbed: usize,
+    pub replaced: usize,
+    pub absorbed_amount: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Puddles {
     width: i32,
@@ -552,6 +560,102 @@ impl Puddles {
         let taken = entry.puddle.amount.min(amount.max(0.0));
         entry.puddle.amount -= taken;
         taken
+    }
+
+    pub fn absorb_neighbor_target_puddles(
+        &mut self,
+        x: i32,
+        y: i32,
+        liquid: &PuddleLiquidInfo,
+        amount: f32,
+        delta: f32,
+    ) -> PuddleCellAbsorbReport {
+        let mut report = PuddleCellAbsorbReport::default();
+        let Some(target_name) = liquid.reaction_target.as_deref() else {
+            return report;
+        };
+        if !self.in_bounds(x, y) {
+            return report;
+        }
+        let scaling = (amount / MAX_LIQUID).clamp(0.0, 1.0).powf(2.0);
+        if scaling <= 0.0 {
+            return report;
+        }
+        let source_key = (x, y);
+        let Some(source_entry) = self.puddles.get(&source_key) else {
+            return report;
+        };
+        if !source_entry.liquid.same_liquid(liquid) {
+            return report;
+        }
+        let source_tile = source_entry
+            .puddle
+            .tile
+            .map(|tile| {
+                let mut view = PuddleTileView::new(tile.x, tile.y);
+                view.build_present = tile.build_present;
+                view
+            })
+            .unwrap_or_else(|| PuddleTileView::new(x, y));
+
+        for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+            let neighbor_key = (x + dx, y + dy);
+            if !self.in_bounds(neighbor_key.0, neighbor_key.1) {
+                continue;
+            }
+            let Some(other_amount) = self.puddles.get(&neighbor_key).and_then(|entry| {
+                (entry.liquid.name == target_name).then_some(entry.puddle.amount)
+            }) else {
+                continue;
+            };
+            let transfer = other_amount
+                .min((liquid.cell_max_spread * delta * scaling).max(other_amount * 0.25 * scaling));
+            if transfer <= 0.0 {
+                continue;
+            }
+
+            let mut replace_neighbor = false;
+            if let Some(neighbor) = self.puddles.get_mut(&neighbor_key) {
+                if neighbor.liquid.name != target_name {
+                    continue;
+                }
+                let transfer = transfer.min(neighbor.puddle.amount);
+                neighbor.puddle.amount -= transfer;
+                replace_neighbor = neighbor.puddle.amount <= MAX_LIQUID / 3.0;
+                report.absorbed += 1;
+                report.absorbed_amount += transfer;
+            }
+            if let Some(source) = self.puddles.get_mut(&source_key) {
+                source.puddle.amount += transfer;
+            } else {
+                break;
+            }
+
+            if replace_neighbor {
+                if let Some(removed) = self.puddles.remove(&neighbor_key) {
+                    report.removed_ids.push(removed.puddle.id);
+                    let neighbor_tile = removed
+                        .puddle
+                        .tile
+                        .map(|tile| {
+                            let mut view = PuddleTileView::new(tile.x, tile.y);
+                            view.build_present = tile.build_present;
+                            view
+                        })
+                        .unwrap_or_else(|| PuddleTileView::new(neighbor_key.0, neighbor_key.1));
+                    self.deposit(
+                        Some(neighbor_tile),
+                        Some(source_tile.clone()),
+                        liquid.clone(),
+                        transfer.max(MAX_LIQUID / 3.0),
+                        PuddleDepositContext::default(),
+                    );
+                    report.replaced += 1;
+                }
+            }
+        }
+
+        report
     }
 
     pub fn has_liquid(&self, tile: Option<&PuddleTileView>, liquid: &PuddleLiquidInfo) -> bool {
@@ -809,6 +913,12 @@ mod tests {
         liquid
     }
 
+    fn neoplasm() -> PuddleLiquidInfo {
+        let mut liquid = PuddleLiquidInfo::new("neoplasm");
+        liquid.reaction_target = Some("water".to_string());
+        liquid
+    }
+
     #[test]
     fn deposit_creates_puddle_on_server_and_ignores_clients() {
         let tile = PuddleTileView::new(2, 3);
@@ -881,6 +991,79 @@ mod tests {
         assert_eq!(puddles.get(1, 1).unwrap().amount, 30.0);
         assert_eq!(puddles.slurp_matching_liquid(1, 1, "water", 12.0), 12.0);
         assert_eq!(puddles.get(1, 1).unwrap().amount, 18.0);
+    }
+
+    #[test]
+    fn cell_liquid_absorbs_and_replaces_neighbor_target_puddle() {
+        let mut puddles = Puddles::new(5, 5);
+        let neoplasm = neoplasm();
+        puddles.deposit_at(
+            Some(PuddleTileView::new(2, 2)),
+            neoplasm.clone(),
+            70.0,
+            PuddleDepositContext::default(),
+        );
+        puddles.deposit_at(
+            Some(PuddleTileView::new(3, 2)),
+            water(),
+            20.0,
+            PuddleDepositContext::default(),
+        );
+        let water_id = puddles.get(3, 2).unwrap().id;
+
+        let report = puddles.absorb_neighbor_target_puddles(2, 2, &neoplasm, 70.0, 1.0);
+
+        assert_eq!(report.absorbed, 1);
+        assert_eq!(report.replaced, 1);
+        assert_eq!(report.removed_ids, vec![water_id]);
+        assert!((report.absorbed_amount - 5.0).abs() < 0.0001);
+        assert!((puddles.get(2, 2).unwrap().amount - 75.0).abs() < 0.0001);
+        let replacement = puddles.get_entry(3, 2).unwrap();
+        assert_eq!(replacement.liquid.name, "neoplasm");
+        assert!((replacement.puddle.amount - (MAX_LIQUID / 3.0)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn cell_liquid_absorbs_only_d4_target_puddles_without_replacing_large_neighbor() {
+        let mut puddles = Puddles::new(5, 5);
+        let neoplasm = neoplasm();
+        puddles.deposit_at(
+            Some(PuddleTileView::new(2, 2)),
+            neoplasm.clone(),
+            70.0,
+            PuddleDepositContext::default(),
+        );
+        puddles.deposit_at(
+            Some(PuddleTileView::new(3, 2)),
+            water(),
+            40.0,
+            PuddleDepositContext::default(),
+        );
+        puddles.deposit_at(
+            Some(PuddleTileView::new(3, 3)),
+            water(),
+            20.0,
+            PuddleDepositContext::default(),
+        );
+        puddles.deposit_at(
+            Some(PuddleTileView::new(2, 1)),
+            oil(),
+            20.0,
+            PuddleDepositContext::default(),
+        );
+
+        let report = puddles.absorb_neighbor_target_puddles(2, 2, &neoplasm, 70.0, 1.0);
+
+        assert_eq!(report.absorbed, 1);
+        assert_eq!(report.replaced, 0);
+        assert!(report.removed_ids.is_empty());
+        assert!((report.absorbed_amount - 10.0).abs() < 0.0001);
+        assert_eq!(puddles.get_entry(3, 2).unwrap().liquid.name, "water");
+        assert!((puddles.get(3, 2).unwrap().amount - 30.0).abs() < 0.0001);
+        assert_eq!(puddles.get_entry(3, 3).unwrap().liquid.name, "water");
+        assert!((puddles.get(3, 3).unwrap().amount - 20.0).abs() < 0.0001);
+        assert_eq!(puddles.get_entry(2, 1).unwrap().liquid.name, "oil");
+        assert!((puddles.get(2, 1).unwrap().amount - 20.0).abs() < 0.0001);
     }
 
     #[test]

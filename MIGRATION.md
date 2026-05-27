@@ -4853,7 +4853,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --check`
   - `git diff --check`
 - 仍未完成：
-  - nearby puddle 吸收/替换分支仍未完整迁移；
   - `Events.fire(Trigger.neoplasmReact)` 还没有 Rust event bus 等价物；
   - current-building damage/spread 已有入口但仍缺更细的 Java parity 测试；
   - d4c 顺序/集合当前按 d4 + diagonal 显式数组近似，后续应迁移统一 Geometry 常量。
+
+### 12.163 CellLiquid.update nearby puddle absorption/replacement
+
+- 2026-05-28：继续对照 Java `CellLiquid.update(Puddle)`，把 `spread to nearby puddles` 分支接入 `Puddles` 与 server tick，避免 neoplasm 只会吸建筑液体、不会吞噬邻接 water puddle。
+- Java 依据：
+  - 遍历 `Geometry.d4` 四邻 tile；
+  - 若 `Puddles.get(tile)` 存在且 `other.liquid == spreadTarget`：
+    - `amount = min(other.amount, max(maxSpread * Time.delta * scaling, other.amount * 0.25f * scaling))`；
+    - `other.amount -= amount`，当前 puddle `amount += amount`；
+    - 若 `other.amount <= maxLiquid / 3f`，执行 `other.remove()` 并 `Puddles.deposit(tile, puddle.tile, this, max(amount, maxLiquid / 3f))`。
+- Rust 新增/变化：
+  - `PuddleCellAbsorbReport` 记录吸收次数、替换次数、吸收量和被移除 puddle entity id；
+  - `Puddles::absorb_neighbor_target_puddles(...)` 在核心集合内完成四邻 target puddle 扣减、source amount 增量、低残量 remove + replacement deposit，避免 server 层直接多重可变借用 `HashMap`；
+  - `ServerLauncher::tick_server_puddles(...)` 在消费 `liquid_update` event 时调用该 helper，并把额外 removed ids 合并到现有 `HiddenSnapshotCallPacket` 广播列表；
+  - `CellLiquid.update` 入口遵守 Java `Vars.state.rules.fire` 门控，rules.fire=false 时跳过 neoplasm spread/update 分支；
+  - 修正 current-building damage/spread 分支：当前 tile 没有 building 时不再 `continue` 跳过后续 nearby puddle 吸收分支。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core cell_liquid_absorbs --lib`
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id --lib`
+- 仍未完成：
+  - `Events.fire(Trigger.neoplasmReact)` 还没有 Rust event bus 等价物；
+  - current-building water damage/spread 仍缺更细的 Java parity 测试；
+  - building 吸收 deposit 与 nearby puddle 吸收之间的执行顺序仍是 Rust 现有批处理近似，后续如出现 parity 差异需进一步收紧到 Java 单 puddle update 顺序；
+  - `Geometry.d4/d4c` 仍是局部显式数组，后续应统一迁移 Geometry 常量。

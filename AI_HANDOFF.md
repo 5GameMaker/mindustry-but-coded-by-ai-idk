@@ -3493,3 +3493,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - current-building water damage/spread 的严格测试；
      - `Events.fire(Trigger.neoplasmReact)` 等价事件；
      - 统一迁移 `Geometry.d4c` 常量，替代当前显式方向数组。
+
+---
+
+## 105. 最新闭环记录：CellLiquid.update 邻接 puddle 吸收/替换
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：补齐 Java `CellLiquid.update(Puddle)` 中 `spread to nearby puddles` 分支，让 neoplasm 能按 `spreadTarget=water` 吞噬四邻 water puddle，并在低残量时移除旧 puddle、替换成 neoplasm puddle。
+- Java 依据：
+  - `Geometry.d4` 四邻扫描；
+  - `amount = min(other.amount, max(maxSpread * Time.delta * scaling, other.amount * 0.25f * scaling))`；
+  - `other.amount -= amount; puddle.amount += amount`；
+  - `other.amount <= maxLiquid / 3f` 时 `other.remove()`，再 `Puddles.deposit(tile, puddle.tile, this, max(amount, maxLiquid / 3f))`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - 新增 `PuddleCellAbsorbReport`；
+    - 新增 `Puddles::absorb_neighbor_target_puddles(...)`，在 `Puddles` 内部完成四邻 target puddle 吸收、source amount 增量、低残量 remove + replacement deposit，并返回 removed ids；
+    - 新增 core 测试覆盖“吸收并替换”和“只处理 D4 target puddle，不处理对角/非目标液体”。
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 对 `liquid_update + reaction_target` event 调用该 helper；
+    - `CellLiquid.update` 入口遵守 Java `Vars.state.rules.fire` 门控；
+    - 将 helper 返回的 removed ids 合并进现有 hidden snapshot 广播；
+    - 修正 current-building damage/spread 分支的早退：当前 tile 无 building 时不再跳过 nearby puddle 吸收。
+- 已跑验证：
+  - `cargo test -p mindustry-core cell_liquid_absorbs --lib`
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id --lib`
+- 当前仍需继续：
+  1. 跑收尾验证：`server_puddle_cell_liquid_update_absorbs_spread_target_from_neighbor_building` 回归、`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入新生物液体坑邻接替换`。
+  3. 后续补：
+     - `Events.fire(Trigger.neoplasmReact)` 等价事件；
+     - current-building water damage/spread 的严格 Java parity 测试；
+     - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
+     - 统一迁移 `Geometry.d4/d4c` 常量。
