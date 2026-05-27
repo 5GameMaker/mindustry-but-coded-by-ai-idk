@@ -4624,3 +4624,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Mathf.chanceDelta(slurpEffectChance)`、`Tmp.v1.rnd(Mathf.random(unit.hitSize/2f))` 尚未接可复现 RNG；
   - `unit.isFlying()` 当前按 Rust `type_info.flying/elevation` 最小判断，后续需与完整 elevation/hover 状态机对齐；
   - server puddle 同步到 desktop snapshot 仍需补齐。
+
+### 12.153 server puddle entity snapshot sync
+
+- 2026-05-27：在 `LiquidExplodeAbility` 与 `LiquidRegenAbility` 已经把 neoplasm puddle 写入 `GameRuntime.server_puddles` 后，继续补齐服务端到客户端的实体快照链路，避免 puddle runtime 只停留在 server sidecar。
+- Java / 协议依据：
+  - puddle 是实体快照中的 typed entity，外层写 `entity id + class id + sync bytes`；
+  - Rust 已有 `PUDDLE_CLASS_ID=13`、`PuddleSyncWire`、`type_io::write_puddle_sync/read_puddle_sync` 与客户端 `EntityClassKind::Puddle` materialize 分发。
+- Rust 新增/变化：
+  - `Puddles::entries()` 暴露只读迭代器，供服务端 snapshot builder 读取 active puddle entries；
+  - `ServerLauncher::server_unit_entity_snapshot_packet()` 在 cargo unit 记录之后继续写入 `runtime.server_puddles`：
+    - entity id 使用 `PuddleComp.id`；
+    - type id 固定 `PUDDLE_CLASS_ID`；
+    - `PuddleSyncWire` 写入 amount、通过 liquid name 反查得到的 content liquid id、`point2_pack(tile.x, tile.y)`、world `x/y`；
+    - 已移除或 amount<=0 的 puddle 跳过，content 中找不到 liquid id 的 puddle 跳过。
+  - 新增 `server_entity_snapshot_packet_includes_runtime_puddles_for_client_sync`，直接把服务端 packet 喂给 `GameRuntime::apply_client_entity_snapshot_packet_with_content(...)`，断言客户端 `client_puddle_snapshot_entities` materialize 出同 id/amount/tile/liquid 的 puddle。
+- 新增/更新验证：
+  - `cargo test -p mindustry-server server_entity_snapshot_packet_includes_runtime_puddles_for_client_sync --lib`
+- 仍未完成：
+  - puddle removal/evaporation 还没有通过 hidden ids 或 delete snapshot 同步给客户端，后续要防止旧 puddle 残影；
+  - `server_unit_entity_snapshot_packet` 仍沿用历史函数名，实际已经混合 cargo unit + puddle，后续可在不破坏调用方时重命名为通用 entity snapshot builder；
+  - Java `Simplex.noise2d` 边缘噪声、真实 floor/env/space/boil 随机上下文和 `Fx.neoplasmHeal` 表现层仍待迁移。

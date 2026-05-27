@@ -27,7 +27,7 @@ use mindustry_core::mindustry::entities::{
     },
     entity_class_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
     LiquidExplodeDepositPlan, PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
-    UnitCapRules, UnitCapTeam, UnitCapType, UnitSpawnAbility,
+    UnitCapRules, UnitCapTeam, UnitCapType, UnitSpawnAbility, PUDDLE_CLASS_ID,
 };
 use mindustry_core::mindustry::game::vanilla_teams;
 use mindustry_core::mindustry::input::{
@@ -2659,6 +2659,35 @@ impl ServerLauncher {
             data.extend_from_slice(&unit.id().to_be_bytes());
             data.push(type_id);
             type_io::write_unit_sync(&mut data, &self.content_loader, &unit.to_sync_wire())?;
+            amount += 1;
+        }
+        for (_tile, entry) in self.runtime.server_puddles.entries() {
+            if amount == i16::MAX {
+                break;
+            }
+            if entry.puddle.removed || entry.puddle.amount <= 0.0 {
+                continue;
+            }
+            let Some(liquid_id) = self
+                .content_loader
+                .liquid_by_name(&entry.liquid.name)
+                .map(|liquid| liquid.base.mappable.base.id)
+            else {
+                continue;
+            };
+            let tile_pos = entry.puddle.tile.map(|tile| point2_pack(tile.x, tile.y));
+            data.extend_from_slice(&entry.puddle.id.to_be_bytes());
+            data.push(PUDDLE_CLASS_ID);
+            type_io::write_puddle_sync(
+                &mut data,
+                &type_io::PuddleSyncWire {
+                    amount: entry.puddle.amount,
+                    liquid_id: Some(liquid_id),
+                    tile_pos,
+                    x: entry.puddle.x,
+                    y: entry.puddle.y,
+                },
+            )?;
             amount += 1;
         }
         Ok(EntitySnapshotCallPacket { amount, data })
@@ -8242,6 +8271,56 @@ mod tests {
             "cargo unit snapshot should be within transfer range after moveTo"
         );
         assert_eq!(client_unit.items.stack.amount, 0);
+    }
+
+    #[test]
+    fn server_entity_snapshot_packet_includes_runtime_puddles_for_client_sync() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.server_puddles = Puddles::new(32, 32);
+        let neoplasm = launcher
+            .content_loader
+            .liquid_by_name("neoplasm")
+            .expect("v158.1 content should include neoplasm");
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(10, 12)),
+            PuddleLiquidInfo::from(neoplasm),
+            18.0,
+            PuddleDepositContext::default(),
+        );
+        let server_puddle = launcher
+            .runtime
+            .server_puddles
+            .get(10, 12)
+            .expect("server puddle should be registered")
+            .clone();
+
+        let packet = launcher
+            .server_unit_entity_snapshot_packet()
+            .expect("puddle snapshot should encode");
+
+        assert_eq!(packet.amount, 1);
+        let mut client_runtime = GameRuntime::default();
+        let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
+            &launcher.content_loader,
+            packet.amount,
+            &packet.data,
+        );
+        assert_eq!(report.entity_parse_errors, 0);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        let client_puddle = client_runtime
+            .client_puddle_snapshot_entities
+            .get(&server_puddle.id)
+            .expect("client should materialize puddle entity from server snapshot");
+        assert_eq!(client_puddle.amount, server_puddle.amount);
+        assert_eq!(client_puddle.tile.unwrap().x, 10);
+        assert_eq!(client_puddle.tile.unwrap().y, 12);
+        assert_eq!(
+            client_puddle
+                .liquid
+                .expect("client puddle should resolve neoplasm liquid")
+                .cap_puddles,
+            server_puddle.liquid.unwrap().cap_puddles
+        );
     }
 
     #[test]

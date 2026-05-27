@@ -3165,3 +3165,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入新生物吸液回血运行时`。
   3. 后续补 `Fx.neoplasmHeal` effect queue、chance/random offset、完整 flying/elevation 判断、server puddle snapshot 广播到 desktop。
+
+---
+
+## 95. 最新闭环记录：server puddle entity snapshot sync
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：把 `GameRuntime.server_puddles` 中的服务端 puddle 写入 `EntitySnapshotCallPacket`，让桌面客户端能通过已有 typed runtime materialize puddle entity。
+- 已确认上游/基线：
+  - `git -C "D:/MDT/mindustry-upstream-v157.4" fetch --tags origin`
+  - `git -C "D:/MDT/mindustry-upstream-v157.4" describe --tags --always --dirty` => `v158.1`
+  - `git -C "D:/MDT/mindustry-upstream-v157.4" rev-parse HEAD` => `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - 新增 `Puddles::entries()`，只读暴露内部 `(tile, PuddleEntry)` iterator。
+  - `server/src/lib.rs`
+    - import `PUDDLE_CLASS_ID`；
+    - `server_unit_entity_snapshot_packet()` 继续写 `runtime.server_puddles`：
+      - 跳过 removed / amount<=0 / content 中无法反查 liquid id 的 puddle；
+      - `entity_id = entry.puddle.id`；
+      - `type_id = PUDDLE_CLASS_ID`；
+      - `PuddleSyncWire { amount, liquid_id: Some(...), tile_pos: point2_pack(tile.x,tile.y), x, y }`；
+    - 新增 `server_entity_snapshot_packet_includes_runtime_puddles_for_client_sync`，验证 server packet 经 `GameRuntime::apply_client_entity_snapshot_packet_with_content(...)` 后进入 `client_puddle_snapshot_entities`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-server server_entity_snapshot_packet_includes_runtime_puddles_for_client_sync --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`同步服务端液体坑实体快照`。
+  3. 后续优先补：
+     - puddle removal/evaporation 的 hidden/delete 同步，避免客户端残影；
+     - `LiquidRegenAbility` 的 `Fx.neoplasmHeal` effect queue；
+     - `LiquidExplodeAbility` 的 Java `Simplex.noise2d` 边缘噪声与真实 floor/env/space/boil 随机上下文；
+     - 把当前混合 cargo unit + puddle 的 `server_unit_entity_snapshot_packet` 逐步泛化命名和拆分。

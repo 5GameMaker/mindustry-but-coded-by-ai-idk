@@ -341,6 +341,10 @@ impl Puddles {
         self.puddles.get(&(x, y))
     }
 
+    pub fn entries(&self) -> impl Iterator<Item = (&(i32, i32), &PuddleEntry)> {
+        self.puddles.iter()
+    }
+
     pub fn slurp_matching_liquid(&mut self, x: i32, y: i32, liquid_name: &str, amount: f32) -> f32 {
         let Some(entry) = self.puddles.get_mut(&(x, y)) else {
             return 0.0;
