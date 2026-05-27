@@ -4208,3 +4208,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续圆粒子/光照系列：`smokeAoeCloud`、`missileTrailSmokeSmall`、`missileTrailSmoke`；
   2. 后续如果迁移 `steamCoolSmoke`，需要补 `Interp.pow2Out/pow3Out` 与 direction/progress 组合；
   3. 三角形类 `shootSmall/shootBig` 需要先设计 triangle primitive。
+
+---
+
+## 126. 最新闭环记录：Fx.smokeAoeCloud 高数量烟云迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `Fx.smokeAoeCloud`，补齐高 count 圆粒子烟云和非默认 clip 的标准 effect metadata。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:604` 附近；
+  - id 为 `55`；
+  - lifetime `60f * 3f = 180f`；
+  - clip `250f`；
+  - 颜色 `e.color`，alpha `0.65f`；
+  - `randLenVectors(e.id, 80, 90f, ...)`；
+  - 半径 `6f * clamp(fin / 0.1f) * clamp(fout / 0.1f)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SMOKE_AOE_CLOUD_ID = 55`；
+    - 接入 `standard_effect_id("smokeAoeCloud")`；
+    - 接入 `standard_effect(...)`，lifetime `180.0`、clip `250.0`；
+    - `standard_effect_draw_plan(...)` 新增 `smokeAoeCloud`，复用 `SeededCircleParticles`，`count=80`、`length=90.0`、`alpha=0.65`、半径使用 plan 阶段固定 `radius_base`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `missileTrailSmokeSmall` / `missileTrailSmoke`，需要对 `rand.setSeed(b.id*2+i)` 多 pass 粒子和 `Drawf.light` 做可复用建模；
+  2. 或先做 `steamCoolSmoke`，需要补 Interp pow2Out/pow3Out 与方向扇区公式。

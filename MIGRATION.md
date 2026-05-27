@@ -5920,3 +5920,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 带 `ParticleConsumer` 的方向/progress 重载仍未迁移；当前只覆盖 `Floatc2` 方向扇区重载；
   - `shootSmall/shootBig` 等三角形 primitive 类 Fx 仍未接入；
   - 真实 desktop 2D/GPU backend 尚未消费这些 primitive。
+
+### 12.200 Fx.smokeAoeCloud 高数量烟云粒子绘制计划
+
+- 2026-05-28：继续对照 `Fx.java`，迁移 `smokeAoeCloud`；该效果不需要新增 primitive 类型，但覆盖了高 count 圆粒子和非默认 clip。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:604` 附近：
+    - `smokeAoeCloud = new Effect(60f * 3f, 250f, e -> { ... })`；
+    - `color(e.color, 0.65f)`；
+    - `randLenVectors(e.id, 80, 90f, ...)`；
+    - `Fill.circle(..., 6f * Mathf.clamp(e.fin() / 0.1f) * Mathf.clamp(e.fout() / 0.1f))`。
+  - 本地按 `new Effect` 声明顺序计数，`smokeAoeCloud` 为 `id=55`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SMOKE_AOE_CLOUD_ID = 55`；
+    - `standard_effect_id("smokeAoeCloud")`、`standard_effect(FX_SMOKE_AOE_CLOUD_ID)` 接入；
+    - lifetime 为 `180.0`，clip 为 `250.0`；
+    - `standard_effect_draw_plan(...)` 新增 `smokeAoeCloud`：
+      - `input_color = Some(color)`；
+      - `alpha = 0.65`；
+      - `count = 80`；
+      - `length = 90.0`；
+      - 半径在 plan 阶段计算为 `6.0 * clamp(fin / 0.1) * clamp(fout / 0.1)`，作为每个粒子的固定 `radius_base`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime/clip；
+  - `standard_effect_draw_plan_covers_simple_smoke_and_fire_variants` 覆盖 draw plan、80 个 seeded circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - `smokeAoeCloud` 仍只进入标准 effect primitive/frame data 边界；
+  - 真实 desktop renderer 未消费；
+  - 完整 `Fx.java` registry 仍待继续迁移。

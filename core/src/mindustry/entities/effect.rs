@@ -6,6 +6,8 @@ pub const DEFAULT_EFFECT_CLIP: f32 = 50.0;
 pub const DEFAULT_EFFECT_LAYER: f32 = 110.0;
 /// Upstream `Fx.unitAssemble` id in `mindustry.content.Fx` for v158.1.
 pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
+/// Upstream `Fx.smokeAoeCloud` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SMOKE_AOE_CLOUD_ID: i32 = 55;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
 /// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -56,6 +58,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "rocketSmoke" => Some(FX_ROCKET_SMOKE_ID),
         "rocketSmokeLarge" => Some(FX_ROCKET_SMOKE_LARGE_ID),
         "magmasmoke" => Some(FX_MAGMA_SMOKE_ID),
+        "smokeAoeCloud" => Some(FX_SMOKE_AOE_CLOUD_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
@@ -86,6 +89,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_ROCKET_SMOKE_LARGE_ID, 220.0, DEFAULT_EFFECT_CLIP)
         }
         FX_MAGMA_SMOKE_ID => Effect::with_lifetime(FX_MAGMA_SMOKE_ID, 110.0, DEFAULT_EFFECT_CLIP),
+        FX_SMOKE_AOE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_AOE_CLOUD_ID, 180.0, 250.0),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
             Effect::with_lifetime(FX_UNIT_ASSEMBLE_ID, 70.0, DEFAULT_EFFECT_CLIP)
@@ -509,6 +513,45 @@ pub fn standard_effect_draw_plan(
             radius: fslope * 6.0,
             stroke: 0.0,
             particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_SMOKE_AOE_CLOUD_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 0.65,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 80,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 90.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 6.0 * (fin / 0.1).clamp(0.0, 1.0) * (fout / 0.1).clamp(0.0, 1.0),
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
             light_color: None,
             light_radius: 0.0,
             light_opacity: 0.0,
@@ -2191,6 +2234,10 @@ mod tests {
             Some(FX_ROCKET_SMOKE_LARGE_ID)
         );
         assert_eq!(standard_effect_id("magmasmoke"), Some(FX_MAGMA_SMOKE_ID));
+        assert_eq!(
+            standard_effect_id("smokeAoeCloud"),
+            Some(FX_SMOKE_AOE_CLOUD_ID)
+        );
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
@@ -2245,6 +2292,9 @@ mod tests {
             220.0
         );
         assert_eq!(standard_effect(FX_MAGMA_SMOKE_ID).unwrap().lifetime, 110.0);
+        let smoke_aoe = standard_effect(FX_SMOKE_AOE_CLOUD_ID).unwrap();
+        assert_eq!(smoke_aoe.lifetime, 180.0);
+        assert_eq!(smoke_aoe.clip, 250.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
@@ -2573,6 +2623,29 @@ mod tests {
         .unwrap();
         assert_eq!(magma.kind, StandardEffectDrawKind::FilledCircle);
         assert_eq!(magma.radius, 6.0);
+
+        let smoke_aoe = standard_effect_draw_plan(
+            Some(FX_SMOKE_AOE_CLOUD_ID as u16),
+            57,
+            3.0,
+            4.0,
+            0.0,
+            90.0,
+            180.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            smoke_aoe.kind,
+            StandardEffectDrawKind::SeededCircleParticles
+        );
+        assert_eq!(smoke_aoe.input_color, Some(DecalColor::WHITE));
+        assert_eq!(smoke_aoe.alpha, 0.65);
+        let smoke_aoe_particles = smoke_aoe.particles.unwrap();
+        assert_eq!(smoke_aoe_particles.count, 80);
+        assert_eq!(smoke_aoe_particles.length, 90.0);
+        assert_eq!(smoke_aoe_particles.radius_base, 6.0);
+        assert_eq!(smoke_aoe.circle_render_primitives_from_seed().len(), 80);
 
         let burning = standard_effect_draw_plan(
             Some(FX_BURNING_ID as u16),
