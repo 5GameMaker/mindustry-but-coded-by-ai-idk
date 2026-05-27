@@ -4877,6 +4877,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_neighbor_target_puddle_and_hides_removed_id --lib`
 - 仍未完成：
   - `Events.fire(Trigger.neoplasmReact)` 还没有 Rust event bus 等价物；
-  - current-building water damage/spread 仍缺更细的 Java parity 测试；
+  - building 吸收 deposit 与 nearby puddle 吸收之间的执行顺序仍是 Rust 现有批处理近似，后续如出现 parity 差异需进一步收紧到 Java 单 puddle update 顺序；
+  - `Geometry.d4/d4c` 仍是局部显式数组，后续应统一迁移 Geometry 常量。
+
+### 12.164 CellLiquid.update current-building damage/spread regression
+
+- 2026-05-28：为上一节已存在的 current-building damage/spread 入口补 server 回归，锁定 Java `CellLiquid.update(Puddle)` 中“液体坑所在 building 含 spreadTarget 时”的行为。
+- Java 依据：
+  - 条件：`spreadDamage > 0 && puddle.tile.build != null && puddle.tile.build.liquids != null && puddle.tile.build.liquids.get(spreadTarget) > 0.0001f`；
+  - `amountSpread = min(build.liquids.get(spreadTarget) * spreadConversion, maxSpread * Time.delta) / 2f`；
+  - 对 `Geometry.d4` 执行 `Puddles.deposit(puddle.tile, other, puddle.liquid, amountSpread)`；
+  - 对当前 building 造成 `spreadDamage * Time.delta * scaling` 伤害；该分支本身不移除 current building 中的 spreadTarget 液体。
+- Rust 验证：
+  - 新增 `server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread`：
+    - 在 neoplasm puddle 所在 tile 放置带 water 的 `liquid-router`；
+    - tick 后断言 building health 下降；
+    - 断言 building water 未被该分支移除；
+    - 断言 source puddle 通过 same-liquid deposit 的 `accepting` 接收到 `amountSpread`。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread --lib`
+- 仍未完成：
+  - `Events.fire(Trigger.neoplasmReact)` 还没有 Rust event bus 等价物；
   - building 吸收 deposit 与 nearby puddle 吸收之间的执行顺序仍是 Rust 现有批处理近似，后续如出现 parity 差异需进一步收紧到 Java 单 puddle update 顺序；
   - `Geometry.d4/d4c` 仍是局部显式数组，后续应统一迁移 Geometry 常量。

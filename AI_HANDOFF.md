@@ -3526,3 +3526,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - current-building water damage/spread 的严格 Java parity 测试；
      - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
      - 统一迁移 `Geometry.d4/d4c` 常量。
+
+---
+
+## 106. 最新闭环记录：CellLiquid.update current-building damage/spread 回归
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：给已经接入的 `CellLiquid.update` current-building damage/spread 分支补 server 回归，防止该分支只停留在未锁定行为的入口。
+- Java 依据：
+  - 当前 puddle 所在 tile 的 building 含 `spreadTarget` 且 `spreadDamage > 0` 时触发；
+  - `amountSpread = min(available * spreadConversion, maxSpread * Time.delta) / 2f`；
+  - `Puddles.deposit(puddle.tile, other, puddle.liquid, amountSpread)` 通过 same-liquid deposit 回到 source puddle 的 accepting；
+  - building 受到 `spreadDamage * Time.delta * scaling` 伤害；
+  - 该分支不会移除 current building 中的 target liquid。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - 新增 `server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread`；
+    - 测试构造 neoplasm puddle + 同 tile 带 water 的 `liquid-router`，断言 building health 下降、water 未移除、source puddle accepting 接收 `amountSpread`。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread --lib`
+- 当前仍需继续：
+  1. 跑收尾验证：相关 CellLiquid 三条 server 测试、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`锁定新生物液体坑建筑伤害`。
+  3. 后续补：
+     - `Events.fire(Trigger.neoplasmReact)` 等价事件；
+     - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
+     - 统一迁移 `Geometry.d4/d4c` 常量。

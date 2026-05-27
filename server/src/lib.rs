@@ -9032,7 +9032,7 @@ mod tests {
         };
         let mut launcher = ServerLauncher::new(Vec::new());
         launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
-        launcher.net_server.open(free_local_port()).unwrap();
+        launcher.net_server.open(6598).unwrap();
         launcher.runtime.state.set(GameStateState::Playing);
         launcher.runtime.state.world.resize(4, 4);
         launcher.runtime.server_puddles = Puddles::new(4, 4);
@@ -9082,6 +9082,69 @@ mod tests {
                         if packet.ids.contains(&water_puddle_id)
                 )
         }));
+    }
+
+    #[test]
+    fn server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(4, 4);
+        launcher.runtime.server_puddles = Puddles::new(4, 4);
+        let router = launcher
+            .content_loader
+            .block_by_name("liquid-router")
+            .unwrap()
+            .base()
+            .clone();
+        let tile_pos = point2_pack(1, 1);
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, router, TeamId(1)));
+        let water_id = launcher
+            .content_loader
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let building = launcher
+            .runtime
+            .buildings
+            .iter_mut()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        let health_before = building.health;
+        building.liquids.as_mut().unwrap().add(water_id, 10.0);
+        let neoplasm = launcher.content_loader.liquid_by_name("neoplasm").unwrap();
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1).with_build(1)),
+            PuddleLiquidInfo::from(neoplasm),
+            70.0,
+            PuddleDepositContext::default(),
+        );
+
+        launcher.tick_server_puddles(1.0).unwrap();
+
+        let building = launcher
+            .runtime
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .unwrap();
+        assert!(
+            building.health < health_before,
+            "CellLiquid.update should damage the building underneath when it contains spreadTarget"
+        );
+        assert!(
+            building.liquids.as_ref().unwrap().get(water_id) >= 9.999,
+            "current-building damage branch should not remove spreadTarget liquid"
+        );
+        let source = launcher.runtime.server_puddles.get(1, 1).unwrap();
+        assert!(
+            source.accepting >= 0.37,
+            "CellLiquid.update should re-deposit amountSpread onto the source puddle through accepting"
+        );
     }
 
     #[test]
