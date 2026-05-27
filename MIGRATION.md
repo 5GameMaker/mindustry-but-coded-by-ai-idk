@@ -3807,7 +3807,10 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 2026-05-27：补 `UnitCargoUnloadPoint.buildConfiguration/configClear` 对应的客户端 packet 构造入口。`mindustry::input` 新增 `client_unit_cargo_unload_item_config_packet(...)` 与 `client_unit_cargo_unload_clear_config_packet(...)`，分别生成 Java `config(Item.class, ...)` 对应的 `TypeValue::Content(ContentRef(Item, id))` 与 `configClear` 对应的 `TypeValue::Null` 客户端 `TileConfigCallPacket`；后续桌面 UI 选择表可直接调用该入口接入既有 server/runtime/network 配置链路。
 - 2026-05-27：补 `CargoAI.moveTo(..., moveRange, moveSmoothing)` 的最小 server 运动语义。cargo unit 现在在 pickup/drop 前会通过 `move_runtime_unit_cargo_towards(...)` 向 loader/unload 点推进，只有进入 `transferRange = 20` 后才执行 `take_items`/`transfer_item_to`；移动步长使用 Java 常量 `moveRange = 6`、`moveSmoothing = 20` 的近似过渡实现，不再在装卸前直接瞬移到目标中心。entity snapshot 与真实 server→desktop smoke 也改为断言客户端 unit 处于 transfer range 内，后续仍需补更精确的速度/路径/插值。
 - 2026-05-27：补 Java `AIController.retarget()` 在 cargo AI 上的最小 40 tick 节流。`CargoAiRuntimeState` 新增 `retarget_timer`，默认 ready 以保持初次 spawn 行为；空载 pickup 与载货但暂无 unload target 的分支现在会通过 `runtime_unit_cargo_retarget_ready(...)` 按 `target == null ? 40 : 90` 中的空目标间隔近似节流，避免每 tick 扫描/重选目标。新增 server 回归验证 retarget timer 未到时不 pickup，计时到达后才选择 unload target 并装货。
+- 2026-05-27：补 Java `UnitCargoLoader.acceptItem(...)` 的真实 item dump 接入。`dump_target_accepts_item(...)` 现在识别 `DistributionBlockKind::UnitCargoLoader`，按 `items.total() < itemCapacity` 与同队判断接收物品；后续 conveyor/router/bridge 等通用物品流可直接给 loader 入库，不再只依赖手写库存或 cargo AI 测试准备。
+  - 新增 `game_runtime_unit_cargo_loader_accepts_items_until_capacity_like_java`
 - 验证：
+  - `cargo test -p mindustry-core game_runtime_unit_cargo_loader_accepts_items_until_capacity_like_java --lib`
   - `cargo test -p mindustry-core unit_cargo_unload_config_packets --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_despawn --lib`（本轮通过 1/1）

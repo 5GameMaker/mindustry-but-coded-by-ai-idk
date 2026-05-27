@@ -170,13 +170,13 @@ use crate::mindustry::{
         read_unit_assembler_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
         read_unit_factory_state, reconstructor_accept_payload, reconstructor_update,
         unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_spawned,
-        unit_assembler_update_progress, unit_cargo_loader_spawned, unit_cargo_loader_update,
-        unit_cargo_unload_update, unit_factory_accept_item, unit_factory_configure_plan,
-        unit_factory_fraction, unit_factory_maximum_accepted, unit_factory_update,
-        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
-        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
-        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        unit_assembler_update_progress, unit_cargo_loader_accept_item, unit_cargo_loader_spawned,
+        unit_cargo_loader_update, unit_cargo_unload_update, unit_factory_accept_item,
+        unit_factory_configure_plan, unit_factory_fraction, unit_factory_maximum_accepted,
+        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
+        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
+        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
+        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -15317,6 +15317,14 @@ impl GameRuntime {
                         .is_some()
             }
             Some(BlockDef::Distribution(distribution))
+                if distribution.kind == DistributionBlockKind::UnitCargoLoader =>
+            {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                unit_cargo_loader_accept_item(items.total(), target.block.item_capacity)
+            }
+            Some(BlockDef::Distribution(distribution))
                 if distribution.kind == DistributionBlockKind::Duct =>
             {
                 let Some(items) = target.items.as_ref() else {
@@ -22909,6 +22917,49 @@ mod tests {
                 .get(nitrogen.base.mappable.base.id)
                 < 20.0
         );
+    }
+
+    #[test]
+    fn game_runtime_unit_cargo_loader_accepts_items_until_capacity_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("unit-cargo-loader").unwrap();
+        let source_def = content.block_by_name("router").unwrap();
+        let silicon = content.item_by_name("silicon").unwrap();
+        let silicon_id = silicon.base.mappable.base.id;
+        let source_pos = point2_pack(17, 18);
+        let loader_pos = point2_pack(18, 18);
+        let enemy_source_pos = point2_pack(19, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            source_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime.add_building(BuildingComp::new(
+            loader_pos,
+            loader_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime.add_building(BuildingComp::new(
+            enemy_source_pos,
+            source_def.base().clone(),
+            TeamId(5),
+        ));
+
+        runtime.buildings[1]
+            .items
+            .as_mut()
+            .expect("unit cargo loader should own item storage")
+            .set(silicon_id, loader_def.base().item_capacity - 1);
+        assert!(runtime.dump_target_accepts_item(&content, 0, 1, silicon_id));
+        assert!(!runtime.dump_target_accepts_item(&content, 2, 1, silicon_id));
+
+        runtime.buildings[1]
+            .items
+            .as_mut()
+            .unwrap()
+            .set(silicon_id, loader_def.base().item_capacity);
+        assert!(!runtime.dump_target_accepts_item(&content, 0, 1, silicon_id));
     }
 
     #[test]
