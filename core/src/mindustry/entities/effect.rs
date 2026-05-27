@@ -1,4 +1,4 @@
-use crate::mindustry::entities::comp::DecalColor;
+use crate::mindustry::{entities::comp::DecalColor, graphics::Layer};
 
 pub const SHAKE_FALLOFF: f32 = 10000.0;
 pub const DEFAULT_EFFECT_LIFETIME: f32 = 50.0;
@@ -48,6 +48,48 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "ripple" => Some(FX_RIPPLE_ID),
         _ => None,
     }
+}
+
+pub fn standard_effect(effect_id: i32) -> Option<Effect> {
+    let effect = match effect_id {
+        FX_SMOKE_ID => Effect::with_lifetime(FX_SMOKE_ID, 100.0, DEFAULT_EFFECT_CLIP),
+        FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
+        FX_UNIT_ASSEMBLE_ID => {
+            Effect::with_lifetime(FX_UNIT_ASSEMBLE_ID, 70.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::FLYING_UNIT + 5.0)
+        }
+        FX_MISSILE_TRAIL_ID => {
+            Effect::with_lifetime(FX_MISSILE_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::BULLET - 0.001)
+        }
+        FX_MISSILE_TRAIL_SHORT_ID => {
+            Effect::with_lifetime(FX_MISSILE_TRAIL_SHORT_ID, 22.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::BULLET - 0.001)
+        }
+        FX_FIRE_ID => Effect::with_lifetime(FX_FIRE_ID, 50.0, DEFAULT_EFFECT_CLIP),
+        FX_FIRE_SMOKE_ID => Effect::with_lifetime(FX_FIRE_SMOKE_ID, 35.0, DEFAULT_EFFECT_CLIP),
+        FX_NEOPLASM_HEAL_ID => {
+            Effect::with_lifetime(FX_NEOPLASM_HEAL_ID, 120.0, DEFAULT_EFFECT_CLIP)
+                .follow_parent(true)
+                .rot_with_parent(true)
+                .layer(Layer::BULLET - 2.0)
+        }
+        FX_STEAM_ID => Effect::with_lifetime(FX_STEAM_ID, 35.0, DEFAULT_EFFECT_CLIP),
+        FX_VAPOR_ID => Effect::with_lifetime(FX_VAPOR_ID, 110.0, DEFAULT_EFFECT_CLIP),
+        FX_FIREBALL_SMOKE_ID => {
+            Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
+        FX_RIPPLE_ID => {
+            Effect::with_lifetime(FX_RIPPLE_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
+        }
+        _ => return None,
+    };
+    Some(effect)
+}
+
+pub fn standard_effect_by_name(name: &str) -> Option<Effect> {
+    standard_effect_id(name).and_then(standard_effect)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1213,6 +1255,43 @@ mod tests {
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
         assert_eq!(standard_effect_id("none"), None);
+    }
+
+    #[test]
+    fn standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers() {
+        let smoke = standard_effect_by_name("smoke").unwrap();
+        assert_eq!(smoke.id, FX_SMOKE_ID);
+        assert_eq!(smoke.lifetime, 100.0);
+        assert_eq!(smoke.clip, 50.0);
+        assert!(smoke.follow_parent);
+        assert!(!smoke.rot_with_parent);
+
+        let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
+        assert_eq!(assemble.lifetime, 70.0);
+        assert_eq!(assemble.clip, 50.0);
+        assert_eq!(
+            assemble.layer,
+            crate::mindustry::graphics::Layer::FLYING_UNIT + 5.0
+        );
+
+        let trail = standard_effect(FX_MISSILE_TRAIL_SHORT_ID).unwrap();
+        assert_eq!(trail.lifetime, 22.0);
+        assert_eq!(
+            trail.layer,
+            crate::mindustry::graphics::Layer::BULLET - 0.001
+        );
+
+        let heal = standard_effect_by_name("neoplasmHeal").unwrap();
+        assert_eq!(heal.lifetime, 120.0);
+        assert!(heal.follow_parent);
+        assert!(heal.rot_with_parent);
+        assert_eq!(heal.layer, crate::mindustry::graphics::Layer::BULLET - 2.0);
+
+        let ripple = standard_effect(FX_RIPPLE_ID).unwrap();
+        assert_eq!(ripple.lifetime, 30.0);
+        assert_eq!(ripple.layer, crate::mindustry::graphics::Layer::DEBRIS);
+        assert!(standard_effect_by_name("none").is_none());
+        assert!(standard_effect(-1).is_none());
     }
 
     #[test]

@@ -5408,3 +5408,45 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 完整 `EffectRegistry` / `Fx` id→lifetime/clip/renderer 映射仍未迁移，当前 desktop materialize 缺失 lookup 时继续使用默认 lifetime/clip；
   - `client_effect_snapshot_entities` 的服务端 snapshot effect 仍未统一接真实 effect lookup；
   - 真正图形后端还未把 `draw_local_effect_states_for_render(...)` 转成 GPU draw call。
+
+### 12.183 Standard Fx lifetime/clip lookup for local and snapshot EffectState
+
+- 2026-05-28：在上一节本地 `EffectStateComp` 生命周期接线基础上，补入当前已迁移/运行时会直接引用的标准 `Fx` 元数据 lookup，让本地 effect materialize 与服务端 snapshot effect apply 不再全部退回默认 lifetime/clip。
+- Java 依据：
+  - `core/src/mindustry/entities/Effect.java`
+    - `Effect(float life, Cons<EffectContainer>)` 默认 `clip = 50f`；
+    - 默认 `followParent = true`，`rotWithParent = false`。
+  - `core/src/mindustry/content/Fx.java`
+    - `smoke = new Effect(100, ...)`；
+    - `hitLiquid = new Effect(16, ...)`；
+    - `unitAssemble = new Effect(70, ...).layer(Layer.flyingUnit + 5f)`；
+    - `missileTrail = new Effect(50, ...).layer(Layer.bullet - 0.001f)`；
+    - `missileTrailShort = new Effect(22, ...).layer(Layer.bullet - 0.001f)`；
+    - `fire = new Effect(50f, ...)`；
+    - `fireSmoke = new Effect(35f, ...)`；
+    - `neoplasmHeal = new Effect(120f, ...).followParent(true).rotWithParent(true).layer(Layer.bullet - 2)`；
+    - `steam = new Effect(35f, ...)`；
+    - `vapor = new Effect(110f, ...)`；
+    - `fireballsmoke = new Effect(25f, ...)`；
+    - `smokeCloud = new Effect(70, ...)`；
+    - `ripple = new Effect(30, ...).layer(Layer.debris)`，但 Java renderer 内还会 `e.lifetime = 30f * e.rotation`，Rust 目前只保留静态构造 lifetime。
+- Rust 新增/变化：
+  - `entities::effect` 新增：
+    - `standard_effect(effect_id)`；
+    - `standard_effect_by_name(name)`；
+  - 上述 lookup 返回 `Effect { lifetime, clip, layer, follow_parent, rot_with_parent }`，覆盖当前 `standard_effect_id(...)` 已知的高频 Fx；
+  - `GameRuntime::apply_client_effect_state_sync_wire(...)` 使用 `standard_effect(sync.effect_id)` 填充 snapshot effect 的 `effect_clip`；
+  - `DesktopLauncher::materialize_local_effect_events_for_render()` 使用同一 lookup，将本地 packet 转成带 Java lifetime/clip 的 `EffectStateComp`。
+- 新增/更新验证：
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers`
+  - `game_runtime_applies_client_effect_entity_snapshot_to_typed_runtime` 增加标准 Fx clip 断言；
+  - desktop local effect tests 增加 `neoplasmHeal` / `missileTrailShort` / `ripple` 的 lifetime/clip 断言。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_effect_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-desktop local_effect --lib`
+- 仍未完成：
+  - `ripple` 的动态 lifetime `30f * rotation` 还未挂到真实 renderer callback；
+  - 这仍是覆盖当前高频 Fx 的过渡表，不是完整 `Fx.java` registry；
+  - 真实 GPU renderer 仍未消费 `draw_local_effect_states_for_render(...)`。

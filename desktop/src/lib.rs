@@ -15,8 +15,8 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
-    PLAYER_CLASS_ID,
+    entity_class_kind, standard_effect, EffectRenderInput, EntityClassKind, PlayerComp,
+    PlayerUnitSwitchContext, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -173,7 +173,9 @@ impl DesktopLauncher {
 
     pub fn materialize_local_effect_events_for_render(&mut self) -> usize {
         self.runtime
-            .drain_client_local_effect_events_to_states(|_| None)
+            .drain_client_local_effect_events_to_states(|effect_id| {
+                standard_effect(effect_id as i32)
+            })
     }
 
     pub fn tick_local_effect_states_for_render(&mut self, delta: f32) -> usize {
@@ -2362,6 +2364,8 @@ mod tests {
             .unwrap();
         assert_eq!(state.effect_id, Some(packet.effect.effect_id));
         assert_eq!((state.x, state.y, state.rotation), (80.0, 96.0, 15.0));
+        assert_eq!(state.lifetime, 120.0);
+        assert_eq!(state.effect_clip, 50.0);
         assert_eq!(state.data, TypeValue::Unit(37));
         assert_eq!(state.time, 1.0);
         launcher.update();
@@ -2501,6 +2505,8 @@ mod tests {
         );
         assert!((effect.x - 93.0).abs() < 0.0001);
         assert!((effect.y - 200.0).abs() < 0.0001);
+        assert_eq!(effect.lifetime, 22.0);
+        assert_eq!(effect.effect_clip, 50.0);
         assert_eq!(effect.data, TypeValue::Null);
     }
 
@@ -2538,6 +2544,8 @@ mod tests {
         );
         let offset_x = effect.x - 8.0;
         let offset_y = effect.y - 16.0;
+        assert_eq!(effect.lifetime, 30.0);
+        assert_eq!(effect.effect_clip, 50.0);
         assert!(offset_x.abs() <= 3.0);
         assert!(offset_y.abs() <= 3.0);
         assert!(

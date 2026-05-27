@@ -32,9 +32,9 @@ use crate::mindustry::{
             LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile,
             UnitComp, UnitControllerState, WorldLabelComp,
         },
-        entity_class_id, entity_class_kind, standard_effect_id, Effect, EntityClassKind, Fires,
-        PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent, Puddles,
-        DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LIFETIME, FX_UNIT_ASSEMBLE_ID,
+        entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
+        EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
+        Puddles, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LIFETIME, FX_UNIT_ASSEMBLE_ID,
     },
     game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo, Trigger},
     input::input_handler::ItemRemoveStackPlan,
@@ -3295,7 +3295,8 @@ impl GameRuntime {
             .client_effect_snapshot_entities
             .entry(entity_id)
             .or_insert_with(|| EffectStateComp::new(entity_id));
-        effect.apply_sync_wire(sync, None);
+        let effect_def = standard_effect(sync.effect_id as i32);
+        effect.apply_sync_wire(sync, effect_def.as_ref());
         true
     }
 
@@ -21581,7 +21582,7 @@ mod tests {
         let sync = type_io::EffectStateSyncWire {
             color: type_io::RgbaColor::new(0x336699cc),
             data: TypeValue::String("spark".into()),
-            effect_id: 7,
+            effect_id: standard_effect_id("smoke").unwrap() as u16,
             lifetime: 50.0,
             offset_pos: 1.25,
             offset_rot: -2.5,
@@ -21620,9 +21621,13 @@ mod tests {
             .get(&7004)
             .expect("effect sync should materialize typed runtime effect state");
         assert_eq!(effect.id, 7004);
-        assert_eq!(effect.effect_id, Some(7));
+        assert_eq!(
+            effect.effect_id,
+            Some(standard_effect_id("smoke").unwrap() as u16)
+        );
         assert_eq!(effect.data, TypeValue::String("spark".into()));
         assert_eq!(effect.lifetime, 50.0);
+        assert_eq!(effect.effect_clip, DEFAULT_EFFECT_CLIP);
         assert_eq!(effect.offset_pos, 1.25);
         assert_eq!(effect.offset_rot, -2.5);
         assert_eq!(effect.offset_x, 3.0);
