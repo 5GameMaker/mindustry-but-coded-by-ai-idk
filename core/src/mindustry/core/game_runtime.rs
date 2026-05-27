@@ -4185,7 +4185,7 @@ impl GameRuntime {
         }
     }
 
-    pub fn command_owned_unit_factory_positions(
+    pub fn command_owned_building_positions(
         &mut self,
         content: &ContentLoader,
         team: TeamId,
@@ -4210,33 +4210,115 @@ impl GameRuntime {
                 continue;
             }
 
+            let building = self.buildings[index].clone();
             let Some(block) = content.block(self.buildings[index].block.id) else {
                 report.unsupported_blocks += 1;
                 continue;
             };
-            let BlockDef::UnitFactory(factory_block) = block else {
-                report.unsupported_blocks += 1;
-                continue;
+
+            let commanded = match block {
+                BlockDef::UnitFactory(factory_block) => {
+                    if !factory_block.commandable {
+                        report.uncommandable_buildings += 1;
+                        false
+                    } else if !self.ensure_unit_state_for_building(content, &building) {
+                        report.missing_runtime_states += 1;
+                        false
+                    } else if let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+                        self.unit_runtime_states.get_mut(&tile_pos)
+                    {
+                        factory.command_pos = Some(target);
+                        true
+                    } else {
+                        report.missing_runtime_states += 1;
+                        false
+                    }
+                }
+                BlockDef::UnitReconstructor(reconstructor_block) => {
+                    if !reconstructor_block.commandable {
+                        report.uncommandable_buildings += 1;
+                        false
+                    } else if !self.ensure_unit_state_for_building(content, &building) {
+                        report.missing_runtime_states += 1;
+                        false
+                    } else if let Some(GameRuntimeUnitBlockState::Reconstructor {
+                        reconstructor,
+                        ..
+                    }) = self.unit_runtime_states.get_mut(&tile_pos)
+                    {
+                        reconstructor.command_pos = Some(target);
+                        true
+                    } else {
+                        report.missing_runtime_states += 1;
+                        false
+                    }
+                }
+                BlockDef::UnitAssembler(assembler_block) => {
+                    if !assembler_block.commandable {
+                        report.uncommandable_buildings += 1;
+                        false
+                    } else if !self.ensure_unit_state_for_building(content, &building) {
+                        report.missing_runtime_states += 1;
+                        false
+                    } else if let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+                        self.unit_runtime_states.get_mut(&tile_pos)
+                    {
+                        assembler.command_pos = Some(target);
+                        true
+                    } else {
+                        report.missing_runtime_states += 1;
+                        false
+                    }
+                }
+                BlockDef::Sandbox(sandbox) if sandbox.kind == SandboxBlockKind::PayloadSource => {
+                    if !sandbox.commandable {
+                        report.uncommandable_buildings += 1;
+                        false
+                    } else if !self.ensure_payload_state_for_building(content, &building) {
+                        report.missing_runtime_states += 1;
+                        false
+                    } else if let Some(GameRuntimePayloadBlockState::Source { source, .. }) =
+                        self.payload_runtime_states.get_mut(&tile_pos)
+                    {
+                        source.command_pos = Some(PayloadVec2 {
+                            x: target.x,
+                            y: target.y,
+                        });
+                        true
+                    } else {
+                        report.missing_runtime_states += 1;
+                        false
+                    }
+                }
+                BlockDef::Storage(storage) if storage.kind == StorageBlockKind::Core => {
+                    if !storage.commandable {
+                        report.uncommandable_buildings += 1;
+                        false
+                    } else {
+                        let entry =
+                            self.storage_runtime_states
+                                .entry(tile_pos)
+                                .or_insert_with(|| {
+                                    GameRuntimeStorageBlockState::Core(CoreBuildState::default())
+                                });
+                        let GameRuntimeStorageBlockState::Core(state) = entry;
+                        state.command_pos = Some(target);
+                        true
+                    }
+                }
+                _ => {
+                    if block.base().commandable {
+                        report.unsupported_blocks += 1;
+                    } else {
+                        report.uncommandable_buildings += 1;
+                    }
+                    false
+                }
             };
-            if !factory_block.commandable {
-                report.uncommandable_buildings += 1;
+
+            if !commanded {
                 continue;
             }
-
-            let building = self.buildings[index].clone();
-            if !self.ensure_unit_state_for_building(content, &building) {
-                report.missing_runtime_states += 1;
-                continue;
-            }
-
-            let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
-                self.unit_runtime_states.get_mut(&tile_pos)
-            else {
-                report.missing_runtime_states += 1;
-                continue;
-            };
-
-            factory.command_pos = Some(target);
             if let Some(last_accessed) = &last_accessed {
                 self.buildings[index].last_accessed = last_accessed.clone();
             }
@@ -21137,7 +21219,7 @@ mod tests {
             },
         );
 
-        let report = runtime.command_owned_unit_factory_positions(
+        let report = runtime.command_owned_building_positions(
             &content,
             TeamId(2),
             &[
@@ -21152,7 +21234,7 @@ mod tests {
 
         assert_eq!(report.commanded_positions, vec![factory_tile]);
         assert_eq!(report.team_mismatches, 1);
-        assert_eq!(report.unsupported_blocks, 1);
+        assert_eq!(report.uncommandable_buildings, 1);
         assert_eq!(report.missing_buildings, 1);
         assert!(report.changed());
         assert_eq!(runtime.buildings[0].last_accessed, "[#AABBCCDD]builder");
@@ -21193,6 +21275,100 @@ mod tests {
             panic!("commanded factory payload should get Command controller");
         };
         assert_eq!(command.target_pos, Some(target));
+    }
+
+    #[test]
+    fn game_runtime_commands_other_commandable_building_positions_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let payload_source_def = content.block_by_name("payload-source").unwrap();
+        let core_def = content.block_by_name("core-shard").unwrap();
+        let reconstructor_tile = point2_pack(8, 20);
+        let assembler_tile = point2_pack(20, 20);
+        let payload_source_tile = point2_pack(36, 20);
+        let core_tile = point2_pack(52, 20);
+        let target = IoVec2::new(112.0, 144.0);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(80, 40);
+        for (tile_pos, block) in [
+            (reconstructor_tile, reconstructor_def.base().clone()),
+            (assembler_tile, assembler_def.base().clone()),
+            (payload_source_tile, payload_source_def.base().clone()),
+            (core_tile, core_def.base().clone()),
+        ] {
+            runtime.add_building(BuildingComp::new(tile_pos, block, TeamId(2)));
+        }
+
+        let report = runtime.command_owned_building_positions(
+            &content,
+            TeamId(2),
+            &[
+                reconstructor_tile,
+                assembler_tile,
+                payload_source_tile,
+                core_tile,
+            ],
+            target,
+            Some("[#01020304]commander".into()),
+        );
+
+        assert_eq!(
+            report.commanded_positions,
+            vec![
+                reconstructor_tile,
+                assembler_tile,
+                payload_source_tile,
+                core_tile
+            ]
+        );
+        assert!(report.changed());
+        assert!(runtime
+            .buildings()
+            .iter()
+            .filter(|building| [
+                reconstructor_tile,
+                assembler_tile,
+                payload_source_tile,
+                core_tile
+            ]
+            .contains(&building.tile_pos))
+            .all(|building| building.last_accessed == "[#01020304]commander"));
+
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            runtime.unit_runtime_states.get(&reconstructor_tile)
+        else {
+            panic!("reconstructor sidecar should be commandable");
+        };
+        assert_eq!(reconstructor.command_pos, Some(target));
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get(&assembler_tile)
+        else {
+            panic!("assembler sidecar should be commandable");
+        };
+        assert_eq!(assembler.command_pos, Some(target));
+
+        let Some(GameRuntimePayloadBlockState::Source { source, .. }) =
+            runtime.payload_runtime_states.get(&payload_source_tile)
+        else {
+            panic!("payload-source sidecar should be commandable");
+        };
+        assert_eq!(
+            source.command_pos,
+            Some(Vec2 {
+                x: target.x,
+                y: target.y
+            })
+        );
+
+        assert_eq!(
+            runtime.storage_runtime_states.get(&core_tile),
+            Some(&GameRuntimeStorageBlockState::Core(CoreBuildState {
+                command_pos: Some(target),
+                ..CoreBuildState::default()
+            }))
+        );
     }
 
     #[test]

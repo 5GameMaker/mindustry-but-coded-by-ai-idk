@@ -3822,18 +3822,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 ### 12.116 UnitFactory `CommandBuildingCallPacket` 命令位置联机链路
 
 - 2026-05-27：对照 Java `InputHandler.commandBuilding(...)` 与 `UnitFactoryBuild.onCommand(Vec2 target)`，把建筑命令从“客户端 helper 只生成 packet / UnitFactoryState 只序列化 commandPos”推进到 runtime + server + desktop 的完整最小链路。
+- 2026-05-27：继续扩展同一入口，不让 UnitFactory 成为单点孤岛；对照 Java `Reconstructor`、`UnitAssembler`、`PayloadSource`、`CoreBlock` 的 `getCommandPosition()/onCommand(Vec2)`，把 Rust 已有的 `command_pos` sidecar 接到统一 command building runtime。
 - Java 依据：
   - `InputHandler.commandBuilding(Player, int[], Vec2)`：server 校验 `ActionType.commandBuilding`，遍历同队且 `build.isCommandable()` 的建筑，执行 `build.onCommand(target)` 与 `build.updateLastAccess(player)`；
-  - `UnitFactoryBuild.onCommand(Vec2 target)`：写入 `commandPos = target`；
+  - `UnitFactoryBuild`、`ReconstructorBuild`、`UnitAssemblerBuild`、`PayloadSourceBuild`、`CoreBuild` 的 `onCommand(Vec2 target)`：写入 `commandPos = target`；
   - `UnitFactory.updateTile()` 创建 unit payload 时，后续命令控制器使用该 `commandPos`。
 - Rust 新增/变化：
-  - `GameRuntimeCommandBuildingReport` 与 `GameRuntime::command_owned_unit_factory_positions(...)`：按 team、block 类型与 `UnitFactoryBlockData.commandable` 过滤，写入 `UnitFactoryState.command_pos`，并同步 `BuildingComp.last_accessed`；
+  - `GameRuntimeCommandBuildingReport` 与 `GameRuntime::command_owned_building_positions(...)`：按 team、block 类型与对应 block `commandable` 字段过滤，写入 `UnitFactoryState.command_pos` / `ReconstructorState.command_pos` / `UnitAssemblerState.command_pos` / `PayloadSourceState.command_pos` / `CoreBuildState.command_pos`，并同步 `BuildingComp.last_accessed`；
   - `NetServer` 现在记录并允许/拒绝 `PacketKind::CommandBuildingCallPacket`，使用 `ActionType::CommandBuilding` 填充 `PlayerAction.building_positions`，并生成 server event；
   - `ServerLauncher::apply_new_network_server_events()` 处理 `CommandBuildingCallPacket`，把来源连接转换为 player/team/colored name，调用 runtime 写入 command position，并可靠转发 server 形态 packet（含 `player`）给已连接客户端；
-  - `DesktopLauncher::update()` 新增 `sync_command_building_to_runtime()`，消费 `NetClient.last_command_building`，从本地/远端 player 或目标 building 恢复 team，回填客户端 runtime 的 `UnitFactoryState.command_pos`；
+  - `DesktopLauncher::update()` 新增 `sync_command_building_to_runtime()`，消费 `NetClient.last_command_building`，从本地/远端 player 或目标 building 恢复 team，回填客户端 runtime 的 commandable building `command_pos`；
   - `advance_owned_unit_factories(...)` 已有的 payload controller patch 现在可由真实 command building packet 驱动，产出的 unit payload 带 `ControllerWire::Command.target_pos`。
 - 新增验证：
   - `cargo test -p mindustry-core game_runtime_commands_unit_factory_position_and_payload_controller_like_java --lib`
+  - `cargo test -p mindustry-core game_runtime_commands_other_commandable_building_positions_like_java --lib`
   - `cargo test -p mindustry-server server_update_applies_command_building_packet_to_unit_factory_and_forwards --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_syncs_command_building_packet_to_unit_factory_runtime --lib`
-- 仍未完成：当前命令位置只落到 `UnitFactory` 最小闭环；Java 中其他 `isCommandable()` 建筑（如 reconstructor/assembler/payload-source/core 等）的 `onCommand/getCommandPosition` 行为、客户端 Fx/BuildingCommandEvent、完整 command UI marker 与权限 rollback 仍需继续补齐。
+- 仍未完成：command position 已接入 factory/reconstructor/assembler/payload-source/core 的 runtime/server/desktop 最小闭环，但客户端 Fx.moveCommand、BuildingCommandEvent、完整 command UI marker/overlay、权限 rollback 以及更多真实 Java↔Rust command smoke 仍需继续补齐。

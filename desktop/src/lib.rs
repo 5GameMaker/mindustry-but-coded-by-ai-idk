@@ -600,7 +600,7 @@ impl DesktopLauncher {
             return false;
         };
         let last_accessed = player.as_ref().map(|player| player.colored_name());
-        let report = self.runtime.command_owned_unit_factory_positions(
+        let report = self.runtime.command_owned_building_positions(
             &self.content_loader,
             team,
             &packet.buildings,

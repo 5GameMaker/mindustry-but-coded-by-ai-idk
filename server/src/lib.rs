@@ -556,7 +556,7 @@ impl ServerLauncher {
         player.color = source_connection.color as u32;
         player.locale = source_connection.locale.clone();
         player.con = Some(source_connection.clone());
-        let report = self.runtime.command_owned_unit_factory_positions(
+        let report = self.runtime.command_owned_building_positions(
             &self.content_loader,
             source_connection.team,
             &packet.buildings,
