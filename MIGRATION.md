@@ -3352,3 +3352,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_item_mirror_to_runtime_unit_snapshot`
   - `cargo check --workspace`
 - 仍未完成：payload sidecar 尚未接入 typed `PayloadComp`；unit item mirror 仍依赖 packet sidecar 的“最后可观察值”，尚未用 packet timestamp/snapshot sequence 解决 snapshot 与 remote-call 乱序；`TransferItemToUnitCallPacket.to` 仍需结合 entity class 判断是否是 Unit/Building/其他 Itemsc，视觉 transfer effect 也还没有进入 renderer。
+
+### 12.96 Desktop/GameRuntime 消费客户端单位 payload mirror
+
+- 2026-05-27：把 `NetClientState.unit_payload_mirrors` 继续从独立 sidecar 推进到 desktop/runtime typed unit 链路，最小化同步到 `GameRuntime.client_unit_snapshot_entities[*].payload`。
+- Java 依据：
+  - `InputHandler.pickedBuildPayload(...)`、`pickedUnitPayload(...)` 和 `payloadDropped(...)` 最终修改的是单位 `PayloadComp.payloads`；
+  - Rust 客户端已经有 `PickedBuildPayload/PickedUnitPayload/PayloadDropped` 的 packet sidecar 计数，因此 desktop 应在 unit snapshot materialize 后把该计数回放到 typed `UnitComp.payload`，而不是停留在 NetClient 调试层。
+- Rust 新增/变化：
+  - `GameRuntime::apply_client_unit_payload_mirror(...)` 新增最小应用点：按 entity id 查找 typed client unit，确保 `PayloadComp` 存在并同步 team/capacity/pickup_units，然后按 sidecar `payload_count` 写入 placeholder `PayloadState` 列表；
+  - placeholder 会用 `picked_unit_payloads_seen` 尽量保留 Unit payload 个数，其余按 Build payload 占位，`size` 暂为 `0.0`，用于先接通 count/has_payload/logic sense/UI 调试链；
+  - `DesktopLauncher` 新增 `last_applied_unit_payload_mirrors` 游标与 `sync_unit_payload_mirrors_to_runtime()`，与 unit item mirror 一样只在 typed unit 存在且 sidecar 变化时标记已应用；
+  - 新增 core/desktop 测试覆盖 payload count、Unit/Build placeholder 区分、drop 后 count 收敛和缺失 unit 拒绝。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_payload_mirror_to_typed_unit`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_payload_mirror_to_runtime_unit_snapshot`
+  - `cargo check --workspace`
+- 仍未完成：当前 typed payload 仍是 count/类型占位，尚未保留完整 `BuildPayload` building bytes、`UnitPayload` entity id/sync bytes、真实 payload size 与落地碰撞；packet sidecar 与 entity snapshot 的乱序仍需引入 sequence/timestamp 或 authoritative snapshot 合并策略。

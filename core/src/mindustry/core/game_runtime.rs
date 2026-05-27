@@ -26,7 +26,8 @@ use crate::mindustry::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
             BuildingComp, BulletComp, DecalComp, DecalRegion, EffectStateComp, FireComp,
-            LaunchCoreBlock, LaunchCoreComp, PuddleComp, PuddleTile, UnitComp, WorldLabelComp,
+            LaunchCoreBlock, LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp,
+            PuddleTile, UnitComp, WorldLabelComp,
         },
         entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
@@ -3036,6 +3037,50 @@ impl GameRuntime {
         } else {
             0
         };
+        true
+    }
+
+    pub fn apply_client_unit_payload_mirror(
+        &mut self,
+        entity_id: i32,
+        payload_count: usize,
+        picked_build_payloads_seen: u64,
+        picked_unit_payloads_seen: u64,
+    ) -> bool {
+        let Some(unit) = self.client_unit_snapshot_entities.get_mut(&entity_id) else {
+            return false;
+        };
+        let team = unit.team_id();
+        let payload_capacity = unit.type_info.payload_capacity;
+        let pickup_units = unit.type_info.pickup_units;
+        let payload = unit
+            .payload
+            .get_or_insert_with(|| PayloadComp::new(team, payload_capacity));
+        payload.team = team;
+        payload.payload_capacity = payload_capacity;
+        payload.pickup_units = pickup_units;
+        payload.payloads.clear();
+
+        let unit_payloads = (picked_unit_payloads_seen as usize).min(payload_count);
+        let mut build_payloads = payload_count.saturating_sub(unit_payloads);
+        let observed_build_payloads = picked_build_payloads_seen as usize;
+        if observed_build_payloads > 0 {
+            build_payloads = build_payloads.min(observed_build_payloads);
+        }
+        let unknown_payloads = payload_count.saturating_sub(unit_payloads + build_payloads);
+
+        payload
+            .payloads
+            .extend((0..unit_payloads).map(|_| PayloadState {
+                kind: PayloadKind::Unit,
+                size: 0.0,
+            }));
+        payload.payloads.extend(
+            (0..build_payloads + unknown_payloads).map(|_| PayloadState {
+                kind: PayloadKind::Build,
+                size: 0.0,
+            }),
+        );
         true
     }
 
@@ -17363,6 +17408,45 @@ mod tests {
         assert_eq!(unit.items.stack.amount, 0);
 
         assert!(!runtime.apply_client_unit_item_mirror(9999, Some("copper"), 1));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_payload_mirror_to_typed_unit() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mega = content.unit_by_name("mega").unwrap().clone();
+        let mut runtime = GameRuntime::default();
+        runtime
+            .client_unit_snapshot_entities
+            .insert(4244, UnitComp::new(4244, mega, TeamId(3)));
+
+        assert!(runtime.apply_client_unit_payload_mirror(4244, 3, 2, 1));
+        let unit = runtime.client_unit_snapshot_entities.get(&4244).unwrap();
+        let payload = unit.payload.as_ref().unwrap();
+        assert_eq!(payload.payloads.len(), 3);
+        assert_eq!(
+            payload
+                .payloads
+                .iter()
+                .filter(|payload| payload.kind == PayloadKind::Unit)
+                .count(),
+            1
+        );
+        assert_eq!(
+            payload
+                .payloads
+                .iter()
+                .filter(|payload| payload.kind == PayloadKind::Build)
+                .count(),
+            2
+        );
+        assert_eq!(payload.team, TeamId(3));
+        assert_eq!(payload.payload_capacity, unit.type_info.payload_capacity);
+
+        assert!(runtime.apply_client_unit_payload_mirror(4244, 0, 2, 1));
+        let unit = runtime.client_unit_snapshot_entities.get(&4244).unwrap();
+        assert!(unit.payload.as_ref().unwrap().payloads.is_empty());
+
+        assert!(!runtime.apply_client_unit_payload_mirror(9999, 1, 1, 0));
     }
 
     #[test]

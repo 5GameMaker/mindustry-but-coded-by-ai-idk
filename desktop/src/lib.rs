@@ -2,6 +2,7 @@ use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::core::game_runtime::GameRuntimeClientSnapshotApplyReport;
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
+    ClientUnitPayloadMirror,
 };
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
@@ -54,6 +55,7 @@ pub struct DesktopLauncher {
     last_applied_entity_snapshot_mirror_count: usize,
     last_applied_hidden_snapshot_mirror: Option<ClientHiddenSnapshotMirror>,
     last_applied_unit_item_mirrors: BTreeMap<i32, ClientUnitItemMirror>,
+    last_applied_unit_payload_mirrors: BTreeMap<i32, ClientUnitPayloadMirror>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
     last_applied_client_plan_snapshot_received_count: usize,
@@ -80,6 +82,7 @@ impl DesktopLauncher {
             last_applied_entity_snapshot_mirror_count: 0,
             last_applied_hidden_snapshot_mirror: None,
             last_applied_unit_item_mirrors: BTreeMap::new(),
+            last_applied_unit_payload_mirrors: BTreeMap::new(),
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
             last_applied_client_plan_snapshot_received_count: 0,
@@ -94,6 +97,7 @@ impl DesktopLauncher {
         self.sync_state_snapshot();
         self.sync_snapshot_mirrors();
         self.sync_unit_item_mirrors_to_runtime();
+        self.sync_unit_payload_mirrors_to_runtime();
         let now_millis = current_millis();
         self.sync_remote_player_snapshots_from_runtime();
         self.sync_remote_preview_plan_packets(now_millis);
@@ -300,8 +304,47 @@ impl DesktopLauncher {
         applied
     }
 
+    fn sync_unit_payload_mirrors_to_runtime(&mut self) -> usize {
+        if self.last_applied_world_data.is_none() {
+            return 0;
+        }
+
+        let mirrors = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.unit_payload_mirrors.clone()
+        };
+        self.last_applied_unit_payload_mirrors
+            .retain(|unit_id, _| mirrors.contains_key(unit_id));
+
+        let mut applied = 0;
+        for (unit_id, mirror) in mirrors {
+            if self.last_applied_unit_payload_mirrors.get(&unit_id) == Some(&mirror) {
+                continue;
+            }
+            if self.runtime.apply_client_unit_payload_mirror(
+                unit_id,
+                mirror.payload_count,
+                mirror.picked_build_payloads_seen,
+                mirror.picked_unit_payloads_seen,
+            ) {
+                self.last_applied_unit_payload_mirrors
+                    .insert(unit_id, mirror);
+                applied += 1;
+            }
+        }
+        applied
+    }
+
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
-        let (block_mirror, entity_count, hidden_mirror, preview_plan_count, unit_item_mirrors) = {
+        let (
+            block_mirror,
+            entity_count,
+            hidden_mirror,
+            preview_plan_count,
+            unit_item_mirrors,
+            unit_payload_mirrors,
+        ) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
             (
@@ -310,6 +353,7 @@ impl DesktopLauncher {
                 state.last_hidden_snapshot_mirror.clone(),
                 state.client_plan_snapshot_received_packets.len(),
                 state.unit_item_mirrors.clone(),
+                state.unit_payload_mirrors.clone(),
             )
         };
         self.last_applied_block_snapshot_mirror = block_mirror;
@@ -318,6 +362,7 @@ impl DesktopLauncher {
         self.last_client_snapshot_apply_report = None;
         self.last_applied_client_plan_snapshot_received_count = preview_plan_count;
         self.last_applied_unit_item_mirrors = unit_item_mirrors;
+        self.last_applied_unit_payload_mirrors = unit_payload_mirrors;
     }
 
     fn clear_snapshot_apply_cursors(&mut self) {
@@ -327,6 +372,7 @@ impl DesktopLauncher {
         self.last_client_snapshot_apply_report = None;
         self.last_applied_client_plan_snapshot_received_count = 0;
         self.last_applied_unit_item_mirrors.clear();
+        self.last_applied_unit_payload_mirrors.clear();
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
     }
@@ -901,6 +947,7 @@ mod tests {
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
         ClientEntitySnapshotRecordMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
+        ClientUnitPayloadMirror,
     };
     use mindustry_core::mindustry::core::{
         GameRuntime, GameRuntimeNetworkContext, WorldLoadEventKind,
@@ -921,7 +968,7 @@ mod tests {
     };
     use mindustry_core::mindustry::{
         entities::{
-            comp::{BuildingComp, UnitComp},
+            comp::{BuildingComp, PayloadKind, UnitComp},
             PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
             PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
@@ -1272,6 +1319,82 @@ mod tests {
             .unwrap();
         assert_eq!(unit.items.stack.item.as_deref(), Some("lead"));
         assert_eq!(unit.items.stack.amount, 5);
+    }
+
+    #[test]
+    fn desktop_launcher_applies_unit_payload_mirror_to_runtime_unit_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let mega = launcher
+            .content_loader
+            .unit_by_name("mega")
+            .unwrap()
+            .clone();
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(8802, UnitComp::new(8802, mega, TeamId(4)));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.unit_payload_mirrors.insert(
+                8802,
+                ClientUnitPayloadMirror {
+                    payload_count: 2,
+                    picked_build_payloads_seen: 1,
+                    picked_unit_payloads_seen: 1,
+                    payload_drops_seen: 0,
+                },
+            );
+        }
+        launcher.update();
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&8802)
+            .unwrap();
+        let payload = unit.payload.as_ref().unwrap();
+        assert_eq!(payload.payloads.len(), 2);
+        assert_eq!(
+            payload
+                .payloads
+                .iter()
+                .filter(|payload| payload.kind == PayloadKind::Unit)
+                .count(),
+            1
+        );
+        assert_eq!(
+            payload
+                .payloads
+                .iter()
+                .filter(|payload| payload.kind == PayloadKind::Build)
+                .count(),
+            1
+        );
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            let mirror = state.unit_payload_mirrors.get_mut(&8802).unwrap();
+            mirror.payload_count = 1;
+            mirror.payload_drops_seen = 1;
+        }
+        launcher.update();
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&8802)
+            .unwrap();
+        assert_eq!(unit.payload.as_ref().unwrap().payloads.len(), 1);
     }
 
     #[test]
