@@ -17,7 +17,7 @@ use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
     entity_class_kind, standard_effect, standard_effect_draw_plan, standard_effect_render_lifetime,
     EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
-    StandardEffectDrawPlan, PLAYER_CLASS_ID,
+    StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -56,6 +56,7 @@ pub struct DesktopLauncher {
     pub remote_players: BTreeMap<i32, PlayerComp>,
     pub other_player_preview_overlays: Vec<OtherPlayerPreviewOverlayPlan>,
     pub standard_local_effect_draw_plans: Vec<StandardEffectDrawPlan>,
+    pub standard_local_effect_circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -102,6 +103,7 @@ impl DesktopLauncher {
             remote_players: BTreeMap::new(),
             other_player_preview_overlays: Vec::new(),
             standard_local_effect_draw_plans: Vec::new(),
+            standard_local_effect_circle_primitives: Vec::new(),
             connect_target,
             connect_error: None,
             args,
@@ -174,8 +176,13 @@ impl DesktopLauncher {
         self.puddle_particle_rand_state = puddle_particle_rand_state;
         self.materialize_local_effect_events_for_render();
         self.tick_local_effect_states_for_render(1.0);
-        self.standard_local_effect_draw_plans =
+        let standard_local_effect_draw_plans =
             self.collect_standard_local_effect_draw_plans_for_render();
+        self.standard_local_effect_circle_primitives = standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::circle_render_primitives_from_seed)
+            .collect();
+        self.standard_local_effect_draw_plans = standard_local_effect_draw_plans;
     }
 
     pub fn materialize_local_effect_events_for_render(&mut self) -> usize {
@@ -221,6 +228,15 @@ impl DesktopLauncher {
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
         });
         plans
+    }
+
+    pub fn collect_standard_local_effect_circle_primitives_for_render(
+        &self,
+    ) -> Vec<StandardEffectCircleRenderPrimitive> {
+        self.standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::circle_render_primitives_from_seed)
+            .collect()
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -279,6 +295,7 @@ impl DesktopLauncher {
                     self.remote_players.clear();
                     self.other_player_preview_overlays.clear();
                     self.standard_local_effect_draw_plans.clear();
+                    self.standard_local_effect_circle_primitives.clear();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
                     self.last_runtime_map_load_report = None;
@@ -976,6 +993,7 @@ impl DesktopLauncher {
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
         self.standard_local_effect_draw_plans.clear();
+        self.standard_local_effect_circle_primitives.clear();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -2485,8 +2503,12 @@ mod tests {
         );
 
         launcher.standard_local_effect_draw_plans = plans;
+        launcher.standard_local_effect_circle_primitives =
+            launcher.collect_standard_local_effect_circle_primitives_for_render();
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
         launcher.clear_snapshot_apply_cursors();
         assert!(launcher.standard_local_effect_draw_plans.is_empty());
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
     }
 
     #[test]
@@ -2606,6 +2628,14 @@ mod tests {
         assert!((plan.center.0 - 93.0).abs() < 0.0001);
         assert!((plan.center.1 - 200.0).abs() < 0.0001);
         assert!((plan.radius - (3.0 * 21.0 / 22.0)).abs() < 0.0001);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
+        let primitive = &launcher.standard_local_effect_circle_primitives[0];
+        assert_eq!(primitive.kind, StandardEffectDrawKind::FilledCircle);
+        assert!((primitive.center.0 - 93.0).abs() < 0.0001);
+        assert!((primitive.center.1 - 200.0).abs() < 0.0001);
+        assert!((primitive.radius - plan.radius).abs() < 0.0001);
+        assert_eq!(primitive.stroke, 0.0);
+        assert_eq!(primitive.alpha, 1.0);
     }
 
     #[test]

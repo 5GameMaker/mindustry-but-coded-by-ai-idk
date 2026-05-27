@@ -5661,3 +5661,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 颜色解析仍保留为 `color_from/color_to/input_color/color_mix/color_mul` 元数据，尚未统一压成最终 RGBA；
   - `fire` 的 light 仍是 plan 字段，尚未统一成 light render primitive；
   - desktop 仍需建立真实帧渲染/窗口 backend 来消费这些 primitive。
+
+### 12.192 Desktop frame cache for standard effect circle primitives
+
+- 2026-05-28：将上一节 core 层统一 circle render primitive 接入 `DesktopLauncher` 帧缓存，使桌面端每帧不只持有高层 `StandardEffectDrawPlan`，还持有后续 2D backend 可直接消费的圆形 primitive 列表。
+- Rust 新增/变化：
+  - `entities::mod` 导出 `StandardEffectCircleRenderPrimitive`；
+  - `DesktopLauncher` 新增公开帧缓存：
+    - `standard_local_effect_circle_primitives: Vec<StandardEffectCircleRenderPrimitive>`；
+  - `update()` 生成 `standard_local_effect_draw_plans` 后，立即调用 `StandardEffectDrawPlan::circle_render_primitives_from_seed()` 展开并缓存 primitive；
+  - `collect_standard_local_effect_circle_primitives_for_render()` 可从当前帧 draw plan 重新生成 primitive；
+  - 世界卸载 / snapshot cursor 清理时同步清空 primitive 缓存。
+- 新增/更新验证：
+  - `desktop_launcher_standard_effect_draw_updates_ripple_lifetime` 增加 primitive 缓存清理断言；
+  - `desktop_launcher_ticks_elude_move_effect_to_local_effect_queue` 增加 `missileTrailShort` 由 draw plan 到 `FilledCircle` primitive 的帧级断言。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop standard_effect_draw --lib`
+  - `cargo test -p mindustry-desktop ticks_elude --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - primitive 仍停在内存帧缓存，还未被真实窗口/2D backend present；
+  - circle primitive 仍依赖 plan 的颜色元数据，颜色解析和 light primitive 仍待后续统一。
