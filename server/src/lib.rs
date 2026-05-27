@@ -1894,7 +1894,6 @@ impl ServerLauncher {
                 updates += 1;
             }
         }
-        let mut cell_deposits = Vec::new();
         let mut cell_removed_ids = Vec::new();
         for event in &report.events {
             if !event.liquid_update {
@@ -1927,32 +1926,40 @@ impl ServerLauncher {
                 let Some(build_ref) = self.runtime.state.world.build(nx, ny) else {
                     continue;
                 };
-                let Some(building) = self
-                    .runtime
-                    .buildings
-                    .iter_mut()
-                    .find(|building| building.tile_pos == build_ref.tile_pos)
-                else {
+                let Some((team, deposit_amount)) = ({
+                    let Some(building) = self
+                        .runtime
+                        .buildings
+                        .iter_mut()
+                        .find(|building| building.tile_pos == build_ref.tile_pos)
+                    else {
+                        continue;
+                    };
+                    let team = building.team;
+                    let Some(liquids) = building.liquids.as_mut() else {
+                        continue;
+                    };
+                    let available = liquids.get(target_liquid_id);
+                    if available <= 0.0001 {
+                        continue;
+                    }
+                    let amount =
+                        available.min(event.liquid.cell_max_spread * delta_ticks * scaling);
+                    if amount <= 0.0 {
+                        continue;
+                    }
+                    liquids.remove(target_liquid_id, amount * event.liquid.cell_remove_scaling);
+                    Some((team, amount * event.liquid.cell_spread_conversion))
+                }) else {
                     continue;
                 };
-                let Some(liquids) = building.liquids.as_mut() else {
-                    continue;
-                };
-                let available = liquids.get(target_liquid_id);
-                if available <= 0.0001 {
-                    continue;
-                }
-                let amount = available.min(event.liquid.cell_max_spread * delta_ticks * scaling);
-                if amount <= 0.0 {
-                    continue;
-                }
-                liquids.remove(target_liquid_id, amount * event.liquid.cell_remove_scaling);
-                cell_deposits.push((
-                    PuddleTileView::new(nx, ny).with_build(building.team.0 as i32),
+                self.runtime.server_puddles.deposit(
+                    Some(PuddleTileView::new(nx, ny).with_build(team.0 as i32)),
                     Some(PuddleTileView::new(event.tile.x, event.tile.y)),
                     event.liquid.clone(),
-                    amount * event.liquid.cell_spread_conversion,
-                ));
+                    deposit_amount,
+                    PuddleDepositContext::default(),
+                );
                 reacted = true;
                 updates += 1;
             }
@@ -1965,39 +1972,55 @@ impl ServerLauncher {
                     .build(event.tile.x, event.tile.y)
                     .map(|build_ref| build_ref.tile_pos);
                 if let Some(build_tile_pos) = build_tile_pos {
-                    if let Some(building) = self
+                    let spread = self
                         .runtime
                         .buildings
-                        .iter_mut()
+                        .iter()
                         .find(|building| building.tile_pos == build_tile_pos)
-                    {
-                        if let Some(liquids) = building.liquids.as_mut() {
-                            let available = liquids.get(target_liquid_id);
-                            if available > 0.0001 {
-                                let amount_spread = (available
-                                    * event.liquid.cell_spread_conversion)
-                                    .min(event.liquid.cell_max_spread * delta_ticks)
-                                    / 2.0;
-                                for point in ORTHOGONAL_NEIGHBORS {
-                                    cell_deposits.push((
-                                        PuddleTileView::new(event.tile.x, event.tile.y)
-                                            .with_build(building.team.0 as i32),
-                                        Some(PuddleTileView::new(
-                                            event.tile.x + point.x,
-                                            event.tile.y + point.y,
-                                        )),
-                                        event.liquid.clone(),
-                                        amount_spread,
-                                    ));
+                        .and_then(|building| {
+                            building.liquids.as_ref().and_then(|liquids| {
+                                let available = liquids.get(target_liquid_id);
+                                if available > 0.0001 {
+                                    Some((
+                                        building.team,
+                                        (available * event.liquid.cell_spread_conversion)
+                                            .min(event.liquid.cell_max_spread * delta_ticks)
+                                            / 2.0,
+                                    ))
+                                } else {
+                                    None
                                 }
-                                building.damage(
-                                    event.liquid.cell_spread_damage * delta_ticks * scaling,
-                                    Self::current_millis() as f32,
-                                );
-                                reacted = true;
-                                updates += 1;
-                            }
+                            })
+                        });
+                    if let Some((team, amount_spread)) = spread {
+                        for point in ORTHOGONAL_NEIGHBORS {
+                            self.runtime.server_puddles.deposit(
+                                Some(
+                                    PuddleTileView::new(event.tile.x, event.tile.y)
+                                        .with_build(team.0 as i32),
+                                ),
+                                Some(PuddleTileView::new(
+                                    event.tile.x + point.x,
+                                    event.tile.y + point.y,
+                                )),
+                                event.liquid.clone(),
+                                amount_spread,
+                                PuddleDepositContext::default(),
+                            );
                         }
+                        if let Some(building) = self
+                            .runtime
+                            .buildings
+                            .iter_mut()
+                            .find(|building| building.tile_pos == build_tile_pos)
+                        {
+                            building.damage(
+                                event.liquid.cell_spread_damage * delta_ticks * scaling,
+                                Self::current_millis() as f32,
+                            );
+                        }
+                        reacted = true;
+                        updates += 1;
                     }
                 }
             }
@@ -2018,15 +2041,6 @@ impl ServerLauncher {
                 self.runtime.note_trigger_event(Trigger::NeoplasmReact);
                 updates += 1;
             }
-        }
-        for (tile, source, liquid, amount) in cell_deposits {
-            self.runtime.server_puddles.deposit(
-                Some(tile),
-                source,
-                liquid,
-                amount,
-                PuddleDepositContext::default(),
-            );
         }
         for event in report.events {
             if !event.create_fire {
@@ -9089,6 +9103,76 @@ mod tests {
                         if packet.ids.contains(&water_puddle_id)
                 )
         }));
+    }
+
+    #[test]
+    fn server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(4, 4);
+        launcher.runtime.server_puddles = Puddles::new(4, 4);
+        let router = launcher
+            .content_loader
+            .block_by_name("liquid-router")
+            .unwrap()
+            .base()
+            .clone();
+        let neighbor_tile = point2_pack(2, 1);
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(neighbor_tile, router, TeamId(1)));
+        let water_id = launcher
+            .content_loader
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        launcher
+            .runtime
+            .buildings
+            .iter_mut()
+            .find(|building| building.tile_pos == neighbor_tile)
+            .unwrap()
+            .liquids
+            .as_mut()
+            .unwrap()
+            .add(water_id, 10.0);
+        let neoplasm = launcher.content_loader.liquid_by_name("neoplasm").unwrap();
+        let water = launcher.content_loader.liquid_by_name("water").unwrap();
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1)),
+            PuddleLiquidInfo::from(neoplasm),
+            70.0,
+            PuddleDepositContext::default(),
+        );
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(2, 1)),
+            PuddleLiquidInfo::from(water),
+            20.0,
+            PuddleDepositContext::default(),
+        );
+
+        launcher.tick_server_puddles(1.0).unwrap();
+
+        let replacement = launcher
+            .runtime
+            .server_puddles
+            .get_entry(2, 1)
+            .expect("low-residue target puddle should still be replaced by neoplasm");
+        assert_eq!(replacement.liquid.name, "neoplasm");
+        assert!(
+            replacement.puddle.accepting.abs() <= f32::EPSILON,
+            "Java applies building conversion deposit before nearby puddle absorption; neoplasm poured onto an existing water puddle reacts through water and must not become same-liquid accepting after replacement"
+        );
+        assert!(
+            (replacement.puddle.amount
+                - mindustry_core::mindustry::entities::puddles::MAX_LIQUID / 3.0)
+                .abs()
+                < 0.001,
+            "replacement amount should come only from CellLiquid nearby-puddle replacement, not from a delayed building deposit"
+        );
     }
 
     #[test]

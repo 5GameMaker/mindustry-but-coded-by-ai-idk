@@ -4980,3 +4980,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 目前 bridge 覆盖“持有 `DesktopLauncher.runtime + ClientLauncher.service` 的本地客户端路径”；server runtime 触发到远端客户端平台服务仍需要后续网络事件/packet 或更完整的 Java event bus 迁移；
   - `DefaultGameService` backing store 仍是内存态，后续平台/磁盘持久化要对齐 Java 平台实现。
+
+### 12.169 CellLiquid.update immediate deposit ordering
+
+- 2026-05-28：继续收紧 Java `CellLiquid.update(Puddle)` 顺序。Java 在 `Geometry.d4c` building 吸收和 current-building damage/spread 分支中会立即调用 `Puddles.deposit(...)`，然后才进入 nearby puddle absorption；Rust 之前把这些 deposit 暂存在 `cell_deposits`，等 nearby puddle absorption 后才统一落库。
+- 影响：
+  - 当邻接 tile 同时有 target-liquid building 和 target-liquid puddle 时，Java 的 building deposit 会先尝试把 neoplasm 倒到现有 water puddle 上，走 `water.react(neoplasm)=0`，不会在 replacement 后变成 same-liquid accepting；
+  - Rust 延迟落库会先把 water puddle replacement 成 neoplasm，再把 building deposit 当作 same-liquid accepting 加到 replacement puddle，导致同 tick 状态偏大。
+- Rust 新增/变化：
+  - `ServerLauncher::tick_server_puddles(...)` 不再维护 `cell_deposits` 延迟队列；
+  - d4c building 吸收后立即 `server_puddles.deposit(...)`；
+  - current-building damage/spread 分支先计算 `amountSpread`，立即对 d4 方向 deposit，再对 building damage，之后才进入 nearby puddle absorption；
+  - 新增回归 `server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java`。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java --lib`
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update --lib`
+  - `cargo check --workspace`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - `Puddles::update_all_with_passability_report(...)` 普通 overfilled spread 仍是先收集 `spread_deposits` 后统一落库，后续如要进一步贴近 Java `PuddleComp.update()`，应验证并收紧“同 tick later puddle 是否能看到 earlier puddle spread”的顺序。

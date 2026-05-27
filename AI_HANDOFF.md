@@ -3648,3 +3648,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. 中文提交并推送 `origin main`，建议标题：`接入触发事件成就服务`；
   2. 后续补：server runtime trigger 通过网络/完整 event bus 传到远端客户端平台服务；`DefaultGameService` 的持久化仍是内存态，后续要接平台/磁盘存储。
+
+---
+
+## 110. 最新闭环记录：CellLiquid.update 即时 deposit 顺序
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：收紧 Java `CellLiquid.update(Puddle)` 中 building 吸收/damage 分支与 nearby puddle absorption 的执行顺序。
+- Java 依据：
+  - `CellLiquid.update()` 中 `Geometry.d4c` building 吸收立即 `Puddles.deposit(tile, this, amount * spreadConversion)`；
+  - current-building damage/spread 分支立即对 `Geometry.d4` 执行 `Puddles.deposit(puddle.tile, other, puddle.liquid, amountSpread)`；
+  - 然后才进入 `spread to nearby puddles`；
+  - 最后如果 `reacted && this == Liquids.neoplasm` 才 `Events.fire(Trigger.neoplasmReact)`。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 移除延迟 `cell_deposits` 队列；
+    - building d4c 吸收后立即写入 `runtime.server_puddles.deposit(...)`；
+    - current-building amountSpread 对 d4 方向立即 deposit，再 damage building；
+    - nearby puddle absorb 仍在这些即时 deposit 之后执行。
+  - 新增测试：
+    - `server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java`
+    - 构造“邻接 tile 同时有 water building + water puddle”的场景，断言 replacement neoplasm puddle 没有被延迟 building deposit 写成 same-liquid accepting。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java --lib`
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update --lib`
+  - `cargo check --workspace`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 可补一次 `cargo test -p mindustry-server --lib` 或全 workspace test 后提交；
+  2. 中文提交并推送 `origin main`，建议标题：`收紧新生物液体更新顺序`；
+  3. 后续欠账：`Puddles::update_all_with_passability_report(...)` 普通 overfilled spread 仍是整轮后统一落库，若继续 Java tick 顺序路线，可补 `puddle_update_spread_deposits_are_visible_to_later_puddles_same_tick`。
