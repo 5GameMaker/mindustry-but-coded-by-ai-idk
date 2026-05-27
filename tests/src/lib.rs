@@ -716,10 +716,11 @@ fn real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime(
         .iter()
         .find(|building| building.tile_pos == unload_tile)
         .expect("server unload point should exist");
-    assert_eq!(
-        (desktop_unit.x(), desktop_unit.y()),
-        (server_unload_building.x, server_unload_building.y),
-        "desktop cargo unit should apply server entity snapshot position; {last_status}"
+    let dx = desktop_unit.x() - server_unload_building.x;
+    let dy = desktop_unit.y() - server_unload_building.y;
+    assert!(
+        (dx * dx + dy * dy).sqrt() <= 20.0,
+        "desktop cargo unit should apply server moveTo snapshot within transfer range; {last_status}"
     );
     let desktop_unload_amount = desktop
         .runtime

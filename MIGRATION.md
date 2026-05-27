@@ -3763,6 +3763,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 2026-05-27：继续补 Java `CargoAI.findAnyTarget(...)` 的 stale 优先级语义。Rust 现在把 drop target 枚举抽成 `runtime_unit_cargo_drop_targets(...)`；空载 pickup 规划会先按 loader 库存降序扫描物品，但不会因为第一个物品只有 stale unload 点就立即停下，而是继续寻找后续物品的非 stale 目标，只有所有候选都没有非 stale 目标时才 fallback 到最后一个 stale target。新增回归覆盖 copper 库存更多但 unload stale、lead 库存更少但 unload fresh 时选择 lead。
 - 2026-05-27：把 server cargo unit 的位置/状态同步接到现有 Java-like `EntitySnapshotCallPacket` 链路。`ServerLauncher::update()` 在 cargo AI tick 后会把 authoritative cargo `UnitComp::to_sync_wire()` 编入 unit entity snapshot 并非可靠广播；desktop 侧复用既有 `NetClient.entity_snapshot_mirrors -> DesktopLauncher::apply_client_entity_snapshot_packet_with_content(...) -> GameRuntime::apply_client_unit_sync_wire(...)`，真实 server→desktop cargo transfer smoke 现在断言客户端 materialized `manifold` 的位置跟随 server unload 点，而不再只依赖 item mirror。
 - 2026-05-27：补 `UnitCargoUnloadPoint.buildConfiguration/configClear` 对应的客户端 packet 构造入口。`mindustry::input` 新增 `client_unit_cargo_unload_item_config_packet(...)` 与 `client_unit_cargo_unload_clear_config_packet(...)`，分别生成 Java `config(Item.class, ...)` 对应的 `TypeValue::Content(ContentRef(Item, id))` 与 `configClear` 对应的 `TypeValue::Null` 客户端 `TileConfigCallPacket`；后续桌面 UI 选择表可直接调用该入口接入既有 server/runtime/network 配置链路。
+- 2026-05-27：补 `CargoAI.moveTo(..., moveRange, moveSmoothing)` 的最小 server 运动语义。cargo unit 现在在 pickup/drop 前会通过 `move_runtime_unit_cargo_towards(...)` 向 loader/unload 点推进，只有进入 `transferRange = 20` 后才执行 `take_items`/`transfer_item_to`；移动步长使用 Java 常量 `moveRange = 6`、`moveSmoothing = 20` 的近似过渡实现，不再在装卸前直接瞬移到目标中心。entity snapshot 与真实 server→desktop smoke 也改为断言客户端 unit 处于 transfer range 内，后续仍需补更精确的速度/路径/插值。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo_unload_config_packets --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-core unit_cargo`
@@ -3774,7 +3775,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server tethered_unit --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-server unit_cargo --lib`（本轮通过 9/9）
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`（本轮通过）
-  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过，含 cargo unit entity snapshot 位置同步断言）
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过，含 cargo unit entity snapshot moveTo/transfer range 位置同步断言）
   - `cargo test -p mindustry-core unit_tether_block_spawned --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-desktop unit_cargo --lib`（本轮通过 1/1）
@@ -3785,4 +3786,4 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过；首次遇到临时端口占用重试后通过）
   - `cargo fmt --check`
   - `cargo check --workspace`（本轮通过，仅保留既有 unused warning）
-- 仍未完成：`BuildingTetherComp` 已并入 cargo `UnitComp` 与 server/client tether 物化链路，但还未接入通用 `Groups.unit` 生命周期；当前 cargo AI 仍是 server launcher 驱动的最小 authoritative 闭环，尚未完整迁移 Java `retarget()` 的全局计时、真实平滑移动/范围判断与客户端单位运动 snapshot 可视化；loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的 UI 选择表/rollback 权限细节、Java 客户端/服务端更完整联机兼容仍待补。
+- 仍未完成：`BuildingTetherComp` 已并入 cargo `UnitComp` 与 server/client tether 物化链路，但还未接入通用 `Groups.unit` 生命周期；当前 cargo AI 仍是 server launcher 驱动的最小 authoritative 闭环，尚未完整迁移 Java `retarget()` 的全局计时、真实速度/路径/插值、目标选择排序函数与客户端可视化；loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的完整 UI 选择表/rollback 权限细节、Java 客户端/服务端更完整联机兼容仍待补。

@@ -66,6 +66,9 @@ use std::{
 const SERVER_RUNTIME_UNIT_ID_START: i32 = 1_000_000;
 const CARGO_AI_EMPTY_WAIT_TIME: f32 = 60.0 * 2.0;
 const CARGO_AI_DROP_SPACING: f32 = 60.0 * 1.5;
+const CARGO_AI_TRANSFER_RANGE: f32 = 20.0;
+const CARGO_AI_MOVE_RANGE: f32 = 6.0;
+const CARGO_AI_MOVE_SMOOTHING: f32 = 20.0;
 
 #[derive(Debug, Clone)]
 pub struct ServerLauncher {
@@ -1524,6 +1527,12 @@ impl ServerLauncher {
         }
 
         if !unit_snapshot.items.has_item() {
+            let within_loader = self
+                .move_runtime_unit_cargo_towards(unit_id, loader_x, loader_y)
+                .unwrap_or(false);
+            if !within_loader {
+                return Ok(0);
+            }
             let unit_capacity = unit_snapshot.items.item_capacity();
             let target_index = unit_snapshot
                 .cargo_ai
@@ -1548,7 +1557,6 @@ impl ServerLauncher {
             };
 
             if let Some(unit) = self.server_units.get_mut(&unit_id) {
-                unit.set_pos(loader_x, loader_y);
                 unit.set_rotation(90.0);
                 let cargo = unit
                     .cargo_ai
@@ -1675,6 +1683,17 @@ impl ServerLauncher {
                 return Ok(0);
             };
 
+        let (target_x, target_y) = {
+            let target = &self.runtime.buildings[target_building_index];
+            (target.x, target.y)
+        };
+        let within_target = self
+            .move_runtime_unit_cargo_towards(unit_id, target_x, target_y)
+            .unwrap_or(false);
+        if !within_target {
+            return Ok(0);
+        }
+
         let drop_ready = if let Some(unit) = self.server_units.get_mut(&unit_id) {
             let cargo = unit
                 .cargo_ai
@@ -1745,11 +1764,6 @@ impl ServerLauncher {
         }
 
         if let Some(unit) = self.server_units.get_mut(&unit_id) {
-            let (target_x, target_y) = {
-                let target = &self.runtime.buildings[target_building_index];
-                (target.x, target.y)
-            };
-            unit.set_pos(target_x, target_y);
             let cargo = unit
                 .cargo_ai
                 .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
@@ -2357,6 +2371,33 @@ impl ServerLauncher {
         amount.min(remaining).max(0)
     }
 
+    fn move_runtime_unit_cargo_towards(
+        &mut self,
+        unit_id: i32,
+        target_x: f32,
+        target_y: f32,
+    ) -> Option<bool> {
+        let unit = self.server_units.get_mut(&unit_id)?;
+        let dx = target_x - unit.x();
+        let dy = target_y - unit.y();
+        let distance = (dx * dx + dy * dy).sqrt();
+        if distance <= CARGO_AI_TRANSFER_RANGE {
+            return Some(true);
+        }
+        if distance <= f32::EPSILON {
+            return Some(true);
+        }
+
+        let travel = (distance - CARGO_AI_MOVE_RANGE)
+            .max(0.0)
+            .min(CARGO_AI_MOVE_SMOOTHING)
+            .min(distance);
+        let scale = travel / distance;
+        unit.set_pos(unit.x() + dx * scale, unit.y() + dy * scale);
+        let remaining = (distance - travel).max(0.0);
+        Some(remaining <= CARGO_AI_TRANSFER_RANGE)
+    }
+
     fn apply_payload_drop_to_server_unit(&mut self, unit_ref: UnitRef, x: f32, y: f32) -> bool {
         let UnitRef::Unit { id } = unit_ref else {
             return false;
@@ -2648,7 +2689,7 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServerLauncher, CARGO_AI_DROP_SPACING};
+    use super::{ServerLauncher, CARGO_AI_DROP_SPACING, CARGO_AI_TRANSFER_RANGE};
     use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
@@ -5353,6 +5394,10 @@ mod tests {
             TeamId(6),
         );
         cargo_unit.set_controller(UnitControllerState::Cargo);
+        cargo_unit.set_pos(
+            launcher.runtime.buildings()[0].x,
+            launcher.runtime.buildings()[0].y,
+        );
         launcher.server_units.insert(7, cargo_unit);
         launcher.runtime.state.set(GameStateState::Playing);
 
@@ -5435,8 +5480,13 @@ mod tests {
             .client_unit_snapshot_entities
             .get(&7)
             .unwrap();
-        assert_eq!(client_unit.x(), launcher.runtime.buildings()[1].x);
-        assert_eq!(client_unit.y(), launcher.runtime.buildings()[1].y);
+        let dx = client_unit.x() - launcher.runtime.buildings()[1].x;
+        let dy = client_unit.y() - launcher.runtime.buildings()[1].y;
+        assert_ne!(client_unit.x(), launcher.runtime.buildings()[1].x);
+        assert!(
+            (dx * dx + dy * dy).sqrt() <= CARGO_AI_TRANSFER_RANGE,
+            "cargo unit snapshot should be within transfer range after moveTo"
+        );
         assert_eq!(client_unit.items.stack.amount, 0);
     }
 
@@ -5525,6 +5575,10 @@ mod tests {
             TeamId(6),
         );
         cargo_unit.set_controller(UnitControllerState::Cargo);
+        cargo_unit.set_pos(
+            launcher.runtime.buildings()[0].x,
+            launcher.runtime.buildings()[0].y,
+        );
         launcher.server_units.insert(7, cargo_unit);
         launcher.runtime.state.set(GameStateState::Playing);
 
@@ -5716,6 +5770,10 @@ mod tests {
             TeamId(6),
         );
         cargo_unit.set_controller(UnitControllerState::Cargo);
+        cargo_unit.set_pos(
+            launcher.runtime.buildings()[1].x,
+            launcher.runtime.buildings()[1].y,
+        );
         cargo_unit.items.add_item_amount("copper", 12);
         cargo_unit.cargo_ai = Some(CargoAiRuntimeState {
             tether_tile_pos: Some(loader_tile),
