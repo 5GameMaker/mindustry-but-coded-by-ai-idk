@@ -3389,20 +3389,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check --workspace`
 - 仍未完成：`server_units` 仍是 launcher mirror，不是完整 entity group；目标 unit 被移除后尚未同步 entity hidden/remove snapshot，也未保存完整 `UnitPayload` sync bytes；真实 target lookup 应最终接入 world/entity groups 与 Java `Groups.unit`，并移除 bootstrap 距离 fallback。
 
-### 12.98 Server DropItem 权威 unit stack 清空与广播
+### 12.98 Server DropItem 权威 unit stack 清空
 
-- 2026-05-27：把 `DropItemCallPacket` 从 input helper 推进到 server 事件循环，形成 `DropItemCallPacket -> input_handler::drop_item(...) -> server_units item stack clear -> DropItemCallPacket broadcast` 的最小权威闭环。
+- 2026-05-27：把 `DropItemCallPacket` 从 input helper 推进到 server 事件循环，形成 `DropItemCallPacket -> input_handler::drop_item(...) -> server_units item stack clear` 的最小权威闭环。
 - Java 依据：
   - `InputHandler.dropItem(Player player, float angle)` 在 server 侧要求玩家和单位存在，若单位 stack 为空则抛出 validate；成功时播放 `Fx.dropItem` 并 `unit.clearItem()`；
-  - 该 remote 为 `targets = Loc.client, called = Loc.server`，因此 Rust server 消费客户端请求后需要把成功结果转发给客户端。
+  - 该 remote 为 `targets = Loc.client, called = Loc.server`：按 upstream 注解生成语义，这是客户端发起、服务端处理的 remote；当前 Rust 不再把同一个 `DropItemCallPacket` 当作 server-to-client 包广播，避免让客户端收包链路依赖错误方向。
 - Rust 新增/变化：
   - `ServerLauncher::apply_new_network_server_events()` 新增 `PacketKind::DropItemCallPacket` 分支；
   - 新增 drop-item 统计与 `last_runtime_drop_item_outcome`；
   - `apply_server_drop_item_packet(...)` 用连接 id 绑定 player/unit，不信任客户端隐式 player，调用 `drop_item(DropItemContext { local_player: false }, ...)` 清空 `server_units[connection_id].items.stack.amount`；
-  - 成功后可靠广播 `DropItemCallPacket`，为后续客户端 effect/UI 消费保留出站包；
-  - 新增 server 测试覆盖单位物品栈清空、previous item/amount outcome、统计字段和可靠广播。
+  - 成功后只记录 outcome，不可靠广播同一个 C2S packet；后续客户端视觉/typed state 应通过 entity/block snapshot、明确携带 player/unit 的 effect/event，或 Java 等价的同步路径接入；
+  - 新增 server 测试覆盖单位物品栈清空、previous item/amount outcome、统计字段，并断言不会错误广播 `DropItemCallPacket`。
 - 验证：
-  - `cargo test -p mindustry-server server_launcher_applies_drop_item_packet_to_unit_stack_and_broadcasts_drop_item`
-  - `cargo test -p mindustry-server`
+  - `cargo test -p mindustry-server server_launcher_applies_drop_item_packet_to_unit_stack`
+  - `cargo test -p mindustry-server server_launcher_ -- --test-threads=1`
   - `cargo check --workspace`
-- 仍未完成：客户端收到 `DropItemCallPacket` 后尚未能定位具体 player/unit 来清空 typed unit mirror；`Fx.dropItem` 视觉效果还没有接入 desktop renderer；server 侧仍依赖 `server_units` launcher mirror，后续要接入真实 player unit lifecycle 和 validate/admin 事件流。
+- 仍未完成：客户端 typed unit mirror 需要通过后续 authoritative snapshot/明确事件来看到清空结果；`Fx.dropItem` 视觉效果还没有接入 desktop renderer；server 侧仍依赖 `server_units` launcher mirror，后续要接入真实 player unit lifecycle、entity snapshot 和 validate/admin 事件流。

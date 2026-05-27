@@ -605,12 +605,6 @@ impl ServerLauncher {
             return Ok(false);
         }
 
-        if let Some(packet) = drop_outcome.packet.as_ref() {
-            self.net_server
-                .net_mut()
-                .send(&PacketKind::DropItemCallPacket(packet.clone()), true)?;
-            self.runtime_drop_item_packets_sent += 1;
-        }
         let accepted = drop_outcome.accepted;
         self.last_runtime_drop_item_outcome = Some(drop_outcome);
         Ok(accepted)
@@ -2016,7 +2010,7 @@ mod tests {
     }
 
     #[test]
-    fn server_launcher_applies_drop_item_packet_to_unit_stack_and_broadcasts_drop_item() {
+    fn server_launcher_applies_drop_item_packet_to_unit_stack() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
             sent: Arc::clone(&sent),
@@ -2059,7 +2053,7 @@ mod tests {
         assert_eq!(launcher.runtime_drop_item_packets_seen, 1);
         assert_eq!(launcher.runtime_drop_item_packets_accepted, 1);
         assert_eq!(launcher.runtime_drop_item_packets_rejected, 0);
-        assert_eq!(launcher.runtime_drop_item_packets_sent, 1);
+        assert_eq!(launcher.runtime_drop_item_packets_sent, 0);
         assert_eq!(launcher.server_units.get(&7).unwrap().items.stack.amount, 0);
         assert!(launcher
             .last_runtime_drop_item_outcome
@@ -2071,13 +2065,12 @@ mod tests {
             }));
 
         let sent = sent.lock().unwrap();
-        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
-            *reliable
-                && matches!(
-                    packet,
-                    PacketKind::DropItemCallPacket(packet) if packet.angle == 37.5
-                )
-        }));
+        assert!(sent
+            .iter()
+            .all(|(_connection_id, packet, _reliable)| !matches!(
+                packet,
+                PacketKind::DropItemCallPacket(_)
+            )));
     }
 
     #[test]
