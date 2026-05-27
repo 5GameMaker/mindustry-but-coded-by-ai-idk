@@ -4462,7 +4462,7 @@ impl GameRuntime {
             if self.client_fire_snapshot_entities.contains_key(id) {
                 existing = true;
             }
-            if self.client_puddle_snapshot_entities.contains_key(id) {
+            if self.client_puddle_snapshot_entities.remove(id).is_some() {
                 existing = true;
             }
             if self.client_weather_snapshot_entities.contains_key(id) {
@@ -21501,6 +21501,7 @@ mod tests {
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7002]);
         assert_eq!(hidden.hidden_existing_entities, 1);
+        assert!(runtime.client_puddle_snapshot_entities.get(&7002).is_none());
     }
 
     #[test]

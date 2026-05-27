@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::mindustry::entities::comp::{PuddleComp, PuddleLiquid, PuddleTile};
+use crate::mindustry::entities::comp::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext};
 use crate::mindustry::r#type::{CellLiquid, Liquid};
 use crate::mindustry::vars::TILE_SIZE;
 
@@ -345,6 +345,38 @@ impl Puddles {
         self.puddles.iter()
     }
 
+    pub fn update_all(&mut self, delta: f32, headless: bool) -> Vec<i32> {
+        let keys: Vec<_> = self.puddles.keys().copied().collect();
+        let mut removed = Vec::new();
+        let mut remove_keys = Vec::new();
+
+        for key in keys {
+            let Some(entry) = self.puddles.get_mut(&key) else {
+                continue;
+            };
+            let plan = entry.puddle.update(PuddleUpdateContext {
+                delta,
+                nearby_spread_targets: 0,
+                registry_matches_self: true,
+                headless,
+                fire_chance_passed: false,
+            });
+            if plan.removed
+                || entry.puddle.removed
+                || entry.puddle.amount <= 0.0
+                || entry.puddle.liquid.is_none()
+            {
+                removed.push(entry.puddle.id);
+                remove_keys.push(key);
+            }
+        }
+
+        for key in remove_keys {
+            self.puddles.remove(&key);
+        }
+        removed
+    }
+
     pub fn slurp_matching_liquid(&mut self, x: i32, y: i32, liquid_name: &str, amount: f32) -> f32 {
         let Some(entry) = self.puddles.get_mut(&(x, y)) else {
             return 0.0;
@@ -684,6 +716,20 @@ mod tests {
         assert_eq!(puddles.get(1, 1).unwrap().amount, 30.0);
         assert_eq!(puddles.slurp_matching_liquid(1, 1, "water", 12.0), 12.0);
         assert_eq!(puddles.get(1, 1).unwrap().amount, 18.0);
+    }
+
+    #[test]
+    fn update_all_removes_empty_puddles_and_returns_entity_ids() {
+        let tile = PuddleTileView::new(1, 1);
+        let mut puddles = Puddles::new(5, 5);
+        puddles.deposit_at(Some(tile), water(), 2.0, PuddleDepositContext::default());
+        let id = puddles.get(1, 1).unwrap().id;
+        assert_eq!(puddles.slurp_matching_liquid(1, 1, "water", 2.0), 2.0);
+
+        let removed = puddles.update_all(1.0, true);
+
+        assert_eq!(removed, vec![id]);
+        assert!(puddles.get(1, 1).is_none());
     }
 
     #[test]

@@ -47,12 +47,12 @@ use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, AssemblerDroneSpawnedCallPacket,
     AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
     DropItemCallPacket, EffectCallPacket, EffectCallPacket2, EntitySnapshotCallPacket,
-    LandingPadLandedCallPacket, Net, NetConnection, NetworkPlayerData, NetworkWorldData,
-    PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, ProviderEvent,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, TileConfigCallPacket, TransferInventoryCallPacket,
-    UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitSpawnCallPacket,
-    UnitTetherBlockSpawnedCallPacket,
+    HiddenSnapshotCallPacket, LandingPadLandedCallPacket, Net, NetConnection, NetworkPlayerData,
+    NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    ProviderEvent, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, TileConfigCallPacket,
+    TransferInventoryCallPacket, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
+    UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -306,6 +306,9 @@ impl ServerLauncher {
             }
             self.tick_server_regen_abilities(1.0);
             if let Err(error) = self.tick_server_liquid_regen_abilities(1.0) {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) = self.tick_server_puddles(1.0) {
                 self.network_error = Some(error.to_string());
             }
             self.tick_server_force_field_abilities(1.0);
@@ -1797,6 +1800,15 @@ impl ServerLauncher {
         Ok(updates)
     }
 
+    fn tick_server_puddles(&mut self, delta_ticks: f32) -> io::Result<usize> {
+        let removed_ids = self.runtime.server_puddles.update_all(delta_ticks, true);
+        if removed_ids.is_empty() {
+            return Ok(0);
+        }
+        self.broadcast_server_hidden_snapshot(&removed_ids)?;
+        Ok(removed_ids.len())
+    }
+
     fn tick_server_force_field_abilities(&mut self, delta_ticks: f32) -> usize {
         let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
         let mut updates = 0;
@@ -2664,6 +2676,17 @@ impl ServerLauncher {
                 },
                 data,
             }),
+            false,
+        )?;
+        Ok(true)
+    }
+
+    fn broadcast_server_hidden_snapshot(&mut self, ids: &[i32]) -> io::Result<bool> {
+        if ids.is_empty() || !self.net_server.is_active() {
+            return Ok(false);
+        }
+        self.net_server.net_mut().send(
+            &PacketKind::HiddenSnapshotCallPacket(HiddenSnapshotCallPacket { ids: ids.to_vec() }),
             false,
         )?;
         Ok(true)
@@ -6484,9 +6507,8 @@ mod tests {
         let passive_regen = unit.health.max_health * (1.0 / (70.0 * 60.0));
         assert!((unit.health.health - (damaged + passive_regen + 30.0)).abs() < 0.0001);
         assert!(unit.was_healed);
-        assert_eq!(
-            launcher.runtime.server_puddles.get(10, 12).unwrap().amount,
-            15.0
+        assert!(
+            (launcher.runtime.server_puddles.get(10, 12).unwrap().amount - 14.97).abs() < 0.0001
         );
         let sent = sent.lock().unwrap();
         assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
@@ -6499,6 +6521,51 @@ mod tests {
                             && packet.effect.x == 80.0
                             && packet.effect.y == 96.0
                             && packet.data == TypeValue::Unit(37)
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_hides_puddle_entity_when_liquid_regen_drains_it_empty() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6594).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(32, 32);
+        launcher.runtime.server_puddles = Puddles::new(32, 32);
+        let neoplasm = launcher.content_loader.liquid_by_name("neoplasm").unwrap();
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(10, 12)),
+            PuddleLiquidInfo::from(neoplasm),
+            5.0,
+            PuddleDepositContext::default(),
+        );
+        let puddle_id = launcher.runtime.server_puddles.get(10, 12).unwrap().id;
+
+        let renale = launcher
+            .content_loader
+            .unit_by_name("renale")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(38, renale, TeamId(1));
+        unit.set_pos(80.0, 96.0);
+        unit.health.damage(100.0);
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        assert!(launcher.runtime.server_puddles.get(10, 12).is_none());
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::HiddenSnapshotCallPacket(packet)
+                        if packet.ids == vec![puddle_id]
                 )
         }));
     }

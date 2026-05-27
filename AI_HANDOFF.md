@@ -3270,3 +3270,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - Arc Simplex 3D/4D/tiled 分支的系统化迁移（当前只迁移 2D 本能力所需分支）；
      - floor/env/space/boil 的真实 map/env/random 上下文；
      - puddle evaporation/removal 的客户端删除同步。
+
+---
+
+## 98. 最新闭环记录：Puddles lifecycle removal and hidden snapshot sync
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：让 `GameRuntime.server_puddles` 的空/removed puddle 在服务端生命周期中被移除，并通过 `HiddenSnapshotCallPacket` 同步到客户端，避免被吸干后残留。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - 新增 `Puddles::update_all(delta, headless) -> Vec<i32>`；
+    - 调用 `PuddleComp::update(PuddleUpdateContext { nearby_spread_targets:0, registry_matches_self:true, headless, fire_chance_passed:false, ... })`；
+    - 删除 removed / amount<=0 / liquid none 的 puddle，并返回 entity ids。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `apply_client_hidden_snapshot_ids(...)` 对 puddle 从 `contains_key` 改为 `remove`，hidden 后实际清掉 `client_puddle_snapshot_entities`。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 在 `tick_server_liquid_regen_abilities(1.0)` 后调用 `tick_server_puddles(1.0)`；
+    - 新增 `broadcast_server_hidden_snapshot(...)`，对 removed puddle ids 发送 `HiddenSnapshotCallPacket`；
+    - 新增 `server_update_hides_puddle_entity_when_liquid_regen_drains_it_empty`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core update_all_removes_empty_puddles --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_puddle --lib`
+  - `cargo test -p mindustry-server server_update_slurps_neoplasm --lib`
+  - `cargo test -p mindustry-server server_update_hides_puddle --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`同步液体坑移除快照`。
+  3. 后续补：
+     - puddle spread / affect units / fire / particle / ripple 事件；
+     - hidden snapshot 对其他 typed entities 的最终 remove 语义（本轮只处理 puddle）；
+     - 客户端渲染层真正消费 puddle add/remove 的表现。

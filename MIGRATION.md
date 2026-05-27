@@ -4691,3 +4691,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Simplex helper 当前仅迁移本能力需要的 2D 分支，Arc 3D/4D/tiled noise 仍未系统化迁移；
   - floor/env/space/boil 的真实随机上下文仍沿 `Puddles` 默认 helper，后续需要接 map tile 与可复现随机源；
   - death puddle removal/evaporation 的客户端删除同步仍待补齐。
+
+### 12.156 Puddles lifecycle removal and hidden snapshot sync
+
+- 2026-05-27：在 `server_puddles` 已经能由死亡洒液创建、由吸液回血消耗并同步到客户端后，继续补齐 puddle 生命周期删除链路，避免 amount 归零或 update 移除后客户端仍保留旧 puddle typed entity。
+- Java 依据：
+  - puddle 每帧 `update` 会按 viscosity 蒸发、合并接受量并在 amount 归零/无 liquid/无 tile 时 remove；
+  - 网络侧使用 hidden snapshot 类机制通知客户端实体不再可见/存在。
+- Rust 新增/变化：
+  - `Puddles::update_all(delta, headless)` 遍历当前 puddle，调用 `PuddleComp::update(...)`，删除 removed/empty/no-liquid puddle 并返回对应 entity ids；
+  - `ServerLauncher::tick_server_puddles(1.0)` 在 playing frame 中、`LiquidRegenAbility` slurp 后运行，保证被吸干的 puddle 当帧移除；
+  - `ServerLauncher::broadcast_server_hidden_snapshot(...)` 将移除的 puddle id 通过 `HiddenSnapshotCallPacket` 广播；
+  - `GameRuntime::apply_client_hidden_snapshot_ids(...)` 对 puddle typed runtime 从原先“只标记存在”改为从 `client_puddle_snapshot_entities` 中移除。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core update_all_removes_empty_puddles --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_puddle --lib`
+  - `cargo test -p mindustry-server server_update_slurps_neoplasm --lib`
+  - `cargo test -p mindustry-server server_update_hides_puddle --lib`
+- 仍未完成：
+  - `Puddles::update_all` 当前不做 spread 目标扫描、建筑影响、火焰/particle effect 事件，只先闭合蒸发/empty removal；
+  - hidden snapshot 对其他 entity typed maps 仍保持原有 mark/sidecar 语义，只有 puddle 在本轮做实际 remove；
+  - 后续需要把 puddle update 的 ripple/steam/fire/particle 事件接到 effect/network 层。
