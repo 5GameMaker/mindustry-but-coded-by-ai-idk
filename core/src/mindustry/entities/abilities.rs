@@ -424,6 +424,7 @@ impl Ability for LiquidExplodeAbility {
 pub struct LiquidRegenAbility {
     pub base: BasicAbility,
     pub liquid_name: String,
+    pub slurp_effect: String,
     pub slurp_speed: f32,
     pub regen_per_slurp: f32,
     pub slurp_effect_chance: f32,
@@ -434,6 +435,7 @@ impl Default for LiquidRegenAbility {
         Self {
             base: BasicAbility::default(),
             liquid_name: String::new(),
+            slurp_effect: "heal".into(),
             slurp_speed: 5.0,
             regen_per_slurp: 6.0,
             slurp_effect_chance: 0.4,
@@ -442,6 +444,62 @@ impl Default for LiquidRegenAbility {
 }
 
 impl LiquidRegenAbility {
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("LiquidRegenAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("LiquidRegenAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+        let mut ability = Self {
+            liquid_name: parts.next()?.to_string(),
+            ..Self::default()
+        };
+        if let Some(effect) = parts.next() {
+            ability.slurp_effect = effect.to_string();
+        }
+        if let Some(slurp_speed) = parts.next() {
+            ability.slurp_speed = slurp_speed.parse().ok()?;
+        }
+        if let Some(regen_per_slurp) = parts.next() {
+            ability.regen_per_slurp = regen_per_slurp.parse().ok()?;
+        }
+        if let Some(slurp_effect_chance) = parts.next() {
+            ability.slurp_effect_chance = slurp_effect_chance.parse().ok()?;
+        }
+        Some(ability)
+    }
+
+    pub fn slurp_radius(&self, hit_size: f32, tile_size: f32) -> i32 {
+        ((hit_size / tile_size.max(0.0001)) * 0.6).max(1.0) as i32
+    }
+
+    pub fn slurp_tiles(
+        &self,
+        unit_x: f32,
+        unit_y: f32,
+        hit_size: f32,
+        tile_size: f32,
+    ) -> Vec<(i32, i32)> {
+        let radius = self.slurp_radius(hit_size, tile_size);
+        let tile_size = tile_size.max(0.0001);
+        let center_x = (unit_x / tile_size).floor() as i32;
+        let center_y = (unit_y / tile_size).floor() as i32;
+        let mut tiles = Vec::new();
+        for ox in -radius..=radius {
+            for oy in -radius..=radius {
+                if ox * ox + oy * oy <= radius * radius {
+                    tiles.push((center_x + ox, center_y + oy));
+                }
+            }
+        }
+        tiles
+    }
+
     pub fn planned_heal_amount(&self, slurped_amount: f32) -> f32 {
         slurped_amount * self.regen_per_slurp
     }
@@ -2428,6 +2486,22 @@ mod tests {
         assert!(ability.is_visible());
         assert_eq!(ability.data(), 7.5);
         assert!((ability.planned_heal_amount(2.0) - 12.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn liquid_regen_descriptor_parses_neoplasm_entry_and_slurp_tiles() {
+        let ability =
+            LiquidRegenAbility::from_descriptor("LiquidRegenAbility:neoplasm:neoplasmHeal")
+                .expect("neoplasm liquid regen descriptor should parse");
+        assert_eq!(ability.liquid_name, "neoplasm");
+        assert_eq!(ability.slurp_effect, "neoplasmHeal");
+        assert_eq!(ability.slurp_speed, 5.0);
+        assert_eq!(ability.regen_per_slurp, 6.0);
+        assert_eq!(ability.slurp_radius(9.0, 8.0), 1);
+        assert!(ability
+            .slurp_tiles(80.0, 96.0, 9.0, 8.0)
+            .contains(&(10, 12)));
+        assert!(LiquidRegenAbility::from_descriptor("LiquidExplodeAbility").is_none());
     }
 
     #[test]

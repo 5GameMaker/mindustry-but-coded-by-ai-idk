@@ -341,6 +341,18 @@ impl Puddles {
         self.puddles.get(&(x, y))
     }
 
+    pub fn slurp_matching_liquid(&mut self, x: i32, y: i32, liquid_name: &str, amount: f32) -> f32 {
+        let Some(entry) = self.puddles.get_mut(&(x, y)) else {
+            return 0.0;
+        };
+        if entry.liquid.name != liquid_name {
+            return 0.0;
+        }
+        let taken = entry.puddle.amount.min(amount.max(0.0));
+        entry.puddle.amount -= taken;
+        taken
+    }
+
     pub fn has_liquid(&self, tile: Option<&PuddleTileView>, liquid: &PuddleLiquidInfo) -> bool {
         let Some(tile) = tile else {
             return false;
@@ -656,6 +668,18 @@ mod tests {
         assert_eq!(result.accepting, 12.0);
         assert!(result.ripple);
         assert_eq!(puddles.get(1, 1).unwrap().last_ripple, 55.0);
+    }
+
+    #[test]
+    fn slurp_matching_liquid_decrements_only_matching_puddle() {
+        let tile = PuddleTileView::new(1, 1);
+        let mut puddles = Puddles::new(5, 5);
+        puddles.deposit_at(Some(tile), water(), 30.0, PuddleDepositContext::default());
+
+        assert_eq!(puddles.slurp_matching_liquid(1, 1, "oil", 5.0), 0.0);
+        assert_eq!(puddles.get(1, 1).unwrap().amount, 30.0);
+        assert_eq!(puddles.slurp_matching_liquid(1, 1, "water", 12.0), 12.0);
+        assert_eq!(puddles.get(1, 1).unwrap().amount, 18.0);
     }
 
     #[test]

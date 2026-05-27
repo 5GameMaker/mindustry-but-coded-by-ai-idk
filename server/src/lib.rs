@@ -304,6 +304,7 @@ impl ServerLauncher {
                 self.network_error = Some(error.to_string());
             }
             self.tick_server_regen_abilities(1.0);
+            self.tick_server_liquid_regen_abilities(1.0);
             self.tick_server_force_field_abilities(1.0);
             self.tick_server_shield_arc_abilities(1.0);
             self.tick_server_shield_regen_field_abilities(1.0);
@@ -1718,6 +1719,57 @@ impl ServerLauncher {
                 parent.refresh_component_views();
             }
             updates += heals.len();
+        }
+
+        updates
+    }
+
+    fn tick_server_liquid_regen_abilities(&mut self, delta_ticks: f32) -> usize {
+        let unit_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut updates = 0;
+
+        for unit_id in unit_ids {
+            let Some(unit_snapshot) = self.server_units.get(&unit_id) else {
+                continue;
+            };
+            if unit_snapshot.health.dead
+                || !unit_snapshot.health.damaged()
+                || unit_snapshot.type_info.flying
+                || unit_snapshot.elevation > 0.001
+            {
+                continue;
+            }
+
+            let unit_x = unit_snapshot.x();
+            let unit_y = unit_snapshot.y();
+            let hit_size = unit_snapshot.type_info.hit_size;
+            let abilities = unit_snapshot.liquid_regen_abilities();
+            let mut total_heal = 0.0;
+
+            for ability in abilities {
+                for (tile_x, tile_y) in
+                    ability.slurp_tiles(unit_x, unit_y, hit_size, TILE_SIZE as f32)
+                {
+                    let taken = self.runtime.server_puddles.slurp_matching_liquid(
+                        tile_x,
+                        tile_y,
+                        &ability.liquid_name,
+                        ability.slurp_speed * delta_ticks,
+                    );
+                    total_heal += ability.planned_heal_amount(taken);
+                }
+            }
+
+            if total_heal <= 0.0 {
+                continue;
+            }
+            let Some(unit) = self.server_units.get_mut(&unit_id) else {
+                continue;
+            };
+            unit.heal_mark(total_heal);
+            unit.health.heal(total_heal);
+            unit.refresh_component_views();
+            updates += 1;
         }
 
         updates
@@ -3917,6 +3969,9 @@ mod tests {
     use mindustry_core::mindustry::entities::comp::{
         BuildingComp, BuildingTetherAction, BuildingTetherComp, BuildingTetherRef,
         CargoAiRuntimeState, PayloadComp, PayloadKind, PayloadState, UnitComp, UnitControllerState,
+    };
+    use mindustry_core::mindustry::entities::{
+        PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
     };
     use mindustry_core::mindustry::game::{BlockPlan, ExportStat, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
@@ -6309,6 +6364,43 @@ mod tests {
             .expect("renale death should deposit neoplasm on its tile");
         assert_eq!(entry.puddle.amount, 70.0);
         assert_eq!(entry.liquid.name, "neoplasm");
+    }
+
+    #[test]
+    fn server_update_slurps_neoplasm_puddle_to_regen_renale() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(32, 32);
+        launcher.runtime.server_puddles = Puddles::new(32, 32);
+        let neoplasm = launcher.content_loader.liquid_by_name("neoplasm").unwrap();
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(10, 12)),
+            PuddleLiquidInfo::from(neoplasm),
+            20.0,
+            PuddleDepositContext::default(),
+        );
+
+        let renale = launcher
+            .content_loader
+            .unit_by_name("renale")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(37, renale, TeamId(1));
+        unit.set_pos(80.0, 96.0);
+        unit.health.damage(100.0);
+        let damaged = unit.health.health;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&37).unwrap();
+        let passive_regen = unit.health.max_health * (1.0 / (70.0 * 60.0));
+        assert!((unit.health.health - (damaged + passive_regen + 30.0)).abs() < 0.0001);
+        assert!(unit.was_healed);
+        assert_eq!(
+            launcher.runtime.server_puddles.get(10, 12).unwrap().amount,
+            15.0
+        );
     }
 
     #[test]

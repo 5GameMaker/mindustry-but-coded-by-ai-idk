@@ -4600,3 +4600,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `Simplex.noise2d` 边缘噪声尚未迁移；当前 deterministic circle 对 renale 最小半径闭环等价到中心 puddle，但 latum 大半径边缘会少噪声细节；
   - server puddle 尚未进入 `EntitySnapshotCallPacket` 广播与 desktop typed runtime 同步；当前先接入 server death lifecycle 与 `Puddles` 数据结构；
   - 液体反应、space/boil 概率分支目前沿 `Puddles` helper 的上下文默认值，后续需接真实 map floor/env 与可复现随机源。
+
+### 12.152 LiquidRegenAbility / neoplasm 吸液回血 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `LiquidRegenAbility.java` 与 `NeoplasmUnitType.java`，把 neoplasm 单位从同液体 puddle 吸取液体并回血的能力接入 `UnitComp` ability descriptor、server unit health runtime 与 `GameRuntime.server_puddles`。
+- Java 依据：
+  - `LiquidRegenAbility.update(Unit unit)`：当 `unit.damaged() && !unit.isFlying()` 时，按 `rad = max((int)(unit.hitSize / tilesize * 0.6f), 1)` 扫描附近 tile；
+  - 若 tile 上存在同 `liquid` puddle，则每帧取 `fractionTaken = min(puddle.amount, slurpSpeed * Time.delta)`，扣减 puddle 并 `unit.heal(fractionTaken * regenPerSlurp)`；
+  - 任意回血后按 `slurpEffectChance` 播放 `slurpEffect`；neoplasm preset 使用 `liquid=neoplasm`、`slurpEffect=Fx.neoplasmHeal`、默认 `slurpSpeed=5`、`regenPerSlurp=6`。
+- Rust 新增/变化：
+  - `LiquidRegenAbility` 增加 `slurp_effect` 字段与 `from_descriptor(...)`，解析 `LiquidRegenAbility:neoplasm:neoplasmHeal`；
+  - `LiquidRegenAbility::slurp_radius(...)` 与 `slurp_tiles(...)` 复现 Java tile 扫描半径；
+  - `UnitComp::liquid_regen_abilities()` 从 unit descriptor 暴露 LiquidRegen abilities；
+  - `Puddles::slurp_matching_liquid(...)` 对同液体 puddle 扣减 amount 并返回实际取走量；
+  - `ServerLauncher::tick_server_liquid_regen_abilities(1.0)` 在 playing frame 中对受伤、非飞行 server unit 执行 slurp + heal，并刷新 unit component views。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core liquid_regen --lib`
+  - `cargo test -p mindustry-core slurp_matching --lib`
+  - `cargo test -p mindustry-core unit_component_reads_liquid_regen --lib`
+  - `cargo test -p mindustry-server slurps_neoplasm --lib`
+- 仍未完成：
+  - `slurpEffect` / `Fx.neoplasmHeal` 仅保留 descriptor 字段，尚未接入 effect queue 与随机偏移；
+  - `Mathf.chanceDelta(slurpEffectChance)`、`Tmp.v1.rnd(Mathf.random(unit.hitSize/2f))` 尚未接可复现 RNG；
+  - `unit.isFlying()` 当前按 Rust `type_info.flying/elevation` 最小判断，后续需与完整 elevation/hover 状态机对齐；
+  - server puddle 同步到 desktop snapshot 仍需补齐。

@@ -3133,3 +3133,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入新生物死亡洒液运行时`。
   3. 后续补 Java `Simplex.noise2d` 边缘噪声、server puddle entity snapshot 广播到 desktop、真实 floor/env/space/boil 随机上下文，再接 `LiquidRegenAbility` slurp puddle 回血。
+
+---
+
+## 94. 最新闭环记录：LiquidRegenAbility / neoplasm slurp puddle regen runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `LiquidRegenAbility.java` 与 `NeoplasmUnitType.java`，把 neoplasm 单位从同液体 puddle 吸液回血接入 server unit + puddle runtime。
+- Java 依据：
+  - damaged 且非 flying 时扫描 `hitSize / tilesize * 0.6` 半径内 tile；
+  - 同液体 puddle 每帧扣 `min(puddle.amount, slurpSpeed * Time.delta)`；
+  - 单位回血 `fractionTaken * regenPerSlurp`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `LiquidRegenAbility` 增加 `slurp_effect`；
+    - 新增 `from_descriptor(...)`、`slurp_radius(...)`、`slurp_tiles(...)`；
+    - 新增 neoplasm descriptor/半径测试。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::liquid_regen_abilities()`。
+  - `core/src/mindustry/entities/puddles.rs`
+    - 新增 `Puddles::slurp_matching_liquid(...)` 与测试。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` playing frame 内在 passive Regen 后调用 `tick_server_liquid_regen_abilities(1.0)`；
+    - 新增 `server_update_slurps_neoplasm_puddle_to_regen_renale`，验证 renale 从 neoplasm puddle 扣 5 液体并回血 30，同时保留 passive regen。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core liquid_regen --lib`
+  - `cargo test -p mindustry-core slurp_matching --lib`
+  - `cargo test -p mindustry-core unit_component_reads_liquid_regen --lib`
+  - `cargo test -p mindustry-server slurps_neoplasm --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入新生物吸液回血运行时`。
+  3. 后续补 `Fx.neoplasmHeal` effect queue、chance/random offset、完整 flying/elevation 判断、server puddle snapshot 广播到 desktop。

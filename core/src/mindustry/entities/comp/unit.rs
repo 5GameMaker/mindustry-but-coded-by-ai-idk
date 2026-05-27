@@ -11,11 +11,12 @@ use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
     EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility, ForceFieldUpdate,
-    LiquidExplodeAbility, LiquidExplodeDepositPlan, MoveEffectAbility, MoveEffectPlan,
-    RegenAbility, RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldArcAbility,
-    ShieldArcUpdate, ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget,
-    SpawnDeathAbility, SpawnDeathSpawnPlan, StatusFieldAbility, StatusFieldPulse,
-    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
+    LiquidExplodeAbility, LiquidExplodeDepositPlan, LiquidRegenAbility, MoveEffectAbility,
+    MoveEffectPlan, RegenAbility, RepairFieldAbility, RepairFieldPulse, RepairFieldTarget,
+    ShieldArcAbility, ShieldArcUpdate, ShieldRegenFieldAbility, ShieldRegenFieldPulse,
+    ShieldRegenFieldTarget, SpawnDeathAbility, SpawnDeathSpawnPlan, StatusFieldAbility,
+    StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility,
+    UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -633,6 +634,14 @@ impl UnitComp {
             .flat_map(|ability| {
                 ability.deposit_plans(self.x(), self.y(), self.type_info.hit_size, TILE_SIZE)
             })
+            .collect()
+    }
+
+    pub fn liquid_regen_abilities(&self) -> Vec<LiquidRegenAbility> {
+        self.type_info
+            .abilities
+            .iter()
+            .filter_map(|descriptor| LiquidRegenAbility::from_descriptor(descriptor))
             .collect()
     }
 
@@ -1891,6 +1900,18 @@ mod tests {
         assert_eq!(plans[0].liquid_name, "neoplasm");
         assert_eq!((plans[0].tile_x, plans[0].tile_y), (10, 12));
         assert_eq!(plans[0].amount, 600.0);
+    }
+
+    #[test]
+    fn unit_component_reads_liquid_regen_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["LiquidRegenAbility:neoplasm:neoplasmHeal".into()];
+        let unit = UnitComp::new(52, unit_type, TeamId(1));
+
+        let abilities = unit.liquid_regen_abilities();
+        assert_eq!(abilities.len(), 1);
+        assert_eq!(abilities[0].liquid_name, "neoplasm");
+        assert_eq!(abilities[0].slurp_effect, "neoplasmHeal");
     }
 
     #[test]
