@@ -141,6 +141,15 @@ pub struct StandardEffectCirclePrimitive {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectCircleRenderPrimitive {
+    pub kind: StandardEffectDrawKind,
+    pub center: (f32, f32),
+    pub radius: f32,
+    pub stroke: f32,
+    pub alpha: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StandardEffectDrawPlan {
     pub effect_id: i32,
     pub layer: f32,
@@ -209,6 +218,31 @@ impl StandardEffectDrawPlan {
     pub fn expand_seeded_particle_circles_from_seed(&self) -> Vec<StandardEffectCirclePrimitive> {
         let vectors = self.seeded_particle_vectors();
         self.expand_seeded_particle_circles(&vectors)
+    }
+
+    pub fn circle_render_primitives_from_seed(&self) -> Vec<StandardEffectCircleRenderPrimitive> {
+        match self.kind {
+            StandardEffectDrawKind::FilledCircle | StandardEffectDrawKind::StrokedCircle => {
+                vec![StandardEffectCircleRenderPrimitive {
+                    kind: self.kind,
+                    center: self.center,
+                    radius: self.radius,
+                    stroke: self.stroke,
+                    alpha: self.alpha,
+                }]
+            }
+            StandardEffectDrawKind::SeededCircleParticles => self
+                .expand_seeded_particle_circles_from_seed()
+                .into_iter()
+                .map(|circle| StandardEffectCircleRenderPrimitive {
+                    kind: StandardEffectDrawKind::FilledCircle,
+                    center: circle.center,
+                    radius: circle.radius,
+                    stroke: 0.0,
+                    alpha: circle.alpha,
+                })
+                .collect(),
+        }
     }
 }
 
@@ -2064,6 +2098,75 @@ mod tests {
                 fout: 0.5,
             }])
             .is_empty());
+    }
+
+    #[test]
+    fn standard_effect_plan_resolves_circle_render_primitives_from_seed() {
+        let smoke = standard_effect_draw_plan(
+            Some(FX_SMOKE_ID as u16),
+            7,
+            10.0,
+            20.0,
+            0.0,
+            50.0,
+            100.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let smoke_primitives = smoke.circle_render_primitives_from_seed();
+        assert_eq!(
+            smoke_primitives,
+            vec![StandardEffectCircleRenderPrimitive {
+                kind: StandardEffectDrawKind::FilledCircle,
+                center: (10.0, 20.0),
+                radius: 1.75,
+                stroke: 0.0,
+                alpha: 1.0,
+            }]
+        );
+
+        let ripple = standard_effect_draw_plan(
+            Some(FX_RIPPLE_ID as u16),
+            9,
+            3.0,
+            4.0,
+            2.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let ripple_primitives = ripple.circle_render_primitives_from_seed();
+        assert_eq!(ripple_primitives.len(), 1);
+        assert_eq!(
+            ripple_primitives[0].kind,
+            StandardEffectDrawKind::StrokedCircle
+        );
+        assert!((ripple_primitives[0].radius - 6.0).abs() < 0.0001);
+        assert!((ripple_primitives[0].stroke - 1.05).abs() < 0.0001);
+
+        let fire = standard_effect_draw_plan(
+            Some(FX_FIRE_ID as u16),
+            42,
+            10.0,
+            20.0,
+            0.0,
+            25.0,
+            50.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let fire_primitives = fire.circle_render_primitives_from_seed();
+        assert_eq!(fire_primitives.len(), 2);
+        assert_eq!(
+            fire_primitives[0].kind,
+            StandardEffectDrawKind::FilledCircle
+        );
+        assert!((fire_primitives[0].center.0 - 12.061711).abs() < 0.00001);
+        assert!((fire_primitives[0].center.1 - 25.472529).abs() < 0.00001);
+        assert_eq!(fire_primitives[0].radius, 1.7);
+        assert_eq!(fire_primitives[0].stroke, 0.0);
+        assert_eq!(fire_primitives[0].alpha, 1.0);
     }
 
     #[test]

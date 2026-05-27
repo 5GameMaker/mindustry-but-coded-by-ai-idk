@@ -5639,3 +5639,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 还需要把 circle/light primitives 接入桌面真实 2D backend；
   - 当前只覆盖已迁移的标准 Fx 子集，完整 `Fx.java` renderer 仍需继续逐项迁移；
   - `Angles.randLenVectors` 其他 overload（cone/random offset 等）待后续迁移到更多 Fx 时继续补齐。
+
+### 12.191 Unified circle render primitives for standard Fx plans
+
+- 2026-05-28：在 seeded vector 与 circle expansion 已可用后，补一层统一的后端消费接口，把单圆、描边圆与 seeded particle 圆云都解析为同一种 circle render primitive 列表，减少桌面 2D backend 后续需要理解的高层 `Fx` 分支。
+- Rust 新增/变化：
+  - 新增 `StandardEffectCircleRenderPrimitive { kind, center, radius, stroke, alpha }`；
+  - `StandardEffectDrawPlan::circle_render_primitives_from_seed()`：
+    - `FilledCircle` / `StrokedCircle` 直接生成单个 primitive；
+    - `SeededCircleParticles` 先按 Arc `Rand` / `Angles.randLenVectors` 生成 seeded vectors，再展开为多个 `FilledCircle` primitive；
+  - 该接口不引入窗口库或 GPU 依赖，保持 core 层只输出可排序/可消费的几何 primitive。
+- 新增验证：
+  - `standard_effect_plan_resolves_circle_render_primitives_from_seed`
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 颜色解析仍保留为 `color_from/color_to/input_color/color_mix/color_mul` 元数据，尚未统一压成最终 RGBA；
+  - `fire` 的 light 仍是 plan 字段，尚未统一成 light render primitive；
+  - desktop 仍需建立真实帧渲染/窗口 backend 来消费这些 primitive。
