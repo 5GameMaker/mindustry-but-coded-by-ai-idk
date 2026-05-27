@@ -3634,3 +3634,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
 - 仍未完成：`UnitCommand` 配置/清空、`command` 是否属于目标 unit `commands` 的过滤、`UnitType.init()` 自动命令列表、UI 选择表、logic `senseObject(LAccess.config)`/网络 `TileConfigCallPacket` 分发仍需后续闭环。
+
+### 12.111 UnitAssembler 最小 owned runtime tick
+
+- 2026-05-27：对照 Java `UnitAssemblerBuild.updateTile()`，把 `UnitAssembler` 从内容/状态/序列化 helper 推进到 `advance_owned_runtime_blocks(...).unit.assembler` 的真实 owned runtime 路径。
+- Java 依据：
+  - `updateTile()` 先处理 tier 变化、payload `moveInPayload()` 后 `yeetPayload(payload)` 累加到 `blocks`，再按当前 tier clamp 到 plan；
+  - `progress += edelta() * state.rules.unitBuildSpeed(team) * eff / plan.time`，达到 1 后 `spawned()`，随后 `consume()` 并清空 `blocks`；
+  - 动态 consume 来源包括 `ConsumePayloadDynamic`、`ConsumeItemDynamic`、`ConsumeLiquidsDynamic`，并通过 `state.rules.unitCost(team)` 缩放。
+- Rust 新增/变化：
+  - `ensure_unit_state_for_building(...)` 现在会为 `BlockDef::UnitAssembler` 懒创建 `GameRuntimeUnitBlockState::Assembler { common, assembler }`，并为 `BlockDef::UnitAssemblerModule` 创建 terminal `PayloadBlockBuildState`；
+  - 新增 `GameRuntimeUnitAssemblerFrameReport`，并把 `GameRuntimeOwnedUnitFrameReport` 扩展为 `factory + reconstructor + assembler`；
+  - 新增 assembler payload/item/liquid requirement 解析与消费：payload requirements 按 `PayloadContentSpec::{Unit,Block}` 映射为 `PayloadKey`，数量按 `rules.unitCost(team)` 缩放；
+  - `advance_owned_unit_assemblers_ticks(...)` 已接入 `advance_owned_runtime_blocks`：先把已抵达 `PayloadBlockBuildState.common.payload` 的 payload 转入 `assembler.blocks`，再调用 `unit_assembler_update_progress(...)`，完成时调用 `unit_assembler_spawned(...)`、消费 payload/items/liquids，并上报完成计数；
+  - 当前实现是接入主 runtime 的过渡闭环，不是独立 helper；后续 drone/模块/单位实体链路会在同一路径继续补齐。
+- 新增 core 回归测试：
+  - `game_runtime_owned_runtime_blocks_includes_unit_assembler_tick_like_java`：验证 `tank-assembler` 在 owned runtime 中接收最后一个 `stell` payload、满足 `PayloadSeq` 需求、完成进度、消费 payload requirements 并清零 progress。
+- 验证：
+  - `cargo test -p mindustry-core unit_assembler`
+  - `cargo check --workspace`
+- 仍未完成：真实 `AssemblerAI`/`BuildingTether` drone 创建与同步、`UnitAssemblerModule.findLink()`/module→assembler payload 转运、`checkSolid`/spawn rect 占位判定、最终 `UnitType.create(team)` 加入 world/目标 build payload、sound/Fx/Event/Call 联机广播、`shouldConsume()` 与 `team.activateUnitFactories()` 的精确语义仍待后续闭环。

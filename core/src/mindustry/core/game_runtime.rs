@@ -38,7 +38,7 @@ use crate::mindustry::{
         LegacyShortChunkMap, TeamId, UnitRef,
     },
     net::{NetworkPlayerSyncData, UnitEnteredPayloadCallPacket},
-    r#type::{PayloadSeq, WeatherState},
+    r#type::{PayloadKey, PayloadSeq, WeatherState},
     vars::TILE_SIZE,
     world::block::Block,
     world::blocks::campaign::{
@@ -162,11 +162,12 @@ use crate::mindustry::{
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        reconstructor_accept_payload, reconstructor_update, unit_factory_configure_plan,
-        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
-        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
-        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
-        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+        reconstructor_accept_payload, reconstructor_update, unit_assembler_spawned,
+        unit_assembler_update_progress, unit_factory_configure_plan, unit_factory_update,
+        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
+        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
+        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -1063,6 +1064,45 @@ fn consume_building_items(building: &mut BuildingComp, requirements: &[(ContentI
     }
 }
 
+fn scaled_liquid_requirements(
+    stacks: &[crate::mindustry::content::blocks::LiquidAmount],
+    multiplier: f32,
+) -> Vec<(ContentId, f32)> {
+    let multiplier = if multiplier.is_finite() {
+        multiplier.max(0.0)
+    } else {
+        0.0
+    };
+    stacks
+        .iter()
+        .filter_map(|stack| {
+            let amount = stack.amount * multiplier;
+            (amount > 0.0).then_some((stack.liquid, amount))
+        })
+        .collect()
+}
+
+fn building_has_liquids(building: &BuildingComp, requirements: &[(ContentId, f32)]) -> bool {
+    if requirements.is_empty() {
+        return true;
+    }
+    let Some(liquids) = building.liquids.as_ref() else {
+        return false;
+    };
+    requirements
+        .iter()
+        .all(|(liquid, amount)| liquids.get(*liquid) + 0.0001 >= *amount)
+}
+
+fn consume_building_liquids(building: &mut BuildingComp, requirements: &[(ContentId, f32)]) {
+    let Some(liquids) = building.liquids.as_mut() else {
+        return;
+    };
+    for (liquid, amount) in requirements {
+        liquids.remove(*liquid, *amount);
+    }
+}
+
 fn network_map_entity_records(
     runtime: &GameRuntime,
     content: &ContentLoader,
@@ -1920,9 +1960,25 @@ pub struct GameRuntimeUnitReconstructorFrameReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimeUnitAssemblerFrameReport {
+    pub visited_buildings: usize,
+    pub assembler_candidates: usize,
+    pub updated_assemblers: usize,
+    pub moved_in_payloads: usize,
+    pub completed_units: usize,
+    pub consumed_payload_batches: usize,
+    pub consumed_item_batches: usize,
+    pub consumed_liquid_batches: usize,
+    pub missing_requirements: usize,
+    pub invalid_plans: usize,
+    pub missing_runtime_states: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeOwnedUnitFrameReport {
     pub factory: GameRuntimeUnitFactoryFrameReport,
     pub reconstructor: GameRuntimeUnitReconstructorFrameReport,
+    pub assembler: GameRuntimeUnitAssemblerFrameReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -3432,6 +3488,13 @@ impl GameRuntime {
                 common: PayloadBlockBuildState::default(),
                 reconstructor: ReconstructorState::default(),
             }),
+            BlockDef::UnitAssembler(_) => Some(GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState::default(),
+            }),
+            BlockDef::UnitAssemblerModule(_) => Some(GameRuntimeUnitBlockState::AssemblerModule(
+                PayloadBlockBuildState::default(),
+            )),
             _ => None,
         };
         let Some(state) = state else {
@@ -16397,6 +16460,242 @@ impl GameRuntime {
         report
     }
 
+    fn assembler_payload_requirements(
+        content: &ContentLoader,
+        plan: &crate::mindustry::content::blocks::AssemblerUnitPlanSpec,
+        unit_cost: f32,
+    ) -> Option<Vec<(PayloadKey, i32)>> {
+        let unit_cost = if unit_cost.is_finite() {
+            unit_cost.max(0.0)
+        } else {
+            0.0
+        };
+        plan.payload_requirements
+            .iter()
+            .map(|stack| {
+                let key = match &stack.content {
+                    crate::mindustry::content::blocks::PayloadContentSpec::Unit(name) => content
+                        .unit_by_name(name)
+                        .map(|unit| PayloadKey::new(ContentType::Unit, unit.base.mappable.base.id)),
+                    crate::mindustry::content::blocks::PayloadContentSpec::Block(name) => content
+                        .block_by_name(name)
+                        .map(|block| PayloadKey::new(ContentType::Block, block.base().id)),
+                }?;
+                let amount = ((stack.amount as f32) * unit_cost).ceil() as i32;
+                Some((key, amount.max(0)))
+            })
+            .collect()
+    }
+
+    fn payload_key_from_sort_key(sort_key: PayloadSortKey) -> Option<PayloadKey> {
+        if sort_key.content_type == ContentType::Unit.ordinal() as i8 {
+            Some(PayloadKey::new(ContentType::Unit, sort_key.id))
+        } else if sort_key.content_type == ContentType::Block.ordinal() as i8 {
+            Some(PayloadKey::new(ContentType::Block, sort_key.id))
+        } else {
+            None
+        }
+    }
+
+    fn payload_seq_contains_requirements(
+        payloads: &PayloadSeq,
+        requirements: &[(PayloadKey, i32)],
+    ) -> bool {
+        requirements
+            .iter()
+            .all(|(key, amount)| *amount <= 0 || payloads.contains(*key, *amount))
+    }
+
+    fn payload_seq_consume_requirements(
+        payloads: &mut PayloadSeq,
+        requirements: &[(PayloadKey, i32)],
+    ) {
+        for (key, amount) in requirements {
+            if *amount > 0 {
+                payloads.remove(*key, *amount);
+            }
+        }
+    }
+
+    fn advance_owned_unit_assemblers_ticks(
+        &mut self,
+        content: &ContentLoader,
+        frame_delta: f32,
+    ) -> GameRuntimeUnitAssemblerFrameReport {
+        let mut report = GameRuntimeUnitAssemblerFrameReport::default();
+
+        for index in 0..self.buildings.len() {
+            let (tile_pos, block_id, enabled, efficiency, time_scale, rotdeg, team, power_status) = {
+                let building = &self.buildings[index];
+                report.visited_buildings += 1;
+                (
+                    building.tile_pos,
+                    building.block.id,
+                    building.enabled,
+                    building.efficiency,
+                    building.time_scale,
+                    building.rotdeg(),
+                    building.team,
+                    building
+                        .power
+                        .as_ref()
+                        .map(|power| power.status)
+                        .unwrap_or(1.0),
+                )
+            };
+
+            let Some(BlockDef::UnitAssembler(assembler_block)) = content.block(block_id) else {
+                continue;
+            };
+            report.assembler_candidates += 1;
+
+            if !self.unit_runtime_states.contains_key(&tile_pos) {
+                let building = self.buildings[index].clone();
+                if !self.ensure_unit_state_for_building(content, &building) {
+                    report.missing_runtime_states += 1;
+                    continue;
+                }
+            }
+
+            let current_tier = self
+                .unit_runtime_states
+                .get(&tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Assembler { assembler, .. } => {
+                        Some(assembler.current_tier)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0)
+                .max(0) as usize;
+            let Some(plan) = assembler_block
+                .plans
+                .get(current_tier.min(assembler_block.plans.len().saturating_sub(1)))
+            else {
+                report.invalid_plans += 1;
+                continue;
+            };
+
+            let plan_unit = content.unit_by_name(&plan.unit);
+            let can_create = plan_unit
+                .map(|unit| !self.state.rules.is_unit_banned(unit.name()))
+                .unwrap_or(false);
+            let unit_cost = self.state.rules.unit_cost(team.0 as usize);
+            let unit_build_speed = self.state.rules.unit_build_speed(team.0 as usize);
+            let Some(payload_requirements) =
+                Self::assembler_payload_requirements(content, plan, unit_cost)
+            else {
+                report.invalid_plans += 1;
+                continue;
+            };
+            let item_requirements = scaled_item_requirements(&plan.item_requirements, unit_cost);
+            let liquid_requirements =
+                scaled_liquid_requirements(&plan.liquid_requirements, unit_cost);
+            let has_required_items = building_has_items(&self.buildings[index], &item_requirements);
+            let has_required_liquids =
+                building_has_liquids(&self.buildings[index], &liquid_requirements);
+            if !can_create {
+                report.invalid_plans += 1;
+            }
+
+            let mut completed_unit = false;
+            let mut consumed_payloads = false;
+            {
+                let Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) =
+                    self.unit_runtime_states.get_mut(&tile_pos)
+                else {
+                    report.missing_runtime_states += 1;
+                    continue;
+                };
+
+                common.pay_rotation = rotdeg;
+                if common.payload.is_some() {
+                    let moved_in = payload_block_move_in(
+                        common,
+                        true,
+                        assembler_block.rotate,
+                        rotdeg,
+                        assembler_block.payload_speed,
+                        assembler_block.payload_rotate_speed,
+                        frame_delta * time_scale,
+                    );
+                    if moved_in && !assembler.was_occupied {
+                        if let Some(payload) = common.payload.take() {
+                            if let Some(key) = payload_ref_sort_key(&payload)
+                                .and_then(Self::payload_key_from_sort_key)
+                            {
+                                assembler.blocks.add_one(key);
+                                report.moved_in_payloads += 1;
+                            } else {
+                                common.payload = Some(payload);
+                            }
+                        }
+                    }
+                }
+
+                let has_required_payloads = Self::payload_seq_contains_requirements(
+                    &assembler.blocks,
+                    &payload_requirements,
+                );
+                let requirements_met =
+                    has_required_payloads && has_required_items && has_required_liquids;
+                if !requirements_met {
+                    report.missing_requirements += 1;
+                }
+
+                let drones_created = assembler_block.drones_created.max(0) as usize;
+                // Until AssemblerAI/BuildingTether unit ownership is migrated, the
+                // owned runtime treats the Java-created drone slots as present and
+                // in position. This keeps the real block tick moving through the
+                // same runtime path while the full drone entity loop is ported.
+                let simulated_drones = drones_created;
+                let _drone_spawned = unit_assembler_update_progress(
+                    assembler,
+                    enabled,
+                    power_status,
+                    simulated_drones,
+                    drones_created,
+                    efficiency,
+                    can_create,
+                    requirements_met,
+                    simulated_drones,
+                    frame_delta * time_scale,
+                    frame_delta * time_scale * efficiency,
+                    unit_build_speed,
+                    plan.time,
+                );
+                report.updated_assemblers += 1;
+
+                if assembler.progress >= 1.0 && requirements_met && can_create {
+                    unit_assembler_spawned(assembler);
+                    Self::payload_seq_consume_requirements(
+                        &mut assembler.blocks,
+                        &payload_requirements,
+                    );
+                    completed_unit = true;
+                    consumed_payloads = !payload_requirements.is_empty();
+                }
+            }
+
+            if completed_unit {
+                report.completed_units += 1;
+                if consumed_payloads {
+                    report.consumed_payload_batches += 1;
+                }
+                if !item_requirements.is_empty() {
+                    consume_building_items(&mut self.buildings[index], &item_requirements);
+                    report.consumed_item_batches += 1;
+                }
+                if !liquid_requirements.is_empty() {
+                    consume_building_liquids(&mut self.buildings[index], &liquid_requirements);
+                    report.consumed_liquid_batches += 1;
+                }
+            }
+        }
+
+        report
+    }
+
     pub fn advance_owned_unit_reconstructors(
         &mut self,
         content: &ContentLoader,
@@ -16859,6 +17158,7 @@ impl GameRuntime {
         let unit = GameRuntimeOwnedUnitFrameReport {
             factory: self.advance_owned_unit_factories_ticks(content, frame.delta),
             reconstructor: self.advance_owned_unit_reconstructors_ticks(content, frame.delta),
+            assembler: self.advance_owned_unit_assemblers_ticks(content, frame.delta),
         };
 
         let mut batch_resources = EffectBlockFrameBatchResources {
@@ -19537,6 +19837,93 @@ mod tests {
                 .id,
             horizon.id()
         );
+    }
+
+    #[test]
+    fn game_runtime_owned_runtime_blocks_includes_unit_assembler_tick_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let stell = content.unit_by_name("stell").unwrap().clone();
+        let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let plan = &assembler_block.plans[0];
+        let tile_pos = point2_pack(12, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+        if let Some(power) = runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+
+        let mut stell_unit = UnitComp::new(6601, stell.clone(), TeamId(4));
+        stell_unit.set_pos(runtime.buildings[0].x, runtime.buildings[0].y);
+        let stell_payload = GameRuntime::unit_payload_ref_from_unit(&content, &stell_unit)
+            .expect("stell should serialize as a unit payload");
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 3);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState {
+                    payload: Some(stell_payload),
+                    pay_vector: Vec2::ZERO,
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                assembler: UnitAssemblerState {
+                    progress: 1.0 - 1.0 / plan.time,
+                    blocks,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(report.unit.assembler.assembler_candidates, 1);
+        assert_eq!(report.unit.assembler.updated_assemblers, 1);
+        assert_eq!(report.unit.assembler.moved_in_payloads, 1);
+        assert_eq!(report.unit.assembler.completed_units, 1);
+        assert_eq!(report.unit.assembler.consumed_payload_batches, 1);
+        assert_eq!(report.unit.assembler.missing_requirements, 0);
+        let Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit assembler sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(assembler.progress, 0.0);
+        assert_eq!(assembler.blocks.total(), 0);
     }
 
     #[test]
