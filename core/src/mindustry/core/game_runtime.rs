@@ -168,7 +168,8 @@ use crate::mindustry::{
     world::blocks::units::{
         assembler_module_transfer_payload, read_reconstructor_state, read_repair_turret_state,
         read_unit_assembler_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
-        read_unit_factory_state, reconstructor_accept_payload, reconstructor_update,
+        read_unit_factory_state, reconstructor_accept_item, reconstructor_accept_payload,
+        reconstructor_fraction, reconstructor_maximum_accepted, reconstructor_update,
         unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_spawned,
         unit_assembler_update_progress, unit_cargo_loader_accept_item, unit_cargo_loader_spawned,
         unit_cargo_loader_update, unit_cargo_unload_update, unit_factory_accept_item,
@@ -4752,6 +4753,9 @@ impl GameRuntime {
             BlockDef::UnitFactory(factory_block) => {
                 self.sense_owned_unit_factory_number(factory_block, building, sensor)
             }
+            BlockDef::UnitReconstructor(reconstructor_block) => {
+                self.sense_owned_reconstructor_number(reconstructor_block, building, sensor)
+            }
             _ => None,
         }
     }
@@ -4882,6 +4886,38 @@ impl GameRuntime {
             }
             LAccess::ItemCapacity => Some(
                 (factory_block.base.item_capacity as f32
+                    * self.state.rules.unit_cost(building.team.0 as usize))
+                .round() as f64,
+            ),
+            _ => None,
+        }
+    }
+
+    fn sense_owned_reconstructor_number(
+        &self,
+        reconstructor_block: &crate::mindustry::content::blocks::UnitReconstructorBlockData,
+        building: &BuildingComp,
+        sensor: LAccess,
+    ) -> Option<f64> {
+        match sensor {
+            LAccess::Progress => {
+                let progress = self
+                    .unit_runtime_states
+                    .get(&building.tile_pos)
+                    .and_then(|state| match state {
+                        GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. } => {
+                            Some(reconstructor.base.progress)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(0.0);
+                Some(
+                    reconstructor_fraction(progress, reconstructor_block.construct_time)
+                        .clamp(0.0, 1.0) as f64,
+                )
+            }
+            LAccess::ItemCapacity => Some(
+                (reconstructor_block.base.item_capacity as f32
                     * self.state.rules.unit_cost(building.team.0 as usize))
                 .round() as f64,
             ),
@@ -15710,6 +15746,22 @@ impl GameRuntime {
                     plan_contains_item,
                 )
             }
+            Some(BlockDef::UnitReconstructor(reconstructor_block)) => {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                let base_capacity = reconstructor_block
+                    .capacities
+                    .iter()
+                    .find(|capacity| capacity.item == item_id)
+                    .map(|capacity| capacity.amount)
+                    .unwrap_or(0);
+                let maximum_accepted = reconstructor_maximum_accepted(
+                    base_capacity,
+                    self.state.rules.unit_cost(target.team.0 as usize),
+                );
+                reconstructor_accept_item(items.get(item_id), maximum_accepted)
+            }
             Some(BlockDef::Storage(storage)) => {
                 let target_owner_index = self.item_module_owner_index(content, target_index);
                 let Some(items) = self
@@ -21321,6 +21373,57 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_reconstructor_accepts_consume_items_until_capacity_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let source_def = content.block_by_name("router").unwrap();
+        let silicon = content.item_by_name("silicon").unwrap();
+        let lead = content.item_by_name("lead").unwrap();
+        let silicon_id = silicon.base.mappable.base.id;
+        let lead_id = lead.base.mappable.base.id;
+        let BlockDef::UnitReconstructor(reconstructor_block) = reconstructor_def else {
+            panic!("additive-reconstructor should be a unit reconstructor");
+        };
+        let tile_pos = point2_pack(10, 14);
+        let source_pos = point2_pack(9, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.unit_cost_multiplier = 1.5;
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            source_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(2),
+        ));
+
+        let base_capacity = reconstructor_block
+            .capacities
+            .iter()
+            .find(|capacity| capacity.item == silicon_id)
+            .map(|capacity| capacity.amount)
+            .expect("additive reconstructor should consume silicon");
+        let maximum_accepted = reconstructor_maximum_accepted(base_capacity, 1.5);
+        let reconstructor_items = runtime.buildings[1]
+            .items
+            .as_mut()
+            .expect("reconstructor should own item storage");
+        reconstructor_items.set(silicon_id, maximum_accepted - 1);
+
+        assert!(runtime.dump_target_accepts_item(&content, 0, 1, silicon_id));
+        assert!(!runtime.dump_target_accepts_item(&content, 0, 1, lead_id));
+
+        runtime.buildings[1]
+            .items
+            .as_mut()
+            .unwrap()
+            .set(silicon_id, maximum_accepted);
+        assert!(!runtime.dump_target_accepts_item(&content, 0, 1, silicon_id));
+    }
+
+    #[test]
     fn game_runtime_configures_unit_factory_plan_and_clears_progress_like_java() {
         let content = ContentLoader::create_base_content().unwrap();
         let factory_def = content.block_by_name("air-factory").unwrap();
@@ -22457,6 +22560,45 @@ mod tests {
                 ("rebuild", false, true),
                 ("assist", false, false),
             ]
+        );
+    }
+
+    #[test]
+    fn game_runtime_senses_reconstructor_progress_and_item_capacity_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let BlockDef::UnitReconstructor(reconstructor_block) = reconstructor_def else {
+            panic!("additive-reconstructor should be a unit reconstructor");
+        };
+        let tile_pos = point2_pack(18, 17);
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.unit_cost_multiplier = 1.5;
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Reconstructor {
+                common: PayloadBlockBuildState::default(),
+                reconstructor: ReconstructorState {
+                    base: UnitBlockState {
+                        progress: reconstructor_block.construct_time / 4.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..ReconstructorState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.sense_owned_building_number(&content, tile_pos, LAccess::Progress),
+            Some(0.25)
+        );
+        assert_eq!(
+            runtime.sense_owned_building_number(&content, tile_pos, LAccess::ItemCapacity),
+            Some((reconstructor_block.base.item_capacity as f32 * 1.5).round() as f64)
         );
     }
 

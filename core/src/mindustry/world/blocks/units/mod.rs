@@ -340,6 +340,14 @@ pub fn reconstructor_capacities(
     (capacities, item_capacity)
 }
 
+pub fn reconstructor_accept_item(stored: i32, maximum_accepted: i32) -> bool {
+    maximum_accepted > 0 && stored < maximum_accepted
+}
+
+pub fn reconstructor_maximum_accepted(base_capacity: i32, unit_cost: f32) -> i32 {
+    (base_capacity as f32 * unit_cost).round() as i32
+}
+
 pub fn reconstructor_fraction(progress: f32, construct_time: f32) -> f32 {
     if construct_time == 0.0 {
         0.0
@@ -1263,6 +1271,10 @@ mod tests {
         );
         assert_eq!(caps, vec![10, 60, 0]);
         assert_eq!(item_cap, 60);
+        assert_eq!(reconstructor_maximum_accepted(60, 1.5), 90);
+        assert!(reconstructor_accept_item(89, 90));
+        assert!(!reconstructor_accept_item(90, 90));
+        assert!(!reconstructor_accept_item(0, 0));
         assert_eq!(reconstructor_fraction(30.0, 120.0), 0.25);
         assert!(reconstructor_accept_payload(
             true, true, true, true, true, false

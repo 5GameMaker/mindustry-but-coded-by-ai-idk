@@ -3893,3 +3893,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --check`
   - `cargo check -p mindustry-core`
 - 仍未完成：该 plan 仍只是 runtime/UI 数据源，尚未接到真实桌面配置菜单渲染；Java `team.isAI()` 研究绕过、客户端权限 rollback、完整 Java↔Rust UI/联机 smoke 仍需继续迁移。
+
+### 12.119 Reconstructor 物品输入与逻辑感知
+
+- 2026-05-27：对照 Java `ReconstructorBuild.getMaximumAccepted(Item)`、默认 `Building.acceptItem(...)` 与 `sense(LAccess.progress/itemCapacity)`，把重构器消耗物品接入真实 item transport 入口，并补齐逻辑感知值。
+- Java 依据：
+  - `getMaximumAccepted(item)` 返回 `round(capacities[item.id] * state.rules.unitCost(team))`；
+  - Reconstructor 不像 UnitFactory 那样按当前 plan 过滤物品，而是依赖 `consume_items` 初始化出的 `capacities`；
+  - `sense(progress)` 返回 `clamp(fraction())`，`sense(itemCapacity)` 返回 `round(itemCapacity * state.rules.unitCost(team))`。
+- Rust 新增/变化：
+  - `world::blocks::units` 新增 `reconstructor_accept_item(...)` 与 `reconstructor_maximum_accepted(...)`，并扩展既有 Reconstructor 单元测试；
+  - `GameRuntime::dump_target_accepts_item(...)` 现在识别 `BlockDef::UnitReconstructor`，按 `capacities[item] * rules.unitCost(team)` 接收 consume item，使 conveyor/router 等真实物品流可给 Reconstructor 补料；
+  - `GameRuntime::sense_owned_building_number(...)` 现在支持 `BlockDef::UnitReconstructor` 的 `LAccess::Progress` 与 `LAccess::ItemCapacity`。
+- 新增验证：
+  - `cargo test -p mindustry-core reconstructor_accepts_consume_items --lib`
+  - `cargo test -p mindustry-core senses_reconstructor --lib`
+  - `cargo test -p mindustry-core reconstructor_progress_acceptance_and_serialization_follow_upstream --lib`
+  - `cargo fmt --check`
+  - `cargo check -p mindustry-core`
+- 仍未完成：资源 consumer 的 `shouldConsume()` 仍只是 Reconstructor tick 的最小门控，尚未完整迁移 Java consume rollback/efficiency UI；真实 Java↔Rust 服务端物品传输 smoke 仍需补。
