@@ -4117,3 +4117,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 后续接入建议：
   - 若后续补齐 follow-up menu/dialog stack，需在非 game state 回调后自动 hide；
   - 若后续补齐 HUD renderer，再迁移 sidebar bar 绘制、status icon found 判定和无限时长显示。
+
+### 12.132 v158.1 UnitAssembler / AssemblerAI 真实 drone 到位倍率
+
+- 2026-05-27：再次确认 Java 参考目录 `D:/MDT/mindustry-upstream-v157.4` 当前为 `v158.1` / `05b2ecd`；继续对照 `UnitAssembler.java` 与 `AssemblerAI.java`，把 Rust UnitAssembler 从“所有 drone 视为到位”的过渡口径推进到真实 pose 判定。
+- Java 依据：
+  - `UnitAssemblerBuild.updateTile()` 每帧按 `i * 90f + 45f` 给每个 drone 设置 `AssemblerAI.targetPos`，距离为 `areaSize / 2f * Mathf.sqrt2 * tilesize`，`targetAngle = i * 90f + 45f + 180f`；
+  - `AssemblerAI.inPosition()` 要求 `unit.within(targetPos, 10f)` 且 `Angles.within(unit.rotation, targetAngle, 15f)`；
+  - `progress += edelta() * unitBuildSpeed * eff / plan.time` 中的 `eff` 来自真实到位 drone 数 / `dronesCreated`。
+- Rust 新增/变化：
+  - `core/src/mindustry/world/blocks/units/mod.rs`
+    - 新增 `UnitAssemblerDroneTarget`；
+    - 新增 `unit_assembler_drone_target(...)`；
+    - 新增 `unit_assembler_drone_in_position(...)`；
+  - `GameRuntime::advance_owned_unit_assemblers_ticks(...)`
+    - 移除 `simulated_drones = drones_created`；
+    - 从 `UnitAssemblerState.read_unit_ids` 保留顺序去重后，读取 `client_unit_snapshot_entities` 中的 `UnitComp` pose；
+    - 只统计 `UnitControllerState::Assembler`、team 匹配且满足 Java 距离/角度阈值的 drone；
+    - `GameRuntimeUnitAssemblerFrameReport` 新增 `drones_in_position` 便于验证；
+  - `ServerLauncher::update()` 在 owned runtime tick 前调用 `tick_runtime_unit_assembler_ai()`：
+    - 依据 assembler building、`read_unit_ids` 与 slot index 计算目标点；
+    - 移动 server-side assembler drone 朝目标点靠近；
+    - 到近处后转向目标角；
+    - 将移动后的 server unit 快照同步到 `runtime.client_unit_snapshot_entities`，让 owned runtime 使用真实 pose 计算生产倍率。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core assembler_geometry_tiers_acceptance_and_progress_follow_upstream --lib`
+  - `cargo test -p mindustry-core unit_assembler --lib`
+  - `cargo test -p mindustry-core assembler_module --lib`
+  - `cargo test -p mindustry-server assembler --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `cargo fmt --check`
+- 仍未完成：
+  - server 侧 drone 移动是最小可玩近似，尚未完整迁移 Java `AIController.moveTo(targetPos, 1f, 3f)` 的完整加速度/避障/朝向细节；
+  - `UnitAssembler.spawned()` 中输出 unit 尝试投递到 `commandPos` 目标建筑的 payload 逻辑仍需继续接入；
+  - `AssemblerAI` 的完整 controller runtime state 尚未独立实体化，当前以 helper + server movement + snapshot sidecar 实现最小闭环。

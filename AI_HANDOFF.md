@@ -2439,3 +2439,42 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 后续补 dialog stack/follow-up menu 时迁移 `!state.isGame() -> hide()`；
   2. 后续补 HUD renderer 时再迁移 `HudFragment` 绘制与 tooltip 差异；
   3. 目前继续主线 runtime/network/content 迁移，不要把 UI 差异写入 gameplay 层。
+
+---
+
+## 74. 最新闭环记录：UnitAssembler / AssemblerAI drone 真实到位接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `UnitAssembler.java` 与 `AssemblerAI.java`，把 UnitAssembler 生产进度从“所有 drone 视为到位”的临时逻辑改为按真实 drone 位置/角度计算。
+- Java 依据：
+  - `ai.targetPos.trns(i * 90f + 45f, areaSize / 2f * Mathf.sqrt2 * tilesize).add(spawn);`
+  - `ai.targetAngle = i * 90f + 45f + 180f;`
+  - `AssemblerAI.inPosition()`：10f 距离阈值 + 15f 角度阈值；
+  - `eff = inPositionCount / dronesCreated` 后才推进 assembler progress。
+- Rust 主改动：
+  - `core/src/mindustry/world/blocks/units/mod.rs`
+    - `UnitAssemblerDroneTarget`
+    - `unit_assembler_drone_target(...)`
+    - `unit_assembler_drone_in_position(...)`
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `advance_owned_unit_assemblers_ticks(...)` 不再使用 `simulated_drones = drones_created`；
+    - 按 `read_unit_ids` 的顺序去重、slot index 与 `client_unit_snapshot_entities` 里的 `UnitComp` pose 计算 `drones_in_position`；
+    - `GameRuntimeUnitAssemblerFrameReport` 新增 `drones_in_position`；
+    - 新增测试锁定无真实到位 drone 时 progress 不再推进。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 在 owned runtime 前调用 `tick_runtime_unit_assembler_ai()`；
+    - server-side assembler drone 朝 slot target 移动、接近后转向 targetAngle；
+    - 移动后的 drone 同步回 `runtime.client_unit_snapshot_entities`，使 runtime 使用真实 pose 计算倍率。
+- 已跑：
+  - `cargo test -p mindustry-core assembler_geometry_tiers_acceptance_and_progress_follow_upstream --lib`
+  - `cargo test -p mindustry-core unit_assembler --lib`
+  - `cargo test -p mindustry-core assembler_module --lib`
+  - `cargo test -p mindustry-server assembler --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `cargo fmt --check`
+- 当前仍需继续：
+  1. `tick_runtime_unit_assembler_ai()` 是最小可玩近似，后续需更贴近 Java `AIController.moveTo(targetPos, 1f, 3f)` 的加速度/避障/旋转细节；
+  2. 继续迁移 `UnitAssembler.spawned()` 的输出 unit 投递到 `commandPos` 目标建筑 payload 逻辑；
+  3. 继续把 `AssemblerAI` 从 helper 进一步实体化为正式 controller runtime state，避免长期依赖 snapshot sidecar。

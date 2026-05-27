@@ -57,7 +57,9 @@ use mindustry_core::mindustry::vars::{
 use mindustry_core::mindustry::world::blocks::autotiler_direction;
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::world::blocks::payloads::{payload_ref_sort_key, PayloadRef};
-use mindustry_core::mindustry::world::blocks::units::unit_assembler_drone_spawned;
+use mindustry_core::mindustry::world::blocks::units::{
+    unit_assembler_drone_spawned, unit_assembler_drone_target,
+};
 use mindustry_core::mindustry::world::meta::BuildVisibility;
 use mindustry_core::mindustry::world::point2_pack;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -253,6 +255,7 @@ impl ServerLauncher {
         if let Err(error) = self.tick_server_unit_entered_payloads() {
             self.network_error = Some(error.to_string());
         }
+        self.tick_runtime_unit_assembler_ai();
         let unit_cargo_loader_spawn_candidates =
             self.runtime_unit_cargo_loader_spawn_candidate_tiles();
         if let Some(report) = self.update_runtime_owned_blocks(1.0 / 60.0) {
@@ -1732,6 +1735,90 @@ impl ServerLauncher {
         }
     }
 
+    fn tick_runtime_unit_assembler_ai(&mut self) -> usize {
+        let mut targets = Vec::new();
+        for building in &self.runtime.buildings {
+            let Some(BlockDef::UnitAssembler(assembler_block)) =
+                self.content_loader.block(building.block.id)
+            else {
+                continue;
+            };
+            let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+                self.runtime.unit_runtime_states.get(&building.tile_pos)
+            else {
+                continue;
+            };
+            let (dir_x, dir_y) = autotiler_direction(building.rotation);
+            let spawn_len = TILE_SIZE as f32
+                * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+            let spawn_x = building.x + dir_x as f32 * spawn_len;
+            let spawn_y = building.y + dir_y as f32 * spawn_len;
+            let mut seen = BTreeSet::new();
+            for (slot_index, unit_id) in assembler
+                .read_unit_ids
+                .iter()
+                .copied()
+                .filter(|id| *id >= 0 && seen.insert(*id))
+                .take(assembler_block.drones_created.max(0) as usize)
+                .enumerate()
+            {
+                targets.push((
+                    unit_id,
+                    building.tile_pos,
+                    building.team,
+                    unit_assembler_drone_target(
+                        spawn_x,
+                        spawn_y,
+                        assembler_block.area_size,
+                        TILE_SIZE as f32,
+                        slot_index,
+                    ),
+                ));
+            }
+        }
+
+        let mut updated_snapshots = Vec::new();
+        for (unit_id, tile_pos, team, target) in targets {
+            let Some(unit) = self.server_units.get_mut(&unit_id) else {
+                continue;
+            };
+            if unit.team_id() != team || !matches!(unit.controller, UnitControllerState::Assembler)
+            {
+                continue;
+            }
+            let tether_valid = unit
+                .building_tether
+                .as_ref()
+                .and_then(|tether| tether.building.as_ref())
+                .is_some_and(|building| building.tile_pos == tile_pos && building.valid);
+            if !tether_valid {
+                continue;
+            }
+
+            let dx = target.pos.x - unit.x();
+            let dy = target.pos.y - unit.y();
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > f32::EPSILON {
+                let travel = (unit.type_info.speed * 3.0).max(1.0).min(distance);
+                let scale = travel / distance;
+                unit.set_pos(unit.x() + dx * scale, unit.y() + dy * scale);
+            }
+            if distance <= 5.0 {
+                unit.look_at_angle(target.angle, 1.0);
+            }
+            updated_snapshots.push((unit_id, unit.clone()));
+        }
+
+        let updated = updated_snapshots.len();
+        for (unit_id, unit) in updated_snapshots {
+            self.runtime
+                .client_unit_snapshot_entities
+                .insert(unit_id, unit);
+        }
+        updated
+    }
+
     fn broadcast_runtime_unit_block_spawns(&mut self, tile_positions: &[i32]) -> io::Result<usize> {
         if tile_positions.is_empty() || !self.net_server.is_active() {
             return Ok(0);
@@ -3149,7 +3236,7 @@ mod tests {
     use super::{
         ServerLauncher, CARGO_AI_DROP_SPACING, CARGO_AI_RETARGET_INTERVAL, CARGO_AI_TRANSFER_RANGE,
     };
-    use mindustry_core::mindustry::content::blocks::BlockDef;
+    use mindustry_core::mindustry::content::blocks::{BlockDef, UnitAssemblerBlockData};
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeDistributionBlockState,
         GameRuntimePayloadBlockState, GameRuntimePowerNodeBatchLinkReport,
@@ -3162,8 +3249,8 @@ mod tests {
     };
     use mindustry_core::mindustry::ctype::{Content, ContentType};
     use mindustry_core::mindustry::entities::comp::{
-        BuildingComp, BuildingTetherAction, BuildingTetherRef, CargoAiRuntimeState, PayloadComp,
-        PayloadKind, PayloadState, UnitComp, UnitControllerState,
+        BuildingComp, BuildingTetherAction, BuildingTetherComp, BuildingTetherRef,
+        CargoAiRuntimeState, PayloadComp, PayloadKind, PayloadState, UnitComp, UnitControllerState,
     };
     use mindustry_core::mindustry::game::{BlockPlan, ExportStat, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
@@ -3180,6 +3267,7 @@ mod tests {
     };
     use mindustry_core::mindustry::r#type::{PayloadKey, PayloadSeq, Sector};
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
+    use mindustry_core::mindustry::world::blocks::autotiler_direction;
     use mindustry_core::mindustry::world::blocks::campaign::LandingPadState;
     use mindustry_core::mindustry::world::blocks::payloads::{
         payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
@@ -3187,8 +3275,8 @@ mod tests {
         PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::blocks::units::{
-        ReconstructorState, UnitAssemblerState, UnitBlockState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        unit_assembler_drone_target, ReconstructorState, UnitAssemblerState, UnitBlockState,
+        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::collections::BTreeMap;
@@ -3206,6 +3294,67 @@ mod tests {
             }
         }
         panic!("could not reserve a local TCP/UDP port pair");
+    }
+
+    fn seed_server_assembler_drones_in_position(
+        launcher: &mut ServerLauncher,
+        tile_pos: i32,
+        assembler_block: &UnitAssemblerBlockData,
+    ) {
+        let building = launcher
+            .runtime
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .cloned()
+            .expect("assembler building should exist");
+        let Some(drone_type) = launcher
+            .content_loader
+            .unit_by_name(&assembler_block.drone_type)
+            .cloned()
+        else {
+            panic!("assembler drone type should exist");
+        };
+        let (dir_x, dir_y) = autotiler_direction(building.rotation);
+        let spawn_len =
+            TILE_SIZE as f32 * (assembler_block.area_size + assembler_block.base.size) as f32 / 2.0;
+        let spawn_x = building.x + dir_x as f32 * spawn_len;
+        let spawn_y = building.y + dir_y as f32 * spawn_len;
+        let mut ids = Vec::new();
+        for slot_index in 0..assembler_block.drones_created.max(0) as usize {
+            let unit_id = 80_000 + slot_index as i32;
+            let target = unit_assembler_drone_target(
+                spawn_x,
+                spawn_y,
+                assembler_block.area_size,
+                TILE_SIZE as f32,
+                slot_index,
+            );
+            let mut unit = UnitComp::new(unit_id, drone_type.clone(), building.team);
+            unit.set_pos(target.pos.x, target.pos.y);
+            unit.set_rotation(target.angle);
+            unit.set_controller(UnitControllerState::Assembler);
+            unit.building_tether = Some(BuildingTetherComp {
+                team: building.team,
+                building: Some(BuildingTetherRef {
+                    tile_pos,
+                    team: building.team,
+                    valid: true,
+                }),
+            });
+            launcher.server_units.insert(unit_id, unit.clone());
+            launcher
+                .runtime
+                .client_unit_snapshot_entities
+                .insert(unit_id, unit);
+            ids.push(unit_id);
+        }
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            launcher.runtime.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            panic!("assembler sidecar should exist");
+        };
+        assembler.read_unit_ids = ids;
     }
 
     #[test]
@@ -5153,6 +5302,7 @@ mod tests {
         let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
             panic!("tank-assembler should be a unit assembler");
         };
+        let assembler_block = assembler_block.clone();
         let plan = &assembler_block.plans[0];
         let plan_time = plan.time;
         let plan_unit_name = plan.unit.clone();
@@ -5191,6 +5341,7 @@ mod tests {
                 },
             },
         );
+        seed_server_assembler_drones_in_position(&mut launcher, assembler_tile, &assembler_block);
 
         launcher.update();
 
@@ -5312,6 +5463,83 @@ mod tests {
                         if packet.tile == Some(assembler_tile) && packet.id == drone_id
                 )
         }));
+    }
+
+    #[test]
+    fn server_update_moves_assembler_drone_toward_slot_target() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(24, 24);
+
+        let assembler_def = launcher
+            .content_loader
+            .block_by_name("tank-assembler")
+            .unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let assembler_block = assembler_block.clone();
+        let drone_type = launcher
+            .content_loader
+            .unit_by_name(&assembler_block.drone_type)
+            .unwrap()
+            .clone();
+        let assembler_tile = point2_pack(9, 8);
+        launcher.runtime.add_building(BuildingComp::new(
+            assembler_tile,
+            assembler_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.unit_runtime_states.insert(
+            assembler_tile,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    read_unit_ids: vec![7],
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+        let building = launcher.runtime.buildings()[0].clone();
+        let (dir_x, dir_y) = autotiler_direction(building.rotation);
+        let spawn_len =
+            TILE_SIZE as f32 * (assembler_block.area_size + assembler_block.base.size) as f32 / 2.0;
+        let spawn_x = building.x + dir_x as f32 * spawn_len;
+        let spawn_y = building.y + dir_y as f32 * spawn_len;
+        let target = unit_assembler_drone_target(
+            spawn_x,
+            spawn_y,
+            assembler_block.area_size,
+            TILE_SIZE as f32,
+            0,
+        );
+
+        let mut drone = UnitComp::new(7, drone_type, TeamId(6));
+        drone.set_pos(building.x, building.y);
+        drone.set_rotation(90.0);
+        drone.set_controller(UnitControllerState::Assembler);
+        drone.building_tether = Some(BuildingTetherComp {
+            team: TeamId(6),
+            building: Some(BuildingTetherRef {
+                tile_pos: assembler_tile,
+                team: TeamId(6),
+                valid: true,
+            }),
+        });
+        let before =
+            ((target.pos.x - drone.x()).powi(2) + (target.pos.y - drone.y()).powi(2)).sqrt();
+        launcher.server_units.insert(7, drone);
+
+        assert_eq!(launcher.tick_runtime_unit_assembler_ai(), 1);
+
+        let moved = launcher.server_units.get(&7).unwrap();
+        let after =
+            ((target.pos.x - moved.x()).powi(2) + (target.pos.y - moved.y()).powi(2)).sqrt();
+        assert!(after < before);
+        assert!(launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .contains_key(&7));
     }
 
     #[test]

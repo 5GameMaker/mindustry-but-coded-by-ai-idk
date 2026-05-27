@@ -172,15 +172,16 @@ use crate::mindustry::{
         read_unit_assembler_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
         read_unit_factory_state, reconstructor_accept_item, reconstructor_accept_payload,
         reconstructor_fraction, reconstructor_maximum_accepted, reconstructor_update,
-        unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_drone_spawned,
-        unit_assembler_spawned, unit_assembler_update_progress, unit_block_spawned,
-        unit_cargo_loader_accept_item, unit_cargo_loader_spawned, unit_cargo_loader_update,
-        unit_cargo_unload_update, unit_factory_accept_item, unit_factory_configure_plan,
-        unit_factory_fraction, unit_factory_maximum_accepted, unit_factory_update,
-        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
-        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
-        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        unit_assembler_accept_payload, unit_assembler_current_tier,
+        unit_assembler_drone_in_position, unit_assembler_drone_spawned,
+        unit_assembler_drone_target, unit_assembler_spawned, unit_assembler_update_progress,
+        unit_block_spawned, unit_cargo_loader_accept_item, unit_cargo_loader_spawned,
+        unit_cargo_loader_update, unit_cargo_unload_update, unit_factory_accept_item,
+        unit_factory_configure_plan, unit_factory_fraction, unit_factory_maximum_accepted,
+        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
+        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
+        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
+        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -2013,6 +2014,7 @@ pub struct GameRuntimeUnitAssemblerFrameReport {
     pub missing_requirements: usize,
     pub invalid_plans: usize,
     pub missing_runtime_states: usize,
+    pub drones_in_position: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -18916,7 +18918,19 @@ impl GameRuntime {
         let mut report = GameRuntimeUnitAssemblerFrameReport::default();
 
         for index in 0..self.buildings.len() {
-            let (tile_pos, block_id, enabled, efficiency, time_scale, rotdeg, team, power_status) = {
+            let (
+                tile_pos,
+                block_id,
+                enabled,
+                efficiency,
+                time_scale,
+                rotdeg,
+                rotation,
+                building_x,
+                building_y,
+                team,
+                power_status,
+            ) = {
                 let building = &self.buildings[index];
                 report.visited_buildings += 1;
                 (
@@ -18926,6 +18940,9 @@ impl GameRuntime {
                     building.efficiency,
                     building.time_scale,
                     building.rotdeg(),
+                    building.rotation,
+                    building.x,
+                    building.y,
                     building.team,
                     building
                         .power
@@ -19006,6 +19023,66 @@ impl GameRuntime {
             if !can_create {
                 report.invalid_plans += 1;
             }
+            let drones_created = assembler_block.drones_created.max(0) as usize;
+            let drone_ids = self
+                .unit_runtime_states
+                .get(&tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Assembler { assembler, .. } => {
+                        Some(assembler.read_unit_ids.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let mut seen_drone_ids = BTreeSet::new();
+            let unique_drone_ids: Vec<i32> = drone_ids
+                .iter()
+                .copied()
+                .filter(|id| *id >= 0 && seen_drone_ids.insert(*id))
+                .take(drones_created)
+                .collect();
+            let tracked_drones = unique_drone_ids
+                .iter()
+                .filter(|id| {
+                    self.client_unit_snapshot_entities
+                        .get(id)
+                        .is_some_and(|unit| {
+                            matches!(unit.controller, UnitControllerState::Assembler)
+                                && unit.team_id() == team
+                        })
+                })
+                .count();
+            let (dir_x, dir_y) = autotiler_direction(rotation);
+            let spawn_len = TILE_SIZE as f32
+                * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+            let spawn_x = building_x + dir_x as f32 * spawn_len;
+            let spawn_y = building_y + dir_y as f32 * spawn_len;
+            let drones_in_position = unique_drone_ids
+                .iter()
+                .enumerate()
+                .filter(|(slot_index, id)| {
+                    let target = unit_assembler_drone_target(
+                        spawn_x,
+                        spawn_y,
+                        assembler_block.area_size,
+                        TILE_SIZE as f32,
+                        *slot_index,
+                    );
+                    self.client_unit_snapshot_entities
+                        .get(id)
+                        .is_some_and(|unit| {
+                            matches!(unit.controller, UnitControllerState::Assembler)
+                                && unit.team_id() == team
+                                && unit_assembler_drone_in_position(
+                                    unit.x(),
+                                    unit.y(),
+                                    unit.rotation(),
+                                    target,
+                                )
+                        })
+                })
+                .count();
 
             let mut completed_unit = false;
             let mut consumed_payloads = false;
@@ -19060,20 +19137,6 @@ impl GameRuntime {
                     0.0
                 };
 
-                let drones_created = assembler_block.drones_created.max(0) as usize;
-                let tracked_drones = assembler
-                    .read_unit_ids
-                    .iter()
-                    .copied()
-                    .filter(|id| *id >= 0)
-                    .collect::<BTreeSet<_>>()
-                    .len()
-                    .min(drones_created);
-                // Until AssemblerAI/BuildingTether unit ownership is migrated, the
-                // owned runtime treats the Java-created drone slots as in position.
-                // The actual drone IDs are still tracked so the server/client
-                // AssemblerDroneSpawned lifecycle can be ported incrementally.
-                let simulated_drones = drones_created;
                 let drone_spawned = unit_assembler_update_progress(
                     assembler,
                     enabled,
@@ -19083,7 +19146,7 @@ impl GameRuntime {
                     effective_efficiency,
                     can_create,
                     requirements_met,
-                    simulated_drones,
+                    drones_in_position,
                     frame_delta * time_scale,
                     frame_delta * time_scale * effective_efficiency,
                     unit_build_speed,
@@ -19093,6 +19156,7 @@ impl GameRuntime {
                 if drone_spawned {
                     report.spawned_drone_tiles.push(tile_pos);
                 }
+                report.drones_in_position += drones_in_position;
                 report.updated_assemblers += 1;
 
                 if assembler.progress >= 1.0 && requirements_met && can_create {
@@ -19636,7 +19700,9 @@ impl GameRuntime {
 mod tests {
     use super::*;
     use crate::mindustry::{
-        content::blocks::{BulletKind, BulletSpec, PayloadTurretAmmo, TurretBlockData},
+        content::blocks::{
+            BulletKind, BulletSpec, PayloadTurretAmmo, TurretBlockData, UnitAssemblerBlockData,
+        },
         core::GameStateState,
         ctype::{Content, ContentType},
         entities::{
@@ -19753,6 +19819,52 @@ mod tests {
             force_coolant,
             spark_random,
         }
+    }
+
+    fn seed_assembler_drones_in_position(
+        runtime: &mut GameRuntime,
+        content: &ContentLoader,
+        tile_pos: i32,
+        assembler_block: &UnitAssemblerBlockData,
+        team: TeamId,
+    ) {
+        let building = runtime
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .cloned()
+            .expect("assembler building should exist");
+        let Some(drone_type) = content.unit_by_name(&assembler_block.drone_type).cloned() else {
+            panic!("assembler drone type should exist");
+        };
+        let (dir_x, dir_y) = autotiler_direction(building.rotation);
+        let spawn_len =
+            TILE_SIZE as f32 * (assembler_block.area_size + assembler_block.base.size) as f32 / 2.0;
+        let spawn_x = building.x + dir_x as f32 * spawn_len;
+        let spawn_y = building.y + dir_y as f32 * spawn_len;
+        let mut ids = Vec::new();
+        for slot_index in 0..assembler_block.drones_created.max(0) as usize {
+            let id = 70_000 + slot_index as i32;
+            let target = unit_assembler_drone_target(
+                spawn_x,
+                spawn_y,
+                assembler_block.area_size,
+                TILE_SIZE as f32,
+                slot_index,
+            );
+            let mut unit = UnitComp::new(id, drone_type.clone(), team);
+            unit.set_pos(target.pos.x, target.pos.y);
+            unit.set_rotation(target.angle);
+            unit.set_controller(UnitControllerState::Assembler);
+            runtime.client_unit_snapshot_entities.insert(id, unit);
+            ids.push(id);
+        }
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            panic!("assembler sidecar should exist");
+        };
+        assembler.read_unit_ids = ids;
     }
 
     #[test]
@@ -23761,6 +23873,13 @@ mod tests {
                 },
             },
         );
+        seed_assembler_drones_in_position(
+            &mut runtime,
+            &content,
+            tile_pos,
+            assembler_block,
+            TeamId(4),
+        );
 
         let mut bullets = Vec::new();
         let mut units = Vec::new();
@@ -23797,6 +23916,78 @@ mod tests {
         assert!(common.payload.is_none());
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
+    }
+
+    #[test]
+    fn game_runtime_unit_assembler_progress_waits_for_real_drone_position_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let stell = content.unit_by_name("stell").unwrap();
+        let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let plan = &assembler_block.plans[0];
+        let tile_pos = point2_pack(16, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+        if let Some(power) = runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+        let starting_progress = 1.0 - 1.0 / plan.time;
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 4);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: starting_progress,
+                    blocks,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(report.unit.assembler.drones_in_position, 0);
+        assert_eq!(report.unit.assembler.completed_units, 0);
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit assembler sidecar should remain present");
+        };
+        assert!((assembler.progress - starting_progress).abs() < 0.000001);
     }
 
     #[test]
@@ -23843,6 +24034,13 @@ mod tests {
                     ..UnitAssemblerState::default()
                 },
             },
+        );
+        seed_assembler_drones_in_position(
+            &mut runtime,
+            &content,
+            tile_pos,
+            assembler_block,
+            TeamId(4),
         );
 
         let mut bullets = Vec::new();
@@ -23958,6 +24156,13 @@ mod tests {
                     ..UnitAssemblerState::default()
                 },
             },
+        );
+        seed_assembler_drones_in_position(
+            &mut runtime,
+            &content,
+            assembler_tile,
+            assembler_block,
+            TeamId(4),
         );
 
         let mut bullets = Vec::new();
@@ -24077,6 +24282,13 @@ mod tests {
                     ..UnitAssemblerState::default()
                 },
             },
+        );
+        seed_assembler_drones_in_position(
+            &mut runtime,
+            &content,
+            assembler_tile,
+            assembler_block,
+            TeamId(4),
         );
         runtime.unit_runtime_states.insert(
             module_tile,

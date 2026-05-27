@@ -467,6 +467,44 @@ pub fn unit_assembler_rect(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitAssemblerDroneTarget {
+    pub pos: Vec2,
+    pub angle: f32,
+}
+
+pub fn unit_assembler_drone_target(
+    spawn_x: f32,
+    spawn_y: f32,
+    area_size: i32,
+    tile_size: f32,
+    slot_index: usize,
+) -> UnitAssemblerDroneTarget {
+    let angle = slot_index as f32 * 90.0 + 45.0;
+    let distance = area_size.max(0) as f32 / 2.0 * std::f32::consts::SQRT_2 * tile_size;
+    let radians = angle.to_radians();
+    UnitAssemblerDroneTarget {
+        pos: Vec2::new(
+            spawn_x + radians.cos() * distance,
+            spawn_y + radians.sin() * distance,
+        ),
+        angle: angle + 180.0,
+    }
+}
+
+pub fn unit_assembler_drone_in_position(
+    unit_x: f32,
+    unit_y: f32,
+    unit_rotation: f32,
+    target: UnitAssemblerDroneTarget,
+) -> bool {
+    let dx = unit_x - target.pos.x;
+    let dy = unit_y - target.pos.y;
+    let distance_sq = dx * dx + dy * dy;
+    distance_sq <= 10.0_f32.powi(2)
+        && angle_distance(unit_rotation, target.angle) <= 15.0 + f32::EPSILON
+}
+
 pub fn unit_assembler_current_tier(mut tiers: Vec<i32>) -> i32 {
     tiers.sort_unstable();
     let mut max = 0;
@@ -1040,6 +1078,10 @@ fn direction(rotation: i32) -> (i32, i32) {
     }
 }
 
+fn angle_distance(a: f32, b: f32) -> f32 {
+    ((a - b + 180.0).rem_euclid(360.0) - 180.0).abs()
+}
+
 fn write_payload_seq<W: Write>(write: &mut W, seq: &PayloadSeq) -> io::Result<()> {
     write_i16(write, -(seq.len() as i16))?;
     for (key, amount) in seq.entries() {
@@ -1339,6 +1381,26 @@ mod tests {
         );
         assert_eq!(unit_assembler_current_tier(vec![0, 1, 3]), 1);
         assert_eq!(unit_assembler_current_tier(vec![2, 3]), 0);
+        let first_target = unit_assembler_drone_target(100.0, 200.0, 2, 10.0, 0);
+        assert!((first_target.pos.x - 110.0).abs() < 0.00001);
+        assert!((first_target.pos.y - 210.0).abs() < 0.00001);
+        assert_eq!(first_target.angle, 225.0);
+        let second_target = unit_assembler_drone_target(100.0, 200.0, 2, 10.0, 1);
+        assert!((second_target.pos.x - 90.0).abs() < 0.00001);
+        assert!((second_target.pos.y - 210.0).abs() < 0.00001);
+        assert_eq!(second_target.angle, 315.0);
+        assert!(unit_assembler_drone_in_position(
+            110.0,
+            210.0,
+            225.0,
+            first_target
+        ));
+        assert!(!unit_assembler_drone_in_position(
+            110.0,
+            210.0,
+            241.0,
+            first_target
+        ));
         assert!(unit_assembler_accept_item(true, 9, 10, true));
         assert!(!unit_assembler_accept_item(false, 0, 10, true));
         assert!(unit_assembler_accept_payload(true, false, 4, 3, 1.0, false));
