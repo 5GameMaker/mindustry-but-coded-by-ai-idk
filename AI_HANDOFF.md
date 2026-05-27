@@ -3326,3 +3326,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - spread passability 接真实 world block/floor，而不是仅 `in_bounds`；
      - puddle ripple/particle/fire/building puddleOn 事件；
      - `liquid.update(self())` hook。
+
+---
+
+## 100. 最新闭环记录：Puddles spread passability from server world/content
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：把 99 中的 puddle D4 spread passability 从 `in_bounds` 近似接到真实 server world/content solidity。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - 新增 `update_all_with_passability(delta, headless, passable)`；
+    - `update_all(...)` 保持纯 core 默认行为，内部委托给 passability 版本；
+    - `d4_spread_targets(...)` 同时检查 in-bounds 与 passability callback；
+    - 新增 `update_all_spread_respects_passability_callback`。
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 传入 server `world` + `content_loader`；
+    - spread 目标要求 tile 存在，且 `liquid.move_through_blocks || !world.wall_solid_with_content(x, y, content)`；
+    - 更新 `server_update_spreads_overfilled_puddle_and_snapshots_neighbors`，用 `copper-wall` 阻挡 water east neighbor，snapshot amount 断言为 4。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core update_all_spread --lib`
+  - `cargo test -p mindustry-server server_update_spreads_overfilled --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入液体坑扩散通行判断`。
+  3. 后续补：
+     - 如果要严格 Java parity，把 passability 从 solidity 改为 block id `air` 或 `moveThroughBlocks`；
+     - server world floor/liquid context 注入 spread/deposit；
+     - puddle ripple/particle/fire/building puddleOn/liquid.update hook。

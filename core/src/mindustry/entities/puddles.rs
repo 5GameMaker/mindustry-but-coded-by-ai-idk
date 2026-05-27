@@ -346,13 +346,22 @@ impl Puddles {
     }
 
     pub fn update_all(&mut self, delta: f32, headless: bool) -> Vec<i32> {
+        self.update_all_with_passability(delta, headless, |_, _, _| true)
+    }
+
+    pub fn update_all_with_passability(
+        &mut self,
+        delta: f32,
+        headless: bool,
+        mut passable: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
+    ) -> Vec<i32> {
         let keys: Vec<_> = self.puddles.keys().copied().collect();
         let mut removed = Vec::new();
         let mut remove_keys = Vec::new();
         let mut spread_deposits = Vec::new();
 
         for key in keys {
-            let spread_targets = self.d4_spread_targets(key.0, key.1);
+            let spread_targets = self.d4_spread_targets(key.0, key.1, &mut passable);
             let Some(entry) = self.puddles.get_mut(&key) else {
                 continue;
             };
@@ -409,13 +418,21 @@ impl Puddles {
         removed
     }
 
-    fn d4_spread_targets(&self, x: i32, y: i32) -> Vec<(i32, i32)> {
+    fn d4_spread_targets(
+        &self,
+        x: i32,
+        y: i32,
+        passable: &mut impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
+    ) -> Vec<(i32, i32)> {
+        let Some(entry) = self.puddles.get(&(x, y)) else {
+            return Vec::new();
+        };
         [(0, -1), (1, 0), (0, 1), (-1, 0)]
             .into_iter()
             .filter_map(|(dx, dy)| {
                 let nx = x + dx;
                 let ny = y + dy;
-                self.in_bounds(nx, ny).then_some((nx, ny))
+                (self.in_bounds(nx, ny) && passable(nx, ny, &entry.liquid)).then_some((nx, ny))
             })
             .collect()
     }
@@ -792,6 +809,21 @@ mod tests {
                 "neighbor ({x},{y}) should receive Java d4 spread deposit"
             );
         }
+    }
+
+    #[test]
+    fn update_all_spread_respects_passability_callback() {
+        let tile = PuddleTileView::new(2, 2);
+        let mut puddles = Puddles::new(5, 5);
+        puddles.deposit_at(Some(tile), water(), 70.0, PuddleDepositContext::default());
+
+        let removed =
+            puddles.update_all_with_passability(1.0, true, |x, y, _liquid| (x, y) != (3, 2));
+
+        assert!(removed.is_empty());
+        assert_eq!(puddles.len(), 4);
+        assert!(puddles.get(3, 2).is_none());
+        assert!((puddles.get(2, 2).unwrap().amount - 69.0).abs() < 0.0001);
     }
 
     #[test]

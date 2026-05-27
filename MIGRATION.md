@@ -4732,3 +4732,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 spread passability 仅用 `in_bounds` 近似 Java `other != null && (other.block()==air || liquid.moveThroughBlocks)`，尚未接真实 world block/floor passability；
   - spread 引发的 ripple/particle/fire/building puddleOn 事件仍未接入；
   - 液体 update hook `liquid.update(self())` 仍未迁移。
+
+### 12.158 Puddles spread passability from server world/content
+
+- 2026-05-28：继续收紧 12.157 的四向扩散，把 spread target 判定从纯 `in_bounds` 近似推进到 server 真实 world/content solidity。
+- Java 依据：
+  - `PuddleComp.update()` 扩散时要求 `other != null && (other.block() == Blocks.air || liquid.moveThroughBlocks)`。
+- Rust 新增/变化：
+  - `Puddles::update_all(...)` 改为委托 `update_all_with_passability(...)`，默认仍允许所有 in-bounds 目标，方便纯 core 测试；
+  - `Puddles::update_all_with_passability(delta, headless, passable)` 新增 passability callback，D4 spread target 会同时要求 in-bounds 与 callback 通过；
+  - `ServerLauncher::tick_server_puddles(...)` 传入真实 server `World` 与 `ContentLoader`：
+    - tile 必须存在；
+    - 若 `liquid.move_through_blocks` 为 true 则允许穿过 block；
+    - 否则要求 `!world.wall_solid_with_content(x, y, content)`。
+  - server spread 测试将东侧邻居设置为 `copper-wall`，验证 water 不向该实体墙扩散，snapshot amount 从 5 收紧为 4。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core update_all_spread --lib`
+  - `cargo test -p mindustry-server server_update_spreads_overfilled --lib`
+- 仍未完成：
+  - Java 精确条件是 `block()==air || liquid.moveThroughBlocks`；Rust 当前用 content-backed solidity 允许 conveyor 等非 solid block，后续如需 byte-level parity 可改为直接检查 block id 是否 air；
+  - floor solid/liquid floor compatibility 已在 deposit helper 中存在，但 spread target 的完整 tile/floor context 仍需从 server world 注入；
+  - ripple/particle/fire/building puddleOn/liquid.update hook 仍待接入。

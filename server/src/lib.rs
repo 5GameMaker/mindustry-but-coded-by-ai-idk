@@ -1801,7 +1801,16 @@ impl ServerLauncher {
     }
 
     fn tick_server_puddles(&mut self, delta_ticks: f32) -> io::Result<usize> {
-        let removed_ids = self.runtime.server_puddles.update_all(delta_ticks, true);
+        let world = &self.runtime.state.world;
+        let content = &self.content_loader;
+        let removed_ids = self.runtime.server_puddles.update_all_with_passability(
+            delta_ticks,
+            true,
+            |x, y, liquid| {
+                world.tile(x, y).is_some()
+                    && (liquid.move_through_blocks || !world.wall_solid_with_content(x, y, content))
+            },
+        );
         if removed_ids.is_empty() {
             return Ok(0);
         }
@@ -6581,6 +6590,13 @@ mod tests {
         launcher.net_server.open(6595).unwrap();
         launcher.runtime.state.set(GameStateState::Playing);
         launcher.runtime.state.world.resize(8, 8);
+        let copper_wall = launcher
+            .content_loader
+            .block_by_name("copper-wall")
+            .unwrap()
+            .base()
+            .id;
+        launcher.runtime.state.world.tile_mut(3, 2).unwrap().block = copper_wall;
         launcher.runtime.server_puddles = Puddles::new(8, 8);
         let water = launcher.content_loader.liquid_by_name("water").unwrap();
         launcher.runtime.server_puddles.deposit_at(
@@ -6592,8 +6608,9 @@ mod tests {
 
         launcher.update();
 
-        assert_eq!(launcher.runtime.server_puddles.len(), 5);
-        assert!((launcher.runtime.server_puddles.get(2, 2).unwrap().amount - 68.7).abs() < 0.0001);
+        assert_eq!(launcher.runtime.server_puddles.len(), 4);
+        assert!(launcher.runtime.server_puddles.get(3, 2).is_none());
+        assert!((launcher.runtime.server_puddles.get(2, 2).unwrap().amount - 69.0).abs() < 0.0001);
         let snapshot = sent
             .lock()
             .unwrap()
@@ -6608,7 +6625,7 @@ mod tests {
                 None
             })
             .expect("puddle spread should be broadcast as entity snapshots");
-        assert_eq!(snapshot.amount, 5);
+        assert_eq!(snapshot.amount, 4);
     }
 
     #[test]
