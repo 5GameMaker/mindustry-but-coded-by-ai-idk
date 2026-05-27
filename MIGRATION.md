@@ -4798,3 +4798,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - Puddle 对单位的 `Fx.ripple.at(unit.x, unit.y, unit.type.rippleScale, liquid.color)` 网络/本地 effect 发送尚未接入；
   - 仍需补 `Units.nearby`、单位 hitbox overlap、grounded/hovering 判定与 liquid status apply。
+
+### 12.161 Puddle Units.nearby status/ripple server consumer
+
+- 2026-05-28：继续对照 Java `PuddleComp.update()`，把 effects-only 分支中的 `Units.nearby(...)` 从 report event 接入 server unit runtime 与网络 effect。
+- Java 依据：
+  - 查询矩形：`rect.setSize(clamp(amount / (maxLiquid / 1.5f)) * 10f).setCenter(x, y)`；
+  - 命中单位要求 `unit.isGrounded() && !unit.type.hovering` 且 unit hitbox 与矩形 overlap；
+  - 命中后 `unit.apply(liquid.effect, 60 * 2)`；
+  - 若 `unit.vel.len2() > 0.1f * 0.1f`，发送 `Fx.ripple.at(unit.x, unit.y, unit.type.rippleScale, liquid.color)`。
+- Rust 新增/变化：
+  - `ServerLauncher::tick_server_puddles(...)` 消费 `PuddleUpdateEvent.affect_units`：
+    - 按 Java 同款矩形尺寸筛选 `server_units`；
+    - 跳过 dead、非 grounded、hovering 单位；
+    - 用 `ContentLoader::status_effect_by_name(liquid.effect)` 解析并 `unit.status.apply(..., 120.0)`；
+    - 移动单位收集 ripple effect，并通过新增 `broadcast_server_effect_colored(...)` 发送 `EffectCallPacket`；
+    - ripple rotation 使用 `unit.type_info.ripple_scale`，color 使用 liquid color。
+- 新增/更新验证：
+  - `cargo test -p mindustry-server server_update_applies_puddle_liquid_status_and_ripple_to_ground_units --lib`
+  - `cargo test -p mindustry-server server_update_creates_fire_when_hot_puddle_touches_building --lib`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - 目前使用 server-side AABB 近似 Java `Units.nearby` 空间索引，后续可接真实 entity indexer/group；
+  - `tile.build.puddleOn(self())` 还未接入；
+  - `CellLiquid.update(Puddle)` / neoplasm reaction 仍待迁移；
+  - ripple 已发送网络 effect，但 desktop renderer/backend 仍只是进入现有本地 effect sidecar。

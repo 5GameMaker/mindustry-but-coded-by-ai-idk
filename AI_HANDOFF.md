@@ -3421,3 +3421,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - 单位矩形查询、grounded/hovering 过滤、liquid status apply 120 tick；
      - 移动单位 `Fx.ripple` effect packet/local queue；
      - `tile.build.puddleOn` 与 `CellLiquid.update`。
+
+---
+
+## 103. 最新闭环记录：Puddle Units.nearby status/ripple server consumer
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：消费 101 中暴露的 `PuddleUpdateEvent.affect_units`，把 Java `Units.nearby` 的 liquid status 与移动 ripple 副作用接入 server runtime。
+- Java 依据：
+  - `rect.setSize(clamp(amount / (maxLiquid / 1.5f)) * 10f).setCenter(x, y)`；
+  - `unit.isGrounded() && !unit.type.hovering`；
+  - `unit.apply(liquid.effect, 60 * 2)`；
+  - 移动单位 `Fx.ripple.at(unit.x, unit.y, unit.type.rippleScale, liquid.color)`。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 现在遍历 `report.events`，对 `affect_units` 分支筛选 `server_units`；
+    - 对命中单位应用 `ContentLoader::status_effect_by_name(liquid.effect)`，持续 `120.0` tick；
+    - 移动单位收集 ripple 并通过新增 `broadcast_server_effect_colored(...)` 发送 `EffectCallPacket`；
+    - 新增 `server_update_applies_puddle_liquid_status_and_ripple_to_ground_units`，验证 water puddle 给 dagger 施加 `wet` 并广播 `ripple` effect。
+- 已跑局部/收尾验证：
+  - `cargo test -p mindustry-server server_update_applies_puddle_liquid_status_and_ripple_to_ground_units --lib`
+  - `cargo test -p mindustry-server server_update_creates_fire_when_hot_puddle_touches_building --lib`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`接入液体坑单位影响运行时`。
+  2. 后续补：
+     - `tile.build.puddleOn(self())` 的 Rust building consumer；
+     - `CellLiquid.update(Puddle)` / neoplasm 周边液体吸收、建筑伤害、neoplasmReact；
+     - Java `Units.nearby` 空间索引与 Groups 语义的更严格替代；
+     - desktop renderer/audio 对 ripple effect sidecar 的真实表现层。

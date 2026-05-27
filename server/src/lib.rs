@@ -1838,6 +1838,60 @@ impl ServerLauncher {
                 },
             );
         let mut updates = report.events.len();
+        let mut ripple_effects = Vec::new();
+        for event in &report.events {
+            if !event.affect_units {
+                continue;
+            }
+            let status_effect = event
+                .liquid
+                .effect
+                .as_deref()
+                .filter(|effect| *effect != "none")
+                .and_then(|effect| self.content_loader.status_effect_by_name(effect))
+                .cloned();
+            let size = (event.amount
+                / (mindustry_core::mindustry::entities::puddles::MAX_LIQUID / 1.5))
+                .clamp(0.0, 1.0)
+                * 10.0;
+            let rect_x = event.x - size / 2.0;
+            let rect_y = event.y - size / 2.0;
+            for unit in self.server_units.values_mut() {
+                if unit.health.dead || !unit.is_grounded() || unit.type_info.hovering {
+                    continue;
+                }
+                let hit_size = unit.hitbox.hit_size;
+                let unit_x = unit.x() - hit_size / 2.0;
+                let unit_y = unit.y() - hit_size / 2.0;
+                let overlaps = rect_x < unit_x + hit_size
+                    && rect_x + size > unit_x
+                    && rect_y < unit_y + hit_size
+                    && rect_y + size > unit_y;
+                if !overlaps {
+                    continue;
+                }
+                if let Some(status_effect) = status_effect.clone() {
+                    unit.status.apply(status_effect, 60.0 * 2.0);
+                    unit.refresh_component_views();
+                    updates += 1;
+                }
+                let velocity_len2 =
+                    unit.vel.vel.x * unit.vel.vel.x + unit.vel.vel.y * unit.vel.vel.y;
+                if velocity_len2 > 0.1 * 0.1 {
+                    ripple_effects.push((
+                        unit.x(),
+                        unit.y(),
+                        unit.type_info.ripple_scale,
+                        event.liquid.color_rgba,
+                    ));
+                }
+            }
+        }
+        for (x, y, rotation, color) in ripple_effects {
+            if self.broadcast_server_effect_colored("ripple", x, y, rotation, color)? {
+                updates += 1;
+            }
+        }
         for event in report.events {
             if !event.create_fire {
                 continue;
@@ -2733,6 +2787,33 @@ impl ServerLauncher {
                     color: type_io::RgbaColor::new(-1),
                 },
                 data,
+            }),
+            false,
+        )?;
+        Ok(true)
+    }
+
+    fn broadcast_server_effect_colored(
+        &mut self,
+        effect: &str,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color_rgba: u32,
+    ) -> io::Result<bool> {
+        if !self.net_server.is_active() {
+            return Ok(false);
+        }
+        let Some(effect_id) = standard_effect_id(effect) else {
+            return Ok(false);
+        };
+        self.net_server.net_mut().send(
+            &PacketKind::EffectCallPacket(EffectCallPacket {
+                effect_id: effect_id as u16,
+                x,
+                y,
+                rotation,
+                color: type_io::RgbaColor::new(color_rgba as i32),
             }),
             false,
         )?;
@@ -8690,6 +8771,56 @@ mod tests {
                 .contains_key(&super::server_fire_entity_id(1, 1)),
             "client should receive the fire created from the hot puddle/building contact"
         );
+    }
+
+    #[test]
+    fn server_update_applies_puddle_liquid_status_and_ripple_to_ground_units() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6597).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(4, 4);
+        launcher.runtime.server_puddles = Puddles::new(4, 4);
+        let water = launcher.content_loader.liquid_by_name("water").unwrap();
+        let water_color = water.color_rgba;
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1)),
+            PuddleLiquidInfo::from(water),
+            40.0,
+            PuddleDepositContext::default(),
+        );
+
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(71, dagger, TeamId(1));
+        unit.set_pos(8.0, 8.0);
+        unit.vel.vel.x = 1.0;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&71).unwrap();
+        assert_eq!(unit.status.get_duration("wet"), 60.0 * 2.0);
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::EffectCallPacket(packet)
+                        if packet.effect_id == standard_effect_id("ripple").unwrap() as u16
+                            && packet.x == 8.0
+                            && packet.y == 8.0
+                            && packet.rotation == unit.type_info.ripple_scale
+                            && packet.color.rgba() == water_color as i32
+                )
+        }));
     }
 
     #[test]
