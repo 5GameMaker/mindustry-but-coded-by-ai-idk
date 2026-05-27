@@ -599,6 +599,7 @@ pub fn unit_assembler_update_progress(
     delta: f32,
     edelta: f32,
     unit_build_speed: f32,
+    drone_construct_time: f32,
     plan_time: f32,
 ) -> bool {
     if state.last_tier != state.current_tier {
@@ -621,7 +622,8 @@ pub fn unit_assembler_update_progress(
     state.total_drone_progress += state.drone_warmup * delta;
     let mut drone_spawned = false;
     if units < drones_created {
-        state.drone_progress += delta * unit_build_speed * pstatus / (60.0 * 4.0);
+        state.drone_progress +=
+            delta * unit_build_speed * pstatus / drone_construct_time.max(f32::EPSILON);
         if state.drone_progress >= 1.0 {
             drone_spawned = true;
         }
@@ -1347,7 +1349,7 @@ mod tests {
 
         let mut state = UnitAssemblerState::default();
         let drone_spawned = unit_assembler_update_progress(
-            &mut state, true, 1.0, 0, 4, 0.5, true, true, 2, 1.0, 1.0, 1.0, 10.0,
+            &mut state, true, 1.0, 0, 4, 0.5, true, true, 2, 1.0, 1.0, 1.0, 240.0, 10.0,
         );
         assert!(!drone_spawned);
         assert_eq!(state.warmup, 0.05);

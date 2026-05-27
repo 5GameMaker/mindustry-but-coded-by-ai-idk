@@ -2003,6 +2003,7 @@ pub struct GameRuntimeUnitAssemblerFrameReport {
     pub inactive_assemblers: usize,
     pub tier_updates: usize,
     pub moved_in_payloads: usize,
+    pub spawned_drone_tiles: Vec<i32>,
     pub completed_units: usize,
     pub spawned_tiles: Vec<i32>,
     pub consumed_payload_batches: usize,
@@ -18540,16 +18541,24 @@ impl GameRuntime {
                 };
 
                 let drones_created = assembler_block.drones_created.max(0) as usize;
+                let tracked_drones = assembler
+                    .read_unit_ids
+                    .iter()
+                    .copied()
+                    .filter(|id| *id >= 0)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    .min(drones_created);
                 // Until AssemblerAI/BuildingTether unit ownership is migrated, the
-                // owned runtime treats the Java-created drone slots as present and
-                // in position. This keeps the real block tick moving through the
-                // same runtime path while the full drone entity loop is ported.
+                // owned runtime treats the Java-created drone slots as in position.
+                // The actual drone IDs are still tracked so the server/client
+                // AssemblerDroneSpawned lifecycle can be ported incrementally.
                 let simulated_drones = drones_created;
-                let _drone_spawned = unit_assembler_update_progress(
+                let drone_spawned = unit_assembler_update_progress(
                     assembler,
                     enabled,
                     power_status,
-                    simulated_drones,
+                    tracked_drones,
                     drones_created,
                     effective_efficiency,
                     can_create,
@@ -18558,8 +18567,12 @@ impl GameRuntime {
                     frame_delta * time_scale,
                     frame_delta * time_scale * effective_efficiency,
                     unit_build_speed,
+                    assembler_block.drone_construct_time,
                     plan.time,
                 );
+                if drone_spawned {
+                    report.spawned_drone_tiles.push(tile_pos);
+                }
                 report.updated_assemblers += 1;
 
                 if assembler.progress >= 1.0 && requirements_met && can_create {

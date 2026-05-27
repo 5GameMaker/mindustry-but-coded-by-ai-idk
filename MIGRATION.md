@@ -4033,3 +4033,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core assembler_drone_spawned_packet --lib`
   - `cargo test -p mindustry-desktop syncs_assembler_drone_spawned --lib`
 - 仍未完成：Rust server 尚未真实创建 assembly drone 并广播 `AssemblerDroneSpawnedCallPacket`；`read_unit_ids` 仍未接入完整 `client_unit_snapshot_entities` / `AssemblerAI` in-position 计算。
+
+### 12.127 UnitAssembler 服务端 assembly drone 生成
+
+- 2026-05-27：继续对照 Java `UnitAssemblerBuild.updateTile()` 的 drone 构造分支，把 Rust server 端的 assembly drone 实体生成、建筑 tether 与 `AssemblerDroneSpawnedCallPacket` 广播接入真实 update 链路。
+- Java 依据：
+  - 当 `units.size < dronesCreated && enabled` 且 `droneProgress` 达到 1 时，创建 `droneType` 单位；
+  - drone 需要 `AssemblerAI` 控制器与 `BuildingTetherComp` 指向 assembler；
+  - 创建后加入 `units`，并广播 `Call.assemblerDroneSpawned(tile, unit.id)`。
+- Rust 新增/变化：
+  - `unit_assembler_update_progress(...)` 现在使用 `UnitAssemblerBlockData.drone_construct_time` 等价字段，不再硬编码 `60f * 4f`；
+  - `GameRuntimeUnitAssemblerFrameReport` 新增 `spawned_drone_tiles`，在 drone progress 达标时上报 tile；
+  - `ServerLauncher::apply_runtime_unit_assembler_drone_spawns(...)` 创建 `drone_type` 对应 `UnitComp`，设置 `UnitControllerState::Assembler` 与 `BuildingTetherComp`，写入 `server_units`；
+  - server 同步更新 `UnitAssemblerState.read_unit_ids` 并可靠广播 `AssemblerDroneSpawnedCallPacket`，后续实体快照可携带该 drone。
+- 新增验证：
+  - `cargo test -p mindustry-core assembler_geometry_tiers_acceptance --lib`
+  - `cargo test -p mindustry-server assembler_drone_spawn_packet --lib`
+- 仍未完成：`AssemblerAI` 目标点/角度与真实 `inPosition()` 尚未参与进度倍率；当前 UnitAssembler 生产进度仍保留“drone 视为到位”的过渡口径以避免破坏既有可玩闭环。

@@ -41,13 +41,14 @@ use mindustry_core::mindustry::io::{
     type_io, BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef,
 };
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotCallPacket,
-    CommandBuildingCallPacket, DropItemCallPacket, EntitySnapshotCallPacket, Net, NetConnection,
-    NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
-    PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
-    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    TileConfigCallPacket, TransferInventoryCallPacket, UnitBlockSpawnCallPacket,
-    UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+    write_world_data, ArcNetProvider, AssemblerDroneSpawnedCallPacket,
+    AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
+    DropItemCallPacket, EntitySnapshotCallPacket, Net, NetConnection, NetworkPlayerData,
+    NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    ProviderEvent, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, TileConfigCallPacket,
+    TransferInventoryCallPacket, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
+    UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -56,6 +57,7 @@ use mindustry_core::mindustry::vars::{
 use mindustry_core::mindustry::world::blocks::autotiler_direction;
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::world::blocks::payloads::{payload_ref_sort_key, PayloadRef};
+use mindustry_core::mindustry::world::blocks::units::unit_assembler_drone_spawned;
 use mindustry_core::mindustry::world::meta::BuildVisibility;
 use mindustry_core::mindustry::world::point2_pack;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -270,6 +272,11 @@ impl ServerLauncher {
                 .copied()
                 .collect();
             if let Err(error) = self.broadcast_runtime_unit_block_spawns(&unit_block_spawn_tiles) {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) = self.apply_runtime_unit_assembler_drone_spawns(
+                &report.unit.assembler.spawned_drone_tiles,
+            ) {
                 self.network_error = Some(error.to_string());
             }
             if let Err(error) =
@@ -1620,6 +1627,104 @@ impl ServerLauncher {
         }
 
         Ok(applied)
+    }
+
+    fn apply_runtime_unit_assembler_drone_spawns(
+        &mut self,
+        tile_positions: &[i32],
+    ) -> io::Result<usize> {
+        if tile_positions.is_empty() {
+            return Ok(0);
+        }
+
+        let mut applied = 0;
+        let mut seen = BTreeSet::new();
+        let mut first_error = None;
+        for tile_pos in tile_positions {
+            if !seen.insert(*tile_pos) {
+                continue;
+            }
+            let Some(building) = self
+                .runtime
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == *tile_pos)
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(BlockDef::UnitAssembler(assembler_block)) =
+                self.content_loader.block(building.block.id)
+            else {
+                continue;
+            };
+            let tracked_drones = self
+                .runtime
+                .unit_runtime_states
+                .get(tile_pos)
+                .and_then(|state| match state {
+                    GameRuntimeUnitBlockState::Assembler { assembler, .. } => Some(
+                        assembler
+                            .read_unit_ids
+                            .iter()
+                            .filter(|id| **id >= 0)
+                            .count(),
+                    ),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            if tracked_drones >= assembler_block.drones_created.max(0) as usize {
+                continue;
+            }
+            let Some(unit_type) = self
+                .content_loader
+                .unit_by_name(&assembler_block.drone_type)
+                .cloned()
+            else {
+                continue;
+            };
+
+            let unit_id = self.next_server_runtime_unit_id();
+            let mut unit = UnitComp::new(unit_id, unit_type, building.team);
+            unit.set_pos(building.x, building.y);
+            unit.set_rotation(90.0);
+            unit.set_controller(UnitControllerState::Assembler);
+            unit.building_tether = Some(BuildingTetherComp {
+                team: building.team,
+                building: Some(BuildingTetherRef {
+                    tile_pos: *tile_pos,
+                    team: building.team,
+                    valid: building.is_valid(),
+                }),
+            });
+            self.server_units.insert(unit_id, unit);
+
+            if let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+                self.runtime.unit_runtime_states.get_mut(tile_pos)
+            {
+                unit_assembler_drone_spawned(assembler, unit_id, true);
+            }
+
+            if self.net_server.is_active() {
+                let packet =
+                    PacketKind::AssemblerDroneSpawnedCallPacket(AssemblerDroneSpawnedCallPacket {
+                        tile: Some(*tile_pos),
+                        id: unit_id,
+                    });
+                if let Err(error) = self.net_server.net_mut().send(&packet, true) {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+            applied += 1;
+        }
+
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(applied)
+        }
     }
 
     fn broadcast_runtime_unit_block_spawns(&mut self, tile_positions: &[i32]) -> io::Result<usize> {
@@ -5016,6 +5121,7 @@ mod tests {
             assembler_def.base().clone(),
             TeamId(6),
         ));
+        launcher.runtime.buildings[0].enabled = true;
         if let Some(power) = launcher.runtime.buildings[0].power.as_mut() {
             power.status = 1.0;
         }
@@ -5076,6 +5182,93 @@ mod tests {
                     packet,
                     PacketKind::AssemblerUnitSpawnedCallPacket(packet)
                         if packet.tile == Some(assembler_tile)
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_broadcasts_assembler_drone_spawn_packet_and_tethers_unit() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6587).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(24, 24);
+
+        let assembler_def = launcher
+            .content_loader
+            .block_by_name("tank-assembler")
+            .unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let drone_type_name = assembler_block.drone_type.clone();
+        let assembler_tile = point2_pack(9, 8);
+        launcher.runtime.add_building(BuildingComp::new(
+            assembler_tile,
+            assembler_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.buildings[0].enabled = true;
+        if let Some(power) = launcher.runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+        launcher.runtime.unit_runtime_states.insert(
+            assembler_tile,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    drone_progress: 1.0,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            launcher.runtime.unit_runtime_states.get(&assembler_tile)
+        else {
+            panic!("assembler sidecar should remain present");
+        };
+        assert_eq!(assembler.drone_progress, 0.0);
+        assert_eq!(assembler.read_unit_ids.len(), 1);
+        let drone_id = assembler.read_unit_ids[0];
+        let drone = launcher
+            .server_units
+            .get(&drone_id)
+            .expect("assembler drone should be materialized server-side");
+        assert_eq!(drone.type_info.name(), drone_type_name);
+        assert_eq!(drone.team_id(), TeamId(6));
+        assert_eq!(drone.x(), launcher.runtime.buildings()[0].x);
+        assert_eq!(drone.y(), launcher.runtime.buildings()[0].y);
+        assert_eq!(drone.rotation(), 90.0);
+        assert!(matches!(drone.controller, UnitControllerState::Assembler));
+        let tether = drone
+            .building_tether
+            .as_ref()
+            .expect("assembler drone should keep a formal building tether");
+        assert_eq!(tether.team, TeamId(6));
+        assert_eq!(
+            tether.building,
+            Some(BuildingTetherRef {
+                tile_pos: assembler_tile,
+                team: TeamId(6),
+                valid: true,
+            })
+        );
+        assert_eq!(tether.update(), BuildingTetherAction::Keep);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::AssemblerDroneSpawnedCallPacket(packet)
+                        if packet.tile == Some(assembler_tile) && packet.id == drone_id
                 )
         }));
     }
