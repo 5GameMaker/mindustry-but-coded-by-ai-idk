@@ -6544,3 +6544,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `healBlockFull` 需要 block icon/rect/mixcol 数据；
   - `shieldBreak` 及后续 shield/unit 类需要 poly/arc/line primitive；
   - square primitive 仍需 renderer backend 消费。
+
+### 12.215 Seeded stroked-circle particles + Fx.bubble
+
+- 2026-05-28：补充 seeded stroked-circle particles 表达，迁移此前因“随机位置圆环”而暂缓的 `Fx.bubble`。
+- 本轮迁移：
+  - `bubble=245`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2727` 附近：
+    - `bubble = new Effect(20, ...)`；
+    - `color(Tmp.c1.set(e.color).shiftValue(0.1f))`；
+    - `stroke(e.fout() + 0.2f)`；
+    - `randLenVectors(e.id, 2, e.rotation * 0.9f, ...)`；
+    - `Lines.circle(..., 1f + e.fin() * 3f)`。
+  - `javap arc.graphics.Color` 证实 `shiftValue` 是先 `toHsv`，再把 HSV value 加上传入值，最后 `fromHsv`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - `StandardEffectDrawKind` 新增 `SeededStrokedCircleParticles`；
+    - `circle_render_primitives_from_seed()` 可把 seeded 粒子展开为 `StrokedCircle` render primitive；
+    - 新增 `shift_color_value(...)` 与 `color_from_hsv(...)`，用于复刻 `Color.shiftValue(0.1f)`；
+    - 新增 `FX_BUBBLE_ID = 245`，接入 name/metadata/draw plan；
+    - `bubble` draw plan 使用输入色 shiftValue、stroke `fout+0.2`、半径 `1+fin*3`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `bubble` name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖颜色 value shift、stroke、粒子数量、长度、半径和 primitive 展开。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 仍未完成：
+  - `launchPod=248` 仍需 scaled 子时间片与 lineAngle；
+  - `healBlockFull=252` 仍需 block icon/rect/mixcol；
+  - seeded stroked-circle primitive 仍需真实 renderer backend 消费。

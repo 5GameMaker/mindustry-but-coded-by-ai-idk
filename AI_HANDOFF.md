@@ -4730,3 +4730,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `healBlockFull` 需要 block icon/rect/mixcol，不能直接塞 square；
   2. `bubble=245` 可通过 seeded stroked-circle particles 解锁；
   3. `shieldBreak` 需要 poly/arc primitive。
+
+---
+
+## 141. 最新闭环记录：Seeded stroked-circle particles 与 Fx.bubble
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补随机位置圆环粒子表达，迁移 `bubble=245`。
+- Java 依据：
+  - `Fx.java:2727-2732`；
+  - `color(Tmp.c1.set(e.color).shiftValue(0.1f))`；
+  - `stroke(fout+0.2)`；
+  - `randLenVectors(id, 2, rotation*0.9)`；
+  - 圆环半径 `1+fin*3`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `SeededStrokedCircleParticles`；
+    - `circle_render_primitives_from_seed()` 支持展开为 `StrokedCircle`；
+    - 新增 `shift_color_value(...)` / `color_from_hsv(...)` 对齐 `Color.shiftValue`；
+    - 新增 `FX_BUBBLE_ID = 245` 并接入 draw plan。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 下一步建议：
+  1. `launchPod=248` 需要 scaled circle + lineAngle；
+  2. `healBlockFull=252` 需要 rect/icon/mixcol；
+  3. `shieldBreak` 需要 poly/arc primitive。

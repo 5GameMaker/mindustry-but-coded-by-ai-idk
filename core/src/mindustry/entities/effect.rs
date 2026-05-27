@@ -120,6 +120,8 @@ pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 pub const FX_BLAST_SMOKE_ID: i32 = 226;
 /// Upstream `Fx.ripple` id in `mindustry.content.Fx` for v158.1.
 pub const FX_RIPPLE_ID: i32 = 244;
+/// Upstream `Fx.bubble` id in `mindustry.content.Fx` for v158.1.
+pub const FX_BUBBLE_ID: i32 = 245;
 /// Upstream `Fx.launchAccelerator` id in `mindustry.content.Fx` for v158.1.
 pub const FX_LAUNCH_ACCELERATOR_ID: i32 = 246;
 /// Upstream `Fx.launch` id in `mindustry.content.Fx` for v158.1.
@@ -197,6 +199,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
+        "bubble" => Some(FX_BUBBLE_ID),
         "launchAccelerator" => Some(FX_LAUNCH_ACCELERATOR_ID),
         "launch" => Some(FX_LAUNCH_ID),
         "healWaveMend" => Some(FX_HEAL_WAVE_MEND_ID),
@@ -318,6 +321,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_RIPPLE_ID => {
             Effect::with_lifetime(FX_RIPPLE_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
         }
+        FX_BUBBLE_ID => Effect::with_lifetime(FX_BUBBLE_ID, 20.0, DEFAULT_EFFECT_CLIP),
         FX_LAUNCH_ACCELERATOR_ID => {
             Effect::with_lifetime(FX_LAUNCH_ACCELERATOR_ID, 22.0, DEFAULT_EFFECT_CLIP)
         }
@@ -358,6 +362,7 @@ pub enum StandardEffectDrawKind {
     FilledCircle,
     StrokedCircle,
     SeededCircleParticles,
+    SeededStrokedCircleParticles,
     FilledSquare,
     StrokedSquare,
     SeededSquareParticles,
@@ -554,6 +559,18 @@ impl StandardEffectDrawPlan {
                     color,
                 })
                 .collect(),
+            StandardEffectDrawKind::SeededStrokedCircleParticles => self
+                .expand_seeded_particle_circles_from_seed()
+                .into_iter()
+                .map(|circle| StandardEffectCircleRenderPrimitive {
+                    kind: StandardEffectDrawKind::StrokedCircle,
+                    center: circle.center,
+                    radius: circle.radius,
+                    stroke: self.stroke,
+                    alpha: circle.alpha,
+                    color,
+                })
+                .collect(),
             StandardEffectDrawKind::FilledSquare
             | StandardEffectDrawKind::StrokedSquare
             | StandardEffectDrawKind::SeededSquareParticles => Vec::new(),
@@ -597,7 +614,8 @@ impl StandardEffectDrawPlan {
                 .collect(),
             StandardEffectDrawKind::FilledCircle
             | StandardEffectDrawKind::StrokedCircle
-            | StandardEffectDrawKind::SeededCircleParticles => Vec::new(),
+            | StandardEffectDrawKind::SeededCircleParticles
+            | StandardEffectDrawKind::SeededStrokedCircleParticles => Vec::new(),
         }
     }
 
@@ -2041,6 +2059,45 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_BUBBLE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededStrokedCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(shift_color_value(color, 0.1)),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: fout + 0.2,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: rotation * 0.9,
+                fin,
+                fout,
+                fslope,
+                radius_base: 1.0,
+                radius_fin_scale: 3.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         _ => return None,
     };
     Some(plan)
@@ -2064,6 +2121,48 @@ fn interp_pow3_out(value: f32) -> f32 {
 
 fn mathf_random_seed_range(seed: i64, range: f32) -> f32 {
     ArcRand::with_seed(seed.wrapping_mul(99_999)).range(range)
+}
+
+fn shift_color_value(color: DecalColor, amount: f32) -> DecalColor {
+    let max = color.r.max(color.g).max(color.b);
+    let min = color.r.min(color.g).min(color.b);
+    let delta = max - min;
+    let hue = if delta.abs() <= f32::EPSILON {
+        0.0
+    } else if (max - color.r).abs() <= f32::EPSILON {
+        60.0 * ((color.g - color.b) / delta).rem_euclid(6.0)
+    } else if (max - color.g).abs() <= f32::EPSILON {
+        60.0 * ((color.b - color.r) / delta + 2.0)
+    } else {
+        60.0 * ((color.r - color.g) / delta + 4.0)
+    };
+    let saturation = if max.abs() <= f32::EPSILON {
+        0.0
+    } else {
+        delta / max
+    };
+
+    color_from_hsv(hue, saturation, max + amount, color.a)
+}
+
+fn color_from_hsv(hue: f32, saturation: f32, value: f32, alpha: f32) -> DecalColor {
+    let hue = (hue / 60.0 + 6.0) % 6.0;
+    let sector = hue as i32;
+    let fraction = hue - sector as f32;
+    let p = value * (1.0 - saturation);
+    let q = value * (1.0 - saturation * fraction);
+    let t = value * (1.0 - saturation * (1.0 - fraction));
+
+    let (r, g, b) = match sector {
+        0 => (value, t, p),
+        1 => (q, value, p),
+        2 => (p, value, t),
+        3 => (p, q, value),
+        4 => (t, p, value),
+        _ => (value, p, q),
+    };
+
+    DecalColor { r, g, b, a: alpha }
 }
 
 pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
@@ -3453,6 +3552,7 @@ mod tests {
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
+        assert_eq!(standard_effect_id("bubble"), Some(FX_BUBBLE_ID));
         assert_eq!(
             standard_effect_id("launchAccelerator"),
             Some(FX_LAUNCH_ACCELERATOR_ID)
@@ -3619,6 +3719,7 @@ mod tests {
         let ripple = standard_effect(FX_RIPPLE_ID).unwrap();
         assert_eq!(ripple.lifetime, 30.0);
         assert_eq!(ripple.layer, crate::mindustry::graphics::Layer::DEBRIS);
+        assert_eq!(standard_effect(FX_BUBBLE_ID).unwrap().lifetime, 20.0);
         assert_eq!(
             standard_effect(FX_LAUNCH_ACCELERATOR_ID).unwrap().lifetime,
             22.0
@@ -3907,6 +4008,40 @@ mod tests {
         assert_eq!(ripple.color_mul, 1.5);
         assert!((ripple.radius - 6.0).abs() < 0.0001);
         assert!((ripple.stroke - 1.05).abs() < 0.0001);
+
+        let bubble = standard_effect_draw_plan(
+            Some(FX_BUBBLE_ID as u16),
+            245,
+            3.0,
+            4.0,
+            10.0,
+            10.0,
+            20.0,
+            DecalColor::from_rgba(0x000000ff),
+        )
+        .unwrap();
+        assert_eq!(
+            bubble.kind,
+            StandardEffectDrawKind::SeededStrokedCircleParticles
+        );
+        assert_eq!(bubble.stroke, 0.7);
+        let bubble_color = bubble.resolved_draw_color().unwrap();
+        assert!((bubble_color.r - 0.1).abs() < 0.0001);
+        assert!((bubble_color.g - 0.1).abs() < 0.0001);
+        assert!((bubble_color.b - 0.1).abs() < 0.0001);
+        let bubble_particles = bubble.particles.unwrap();
+        assert_eq!(bubble_particles.count, 2);
+        assert_eq!(bubble_particles.length, 9.0);
+        assert_eq!(bubble_particles.radius_base, 1.0);
+        assert_eq!(bubble_particles.radius_fin_scale, 3.0);
+        let bubble_primitives = bubble.circle_render_primitives_from_seed();
+        assert_eq!(bubble_primitives.len(), 2);
+        assert_eq!(
+            bubble_primitives[0].kind,
+            StandardEffectDrawKind::StrokedCircle
+        );
+        assert_eq!(bubble_primitives[0].stroke, 0.7);
+        assert_eq!(bubble_primitives[0].radius, 2.5);
 
         let launch_accelerator = standard_effect_draw_plan(
             Some(FX_LAUNCH_ACCELERATOR_ID as u16),
