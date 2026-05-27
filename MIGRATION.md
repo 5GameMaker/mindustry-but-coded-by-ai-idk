@@ -3599,17 +3599,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 
 - 2026-05-27：对照 Java `UnitFactoryBuild.updateTile()`，把 `UnitFactory` 从仅有状态读写/纯 helper 推进到 owned runtime tick，并接入 `advance_owned_runtime_blocks(...).unit.factory` 聚合报告。
 - Java 依据：
+  - `created()` 会在 `currentPlan == -1` 时自动选择第一个 `plans.indexOf(u -> u.unit.unlockedNow())`，若没有已解锁 plan 则保持 `-1`；
   - `updateTile()` 会在不可配置 factory 上强制 `currentPlan = 0`，修正越界 plan，`efficiency > 0 && currentPlan != -1` 时推进 `progress/time/speedScl`；
   - 每 tick 先 `moveOutPayload()`，然后在 `currentPlan != -1 && payload == null` 时检查 plan unit banned，`progress >= plan.time` 后创建 unit payload、清零 `payVector`、`consume()` 并触发 `UnitCreateEvent`；
   - `shouldConsume()` 要求 `currentPlan != -1 && enabled && payload == null && team.activateUnitFactories()`，动态消耗按当前 plan requirements 和 `rules.unitCost(team)` 缩放。
 - Rust 新增/变化：
   - `ensure_unit_state_for_building(...)` 现在会为 `BlockDef::UnitFactory` 懒创建 `GameRuntimeUnitBlockState::Factory { common, factory }`；
+  - `add_placed_building(...)` 会在真实放置路径初始化 unit block sidecar；UnitFactory 初始 `current_plan` 优先采用已有 `BuildingComp.config == Int(plan)`，否则按 Java `created()` 选择首个 `unit_unlocked_now(...)` 的 plan，避免新放置 factory 长期停在空配置；
   - 新增 `GameRuntimeUnitFactoryFrameReport`，并把 `GameRuntimeOwnedUnitFrameReport` 拆为 `factory + reconstructor`；
   - 新增 `advance_owned_unit_factories(...)` / ticks：检查当前 plan requirements、调用 `unit_factory_update(...)` 推进进度，完成时用 `UnitComp::new(...).to_sync_wire()` 生成 Java-style `PayloadRef::Unit`，写入 factory command/defaultCommand controller，消耗 items；
   - `transfer_payload_output_to_front(...)` 现在也能把 `UnitFactory` 作为 payload source，允许 factory 输出到前方 payload conveyor/router/reconstructor 等真实目标。
 - 新增 core 回归测试：
   - `game_runtime_unit_factory_produces_configured_unit_payload`（通过 `advance_owned_runtime_blocks` 验证聚合入口）
   - `game_runtime_unit_factory_outputs_payload_to_front_conveyor`
+  - `game_runtime_unit_factory_created_selects_first_unlocked_plan_like_java`
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
   - `cargo check --workspace`

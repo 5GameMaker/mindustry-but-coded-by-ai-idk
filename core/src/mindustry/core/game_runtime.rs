@@ -3652,10 +3652,15 @@ impl GameRuntime {
             return false;
         };
         let state = match block {
-            BlockDef::UnitFactory(_) => Some(GameRuntimeUnitBlockState::Factory {
-                common: PayloadBlockBuildState::default(),
-                factory: UnitFactoryState::default(),
-            }),
+            BlockDef::UnitFactory(factory_block) => {
+                let mut factory = UnitFactoryState::default();
+                factory.current_plan =
+                    self.unit_factory_initial_current_plan(content, building, factory_block);
+                Some(GameRuntimeUnitBlockState::Factory {
+                    common: PayloadBlockBuildState::default(),
+                    factory,
+                })
+            }
             BlockDef::UnitReconstructor(_) => Some(GameRuntimeUnitBlockState::Reconstructor {
                 common: PayloadBlockBuildState::default(),
                 reconstructor: ReconstructorState::default(),
@@ -3674,6 +3679,38 @@ impl GameRuntime {
         };
         self.unit_runtime_states.insert(building.tile_pos, state);
         true
+    }
+
+    fn unit_factory_initial_current_plan(
+        &self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+        factory_block: &UnitFactoryBlockData,
+    ) -> i32 {
+        match building.config_value() {
+            type_io::TypeValue::Int(plan) => plan,
+            type_io::TypeValue::Null => {
+                Self::unit_factory_first_unlocked_plan(&self.state.rules, content, factory_block)
+            }
+            _ => -1,
+        }
+    }
+
+    fn unit_factory_first_unlocked_plan(
+        rules: &crate::mindustry::game::Rules,
+        content: &ContentLoader,
+        factory_block: &UnitFactoryBlockData,
+    ) -> i32 {
+        factory_block
+            .plans
+            .iter()
+            .position(|plan| {
+                content
+                    .unit_by_name(&plan.unit)
+                    .is_some_and(|unit| Self::unit_unlocked_now(rules, unit))
+            })
+            .map(|index| index as i32)
+            .unwrap_or(-1)
     }
 
     fn attach_unit_payload_to_building_state(
@@ -4919,7 +4956,9 @@ impl GameRuntime {
         client: bool,
     ) -> GameRuntimePlacedBuildingReport {
         let tile_pos = building.tile_pos;
+        let placed = building.clone();
         let index = self.add_building(building);
+        let _ = self.ensure_unit_state_for_building(content, &placed);
         let power_node_links = self.placed_owned_power_node(content, tile_pos, client);
         let power_building_links = self.placed_owned_power_building(content, tile_pos, client);
         let beam_node_links = self.refresh_owned_beam_node_links(content);
@@ -15539,6 +15578,13 @@ impl GameRuntime {
         rules: &crate::mindustry::game::Rules,
         unit: &crate::mindustry::r#type::UnitType,
     ) -> bool {
+        Self::unit_unlocked_now(rules, unit)
+    }
+
+    fn unit_unlocked_now(
+        rules: &crate::mindustry::game::Rules,
+        unit: &crate::mindustry::r#type::UnitType,
+    ) -> bool {
         unit.base.unlocked()
             || rules.researched.contains(unit.name())
             || rules.editor
@@ -20753,6 +20799,83 @@ mod tests {
             runtime.sense_owned_building_object(&content, router_tile, LAccess::Config),
             None
         );
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_created_selects_first_unlocked_plan_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let mono = content.unit_by_name("mono").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let tile_pos = point2_pack(17, 14);
+        let mut runtime = GameRuntime::default();
+
+        runtime.add_placed_building(
+            &content,
+            BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(2)),
+            false,
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("placed unit factory should initialize its sidecar like created()");
+        };
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(
+            runtime.sense_owned_building_object(&content, tile_pos, LAccess::Config),
+            Some(TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Unit,
+                flare.id()
+            )))
+        );
+
+        let researched_tile = point2_pack(18, 14);
+        let mut researched_runtime = GameRuntime::default();
+        researched_runtime
+            .state
+            .rules
+            .researched
+            .insert("mono".into());
+        researched_runtime.add_placed_building(
+            &content,
+            BuildingComp::new(researched_tile, factory_def.base().clone(), TeamId(2)),
+            false,
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            researched_runtime.unit_runtime_states.get(&researched_tile)
+        else {
+            panic!("researched unit factory should initialize its sidecar");
+        };
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(
+            researched_runtime.sense_owned_building_object(
+                &content,
+                researched_tile,
+                LAccess::Config
+            ),
+            Some(TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Unit,
+                mono.id()
+            )))
+        );
+
+        let configured_tile = point2_pack(19, 14);
+        let mut configured_runtime = GameRuntime::default();
+        configured_runtime
+            .state
+            .rules
+            .researched
+            .insert("copper".into());
+        let mut configured =
+            BuildingComp::new(configured_tile, factory_def.base().clone(), TeamId(2));
+        configured.config = Some(TypeValue::Int(0));
+        configured_runtime.add_placed_building(&content, configured, false);
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            configured_runtime.unit_runtime_states.get(&configured_tile)
+        else {
+            panic!("preconfigured unit factory should initialize its sidecar");
+        };
+        assert_eq!(factory.current_plan, 0);
     }
 
     #[test]
