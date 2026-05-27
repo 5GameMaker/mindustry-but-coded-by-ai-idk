@@ -2039,6 +2039,23 @@ mod tests {
             .unwrap();
         assert_eq!(unit.items.stack.item.as_deref(), Some("lead"));
         assert_eq!(unit.items.stack.amount, 5);
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            let mirror = state.unit_item_mirrors.get_mut(&8801).unwrap();
+            mirror.item = None;
+            mirror.amount = 99;
+            mirror.take_items_packets_seen = 3;
+        }
+        launcher.update();
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&8801)
+            .unwrap();
+        assert_eq!(unit.items.stack.item, None);
+        assert_eq!(unit.items.stack.amount, 0);
     }
 
     #[test]
@@ -2200,6 +2217,21 @@ mod tests {
             .get(&8802)
             .unwrap();
         assert_eq!(unit.payload.as_ref().unwrap().payloads.len(), 1);
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            let mirror = state.unit_payload_mirrors.get_mut(&8802).unwrap();
+            mirror.payload_count = 0;
+            mirror.payload_drops_seen = 2;
+        }
+        launcher.update();
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&8802)
+            .unwrap();
+        assert_eq!(unit.payload.as_ref().unwrap().payloads.len(), 0);
     }
 
     #[test]

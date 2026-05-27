@@ -5798,3 +5798,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 这仍不是完整 `Fx.java` registry；
   - `rocketSmoke` 的 `Interp.pow3In` 当前按 `rotation.powi(3)` 等价处理，后续如抽象完整 Interp registry 可统一替换；
   - `Fx.ripple` id 仍沿用既有 `243`，完整 Fx id 审计时需要与 content registry 初始化顺序统一确认。
+
+### 12.197 Desktop unit item/payload mirror clear regressions
+
+- 2026-05-28：对照当前 `NetClient` packet sidecar → `DesktopLauncher` sync → `GameRuntime` typed unit runtime 链路，补齐桌面端镜像归零/清空回归断言，确保单位物品/载荷镜像不仅能增加和变更，也能清回空状态。
+- Rust 现状确认：
+  - `GameRuntime::apply_client_unit_item_mirror(...)` 已在 `item=None` 时清空 `UnitComp.items.stack`；
+  - `GameRuntime::apply_client_unit_payload_mirror(...)` 已在 `payload_count=0` 时保留 payload comp 但清空 payload 列表；
+  - `DesktopLauncher::sync_unit_item_mirrors_to_runtime()` / `sync_unit_payload_mirrors_to_runtime()` 已每帧从 `NetClientState` mirror 同步到 typed runtime。
+- Rust 更新验证：
+  - `desktop_launcher_applies_unit_item_mirror_to_runtime_unit_snapshot` 增加：
+    - mirror 从 `lead x5` 改为 `item=None, amount=99` 后，typed `UnitComp.items.stack.item=None` 且 `amount=0`；
+  - `desktop_launcher_applies_unit_payload_mirror_to_runtime_unit_snapshot` 增加：
+    - mirror 从 `payload_count=1` 改为 `payload_count=0` 后，typed `UnitComp.payload.payloads.len()==0`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop unit_item_mirror --lib`
+  - `cargo test -p mindustry-desktop unit_payload_mirror --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 payload mirror 仍只保留 kind/count 近似，未携带真实 build/unit payload 内容；
+  - item/payload mirror 移除 map entry 时是否应同步清 typed runtime 仍需结合 Java 真实 packet 生命周期继续确认。
