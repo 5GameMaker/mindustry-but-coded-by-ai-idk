@@ -150,6 +150,14 @@ pub struct StandardEffectCircleRenderPrimitive {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectLightRenderPrimitive {
+    pub center: (f32, f32),
+    pub radius: f32,
+    pub color: &'static str,
+    pub opacity: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StandardEffectDrawPlan {
     pub effect_id: i32,
     pub layer: f32,
@@ -243,6 +251,20 @@ impl StandardEffectDrawPlan {
                 })
                 .collect(),
         }
+    }
+
+    pub fn light_render_primitives(&self) -> Vec<StandardEffectLightRenderPrimitive> {
+        self.light_color
+            .filter(|_| self.light_radius > 0.0 && self.light_opacity > 0.0)
+            .map(|color| {
+                vec![StandardEffectLightRenderPrimitive {
+                    center: self.center,
+                    radius: self.light_radius,
+                    color,
+                    opacity: self.light_opacity,
+                }]
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -2167,6 +2189,17 @@ mod tests {
         assert_eq!(fire_primitives[0].radius, 1.7);
         assert_eq!(fire_primitives[0].stroke, 0.0);
         assert_eq!(fire_primitives[0].alpha, 1.0);
+
+        assert_eq!(
+            fire.light_render_primitives(),
+            vec![StandardEffectLightRenderPrimitive {
+                center: (10.0, 20.0),
+                radius: 20.0,
+                color: "Pal.lightFlame",
+                opacity: 0.5,
+            }]
+        );
+        assert!(smoke.light_render_primitives().is_empty());
     }
 
     #[test]

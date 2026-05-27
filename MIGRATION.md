@@ -5684,3 +5684,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - primitive 仍停在内存帧缓存，还未被真实窗口/2D backend present；
   - circle primitive 仍依赖 plan 的颜色元数据，颜色解析和 light primitive 仍待后续统一。
+
+### 12.193 Standard effect light primitives and desktop cache
+
+- 2026-05-28：补齐 `Fx.fire` renderer 中 `Drawf.light(...)` 的过渡渲染数据，把光照从 `StandardEffectDrawPlan` 字段统一拆成 light render primitive，并接入桌面帧缓存。
+- Java 依据：
+  - `Fx.fire`：`Drawf.light(e.x, e.y, 20f * e.fslope(), Pal.lightFlame, 0.5f)`。
+- Rust 新增/变化：
+  - 新增 `StandardEffectLightRenderPrimitive { center, radius, color, opacity }`；
+  - `StandardEffectDrawPlan::light_render_primitives()` 将 `light_color/light_radius/light_opacity` 转为 light primitive；
+  - `entities::mod` 导出 `StandardEffectLightRenderPrimitive`；
+  - `DesktopLauncher` 新增公开帧缓存：
+    - `standard_local_effect_light_primitives: Vec<StandardEffectLightRenderPrimitive>`；
+  - `update()` 每帧从标准 effect draw plan 同步生成 light primitive；
+  - 世界卸载 / snapshot cursor 清理时同步清空 light primitive 缓存。
+- 新增/更新验证：
+  - `standard_effect_plan_resolves_circle_render_primitives_from_seed` 增加 `fire` light primitive 断言；
+  - `desktop_launcher_caches_fire_light_primitives_for_render` 覆盖本地 `Fx.fire` packet → effect state → draw plan → circle primitives → light primitive 帧缓存；
+  - `desktop_launcher_standard_effect_draw_updates_ripple_lifetime` 增加 light primitive 清理断言。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo test -p mindustry-desktop fire_light --lib`
+  - `cargo test -p mindustry-desktop standard_effect_draw --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - light primitive 仍是内存帧数据，还未提交给真实 2D/GPU backend；
+  - 颜色仍是符号名 `Pal.lightFlame`，尚未接入实际 RGBA palette 解析。

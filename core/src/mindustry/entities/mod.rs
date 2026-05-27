@@ -378,10 +378,10 @@ pub use effect::{
     ExplosionSparkPlan, ExplosionWavePlan, MultiEffect, ParticleDrawItem, ParticleDrawKind,
     ParticleDrawPlan, ParticleEffect, ParticleVectorInput, RadialEffect, SeqEffect, SeqRenderPlan,
     SoundEffect, SoundEffectCreatePlan, SoundPlaybackPlan, StandardEffectCircleRenderPrimitive,
-    StandardEffectDrawKind, StandardEffectDrawPlan, WaveDrawPlan, WaveEffect, WrapEffect,
-    DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER, DEFAULT_EFFECT_LIFETIME, FX_MISSILE_TRAIL_ID,
-    FX_MISSILE_TRAIL_SHORT_ID, FX_NEOPLASM_HEAL_ID, FX_RIPPLE_ID, FX_UNIT_ASSEMBLE_ID,
-    SHAKE_FALLOFF,
+    StandardEffectDrawKind, StandardEffectDrawPlan, StandardEffectLightRenderPrimitive,
+    WaveDrawPlan, WaveEffect, WrapEffect, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER,
+    DEFAULT_EFFECT_LIFETIME, FX_MISSILE_TRAIL_ID, FX_MISSILE_TRAIL_SHORT_ID, FX_NEOPLASM_HEAL_ID,
+    FX_RIPPLE_ID, FX_UNIT_ASSEMBLE_ID, SHAKE_FALLOFF,
 };
 pub use entity_collisions::{
     collide, legs_solid, move_check_hitbox, move_delta_rect, move_hitbox, move_rect, overlaps_tile,

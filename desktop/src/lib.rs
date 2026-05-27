@@ -17,7 +17,8 @@ use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
     entity_class_kind, standard_effect, standard_effect_draw_plan, standard_effect_render_lifetime,
     EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
-    StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan, PLAYER_CLASS_ID,
+    StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
+    StandardEffectLightRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -57,6 +58,7 @@ pub struct DesktopLauncher {
     pub other_player_preview_overlays: Vec<OtherPlayerPreviewOverlayPlan>,
     pub standard_local_effect_draw_plans: Vec<StandardEffectDrawPlan>,
     pub standard_local_effect_circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
+    pub standard_local_effect_light_primitives: Vec<StandardEffectLightRenderPrimitive>,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -104,6 +106,7 @@ impl DesktopLauncher {
             other_player_preview_overlays: Vec::new(),
             standard_local_effect_draw_plans: Vec::new(),
             standard_local_effect_circle_primitives: Vec::new(),
+            standard_local_effect_light_primitives: Vec::new(),
             connect_target,
             connect_error: None,
             args,
@@ -182,6 +185,10 @@ impl DesktopLauncher {
             .iter()
             .flat_map(StandardEffectDrawPlan::circle_render_primitives_from_seed)
             .collect();
+        self.standard_local_effect_light_primitives = standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::light_render_primitives)
+            .collect();
         self.standard_local_effect_draw_plans = standard_local_effect_draw_plans;
     }
 
@@ -236,6 +243,15 @@ impl DesktopLauncher {
         self.standard_local_effect_draw_plans
             .iter()
             .flat_map(StandardEffectDrawPlan::circle_render_primitives_from_seed)
+            .collect()
+    }
+
+    pub fn collect_standard_local_effect_light_primitives_for_render(
+        &self,
+    ) -> Vec<StandardEffectLightRenderPrimitive> {
+        self.standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::light_render_primitives)
             .collect()
     }
 
@@ -296,6 +312,7 @@ impl DesktopLauncher {
                     self.other_player_preview_overlays.clear();
                     self.standard_local_effect_draw_plans.clear();
                     self.standard_local_effect_circle_primitives.clear();
+                    self.standard_local_effect_light_primitives.clear();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
                     self.last_runtime_map_load_report = None;
@@ -994,6 +1011,7 @@ impl DesktopLauncher {
         self.other_player_preview_overlays.clear();
         self.standard_local_effect_draw_plans.clear();
         self.standard_local_effect_circle_primitives.clear();
+        self.standard_local_effect_light_primitives.clear();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -2506,9 +2524,46 @@ mod tests {
         launcher.standard_local_effect_circle_primitives =
             launcher.collect_standard_local_effect_circle_primitives_for_render();
         assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
+        launcher.standard_local_effect_light_primitives =
+            launcher.collect_standard_local_effect_light_primitives_for_render();
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
         launcher.clear_snapshot_apply_cursors();
         assert!(launcher.standard_local_effect_draw_plans.is_empty());
         assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_caches_fire_light_primitives_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("fire").unwrap() as u16,
+                    x: 32.0,
+                    y: 48.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 1);
+        assert_eq!(
+            launcher.standard_local_effect_draw_plans[0].kind,
+            StandardEffectDrawKind::SeededCircleParticles
+        );
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 2);
+        assert_eq!(launcher.standard_local_effect_light_primitives.len(), 1);
+        let light = &launcher.standard_local_effect_light_primitives[0];
+        assert_eq!(light.center, (32.0, 48.0));
+        assert!((light.radius - 0.8).abs() < 0.0001);
+        assert_eq!(light.color, "Pal.lightFlame");
+        assert_eq!(light.opacity, 0.5);
     }
 
     #[test]
