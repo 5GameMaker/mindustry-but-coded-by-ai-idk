@@ -3179,11 +3179,17 @@ impl GameRuntime {
         if unit.team_id() != building.team {
             return false;
         }
+        if !unit.type_info.allowed_in_payloads || unit.spawned_by_core {
+            return false;
+        }
         let Some(payload) = Self::unit_payload_ref_from_unit(content, unit) else {
             return false;
         };
+        let Some(block) = content.block(building.block.id) else {
+            return false;
+        };
         self.ensure_payload_state_for_building(content, &building)
-            && self.attach_unit_payload_to_building_state(&building, unit, payload)
+            && self.attach_unit_payload_to_building_state(block, &building, unit, payload)
     }
 
     fn unit_payload_ref_from_unit(content: &ContentLoader, unit: &UnitComp) -> Option<PayloadRef> {
@@ -3274,6 +3280,21 @@ impl GameRuntime {
             return false;
         };
         let state = match block {
+            BlockDef::Payload(payload) if payload.kind == PayloadBlockKind::PayloadConveyor => {
+                Some(GameRuntimePayloadBlockState::Conveyor(
+                    PayloadConveyorState::default(),
+                ))
+            }
+            BlockDef::Payload(payload) if payload.kind == PayloadBlockKind::PayloadRouter => {
+                Some(GameRuntimePayloadBlockState::Router {
+                    conveyor: PayloadConveyorState::default(),
+                    sorted: None,
+                    rec_dir: 0,
+                    matches: false,
+                    smooth_rot: 0.0,
+                    control_time: -1.0,
+                })
+            }
             BlockDef::PayloadMassDriver(_) => Some(GameRuntimePayloadBlockState::MassDriver {
                 common: PayloadBlockBuildState::default(),
                 driver: PayloadMassDriverState::default(),
@@ -3315,6 +3336,7 @@ impl GameRuntime {
 
     fn attach_unit_payload_to_building_state(
         &mut self,
+        block: &BlockDef,
         building: &BuildingComp,
         unit: &UnitComp,
         payload: PayloadRef,
@@ -3329,13 +3351,74 @@ impl GameRuntime {
         };
         let size = building.block.size;
         let rotation = unit.rotation();
+        let unit_size_tiles = unit.type_info.hit_size / TILE_SIZE as f32;
         let Some(state) = self.payload_runtime_states.get_mut(&building.tile_pos) else {
             return false;
         };
-        match state {
-            GameRuntimePayloadBlockState::MassDriver { common, driver }
-                if common.payload.is_none() =>
+        match (block, state) {
+            (
+                BlockDef::Payload(payload_block),
+                GameRuntimePayloadBlockState::Conveyor(conveyor),
+            ) if payload_block.kind == PayloadBlockKind::PayloadConveyor
+                && payload_conveyor_accept_payload(
+                    conveyor.item.is_some(),
+                    unit_size_tiles <= payload_block.payload_limit,
+                    true,
+                    building.enabled,
+                    conveyor.progress,
+                ) =>
             {
+                let cur_step =
+                    payload_conveyor_cur_step(self.state.tick as f32, payload_block.move_time);
+                payload_conveyor_handle_payload(
+                    conveyor,
+                    payload,
+                    cur_step,
+                    true,
+                    building.rotdeg(),
+                    building.rotdeg(),
+                );
+                true
+            }
+            (
+                BlockDef::Payload(payload_block),
+                GameRuntimePayloadBlockState::Router {
+                    conveyor,
+                    sorted,
+                    matches,
+                    ..
+                },
+            ) if payload_block.kind == PayloadBlockKind::PayloadRouter
+                && payload_conveyor_accept_payload(
+                    conveyor.item.is_some(),
+                    unit_size_tiles <= payload_block.payload_limit,
+                    true,
+                    building.enabled,
+                    conveyor.progress,
+                ) =>
+            {
+                let cur_step =
+                    payload_conveyor_cur_step(self.state.tick as f32, payload_block.move_time);
+                payload_conveyor_handle_payload(
+                    conveyor,
+                    payload,
+                    cur_step,
+                    true,
+                    building.rotdeg(),
+                    building.rotdeg(),
+                );
+                *matches = conveyor
+                    .item
+                    .as_ref()
+                    .and_then(payload_ref_sort_key)
+                    .map(|key| payload_router_check_match(*sorted, Some(key), payload_block.invert))
+                    .unwrap_or(false);
+                true
+            }
+            (
+                BlockDef::PayloadMassDriver(driver_block),
+                GameRuntimePayloadBlockState::MassDriver { common, driver },
+            ) if common.payload.is_none() && unit_size_tiles <= driver_block.max_payload_size => {
                 payload_block_handle_payload(
                     common,
                     payload,
@@ -3348,24 +3431,20 @@ impl GameRuntime {
                 driver.loaded = true;
                 true
             }
-            GameRuntimePayloadBlockState::Loader { common, loader } if common.payload.is_none() => {
-                payload_block_handle_payload(
+            (
+                BlockDef::PayloadDeconstructor(deconstructor_block),
+                GameRuntimePayloadBlockState::Deconstructor {
                     common,
-                    payload,
-                    build_pos,
-                    source_pos,
-                    rotation,
-                    size,
-                    TILE_SIZE as f32,
-                );
-                loader.has_payload = true;
-                loader.exporting = false;
-                true
-            }
-            GameRuntimePayloadBlockState::Deconstructor {
-                common,
-                deconstructor,
-            } if common.payload.is_none() => {
+                    deconstructor,
+                },
+            ) if common.payload.is_none()
+                && payload_deconstructor_accept_payload(
+                    deconstructor,
+                    1,
+                    unit_size_tiles,
+                    deconstructor_block.max_payload_size,
+                ) =>
+            {
                 payload_block_handle_payload(
                     common,
                     payload,
@@ -3379,35 +3458,9 @@ impl GameRuntime {
                 deconstructor.accum = None;
                 true
             }
-            GameRuntimePayloadBlockState::Constructor {
-                common, producer, ..
-            } if common.payload.is_none() => {
-                payload_block_handle_payload(
-                    common,
-                    payload,
-                    build_pos,
-                    source_pos,
-                    rotation,
-                    size,
-                    TILE_SIZE as f32,
-                );
-                producer.has_payload = true;
-                true
-            }
-            GameRuntimePayloadBlockState::Source { common, source } if common.payload.is_none() => {
-                payload_block_handle_payload(
-                    common,
-                    payload,
-                    build_pos,
-                    source_pos,
-                    rotation,
-                    size,
-                    TILE_SIZE as f32,
-                );
-                source.has_payload = true;
-                true
-            }
-            GameRuntimePayloadBlockState::Void(common) if common.payload.is_none() => {
+            (BlockDef::Sandbox(sandbox), GameRuntimePayloadBlockState::Void(common))
+                if sandbox.kind == SandboxBlockKind::PayloadVoid && common.payload.is_none() =>
+            {
                 payload_block_handle_payload(
                     common,
                     payload,
@@ -17792,12 +17845,12 @@ mod tests {
     fn game_runtime_applies_client_unit_entered_payload_packet_to_payload_building() {
         let content = ContentLoader::create_base_content().unwrap();
         let flare = content.unit_by_name("flare").unwrap().clone();
-        let loader_block = content.block_by_name("payload-loader").unwrap();
+        let driver_block = content.block_by_name("payload-mass-driver").unwrap();
         let tile_pos = point2_pack(9, 10);
         let mut runtime = GameRuntime::default();
         runtime.buildings.push(BuildingComp::new(
             tile_pos,
-            loader_block.base().clone(),
+            driver_block.base().clone(),
             TeamId(3),
         ));
         let mut unit = UnitComp::new(5151, flare, TeamId(3));
@@ -17846,19 +17899,18 @@ mod tests {
                 .hidden
         );
 
-        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+        let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
             runtime.payload_runtime_states.get(&tile_pos)
         else {
-            panic!("payload-loader should receive a runtime payload state");
+            panic!("payload-mass-driver should receive a runtime payload state");
         };
-        assert!(loader.has_payload);
-        assert!(!loader.exporting);
+        assert!(driver.loaded);
         let Some(PayloadRef::Unit {
             class_id,
             unit_bytes,
         }) = common.payload.as_ref()
         else {
-            panic!("payload-loader should receive a unit payload");
+            panic!("payload-mass-driver should receive a unit payload");
         };
         assert_eq!(*class_id, 3);
         let mut exact = unit_bytes.as_slice();
@@ -17869,6 +17921,63 @@ mod tests {
         let mut fields = unit_bytes.as_slice();
         assert_eq!(type_io::read_i16(&mut fields).unwrap(), 9);
         assert_eq!(common.pay_rotation, 135.0);
+    }
+
+    #[test]
+    fn game_runtime_rejects_unit_payload_for_payload_loader_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let loader_block = content.block_by_name("payload-loader").unwrap();
+        let tile_pos = point2_pack(12, 10);
+        let mut runtime = GameRuntime::default();
+        runtime.buildings.push(BuildingComp::new(
+            tile_pos,
+            loader_block.base().clone(),
+            TeamId(3),
+        ));
+        let mut unit = UnitComp::new(5252, flare, TeamId(3));
+        unit.set_pos(96.0, 80.0);
+
+        assert!(!runtime.attach_unit_payload_to_building(&content, tile_pos, &unit));
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload-loader sidecar should still be initialized");
+        };
+        assert!(!loader.has_payload);
+        assert!(common.payload.is_none());
+    }
+
+    #[test]
+    fn game_runtime_attaches_unit_payload_to_payload_conveyor_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let conveyor_block = content.block_by_name("payload-conveyor").unwrap();
+        let tile_pos = point2_pack(13, 10);
+        let mut runtime = GameRuntime::default();
+        runtime.buildings.push(BuildingComp::new(
+            tile_pos,
+            conveyor_block.base().clone(),
+            TeamId(3),
+        ));
+        let mut unit = UnitComp::new(5353, flare, TeamId(3));
+        unit.set_pos(104.0, 80.0);
+        unit.set_rotation(45.0);
+
+        assert!(runtime.attach_unit_payload_to_building(&content, tile_pos, &unit));
+        let Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) =
+            runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload-conveyor should receive entered unit payload");
+        };
+        assert!(matches!(
+            conveyor.item,
+            Some(PayloadRef::Unit {
+                class_id: 3,
+                ref unit_bytes
+            }) if !unit_bytes.is_empty()
+        ));
+        assert_eq!(conveyor.item_rotation, 0.0);
     }
 
     #[test]

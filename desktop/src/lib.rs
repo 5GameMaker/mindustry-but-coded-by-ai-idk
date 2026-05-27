@@ -1455,7 +1455,7 @@ mod tests {
         let tile_pos = mindustry_core::mindustry::world::point2_pack(6, 7);
         let loader = launcher
             .content_loader
-            .block_by_name("payload-loader")
+            .block_by_name("payload-mass-driver")
             .unwrap()
             .base()
             .clone();
@@ -1497,12 +1497,12 @@ mod tests {
             .client_unit_snapshot_entities
             .contains_key(&8803));
         assert!(launcher.runtime.client_hidden_entity_ids.contains(&8803));
-        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+        let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
             launcher.runtime.payload_runtime_states.get(&tile_pos)
         else {
-            panic!("payload-loader should receive entered unit payload");
+            panic!("payload-mass-driver should receive entered unit payload");
         };
-        assert!(loader.has_payload);
+        assert!(driver.loaded);
         assert!(matches!(
             common.payload,
             Some(PayloadRef::Unit {

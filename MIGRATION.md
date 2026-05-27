@@ -3504,3 +3504,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
   - `cargo check --workspace`
 - 仍未完成：sort-key 仍只从 raw body 尾部恢复 UnitType id，不等于完整 materialize `UnitPayload`；后续需要把 payload-router 的 fits/draw/contentEquals 与完整 UnitType/EntityMapping 恢复继续接上。
+
+### 12.105 收紧 UnitPayload attach 的 Java block-level 门禁
+
+- 2026-05-27：修正 `GameRuntime::attach_unit_payload_to_building(...)` 对 Java `build.acceptPayload(build, new UnitPayload(unit))` 的块级语义：不再把 UnitPayload 塞进 `PayloadLoader/PayloadConstructor/PayloadSource`，并补上 `PayloadConveyor/PayloadRouter` 的真实可承载路径。
+- Java 依据：
+  - `PayloadLoader.acceptPayload(...)` 明确要求 `payload instanceof BuildPayload`，因此不接收 UnitPayload；
+  - `BlockProducer` / `PayloadSource` 的 `acceptPayload(...)` 返回 false；
+  - `PayloadConveyor.acceptPayload(...)` 要求目标空且 `payload.fits(payloadLimit)`，`source == this` 时不受 enabled/progress 限制；`PayloadRouter` 继承该逻辑并维护 sorted/matches；
+  - `PayloadMassDriver.acceptPayload(...)` 要求 `payload.size() <= maxPayloadSize * tilesize`，`PayloadDeconstructor` 还要求目标空、未在 deconstructing 且 fits。
+- Rust 新增/变化：
+  - `ensure_payload_state_for_building(...)` 现在会为 `payload-conveyor` / `payload-router` 初始化 sidecar；
+  - `attach_unit_payload_to_building_state(...)` 改为按 `BlockDef + GameRuntimePayloadBlockState` 分发：Conveyor/Router 走 `payload_conveyor_accept_payload + payload_conveyor_handle_payload`，MassDriver/Deconstructor/Void 各自校验，Loader/Constructor/Source 对 UnitPayload 显式无匹配分支；
+  - desktop/server 的 UnitEnteredPayload smoke 从错误的 `payload-loader` 改为 Java 可接受的 `payload-mass-driver`；
+  - 新增 core 回归测试：loader 拒收 UnitPayload、conveyor 可接收 UnitPayload。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
+  - `cargo test -p mindustry-core game_runtime_rejects_unit_payload_for_payload_loader_like_java`
+  - `cargo test -p mindustry-core game_runtime_attaches_unit_payload_to_payload_conveyor_like_java`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
+  - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
+  - `cargo test -p mindustry-server server_launcher_update_applies_enter_payload_command_to_payload_building_and_broadcasts_packet`
+  - `cargo check --workspace`
+- 仍未完成：Deconstructor 仍缺 Java `unit.type.getTotalRequirements().length > 0` 的真实需求表，Reconstructor 这类非 payload block 的 UnitPayload 接收路径尚未迁移；后续需要补 UnitType requirements 与更多 block-specific `acceptUnitPayload/acceptPayload`。

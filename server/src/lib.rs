@@ -2500,9 +2500,9 @@ mod tests {
         launcher.net_server.open(6578).unwrap();
 
         let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
-        let loader_block = launcher
+        let driver_block = launcher
             .content_loader
-            .block_by_name("payload-loader")
+            .block_by_name("payload-mass-driver")
             .unwrap()
             .base()
             .clone();
@@ -2510,7 +2510,7 @@ mod tests {
         launcher
             .runtime
             .buildings
-            .push(BuildingComp::new(tile_pos, loader_block, default_team));
+            .push(BuildingComp::new(tile_pos, driver_block, default_team));
 
         let mut unit_type = launcher
             .content_loader
@@ -2528,12 +2528,12 @@ mod tests {
             .unwrap());
 
         assert!(!launcher.server_units.contains_key(&5151));
-        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+        let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
             launcher.runtime.payload_runtime_states.get(&tile_pos)
         else {
-            panic!("payload-loader should receive entered unit payload");
+            panic!("payload-mass-driver should receive entered unit payload");
         };
-        assert!(loader.has_payload);
+        assert!(driver.loaded);
         assert!(matches!(
             common.payload,
             Some(PayloadRef::Unit {
@@ -2566,9 +2566,9 @@ mod tests {
         launcher.net_server.open(6579).unwrap();
 
         let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
-        let loader_block = launcher
+        let driver_block = launcher
             .content_loader
-            .block_by_name("payload-loader")
+            .block_by_name("payload-mass-driver")
             .unwrap()
             .base()
             .clone();
@@ -2578,7 +2578,7 @@ mod tests {
         launcher
             .runtime
             .buildings
-            .push(BuildingComp::new(tile_pos, loader_block, default_team));
+            .push(BuildingComp::new(tile_pos, driver_block, default_team));
         launcher.runtime.sync_world_footprint_refs(0);
 
         let enter_payload_id = launcher
@@ -2610,12 +2610,12 @@ mod tests {
         launcher.update();
 
         assert!(!launcher.server_units.contains_key(&6161));
-        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+        let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
             launcher.runtime.payload_runtime_states.get(&tile_pos)
         else {
-            panic!("payload-loader should receive entered unit payload from server update");
+            panic!("payload-mass-driver should receive entered unit payload from server update");
         };
-        assert!(loader.has_payload);
+        assert!(driver.loaded);
         assert!(matches!(
             common.payload,
             Some(PayloadRef::Unit {
@@ -2647,9 +2647,9 @@ mod tests {
         launcher.net_server.open(6580).unwrap();
 
         let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
-        let loader_block = launcher
+        let driver_block = launcher
             .content_loader
-            .block_by_name("payload-loader")
+            .block_by_name("payload-mass-driver")
             .unwrap()
             .base()
             .clone();
@@ -2657,7 +2657,7 @@ mod tests {
         launcher
             .runtime
             .buildings
-            .push(BuildingComp::new(tile_pos, loader_block, default_team));
+            .push(BuildingComp::new(tile_pos, driver_block, default_team));
         launcher.runtime.sync_world_footprint_refs(0);
 
         let enter_payload_id = launcher
@@ -2683,10 +2683,10 @@ mod tests {
         launcher.update();
 
         assert!(launcher.server_units.contains_key(&6262));
-        if let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+        if let Some(GameRuntimePayloadBlockState::MassDriver { common, driver }) =
             launcher.runtime.payload_runtime_states.get(&tile_pos)
         {
-            assert!(!loader.has_payload);
+            assert!(!driver.loaded);
             assert!(common.payload.is_none());
         }
 
