@@ -134,6 +134,7 @@ pub struct SpawnDeathSpawnPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpawnDeathAbility {
     pub base: BasicAbility,
+    pub unit: String,
     pub amount: i32,
     pub rand_amount: i32,
     /// Random spread of units away from the spawned.
@@ -146,6 +147,7 @@ impl Default for SpawnDeathAbility {
     fn default() -> Self {
         Self {
             base: BasicAbility::default(),
+            unit: String::new(),
             amount: 1,
             rand_amount: 0,
             spread: 8.0,
@@ -155,6 +157,37 @@ impl Default for SpawnDeathAbility {
 }
 
 impl SpawnDeathAbility {
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("SpawnDeathAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("SpawnDeathAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let unit = parts.next()?.to_string();
+        let amount = parts.next()?.parse().ok()?;
+        let spread = parts.next()?.parse().ok()?;
+        let rand_amount = parts.next().map(str::parse).transpose().ok()?.unwrap_or(0);
+        let face_outwards = parts
+            .next()
+            .map(|value| matches!(value, "true" | "1" | "out"))
+            .unwrap_or(true);
+
+        Some(Self {
+            unit,
+            amount,
+            rand_amount,
+            spread,
+            face_outwards,
+            ..Default::default()
+        })
+    }
+
     pub fn planned_spawn_count(&self, random_bonus: i32) -> i32 {
         (self.amount + random_bonus.clamp(0, self.rand_amount.max(0))).max(0)
     }
@@ -2189,6 +2222,18 @@ mod tests {
         assert!(plan.offset_x.abs() < 0.0001);
         assert!((plan.offset_y - 4.0).abs() < 0.0001);
         assert_eq!(plan.rotation, 90.0);
+    }
+
+    #[test]
+    fn spawn_death_descriptor_parses_latum_runtime_entry() {
+        let ability = SpawnDeathAbility::from_descriptor("SpawnDeathAbility:renale:5:11")
+            .expect("latum descriptor should parse");
+        assert_eq!(ability.unit, "renale");
+        assert_eq!(ability.amount, 5);
+        assert_eq!(ability.rand_amount, 0);
+        assert_eq!(ability.spread, 11.0);
+        assert!(ability.face_outwards);
+        assert!(SpawnDeathAbility::from_descriptor("RepairFieldAbility").is_none());
     }
 
     #[test]

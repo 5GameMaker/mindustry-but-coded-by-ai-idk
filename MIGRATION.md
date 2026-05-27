@@ -4487,3 +4487,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 bullet absorb/deflect、missile unit kill、普通敌方 unit push 尚未接入 server runtime；当前只接状态 tick，纯算法 `apply_bullet_hit(...)` 仍保留；
   - `region=tecta-shield`、arc draw、push/absorb/break effects、sounds 与 shield bar 表现层尚未迁移；
   - `AbilityWire.data` 只能保存弧盾 data，`widthScale/alpha` 仍需结构化 ability runtime state。
+
+### 12.147 SpawnDeathAbility / latum 死亡生成 renale runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `SpawnDeathAbility.java` 与 `UnitTypes.latum`，把死亡生成单位能力从纯 plan 接入 `UnitType` content、`UnitComp` 死亡计划与 server dead-unit removal/spawn runtime。
+- Java 依据：
+  - `SpawnDeathAbility.death(Unit unit)`：非 client 端计算 `spawned = amount + Mathf.random(randAmount)`；
+  - 对每个生成体在 `spread` 范围内随机偏移，调用 `this.unit.spawn(unit.team, unit.x + offset.x, unit.y + offset.y)`；
+  - `faceOutwards` 为真时新单位朝向偏移角，否则沿父单位 rotation 加 jitter；
+  - `latum` 参数：`new SpawnDeathAbility(renale, 5, 11f)`。
+- Rust 新增/变化：
+  - `SpawnDeathAbility` 增加 `unit` 字段，并新增 `from_descriptor(...)`，支持 `SpawnDeathAbility:unit:amount:spread[:randAmount[:faceOutwards]]`；
+  - `content/unit_types.rs` 为 `latum` 挂载 `SpawnDeathAbility:renale:5:11`；
+  - `UnitComp::spawn_death_ability_plans(...)` 从 descriptor 生成死亡产子计划；当前使用确定性等角度 spread，避免 server 测试和回放不可复现；
+  - `ServerLauncher::apply_server_unit_death_abilities(...)` 在 playing frame 内移除 dead `server_units`，广播 despawn，并为每个 SpawnDeath plan 创建子 `UnitComp`、`unit.add()`、`broadcast_server_unit_spawn(...)`；
+  - 生成子单位时调用 `note_unit_create_event(Some(child_id), unit_name, team, None, Some(parent_id))`，接入统计与 sidecar。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core spawn_death --lib`
+  - `cargo test -p mindustry-core unit_component_plans_spawn_death --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server latum --lib`
+- 仍未完成：
+  - Java 随机 spread / randAmount 目前用确定性等角度计划替代，后续需要接入可复现 RNG；
+  - 普通 unit death/removal 的全局事件总线、death effect、wreck/尸体等完整路径仍需继续迁移；
+  - UnitCreateEvent 是否完全等价于 Java `UnitType.spawn(...)` 内部事件需后续对照确认。

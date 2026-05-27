@@ -12,9 +12,9 @@ use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
     EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility, ForceFieldUpdate,
     RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldArcAbility, ShieldArcUpdate,
-    ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget, StatusFieldAbility,
-    StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility,
-    UnitSpawnPlan,
+    ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget, SpawnDeathAbility,
+    SpawnDeathSpawnPlan, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
+    SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -531,6 +531,29 @@ impl UnitComp {
         }
 
         plans
+    }
+
+    pub fn spawn_death_ability_plans(&self) -> Vec<(String, SpawnDeathSpawnPlan)> {
+        let unit_rotation = self.rotation();
+        self.type_info
+            .abilities
+            .iter()
+            .filter_map(|descriptor| SpawnDeathAbility::from_descriptor(descriptor))
+            .flat_map(|ability| {
+                let count = ability.planned_spawn_count(0).max(0) as usize;
+                (0..count).map(move |index| {
+                    let angle = if count == 0 {
+                        0.0
+                    } else {
+                        index as f32 * 360.0 / count as f32
+                    };
+                    (
+                        ability.unit.clone(),
+                        ability.planned_spawn(unit_rotation, angle, 1.0, 0.0),
+                    )
+                })
+            })
+            .collect()
     }
 
     pub fn update_energy_field_abilities(
@@ -1758,6 +1781,21 @@ mod tests {
         assert!((updates[0].x - 80.0).abs() < 0.0001);
         assert!((updates[0].y - 200.0).abs() < 0.0001);
         assert!((unit.abilities[0].data - 2000.75).abs() < 0.0001);
+    }
+
+    #[test]
+    fn unit_component_plans_spawn_death_ability_from_runtime_descriptor() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["SpawnDeathAbility:renale:5:11".into()];
+        let mut unit = UnitComp::new(48, unit_type, TeamId(1));
+        unit.set_rotation(90.0);
+
+        let plans = unit.spawn_death_ability_plans();
+        assert_eq!(plans.len(), 5);
+        assert!(plans.iter().all(|(unit, _plan)| unit == "renale"));
+        assert!((plans[0].1.offset_x - 11.0).abs() < 0.0001);
+        assert!(plans[0].1.offset_y.abs() < 0.0001);
+        assert_eq!(plans[0].1.rotation, 0.0);
     }
 
     #[test]

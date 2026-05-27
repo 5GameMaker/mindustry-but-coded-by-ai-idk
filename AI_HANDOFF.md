@@ -2967,3 +2967,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入弧形护盾单位能力运行时`。
   3. 后续必须补真实 bullet absorb/deflect、missile unit kill、enemy unit push、region/effects/sounds、结构化 ability runtime state。
+
+---
+
+## 89. 最新闭环记录：SpawnDeathAbility / latum dead-unit spawn runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `SpawnDeathAbility.java` 与 `UnitTypes.latum`，把 latum 死亡生成 renale 接入 `UnitType` content、`UnitComp` death plan、server dead-unit removal/spawn runtime。
+- Java 依据：
+  - `SpawnDeathAbility.death(Unit unit)`：非 client 端计算 `spawned = amount + Mathf.random(randAmount)`；
+  - 每个生成单位在 `spread` 范围内随机偏移，调用 `this.unit.spawn(unit.team, unit.x + offset.x, unit.y + offset.y)`；
+  - `faceOutwards` 为真时新单位朝向偏移角；
+  - `latum` 参数：`SpawnDeathAbility(renale, 5, 11f)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `SpawnDeathAbility` 增加 `unit: String`；
+    - 新增 `SpawnDeathAbility::from_descriptor(...)`，支持 `SpawnDeathAbility:unit:amount:spread[:randAmount[:faceOutwards]]`；
+    - 新增 latum descriptor 解析测试。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 为 `latum` 挂载 `SpawnDeathAbility:renale:5:11`；
+    - 内容覆盖测试断言 descriptor 存在。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::spawn_death_ability_plans(...)`；
+    - 当前用确定性等角度 spread 生成计划，避免 server 测试/回放不可复现；后续应替换为可复现 RNG。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 的 playing frame 内调用 `apply_server_unit_death_abilities()`；
+    - server 移除 dead `server_units`，必要时广播 `UnitDespawnCallPacket`；
+    - 对 SpawnDeath plans 创建子 `UnitComp`，调用 `unit.add()`、`broadcast_server_unit_spawn(...)`，并记录 `note_unit_create_event(Some(child_id), unit_name, team, None, Some(parent_id))`；
+    - 新增 `server_update_spawns_renales_when_latum_dies`，验证 dead latum 被移除，生成 5 个同队 renale，记录 5 个 unit create events 与 stats。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core spawn_death --lib`
+  - `cargo test -p mindustry-core unit_component_plans_spawn_death --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server latum --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入死亡产子单位能力运行时`。
+  3. 后续补 Java 等价随机 spread/randAmount 的可复现 RNG、死亡事件总线、death effect/wreck 与更完整 unit removal lifecycle。

@@ -309,6 +309,9 @@ impl ServerLauncher {
             self.tick_server_energy_field_abilities(1.0);
             self.tick_server_status_field_abilities(1.0);
             self.tick_server_suppression_field_abilities(1.0);
+            if let Err(error) = self.apply_server_unit_death_abilities() {
+                self.network_error = Some(error.to_string());
+            }
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
                 self.network_error = Some(error.to_string());
             }
@@ -1977,6 +1980,52 @@ impl ServerLauncher {
         }
 
         suppressed_buildings
+    }
+
+    fn apply_server_unit_death_abilities(&mut self) -> io::Result<usize> {
+        let dead_ids: Vec<i32> = self
+            .server_units
+            .iter()
+            .filter_map(|(&unit_id, unit)| unit.health.dead.then_some(unit_id))
+            .collect();
+        let mut spawned = 0;
+
+        for parent_id in dead_ids {
+            let Some(parent) = self.server_units.remove(&parent_id) else {
+                continue;
+            };
+            if self.net_server.is_active() {
+                self.net_server.net_mut().send(
+                    &PacketKind::UnitDespawnCallPacket(UnitDespawnCallPacket {
+                        unit: UnitRef::Unit { id: parent_id },
+                    }),
+                    false,
+                )?;
+            }
+
+            for (unit_name, plan) in parent.spawn_death_ability_plans() {
+                let Some(unit_type) = self.content_loader.unit_by_name(&unit_name).cloned() else {
+                    continue;
+                };
+                let unit_id = self.next_server_runtime_unit_id();
+                let mut unit = UnitComp::new(unit_id, unit_type, parent.team_id());
+                unit.set_pos(parent.x() + plan.offset_x, parent.y() + plan.offset_y);
+                unit.set_rotation(plan.rotation);
+                self.runtime.note_unit_create_event(
+                    Some(unit_id),
+                    unit_name,
+                    parent.team_id(),
+                    None,
+                    Some(parent_id),
+                );
+                unit.add();
+                self.broadcast_server_unit_spawn(&unit)?;
+                self.server_units.insert(unit_id, unit);
+                spawned += 1;
+            }
+        }
+
+        Ok(spawned)
     }
 
     fn apply_runtime_unit_cargo_loader_spawns(
@@ -6114,6 +6163,40 @@ mod tests {
 
         let parent = launcher.server_units.get(&33).unwrap();
         assert!((parent.abilities[0].data - 2000.75).abs() < 0.0001);
+    }
+
+    #[test]
+    fn server_update_spawns_renales_when_latum_dies() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let latum = launcher
+            .content_loader
+            .unit_by_name("latum")
+            .unwrap()
+            .clone();
+        let team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let mut parent = UnitComp::new(34, latum, team);
+        parent.set_pos(100.0, 200.0);
+        parent.health.kill();
+        launcher.server_units.insert(parent.id(), parent);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&34));
+        let renales = launcher
+            .server_units
+            .values()
+            .filter(|unit| unit.type_info.name() == "renale" && unit.team_id() == team)
+            .collect::<Vec<_>>();
+        assert_eq!(renales.len(), 5);
+        assert!(renales.iter().all(|unit| {
+            let dx = unit.x() - 100.0;
+            let dy = unit.y() - 200.0;
+            (dx * dx + dy * dy).sqrt() <= 11.001
+        }));
+        assert_eq!(launcher.runtime.unit_create_events.len(), 5);
+        assert_eq!(launcher.runtime.state.stats.units_created, 5);
     }
 
     #[test]

@@ -737,6 +737,7 @@ pub fn load() -> Vec<UnitType> {
             u.hidden = true;
             u.target_air = false;
             u.speed = 1.0;
+            u.abilities.push("SpawnDeathAbility:renale:5:11".into());
         }),
         unit(&mut next_id, "evoke", UnitKind::Erekir, |u| {
             u.is_enemy = false;
@@ -1204,6 +1205,12 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| entry == "LiquidExplodeAbility:neoplasm"));
+
+        let latum = by_name(&units, "latum");
+        assert!(latum
+            .abilities
+            .iter()
+            .any(|entry| entry == "SpawnDeathAbility:renale:5:11"));
 
         let scepter = by_name(&units, "scepter");
         assert!(scepter
