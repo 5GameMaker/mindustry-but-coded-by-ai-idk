@@ -149,6 +149,13 @@ impl Rules {
         self.unit_cost_multiplier * self.teams.get_or_default(team_id).unit_cost_multiplier
     }
 
+    pub fn unit_factory_active(&self, team_id: usize, tick: f64) -> bool {
+        tick >= self
+            .teams
+            .get_or_default(team_id)
+            .unit_factory_activation_delay as f64
+    }
+
     pub fn unit_damage(&self, team_id: usize) -> f32 {
         self.unit_damage_multiplier * self.teams.get_or_default(team_id).unit_damage_multiplier
     }

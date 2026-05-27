@@ -1947,6 +1947,7 @@ pub struct GameRuntimeUnitFactoryFrameReport {
     pub visited_buildings: usize,
     pub factory_candidates: usize,
     pub updated_factories: usize,
+    pub inactive_factories: usize,
     pub produced_unit_payloads: usize,
     pub consumed_item_batches: usize,
     pub moved_out_payloads: usize,
@@ -17540,6 +17541,10 @@ impl GameRuntime {
 
             let unit_cost = self.state.rules.unit_cost(team.0 as usize);
             let unit_build_speed = self.state.rules.unit_build_speed(team.0 as usize);
+            let team_activates_factories = self
+                .state
+                .rules
+                .unit_factory_active(team.0 as usize, self.state.tick);
 
             let current_plan = self
                 .unit_runtime_states
@@ -17593,11 +17598,15 @@ impl GameRuntime {
                     }
                 }
 
-                let effective_efficiency = if common.payload.is_none() && has_required_items {
-                    efficiency
-                } else {
-                    0.0
-                };
+                if !team_activates_factories {
+                    report.inactive_factories += 1;
+                }
+                let effective_efficiency =
+                    if team_activates_factories && common.payload.is_none() && has_required_items {
+                        efficiency
+                    } else {
+                        0.0
+                    };
                 let update = unit_factory_update(
                     factory,
                     factory_block.configurable,
@@ -20866,6 +20875,74 @@ mod tests {
                 .id,
             flare.id()
         );
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_respects_team_activation_delay_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let plan = &factory_block.plans[0];
+        let tile_pos = point2_pack(7, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(24, 24);
+        runtime
+            .state
+            .rules
+            .teams
+            .get_or_insert(2)
+            .unit_factory_activation_delay = 120.0;
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &plan.requirements {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let inactive_report = runtime
+            .advance_owned_unit_factories(&content, 1.0)
+            .expect("playing runtime should advance one factory frame");
+        assert_eq!(runtime.state.tick, 60.0);
+        assert_eq!(inactive_report.factory_candidates, 1);
+        assert_eq!(inactive_report.updated_factories, 1);
+        assert_eq!(inactive_report.inactive_factories, 1);
+        assert_eq!(inactive_report.produced_unit_payloads, 0);
+        let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should remain present while inactive");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(factory.base.progress, 0.0);
+
+        let active_report = runtime
+            .advance_owned_unit_factories(&content, 1.0)
+            .expect("playing runtime should advance second factory frame");
+        assert_eq!(runtime.state.tick, 120.0);
+        assert_eq!(active_report.inactive_factories, 0);
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should remain present after activation");
+        };
+        assert!(factory.base.progress > 0.0);
     }
 
     #[test]
