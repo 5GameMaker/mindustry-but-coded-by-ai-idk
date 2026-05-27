@@ -3456,7 +3456,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
   - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
   - `cargo check --workspace`
-- 仍未完成：需要继续迁移 Java `Payload`/`UnitPayload` 的完整 write/read 与 TypeIO payload 读写路径，后续才能把 payload 内 unit 从 `UnitSyncWire` subset 升级为 Java 兼容 full unit body，并接入真实实体恢复、渲染和 save/load。
+- 仍未完成：该节先落的是 `UnitSyncWire` subset；后续 12.103 已把已知 UnitPayload schema 的写入边界升级为 Java `unit.write(...)` 风格 body，但完整实体恢复、渲染和 save/load 仍需继续迁移。
 
 ### 12.102 Server update 自动触发 enterPayload 单位进入载荷
 
@@ -3474,3 +3474,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
   - `cargo check --workspace`
 - 仍未完成：当前 tick 仍是 server launcher sidecar 上的最小 `CommandAI` 等价判定，还没有完整迁移 Java `CommandAI` path/finishPath/commandQueue 行为，也没有完整 block-level `acceptUnitPayload/acceptPayload` 精度；后续需要把单位命令、路径与 payload building 接入更完整的 AI/entity lifecycle。
+
+### 12.103 UnitEnteredPayload 写入 Java 风格 UnitPayload body
+
+- 2026-05-27：把 `GameRuntime::unit_payload_ref_from_unit(...)` 的首选写入从 `UnitSyncWire` subset 升级为 Java `UnitPayload.write(...)` 风格的 unit body：`revision + unit.write(...)` 字段序列；仅在 class/revision schema 未知或写入失败时才回退到旧 `UnitSyncWire` body。
+- Java 依据：
+  - `UnitPayload.write(Writes)` 字段顺序为 `payloadUnit(0) -> unit.classId() -> unit.write(write)`；
+  - `Payload.read(Reads)` 在 unit 分支读取 `payloadUnit -> classId -> EntityMapping.map(id).get().read(read)`，因此 `PayloadRef::Unit.unit_bytes` 必须能被 Rust 的 exact unit payload reader 按 Java `unit.write` schema 消费。
+- Rust 新增/变化：
+  - 新增 `GameRuntime::unit_payload_revision_and_schema(class_id)`，把已迁移 class/revision schema 抽成 writer/reader 共用入口；
+  - 新增 `GameRuntime::unit_payload_body_from_unit(...)`，按 schema 写入 revision、abilities、坐标/Ammo 特例、controller、elevation、flag、health、mine tile、mounts、payload seq 占位、plans、rotation、shield、items、statuses、team、unit type、updateBuilding、velocity 与最终 x/y；
+  - `game_runtime_applies_client_unit_entered_payload_packet_to_payload_building` 现在断言 flare payload `class_id == 3`、body revision 为 `9`，且 `read_exact_unit_payload_body(...)` 可完整消费。
+- 验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
+  - `cargo test -p mindustry-server server_launcher_update_applies_enter_payload_command_to_payload_building_and_broadcasts_packet`
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
+  - `cargo check --workspace`
+- 仍未完成：`Payloads/BuildingPayloads` schema 的内部 payload seq 当前仍写空占位，`Missile/Ammo` 特化字段也只保留最小同步值；后续需要迁移完整 Unit entity `write/read`、payload nesting materialization 和 Java EntityMapping 恢复，而不是长期依赖 sidecar raw bytes。

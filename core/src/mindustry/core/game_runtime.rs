@@ -3187,12 +3187,78 @@ impl GameRuntime {
     }
 
     fn unit_payload_ref_from_unit(content: &ContentLoader, unit: &UnitComp) -> Option<PayloadRef> {
-        let mut unit_bytes = Vec::new();
-        type_io::write_unit_sync(&mut unit_bytes, content, &unit.to_sync_wire()).ok()?;
+        let class_id = entity_class_id(unit.type_info.name())?;
+        let unit_bytes = Self::unit_payload_body_from_unit(content, class_id, unit)
+            .or_else(|| Self::unit_sync_payload_body_from_unit(content, unit))?;
         Some(PayloadRef::Unit {
-            class_id: entity_class_id(unit.type_info.name())?,
+            class_id,
             unit_bytes,
         })
+    }
+
+    fn unit_sync_payload_body_from_unit(
+        content: &ContentLoader,
+        unit: &UnitComp,
+    ) -> Option<Vec<u8>> {
+        let mut unit_bytes = Vec::new();
+        type_io::write_unit_sync(&mut unit_bytes, content, &unit.to_sync_wire()).ok()?;
+        Some(unit_bytes)
+    }
+
+    fn unit_payload_body_from_unit(
+        content: &ContentLoader,
+        class_id: u8,
+        unit: &UnitComp,
+    ) -> Option<Vec<u8>> {
+        let (revision, schema) = Self::unit_payload_revision_and_schema(class_id)?;
+        let sync = unit.to_sync_wire();
+        let mut unit_bytes = Vec::new();
+        type_io::write_i16(&mut unit_bytes, revision).ok()?;
+        type_io::write_abilities(&mut unit_bytes, &sync.abilities).ok()?;
+        if matches!(schema, GameRuntimeUnitPayloadSchema::Ammo) {
+            type_io::write_f32(&mut unit_bytes, sync.ammo).ok()?;
+        } else {
+            type_io::write_f32(&mut unit_bytes, sync.x).ok()?;
+            type_io::write_f32(&mut unit_bytes, sync.y).ok()?;
+        }
+        if matches!(schema, GameRuntimeUnitPayloadSchema::BaseRotation) {
+            type_io::write_f32(&mut unit_bytes, sync.rotation).ok()?;
+        }
+        if matches!(schema, GameRuntimeUnitPayloadSchema::BuildingPayloads) {
+            type_io::write_building_ref(&mut unit_bytes, BuildingRef { tile_pos: None }).ok()?;
+        }
+        type_io::write_controller(&mut unit_bytes, &sync.controller).ok()?;
+        type_io::write_f32(&mut unit_bytes, sync.elevation).ok()?;
+        type_io::write_u64(&mut unit_bytes, sync.flag.to_bits()).ok()?;
+        type_io::write_f32(&mut unit_bytes, sync.health).ok()?;
+        type_io::write_bool(&mut unit_bytes, sync.is_shooting).ok()?;
+        if matches!(schema, GameRuntimeUnitPayloadSchema::Missile) {
+            type_io::write_f32(&mut unit_bytes, 0.0).ok()?;
+        }
+        type_io::write_tile_pos(&mut unit_bytes, sync.mine_tile).ok()?;
+        type_io::write_mounts(&mut unit_bytes, &sync.mounts).ok()?;
+        if matches!(
+            schema,
+            GameRuntimeUnitPayloadSchema::Payloads | GameRuntimeUnitPayloadSchema::BuildingPayloads
+        ) {
+            type_io::write_i32(&mut unit_bytes, 0).ok()?;
+        }
+        type_io::write_plans_queue_net(&mut unit_bytes, content, sync.plans.as_deref()).ok()?;
+        type_io::write_f32(&mut unit_bytes, sync.rotation).ok()?;
+        type_io::write_f32(&mut unit_bytes, sync.shield).ok()?;
+        type_io::write_bool(&mut unit_bytes, sync.spawned_by_core).ok()?;
+        type_io::write_items(&mut unit_bytes, content, &sync.stack).ok()?;
+        type_io::write_statuses(&mut unit_bytes, &sync.statuses).ok()?;
+        type_io::write_team(&mut unit_bytes, Some(sync.team)).ok()?;
+        type_io::write_i16(&mut unit_bytes, sync.type_id).ok()?;
+        if matches!(schema, GameRuntimeUnitPayloadSchema::Missile) {
+            type_io::write_f32(&mut unit_bytes, 0.0).ok()?;
+        }
+        type_io::write_bool(&mut unit_bytes, sync.update_building).ok()?;
+        type_io::write_vec2(&mut unit_bytes, sync.vel).ok()?;
+        type_io::write_f32(&mut unit_bytes, sync.x).ok()?;
+        type_io::write_f32(&mut unit_bytes, sync.y).ok()?;
+        Some(unit_bytes)
     }
 
     fn ensure_payload_state_for_building(
@@ -6810,29 +6876,29 @@ impl GameRuntime {
     }
 
     fn unit_payload_schema(class_id: u8, revision: i16) -> Option<GameRuntimeUnitPayloadSchema> {
-        match (class_id, revision) {
-            (0, 5)
-            | (2, 9)
-            | (3, 9)
-            | (16, 8)
-            | (18, 7)
-            | (20, 9)
-            | (21, 8)
-            | (24, 9)
-            | (29, 5)
-            | (30, 5)
-            | (31, 5)
-            | (33, 5)
-            | (43, 2)
-            | (45, 2)
-            | (46, 2) => Some(GameRuntimeUnitPayloadSchema::Common),
-            (4, 9) | (17, 7) | (19, 5) | (32, 5) => {
-                Some(GameRuntimeUnitPayloadSchema::BaseRotation)
-            }
-            (5, 7) | (23, 8) | (26, 7) => Some(GameRuntimeUnitPayloadSchema::Payloads),
-            (36, 3) => Some(GameRuntimeUnitPayloadSchema::BuildingPayloads),
-            (39, 3) => Some(GameRuntimeUnitPayloadSchema::Missile),
-            (40, 1) | (44, 0) | (47, 1) => Some(GameRuntimeUnitPayloadSchema::Ammo),
+        let (latest_revision, schema) = Self::unit_payload_revision_and_schema(class_id)?;
+        (revision == latest_revision).then_some(schema)
+    }
+
+    fn unit_payload_revision_and_schema(
+        class_id: u8,
+    ) -> Option<(i16, GameRuntimeUnitPayloadSchema)> {
+        match class_id {
+            0 => Some((5, GameRuntimeUnitPayloadSchema::Common)),
+            2 | 3 | 20 | 24 => Some((9, GameRuntimeUnitPayloadSchema::Common)),
+            16 | 21 => Some((8, GameRuntimeUnitPayloadSchema::Common)),
+            18 => Some((7, GameRuntimeUnitPayloadSchema::Common)),
+            29 | 30 | 31 | 33 => Some((5, GameRuntimeUnitPayloadSchema::Common)),
+            43 | 45 | 46 => Some((2, GameRuntimeUnitPayloadSchema::Common)),
+            4 => Some((9, GameRuntimeUnitPayloadSchema::BaseRotation)),
+            17 => Some((7, GameRuntimeUnitPayloadSchema::BaseRotation)),
+            19 | 32 => Some((5, GameRuntimeUnitPayloadSchema::BaseRotation)),
+            5 | 26 => Some((7, GameRuntimeUnitPayloadSchema::Payloads)),
+            23 => Some((8, GameRuntimeUnitPayloadSchema::Payloads)),
+            36 => Some((3, GameRuntimeUnitPayloadSchema::BuildingPayloads)),
+            39 => Some((3, GameRuntimeUnitPayloadSchema::Missile)),
+            40 | 47 => Some((1, GameRuntimeUnitPayloadSchema::Ammo)),
+            44 => Some((0, GameRuntimeUnitPayloadSchema::Ammo)),
             _ => None,
         }
     }
@@ -17787,13 +17853,21 @@ mod tests {
         };
         assert!(loader.has_payload);
         assert!(!loader.exporting);
-        assert!(matches!(
-            common.payload,
-            Some(PayloadRef::Unit {
-                class_id: 3,
-                ref unit_bytes
-            }) if !unit_bytes.is_empty()
-        ));
+        let Some(PayloadRef::Unit {
+            class_id,
+            unit_bytes,
+        }) = common.payload.as_ref()
+        else {
+            panic!("payload-loader should receive a unit payload");
+        };
+        assert_eq!(*class_id, 3);
+        let mut exact = unit_bytes.as_slice();
+        runtime
+            .read_exact_unit_payload_body(&content, *class_id, &mut exact)
+            .unwrap();
+        assert!(exact.is_empty());
+        let mut fields = unit_bytes.as_slice();
+        assert_eq!(type_io::read_i16(&mut fields).unwrap(), 9);
         assert_eq!(common.pay_rotation, 135.0);
     }
 
