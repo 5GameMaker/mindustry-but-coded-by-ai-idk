@@ -4319,3 +4319,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 普通 `UnitType.abilities` 仍是字符串描述，后续需要完整结构化 ability content / mod patcher 支持，避免长期依赖描述字符串；
   - Java client 本地 ability tick / draw 预览 / `spawnEffect.at(...)` 的完整表现层仍未迁移；当前 server 已能即时广播子单位；
   - `unit_create_events` 到正式 event bus / `DefaultGameService` / achievement backend 的 bridge 仍未完成。
+
+### 12.140 EnergyFieldAbility / aegires 单位能力 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `EnergyFieldAbility.java` 与 `UnitTypes.aegires`，把 Rust 已有的 EnergyField 纯算法接入内容层、`UnitComp` ability slot 与 server units runtime。
+- Java 依据：
+  - `EnergyFieldAbility.update(Unit unit)`：每帧 `timer += Time.delta`，达到 `reload` 后按 `unit.rotation - 90 + x/y` 计算中心，收集附近 unit/building，按距离排序并限制 `maxTargets`；
+  - 同队且受损目标按 `healPercent / 100 * maxHealth` 治疗，同 unit type 再乘 `sameTypeHealMult`；
+  - 敌对目标造成 `damage * state.rules.unitDamage(unit.team) * unit.damageMultiplier` 并应用 `status/statusDuration`；
+  - `aegires` 参数：`EnergyFieldAbility(40f, 65f, 180f)`、`statusDuration=60f*6f`、`maxTargets=25`、`healPercent=1.5f`、`sameTypeHealMult=0.5f`。
+- Rust 新增/变化：
+  - `EnergyFieldTarget` 补 `air/targetable`，`EnergyFieldHit` 补 `status_duration`，使 runtime 层能对齐 targetAir/targetGround 与 status 持续时间；
+  - `EnergyFieldAbility::from_descriptor(...)` 支持 `EnergyFieldAbility:40:65:180:1.5:0.5:25` 这类参数化描述；
+  - `content/unit_types.rs` 为 `aegires` 挂载上述 descriptor，避免只用默认参数；
+  - `UnitComp::update_energy_field_abilities(...)` 从 `AbilityWire.data` 读取/写回 timer，调用 `update_targets(...)` 并返回 pulse；
+  - `ServerLauncher::tick_server_energy_field_abilities(...)` 在 playing frame 中收集 `server_units` 目标，执行 aegires EnergyField，应用到真实 `HealthComp` / `StatusComp`：
+    - 同队受损单位 heal 并标记 `was_healed`；
+    - 敌对单位 damage 并应用 `electrified`；
+    - server 侧按 v158.1 观察到的 Java `update(...)` 行为不扣 ammo（纯算法仍保留 `unit_ammo_rule` gate 供后续其他版本/规则复用）。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core energy_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server energy_field --lib`
+- 仍未完成：
+  - `hitBuildings` / building privileged / derelict coreCapture / `Damage.findAbsorber(...)` 尚未接入；当前闭环先覆盖真实 server unit↔unit 目标；
+  - EnergyField 的 draw arcs、chain lightning/heal effects、shoot sound 等表现层 sidecar/backend 尚未迁移；
+  - 普通 ability content 仍是 descriptor 字符串，后续需要结构化 ability spec / mod patcher 支持。

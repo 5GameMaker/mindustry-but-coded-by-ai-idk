@@ -2684,6 +2684,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 
 ---
 
+## 82. 最新闭环记录：EnergyFieldAbility / aegires server unit runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `EnergyFieldAbility.java` 与 `UnitTypes.aegires`，把 EnergyField 从纯算法接入真实 content、`UnitComp` ability slot 和 server-side unit↔unit heal/damage/status runtime。
+- Java 依据：
+  - `EnergyFieldAbility.update(...)`：timer 到 `reload` 后收集附近目标，按距离排序，最多 `maxTargets`；
+  - 同队受损目标治疗，治疗量 `healPercent / 100 * maxHealth`，同类型乘 `sameTypeHealMult`；
+  - 敌对目标造成 `damage * unitDamage * damageMultiplier` 并应用 `status/statusDuration`；
+  - `aegires` 参数：`damage=40`、`reload=65`、`range=180`、`statusDuration=360`、`maxTargets=25`、`healPercent=1.5`、`sameTypeHealMult=0.5`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `EnergyFieldTarget` 增加 `air/targetable`，用于 runtime 调度层过滤；
+    - `EnergyFieldHit` 增加 `status_duration`；
+    - `EnergyFieldAbility::from_descriptor(...)` 支持 `EnergyFieldAbility:40:65:180:1.5:0.5:25`；
+    - 纯逻辑测试增加 descriptor 与 `status_duration` 断言。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `UnitComp::update_energy_field_abilities(...)` 使用 `AbilityWire.data` 存 timer，调用 `EnergyFieldAbility::update_targets(...)`，并按 pulse 回写 ammo/timer；
+    - 新增 UnitComp runtime slot 测试。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `aegires` 挂载 `EnergyFieldAbility:40:65:180:1.5:0.5:25`；
+    - 内容测试断言能力 descriptor 存在。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 在同一 playing frame 内调用 `tick_server_energy_field_abilities(1.0)`；
+    - server 从 `server_units` 收集目标，应用到真实 `HealthComp` / `StatusComp`；
+    - 新增 `server_update_ticks_aegires_energy_field_against_units`：验证 parent timer 清零、同队 aegires heal 90、敌对 flare damage 40 并获得 `electrified` 360 tick。
+- 已跑验证：
+  - `cargo test -p mindustry-core energy_field --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server energy_field --lib`
+- 注意：
+  - v158.1 `EnergyFieldAbility.java` 有 `useAmmo` 字段，但当前 `update(...)` 未实际扣 ammo；server runtime 本轮传 `unit_ammo_rule=false`，保持 Java v158.1 观测行为。纯算法仍保留 ammo gate 以兼容既有测试/后续版本差异。
+- 当前仍需继续：
+  1. 跑全量收尾验证并提交推送。
+  2. 后续补 `hitBuildings`、building privileged / derelict coreCapture、`Damage.findAbsorber(...)`。
+  3. 后续补 EnergyField draw/effect/sound 表现层，以及结构化 ability content / mod patcher。
+  4. 下一个优先候选：`ShieldArcAbility` 或 `StatusFieldAbility`，继续选择能接真实 runtime 的闭环。
+
+---
+
 ## 81. 最新闭环记录：UnitSpawnAbility 单位产子 runtime / UnitCreateEvent
 
 - 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已 fetch 确认 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。

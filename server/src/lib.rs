@@ -25,7 +25,8 @@ use mindustry_core::mindustry::entities::{
         CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
         UnitControllerState,
     },
-    entity_class_id, units_can_create, UnitCapRules, UnitCapTeam, UnitCapType, UnitSpawnAbility,
+    entity_class_id, units_can_create, EnergyFieldAction, EnergyFieldTarget, UnitCapRules,
+    UnitCapTeam, UnitCapType, UnitSpawnAbility,
 };
 use mindustry_core::mindustry::game::vanilla_teams;
 use mindustry_core::mindustry::input::{
@@ -301,6 +302,7 @@ impl ServerLauncher {
             if let Err(error) = self.tick_server_unit_spawn_abilities(1.0) {
                 self.network_error = Some(error.to_string());
             }
+            self.tick_server_energy_field_abilities(1.0);
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
                 self.network_error = Some(error.to_string());
             }
@@ -1612,6 +1614,84 @@ impl ServerLauncher {
         }
 
         Ok(spawned)
+    }
+
+    fn tick_server_energy_field_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut pulses = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent_snapshot) = self.server_units.get(&parent_id) else {
+                continue;
+            };
+            let parent_team = parent_snapshot.team_id();
+            let parent_type_id = parent_snapshot.type_info.id();
+            let parent_damage_scale = self.runtime.state.rules.unit_damage(parent_team.0 as usize)
+                * parent_snapshot.status.damage_multiplier;
+            let targets: Vec<EnergyFieldTarget> = self
+                .server_units
+                .iter()
+                .filter(|(unit_id, unit)| **unit_id != parent_id && !unit.health.dead)
+                .filter_map(|(unit_id, unit)| {
+                    let id = u32::try_from(*unit_id).ok()?;
+                    let same_team = unit.team_id() == parent_team;
+                    Some(EnergyFieldTarget {
+                        id,
+                        x: unit.x(),
+                        y: unit.y(),
+                        air: unit.type_info.flying || unit.elevation > 0.001,
+                        targetable: unit.type_info.targetable,
+                        same_team,
+                        damaged: unit.health.damaged(),
+                        max_health: unit.health.max_health,
+                        same_type: unit.type_info.id() == parent_type_id,
+                    })
+                })
+                .collect();
+
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let field_pulses = parent.update_energy_field_abilities(
+                delta_ticks,
+                parent_damage_scale,
+                false,
+                &targets,
+            );
+            pulses += field_pulses.len();
+
+            for pulse in field_pulses {
+                for hit in pulse.hits {
+                    let Some(target_id) = i32::try_from(hit.id).ok() else {
+                        continue;
+                    };
+                    let status_effect = hit
+                        .status
+                        .as_deref()
+                        .and_then(|name| self.content_loader.status_effect_by_name(name))
+                        .cloned();
+                    let Some(target) = self.server_units.get_mut(&target_id) else {
+                        continue;
+                    };
+
+                    match hit.action {
+                        EnergyFieldAction::Heal => {
+                            target.heal_mark(hit.amount);
+                            target.health.heal(hit.amount);
+                        }
+                        EnergyFieldAction::Damage => {
+                            target.health.damage(hit.amount);
+                            if let Some(effect) = status_effect {
+                                target.status.apply(effect, hit.status_duration);
+                            }
+                        }
+                    }
+                    target.refresh_component_views();
+                }
+            }
+        }
+
+        pulses
     }
 
     fn apply_runtime_unit_cargo_loader_spawns(
@@ -5659,6 +5739,53 @@ mod tests {
                         if packet.container.unit_id == spawned_unit.id()
                 )
         }));
+    }
+
+    #[test]
+    fn server_update_ticks_aegires_energy_field_against_units() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let aegires = launcher
+            .content_loader
+            .unit_by_name("aegires")
+            .unwrap()
+            .clone();
+        let flare = launcher
+            .content_loader
+            .unit_by_name("flare")
+            .unwrap()
+            .clone();
+        let mut parent = UnitComp::new(10, aegires.clone(), TeamId(1));
+        parent.set_pos(100.0, 100.0);
+        parent.abilities[0].data = 64.0;
+        parent.weapons.ammo = 0.0;
+
+        let mut ally = UnitComp::new(11, aegires, TeamId(1));
+        ally.set_pos(120.0, 100.0);
+        ally.health.health = ally.health.max_health - 200.0;
+
+        let mut enemy = UnitComp::new(12, flare, TeamId(2));
+        enemy.set_pos(140.0, 100.0);
+        let enemy_health_before = enemy.health.health;
+
+        launcher.server_units.insert(parent.id(), parent);
+        launcher.server_units.insert(ally.id(), ally);
+        launcher.server_units.insert(enemy.id(), enemy);
+
+        launcher.update();
+
+        let parent = launcher.server_units.get(&10).unwrap();
+        assert_eq!(parent.abilities[0].data, 0.0);
+        assert_eq!(parent.weapons.ammo, 0.0);
+
+        let ally = launcher.server_units.get(&11).unwrap();
+        assert!((ally.health.health - (ally.health.max_health - 110.0)).abs() < 0.0001);
+        assert!(ally.was_healed);
+
+        let enemy = launcher.server_units.get(&12).unwrap();
+        assert!((enemy.health.health - (enemy_health_before - 40.0)).abs() < 0.0001);
+        assert_eq!(enemy.status.get_duration("electrified"), 60.0 * 6.0);
     }
 
     #[test]

@@ -9,7 +9,9 @@
 use crate::mindustry::ai::{PrebuildAiPlanSnapshot, PrebuildAiRequirement};
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
-use crate::mindustry::entities::abilities::{UnitSpawnAbility, UnitSpawnPlan};
+use crate::mindustry::entities::abilities::{
+    EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, UnitSpawnAbility, UnitSpawnPlan,
+};
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
 use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamData};
@@ -438,6 +440,50 @@ impl UnitComp {
         }
 
         plans
+    }
+
+    pub fn update_energy_field_abilities(
+        &mut self,
+        delta: f32,
+        unit_damage_scale: f32,
+        unit_ammo_rule: bool,
+        targets: &[EnergyFieldTarget],
+    ) -> Vec<EnergyFieldPulse> {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let unit_x = self.x();
+        let unit_y = self.y();
+        let unit_rotation = self.rotation();
+        let mut pulses = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = EnergyFieldAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.timer = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+
+            if let Some(pulse) = ability.update_targets(
+                delta,
+                unit_x,
+                unit_y,
+                unit_rotation,
+                unit_damage_scale,
+                self.weapons.ammo as i32,
+                unit_ammo_rule,
+                targets,
+            ) {
+                self.weapons.ammo = pulse.ammo_after.max(0) as f32;
+                pulses.push(pulse);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.timer;
+            }
+        }
+
+        pulses
     }
 
     pub fn refresh_component_views(&mut self) {
@@ -1303,6 +1349,40 @@ mod tests {
 
         let spawned = unit.update_unit_spawn_abilities(0.0, 1.0, |unit_name| unit_name == "mono");
         assert_eq!(spawned.len(), 1);
+        assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_energy_field_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["EnergyFieldAbility:40:5:80:1.5:0.5:3".into()];
+        let mut unit = UnitComp::new(42, unit_type, TeamId(1));
+        unit.set_pos(100.0, 200.0);
+        unit.weapons.ammo = 2.0;
+        let targets = [EnergyFieldTarget {
+            id: 7,
+            x: 120.0,
+            y: 200.0,
+            air: false,
+            targetable: true,
+            same_team: false,
+            damaged: false,
+            max_health: 100.0,
+            same_type: false,
+        }];
+
+        assert!(unit
+            .update_energy_field_abilities(4.0, 1.0, true, &targets)
+            .is_empty());
+        assert_eq!(unit.abilities[0].data, 4.0);
+
+        let pulses = unit.update_energy_field_abilities(1.0, 2.0, true, &targets);
+        assert_eq!(pulses.len(), 1);
+        assert!(pulses[0].any_nearby);
+        assert_eq!(pulses[0].hits.len(), 1);
+        assert_eq!(pulses[0].hits[0].id, 7);
+        assert_eq!(pulses[0].hits[0].amount, 80.0);
+        assert_eq!(unit.weapons.ammo, 1.0);
         assert_eq!(unit.abilities[0].data, 0.0);
     }
 

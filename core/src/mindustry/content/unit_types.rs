@@ -447,6 +447,8 @@ pub fn load() -> Vec<UnitType> {
             u.rotate_speed = 1.4;
             u.ammo_capacity = 40;
             u.build_speed = 3.0;
+            u.abilities
+                .push("EnergyFieldAbility:40:65:180:1.5:0.5:25".into());
         }),
         unit(&mut next_id, "navanax", UnitKind::Naval, |u| {
             u.health = 20000.0;
@@ -1180,6 +1182,12 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| entry == "LiquidExplodeAbility:neoplasm"));
+
+        let aegires = by_name(&units, "aegires");
+        assert!(aegires
+            .abilities
+            .iter()
+            .any(|entry| entry == "EnergyFieldAbility:40:65:180:1.5:0.5:25"));
 
         let flare = by_name(&units, "flare");
         assert_eq!(flare.env_enabled, Env::TERRESTRIAL | Env::SPACE);

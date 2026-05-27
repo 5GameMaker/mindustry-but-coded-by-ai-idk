@@ -1379,6 +1379,8 @@ pub struct EnergyFieldTarget {
     pub id: u32,
     pub x: f32,
     pub y: f32,
+    pub air: bool,
+    pub targetable: bool,
     pub same_team: bool,
     pub damaged: bool,
     pub max_health: f32,
@@ -1392,6 +1394,7 @@ pub struct EnergyFieldHit {
     pub amount: f32,
     pub angle: f32,
     pub status: Option<String>,
+    pub status_duration: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1465,6 +1468,40 @@ impl EnergyFieldAbility {
         }
     }
 
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("EnergyFieldAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("EnergyFieldAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let damage = parts.next()?.parse().ok()?;
+        let reload = parts.next()?.parse().ok()?;
+        let range = parts.next()?.parse().ok()?;
+        let mut ability = Self::new(damage, reload, range);
+        if let Some(heal_percent) = parts.next().and_then(|value| value.parse().ok()) {
+            ability.heal_percent = heal_percent;
+        }
+        if let Some(same_type_heal_mult) = parts.next().and_then(|value| value.parse().ok()) {
+            ability.same_type_heal_mult = same_type_heal_mult;
+        }
+        if let Some(max_targets) = parts.next().and_then(|value| value.parse().ok()) {
+            ability.max_targets = max_targets;
+        }
+        if let Some(status_duration) = parts.next().and_then(|value| value.parse().ok()) {
+            ability.status_duration = status_duration;
+        }
+        if let Some(status) = parts.next() {
+            ability.status = status.to_string();
+        }
+        Some(ability)
+    }
+
     pub fn center(&self, unit_x: f32, unit_y: f32, unit_rotation: f32) -> (f32, f32) {
         let (offset_x, offset_y) = rotate_offset(self.x, self.y, unit_rotation - 90.0);
         (unit_x + offset_x, unit_y + offset_y)
@@ -1498,6 +1535,14 @@ impl EnergyFieldAbility {
             .iter()
             .copied()
             .filter(|target| distance2(cx, cy, target.x, target.y) <= self.range * self.range)
+            .filter(|target| target.targetable)
+            .filter(|target| {
+                if target.air {
+                    self.target_air
+                } else {
+                    self.target_ground
+                }
+            })
             .collect::<Vec<_>>();
         sorted.sort_by(|a, b| {
             distance2(cx, cy, a.x, a.y)
@@ -1522,6 +1567,7 @@ impl EnergyFieldAbility {
                         amount: self.heal_percent / 100.0 * target.max_health * heal_mult,
                         angle: angle_to(cx, cy, target.x, target.y),
                         status: None,
+                        status_duration: 0.0,
                     });
                 }
             } else {
@@ -1532,6 +1578,7 @@ impl EnergyFieldAbility {
                     amount: self.damage * unit_damage_scale,
                     angle: angle_to(cx, cy, target.x, target.y),
                     status: (!self.status.is_empty()).then(|| self.status.clone()),
+                    status_duration: self.status_duration,
                 });
             }
         }
@@ -2327,6 +2374,8 @@ mod tests {
                 id: 1,
                 x: 100.0,
                 y: 210.0,
+                air: false,
+                targetable: true,
                 same_team: false,
                 damaged: false,
                 max_health: 100.0,
@@ -2336,6 +2385,8 @@ mod tests {
                 id: 2,
                 x: 100.0,
                 y: 212.0,
+                air: false,
+                targetable: true,
                 same_team: true,
                 damaged: true,
                 max_health: 200.0,
@@ -2345,6 +2396,8 @@ mod tests {
                 id: 3,
                 x: 500.0,
                 y: 500.0,
+                air: false,
+                targetable: true,
                 same_team: false,
                 damaged: false,
                 max_health: 100.0,
@@ -2368,10 +2421,26 @@ mod tests {
         assert_eq!(pulse.hits[0].action, EnergyFieldAction::Damage);
         assert_eq!(pulse.hits[0].amount, 18.0);
         assert_eq!(pulse.hits[0].status.as_deref(), Some("electrified"));
+        assert_eq!(pulse.hits[0].status_duration, 60.0 * 6.0);
         assert_eq!(pulse.hits[1].id, 2);
         assert_eq!(pulse.hits[1].action, EnergyFieldAction::Heal);
         assert_eq!(pulse.hits[1].amount, 20.0);
         assert_eq!(ability.firing_rate_per_second(), 6.0);
+    }
+
+    #[test]
+    fn energy_field_descriptor_parses_aegires_runtime_entry() {
+        let ability =
+            EnergyFieldAbility::from_descriptor("EnergyFieldAbility:40:65:180:1.5:0.5:25")
+                .expect("aegires descriptor should parse");
+        assert_eq!(ability.damage, 40.0);
+        assert_eq!(ability.reload, 65.0);
+        assert_eq!(ability.range, 180.0);
+        assert_eq!(ability.heal_percent, 1.5);
+        assert_eq!(ability.same_type_heal_mult, 0.5);
+        assert_eq!(ability.max_targets, 25);
+        assert_eq!(ability.status, "electrified");
+        assert!(EnergyFieldAbility::from_descriptor("ForceFieldAbility").is_none());
     }
 
     #[test]
