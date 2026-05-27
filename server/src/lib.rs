@@ -66,6 +66,7 @@ use std::{
 const SERVER_RUNTIME_UNIT_ID_START: i32 = 1_000_000;
 const CARGO_AI_EMPTY_WAIT_TIME: f32 = 60.0 * 2.0;
 const CARGO_AI_DROP_SPACING: f32 = 60.0 * 1.5;
+const CARGO_AI_RETARGET_INTERVAL: f32 = 40.0;
 const CARGO_AI_TRANSFER_RANGE: f32 = 20.0;
 const CARGO_AI_MOVE_RANGE: f32 = 6.0;
 const CARGO_AI_MOVE_SMOOTHING: f32 = 20.0;
@@ -1533,6 +1534,9 @@ impl ServerLauncher {
             if !within_loader {
                 return Ok(0);
             }
+            if !self.runtime_unit_cargo_retarget_ready(unit_id, loader_tile_pos) {
+                return Ok(0);
+            }
             let unit_capacity = unit_snapshot.items.item_capacity();
             let target_index = unit_snapshot
                 .cargo_ai
@@ -1656,6 +1660,9 @@ impl ServerLauncher {
                     cargo_snapshot.target_index,
                 )
             } else {
+                if !self.runtime_unit_cargo_retarget_ready(unit_id, loader_tile_pos) {
+                    return Ok(0);
+                }
                 let Some((target_tile_pos, _target_building_index, next_target_index)) =
                     self.find_runtime_unit_cargo_drop_target(item_id, loader_team, 0, None)
                 else {
@@ -2398,6 +2405,23 @@ impl ServerLauncher {
         Some(remaining <= CARGO_AI_TRANSFER_RANGE)
     }
 
+    fn runtime_unit_cargo_retarget_ready(&mut self, unit_id: i32, loader_tile_pos: i32) -> bool {
+        let Some(unit) = self.server_units.get_mut(&unit_id) else {
+            return false;
+        };
+        let cargo = unit
+            .cargo_ai
+            .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+        cargo.tether_tile_pos = Some(loader_tile_pos);
+        cargo.retarget_timer += 1.0;
+        if cargo.retarget_timer + f32::EPSILON < CARGO_AI_RETARGET_INTERVAL {
+            false
+        } else {
+            cargo.retarget_timer = 0.0;
+            true
+        }
+    }
+
     fn apply_payload_drop_to_server_unit(&mut self, unit_ref: UnitRef, x: f32, y: f32) -> bool {
         let UnitRef::Unit { id } = unit_ref else {
             return false;
@@ -2689,7 +2713,9 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServerLauncher, CARGO_AI_DROP_SPACING, CARGO_AI_TRANSFER_RANGE};
+    use super::{
+        ServerLauncher, CARGO_AI_DROP_SPACING, CARGO_AI_RETARGET_INTERVAL, CARGO_AI_TRANSFER_RANGE,
+    };
     use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
@@ -5612,6 +5638,113 @@ mod tests {
     }
 
     #[test]
+    fn server_update_unit_cargo_pickup_respects_retarget_interval() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let loader_tile = point2_pack(6, 6);
+        let unload_tile = point2_pack(10, 6);
+
+        launcher.runtime.state.world.resize(18, 12);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.items.as_mut().unwrap().add(copper, 12);
+        launcher.runtime.add_building(loader_building);
+        launcher.runtime.add_building(BuildingComp::new(
+            unload_tile,
+            unload_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                read_unit_id: 7,
+                has_unit: true,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        launcher.runtime.distribution_runtime_states.insert(
+            unload_tile,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: Some(copper as i32),
+                stale_timer: 0.0,
+                stale: false,
+            }),
+        );
+        let mut cargo_unit = UnitComp::new(
+            7,
+            launcher
+                .content_loader
+                .unit_by_name("manifold")
+                .unwrap()
+                .clone(),
+            TeamId(6),
+        );
+        cargo_unit.set_controller(UnitControllerState::Cargo);
+        cargo_unit.set_pos(
+            launcher.runtime.buildings()[0].x,
+            launcher.runtime.buildings()[0].y,
+        );
+        cargo_unit.cargo_ai = Some(CargoAiRuntimeState {
+            tether_tile_pos: Some(loader_tile),
+            unload_target_tile_pos: None,
+            item_target: None,
+            no_dest_timer: 0.0,
+            drop_timer: CARGO_AI_DROP_SPACING,
+            retarget_timer: 0.0,
+            target_index: 0,
+        });
+        launcher.server_units.insert(7, cargo_unit);
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+        assert!(!launcher.server_units.get(&7).unwrap().items.has_item());
+        assert_eq!(
+            launcher
+                .server_units
+                .get(&7)
+                .unwrap()
+                .cargo_ai
+                .as_ref()
+                .unwrap()
+                .retarget_timer,
+            1.0
+        );
+
+        for _ in 0..CARGO_AI_RETARGET_INTERVAL as usize {
+            launcher.update();
+            if launcher.server_units.get(&7).unwrap().items.has_item() {
+                break;
+            }
+        }
+
+        let unit = launcher.server_units.get(&7).unwrap();
+        assert_eq!(unit.items.item(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 12);
+        assert_eq!(
+            unit.cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.unload_target_tile_pos),
+            Some(unload_tile)
+        );
+    }
+
+    #[test]
     fn server_update_keeps_unit_cargo_item_when_unload_target_is_reconfigured() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let provider = CaptureProvider {
@@ -5676,6 +5809,7 @@ mod tests {
             item_target: Some("copper".into()),
             no_dest_timer: 0.0,
             drop_timer: CARGO_AI_DROP_SPACING,
+            retarget_timer: CARGO_AI_RETARGET_INTERVAL,
             target_index: 0,
         });
         launcher.server_units.insert(7, cargo_unit);
@@ -5781,6 +5915,7 @@ mod tests {
             item_target: Some("copper".into()),
             no_dest_timer: 0.0,
             drop_timer: CARGO_AI_DROP_SPACING,
+            retarget_timer: CARGO_AI_RETARGET_INTERVAL,
             target_index: 0,
         });
         launcher.server_units.insert(7, cargo_unit);

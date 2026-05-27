@@ -175,6 +175,7 @@ pub struct CargoAiRuntimeState {
     pub item_target: Option<String>,
     pub no_dest_timer: f32,
     pub drop_timer: f32,
+    pub retarget_timer: f32,
     pub target_index: usize,
 }
 
@@ -195,6 +196,7 @@ impl Default for CargoAiRuntimeState {
             item_target: None,
             no_dest_timer: 0.0,
             drop_timer: 90.0,
+            retarget_timer: 40.0,
             target_index: 0,
         }
     }
