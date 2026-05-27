@@ -6167,3 +6167,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `corrosionVapor/vaporSmall` 仍只到 primitive data 边界，真实 renderer backend 未接入；
   - 完整 vapor/corrosion 相关 Fx 仍需继续对照 `Fx.java`。
+
+### 12.206 Fx.blockExplosionSmoke 双圆烟迁移
+
+- 2026-05-28：继续对照 `Fx.java`，迁移 `blockExplosionSmoke`；该效果与已迁移的 `smokePuff` 结构相同，区别是固定使用 `Color.gray` 而不是输入色。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1795` 附近：
+    - `blockExplosionSmoke = new Effect(30, e -> { ... })`；
+    - `color(Color.gray)`；
+    - `randLenVectors(e.id, 6, 4f + 30f * e.finpow(), ...)`；
+    - 每个向量绘制两枚圆：
+      - 主圆 `e.fout() * 3f`
+      - 副圆位移 `x/2,y/2`，半径 `e.fout()`。
+  - 本地按 `new Effect` 声明顺序计数，`blockExplosionSmoke=152`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_BLOCK_EXPLOSION_SMOKE_ID = 152`；
+    - 接入 `standard_effect_id("blockExplosionSmoke")` 与 `standard_effect(...)`，lifetime 为 `30.0`；
+    - `standard_effect_draw_plan(...)` 新增 `blockExplosionSmoke`，复用 `SeededCircleParticles` 的 secondary circle 能力：
+      - `color_from = Some("Color.gray")`
+      - `count = 6`
+      - `length = 4 + 30 * finpow`
+      - 主圆 `radius_fout_scale=3`
+      - 副圆 `secondary_vector_scale=0.5`、`secondary_radius_fout_scale=1`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖 draw plan 与 12 个 circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 renderer backend 仍未接入；
+  - `blockExplosionSmoke` 之前的复杂 explosion/smoke line/light 组合仍需后续新增 line/light per-particle 表达。

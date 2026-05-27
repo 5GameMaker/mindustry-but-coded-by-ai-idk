@@ -4412,3 +4412,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 继续挑选无需新 primitive 的 `Fill.circle` 类 Fx；
   2. 或设计 `missileTrailSmoke*` 的 multi-pass trail spec，避免近似。
+
+---
+
+## 132. 最新闭环记录：Fx.blockExplosionSmoke 双圆烟迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `blockExplosionSmoke`，复用此前为 `smokePuff` 增加的每 vector 双圆展开能力。
+- Java 依据：
+  - `Fx.java:1795-1803`；
+  - id `152`；
+  - lifetime `30`；
+  - `Color.gray`；
+  - `randLenVectors(e.id, 6, 4 + 30 * finpow, ...)`；
+  - 主圆半径 `fout * 3`，副圆 offset `0.5`、半径 `fout`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_BLOCK_EXPLOSION_SMOKE_ID = 152`；
+    - 接入 name/id/lifetime；
+    - `standard_effect_draw_plan(...)` 新增 `blockExplosionSmoke` 分支；
+    - 测试覆盖 6 vectors 展开为 12 circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续找纯 `Fill.circle` 且无需 line/poly/light 的 Fx；
+  2. 对复杂 explosion/trail 类，先设计 line/per-particle light/multi-pass spec。

@@ -44,6 +44,8 @@ pub const FX_CORROSION_VAPOR_ID: i32 = 127;
 pub const FX_VAPOR_SMALL_ID: i32 = 129;
 /// Upstream `Fx.fireballsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
+/// Upstream `Fx.blockExplosionSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_BLOCK_EXPLOSION_SMOKE_ID: i32 = 152;
 /// Upstream `Fx.steamCoolSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_STEAM_COOL_SMOKE_ID: i32 = 153;
 /// Upstream `Fx.smokePuff` id in `mindustry.content.Fx` for v158.1.
@@ -85,6 +87,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "vapor" => Some(FX_VAPOR_ID),
         "vaporSmall" => Some(FX_VAPOR_SMALL_ID),
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
+        "blockExplosionSmoke" => Some(FX_BLOCK_EXPLOSION_SMOKE_ID),
         "steamCoolSmoke" => Some(FX_STEAM_COOL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
         "shootSmallSmoke" => Some(FX_SHOOT_SMALL_SMOKE_ID),
@@ -139,6 +142,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_VAPOR_SMALL_ID => Effect::with_lifetime(FX_VAPOR_SMALL_ID, 50.0, DEFAULT_EFFECT_CLIP),
         FX_FIREBALL_SMOKE_ID => {
             Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_BLOCK_EXPLOSION_SMOKE_ID => {
+            Effect::with_lifetime(FX_BLOCK_EXPLOSION_SMOKE_ID, 30.0, DEFAULT_EFFECT_CLIP)
         }
         FX_STEAM_COOL_SMOKE_ID => {
             Effect::with_lifetime(FX_STEAM_COOL_SMOKE_ID, 35.0, DEFAULT_EFFECT_CLIP)
@@ -930,6 +936,45 @@ pub fn standard_effect_draw_plan(
                 secondary_radius_base: 0.0,
                 secondary_radius_fin_scale: 0.0,
                 secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_BLOCK_EXPLOSION_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Color.gray"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 6,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 4.0 + 30.0 * finpow,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 3.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.5,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 1.0,
                 secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
@@ -2549,6 +2594,10 @@ mod tests {
             Some(FX_FIREBALL_SMOKE_ID)
         );
         assert_eq!(
+            standard_effect_id("blockExplosionSmoke"),
+            Some(FX_BLOCK_EXPLOSION_SMOKE_ID)
+        );
+        assert_eq!(
             standard_effect_id("steamCoolSmoke"),
             Some(FX_STEAM_COOL_SMOKE_ID)
         );
@@ -2606,6 +2655,12 @@ mod tests {
             50.0
         );
         assert_eq!(standard_effect(FX_VAPOR_SMALL_ID).unwrap().lifetime, 50.0);
+        assert_eq!(
+            standard_effect(FX_BLOCK_EXPLOSION_SMOKE_ID)
+                .unwrap()
+                .lifetime,
+            30.0
+        );
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
         assert_eq!(
             standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
@@ -2880,6 +2935,34 @@ mod tests {
         assert_eq!(fireball_particles.length, 5.5);
         assert_eq!(fireball_particles.radius_base, 0.2);
         assert_eq!(fireball_particles.radius_fout_scale, 1.5);
+
+        let block_explosion_smoke = standard_effect_draw_plan(
+            Some(FX_BLOCK_EXPLOSION_SMOKE_ID as u16),
+            152,
+            1.0,
+            2.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(block_explosion_smoke.color_from, Some("Color.gray"));
+        let block_explosion_smoke_particles = block_explosion_smoke.particles.unwrap();
+        assert_eq!(block_explosion_smoke_particles.count, 6);
+        assert_eq!(block_explosion_smoke_particles.length, 30.25);
+        assert_eq!(block_explosion_smoke_particles.radius_fout_scale, 3.0);
+        assert_eq!(block_explosion_smoke_particles.secondary_vector_scale, 0.5);
+        assert_eq!(
+            block_explosion_smoke_particles.secondary_radius_fout_scale,
+            1.0
+        );
+        assert_eq!(
+            block_explosion_smoke
+                .circle_render_primitives_from_seed()
+                .len(),
+            12
+        );
 
         let steam_cool = standard_effect_draw_plan(
             Some(FX_STEAM_COOL_SMOKE_ID as u16),
