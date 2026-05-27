@@ -3983,3 +3983,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unit_assembler_respects_team_activation_delay --lib`
   - `cargo test -p mindustry-core game_runtime_owned_runtime_blocks_includes_unit_assembler_tick_like_java --lib`
 - 仍未完成：UnitAssembler 的完整 UI status/bar、AssemblerAI/BuildingTether 实体所有权、create effect/sound/event、网络广播与 Java↔Rust 真实联机 smoke 仍需继续迁移。
+
+### 12.124 UnitAssembler 完成事件网络回填
+
+- 2026-05-27：对照 Java `Call.assemblerUnitSpawned(tile)` / `UnitAssemblerBuild.spawned()`，把 Rust UnitAssembler 完成事件从 runtime report 接到 server 广播与 desktop/client 回放，并修正完成后 payload requirement 库存清理语义。
+- Java 依据：
+  - `updateTile()` 在进度达到 1 后调用 `Call.assemblerUnitSpawned(tile)`；
+  - `assemblerUnitSpawned(Tile tile)` 在客户端/服务端定位 `UnitAssemblerBuild` 并调用 `spawned()`；
+  - `spawned()` 会 `consume()`、创建/投递 unit、将 `progress = 0f`，并 `blocks.clear()`，不是只扣除本次需求数量。
+- Rust 新增/变化：
+  - `GameRuntimeUnitAssemblerFrameReport` 新增 `spawned_tiles`，UnitAssembler 完成时记录 tile；
+  - `ServerLauncher::update()` 现在把 `report.unit.assembler.spawned_tiles` 广播为可靠 `AssemblerUnitSpawnedCallPacket`；
+  - `DesktopLauncher::sync_unit_lifecycle_to_runtime()` 现在消费 `AssemblerUnitSpawnedCallPacket` 并调用 `GameRuntime::apply_client_assembler_unit_spawned_packet(...)`；
+  - `unit_assembler_spawned(...)` 现在按 Java 清空 `UnitAssemblerState.blocks`，避免完成后保留 stale/额外 payload 计数。
+- 新增验证：
+  - `cargo test -p mindustry-core assembler_unit_spawned_packet --lib`
+  - `cargo test -p mindustry-desktop syncs_assembler_unit_spawned --lib`
+  - `cargo test -p mindustry-server assembler_unit_spawn_packet --lib`
+- 仍未完成：完成时真实 materialize `plan.unit` / payload 投递、`commandPos` 应用、`Fx.unitAssemble` / create sound / `UnitCreateEvent`、AssemblerDroneSpawned 以及真实 Java↔Rust smoke 仍需继续迁移。

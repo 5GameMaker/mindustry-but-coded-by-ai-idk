@@ -41,8 +41,8 @@ use crate::mindustry::{
     },
     logic::{LAccess, LVarValue},
     net::{
-        NetworkPlayerSyncData, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
-        UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        AssemblerUnitSpawnedCallPacket, NetworkPlayerSyncData, UnitBlockSpawnCallPacket,
+        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -1994,7 +1994,7 @@ pub struct GameRuntimeUnitReconstructorFrameReport {
     pub missing_runtime_states: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GameRuntimeUnitAssemblerFrameReport {
     pub visited_buildings: usize,
     pub assembler_candidates: usize,
@@ -2003,6 +2003,7 @@ pub struct GameRuntimeUnitAssemblerFrameReport {
     pub tier_updates: usize,
     pub moved_in_payloads: usize,
     pub completed_units: usize,
+    pub spawned_tiles: Vec<i32>,
     pub consumed_payload_batches: usize,
     pub consumed_item_batches: usize,
     pub consumed_liquid_batches: usize,
@@ -3545,6 +3546,36 @@ impl GameRuntime {
             }
             _ => false,
         }
+    }
+
+    pub fn apply_client_assembler_unit_spawned_packet(
+        &mut self,
+        content: &ContentLoader,
+        packet: &AssemblerUnitSpawnedCallPacket,
+    ) -> bool {
+        let Some(tile_pos) = packet.tile else {
+            return false;
+        };
+
+        let Some(building) = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .cloned()
+        else {
+            return false;
+        };
+        if !self.ensure_unit_state_for_building(content, &building) {
+            return false;
+        }
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            self.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            return false;
+        };
+        unit_assembler_spawned(assembler);
+        true
     }
 
     pub fn apply_client_unit_despawn_packet(&mut self, packet: &UnitDespawnCallPacket) -> bool {
@@ -18129,17 +18160,6 @@ impl GameRuntime {
             .all(|(key, amount)| *amount <= 0 || payloads.contains(*key, *amount))
     }
 
-    fn payload_seq_consume_requirements(
-        payloads: &mut PayloadSeq,
-        requirements: &[(PayloadKey, i32)],
-    ) {
-        for (key, amount) in requirements {
-            if *amount > 0 {
-                payloads.remove(*key, *amount);
-            }
-        }
-    }
-
     fn relative_direction(from_x: f32, from_y: f32, to_x: f32, to_y: f32) -> i32 {
         let dx = to_x - from_x;
         let dy = to_y - from_y;
@@ -18513,18 +18533,15 @@ impl GameRuntime {
                 report.updated_assemblers += 1;
 
                 if assembler.progress >= 1.0 && requirements_met && can_create {
-                    unit_assembler_spawned(assembler);
-                    Self::payload_seq_consume_requirements(
-                        &mut assembler.blocks,
-                        &payload_requirements,
-                    );
-                    completed_unit = true;
                     consumed_payloads = !payload_requirements.is_empty();
+                    unit_assembler_spawned(assembler);
+                    completed_unit = true;
                 }
             }
 
             if completed_unit {
                 report.completed_units += 1;
+                report.spawned_tiles.push(tile_pos);
                 if consumed_payloads {
                     report.consumed_payload_batches += 1;
                 }
@@ -24261,6 +24278,62 @@ mod tests {
         assert!(!runtime.apply_client_unit_block_spawn_packet(
             &content,
             &UnitBlockSpawnCallPacket { tile: None },
+        ));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_assembler_unit_spawned_packet_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let stell = content.unit_by_name("stell").unwrap();
+        let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
+        let router = content.block_by_name("router").unwrap();
+        let tile_pos = point2_pack(17, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 4);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        blocks.add(PayloadKey::new(ContentType::Block, router.base().id), 2);
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 1.25,
+                    blocks,
+                    command_pos: Some(IoVec2::new(14.0, 15.0)),
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        assert!(runtime.apply_client_assembler_unit_spawned_packet(
+            &content,
+            &AssemblerUnitSpawnedCallPacket {
+                tile: Some(tile_pos),
+            },
+        ));
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("assembler sidecar should remain present after assemblerUnitSpawned");
+        };
+        assert_eq!(assembler.progress, 0.0);
+        assert_eq!(assembler.blocks.total(), 0);
+        assert_eq!(assembler.command_pos, Some(IoVec2::new(14.0, 15.0)));
+        assert!(!runtime.apply_client_assembler_unit_spawned_packet(
+            &content,
+            &AssemblerUnitSpawnedCallPacket { tile: None },
         ));
     }
 

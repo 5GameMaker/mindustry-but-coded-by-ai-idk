@@ -645,6 +645,7 @@ pub fn unit_assembler_update_progress(
 
 pub fn unit_assembler_spawned(state: &mut UnitAssemblerState) {
     state.progress = 0.0;
+    state.blocks.clear();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

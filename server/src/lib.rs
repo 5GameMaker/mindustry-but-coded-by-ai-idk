@@ -40,13 +40,13 @@ use mindustry_core::mindustry::io::{
     type_io, BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef,
 };
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
-    DropItemCallPacket, EntitySnapshotCallPacket, Net, NetConnection, NetworkPlayerData,
-    NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
-    ProviderEvent, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
-    RequestItemCallPacket, RequestUnitPayloadCallPacket, TileConfigCallPacket,
-    TransferInventoryCallPacket, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
-    UnitTetherBlockSpawnedCallPacket,
+    write_world_data, ArcNetProvider, AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotCallPacket,
+    CommandBuildingCallPacket, DropItemCallPacket, EntitySnapshotCallPacket, Net, NetConnection,
+    NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
+    PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
+    RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+    TileConfigCallPacket, TransferInventoryCallPacket, UnitBlockSpawnCallPacket,
+    UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -268,6 +268,11 @@ impl ServerLauncher {
                 .copied()
                 .collect();
             if let Err(error) = self.broadcast_runtime_unit_block_spawns(&unit_block_spawn_tiles) {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) =
+                self.broadcast_runtime_assembler_unit_spawns(&report.unit.assembler.spawned_tiles)
+            {
                 self.network_error = Some(error.to_string());
             }
             if let Err(error) = self.tick_runtime_unit_cargo_ai() {
@@ -1548,6 +1553,42 @@ impl ServerLauncher {
             let packet = PacketKind::UnitBlockSpawnCallPacket(UnitBlockSpawnCallPacket {
                 tile: Some(*tile_pos),
             });
+            match self.net_server.net_mut().send(&packet, true) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
+    }
+
+    fn broadcast_runtime_assembler_unit_spawns(
+        &mut self,
+        tile_positions: &[i32],
+    ) -> io::Result<usize> {
+        if tile_positions.is_empty() || !self.net_server.is_active() {
+            return Ok(0);
+        }
+
+        let mut sent = 0;
+        let mut first_error = None;
+        let mut seen = BTreeSet::new();
+        for tile_pos in tile_positions {
+            if !seen.insert(*tile_pos) {
+                continue;
+            }
+            let packet =
+                PacketKind::AssemblerUnitSpawnedCallPacket(AssemblerUnitSpawnedCallPacket {
+                    tile: Some(*tile_pos),
+                });
             match self.net_server.net_mut().send(&packet, true) {
                 Ok(()) => sent += 1,
                 Err(error) => {
@@ -2908,7 +2949,7 @@ mod tests {
         RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
         TileConfigCallPacket, TransferInventoryCallPacket,
     };
-    use mindustry_core::mindustry::r#type::Sector;
+    use mindustry_core::mindustry::r#type::{PayloadKey, PayloadSeq, Sector};
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
     use mindustry_core::mindustry::world::blocks::payloads::{
         payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
@@ -2916,8 +2957,8 @@ mod tests {
         PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::blocks::units::{
-        ReconstructorState, UnitBlockState, UnitCargoLoaderState, UnitCargoUnloadPointState,
-        UnitFactoryState,
+        ReconstructorState, UnitAssemblerState, UnitBlockState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::collections::BTreeMap;
@@ -4853,6 +4894,82 @@ mod tests {
                     packet,
                     PacketKind::UnitBlockSpawnCallPacket(packet)
                         if packet.tile == Some(factory_tile)
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6586).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(24, 24);
+
+        let assembler_def = launcher
+            .content_loader
+            .block_by_name("tank-assembler")
+            .unwrap();
+        let stell = launcher.content_loader.unit_by_name("stell").unwrap();
+        let large_wall = launcher
+            .content_loader
+            .block_by_name("tungsten-wall-large")
+            .unwrap();
+        let router = launcher.content_loader.block_by_name("router").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let plan = &assembler_block.plans[0];
+        let assembler_tile = point2_pack(8, 8);
+        launcher.runtime.add_building(BuildingComp::new(
+            assembler_tile,
+            assembler_def.base().clone(),
+            TeamId(6),
+        ));
+        if let Some(power) = launcher.runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 4);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        blocks.add(PayloadKey::new(ContentType::Block, router.base().id), 2);
+        launcher.runtime.unit_runtime_states.insert(
+            assembler_tile,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 1.0 - 1.0 / plan.time,
+                    blocks,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            launcher.runtime.unit_runtime_states.get(&assembler_tile)
+        else {
+            panic!("assembler sidecar should remain present");
+        };
+        assert_eq!(assembler.progress, 0.0);
+        assert_eq!(assembler.blocks.total(), 0);
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::AssemblerUnitSpawnedCallPacket(packet)
+                        if packet.tile == Some(assembler_tile)
                 )
         }));
     }
