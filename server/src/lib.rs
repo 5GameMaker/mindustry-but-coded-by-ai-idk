@@ -302,6 +302,7 @@ impl ServerLauncher {
             if let Err(error) = self.tick_server_unit_spawn_abilities(1.0) {
                 self.network_error = Some(error.to_string());
             }
+            self.tick_server_regen_abilities(1.0);
             self.tick_server_force_field_abilities(1.0);
             self.tick_server_shield_arc_abilities(1.0);
             self.tick_server_shield_regen_field_abilities(1.0);
@@ -1701,6 +1702,24 @@ impl ServerLauncher {
         }
 
         pulses
+    }
+
+    fn tick_server_regen_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut updates = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            let heals = parent.update_regen_abilities(delta_ticks);
+            if !heals.is_empty() {
+                parent.refresh_component_views();
+            }
+            updates += heals.len();
+        }
+
+        updates
     }
 
     fn tick_server_force_field_abilities(&mut self, delta_ticks: f32) -> usize {
@@ -6197,6 +6216,29 @@ mod tests {
         }));
         assert_eq!(launcher.runtime.unit_create_events.len(), 5);
         assert_eq!(launcher.runtime.state.stats.units_created, 5);
+    }
+
+    #[test]
+    fn server_update_ticks_renale_neoplasm_regen() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let renale = launcher
+            .content_loader
+            .unit_by_name("renale")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(35, renale, TeamId(1));
+        unit.health.damage(42.0);
+        let damaged = unit.health.health;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&35).unwrap();
+        let expected = damaged + unit.health.max_health * (1.0 / (70.0 * 60.0));
+        assert!((unit.health.health - expected).abs() < 0.0001);
+        assert!(unit.was_healed);
     }
 
     #[test]

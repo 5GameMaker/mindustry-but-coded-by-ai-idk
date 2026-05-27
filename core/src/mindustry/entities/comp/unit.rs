@@ -11,11 +11,11 @@ use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
     EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility, ForceFieldUpdate,
-    MoveEffectAbility, MoveEffectPlan, RepairFieldAbility, RepairFieldPulse, RepairFieldTarget,
-    ShieldArcAbility, ShieldArcUpdate, ShieldRegenFieldAbility, ShieldRegenFieldPulse,
-    ShieldRegenFieldTarget, SpawnDeathAbility, SpawnDeathSpawnPlan, StatusFieldAbility,
-    StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility,
-    UnitSpawnPlan,
+    MoveEffectAbility, MoveEffectPlan, RegenAbility, RepairFieldAbility, RepairFieldPulse,
+    RepairFieldTarget, ShieldArcAbility, ShieldArcUpdate, ShieldRegenFieldAbility,
+    ShieldRegenFieldPulse, ShieldRegenFieldTarget, SpawnDeathAbility, SpawnDeathSpawnPlan,
+    StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse,
+    UnitSpawnAbility, UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -421,6 +421,32 @@ impl UnitComp {
 
         self.type_info = type_info;
         self.refresh_component_views();
+    }
+
+    pub fn update_regen_abilities(&mut self, delta: f32) -> Vec<f32> {
+        if self.health.dead {
+            return Vec::new();
+        }
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let mut heals = Vec::new();
+        let descriptors = self.type_info.abilities.clone();
+        for descriptor in descriptors {
+            let Some(ability) = RegenAbility::from_descriptor(&descriptor) else {
+                continue;
+            };
+            let heal = ability.heal_amount(self.health.max_health, delta);
+            if heal <= 0.0 {
+                continue;
+            }
+            self.heal_mark(heal);
+            self.health.heal(heal);
+            heals.push(heal);
+        }
+
+        heals
     }
 
     pub fn update_force_field_abilities(&mut self, delta: f32) -> Vec<ForceFieldUpdate> {
@@ -1861,6 +1887,20 @@ mod tests {
         assert!((plans[0].y - 200.0).abs() < 0.0001);
         assert!(plans[0].team_color);
         assert_eq!(unit.abilities[0].data, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_regen_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.health = 100.0;
+        unit_type.abilities = vec!["RegenAbility:1:2".into()];
+        let mut unit = UnitComp::new(50, unit_type, TeamId(1));
+        unit.health.damage(50.0);
+
+        let heals = unit.update_regen_abilities(3.0);
+        assert_eq!(heals, vec![9.0]);
+        assert_eq!(unit.health.health, 59.0);
+        assert!(unit.was_healed);
     }
 
     #[test]

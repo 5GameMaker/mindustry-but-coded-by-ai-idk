@@ -2,6 +2,8 @@ use crate::mindustry::{ctype::ContentId, r#type::UnitType, world::meta::Env};
 
 pub const PAL_NEOPLASM_OUTLINE_RGBA: u32 = 0x6b2b2bff;
 pub const PAL_NEOPLASM1_RGBA: u32 = 0xc33e2bff;
+pub const NEOPLASM_REGEN_PERCENT_PER_TICK: f32 = 1.0 / (70.0 * 60.0) * 100.0;
+pub const NEOPLASM_REGEN_ABILITY_DESCRIPTOR: &str = "RegenAbility:0.023809524:0";
 
 pub fn neoplasm_unit_type(id: ContentId, name: impl Into<String>) -> UnitType {
     let mut unit = UnitType::new(id, name);
@@ -16,7 +18,7 @@ pub fn apply_neoplasm_unit_type_defaults(unit: &mut UnitType) {
     unit.env_disabled = Env::NONE;
     unit.draw_cell = false;
 
-    push_unique(&mut unit.abilities, "RegenAbility");
+    push_unique(&mut unit.abilities, NEOPLASM_REGEN_ABILITY_DESCRIPTOR);
     push_unique(&mut unit.abilities, "LiquidExplodeAbility:neoplasm");
     push_unique(
         &mut unit.abilities,
@@ -52,7 +54,10 @@ mod tests {
         assert_eq!(unit.heal_color_rgba, PAL_NEOPLASM1_RGBA);
         assert!(unit.immunities.iter().any(|entry| entry == "burning"));
         assert!(unit.immunities.iter().any(|entry| entry == "melting"));
-        assert!(unit.abilities.iter().any(|entry| entry == "RegenAbility"));
+        assert!(unit
+            .abilities
+            .iter()
+            .any(|entry| entry == NEOPLASM_REGEN_ABILITY_DESCRIPTOR));
         assert!(unit
             .abilities
             .iter()
@@ -79,7 +84,7 @@ mod tests {
         assert_eq!(
             unit.abilities
                 .iter()
-                .filter(|entry| entry.as_str() == "RegenAbility")
+                .filter(|entry| entry.as_str() == NEOPLASM_REGEN_ABILITY_DESCRIPTOR)
                 .count(),
             1
         );

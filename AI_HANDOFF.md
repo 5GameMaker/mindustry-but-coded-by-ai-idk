@@ -3036,3 +3036,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入移动特效单位能力槽`。
   3. 后续接入 `MoveEffectPlan` → desktop/client local effect event queue；补可复现 RNG、chance/random offset、fog/player team 可见性、`Fx.missileTrailShort` 真实表现层、结构化 ability spec/runtime state。
+
+---
+
+## 91. 最新闭环记录：RegenAbility / neoplasm server health runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `RegenAbility.java` 与 `NeoplasmUnitType.java`，把 neoplasm preset 的自愈能力接入 `UnitType` content、`UnitComp` ability slot 与 server unit health runtime。
+- Java 依据：
+  - `RegenAbility.update(Unit unit)` 每帧调用 `unit.heal((unit.maxHealth * percentAmount / 100f + amount) * Time.delta)`；
+  - `NeoplasmUnitType` 设置 `percentAmount = 1f / (70f * 60f) * 100f`，约 70 秒回满。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - 新增 `RegenAbility::from_descriptor(...)`，支持 `RegenAbility:percent[:amount]` 与 legacy 裸 `RegenAbility`；
+    - 新增 neoplasm percent descriptor 解析测试。
+  - `core/src/mindustry/type/unit/neoplasm_unit_type.rs`
+    - 将 neoplasm 默认能力改为 `RegenAbility:0.023809524:0`；
+    - 保留 `LiquidExplodeAbility:neoplasm` 与 `LiquidRegenAbility:neoplasm:neoplasmHeal`，后续继续接 world/puddle。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 内容覆盖测试断言 renale 继承参数化 RegenAbility descriptor。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::update_regen_abilities(delta)`，对活 unit 按 descriptor heal，并设置 `was_healed`。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` playing frame 内调用 `tick_server_regen_abilities(1.0)`；
+    - 新增 `server_update_ticks_renale_neoplasm_regen`，验证受伤 renale 一帧后按 Java 70 秒回满公式回血。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core regen --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_regen --lib`
+  - `cargo test -p mindustry-core neoplasm_unit_type_constructor --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server renale_neoplasm_regen --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入新生物单位自愈运行时`。
+  3. 后续优先接 `LiquidExplodeAbility` 死亡洒落 neoplasm puddle，再接 `LiquidRegenAbility` slurp puddle 回血与 `Fx.neoplasmHeal` 表现层。

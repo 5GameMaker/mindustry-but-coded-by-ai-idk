@@ -1206,6 +1206,10 @@ mod tests {
         assert!(renale
             .abilities
             .iter()
+            .any(|entry| entry == "RegenAbility:0.023809524:0"));
+        assert!(renale
+            .abilities
+            .iter()
             .any(|entry| entry == "LiquidExplodeAbility:neoplasm"));
 
         let latum = by_name(&units, "latum");

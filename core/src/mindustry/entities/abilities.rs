@@ -101,6 +101,33 @@ impl Default for RegenAbility {
 }
 
 impl RegenAbility {
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = if descriptor == "RegenAbility" {
+            ""
+        } else {
+            descriptor.strip_prefix("RegenAbility:").or_else(|| {
+                descriptor
+                    .strip_prefix("RegenAbility(")
+                    .and_then(|rest| rest.strip_suffix(')'))
+            })?
+        };
+        let mut ability = Self::default();
+        if args.is_empty() {
+            return Some(ability);
+        }
+
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+        ability.percent_amount = parts.next()?.parse().ok()?;
+        if let Some(amount) = parts.next() {
+            ability.amount = amount.parse().ok()?;
+        }
+        Some(ability)
+    }
+
     pub fn heal_per_delta(&self, max_health: f32) -> f32 {
         max_health * self.percent_amount / 100.0 + self.amount
     }
@@ -2272,6 +2299,16 @@ mod tests {
         assert_eq!(ability.spread, 11.0);
         assert!(ability.face_outwards);
         assert!(SpawnDeathAbility::from_descriptor("RepairFieldAbility").is_none());
+    }
+
+    #[test]
+    fn regen_descriptor_parses_neoplasm_percent_entry() {
+        let ability = RegenAbility::from_descriptor("RegenAbility:0.023809524:0")
+            .expect("neoplasm regen descriptor should parse");
+        assert!((ability.percent_amount - (1.0 / (70.0 * 60.0) * 100.0)).abs() < 0.000001);
+        assert_eq!(ability.amount, 0.0);
+        assert_eq!(ability.heal_amount(4200.0, 1.0), 1.0);
+        assert!(RegenAbility::from_descriptor("RepairFieldAbility").is_none());
     }
 
     #[test]

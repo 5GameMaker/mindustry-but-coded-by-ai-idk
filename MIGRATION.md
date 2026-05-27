@@ -4534,3 +4534,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - chance/random offset、rangeLengthMin/Max 与 `inFogTo(Vars.player.team())` 仍是最小参数入口，后续需接入可复现 RNG 与客户端可见性判断；
   - `Pal.sapBulletBack` 颜色、`Fx.missileTrailShort` 真实 effect backend、parentize effects 与本地渲染/音效 sidecar 仍需继续迁移；
   - ability content 仍采用 descriptor 字符串，后续需结构化 ability spec/runtime state，避免复杂 ability 状态继续堆在 `AbilityWire.data`。
+
+### 12.149 RegenAbility / neoplasm 单位自愈 runtime 接入
+
+- 2026-05-27：对照 v158.1 `RegenAbility.java` 与 `NeoplasmUnitType.java`，把 neoplasm preset 的自愈能力从纯公式与 raw marker 推进到 `UnitType` content、`UnitComp` ability slot 与 server unit health runtime。
+- Java 依据：
+  - `RegenAbility.update(Unit unit)` 每帧执行 `unit.heal((unit.maxHealth * percentAmount / 100f + amount) * Time.delta)`；
+  - `NeoplasmUnitType` 为 neoplasm preset 添加 `RegenAbility`，并设置 `percentAmount = 1f / (70f * 60f) * 100f`，即约 70 秒回满；
+  - 同 preset 还保留 `LiquidExplodeAbility(neoplasm)` 与 `LiquidRegenAbility(neoplasm, neoplasmHeal)`，本闭环只接自愈 health runtime。
+- Rust 新增/变化：
+  - `RegenAbility::from_descriptor(...)` 支持 `RegenAbility`、`RegenAbility:percent[:amount]` 与括号形式；
+  - `type/unit/neoplasm_unit_type.rs` 将 neoplasm 默认能力从裸 `RegenAbility` 收紧为 `RegenAbility:0.023809524:0`，锁定 Java 70 秒回满参数；
+  - `content/unit_types.rs` 内容测试断言 renale 继承该 RegenAbility descriptor；
+  - `UnitComp::update_regen_abilities(delta)` 对活着的单位按 descriptor 计算 heal，调用 `heal_mark(...)` 与 `HealthComp::heal(...)`；
+  - `ServerLauncher::tick_server_regen_abilities(1.0)` 在 playing frame 中 tick `server_units`，使 renale/latum 自愈进入真实 server unit runtime，并随既有 unit snapshot 同步健康值。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core regen --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_regen --lib`
+  - `cargo test -p mindustry-core neoplasm_unit_type_constructor --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server renale_neoplasm_regen --lib`
+- 仍未完成：
+  - `LiquidExplodeAbility` 死亡洒落 neoplasm puddle 尚未接入 death/world/puddle runtime；
+  - `LiquidRegenAbility` 从 neoplasm puddle slurp 回血、`Fx.neoplasmHeal` 与 puddle 消耗尚未接入；
+  - RegenAbility 的 UI stat 文案（每秒 flat/percent 展示）与结构化 ability spec 仍需后续迁移。
