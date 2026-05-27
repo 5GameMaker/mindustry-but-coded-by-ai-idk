@@ -3757,8 +3757,12 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `server_update_drives_spawned_unit_cargo_ai_between_loader_and_unload_point`，覆盖 loader 库存 -> `manifold` -> unload point 库存的两 tick 闭环，以及对应 packet 发送。
 - 2026-05-27：补上客户端 cargo unit 最小物化。`GameRuntime::apply_client_unit_tether_block_spawned_packet(...)` 不再只写 `UnitCargoLoaderState.read_unit_id`，还会用同一 loader building 的 team/坐标在 `client_unit_snapshot_entities` 中创建或更新 `manifold` `UnitComp`，并写入 `UnitControllerState::Cargo` 与 `CargoAiRuntimeState { tether_tile_pos }`；`DesktopLauncher` 的 tether packet 同步测试与真实 server→desktop smoke 均断言该客户端 unit snapshot 存在。这样后续 `TakeItemsCallPacket` / `TransferItemToCallPacket` 经 `NetClient` item mirror 后有真实客户端单位落点，而不是只停在 packet cursor。
 - 2026-05-27：继续把 cargo transfer 的客户端接收端接入 runtime。`GameRuntime::apply_client_building_item_storage_mirror(...)` 会把 `NetClient.building_storage_mirrors` 中已知 item 数量写回对应 runtime building 的 `ItemModule`；`DesktopLauncher::update()` 新增 `sync_building_storage_mirrors_to_runtime()`，先于 unit item mirror 应用 building item mirror。新增真实 server→desktop cargo transfer smoke，验证 `unit-cargo-loader` 生成 `manifold` 后通过 `TakeItemsCallPacket` + `TransferItemToCallPacket` 把 copper 从 loader 搬到 unload point，desktop runtime 中的 materialized cargo unit 最终清空，unload point 库存同步为 12。
+- 2026-05-27：补齐 cargo tether unit 的最小消失同步。`ServerLauncher` 在 tether loader 缺失、失效或 team 不一致时会清理 `UnitCargoLoaderState`、移除 `server_units` 中的 cargo `manifold`，并在网络开启时广播 `UnitDespawnCallPacket(UnitRef::Unit { id })`；`GameRuntime::apply_client_unit_despawn_packet(...)` 会从 `client_unit_snapshot_entities` 移除物化 unit，`DesktopLauncher::sync_unit_lifecycle_to_runtime()` 消费 `NetClient` 的 unit lifecycle cursor，把 server despawn 接到客户端 runtime。这个闭环接入真实 server entity lifecycle、network packet 与 desktop runtime，而不是只删除测试 sidecar。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
+  - `cargo test -p mindustry-core unit_despawn --lib`（本轮通过 1/1）
+  - `cargo test -p mindustry-desktop unit_despawn --lib`（本轮通过 1/1）
+  - `cargo test -p mindustry-server cargo_loader_is_missing --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-core unit_tether_block_spawned --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-desktop unit_cargo --lib`（本轮通过 1/1）

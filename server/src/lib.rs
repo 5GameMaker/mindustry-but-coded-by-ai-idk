@@ -40,7 +40,8 @@ use mindustry_core::mindustry::net::{
     NetConnection, NetworkPlayerData, NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket,
     PickedUnitPayloadCallPacket, ProviderEvent, RequestBuildPayloadCallPacket,
     RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
-    TileConfigCallPacket, TransferInventoryCallPacket, UnitTetherBlockSpawnedCallPacket,
+    TileConfigCallPacket, TransferInventoryCallPacket, UnitDespawnCallPacket,
+    UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -1413,7 +1414,7 @@ impl ServerLauncher {
             .iter()
             .position(|building| building.tile_pos == loader_tile_pos)
         else {
-            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id);
+            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id)?;
             return Ok(0);
         };
 
@@ -1427,7 +1428,7 @@ impl ServerLauncher {
             )
         };
         if !loader_valid {
-            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id);
+            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id)?;
             return Ok(0);
         }
 
@@ -1436,7 +1437,7 @@ impl ServerLauncher {
             return Ok(0);
         };
         if unit_snapshot.team_id() != loader_team {
-            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id);
+            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id)?;
             return Ok(0);
         }
 
@@ -1752,9 +1753,22 @@ impl ServerLauncher {
         }
     }
 
-    fn remove_runtime_unit_cargo_loader_unit(&mut self, tile_pos: i32, unit_id: i32) {
-        self.server_units.remove(&unit_id);
+    fn remove_runtime_unit_cargo_loader_unit(
+        &mut self,
+        tile_pos: i32,
+        unit_id: i32,
+    ) -> io::Result<()> {
+        let removed = self.server_units.remove(&unit_id).is_some();
         self.clear_runtime_unit_cargo_loader_state(tile_pos);
+        if removed && self.net_server.is_active() {
+            self.net_server.net_mut().send(
+                &PacketKind::UnitDespawnCallPacket(UnitDespawnCallPacket {
+                    unit: UnitRef::Unit { id: unit_id },
+                }),
+                false,
+            )?;
+        }
+        Ok(())
     }
 
     fn server_unit_enter_payload_build_tile_pos(&self, unit: &UnitComp) -> Option<i32> {
@@ -5138,6 +5152,61 @@ mod tests {
                             && packet.item.as_deref() == Some("copper")
                             && packet.amount == 12
                             && packet.build == BuildingRef::new(unload_tile)
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_despawns_tethered_unit_when_cargo_loader_is_missing() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6582).unwrap();
+
+        let loader_tile = point2_pack(6, 6);
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                read_unit_id: 7,
+                has_unit: true,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        let mut cargo_unit = UnitComp::new(
+            7,
+            launcher
+                .content_loader
+                .unit_by_name("manifold")
+                .unwrap()
+                .clone(),
+            TeamId(6),
+        );
+        cargo_unit.set_controller(UnitControllerState::Cargo);
+        launcher.server_units.insert(7, cargo_unit);
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&7));
+        let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) = launcher
+            .runtime
+            .distribution_runtime_states
+            .get(&loader_tile)
+        else {
+            panic!("loader runtime state should remain present");
+        };
+        assert!(!state.has_unit);
+        assert_eq!(state.read_unit_id, -1);
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitDespawnCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 7 }
                 )
         }));
     }

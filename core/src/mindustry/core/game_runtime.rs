@@ -37,7 +37,10 @@ use crate::mindustry::{
         type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
         LegacyShortChunkMap, TeamId, UnitRef,
     },
-    net::{NetworkPlayerSyncData, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket},
+    net::{
+        NetworkPlayerSyncData, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
+    },
     r#type::{PayloadKey, PayloadSeq, WeatherState},
     vars::TILE_SIZE,
     world::block::Block,
@@ -3364,6 +3367,13 @@ impl GameRuntime {
         }
         self.client_unit_tether_block_spawned_packets_applied += 1;
         true
+    }
+
+    pub fn apply_client_unit_despawn_packet(&mut self, packet: &UnitDespawnCallPacket) -> bool {
+        let UnitRef::Unit { id } = packet.unit else {
+            return false;
+        };
+        self.client_unit_snapshot_entities.remove(&id).is_some()
     }
 
     pub fn apply_client_unit_entered_payload_packet(
@@ -21495,6 +21505,28 @@ mod tests {
             Some(tile_pos)
         );
         assert_eq!(runtime.client_unit_tether_block_spawned_packets_applied, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_despawn_packet_to_materialized_unit() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let mut runtime = GameRuntime::default();
+        runtime
+            .client_unit_snapshot_entities
+            .insert(77, UnitComp::new(77, flare, TeamId(4)));
+
+        assert!(
+            runtime.apply_client_unit_despawn_packet(&UnitDespawnCallPacket {
+                unit: UnitRef::Unit { id: 77 },
+            })
+        );
+        assert!(!runtime.client_unit_snapshot_entities.contains_key(&77));
+        assert!(
+            !runtime.apply_client_unit_despawn_packet(&UnitDespawnCallPacket {
+                unit: UnitRef::Null,
+            })
+        );
     }
 
     #[test]
