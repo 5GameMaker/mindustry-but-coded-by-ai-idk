@@ -5587,3 +5587,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `StandardEffectParticleSpec` 仍是语义级 seeded particle/cloud plan，还没有在真实 2D/GPU backend 中展开为具体 circle primitives；
   - Java `Angles.randLenVectors` 的完全一致 RNG/角度分布还需要在渲染 backend 或共享 primitive 展开层中复刻；
   - 完整 `Fx.java` renderer 仍待继续逐项迁移。
+
+### 12.189 Standard Fx particle plan circle primitive expansion
+
+- 2026-05-28：在上一节 seeded particle/cloud plan 语义表达基础上，增加一层不依赖窗口库/GPU backend 的 circle primitive 展开接口，使后续桌面 2D backend 能直接消费已计算好的粒子圆心、半径与 alpha，而不是只能理解高层 `randLenVectors(...)` 语义。
+- Rust 新增/变化：
+  - `StandardEffectParticleSpec` 记录当前 effect 的 `fin/fout/fslope`，用于固定 `randLenVectors(e.id, count, length, ...)` 公式；
+  - 新增 `StandardEffectParticleVector { x, y, fin, fout }`，用于由后续 deterministic RNG/Angles 展开层传入 Java 等价随机向量；
+  - 新增 `StandardEffectCirclePrimitive { center, radius, alpha }`；
+  - `StandardEffectDrawPlan::expand_seeded_particle_circles(...)` 将粒子 plan + 向量输入展开为实际圆 primitive：
+    - 普通 `fire/fireSmoke/steam/vapor/fireballsmoke` 使用 effect 全局 `fin/fout/fslope` 计算半径；
+    - `smokeCloud` 使用每个向量携带的局部 `fin/fout` 计算 `0.5f + fout * 4f` 和 midpoint alpha。
+- 新增验证：
+  - `standard_effect_particle_plan_expands_to_circle_primitives`
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 还缺 Java `Angles.randLenVectors` 的 deterministic vector 生成器，因此当前展开层需要调用方传入向量；
+  - 桌面端仍未建立真实窗口/2D backend 来消费这些 circle primitives；
+  - 光照 primitive 仍保留在 `StandardEffectDrawPlan` 上，尚未统一拆成可排序的 backend draw command。
