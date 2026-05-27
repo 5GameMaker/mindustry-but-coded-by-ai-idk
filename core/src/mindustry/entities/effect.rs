@@ -147,6 +147,7 @@ pub struct StandardEffectCircleRenderPrimitive {
     pub radius: f32,
     pub stroke: f32,
     pub alpha: f32,
+    pub color: Option<DecalColor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -154,6 +155,7 @@ pub struct StandardEffectLightRenderPrimitive {
     pub center: (f32, f32),
     pub radius: f32,
     pub color: &'static str,
+    pub color_rgba: Option<DecalColor>,
     pub opacity: f32,
 }
 
@@ -229,6 +231,7 @@ impl StandardEffectDrawPlan {
     }
 
     pub fn circle_render_primitives_from_seed(&self) -> Vec<StandardEffectCircleRenderPrimitive> {
+        let color = self.resolved_draw_color();
         match self.kind {
             StandardEffectDrawKind::FilledCircle | StandardEffectDrawKind::StrokedCircle => {
                 vec![StandardEffectCircleRenderPrimitive {
@@ -237,6 +240,7 @@ impl StandardEffectDrawPlan {
                     radius: self.radius,
                     stroke: self.stroke,
                     alpha: self.alpha,
+                    color,
                 }]
             }
             StandardEffectDrawKind::SeededCircleParticles => self
@@ -248,6 +252,7 @@ impl StandardEffectDrawPlan {
                     radius: circle.radius,
                     stroke: 0.0,
                     alpha: circle.alpha,
+                    color,
                 })
                 .collect(),
         }
@@ -261,10 +266,30 @@ impl StandardEffectDrawPlan {
                     center: self.center,
                     radius: self.light_radius,
                     color,
+                    color_rgba: standard_effect_color_symbol(color),
                     opacity: self.light_opacity,
                 }]
             })
             .unwrap_or_default()
+    }
+
+    pub fn resolved_draw_color(&self) -> Option<DecalColor> {
+        let mut color = match (self.input_color, self.color_from, self.color_to) {
+            (Some(color), _, _) => color,
+            (None, Some(from), Some(to)) => lerp_color(
+                standard_effect_color_symbol(from)?,
+                standard_effect_color_symbol(to)?,
+                self.color_mix,
+            ),
+            (None, Some(from), None) => standard_effect_color_symbol(from)?,
+            _ => return None,
+        };
+
+        color.r *= self.color_mul;
+        color.g *= self.color_mul;
+        color.b *= self.color_mul;
+        color.a *= self.alpha;
+        Some(color)
     }
 }
 
@@ -538,6 +563,34 @@ pub fn standard_effect_draw_plan(
 
 fn effect_fslope_from_fin(fin: f32) -> f32 {
     (1.0 - (fin.clamp(0.0, 1.0) - 0.5).abs() * 2.0).clamp(0.0, 1.0)
+}
+
+pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
+    match name {
+        "Color.white" => Some(DecalColor::WHITE),
+        "Color.gray" => Some(DecalColor::from_rgba(0x7f7f7fff)),
+        "Color.lightGray" => Some(DecalColor::from_rgba(0xbfbfbfff)),
+        "Color.darkGray" => Some(DecalColor::from_rgba(0x3f3f3fff)),
+        "Pal.darkishGray" => Some(DecalColor {
+            r: 0.3,
+            g: 0.3,
+            b: 0.3,
+            a: 1.0,
+        }),
+        "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
+        "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
+        _ => None,
+    }
+}
+
+fn lerp_color(from: DecalColor, to: DecalColor, mix: f32) -> DecalColor {
+    let mix = mix.clamp(0.0, 1.0);
+    DecalColor {
+        r: lerp(from.r, to.r, mix),
+        g: lerp(from.g, to.g, mix),
+        b: lerp(from.b, to.b, mix),
+        a: lerp(from.a, to.a, mix),
+    }
 }
 
 fn trns(angle_degrees: f32, length: f32) -> (f32, f32) {
@@ -2136,16 +2189,20 @@ mod tests {
         )
         .unwrap();
         let smoke_primitives = smoke.circle_render_primitives_from_seed();
+        assert_eq!(smoke_primitives.len(), 1);
         assert_eq!(
-            smoke_primitives,
-            vec![StandardEffectCircleRenderPrimitive {
-                kind: StandardEffectDrawKind::FilledCircle,
-                center: (10.0, 20.0),
-                radius: 1.75,
-                stroke: 0.0,
-                alpha: 1.0,
-            }]
+            smoke_primitives[0].kind,
+            StandardEffectDrawKind::FilledCircle
         );
+        assert_eq!(smoke_primitives[0].center, (10.0, 20.0));
+        assert_eq!(smoke_primitives[0].radius, 1.75);
+        assert_eq!(smoke_primitives[0].stroke, 0.0);
+        assert_eq!(smoke_primitives[0].alpha, 1.0);
+        let smoke_color = smoke_primitives[0].color.unwrap();
+        assert!((smoke_color.r - 0.3990196).abs() < 0.0001);
+        assert!((smoke_color.g - 0.3990196).abs() < 0.0001);
+        assert!((smoke_color.b - 0.3990196).abs() < 0.0001);
+        assert_eq!(smoke_color.a, 1.0);
 
         let ripple = standard_effect_draw_plan(
             Some(FX_RIPPLE_ID as u16),
@@ -2189,6 +2246,10 @@ mod tests {
         assert_eq!(fire_primitives[0].radius, 1.7);
         assert_eq!(fire_primitives[0].stroke, 0.0);
         assert_eq!(fire_primitives[0].alpha, 1.0);
+        let fire_color = fire_primitives[0].color.unwrap();
+        assert!((fire_color.r - (1.0 + 0xdb as f32 / 255.0) / 2.0).abs() < 0.0001);
+        assert!((fire_color.g - (0xdd as f32 / 255.0 + 0x40 as f32 / 255.0) / 2.0).abs() < 0.0001);
+        assert!((fire_color.b - (0x55 as f32 / 255.0 + 0x1c as f32 / 255.0) / 2.0).abs() < 0.0001);
 
         assert_eq!(
             fire.light_render_primitives(),
@@ -2196,6 +2257,7 @@ mod tests {
                 center: (10.0, 20.0),
                 radius: 20.0,
                 color: "Pal.lightFlame",
+                color_rgba: Some(DecalColor::from_rgba(0xffdd55ff)),
                 opacity: 0.5,
             }]
         );

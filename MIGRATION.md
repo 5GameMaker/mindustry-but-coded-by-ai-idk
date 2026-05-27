@@ -5712,3 +5712,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - light primitive 仍是内存帧数据，还未提交给真实 2D/GPU backend；
   - 颜色仍是符号名 `Pal.lightFlame`，尚未接入实际 RGBA palette 解析。
+
+### 12.194 Standard effect color symbol resolution
+
+- 2026-05-28：补齐当前标准 effect draw/light primitive 的基础颜色解析，把 `Color.*` / `Pal.*` 符号色转成 `DecalColor` RGBA，并把解析结果随 circle/light primitive 一起输出给后续 2D backend。
+- Java/Arc 依据：
+  - Arc `Color.gray = 0x7f7f7fff`，`Color.lightGray = 0xbfbfbfff`，`Color.darkGray = 0x3f3f3fff`；
+  - `Pal.darkishGray = new Color(0.3f, 0.3f, 0.3f, 1f)`；
+  - `Pal.lightFlame = Color.valueOf("ffdd55")`；
+  - `Pal.darkFlame = Color.valueOf("db401c")`。
+- Rust 新增/变化：
+  - 新增 `standard_effect_color_symbol(name)`，覆盖当前标准 Fx draw plan 已引用的 `Color.white/gray/lightGray/darkGray` 与 `Pal.darkishGray/lightFlame/darkFlame`；
+  - `StandardEffectDrawPlan::resolved_draw_color()` 根据 `input_color`、`color_from/color_to/color_mix`、`color_mul` 与 `alpha` 解析出当前 primitive 颜色；
+  - `StandardEffectCircleRenderPrimitive` 新增 `color: Option<DecalColor>`；
+  - `StandardEffectLightRenderPrimitive` 新增 `color_rgba: Option<DecalColor>`，保留符号名同时提供已解析 RGBA。
+- 新增/更新验证：
+  - `standard_effect_plan_resolves_circle_render_primitives_from_seed` 增加：
+    - `Fx.smoke` 的 `Color.gray -> Pal.darkishGray` 插值 RGBA；
+    - `Fx.fire` 的 `Pal.lightFlame -> Pal.darkFlame` 插值 RGBA；
+    - `Fx.fire` light primitive 的 `Pal.lightFlame` RGBA。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo test -p mindustry-desktop fire_light --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 颜色解析表只覆盖当前已迁移标准 Fx 所需符号色，不是完整 `Pal.java`/Arc `Color` registry；
+  - renderer 后端还未真正消费这些 RGBA primitive。
