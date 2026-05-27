@@ -40,6 +40,8 @@ pub const FX_VAPOR_ID: i32 = 128;
 pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
 /// Upstream `Fx.smokePuff` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_PUFF_ID: i32 = 154;
+/// Upstream `Fx.shootSmallSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMALL_SMOKE_ID: i32 = 159;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -67,6 +69,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "vapor" => Some(FX_VAPOR_ID),
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
+        "shootSmallSmoke" => Some(FX_SHOOT_SMALL_SMOKE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -112,6 +115,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_PUFF_ID => Effect::with_lifetime(FX_SMOKE_PUFF_ID, 30.0, DEFAULT_EFFECT_CLIP),
+        FX_SHOOT_SMALL_SMOKE_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMALL_SMOKE_ID, 20.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -148,6 +154,8 @@ pub struct StandardEffectParticleSpec {
     pub seed: i32,
     pub count: u16,
     pub progress: Option<f32>,
+    pub angle: Option<f32>,
+    pub angle_range: f32,
     pub length: f32,
     pub fin: f32,
     pub fout: f32,
@@ -205,6 +213,7 @@ pub struct StandardEffectDrawPlan {
     pub kind: StandardEffectDrawKind,
     pub center: (f32, f32),
     pub color_from: Option<&'static str>,
+    pub color_mid: Option<&'static str>,
     pub color_to: Option<&'static str>,
     pub color_mix: f32,
     pub input_color: Option<DecalColor>,
@@ -340,14 +349,25 @@ impl StandardEffectDrawPlan {
     }
 
     pub fn resolved_draw_color(&self) -> Option<DecalColor> {
-        let mut color = match (self.input_color, self.color_from, self.color_to) {
-            (Some(color), _, _) => color,
-            (None, Some(from), Some(to)) => lerp_color(
+        let mut color = match (
+            self.input_color,
+            self.color_from,
+            self.color_mid,
+            self.color_to,
+        ) {
+            (Some(color), _, _, _) => color,
+            (None, Some(from), Some(mid), Some(to)) => lerp_color_three(
+                standard_effect_color_symbol(from)?,
+                standard_effect_color_symbol(mid)?,
+                standard_effect_color_symbol(to)?,
+                self.color_mix,
+            ),
+            (None, Some(from), None, Some(to)) => lerp_color(
                 standard_effect_color_symbol(from)?,
                 standard_effect_color_symbol(to)?,
                 self.color_mix,
             ),
-            (None, Some(from), None) => standard_effect_color_symbol(from)?,
+            (None, Some(from), None, None) => standard_effect_color_symbol(from)?,
             _ => return None,
         };
 
@@ -373,7 +393,10 @@ impl StandardEffectParticleSpec {
                 let (x, y) = trns(angle, length);
                 (x, y, progress * local, (1.0 - progress) * local)
             } else {
-                let angle = rand.random(360.0);
+                let angle = self
+                    .angle
+                    .map(|angle| angle + rand.range(self.angle_range))
+                    .unwrap_or_else(|| rand.random(360.0));
                 let length = rand.random(self.length);
                 let (x, y) = trns(angle, length);
                 (x, y, self.fin, self.fout)
@@ -416,6 +439,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::FilledCircle,
             center: (x, y),
             color_from: Some("Color.gray"),
+            color_mid: None,
             color_to: Some("Pal.darkishGray"),
             color_mix: fin,
             input_color: None,
@@ -434,6 +458,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::FilledCircle,
             center: (x, y),
             color_from: Some("Color.gray"),
+            color_mid: None,
             color_to: Some("Color.darkGray"),
             color_mix: rotation,
             input_color: None,
@@ -452,6 +477,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::FilledCircle,
             center: (x, y),
             color_from: Some("Color.gray"),
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: None,
@@ -474,6 +500,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::FilledCircle,
             center: (x, y),
             color_from: Some("Color.gray"),
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: None,
@@ -492,6 +519,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::FilledCircle,
             center: (x, y),
             color_from: None,
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: Some(color),
@@ -510,6 +538,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::SeededCircleParticles,
             center: (x, y),
             color_from: Some("Pal.lightFlame"),
+            color_mid: None,
             color_to: Some("Pal.darkFlame"),
             color_mix: fin,
             input_color: None,
@@ -521,6 +550,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: 3,
                 progress: None,
+                angle: None,
+                angle_range: 0.0,
                 length: if effect_id == FX_FIRE_HIT_ID {
                     2.0 + fin * 10.0
                 } else {
@@ -558,6 +589,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::SeededCircleParticles,
             center: (x, y),
             color_from: Some("Pal.lightFlame"),
+            color_mid: None,
             color_to: Some("Pal.darkFlame"),
             color_mix: fin,
             input_color: None,
@@ -569,6 +601,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: 2,
                 progress: None,
+                angle: None,
+                angle_range: 0.0,
                 length: 2.0 + fin * 9.0,
                 fin,
                 fout,
@@ -598,6 +632,7 @@ pub fn standard_effect_draw_plan(
             } else {
                 "Color.gray"
             }),
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: None,
@@ -609,6 +644,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: if effect_id == FX_STEAM_ID { 2 } else { 1 },
                 progress: None,
+                angle: None,
+                angle_range: 0.0,
                 length: 2.0 + fin * 7.0,
                 fin,
                 fout,
@@ -634,6 +671,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::SeededCircleParticles,
             center: (x, y),
             color_from: None,
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: Some(color),
@@ -645,6 +683,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: 3,
                 progress: None,
+                angle: None,
+                angle_range: 0.0,
                 length: 2.0 + finpow * 11.0,
                 fin,
                 fout,
@@ -670,6 +710,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::SeededCircleParticles,
             center: (x, y),
             color_from: Some("Color.gray"),
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: None,
@@ -681,6 +722,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: 1,
                 progress: None,
+                angle: None,
+                angle_range: 0.0,
                 length: 2.0 + fin * 7.0,
                 fin,
                 fout,
@@ -706,6 +749,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::SeededCircleParticles,
             center: (x, y),
             color_from: None,
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: Some(color),
@@ -717,6 +761,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: 6,
                 progress: None,
+                angle: None,
+                angle_range: 0.0,
                 length: 4.0 + 30.0 * finpow,
                 fin,
                 fout,
@@ -736,12 +782,52 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_SHOOT_SMALL_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Pal.lighterOrange"),
+            color_mid: Some("Color.lightGray"),
+            color_to: Some("Color.gray"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 5,
+                progress: None,
+                angle: Some(rotation),
+                angle_range: 20.0,
+                length: finpow * 6.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 1.5,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_SMOKE_CLOUD_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
             kind: StandardEffectDrawKind::SeededCircleParticles,
             center: (x, y),
             color_from: Some("Color.gray"),
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: None,
@@ -753,6 +839,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: 30,
                 progress: Some(fin),
+                angle: None,
+                angle_range: 0.0,
                 length: 30.0,
                 fin,
                 fout,
@@ -778,6 +866,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::SeededCircleParticles,
             center: (x, y),
             color_from: Some("Color.lightGray"),
+            color_mid: None,
             color_to: Some("Color.darkGray"),
             color_mix: fin,
             input_color: None,
@@ -789,6 +878,8 @@ pub fn standard_effect_draw_plan(
                 seed: state_id,
                 count: 12,
                 progress: None,
+                angle: None,
+                angle_range: 0.0,
                 length: 1.0 + fin * 23.0,
                 fin,
                 fout,
@@ -814,6 +905,7 @@ pub fn standard_effect_draw_plan(
             kind: StandardEffectDrawKind::StrokedCircle,
             center: (x, y),
             color_from: None,
+            color_mid: None,
             color_to: None,
             color_mix: 0.0,
             input_color: Some(color),
@@ -847,6 +939,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
             b: 0.3,
             a: 1.0,
         }),
+        "Pal.lighterOrange" => Some(DecalColor::from_rgba(0xf6e096ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
         _ => None,
@@ -860,6 +953,15 @@ fn lerp_color(from: DecalColor, to: DecalColor, mix: f32) -> DecalColor {
         g: lerp(from.g, to.g, mix),
         b: lerp(from.b, to.b, mix),
         a: lerp(from.a, to.a, mix),
+    }
+}
+
+fn lerp_color_three(from: DecalColor, mid: DecalColor, to: DecalColor, mix: f32) -> DecalColor {
+    let mix = mix.clamp(0.0, 1.0);
+    if mix < 0.5 {
+        lerp_color(from, mid, mix * 2.0)
+    } else {
+        lerp_color(mid, to, (mix - 0.5) * 2.0)
     }
 }
 
@@ -927,6 +1029,10 @@ impl ArcRand {
 
     fn random(&mut self, range: f32) -> f32 {
         self.next_float() * range
+    }
+
+    fn range(&mut self, range: f32) -> f32 {
+        self.next_float() * range * 2.0 - range
     }
 }
 
@@ -2113,6 +2219,10 @@ mod tests {
             Some(FX_FIREBALL_SMOKE_ID)
         );
         assert_eq!(standard_effect_id("smokePuff"), Some(FX_SMOKE_PUFF_ID));
+        assert_eq!(
+            standard_effect_id("shootSmallSmoke"),
+            Some(FX_SHOOT_SMALL_SMOKE_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -2138,6 +2248,10 @@ mod tests {
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
+        assert_eq!(
+            standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
+            20.0
+        );
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
@@ -2351,6 +2465,31 @@ mod tests {
         assert_eq!(smoke_puff_particles.radius_fout_scale, 3.0);
         assert_eq!(smoke_puff_particles.secondary_vector_scale, 0.5);
         assert_eq!(smoke_puff_particles.secondary_radius_fout_scale, 1.0);
+
+        let shoot_small_smoke = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMALL_SMOKE_ID as u16),
+            159,
+            1.0,
+            2.0,
+            45.0,
+            10.0,
+            20.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_small_smoke.color_from, Some("Pal.lighterOrange"));
+        assert_eq!(shoot_small_smoke.color_mid, Some("Color.lightGray"));
+        assert_eq!(shoot_small_smoke.color_to, Some("Color.gray"));
+        assert_eq!(
+            shoot_small_smoke.resolved_draw_color(),
+            standard_effect_color_symbol("Color.lightGray")
+        );
+        let shoot_small_smoke_particles = shoot_small_smoke.particles.unwrap();
+        assert_eq!(shoot_small_smoke_particles.count, 5);
+        assert_eq!(shoot_small_smoke_particles.length, 1.5);
+        assert_eq!(shoot_small_smoke_particles.angle, Some(45.0));
+        assert_eq!(shoot_small_smoke_particles.angle_range, 20.0);
+        assert_eq!(shoot_small_smoke_particles.radius_fout_scale, 1.5);
 
         let cloud = standard_effect_draw_plan(
             Some(FX_SMOKE_CLOUD_ID as u16),
@@ -2617,6 +2756,30 @@ mod tests {
         assert_eq!(smoke_puff_circles[2].center, (1.0, 12.0));
         assert_eq!(smoke_puff_circles[3].center, (2.0, 8.0));
         assert_eq!(smoke_puff.circle_render_primitives_from_seed().len(), 12);
+
+        let shoot_small_smoke = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMALL_SMOKE_ID as u16),
+            159,
+            0.0,
+            0.0,
+            45.0,
+            10.0,
+            20.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let shoot_small_smoke_vectors = shoot_small_smoke.seeded_particle_vectors();
+        assert_eq!(shoot_small_smoke_vectors.len(), 5);
+        assert!((shoot_small_smoke_vectors[0].x - 0.09767128).abs() < 0.00001);
+        assert!((shoot_small_smoke_vectors[0].y - 0.17498657).abs() < 0.00001);
+        assert!((shoot_small_smoke_vectors[1].x - 0.43052074).abs() < 0.00001);
+        assert!((shoot_small_smoke_vectors[1].y - 0.30730063).abs() < 0.00001);
+        let shoot_small_smoke_circles =
+            shoot_small_smoke.expand_seeded_particle_circles(&shoot_small_smoke_vectors);
+        assert_eq!(shoot_small_smoke_circles.len(), 5);
+        assert!((shoot_small_smoke_circles[0].center.0 - 0.09767128).abs() < 0.00001);
+        assert!((shoot_small_smoke_circles[0].center.1 - 0.17498657).abs() < 0.00001);
+        assert_eq!(shoot_small_smoke_circles[0].radius, 0.75);
 
         let ripple = standard_effect_draw_plan(
             Some(FX_RIPPLE_ID as u16),

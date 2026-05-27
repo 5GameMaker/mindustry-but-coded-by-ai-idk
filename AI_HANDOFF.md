@@ -4169,3 +4169,42 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - 这次没有改动真实 renderer backend；仍是无依赖 primitive/data 边界；
   - `Fx.ripple` id 仍沿用既有 `243`，完整 content id 审计时需要统一；
   - 子代理只读审计建议下一批优先迁移：`shootSmallSmoke`、`smokeAoeCloud`、`missileTrailSmokeSmall`、`missileTrailSmoke`、`neoplasmSplat`。
+
+---
+
+## 125. 最新闭环记录：Fx.shootSmallSmoke 方向扇区粒子迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `Fx.shootSmallSmoke`，同时把 `Angles.randLenVectors(seed, amount, length, angle, range, Floatc2)` 的方向扇区重载接入 Rust 标准 effect 粒子链路。
+- Java/Arc 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1850` 附近；
+  - id 按 `new Effect` 声明顺序为 `159`；
+  - lifetime `20f`；
+  - 颜色 `Pal.lighterOrange -> Color.lightGray -> Color.gray`，插值参数 `e.fin()`；
+  - 粒子 `randLenVectors(e.id, 5, e.finpow() * 6f, e.rotation, 20f, ...)`；
+  - 圆半径 `e.fout() * 1.5f`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMALL_SMOKE_ID = 159`；
+    - 接入 `standard_effect_id("shootSmallSmoke")` 与 `standard_effect(...)`；
+    - `StandardEffectParticleSpec` 新增 `angle/angle_range`；
+    - `ArcRand` 新增 `range(...)`；
+    - `seeded_vectors()` 支持 `angle + rand.range(angle_range)`；
+    - `StandardEffectDrawPlan` 新增 `color_mid`；
+    - `resolved_draw_color()` 支持三段颜色插值；
+    - `standard_effect_color_symbol(...)` 新增 `Pal.lighterOrange`；
+    - `standard_effect_draw_plan(...)` 新增 `shootSmallSmoke`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续圆粒子/光照系列：`smokeAoeCloud`、`missileTrailSmokeSmall`、`missileTrailSmoke`；
+  2. 后续如果迁移 `steamCoolSmoke`，需要补 `Interp.pow2Out/pow3Out` 与 direction/progress 组合；
+  3. 三角形类 `shootSmall/shootBig` 需要先设计 triangle primitive。

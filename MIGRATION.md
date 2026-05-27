@@ -5866,3 +5866,57 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Fx.java` 仍未完整迁移；
   - `smokePuff` 已进入 primitive/data 边界，但真实 desktop 2D/GPU 绘制 backend 尚未接入；
   - 下一批适合继续迁移：`shootSmallSmoke`、`smokeAoeCloud`、`missileTrailSmokeSmall`、`missileTrailSmoke`、`neoplasmSplat`。
+
+### 12.199 Fx.shootSmallSmoke 方向扇区粒子绘制计划
+
+- 2026-05-28：继续对照 `Fx.java`，迁移 `shootSmallSmoke`；这条效果补齐了当前标准 effect 粒子链路缺失的 `Angles.randLenVectors(seed, amount, length, angle, range, Floatc2)` 方向扇区重载，并补了 Java probe 数值回归。
+- Java/Arc 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1850` 附近：
+    - `shootSmallSmoke = new Effect(20f, e -> { ... })`；
+    - `color(Pal.lighterOrange, Color.lightGray, Color.gray, e.fin())`；
+    - `randLenVectors(e.id, 5, e.finpow() * 6f, e.rotation, 20f, ...)`；
+    - 每个向量绘制一枚 `Fill.circle(e.x + x, e.y + y, e.fout() * 1.5f)`。
+  - 本地 `arc-core-4d9760e264.jar` 字节码确认该重载等价于：
+    - `angle = baseAngle + rand.range(range)`；
+    - `length = rand.random(length)`；
+    - `rand.range(x) = nextFloat() * 2x - x`。
+  - Java probe 固定输入 `seed=159, count=5, length=1.5, angle=45, range=20` 的前两组输出：
+    - `(0.09767128, 0.17498657)`
+    - `(0.43052074, 0.30730063)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMALL_SMOKE_ID = 159`；
+    - `standard_effect_id("shootSmallSmoke")`、`standard_effect(FX_SHOOT_SMALL_SMOKE_ID)` 接入，lifetime 为 `20.0`；
+    - `StandardEffectParticleSpec` 新增：
+      - `angle: Option<f32>`
+      - `angle_range: f32`
+    - `ArcRand` 新增 `range(float)` 等价实现；
+    - `seeded_vectors()` 在非 progressive 粒子模式下支持 `angle + rand.range(angle_range)`；
+    - `StandardEffectDrawPlan` 新增 `color_mid`，`resolved_draw_color()` 支持 Java/Arc 三段颜色插值；
+    - `standard_effect_color_symbol(...)` 新增 `Pal.lighterOrange = f6e096`；
+    - `standard_effect_draw_plan(...)` 新增 `shootSmallSmoke`：
+      - `count=5`
+      - `length=finpow * 6.0`
+      - `angle=Some(rotation)`
+      - `angle_range=20.0`
+      - `radius_fout_scale=1.5`
+      - 颜色 `Pal.lighterOrange -> Color.lightGray -> Color.gray`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `shootSmallSmoke` name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖三段颜色和方向粒子字段；
+  - `standard_effect_particle_plan_expands_to_circle_primitives` 覆盖 Java probe 前两组 seeded vector 与圆半径。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 带 `ParticleConsumer` 的方向/progress 重载仍未迁移；当前只覆盖 `Floatc2` 方向扇区重载；
+  - `shootSmall/shootBig` 等三角形 primitive 类 Fx 仍未接入；
+  - 真实 desktop 2D/GPU backend 尚未消费这些 primitive。
