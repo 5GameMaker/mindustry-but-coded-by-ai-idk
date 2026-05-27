@@ -2748,6 +2748,10 @@ impl GameRuntime {
         event
     }
 
+    pub fn drain_trigger_events(&mut self) -> Vec<GameRuntimeTriggerEvent> {
+        std::mem::take(&mut self.trigger_events)
+    }
+
     pub fn note_client_block_snapshot_parse_error(
         &mut self,
     ) -> GameRuntimeClientSnapshotApplyReport {
@@ -3416,8 +3420,23 @@ impl GameRuntime {
         let Some(unit) = self.client_unit_snapshot_entities.get_mut(&entity_id) else {
             return false;
         };
+        let preserve_local_cargo_tether = unit.controller.is_cargo()
+            && sync.controller == type_io::ControllerWire::Ground
+            && unit.cargo_ai.is_some()
+            && unit.building_tether.is_some();
+        let preserved_cargo_ai = preserve_local_cargo_tether
+            .then(|| unit.cargo_ai.clone())
+            .flatten();
+        let preserved_building_tether = preserve_local_cargo_tether
+            .then(|| unit.building_tether.clone())
+            .flatten();
         unit.sync.read_sync();
         unit.apply_sync_wire(sync);
+        if preserve_local_cargo_tether {
+            unit.set_controller(UnitControllerState::Cargo);
+            unit.cargo_ai = preserved_cargo_ai;
+            unit.building_tether = preserved_building_tether;
+        }
         unit.entity.id = entity_id;
         if recreate {
             unit.sync.snap_sync();
@@ -25203,6 +25222,90 @@ mod tests {
             crate::mindustry::entities::comp::BuildingTetherAction::Keep
         );
         assert_eq!(runtime.client_unit_tether_block_spawned_packets_applied, 1);
+    }
+
+    #[test]
+    fn game_runtime_preserves_client_cargo_tether_when_unit_snapshot_arrives() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let loader_def = content.block_by_name("unit-cargo-loader").unwrap();
+        let tile_pos = point2_pack(18, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            loader_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime.distribution_runtime_states.insert(
+            tile_pos,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState::default()),
+        );
+
+        assert!(runtime.apply_client_unit_tether_block_spawned_packet(
+            &content,
+            &UnitTetherBlockSpawnedCallPacket {
+                tile: Some(tile_pos),
+                id: 77,
+            },
+        ));
+        let sync = runtime
+            .client_unit_snapshot_entities
+            .get(&77)
+            .expect("tether packet should materialize cargo unit")
+            .to_sync_wire();
+        assert_eq!(
+            sync.controller,
+            type_io::ControllerWire::Ground,
+            "CargoAI is a local runtime sidecar and currently serializes through the Java ground controller wire"
+        );
+
+        let mut sync_bytes = Vec::new();
+        type_io::write_unit_sync(&mut sync_bytes, &content, &sync).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&77i32.to_be_bytes());
+        data.push(2);
+        data.extend_from_slice(&sync_bytes);
+
+        let report = runtime.apply_client_entity_snapshot_packet_with_content(&content, 1, &data);
+        assert_eq!(report.entity_records_applied, 1);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        let unit = runtime.client_unit_snapshot_entities.get(&77).unwrap();
+        assert!(
+            unit.controller.is_cargo(),
+            "entity snapshot ground controller must not erase UnitTetherBlockSpawned cargo sidecar"
+        );
+        assert_eq!(
+            unit.cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.tether_tile_pos),
+            Some(tile_pos)
+        );
+        assert_eq!(
+            unit.building_tether
+                .as_ref()
+                .and_then(|tether| tether.building.as_ref().map(|building| building.tile_pos)),
+            Some(tile_pos)
+        );
+    }
+
+    #[test]
+    fn game_runtime_drain_trigger_events_returns_and_clears_local_queue() {
+        let mut runtime = GameRuntime::default();
+        runtime.state.set_sector(Some(Sector::new(7)));
+
+        let event = runtime.note_trigger_event(Trigger::NeoplasmReact);
+        assert_eq!(
+            event,
+            GameRuntimeTriggerEvent {
+                trigger: Trigger::NeoplasmReact,
+                campaign: true,
+            }
+        );
+
+        let drained = runtime.drain_trigger_events();
+        assert_eq!(drained, vec![event]);
+        assert!(runtime.trigger_events.is_empty());
+        assert!(runtime.drain_trigger_events().is_empty());
     }
 
     #[test]

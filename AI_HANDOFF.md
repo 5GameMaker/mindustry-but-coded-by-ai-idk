@@ -3609,3 +3609,42 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - 其他散落 AI/pathfinder/block runtime 的私有 D4 常量可逐步统一；
      - building 吸收 deposit 与 nearby puddle 吸收之间的 Java 顺序精确化；
      - 把 `GameRuntime.trigger_events` 自动应用到 `DefaultGameService` / 平台 achievement service。
+
+---
+
+## 109. 最新闭环记录：cargo tether snapshot 保留 + trigger_events 接入 GameService
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：
+  1. 修复刚暴露的真实联机 smoke：`UnitTetherBlockSpawnedCallPacket` 物化 cargo unit 后，后续 `EntitySnapshot` 不应把本地 CargoAI/tether sidecar 覆盖成 ground；
+  2. 把此前记录到 `GameRuntime.trigger_events` 的 trigger 最小接入 `DefaultGameService` 成就/统计链路，不引入全局 event bus。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntime::drain_trigger_events()`；
+    - `apply_client_unit_sync_wire(...)` 对本地 cargo tether sidecar 做保留：已有 `UnitControllerState::Cargo` 且 incoming `ControllerWire::Ground` 时保留 `cargo_ai/building_tether/controller`；
+    - 新增 `game_runtime_preserves_client_cargo_tether_when_unit_snapshot_arrives`；
+    - 新增 `game_runtime_drain_trigger_events_returns_and_clears_local_queue`。
+  - `core/src/mindustry/service/game_service.rs`
+    - `DefaultGameService` 新增内存 backing store：`stats`、`achievements`、`stats_store_count`；
+    - 覆盖实现 `StatService` / `AchievementService`，不再是全 no-op；
+    - 更新默认服务测试并新增 `trigger_plan_apply_to_writes_trigger_stats_and_achievements_into_service_runtime`。
+  - `core/src/mindustry/client_launcher.rs`
+    - `ClientLauncher` 增加 `AchievementState` cache，供 service plan apply 去重/缓存。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::update()` 在 `sync_world_update_events_to_runtime()` 后调用 `sync_runtime_trigger_events_to_service()`；
+    - 该 bridge drain runtime trigger，转成 `GameServiceTriggerSnapshot`，复用 `trigger_plan -> apply_to` 写入 `client.service`；
+    - 新增 `desktop_launcher_drains_runtime_trigger_events_into_game_service`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_preserves_client_cargo_tether_when_unit_snapshot_arrives --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime --lib`
+  - `cargo test -p mindustry-core game_runtime_drain_trigger_events_returns_and_clears_local_queue --lib`
+  - `cargo test -p mindustry-core trigger_plan_apply_to_writes_trigger_stats_and_achievements_into_service_runtime --lib`
+  - `cargo test -p mindustry-core default_game_service_platform_methods_persist_runtime_stats_and_achievements --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_drains_runtime_trigger_events_into_game_service --lib`
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`接入触发事件成就服务`；
+  2. 后续补：server runtime trigger 通过网络/完整 event bus 传到远端客户端平台服务；`DefaultGameService` 的持久化仍是内存态，后续要接平台/磁盘存储。

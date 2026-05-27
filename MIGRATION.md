@@ -4937,3 +4937,46 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `server_puddle_cell_liquid_update_damages_target_liquid_building_and_reaccepts_spread`
 - 仍未完成：
   - 其他散落在 AI/pathfinder/block runtime 的私有 D4 常量尚未统一替换；本轮先修正 Puddles/CellLiquid 主链路，避免扩大改动面。
+
+### 12.167 UnitCargoLoader tether unit snapshot preserves local CargoAI sidecar
+
+- 2026-05-28：修复真实 `ServerLauncher -> DesktopLauncher` smoke 中 `UnitTetherBlockSpawnedCallPacket` 已把客户端 `manifold` 物化为 cargo unit，但随后 `EntitySnapshot` 的 `UnitSyncWire.controller=Ground` 覆盖本地 `CargoAI` sidecar 的问题。
+- Java/Rust 依据：
+  - `CargoAI` / `UnitCargoLoaderBuild.spawned(id)` 关联属于运行态/tether 语义，当前 Rust `UnitControllerState::Cargo` 还没有独立 Java wire controller，`to_sync_wire()` 会按现有兼容路径写成 `ControllerWire::Ground`；
+  - 因此客户端在已经由 tether packet 物化出 cargo unit 后，普通 unit snapshot 只能同步血量/位置/物品等 wire 字段，不能抹掉本地 tether/cargo sidecar。
+- Rust 新增/变化：
+  - `GameRuntime::apply_client_unit_sync_wire(...)` 在已有 unit 是 `Cargo`、且 incoming controller 是 `Ground`、且本地有 `cargo_ai/building_tether` 时，保留 `UnitControllerState::Cargo`、`CargoAiRuntimeState` 与 `BuildingTetherComp`；
+  - 新增回归 `game_runtime_preserves_client_cargo_tether_when_unit_snapshot_arrives`；
+  - 真实联机 smoke `real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime` 重新通过。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_preserves_client_cargo_tether_when_unit_snapshot_arrives --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime --lib`
+
+### 12.168 Runtime trigger_events -> DefaultGameService trigger achievement bridge
+
+- 2026-05-28：继续补齐 `Events.fire(Trigger.neoplasmReact)` 的后半段消费链，避免事件只停在 `GameRuntime.trigger_events`。
+- Java 依据：
+  - `GameService.trigger(Trigger.neoplasmReact, neoplasmWater)` 将 campaign 下的 `neoplasmReact` 映射到 `Achievement.neoplasmWater`；
+  - `ThoriumReactorOverheat` 等 trigger 仍走同一 `trigger_plan(...)` 统计/成就计划入口。
+- Rust 新增/变化：
+  - `DefaultGameService` 增加最小 runtime backing store：`stats: BTreeMap<String, i32>`、`achievements: BTreeSet<String>`、`stats_store_count`，并实现 `StatService`/`AchievementService` 的真实读写；
+  - `ClientLauncher` 增加 `AchievementState` cache，作为 `GameServiceEventPlan::apply_to(...)` 的去重/缓存状态；
+  - `GameRuntime::drain_trigger_events()` 以局部队列 drain 模式消费 trigger，不引入全局 event bus；
+  - `DesktopLauncher::sync_runtime_trigger_events_to_service()` 在 update 中把 runtime trigger 转为 `GameServiceTriggerSnapshot`，复用 `trigger_plan -> apply_to` 写入 `DefaultGameService`；
+  - 新增回归：
+    - `game_runtime_drain_trigger_events_returns_and_clears_local_queue`
+    - `default_game_service_platform_methods_persist_runtime_stats_and_achievements`
+    - `trigger_plan_apply_to_writes_trigger_stats_and_achievements_into_service_runtime`
+    - `desktop_launcher_drains_runtime_trigger_events_into_game_service`
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_drain_trigger_events_returns_and_clears_local_queue --lib`
+  - `cargo test -p mindustry-core trigger_plan_apply_to_writes_trigger_stats_and_achievements_into_service_runtime --lib`
+  - `cargo test -p mindustry-core default_game_service_platform_methods_persist_runtime_stats_and_achievements --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_drains_runtime_trigger_events_into_game_service --lib`
+  - `cargo check --workspace`
+  - `cargo test --workspace`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - 目前 bridge 覆盖“持有 `DesktopLauncher.runtime + ClientLauncher.service` 的本地客户端路径”；server runtime 触发到远端客户端平台服务仍需要后续网络事件/packet 或更完整的 Java event bus 迁移；
+  - `DefaultGameService` backing store 仍是内存态，后续平台/磁盘持久化要对齐 Java 平台实现。

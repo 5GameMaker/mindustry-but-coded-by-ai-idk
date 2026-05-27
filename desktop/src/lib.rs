@@ -30,6 +30,9 @@ use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, StateSnapshotCallPacket,
 };
+use mindustry_core::mindustry::service::{
+    AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
+};
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
@@ -79,6 +82,7 @@ pub struct DesktopLauncher {
     last_command_building_apply_report: Option<GameRuntimeCommandBuildingReport>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
+    last_service_trigger_apply_summary: Option<GameServiceApplySummary>,
     last_applied_client_plan_snapshot_received_count: usize,
 }
 
@@ -122,6 +126,7 @@ impl DesktopLauncher {
             last_command_building_apply_report: None,
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
+            last_service_trigger_apply_summary: None,
             last_applied_client_plan_snapshot_received_count: 0,
         }
     }
@@ -141,6 +146,7 @@ impl DesktopLauncher {
         self.sync_unit_lifecycle_to_runtime();
         self.sync_unit_spawn_packets_to_runtime();
         self.sync_world_update_events_to_runtime();
+        self.sync_runtime_trigger_events_to_service();
         self.sync_tile_config_to_runtime();
         self.sync_command_building_to_runtime();
         self.sync_effect_packets_to_runtime();
@@ -559,6 +565,43 @@ impl DesktopLauncher {
                 .apply_client_landing_pad_landed_packet(&self.content_loader, &packet),
             _ => false,
         }
+    }
+
+    fn sync_runtime_trigger_events_to_service(&mut self) -> bool {
+        let events = self.runtime.drain_trigger_events();
+        if events.is_empty() {
+            return false;
+        }
+
+        let mut total = GameServiceApplySummary::default();
+        for event in events {
+            let plan = self
+                .client
+                .service
+                .state()
+                .trigger_plan(GameServiceTriggerSnapshot {
+                    trigger: event.trigger,
+                    campaign: event.campaign,
+                });
+            let summary = plan.apply_to(
+                &mut self.client.service,
+                &mut self.client.achievement_state,
+                AchievementContext::normal(),
+            );
+            total.stat_additions += summary.stat_additions;
+            total.stat_amount_additions += summary.stat_amount_additions;
+            total.stat_sets += summary.stat_sets;
+            total.stat_max_updates += summary.stat_max_updates;
+            total.achievements_completed += summary.achievements_completed;
+        }
+
+        let changed = total.stat_additions > 0
+            || total.stat_amount_additions > 0
+            || total.stat_sets > 0
+            || total.stat_max_updates > 0
+            || total.achievements_completed > 0;
+        self.last_service_trigger_apply_summary = Some(total);
+        changed
     }
 
     fn sync_tile_config_to_runtime(&mut self) -> bool {
@@ -1471,13 +1514,13 @@ mod tests {
             EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
             WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
-        game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
+        game::{BlockPlan, Trigger, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
         io::{
             type_io, BuildingRef, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
             TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
         },
-        r#type::{ItemStack, PayloadKey, PayloadSeq},
+        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector},
         world::blocks::campaign::LandingPadState,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
@@ -1684,6 +1727,28 @@ mod tests {
 
         launcher.net_client.net_mut().disconnect();
         server.close_server();
+    }
+
+    #[test]
+    fn desktop_launcher_drains_runtime_trigger_events_into_game_service() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.runtime.state.set_sector(Some(Sector::new(7)));
+        launcher.runtime.note_trigger_event(Trigger::NeoplasmReact);
+
+        assert!(launcher.sync_runtime_trigger_events_to_service());
+        assert!(launcher.runtime.trigger_events.is_empty());
+        assert_eq!(
+            launcher
+                .last_service_trigger_apply_summary
+                .map(|summary| summary.achievements_completed),
+            Some(1)
+        );
+        assert!(launcher
+            .client
+            .service
+            .achievements()
+            .contains("neoplasmWater"));
+        assert!(!launcher.sync_runtime_trigger_events_to_service());
     }
 
     #[test]

@@ -1,11 +1,11 @@
 //! Default game-service shell mirroring upstream `mindustry.service.GameService`.
 //!
 //! The Java class is the central platform service hook for achievements,
-//! service statistics and event registration. This module keeps the default
-//! no-op platform behavior and the deterministic state containers; individual
-//! event bindings can be ported incrementally on top.
+//! service statistics and event registration. This module keeps deterministic
+//! in-memory service state until the real platform backends are ported;
+//! individual event bindings can be migrated incrementally on top.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::mindustry::game::Trigger;
 
@@ -1173,6 +1173,9 @@ pub trait GameService: AchievementService {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DefaultGameService {
     state: GameServiceState,
+    stats: BTreeMap<String, i32>,
+    achievements: BTreeSet<String>,
+    stats_store_count: usize,
     events_registered: bool,
 }
 
@@ -1199,14 +1202,50 @@ impl DefaultGameService {
         self.events_registered
     }
 
+    pub fn stats(&self) -> &BTreeMap<String, i32> {
+        &self.stats
+    }
+
+    pub fn achievements(&self) -> &BTreeSet<String> {
+        &self.achievements
+    }
+
+    pub fn stats_store_count(&self) -> usize {
+        self.stats_store_count
+    }
+
     pub fn apply_content_seed(&mut self, seed: GameServiceContentSeed) {
         self.state.apply_content_seed(seed);
     }
 }
 
-impl StatService for DefaultGameService {}
+impl StatService for DefaultGameService {
+    fn get_stat(&self, name: &str, def: i32) -> i32 {
+        self.stats.get(name).copied().unwrap_or(def)
+    }
 
-impl AchievementService for DefaultGameService {}
+    fn set_stat(&mut self, name: &str, amount: i32) {
+        self.stats.insert(name.into(), amount);
+    }
+
+    fn store_stats(&mut self) {
+        self.stats_store_count += 1;
+    }
+}
+
+impl AchievementService for DefaultGameService {
+    fn complete_achievement(&mut self, name: &str) {
+        self.achievements.insert(name.into());
+    }
+
+    fn clear_achievement(&mut self, name: &str) {
+        self.achievements.remove(name);
+    }
+
+    fn is_achieved(&self, name: &str) -> bool {
+        self.achievements.contains(name)
+    }
+}
 
 impl GameService for DefaultGameService {
     fn register_events(&mut self) {
@@ -1265,7 +1304,7 @@ mod tests {
     }
 
     #[test]
-    fn default_game_service_platform_methods_are_noop_like_java_defaults() {
+    fn default_game_service_platform_methods_persist_runtime_stats_and_achievements() {
         let mut service = DefaultGameService::new();
         let mut achievements = AchievementState::new();
 
@@ -1273,14 +1312,17 @@ mod tests {
         assert_eq!(SStat::UnitsDestroyed.get(&service), 0);
 
         SStat::UnitsDestroyed.set(&mut service, 10);
-        assert_eq!(SStat::UnitsDestroyed.get(&service), 0);
+        assert_eq!(SStat::UnitsDestroyed.get(&service), 10);
+        assert_eq!(service.stats().get("unitsDestroyed"), Some(&10));
 
         achievements.complete(
             Achievement::OpenWiki,
             &mut service,
             AchievementContext::normal(),
         );
-        assert!(!achievements.is_achieved(Achievement::OpenWiki, &service));
+        assert!(achievements.is_achieved(Achievement::OpenWiki, &service));
+        assert!(service.achievements().contains("openWiki"));
+        assert_eq!(service.stats_store_count(), 2);
     }
 
     #[test]
@@ -1993,6 +2035,40 @@ mod tests {
             overheat_plan.stat_additions,
             vec![SStat::ReactorsOverheated]
         );
+    }
+
+    #[test]
+    fn trigger_plan_apply_to_writes_trigger_stats_and_achievements_into_service_runtime() {
+        let state = GameServiceState::default();
+        let mut service = DefaultGameService::new();
+        let mut achievements = AchievementState::new();
+
+        let neoplasm = state.trigger_plan(GameServiceTriggerSnapshot {
+            trigger: Trigger::NeoplasmReact,
+            campaign: true,
+        });
+        let summary = neoplasm.apply_to(
+            &mut service,
+            &mut achievements,
+            AchievementContext::normal(),
+        );
+
+        assert_eq!(summary.achievements_completed, 1);
+        assert!(service.achievements().contains("neoplasmWater"));
+        assert!(achievements.is_achieved(Achievement::NeoplasmWater, &service));
+
+        let overheat = state.trigger_plan(GameServiceTriggerSnapshot {
+            trigger: Trigger::ThoriumReactorOverheat,
+            campaign: true,
+        });
+        let summary = overheat.apply_to(
+            &mut service,
+            &mut achievements,
+            AchievementContext::normal(),
+        );
+
+        assert_eq!(summary.stat_additions, 1);
+        assert_eq!(SStat::ReactorsOverheated.get(&service), 1);
     }
 
     #[test]

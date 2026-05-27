@@ -1,4 +1,6 @@
-use crate::mindustry::service::{DefaultGameService, GameService, GameServiceInitAction};
+use crate::mindustry::service::{
+    AchievementState, DefaultGameService, GameService, GameServiceInitAction,
+};
 use crate::mindustry::vars::AppContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6,6 +8,7 @@ pub struct ClientLauncher {
     pub context: AppContext,
     pub loaded: bool,
     pub service: DefaultGameService,
+    pub achievement_state: AchievementState,
     service_waiting_for_client_load: bool,
 }
 
@@ -15,6 +18,7 @@ impl ClientLauncher {
             context,
             loaded: false,
             service: DefaultGameService::new(),
+            achievement_state: AchievementState::new(),
             service_waiting_for_client_load: false,
         }
     }
