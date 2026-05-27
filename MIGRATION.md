@@ -5334,3 +5334,77 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 这仍不是完整 Fx registry，只是补齐当前迁移链路会直接用到的高频内置 Fx；
   - `Fx.ripple` 继续沿用既有常量 `243`，完整 id 审计后续应统一校验全部 Fx 顺序；
   - 真正 renderer 仍未消费 drain 出来的 effect packet。
+
+### 12.181 Local effect packet materialization into EffectStateComp
+
+- 2026-05-28：将客户端本地 effect 从 `EffectCallPacket2` 队列推进到可 tick/draw 的 `EffectStateComp` 状态层，贴近 Java `Effect.add(...) -> EffectState.create()` 生命周期。
+- Java 依据：
+  - `core/src/mindustry/entities/Effect.java`
+    - `create(...)` / `add(...)` 会创建 `EffectState`，写入 `effect/rotation/data/lifetime/x/y/color/parent`；
+    - `render(...)` 返回新的 lifetime。
+  - `core/src/mindustry/entities/comp/EffectStateComp.java`
+    - `draw()` 调用 `effect.render(id, color, time, lifetime, rotation, x, y, data)`；
+    - `clipSize()` 返回 `effect.clip`。
+- Rust 新增/变化：
+  - `GameRuntime` 新增：
+    - `client_local_effect_entities: BTreeMap<i32, EffectStateComp>`；
+    - `next_client_local_effect_id: i32`，本地 effect 使用负数 id，避免和 server snapshot entity id 冲突。
+  - 新增 `GameRuntime::drain_client_local_effect_events_to_states(...)`：
+    - `std::mem::take` 取出 `client_local_effect_events`；
+    - 为每个 `EffectCallPacket2` 分配本地负 id；
+    - 用 `EffectStateComp::apply_sync_wire(...)` 写入 position/rotation/color/data/effect_id/lifetime/clip；
+    - 调用方可传入 effect lookup，缺失时使用默认 `Effect::with_lifetime(id, DEFAULT_EFFECT_LIFETIME, DEFAULT_EFFECT_CLIP)` 作为过渡。
+  - runtime clear 会同步清空 `client_local_effect_entities` 并重置负 id 分配器。
+- 新增验证：
+  - `game_runtime_materializes_local_effect_events_into_effect_states`
+    - 验证 packet queue 被清空；
+    - 验证本地 `EffectStateComp` 使用负 id；
+    - 验证 x/y/rotation/lifetime/clip/data/effect_id 写入正确。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core game_runtime_materializes_local_effect_events_into_effect_states --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 本地 effect state 还没有统一 tick/cull/draw pass；
+  - 完整 effect lookup/registry 仍未迁移，缺失时仍使用默认 lifetime/clip 过渡；
+  - `client_effect_snapshot_entities` 的 server snapshot effect 仍未接真实 effect lookup。
+
+### 12.182 Local EffectState tick/cull/draw pass and desktop render ingress
+
+- 2026-05-28：继续推进 Java `EffectStateComp` 生命周期，把本地 effect 从“packet 队列已物化为 state”推进到可被客户端渲染循环消费的 state pass。
+- Java 依据：
+  - `core/src/mindustry/entities/Effect.java`
+    - `Effect.add(...)` 创建短命 `EffectState`；
+    - `Effect.render(...)` 返回新的 lifetime。
+  - `core/src/mindustry/entities/comp/EffectStateComp.java`
+    - `draw()` 每帧调用 `effect.render(id, color, time, lifetime, rotation, x, y, data)`；
+    - `clipSize()` 返回 `effect.clip`。
+- Rust 新增/变化：
+  - `EffectRenderInput` 增加 `effect_id` 与 `clip`，让 renderer callback 能知道应绘制哪个 Fx 以及裁剪半径；
+  - `EffectStateComp` 新增：
+    - `tick(delta)`：推进本地 effect time；
+    - `is_expired()`：按 `time >= lifetime` 判定回收；
+  - `GameRuntime` 新增：
+    - `tick_client_local_effect_entities(delta)`：统一 tick 并剔除过期本地 effect；
+    - `draw_client_local_effect_entities(render)`：对存活本地 effect 调 `EffectStateComp::draw_with(...)`，并允许 renderer 回写 lifetime；
+  - `DesktopLauncher::update()` 在 move-effect 与 puddle particle effect 入队后，立即执行：
+    - `materialize_local_effect_events_for_render()`；
+    - `tick_local_effect_states_for_render(1.0)`；
+  - `DesktopLauncher` 新增 `draw_local_effect_states_for_render(...)`，作为后续真实 renderer 接入点。
+- 新增/更新验证：
+  - `effect_state_ticks_and_reports_expiry_like_lifetime_entity`
+  - `game_runtime_ticks_culls_and_draws_client_local_effect_states`
+  - desktop 侧 effect/assembler/move-effect/puddle tests 改为断言 `client_local_effect_events` 被物化清空，`client_local_effect_entities` 持有可渲染状态。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core effect_state --lib`
+  - `cargo test -p mindustry-desktop local_effect --lib`
+  - `cargo test -p mindustry-desktop assembler --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 完整 `EffectRegistry` / `Fx` id→lifetime/clip/renderer 映射仍未迁移，当前 desktop materialize 缺失 lookup 时继续使用默认 lifetime/clip；
+  - `client_effect_snapshot_entities` 的服务端 snapshot effect 仍未统一接真实 effect lookup；
+  - 真正图形后端还未把 `draw_local_effect_states_for_render(...)` 转成 GPU draw call。

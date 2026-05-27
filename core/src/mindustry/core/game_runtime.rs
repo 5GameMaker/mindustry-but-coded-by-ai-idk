@@ -28,13 +28,13 @@ use crate::mindustry::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
             BuildingComp, BuildingTetherComp, BuildingTetherRef, BulletComp, CargoAiRuntimeState,
-            DecalComp, DecalRegion, EffectStateComp, FireComp, LaunchCoreBlock, LaunchCoreComp,
-            PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp,
-            UnitControllerState, WorldLabelComp,
+            DecalComp, DecalRegion, EffectRenderInput, EffectStateComp, FireComp, LaunchCoreBlock,
+            LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile,
+            UnitComp, UnitControllerState, WorldLabelComp,
         },
-        entity_class_id, entity_class_kind, standard_effect_id, EntityClassKind, Fires,
+        entity_class_id, entity_class_kind, standard_effect_id, Effect, EntityClassKind, Fires,
         PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent, Puddles,
-        FX_UNIT_ASSEMBLE_ID,
+        DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LIFETIME, FX_UNIT_ASSEMBLE_ID,
     },
     game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo, Trigger},
     input::input_handler::ItemRemoveStackPlan,
@@ -2608,6 +2608,8 @@ pub struct GameRuntime {
     pub client_bullet_snapshot_entities: BTreeMap<i32, BulletComp>,
     pub client_decal_snapshot_entities: BTreeMap<i32, DecalComp>,
     pub client_effect_snapshot_entities: BTreeMap<i32, EffectStateComp>,
+    pub client_local_effect_entities: BTreeMap<i32, EffectStateComp>,
+    pub next_client_local_effect_id: i32,
     pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
     pub client_puddle_snapshot_entities: BTreeMap<i32, PuddleComp>,
@@ -2685,6 +2687,8 @@ impl GameRuntime {
             client_bullet_snapshot_entities: BTreeMap::new(),
             client_decal_snapshot_entities: BTreeMap::new(),
             client_effect_snapshot_entities: BTreeMap::new(),
+            client_local_effect_entities: BTreeMap::new(),
+            next_client_local_effect_id: -1,
             client_fire_snapshot_entities: BTreeMap::new(),
             client_player_snapshot_entities: BTreeMap::new(),
             client_puddle_snapshot_entities: BTreeMap::new(),
@@ -3818,6 +3822,89 @@ impl GameRuntime {
         }
 
         emitted
+    }
+
+    fn alloc_client_local_effect_id(&mut self) -> i32 {
+        let id = self.next_client_local_effect_id;
+        self.next_client_local_effect_id = self.next_client_local_effect_id.saturating_sub(1);
+        id
+    }
+
+    pub fn drain_client_local_effect_events_to_states(
+        &mut self,
+        mut effect_lookup: impl FnMut(u16) -> Option<Effect>,
+    ) -> usize {
+        let events = std::mem::take(&mut self.client_local_effect_events);
+        let mut materialized = 0;
+        for event in events {
+            let effect = effect_lookup(event.effect.effect_id).unwrap_or_else(|| {
+                Effect::with_lifetime(
+                    event.effect.effect_id as i32,
+                    DEFAULT_EFFECT_LIFETIME,
+                    DEFAULT_EFFECT_CLIP,
+                )
+            });
+            let id = self.alloc_client_local_effect_id();
+            let mut state = EffectStateComp::new(id);
+            state.apply_sync_wire(
+                &type_io::EffectStateSyncWire {
+                    color: event.effect.color,
+                    data: event.data,
+                    effect_id: event.effect.effect_id,
+                    lifetime: effect.lifetime,
+                    offset_pos: 0.0,
+                    offset_rot: 0.0,
+                    offset_x: 0.0,
+                    offset_y: 0.0,
+                    parent_id: None,
+                    rot_with_parent: false,
+                    rotation: event.effect.rotation,
+                    time: 0.0,
+                    x: event.effect.x,
+                    y: event.effect.y,
+                },
+                Some(&effect),
+            );
+            self.client_local_effect_entities.insert(id, state);
+            materialized += 1;
+        }
+        materialized
+    }
+
+    pub fn tick_client_local_effect_entities(&mut self, delta: f32) -> usize {
+        for state in self.client_local_effect_entities.values_mut() {
+            state.tick(delta);
+        }
+
+        let expired_ids: Vec<i32> = self
+            .client_local_effect_entities
+            .iter()
+            .filter_map(|(id, state)| state.is_expired().then_some(*id))
+            .collect();
+        let expired_count = expired_ids.len();
+        for id in expired_ids {
+            self.client_local_effect_entities.remove(&id);
+        }
+        expired_count
+    }
+
+    pub fn draw_client_local_effect_entities<F>(&mut self, mut render: F) -> usize
+    where
+        F: FnMut(EffectRenderInput<'_>) -> f32,
+    {
+        let effect_ids: Vec<i32> = self
+            .client_local_effect_entities
+            .iter()
+            .filter_map(|(id, state)| (!state.is_expired()).then_some(*id))
+            .collect();
+        let drawn_count = effect_ids.len();
+        for id in effect_ids {
+            let Some(state) = self.client_local_effect_entities.get_mut(&id) else {
+                continue;
+            };
+            state.draw_with(|input| render(input));
+        }
+        drawn_count
     }
 
     pub fn queue_client_puddle_particle_effects<'a>(
@@ -9870,6 +9957,8 @@ impl GameRuntime {
         self.client_bullet_snapshot_entities.clear();
         self.client_decal_snapshot_entities.clear();
         self.client_effect_snapshot_entities.clear();
+        self.client_local_effect_entities.clear();
+        self.next_client_local_effect_id = -1;
         self.client_fire_snapshot_entities.clear();
         self.client_player_snapshot_entities.clear();
         self.client_puddle_snapshot_entities.clear();
@@ -25670,6 +25759,106 @@ mod tests {
                 .data,
             0.0
         );
+    }
+
+    #[test]
+    fn game_runtime_materializes_local_effect_events_into_effect_states() {
+        let mut runtime = GameRuntime::default();
+        runtime.client_local_effect_events.push(EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: standard_effect_id("smoke").unwrap() as u16,
+                x: 12.0,
+                y: 24.0,
+                rotation: 30.0,
+                color: type_io::RgbaColor::new(0x11223344),
+            },
+            data: TypeValue::String("payload".into()),
+        });
+
+        let materialized = runtime.drain_client_local_effect_events_to_states(|effect_id| {
+            Some(Effect::with_lifetime(effect_id as i32, 35.0, 64.0))
+        });
+
+        assert_eq!(materialized, 1);
+        assert!(runtime.client_local_effect_events.is_empty());
+        assert_eq!(runtime.next_client_local_effect_id, -2);
+        let state = runtime.client_local_effect_entities.get(&-1).unwrap();
+        assert_eq!(state.id, -1);
+        assert_eq!(
+            state.effect_id,
+            Some(standard_effect_id("smoke").unwrap() as u16)
+        );
+        assert_eq!((state.x, state.y, state.rotation), (12.0, 24.0, 30.0));
+        assert_eq!(state.lifetime, 35.0);
+        assert_eq!(state.effect_clip, 64.0);
+        assert_eq!(state.data, TypeValue::String("payload".into()));
+    }
+
+    #[test]
+    fn game_runtime_ticks_culls_and_draws_client_local_effect_states() {
+        let mut runtime = GameRuntime::default();
+        runtime.client_local_effect_events.push(EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: standard_effect_id("smoke").unwrap() as u16,
+                x: 12.0,
+                y: 24.0,
+                rotation: 30.0,
+                color: type_io::RgbaColor::new(0x11223344),
+            },
+            data: TypeValue::String("payload".into()),
+        });
+        runtime.client_local_effect_events.push(EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: standard_effect_id("ripple").unwrap() as u16,
+                x: 48.0,
+                y: 96.0,
+                rotation: 0.0,
+                color: type_io::RgbaColor::new(-1),
+            },
+            data: TypeValue::Null,
+        });
+        runtime.drain_client_local_effect_events_to_states(|effect_id| {
+            Some(Effect::with_lifetime(
+                effect_id as i32,
+                if effect_id == standard_effect_id("smoke").unwrap() as u16 {
+                    5.0
+                } else {
+                    1.0
+                },
+                32.0,
+            ))
+        });
+
+        assert_eq!(runtime.tick_client_local_effect_entities(0.5), 0);
+
+        let mut rendered = Vec::new();
+        assert_eq!(
+            runtime.draw_client_local_effect_entities(|input| {
+                rendered.push((input.id, input.effect_id, input.time, input.clip));
+                if input.effect_id == Some(standard_effect_id("smoke").unwrap() as u16) {
+                    input.lifetime + 2.0
+                } else {
+                    input.lifetime
+                }
+            }),
+            2
+        );
+        assert_eq!(rendered.len(), 2);
+        assert!(rendered
+            .iter()
+            .any(|entry| entry.1 == Some(standard_effect_id("smoke").unwrap() as u16)));
+        assert_eq!(
+            runtime
+                .client_local_effect_entities
+                .get(&-1)
+                .unwrap()
+                .lifetime,
+            7.0
+        );
+
+        assert_eq!(runtime.tick_client_local_effect_entities(1.0), 1);
+        assert!(runtime.client_local_effect_entities.contains_key(&-1));
+        assert!(!runtime.client_local_effect_entities.contains_key(&-2));
     }
 
     #[test]

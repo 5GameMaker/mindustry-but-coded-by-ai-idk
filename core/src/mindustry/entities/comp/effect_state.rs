@@ -9,9 +9,11 @@ use crate::mindustry::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectRenderInput<'a> {
     pub id: i32,
+    pub effect_id: Option<u16>,
     pub color: DecalColor,
     pub time: f32,
     pub lifetime: f32,
+    pub clip: f32,
     pub rotation: f32,
     pub x: f32,
     pub y: f32,
@@ -67,14 +69,28 @@ impl EffectStateComp {
     {
         self.lifetime = render(EffectRenderInput {
             id: self.id,
+            effect_id: self.effect_id,
             color: self.color,
             time: self.time,
             lifetime: self.lifetime,
+            clip: self.effect_clip,
             rotation: self.rotation,
             x: self.x,
             y: self.y,
             data: &self.data,
         });
+    }
+
+    /// Java `EffectState` inherits the normal entity lifetime tick.  Keep the
+    /// time advancement local to the state so callers can materialize packet
+    /// ingress into states first, then run a real tick/cull/draw pass instead
+    /// of treating packets as renderable entities.
+    pub fn tick(&mut self, delta: f32) {
+        self.time += delta.max(0.0);
+    }
+
+    pub fn is_expired(&self) -> bool {
+        self.time >= self.lifetime
     }
 
     pub fn clip_size(&self) -> f32 {
@@ -121,12 +137,16 @@ mod tests {
         state.rotation = 45.0;
         state.time = 3.0;
         state.lifetime = 4.0;
+        state.effect_id = Some(17);
+        state.effect_clip = 11.0;
         state.data = TypeValue::String("payload".into());
 
         state.draw_with(|input| {
             assert_eq!(input.id, 9);
+            assert_eq!(input.effect_id, Some(17));
             assert_eq!((input.x, input.y, input.rotation), (1.0, 2.0, 45.0));
             assert_eq!((input.time, input.lifetime), (3.0, 4.0));
+            assert_eq!(input.clip, 11.0);
             assert_eq!(input.data, &TypeValue::String("payload".into()));
             8.0
         });
@@ -140,6 +160,26 @@ mod tests {
         state.effect_clip = 32.0;
 
         assert_eq!(state.clip_size(), 32.0);
+    }
+
+    #[test]
+    fn effect_state_ticks_and_reports_expiry_like_lifetime_entity() {
+        let mut state = EffectStateComp::new(2);
+        state.lifetime = 3.0;
+
+        state.tick(1.25);
+        assert_eq!(state.time, 1.25);
+        assert!(!state.is_expired());
+
+        state.tick(-10.0);
+        assert_eq!(
+            state.time, 1.25,
+            "negative render deltas must not rewind pooled effect state time"
+        );
+
+        state.tick(1.75);
+        assert_eq!(state.time, 3.0);
+        assert!(state.is_expired());
     }
 
     #[test]

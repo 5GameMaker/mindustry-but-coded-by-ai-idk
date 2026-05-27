@@ -15,7 +15,8 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, EntityClassKind, PlayerComp, PlayerUnitSwitchContext, PLAYER_CLASS_ID,
+    entity_class_kind, EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
+    PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -166,6 +167,24 @@ impl DesktopLauncher {
                 )
             });
         self.puddle_particle_rand_state = puddle_particle_rand_state;
+        self.materialize_local_effect_events_for_render();
+        self.tick_local_effect_states_for_render(1.0);
+    }
+
+    pub fn materialize_local_effect_events_for_render(&mut self) -> usize {
+        self.runtime
+            .drain_client_local_effect_events_to_states(|_| None)
+    }
+
+    pub fn tick_local_effect_states_for_render(&mut self, delta: f32) -> usize {
+        self.runtime.tick_client_local_effect_entities(delta)
+    }
+
+    pub fn draw_local_effect_states_for_render<F>(&mut self, render: F) -> usize
+    where
+        F: FnMut(EffectRenderInput<'_>) -> f32,
+    {
+        self.runtime.draw_client_local_effect_entities(render)
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -2331,13 +2350,25 @@ mod tests {
         }
         launcher.update();
 
-        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
-        assert_eq!(launcher.runtime.client_local_effect_events[0], packet);
+        assert!(
+            launcher.runtime.client_local_effect_events.is_empty(),
+            "desktop update should materialize packet ingress into EffectStateComp before render"
+        );
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
+        let state = launcher
+            .runtime
+            .client_local_effect_entities
+            .get(&-1)
+            .unwrap();
+        assert_eq!(state.effect_id, Some(packet.effect.effect_id));
+        assert_eq!((state.x, state.y, state.rotation), (80.0, 96.0, 15.0));
+        assert_eq!(state.data, TypeValue::Unit(37));
+        assert_eq!(state.time, 1.0);
         launcher.update();
         assert_eq!(
-            launcher.runtime.client_local_effect_events.len(),
+            launcher.runtime.client_local_effect_entities.len(),
             1,
-            "same last effect packet should not be queued again without a new counter"
+            "same last effect packet should not create another local state without a new counter"
         );
     }
 
@@ -2432,7 +2463,8 @@ mod tests {
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
         assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
-        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
+        assert!(launcher.runtime.client_local_effect_events.is_empty());
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
     }
 
@@ -2456,14 +2488,19 @@ mod tests {
 
         launcher.update();
 
-        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
-        let effect = &launcher.runtime.client_local_effect_events[0];
+        assert!(launcher.runtime.client_local_effect_events.is_empty());
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
+        let effect = launcher
+            .runtime
+            .client_local_effect_entities
+            .get(&-1)
+            .unwrap();
         assert_eq!(
-            effect.effect.effect_id,
-            standard_effect_id("missileTrailShort").unwrap() as u16
+            effect.effect_id,
+            Some(standard_effect_id("missileTrailShort").unwrap() as u16)
         );
-        assert!((effect.effect.x - 93.0).abs() < 0.0001);
-        assert!((effect.effect.y - 200.0).abs() < 0.0001);
+        assert!((effect.x - 93.0).abs() < 0.0001);
+        assert!((effect.y - 200.0).abs() < 0.0001);
         assert_eq!(effect.data, TypeValue::Null);
     }
 
@@ -2488,14 +2525,19 @@ mod tests {
 
         launcher.update();
 
-        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
-        let effect = &launcher.runtime.client_local_effect_events[0];
+        assert!(launcher.runtime.client_local_effect_events.is_empty());
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
+        let effect = launcher
+            .runtime
+            .client_local_effect_entities
+            .get(&-1)
+            .unwrap();
         assert_eq!(
-            effect.effect.effect_id,
-            standard_effect_id("ripple").unwrap() as u16
+            effect.effect_id,
+            Some(standard_effect_id("ripple").unwrap() as u16)
         );
-        let offset_x = effect.effect.x - 8.0;
-        let offset_y = effect.effect.y - 16.0;
+        let offset_x = effect.x - 8.0;
+        let offset_y = effect.y - 16.0;
         assert!(offset_x.abs() <= 3.0);
         assert!(offset_y.abs() <= 3.0);
         assert!(
@@ -2576,7 +2618,8 @@ mod tests {
         };
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
-        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
+        assert!(launcher.runtime.client_local_effect_events.is_empty());
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
         let spawned = launcher
             .runtime
             .client_unit_snapshot_entities
