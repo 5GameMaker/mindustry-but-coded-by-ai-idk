@@ -5740,3 +5740,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 颜色解析表只覆盖当前已迁移标准 Fx 所需符号色，不是完整 `Pal.java`/Arc `Color` registry；
   - renderer 后端还未真正消费这些 RGBA primitive。
+
+### 12.195 Desktop standard effect render frame data boundary
+
+- 2026-05-28：在桌面端已有 draw/circle/light 三组标准 effect 帧缓存后，补一个明确的帧级 render data 边界，方便后续真实 2D/GPU backend 在 `launcher.update()` 之后一次性消费当前帧 effect 渲染数据。
+- Rust 新增/变化：
+  - `desktop/src/lib.rs` 新增：
+    - `DesktopStandardEffectRenderFrame { draw_plans, circle_primitives, light_primitives }`；
+    - `DesktopLauncher::standard_effect_render_frame()`，克隆当前帧三组缓存并返回统一 frame data；
+  - 暂不引入 `winit/wgpu/pixels/sdl2` 等外部依赖，保持当前闭环为无依赖内存帧数据边界。
+- 更新验证：
+  - `desktop_launcher_caches_fire_light_primitives_for_render` 增加 `standard_effect_render_frame()` 断言，确认 frame 中 draw/circle/light 与 launcher 当前帧缓存一致。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop fire_light --lib`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `desktop/src/main.rs` 仍未把 frame data 提交给真实窗口/2D backend；
+  - 真实 backend 需要用户确认外部依赖后再接入，或继续先迁移无依赖 software primitive/backend trait。

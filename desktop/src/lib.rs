@@ -47,6 +47,13 @@ pub struct DesktopConnectTarget {
     pub port: u16,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopStandardEffectRenderFrame {
+    pub draw_plans: Vec<StandardEffectDrawPlan>,
+    pub circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
+    pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
+}
+
 #[derive(Debug, Clone)]
 pub struct DesktopLauncher {
     pub client: ClientLauncher,
@@ -253,6 +260,14 @@ impl DesktopLauncher {
             .iter()
             .flat_map(StandardEffectDrawPlan::light_render_primitives)
             .collect()
+    }
+
+    pub fn standard_effect_render_frame(&self) -> DesktopStandardEffectRenderFrame {
+        DesktopStandardEffectRenderFrame {
+            draw_plans: self.standard_local_effect_draw_plans.clone(),
+            circle_primitives: self.standard_local_effect_circle_primitives.clone(),
+            light_primitives: self.standard_local_effect_light_primitives.clone(),
+        }
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -2559,6 +2574,18 @@ mod tests {
         );
         assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 2);
         assert_eq!(launcher.standard_local_effect_light_primitives.len(), 1);
+        let frame = launcher.standard_effect_render_frame();
+        assert_eq!(frame.draw_plans.len(), 1);
+        assert_eq!(frame.circle_primitives.len(), 2);
+        assert_eq!(frame.light_primitives.len(), 1);
+        assert_eq!(
+            frame.draw_plans[0],
+            launcher.standard_local_effect_draw_plans[0]
+        );
+        assert_eq!(
+            frame.circle_primitives,
+            launcher.standard_local_effect_circle_primitives
+        );
         let light = &launcher.standard_local_effect_light_primitives[0];
         assert_eq!(light.center, (32.0, 48.0));
         assert!((light.radius - 0.8).abs() < 0.0001);
