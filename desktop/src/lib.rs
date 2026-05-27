@@ -2366,6 +2366,7 @@ mod tests {
         assert_eq!((state.x, state.y, state.rotation), (80.0, 96.0, 15.0));
         assert_eq!(state.lifetime, 120.0);
         assert_eq!(state.effect_clip, 50.0);
+        assert!(state.rot_with_parent);
         assert_eq!(state.data, TypeValue::Unit(37));
         assert_eq!(state.time, 1.0);
         launcher.update();

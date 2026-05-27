@@ -3858,7 +3858,7 @@ impl GameRuntime {
                     offset_x: 0.0,
                     offset_y: 0.0,
                     parent_id: None,
-                    rot_with_parent: false,
+                    rot_with_parent: effect.rot_with_parent,
                     rotation: event.effect.rotation,
                     time: 0.0,
                     x: event.effect.x,

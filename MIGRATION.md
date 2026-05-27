@@ -5436,7 +5436,8 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
     - `standard_effect_by_name(name)`；
   - 上述 lookup 返回 `Effect { lifetime, clip, layer, follow_parent, rot_with_parent }`，覆盖当前 `standard_effect_id(...)` 已知的高频 Fx；
   - `GameRuntime::apply_client_effect_state_sync_wire(...)` 使用 `standard_effect(sync.effect_id)` 填充 snapshot effect 的 `effect_clip`；
-  - `DesktopLauncher::materialize_local_effect_events_for_render()` 使用同一 lookup，将本地 packet 转成带 Java lifetime/clip 的 `EffectStateComp`。
+  - `GameRuntime::drain_client_local_effect_events_to_states(...)` 会把 lookup 到的 `rot_with_parent` 写入本地 `EffectStateComp`；
+  - `DesktopLauncher::materialize_local_effect_events_for_render()` 使用同一 lookup，将本地 packet 转成带 Java lifetime/clip/rot metadata 的 `EffectStateComp`。
 - 新增/更新验证：
   - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers`
   - `game_runtime_applies_client_effect_entity_snapshot_to_typed_runtime` 增加标准 Fx clip 断言；
