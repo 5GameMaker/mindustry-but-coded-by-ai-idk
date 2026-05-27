@@ -100,8 +100,8 @@ pub use timed_kill::TimedKillComp;
 pub use timer::{BuildingTimerState, Interval, TimerComp};
 pub use underwater_move::{UnderwaterDrawPlan, UnderwaterMoveComp};
 pub use unit::{
-    PrebuildAiUnitInput, UnitCollisionLayer, UnitComp, UnitControllerState, UnitFloorSnapshot,
-    UnitTrailState,
+    CargoAiRuntimeState, PrebuildAiUnitInput, UnitCollisionLayer, UnitComp, UnitControllerState,
+    UnitFloorSnapshot, UnitTrailState,
 };
 pub use unit_tether::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use vel::VelComp;

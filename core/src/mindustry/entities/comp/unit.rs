@@ -52,6 +52,7 @@ pub enum UnitControllerState {
     LegacyFormation { id: i32 },
     Logic { controller_pos: i32 },
     Assembler,
+    Cargo,
     Command(CommandWire),
     Unknown,
 }
@@ -68,6 +69,7 @@ impl UnitControllerState {
                 controller_pos: *controller_pos,
             },
             Self::Assembler => ControllerWire::Assembler,
+            Self::Cargo => ControllerWire::Ground,
             Self::Command(command) => ControllerWire::Command(command.clone()),
         }
     }
@@ -82,6 +84,10 @@ impl UnitControllerState {
 
     pub fn is_commandable(&self) -> bool {
         matches!(self, Self::Command(_))
+    }
+
+    pub fn is_cargo(&self) -> bool {
+        matches!(self, Self::Cargo)
     }
 
     pub fn controlled_code(&self, is_valid: bool) -> i32 {
@@ -162,6 +168,36 @@ impl UnitFloorSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct CargoAiRuntimeState {
+    pub tether_tile_pos: Option<i32>,
+    pub unload_target_tile_pos: Option<i32>,
+    pub item_target: Option<String>,
+    pub no_dest_timer: f32,
+    pub target_index: usize,
+}
+
+impl CargoAiRuntimeState {
+    pub fn new(tether_tile_pos: Option<i32>) -> Self {
+        Self {
+            tether_tile_pos,
+            ..Self::default()
+        }
+    }
+}
+
+impl Default for CargoAiRuntimeState {
+    fn default() -> Self {
+        Self {
+            tether_tile_pos: None,
+            unload_target_tile_pos: None,
+            item_target: None,
+            no_dest_timer: 0.0,
+            target_index: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnitComp {
     pub entity: EntityComp,
     pub sync: SyncComp,
@@ -181,6 +217,7 @@ pub struct UnitComp {
     pub miner: MinerComp,
     pub builder_ai: BuilderAiRuntimeState,
     pub prebuild_ai: PrebuildAiRuntimeState,
+    pub cargo_ai: Option<CargoAiRuntimeState>,
     pub payload: Option<PayloadComp>,
     pub type_info: UnitType,
     pub controller: UnitControllerState,
@@ -244,6 +281,7 @@ impl UnitComp {
             miner: MinerComp::new(miner_type_from_unit_type(&type_info)),
             builder_ai: BuilderAiRuntimeState::default(),
             prebuild_ai: PrebuildAiRuntimeState::default(),
+            cargo_ai: None,
             payload: None,
             type_info: type_info.clone(),
             controller: UnitControllerState::Ground,

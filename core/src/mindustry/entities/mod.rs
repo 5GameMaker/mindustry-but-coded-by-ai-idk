@@ -334,6 +334,10 @@ pub use comp::{
     ElevationMoveComp, Interval, OwnerComp, PosComp, PosTeamDef, RotComp, ShielderComp, SolidPred,
     TeamState, TimerComp,
 };
+pub use comp::{
+    CargoAiRuntimeState, UnitCollisionLayer, UnitComp, UnitControllerState, UnitFloorSnapshot,
+    UnitTrailState,
+};
 pub use comp::{CrawlComp, CrawlSolidPred, CrawlType, CrawlUpdateInput};
 pub use comp::{DecalColor, DecalComp, DecalDrawPlan, DecalRegion};
 pub use comp::{EffectRenderInput, EffectStateComp};
@@ -358,9 +362,6 @@ pub use comp::{TeamComp, TeamRulesView, VelComp};
 pub use comp::{TimedComp, TimedKillComp};
 pub use comp::{TrailState, WaterMoveComp, WaterMoveDrawPlan};
 pub use comp::{UnderwaterDrawPlan, UnderwaterMoveComp};
-pub use comp::{
-    UnitCollisionLayer, UnitComp, UnitControllerState, UnitFloorSnapshot, UnitTrailState,
-};
 pub use comp::{UnitTetherAction, UnitTetherComp, UnitTetherRef};
 pub use comp::{WaterCrawlComp, WaterCrawlSolidPred};
 pub use comp::{WorldLabelAlign, WorldLabelComp, WorldLabelDrawPlan};

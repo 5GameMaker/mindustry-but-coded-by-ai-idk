@@ -20,8 +20,8 @@ use mindustry_core::mindustry::ctype::{Content, ContentId};
 use mindustry_core::mindustry::entities::{
     bullet::BulletType,
     comp::{
-        BuildingComp, BulletComp, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
-        UnitControllerState,
+        BuildingComp, BulletComp, CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp,
+        PlayerUnitState, UnitComp, UnitControllerState,
     },
 };
 use mindustry_core::mindustry::input::{
@@ -246,6 +246,9 @@ impl ServerLauncher {
                 {
                     self.network_error = Some(error.to_string());
                 }
+            }
+            if let Err(error) = self.tick_runtime_unit_cargo_ai() {
+                self.network_error = Some(error.to_string());
             }
             self.last_runtime_item_transport_report = Some(report.item_transport);
             self.last_runtime_payload_report = Some(report.payload);
@@ -1350,6 +1353,8 @@ impl ServerLauncher {
             let mut unit = UnitComp::new(unit_id, unit_type.clone(), building.team);
             unit.set_pos(building.x, building.y);
             unit.set_rotation(90.0);
+            unit.set_controller(UnitControllerState::Cargo);
+            unit.cargo_ai = Some(CargoAiRuntimeState::new(Some(tile_pos)));
             self.server_units.insert(unit_id, unit);
 
             if let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) =
@@ -1373,6 +1378,383 @@ impl ServerLauncher {
         }
 
         Ok(applied)
+    }
+
+    fn tick_runtime_unit_cargo_ai(&mut self) -> io::Result<usize> {
+        let linked_units: Vec<_> = self
+            .runtime
+            .distribution_runtime_states
+            .iter()
+            .filter_map(|(&tile_pos, state)| match state {
+                GameRuntimeDistributionBlockState::UnitCargoLoader(state)
+                    if state.has_unit && state.read_unit_id >= 0 =>
+                {
+                    Some((tile_pos, state.read_unit_id))
+                }
+                _ => None,
+            })
+            .collect();
+
+        let mut applied = 0;
+        for (loader_tile_pos, unit_id) in linked_units {
+            applied += self.tick_runtime_unit_cargo_ai_for_loader(loader_tile_pos, unit_id)?;
+        }
+        Ok(applied)
+    }
+
+    fn tick_runtime_unit_cargo_ai_for_loader(
+        &mut self,
+        loader_tile_pos: i32,
+        unit_id: i32,
+    ) -> io::Result<usize> {
+        let Some(loader_index) = self
+            .runtime
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == loader_tile_pos)
+        else {
+            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id);
+            return Ok(0);
+        };
+
+        let (loader_x, loader_y, loader_team, loader_valid) = {
+            let building = &self.runtime.buildings[loader_index];
+            (
+                building.x,
+                building.y,
+                building.team,
+                building.is_valid() && building.items.is_some(),
+            )
+        };
+        if !loader_valid {
+            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id);
+            return Ok(0);
+        }
+
+        let Some(unit_snapshot) = self.server_units.get(&unit_id).cloned() else {
+            self.clear_runtime_unit_cargo_loader_state(loader_tile_pos);
+            return Ok(0);
+        };
+        if unit_snapshot.team_id() != loader_team {
+            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id);
+            return Ok(0);
+        }
+
+        if !unit_snapshot.controller.is_cargo() {
+            if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                unit.set_controller(UnitControllerState::Cargo);
+            }
+        }
+        if let Some(unit) = self.server_units.get_mut(&unit_id) {
+            let cargo = unit
+                .cargo_ai
+                .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+            cargo.tether_tile_pos = Some(loader_tile_pos);
+        }
+
+        if !unit_snapshot.items.has_item() {
+            let unit_capacity = unit_snapshot.items.item_capacity();
+            let target_index = unit_snapshot
+                .cargo_ai
+                .as_ref()
+                .map(|state| state.target_index)
+                .unwrap_or(0);
+            let Some((item_id, item_name, amount, target_tile_pos, next_target_index)) = self
+                .find_runtime_unit_cargo_pickup_plan(
+                    loader_index,
+                    loader_team,
+                    unit_capacity,
+                    target_index,
+                )
+            else {
+                if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                    if let Some(cargo) = unit.cargo_ai.as_mut() {
+                        cargo.unload_target_tile_pos = None;
+                        cargo.item_target = None;
+                    }
+                }
+                return Ok(0);
+            };
+
+            if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                unit.set_pos(loader_x, loader_y);
+                unit.set_rotation(90.0);
+                let cargo = unit
+                    .cargo_ai
+                    .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+                cargo.tether_tile_pos = Some(loader_tile_pos);
+                cargo.unload_target_tile_pos = Some(target_tile_pos);
+                cargo.item_target = Some(item_name.clone());
+                cargo.target_index = next_target_index;
+                cargo.no_dest_timer = 0.0;
+            }
+
+            let outcome = take_items(
+                self.runtime.buildings_mut().get_mut(loader_index),
+                Some(item_name.clone()),
+                amount,
+                self.server_units.get_mut(&unit_id),
+                |name| {
+                    if name == item_name.as_str() {
+                        Some(item_id)
+                    } else {
+                        None
+                    }
+                },
+            );
+            if let Some(remove_stack) = outcome.remove_stack.as_ref() {
+                self.runtime
+                    .apply_item_remove_stack_plan(&self.content_loader, remove_stack);
+            }
+            if outcome.accepted {
+                if let Some(packet) = outcome.packet.as_ref() {
+                    if self.net_server.is_active() {
+                        self.net_server
+                            .net_mut()
+                            .send(&PacketKind::TakeItemsCallPacket(packet.clone()), false)?;
+                        self.runtime_take_items_packets_sent += 1;
+                    }
+                }
+                if self.net_server.is_active() {
+                    for packet in &outcome.transfer_effects {
+                        self.net_server.net_mut().send(
+                            &PacketKind::TransferItemEffectCallPacket(packet.clone()),
+                            false,
+                        )?;
+                        self.runtime_transfer_item_effect_packets_sent += 1;
+                    }
+                }
+                self.last_runtime_take_items_outcome = Some(outcome);
+                return Ok(1);
+            }
+            self.last_runtime_take_items_outcome = Some(outcome);
+            return Ok(0);
+        }
+
+        let Some(item_name) = unit_snapshot.items.item().map(str::to_owned) else {
+            return Ok(0);
+        };
+        let Some(item_id) = self
+            .content_loader
+            .item_by_name(&item_name)
+            .map(|item| item.base.mappable.base.id as ContentId)
+        else {
+            if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                unit.items.clear_item();
+                if let Some(cargo) = unit.cargo_ai.as_mut() {
+                    cargo.unload_target_tile_pos = None;
+                    cargo.item_target = None;
+                }
+            }
+            return Ok(0);
+        };
+
+        let target_index = unit_snapshot
+            .cargo_ai
+            .as_ref()
+            .map(|state| state.target_index)
+            .unwrap_or(0);
+        let Some((target_tile_pos, target_building_index, next_target_index)) =
+            self.find_runtime_unit_cargo_drop_target(item_id, loader_team, target_index, None)
+        else {
+            if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                unit.items.clear_item();
+                if let Some(cargo) = unit.cargo_ai.as_mut() {
+                    cargo.unload_target_tile_pos = None;
+                    cargo.item_target = None;
+                    cargo.no_dest_timer = 0.0;
+                }
+            }
+            return Ok(0);
+        };
+
+        let accepted_amount = {
+            let target = &self.runtime.buildings[target_building_index];
+            Self::building_accept_stack_amount(target, item_id, unit_snapshot.items.stack.amount)
+        };
+        if accepted_amount <= 0 {
+            if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                let cargo = unit
+                    .cargo_ai
+                    .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+                cargo.unload_target_tile_pos = Some(target_tile_pos);
+                cargo.item_target = Some(item_name);
+                cargo.no_dest_timer += 1.0;
+                cargo.target_index = next_target_index;
+            }
+            return Ok(0);
+        }
+
+        if let Some(unit) = self.server_units.get_mut(&unit_id) {
+            let (target_x, target_y) = {
+                let target = &self.runtime.buildings[target_building_index];
+                (target.x, target.y)
+            };
+            unit.set_pos(target_x, target_y);
+            let cargo = unit
+                .cargo_ai
+                .get_or_insert_with(|| CargoAiRuntimeState::new(Some(loader_tile_pos)));
+            cargo.unload_target_tile_pos = Some(target_tile_pos);
+            cargo.item_target = Some(item_name.clone());
+            cargo.target_index = next_target_index;
+            cargo.no_dest_timer = 0.0;
+        }
+
+        let (unit_x, unit_y) = self
+            .server_units
+            .get(&unit_id)
+            .map(|unit| (unit.x(), unit.y()))
+            .unwrap_or((loader_x, loader_y));
+        let outcome = transfer_item_to(
+            self.server_units.get_mut(&unit_id),
+            Some(item_name.clone()),
+            accepted_amount,
+            unit_x,
+            unit_y,
+            self.runtime.buildings_mut().get_mut(target_building_index),
+            |name| {
+                if name == item_name.as_str() {
+                    Some(item_id)
+                } else {
+                    None
+                }
+            },
+        );
+        if outcome.accepted {
+            if let Some(packet) = outcome.packet.as_ref() {
+                self.runtime.apply_item_handle_stack_side_effects(
+                    &self.content_loader,
+                    packet.build,
+                    item_id,
+                    packet.amount,
+                );
+                if self.net_server.is_active() {
+                    self.net_server
+                        .net_mut()
+                        .send(&PacketKind::TransferItemToCallPacket(packet.clone()), false)?;
+                    self.runtime_transfer_item_to_packets_sent += 1;
+                }
+            }
+            if let Some(unit) = self.server_units.get_mut(&unit_id) {
+                if unit.items.stack.amount == 0 {
+                    if let Some(cargo) = unit.cargo_ai.as_mut() {
+                        cargo.unload_target_tile_pos = None;
+                        cargo.item_target = None;
+                    }
+                }
+            }
+            self.last_runtime_transfer_item_to_outcome = Some(outcome);
+            return Ok(1);
+        }
+        self.last_runtime_transfer_item_to_outcome = Some(outcome);
+        Ok(0)
+    }
+
+    fn find_runtime_unit_cargo_pickup_plan(
+        &self,
+        loader_index: usize,
+        team: TeamId,
+        unit_capacity: i32,
+        target_index: usize,
+    ) -> Option<(ContentId, String, i32, i32, usize)> {
+        let building = self.runtime.buildings.get(loader_index)?;
+        let items = building.items.as_ref()?;
+        let mut item_entries: Vec<_> = items
+            .each()
+            .filter(|(_, amount)| *amount > 0)
+            .map(|(item_id, amount)| (item_id as ContentId, amount))
+            .collect();
+        item_entries.sort_by(|(left_id, left_amount), (right_id, right_amount)| {
+            right_amount
+                .cmp(left_amount)
+                .then_with(|| left_id.cmp(right_id))
+        });
+
+        for (item_id, amount) in item_entries {
+            let Some((target_tile_pos, _, next_target_index)) =
+                self.find_runtime_unit_cargo_drop_target(item_id, team, target_index, None)
+            else {
+                continue;
+            };
+            let item_name = self.content_loader.item(item_id)?.name().to_string();
+            let transfer_amount = amount.min(unit_capacity).max(0);
+            if transfer_amount > 0 {
+                return Some((
+                    item_id,
+                    item_name,
+                    transfer_amount,
+                    target_tile_pos,
+                    next_target_index,
+                ));
+            }
+        }
+        None
+    }
+
+    fn find_runtime_unit_cargo_drop_target(
+        &self,
+        item_id: ContentId,
+        team: TeamId,
+        offset: usize,
+        ignore_tile_pos: Option<i32>,
+    ) -> Option<(i32, usize, usize)> {
+        let mut targets = Vec::new();
+        for (building_index, building) in self.runtime.buildings.iter().enumerate() {
+            if building.team != team || Some(building.tile_pos) == ignore_tile_pos {
+                continue;
+            }
+            let Some(BlockDef::Distribution(distribution)) =
+                self.content_loader.block(building.block.id)
+            else {
+                continue;
+            };
+            if distribution.kind != DistributionBlockKind::UnitCargoUnloadPoint {
+                continue;
+            }
+            let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) = self
+                .runtime
+                .distribution_runtime_states
+                .get(&building.tile_pos)
+            else {
+                continue;
+            };
+            if state.item_id == Some(item_id as i32) {
+                targets.push((building.tile_pos, building_index, state.stale));
+            }
+        }
+        if targets.is_empty() {
+            return None;
+        }
+
+        let start = if targets.is_empty() {
+            0
+        } else {
+            (offset + 1) % targets.len()
+        };
+        for i in 0..targets.len() {
+            let index = (start + i) % targets.len();
+            let (tile_pos, building_index, stale) = targets[index];
+            if !stale {
+                return Some((tile_pos, building_index, index));
+            }
+        }
+
+        let (tile_pos, building_index, _) = targets[0];
+        Some((tile_pos, building_index, 0))
+    }
+
+    fn clear_runtime_unit_cargo_loader_state(&mut self, tile_pos: i32) {
+        if let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) =
+            self.runtime.distribution_runtime_states.get_mut(&tile_pos)
+        {
+            state.has_unit = false;
+            state.read_unit_id = -1;
+        }
+    }
+
+    fn remove_runtime_unit_cargo_loader_unit(&mut self, tile_pos: i32, unit_id: i32) {
+        self.server_units.remove(&unit_id);
+        self.clear_runtime_unit_cargo_loader_state(tile_pos);
     }
 
     fn server_unit_enter_payload_build_tile_pos(&self, unit: &UnitComp) -> Option<i32> {
@@ -4614,6 +4996,14 @@ mod tests {
         assert_eq!(spawned_unit.x(), launcher.runtime.buildings()[0].x);
         assert_eq!(spawned_unit.y(), launcher.runtime.buildings()[0].y);
         assert_eq!(spawned_unit.rotation(), 90.0);
+        assert!(spawned_unit.controller.is_cargo());
+        assert_eq!(
+            spawned_unit
+                .cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.tether_tile_pos),
+            Some(loader_tile)
+        );
 
         let sent = sent.lock().unwrap();
         assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
@@ -4622,6 +5012,132 @@ mod tests {
                     packet,
                     PacketKind::UnitTetherBlockSpawnedCallPacket(packet)
                         if packet.tile == Some(loader_tile) && packet.id == spawned_id
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_drives_spawned_unit_cargo_ai_between_loader_and_unload_point() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6581).unwrap();
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let loader_tile = point2_pack(6, 6);
+        let unload_tile = point2_pack(10, 6);
+
+        launcher.runtime.state.world.resize(18, 12);
+        let mut loader_building =
+            BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+        loader_building.items.as_mut().unwrap().add(copper, 12);
+        launcher.runtime.add_building(loader_building);
+        launcher.runtime.add_building(BuildingComp::new(
+            unload_tile,
+            unload_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                read_unit_id: 7,
+                has_unit: true,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        launcher.runtime.distribution_runtime_states.insert(
+            unload_tile,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: Some(copper as i32),
+                stale_timer: 0.0,
+                stale: false,
+            }),
+        );
+        let mut cargo_unit = UnitComp::new(
+            7,
+            launcher
+                .content_loader
+                .unit_by_name("manifold")
+                .unwrap()
+                .clone(),
+            TeamId(6),
+        );
+        cargo_unit.set_controller(UnitControllerState::Cargo);
+        launcher.server_units.insert(7, cargo_unit);
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        assert_eq!(
+            launcher.runtime.buildings()[0]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            0
+        );
+        let unit = launcher.server_units.get(&7).unwrap();
+        assert_eq!(unit.items.item(), Some("copper"));
+        assert_eq!(unit.items.stack.amount, 12);
+        assert_eq!(
+            unit.cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.unload_target_tile_pos),
+            Some(unload_tile)
+        );
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&7).unwrap();
+        assert_eq!(unit.items.stack.amount, 0);
+        assert_eq!(
+            launcher.runtime.buildings()[1]
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            12
+        );
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::TakeItemsCallPacket(packet)
+                        if packet.build == BuildingRef::new(loader_tile)
+                            && packet.item.as_deref() == Some("copper")
+                            && packet.amount == 12
+                            && packet.to == UnitRef::Unit { id: 7 }
+                )
+        }));
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::TransferItemToCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 7 }
+                            && packet.item.as_deref() == Some("copper")
+                            && packet.amount == 12
+                            && packet.build == BuildingRef::new(unload_tile)
                 )
         }));
     }

@@ -3750,13 +3750,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 2026-05-27：补齐 `UnitCargoLoader` 构建对真实资源门控的最小接入。loader tick 现在会读取 owned power graph 写回的 `power.status`，并按 `consumeLiquid(nitrogen, 10f / 60f)` 的 Java 配置用现有 liquid consumer helper 计算有效效率；缺电或缺 nitrogen 时不推进 `buildProgress`，资源满足时按 `edelta` 推进并消耗 nitrogen。真实 server->desktop tether spawn smoke 已补充 power-source/nitrogen 基线，避免只靠手写 `building.efficiency` 通过。
   - 新增 `game_runtime_unit_cargo_loader_stalls_without_power_or_nitrogen`
   - 调整 `game_runtime_owned_runtime_blocks_advances_unit_cargo_loader_build`、server unit cargo loader smoke 与真实联机 smoke 使用 power-source + nitrogen 复现 Java consume 链。
+- 2026-05-27：开始接入 `CargoAI` 的真实单位往返装卸链路，而不是只保留 loader/unload 两个孤立 block runtime。`UnitComp` 新增 `CargoAiRuntimeState` 与 `UnitControllerState::Cargo`，`ServerLauncher` 在 `unit-cargo-loader` 生成 `manifold` 时写入 tether tile/controller，并在每次 server owned runtime update 后驱动 cargo unit：
+  - 空载 cargo unit 从 tether loader 的真实 `ItemModule` 里按数量优先选择物品，目标来自同队、已配置同物品的 `UnitCargoUnloadPoint`，优先非 stale；
+  - pickup 复用现有 `take_items(...)`，会真实扣 loader 库存、写入 `UnitComp.items`，并广播 Java 兼容的 `TakeItemsCallPacket` / `TransferItemEffectCallPacket`；
+  - 载货 cargo unit 复用 `transfer_item_to(...)` 向匹配 unload point 入库，并广播 `TransferItemToCallPacket`，因此链路接入 server runtime/entity/network，而不是新增孤立 helper；
+  - 新增 `server_update_drives_spawned_unit_cargo_ai_between_loader_and_unload_point`，覆盖 loader 库存 -> `manifold` -> unload point 库存的两 tick 闭环，以及对应 packet 发送。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_tether_block_spawned`
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`
   - `cargo test -p mindustry-desktop unit_cargo --lib`
-  - `cargo test -p mindustry-server unit_cargo --lib`
-  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`
+  - `cargo test -p mindustry-server unit_cargo --lib`（本轮通过 6/6）
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`（本轮通过）
   - `cargo fmt --check`
-  - `cargo check --workspace`
-- 仍未完成：server-side `BuildingTetherComp` 正式并入 `UnitComp`/Groups.unit 生命周期、loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的 UI 选择表/rollback 权限细节、真实 cargo unit AI 往返装卸与 Java 客户端/服务端更完整联机兼容仍待补。
+  - `cargo check --workspace`（本轮通过，仅保留既有 unused warning）
+- 仍未完成：server-side `BuildingTetherComp` 还未作为正式组件并入 `UnitComp`/Groups.unit 生命周期；当前 cargo AI 仍是 server launcher 驱动的最小 authoritative 闭环，尚未完整迁移 Java `CargoAI.retarget()/timer/dropSpacing/noDestTimer`、真实平滑移动与客户端单位实体 snapshot 可视化；loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的 UI 选择表/rollback 权限细节、Java 客户端/服务端更完整联机兼容仍待补。
