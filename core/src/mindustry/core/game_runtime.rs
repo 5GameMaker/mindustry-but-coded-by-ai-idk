@@ -1999,6 +1999,7 @@ pub struct GameRuntimeUnitAssemblerFrameReport {
     pub visited_buildings: usize,
     pub assembler_candidates: usize,
     pub updated_assemblers: usize,
+    pub inactive_assemblers: usize,
     pub tier_updates: usize,
     pub moved_in_payloads: usize,
     pub completed_units: usize,
@@ -18415,6 +18416,10 @@ impl GameRuntime {
                 .unwrap_or(false);
             let unit_cost = self.state.rules.unit_cost(team.0 as usize);
             let unit_build_speed = self.state.rules.unit_build_speed(team.0 as usize);
+            let team_activates_factories = self
+                .state
+                .rules
+                .unit_factory_active(team.0 as usize, self.state.tick);
             let Some(payload_requirements) =
                 Self::assembler_payload_requirements(content, plan, unit_cost)
             else {
@@ -18475,6 +18480,14 @@ impl GameRuntime {
                 if !requirements_met {
                     report.missing_requirements += 1;
                 }
+                if !team_activates_factories {
+                    report.inactive_assemblers += 1;
+                }
+                let effective_efficiency = if team_activates_factories {
+                    efficiency
+                } else {
+                    0.0
+                };
 
                 let drones_created = assembler_block.drones_created.max(0) as usize;
                 // Until AssemblerAI/BuildingTether unit ownership is migrated, the
@@ -18488,12 +18501,12 @@ impl GameRuntime {
                     power_status,
                     simulated_drones,
                     drones_created,
-                    efficiency,
+                    effective_efficiency,
                     can_create,
                     requirements_met,
                     simulated_drones,
                     frame_delta * time_scale,
-                    frame_delta * time_scale * efficiency,
+                    frame_delta * time_scale * effective_efficiency,
                     unit_build_speed,
                     plan.time,
                 );
@@ -23199,6 +23212,108 @@ mod tests {
         assert!(common.payload.is_none());
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
+    }
+
+    #[test]
+    fn game_runtime_unit_assembler_respects_team_activation_delay_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let stell = content.unit_by_name("stell").unwrap();
+        let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let plan = &assembler_block.plans[0];
+        let tile_pos = point2_pack(14, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 32);
+        runtime
+            .state
+            .rules
+            .teams
+            .get_or_insert(4)
+            .unit_factory_activation_delay = 120.0;
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+        if let Some(power) = runtime.buildings[0].power.as_mut() {
+            power.status = 1.0;
+        }
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 4);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 1.0 - 1.0 / plan.time,
+                    blocks,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let inactive_report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+        assert_eq!(runtime.state.tick, 60.0);
+        assert_eq!(inactive_report.unit.assembler.assembler_candidates, 1);
+        assert_eq!(inactive_report.unit.assembler.inactive_assemblers, 1);
+        assert_eq!(inactive_report.unit.assembler.completed_units, 0);
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("assembler sidecar should remain present while inactive");
+        };
+        assert!(assembler.progress < 1.0);
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let active_report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+        assert_eq!(runtime.state.tick, 120.0);
+        assert_eq!(active_report.unit.assembler.inactive_assemblers, 0);
+        assert_eq!(active_report.unit.assembler.completed_units, 1);
     }
 
     #[test]

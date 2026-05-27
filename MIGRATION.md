@@ -3967,3 +3967,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core`
   - `cargo check -p mindustry-server`
 - 仍未完成：Reconstructor 的完整消费系统 rollback/UI efficiency、create sound/effect/event 以及真实 Java↔Rust smoke 仍需继续迁移。
+
+### 12.123 UnitAssembler 队伍激活延迟门控
+
+- 2026-05-27：对照 Java `UnitAssemblerBuild.status()` / `shouldConsume()`，把单位组装厂的生产进度接入 `team.activateUnitFactories()` 等价规则，避免 Rust UnitAssembler 在队伍激活延迟内提前完成组装。
+- Java 依据：
+  - `shouldConsume()` 要求 `enabled && !wasOccupied && Units.canCreate(team, plan().unit) && consPayload.efficiency(this) > 0 && consItem.efficiency(this) > 0 && team.activateUnitFactories()`；
+  - `status()` 在 `!team.activateUnitFactories()` 时返回 `BlockStatus.inactive`；
+  - 激活延迟影响消耗与进度推进，不应阻断已迁移的 sidecar 保留、payload 状态读取与后续激活后的恢复生产。
+- Rust 新增/变化：
+  - `GameRuntimeUnitAssemblerFrameReport` 新增 `inactive_assemblers`；
+  - `advance_owned_unit_assemblers_ticks(...)` 现在读取 `Rules::unit_factory_active(team, tick)`，队伍未激活时记录 inactive，并将传给 `unit_assembler_update_progress(...)` 的 `effective_efficiency` 置零；
+  - 未激活帧不推进 `progress`、不完成单位、不消耗 payload/item requirements；激活后同一 sidecar 可继续推进并完成组装。
+- 新增验证：
+  - `cargo test -p mindustry-core unit_assembler_respects_team_activation_delay --lib`
+  - `cargo test -p mindustry-core game_runtime_owned_runtime_blocks_includes_unit_assembler_tick_like_java --lib`
+- 仍未完成：UnitAssembler 的完整 UI status/bar、AssemblerAI/BuildingTether 实体所有权、create effect/sound/event、网络广播与 Java↔Rust 真实联机 smoke 仍需继续迁移。
