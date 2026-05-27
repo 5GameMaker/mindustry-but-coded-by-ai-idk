@@ -208,6 +208,7 @@ impl DesktopLauncher {
         self.draw_local_effect_states_for_render(|input| {
             if let Some(plan) = standard_effect_draw_plan(
                 input.effect_id,
+                input.id,
                 input.x,
                 input.y,
                 input.rotation,

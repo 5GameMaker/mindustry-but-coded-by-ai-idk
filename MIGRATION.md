@@ -5557,3 +5557,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 该缓存还没有交给真实窗口/图形 backend 绘制；
   - server snapshot effect 与更多 Fx 的 draw plan 仍需扩展。
+
+### 12.188 Standard Fx seeded particle/cloud draw plans
+
+- 2026-05-28：继续对照 `core/src/mindustry/content/Fx.java`，把下一批已经进入标准 Fx lookup 的火焰/烟雾/蒸汽类 renderer 从“无 draw plan”推进到可由桌面帧缓存携带的 seeded particle/cloud plan。
+- Java 依据：
+  - `Fx.fire`：`color(Pal.lightFlame, Pal.darkFlame, e.fin())`；`randLenVectors(e.id, 2, 2f + e.fin() * 9f, ...)`；圆半径 `0.2f + e.fslope() * 1.5f`；并调用 `Drawf.light(..., 20f * e.fslope(), Pal.lightFlame, 0.5f)`；
+  - `Fx.fireSmoke`：`Color.gray`，`randLenVectors(e.id, 1, 2f + e.fin() * 7f, ...)`，圆半径 `0.2f + e.fslope() * 1.5f`；
+  - `Fx.steam`：`Color.lightGray`，`randLenVectors(e.id, 2, 2f + e.fin() * 7f, ...)`，圆半径 `0.2f + e.fslope() * 1.5f`；
+  - `Fx.vapor`：`color(e.color)`，`alpha(e.fout())`，`randLenVectors(e.id, 3, 2f + e.finpow() * 11f, ...)`，圆半径 `0.6f + e.fin() * 5f`；
+  - `Fx.fireballsmoke`：`Color.gray`，`randLenVectors(e.id, 1, 2f + e.fin() * 7f, ...)`，圆半径 `0.2f + e.fout() * 1.5f`；
+  - `Fx.smokeCloud`：`randLenVectors(e.id, e.fin(), 30, 30f, ...)`，局部 alpha `(0.5f - abs(fin - 0.5f)) * 2f`，圆半径 `0.5f + fout * 4f`。
+- Rust 新增/变化：
+  - `StandardEffectDrawKind` 新增 `SeededCircleParticles`；
+  - 新增 `StandardEffectParticleSpec`，记录 Java `randLenVectors(...)` 所需的 deterministic seed、粒子数量、进度、扩散长度、半径曲线和局部 alpha 语义；
+  - `StandardEffectDrawPlan` 增加 `alpha`、`particles`、`light_color/light_radius/light_opacity` 字段，用于表达 `vapor` 的全局透明度和 `fire` 的光照；
+  - `standard_effect_draw_plan(...)` 现在接收 `EffectStateComp.id` 作为 Java `e.id` 等价 seed，并覆盖 `fire/fireSmoke/steam/vapor/fireballsmoke/smokeCloud`；
+  - `DesktopLauncher::collect_standard_local_effect_draw_plans_for_render()` 把 `EffectRenderInput.id` 传入标准 draw plan，使桌面帧缓存保留 seeded particle 所需的运行时 id。
+- 新增验证：
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles`
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-desktop standard_effect_draw --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `StandardEffectParticleSpec` 仍是语义级 seeded particle/cloud plan，还没有在真实 2D/GPU backend 中展开为具体 circle primitives；
+  - Java `Angles.randLenVectors` 的完全一致 RNG/角度分布还需要在渲染 backend 或共享 primitive 展开层中复刻；
+  - 完整 `Fx.java` renderer 仍待继续逐项迁移。

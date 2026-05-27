@@ -106,6 +106,20 @@ pub fn standard_effect_render_lifetime(effect_id: Option<u16>, rotation: f32, cu
 pub enum StandardEffectDrawKind {
     FilledCircle,
     StrokedCircle,
+    SeededCircleParticles,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectParticleSpec {
+    pub seed: i32,
+    pub count: u16,
+    pub progress: Option<f32>,
+    pub length: f32,
+    pub radius_base: f32,
+    pub radius_fin_scale: f32,
+    pub radius_fout_scale: f32,
+    pub radius_fslope_scale: f32,
+    pub alpha_midpoint: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -119,12 +133,18 @@ pub struct StandardEffectDrawPlan {
     pub color_mix: f32,
     pub input_color: Option<DecalColor>,
     pub color_mul: f32,
+    pub alpha: f32,
     pub radius: f32,
     pub stroke: f32,
+    pub particles: Option<StandardEffectParticleSpec>,
+    pub light_color: Option<&'static str>,
+    pub light_radius: f32,
+    pub light_opacity: f32,
 }
 
 pub fn standard_effect_draw_plan(
     effect_id: Option<u16>,
+    state_id: i32,
     x: f32,
     y: f32,
     rotation: f32,
@@ -141,6 +161,8 @@ pub fn standard_effect_draw_plan(
         (time / lifetime).clamp(0.0, 1.0)
     };
     let fout = 1.0 - fin;
+    let finpow = fin * fin;
+    let fslope = effect_fslope_from_fin(fin);
 
     let plan = match effect_id {
         FX_SMOKE_ID => StandardEffectDrawPlan {
@@ -153,8 +175,13 @@ pub fn standard_effect_draw_plan(
             color_mix: fin,
             input_color: None,
             color_mul: 1.0,
+            alpha: 1.0,
             radius: (7.0 - 7.0 * fin) / 2.0,
             stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
         },
         FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
             effect_id,
@@ -166,8 +193,157 @@ pub fn standard_effect_draw_plan(
             color_mix: 0.0,
             input_color: Some(color),
             color_mul: 1.0,
+            alpha: 1.0,
             radius: rotation * fout,
             stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_FIRE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Pal.lightFlame"),
+            color_to: Some("Pal.darkFlame"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                length: 2.0 + fin * 9.0,
+                radius_base: 0.2,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 1.5,
+                alpha_midpoint: false,
+            }),
+            light_color: Some("Pal.lightFlame"),
+            light_radius: 20.0 * fslope,
+            light_opacity: 0.5,
+        },
+        FX_FIRE_SMOKE_ID | FX_STEAM_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some(if effect_id == FX_STEAM_ID {
+                "Color.lightGray"
+            } else {
+                "Color.gray"
+            }),
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: if effect_id == FX_STEAM_ID { 2 } else { 1 },
+                progress: None,
+                length: 2.0 + fin * 7.0,
+                radius_base: 0.2,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 1.5,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_VAPOR_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: fout,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 3,
+                progress: None,
+                length: 2.0 + finpow * 11.0,
+                radius_base: 0.6,
+                radius_fin_scale: 5.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_FIREBALL_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Color.gray"),
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 1,
+                progress: None,
+                length: 2.0 + fin * 7.0,
+                radius_base: 0.2,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 1.5,
+                radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_SMOKE_CLOUD_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Color.gray"),
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 30,
+                progress: Some(fin),
+                length: 30.0,
+                radius_base: 0.5,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 4.0,
+                radius_fslope_scale: 0.0,
+                alpha_midpoint: true,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
         },
         FX_RIPPLE_ID => StandardEffectDrawPlan {
             effect_id,
@@ -179,12 +355,21 @@ pub fn standard_effect_draw_plan(
             color_mix: 0.0,
             input_color: Some(color),
             color_mul: 1.5,
+            alpha: 1.0,
             radius: (2.0 + fin * 4.0) * rotation,
             stroke: fout * 1.4,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
         },
         _ => return None,
     };
     Some(plan)
+}
+
+fn effect_fslope_from_fin(fin: f32) -> f32 {
+    (1.0 - (fin.clamp(0.0, 1.0) - 0.5).abs() * 2.0).clamp(0.0, 1.0)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -417,6 +602,10 @@ impl EffectContainer {
 
     pub fn finpow(&self) -> f32 {
         self.fin().powi(2)
+    }
+
+    pub fn fslope(&self) -> f32 {
+        effect_fslope_from_fin(self.fin())
     }
 
     pub fn scaled(&self, lifetime: f32) -> Option<Self> {
@@ -1406,6 +1595,7 @@ mod tests {
     fn standard_effect_draw_plan_covers_smoke_trails_and_ripple() {
         let smoke = standard_effect_draw_plan(
             Some(FX_SMOKE_ID as u16),
+            7,
             10.0,
             20.0,
             0.0,
@@ -1423,6 +1613,7 @@ mod tests {
 
         let trail = standard_effect_draw_plan(
             Some(FX_MISSILE_TRAIL_SHORT_ID as u16),
+            8,
             1.0,
             2.0,
             4.0,
@@ -1438,6 +1629,7 @@ mod tests {
 
         let ripple = standard_effect_draw_plan(
             Some(FX_RIPPLE_ID as u16),
+            9,
             3.0,
             4.0,
             2.0,
@@ -1451,8 +1643,125 @@ mod tests {
         assert!((ripple.radius - 6.0).abs() < 0.0001);
         assert!((ripple.stroke - 1.05).abs() < 0.0001);
         assert!(
-            standard_effect_draw_plan(None, 0.0, 0.0, 0.0, 0.0, 1.0, DecalColor::WHITE).is_none()
+            standard_effect_draw_plan(None, 0, 0.0, 0.0, 0.0, 0.0, 1.0, DecalColor::WHITE)
+                .is_none()
         );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles() {
+        let fire = standard_effect_draw_plan(
+            Some(FX_FIRE_ID as u16),
+            42,
+            10.0,
+            20.0,
+            0.0,
+            25.0,
+            50.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(fire.kind, StandardEffectDrawKind::SeededCircleParticles);
+        assert_eq!(fire.color_from, Some("Pal.lightFlame"));
+        assert_eq!(fire.color_to, Some("Pal.darkFlame"));
+        assert_eq!(fire.color_mix, 0.5);
+        assert_eq!(fire.light_color, Some("Pal.lightFlame"));
+        assert_eq!(fire.light_radius, 20.0);
+        assert_eq!(fire.light_opacity, 0.5);
+        let fire_particles = fire.particles.unwrap();
+        assert_eq!(fire_particles.seed, 42);
+        assert_eq!(fire_particles.count, 2);
+        assert_eq!(fire_particles.length, 6.5);
+        assert_eq!(fire_particles.radius_base, 0.2);
+        assert_eq!(fire_particles.radius_fslope_scale, 1.5);
+
+        let fire_smoke = standard_effect_draw_plan(
+            Some(FX_FIRE_SMOKE_ID as u16),
+            43,
+            0.0,
+            0.0,
+            0.0,
+            17.5,
+            35.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(fire_smoke.color_from, Some("Color.gray"));
+        let fire_smoke_particles = fire_smoke.particles.unwrap();
+        assert_eq!(fire_smoke_particles.count, 1);
+        assert_eq!(fire_smoke_particles.length, 5.5);
+        assert_eq!(fire_smoke_particles.radius_fslope_scale, 1.5);
+
+        let steam = standard_effect_draw_plan(
+            Some(FX_STEAM_ID as u16),
+            44,
+            0.0,
+            0.0,
+            0.0,
+            17.5,
+            35.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(steam.color_from, Some("Color.lightGray"));
+        assert_eq!(steam.particles.unwrap().count, 2);
+
+        let vapor = standard_effect_draw_plan(
+            Some(FX_VAPOR_ID as u16),
+            45,
+            0.0,
+            0.0,
+            0.0,
+            55.0,
+            110.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(vapor.input_color, Some(DecalColor::WHITE));
+        assert_eq!(vapor.alpha, 0.5);
+        let vapor_particles = vapor.particles.unwrap();
+        assert_eq!(vapor_particles.count, 3);
+        assert_eq!(vapor_particles.length, 4.75);
+        assert_eq!(vapor_particles.radius_base, 0.6);
+        assert_eq!(vapor_particles.radius_fin_scale, 5.0);
+
+        let fireball = standard_effect_draw_plan(
+            Some(FX_FIREBALL_SMOKE_ID as u16),
+            46,
+            0.0,
+            0.0,
+            0.0,
+            12.5,
+            25.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let fireball_particles = fireball.particles.unwrap();
+        assert_eq!(fireball.color_from, Some("Color.gray"));
+        assert_eq!(fireball_particles.count, 1);
+        assert_eq!(fireball_particles.length, 5.5);
+        assert_eq!(fireball_particles.radius_base, 0.2);
+        assert_eq!(fireball_particles.radius_fout_scale, 1.5);
+
+        let cloud = standard_effect_draw_plan(
+            Some(FX_SMOKE_CLOUD_ID as u16),
+            47,
+            0.0,
+            0.0,
+            0.0,
+            35.0,
+            70.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let cloud_particles = cloud.particles.unwrap();
+        assert_eq!(cloud.color_from, Some("Color.gray"));
+        assert_eq!(cloud_particles.count, 30);
+        assert_eq!(cloud_particles.progress, Some(0.5));
+        assert_eq!(cloud_particles.length, 30.0);
+        assert_eq!(cloud_particles.radius_base, 0.5);
+        assert_eq!(cloud_particles.radius_fout_scale, 4.0);
+        assert!(cloud_particles.alpha_midpoint);
     }
 
     #[test]
