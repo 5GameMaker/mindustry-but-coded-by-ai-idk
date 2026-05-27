@@ -4696,3 +4696,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 若继续方形类，补 `StrokedSquare` 后做 `healBlock` 等 `Lines.square`；
   2. 若继续圆环粒子，补 seeded stroked-circle particles 后做 `bubble=245`；
   3. 真实 renderer backend 仍需消费 `StandardEffectSquareRenderPrimitive`。
+
+---
+
+## 140. 最新闭环记录：StrokedSquare 与 block square Fx
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补 `Lines.square` 需要的 `StrokedSquare`，并迁移 block 方块类简单 Fx。
+- 本轮迁移：
+  - `healBlock=251`
+  - `rotateBlock=253`
+  - `lightBlock=254`
+  - `overdriveBlockFull=255`
+- Java 依据：
+  - `Fx.java:2775-2795`；
+  - `healBlock`：`Pal.heal`，stroke `2*fout+0.5`，半径约 `fin*rotation*tilesize/2`；
+  - `rotateBlock`：`Pal.accent`，alpha `fout`，半径 `rotation*tilesize/2`；
+  - `lightBlock`：输入色，alpha `fout`；
+  - `overdriveBlockFull`：输入色，alpha `fslope*0.4`，半径 `rotation*tilesize`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `StrokedSquare`；
+    - `StandardEffectSquareRenderPrimitive` 增加 `stroke`；
+    - `square_render_primitives_from_seed()` 支持 stroked square；
+    - 新增 4 个 `FX_*` 常量；
+    - 引入 `vars::TILE_SIZE` 做 Java `tilesize` 对齐。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 下一步建议：
+  1. `healBlockFull` 需要 block icon/rect/mixcol，不能直接塞 square；
+  2. `bubble=245` 可通过 seeded stroked-circle particles 解锁；
+  3. `shieldBreak` 需要 poly/arc primitive。

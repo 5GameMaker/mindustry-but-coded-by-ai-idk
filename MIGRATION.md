@@ -6508,3 +6508,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - square primitive 目前是计划/测试层表达，真实 renderer backend 仍需按 `StandardEffectSquareRenderPrimitive` 接入；
   - `healBlock` 等 `Lines.square` 需要 stroked square 支持，不等同于本轮 `Fill.square`；
   - `bubble` 仍需 seeded stroked-circle particles。
+
+### 12.214 StrokedSquare + block square Fx batch
+
+- 2026-05-28：在上一轮 `FilledSquare` 基础上继续扩展 `StrokedSquare`，迁移后段 block square 类标准 Fx 中无需 rect/icon/poly/line 的部分。
+- 本轮迁移：
+  - `healBlock=251`
+  - `rotateBlock=253`
+  - `lightBlock=254`
+  - `overdriveBlockFull=255`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2775` 附近：
+    - `healBlock = new Effect(20, ...)`，`Pal.heal`，stroke `2*fout+0.5`，`Lines.square(..., 1 + (fin*rotation*tilesize/2 - 1))`；
+    - `rotateBlock = new Effect(30, ...)`，`Pal.accent`，alpha `fout`，`Fill.square(..., rotation*tilesize/2)`；
+    - `lightBlock = new Effect(60, ...)`，输入色，alpha `fout`，`Fill.square(..., rotation*tilesize/2)`；
+    - `overdriveBlockFull = new Effect(60, ...)`，输入色，alpha `fslope*0.4`，`Fill.square(..., rotation*tilesize)`。
+  - `tilesize` 对应 Rust `vars::TILE_SIZE = 8`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - `StandardEffectDrawKind` 新增 `StrokedSquare`；
+    - `StandardEffectSquareRenderPrimitive` 新增 `stroke` 字段；
+    - `square_render_primitives_from_seed()` 支持 `StrokedSquare`；
+    - 新增 4 个 `FX_*` 常量并接入 name/metadata；
+    - `standard_effect_draw_plan(...)` 新增 block square 分支。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 4 个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖 `StrokedSquare` stroke、半径、alpha、输入色与 `TILE_SIZE` 换算。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+- 仍未完成：
+  - `healBlockFull` 需要 block icon/rect/mixcol 数据；
+  - `shieldBreak` 及后续 shield/unit 类需要 poly/arc/line primitive；
+  - square primitive 仍需 renderer backend 消费。

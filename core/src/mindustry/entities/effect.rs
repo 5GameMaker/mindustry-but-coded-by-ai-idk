@@ -1,4 +1,4 @@
-use crate::mindustry::{entities::comp::DecalColor, graphics::Layer};
+use crate::mindustry::{entities::comp::DecalColor, graphics::Layer, vars::TILE_SIZE};
 
 pub const SHAKE_FALLOFF: f32 = 10000.0;
 pub const DEFAULT_EFFECT_LIFETIME: f32 = 50.0;
@@ -128,6 +128,14 @@ pub const FX_LAUNCH_ID: i32 = 247;
 pub const FX_HEAL_WAVE_MEND_ID: i32 = 249;
 /// Upstream `Fx.overdriveWave` id in `mindustry.content.Fx` for v158.1.
 pub const FX_OVERDRIVE_WAVE_ID: i32 = 250;
+/// Upstream `Fx.healBlock` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HEAL_BLOCK_ID: i32 = 251;
+/// Upstream `Fx.rotateBlock` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ROTATE_BLOCK_ID: i32 = 253;
+/// Upstream `Fx.lightBlock` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LIGHT_BLOCK_ID: i32 = 254;
+/// Upstream `Fx.overdriveBlockFull` id in `mindustry.content.Fx` for v158.1.
+pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
@@ -193,6 +201,10 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "launch" => Some(FX_LAUNCH_ID),
         "healWaveMend" => Some(FX_HEAL_WAVE_MEND_ID),
         "overdriveWave" => Some(FX_OVERDRIVE_WAVE_ID),
+        "healBlock" => Some(FX_HEAL_BLOCK_ID),
+        "rotateBlock" => Some(FX_ROTATE_BLOCK_ID),
+        "lightBlock" => Some(FX_LIGHT_BLOCK_ID),
+        "overdriveBlockFull" => Some(FX_OVERDRIVE_BLOCK_FULL_ID),
         _ => None,
     }
 }
@@ -316,6 +328,12 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_OVERDRIVE_WAVE_ID => {
             Effect::with_lifetime(FX_OVERDRIVE_WAVE_ID, 50.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_HEAL_BLOCK_ID => Effect::with_lifetime(FX_HEAL_BLOCK_ID, 20.0, DEFAULT_EFFECT_CLIP),
+        FX_ROTATE_BLOCK_ID => Effect::with_lifetime(FX_ROTATE_BLOCK_ID, 30.0, DEFAULT_EFFECT_CLIP),
+        FX_LIGHT_BLOCK_ID => Effect::with_lifetime(FX_LIGHT_BLOCK_ID, 60.0, DEFAULT_EFFECT_CLIP),
+        FX_OVERDRIVE_BLOCK_FULL_ID => {
+            Effect::with_lifetime(FX_OVERDRIVE_BLOCK_FULL_ID, 60.0, DEFAULT_EFFECT_CLIP)
+        }
         _ => return None,
     };
     Some(effect)
@@ -341,6 +359,7 @@ pub enum StandardEffectDrawKind {
     StrokedCircle,
     SeededCircleParticles,
     FilledSquare,
+    StrokedSquare,
     SeededSquareParticles,
 }
 
@@ -396,6 +415,7 @@ pub struct StandardEffectCircleRenderPrimitive {
 pub struct StandardEffectSquareRenderPrimitive {
     pub center: (f32, f32),
     pub radius: f32,
+    pub stroke: f32,
     pub rotation: f32,
     pub alpha: f32,
     pub color: Option<DecalColor>,
@@ -535,6 +555,7 @@ impl StandardEffectDrawPlan {
                 })
                 .collect(),
             StandardEffectDrawKind::FilledSquare
+            | StandardEffectDrawKind::StrokedSquare
             | StandardEffectDrawKind::SeededSquareParticles => Vec::new(),
         }
     }
@@ -546,7 +567,18 @@ impl StandardEffectDrawPlan {
                 vec![StandardEffectSquareRenderPrimitive {
                     center: self.center,
                     radius: self.radius,
+                    stroke: 0.0,
                     rotation: self.stroke,
+                    alpha: self.alpha,
+                    color,
+                }]
+            }
+            StandardEffectDrawKind::StrokedSquare => {
+                vec![StandardEffectSquareRenderPrimitive {
+                    center: self.center,
+                    radius: self.radius,
+                    stroke: self.stroke,
+                    rotation: 0.0,
                     alpha: self.alpha,
                     color,
                 }]
@@ -557,6 +589,7 @@ impl StandardEffectDrawPlan {
                 .map(|square| StandardEffectSquareRenderPrimitive {
                     center: square.center,
                     radius: square.radius,
+                    stroke: 0.0,
                     rotation: self.stroke,
                     alpha: square.alpha,
                     color,
@@ -1929,6 +1962,60 @@ pub fn standard_effect_draw_plan(
                 alpha: 1.0,
                 radius,
                 stroke,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
+        FX_HEAL_BLOCK_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedSquare,
+            center: (x, y),
+            color_from: Some("Pal.heal"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fin * rotation * TILE_SIZE as f32 / 2.0,
+            stroke: 2.0 * fout + 0.5,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_ROTATE_BLOCK_ID | FX_LIGHT_BLOCK_ID | FX_OVERDRIVE_BLOCK_FULL_ID => {
+            let (color_from, input_color, alpha, radius) = match effect_id {
+                FX_ROTATE_BLOCK_ID => (
+                    Some("Pal.accent"),
+                    None,
+                    fout,
+                    rotation * TILE_SIZE as f32 / 2.0,
+                ),
+                FX_LIGHT_BLOCK_ID => (None, Some(color), fout, rotation * TILE_SIZE as f32 / 2.0),
+                FX_OVERDRIVE_BLOCK_FULL_ID => {
+                    (None, Some(color), fslope * 0.4, rotation * TILE_SIZE as f32)
+                }
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::FilledSquare,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color,
+                color_mul: 1.0,
+                alpha,
+                radius,
+                stroke: 0.0,
                 particles: None,
                 light_color: None,
                 light_radius: 0.0,
@@ -3379,6 +3466,13 @@ mod tests {
             standard_effect_id("overdriveWave"),
             Some(FX_OVERDRIVE_WAVE_ID)
         );
+        assert_eq!(standard_effect_id("healBlock"), Some(FX_HEAL_BLOCK_ID));
+        assert_eq!(standard_effect_id("rotateBlock"), Some(FX_ROTATE_BLOCK_ID));
+        assert_eq!(standard_effect_id("lightBlock"), Some(FX_LIGHT_BLOCK_ID));
+        assert_eq!(
+            standard_effect_id("overdriveBlockFull"),
+            Some(FX_OVERDRIVE_BLOCK_FULL_ID)
+        );
         assert_eq!(standard_effect_id("none"), None);
     }
 
@@ -3537,6 +3631,15 @@ mod tests {
         assert_eq!(
             standard_effect(FX_OVERDRIVE_WAVE_ID).unwrap().lifetime,
             50.0
+        );
+        assert_eq!(standard_effect(FX_HEAL_BLOCK_ID).unwrap().lifetime, 20.0);
+        assert_eq!(standard_effect(FX_ROTATE_BLOCK_ID).unwrap().lifetime, 30.0);
+        assert_eq!(standard_effect(FX_LIGHT_BLOCK_ID).unwrap().lifetime, 60.0);
+        assert_eq!(
+            standard_effect(FX_OVERDRIVE_BLOCK_FULL_ID)
+                .unwrap()
+                .lifetime,
+            60.0
         );
         assert!(standard_effect_by_name("none").is_none());
         assert!(standard_effect(-1).is_none());
@@ -3873,6 +3976,71 @@ mod tests {
         assert_eq!(overdrive_wave.input_color, Some(input_color));
         assert_eq!(overdrive_wave.radius, 28.0);
         assert_eq!(overdrive_wave.stroke, 0.5);
+
+        let heal_block = standard_effect_draw_plan(
+            Some(FX_HEAL_BLOCK_ID as u16),
+            251,
+            3.0,
+            4.0,
+            3.0,
+            10.0,
+            20.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(heal_block.kind, StandardEffectDrawKind::StrokedSquare);
+        assert_eq!(heal_block.color_from, Some("Pal.heal"));
+        assert_eq!(heal_block.radius, 6.0);
+        assert_eq!(heal_block.stroke, 1.5);
+        let heal_block_square = heal_block.square_render_primitives_from_seed();
+        assert_eq!(heal_block_square.len(), 1);
+        assert_eq!(heal_block_square[0].stroke, 1.5);
+
+        let rotate_block = standard_effect_draw_plan(
+            Some(FX_ROTATE_BLOCK_ID as u16),
+            253,
+            3.0,
+            4.0,
+            2.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(rotate_block.kind, StandardEffectDrawKind::FilledSquare);
+        assert_eq!(rotate_block.color_from, Some("Pal.accent"));
+        assert_eq!(rotate_block.alpha, 0.5);
+        assert_eq!(rotate_block.radius, 8.0);
+
+        let light_block = standard_effect_draw_plan(
+            Some(FX_LIGHT_BLOCK_ID as u16),
+            254,
+            3.0,
+            4.0,
+            2.0,
+            30.0,
+            60.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(light_block.input_color, Some(input_color));
+        assert_eq!(light_block.alpha, 0.5);
+        assert_eq!(light_block.radius, 8.0);
+
+        let overdrive_block = standard_effect_draw_plan(
+            Some(FX_OVERDRIVE_BLOCK_FULL_ID as u16),
+            255,
+            3.0,
+            4.0,
+            2.0,
+            30.0,
+            60.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(overdrive_block.input_color, Some(input_color));
+        assert_eq!(overdrive_block.alpha, 0.4);
+        assert_eq!(overdrive_block.radius, 16.0);
 
         assert!(
             standard_effect_draw_plan(None, 0, 0.0, 0.0, 0.0, 0.0, 1.0, DecalColor::WHITE)
