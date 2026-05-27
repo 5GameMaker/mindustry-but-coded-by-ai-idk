@@ -4307,3 +4307,46 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 继续 `missileTrailSmokeSmall/missileTrailSmoke`，需要多 pass 粒子和 per-particle light；
   2. 或先补 triangle primitive，再做 `shootSmall/shootBig` 系列。
+
+---
+
+## 129. 最新闭环记录：Fx.shootBigSmoke 系列方向烟雾迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shootBigSmoke`、`shootBigSmoke2`、`shootSmokeDisperse` 三个与 `shootSmallSmoke` 同构的方向烟雾 Fx。
+- Java 依据：
+  - `Fx.java:1967-1989`；
+  - ids：
+    - `shootBigSmoke=166`
+    - `shootBigSmoke2=167`
+    - `shootSmokeDisperse=168`
+  - lifetimes：
+    - `17f`
+    - `18f`
+    - `25f`
+  - 均使用 `randLenVectors(e.id, count, e.finpow() * scale, e.rotation, range, ...)`；
+  - 均画 `Fill.circle`，无 light、无 triangle/poly。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` 与 `standard_effect(...)`；
+    - 新增 `Pal.lightOrange` 颜色符号；
+    - `standard_effect_draw_plan(...)` 新增共享分支，按 effect id 参数化：
+      - color_from/color_mid；
+      - particle count；
+      - `finpow` length scale；
+      - angle range；
+      - radius base / fout scale。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 注意：
+  - `artilleryTrailSmoke` 已核对但未迁移：它需要 per-particle lifetime/random alpha/conditional skip；
+  - `shootSmokeSquare*` 需要 polygon/square primitive；
+  - 下一步可以继续 `missileTrailSmokeSmall/missileTrailSmoke`，但需要设计多 pass + per-particle light。

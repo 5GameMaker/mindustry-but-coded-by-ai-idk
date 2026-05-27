@@ -6038,3 +6038,54 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 真实 desktop renderer 仍未消费这些 primitive；
   - `missileTrailSmokeSmall/missileTrailSmoke` 的多 pass 烟轨和 per-particle light 仍未迁移。
+
+### 12.203 Fx.shootBigSmoke 系列方向烟雾迁移
+
+- 2026-05-28：核对 `artilleryTrailSmoke` 后确认其需要每粒子独立 lifetime/random alpha/条件跳过，当前标准粒子 spec 暂不能精确表达；本轮改为迁移同一区段内可精确复用方向扇区粒子和三段颜色插值的 `shootBigSmoke`、`shootBigSmoke2`、`shootSmokeDisperse`。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1967` 附近：
+    - `shootBigSmoke = new Effect(17f, ...)`
+    - 颜色 `Pal.lighterOrange -> Color.lightGray -> Color.gray`
+    - `randLenVectors(e.id, 8, e.finpow() * 19f, e.rotation, 10f, ...)`
+    - 半径 `e.fout() * 2f + 0.2f`
+  - `Fx.java:1975` 附近：
+    - `shootBigSmoke2 = new Effect(18f, ...)`
+    - 颜色 `Pal.lightOrange -> Color.lightGray -> Color.gray`
+    - `randLenVectors(e.id, 9, e.finpow() * 23f, e.rotation, 20f, ...)`
+    - 半径 `e.fout() * 2.4f + 0.2f`
+  - `Fx.java:1983` 附近：
+    - `shootSmokeDisperse = new Effect(25f, ...)`
+    - 颜色 `Pal.lightOrange -> Color.white -> Color.gray`
+    - `randLenVectors(e.id, 9, e.finpow() * 29f, e.rotation, 18f, ...)`
+    - 半径 `e.fout() * 2.2f + 0.1f`
+  - 本地按 `new Effect` 声明顺序计数：
+    - `shootBigSmoke=166`
+    - `shootBigSmoke2=167`
+    - `shootSmokeDisperse=168`
+  - `Pal.lightOrange` 来自 `Pal.java`：`f68021`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增：
+      - `FX_SHOOT_BIG_SMOKE_ID = 166`
+      - `FX_SHOOT_BIG_SMOKE2_ID = 167`
+      - `FX_SHOOT_SMOKE_DISPERSE_ID = 168`
+    - 接入 `standard_effect_id(...)`、`standard_effect(...)`；
+    - `standard_effect_color_symbol(...)` 新增 `Pal.lightOrange = 0xf68021ff`；
+    - `standard_effect_draw_plan(...)` 以一个共享分支迁移三者，分别参数化颜色、count、`finpow` length scale、angle range、radius base/fout scale。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖三个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖三者 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖三者颜色、count、length、angle_range、radius 字段。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `artilleryTrailSmoke` 仍需新增更细粒度 per-particle lifetime/alpha 表达；
+  - `shootSmokeSquare` 等 poly/square 形状仍需新增 polygon primitive；
+  - 真实 renderer backend 仍未接入。

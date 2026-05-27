@@ -46,6 +46,12 @@ pub const FX_STEAM_COOL_SMOKE_ID: i32 = 153;
 pub const FX_SMOKE_PUFF_ID: i32 = 154;
 /// Upstream `Fx.shootSmallSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SMALL_SMOKE_ID: i32 = 159;
+/// Upstream `Fx.shootBigSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_BIG_SMOKE_ID: i32 = 166;
+/// Upstream `Fx.shootBigSmoke2` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_BIG_SMOKE2_ID: i32 = 167;
+/// Upstream `Fx.shootSmokeDisperse` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMOKE_DISPERSE_ID: i32 = 168;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -76,6 +82,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "steamCoolSmoke" => Some(FX_STEAM_COOL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
         "shootSmallSmoke" => Some(FX_SHOOT_SMALL_SMOKE_ID),
+        "shootBigSmoke" => Some(FX_SHOOT_BIG_SMOKE_ID),
+        "shootBigSmoke2" => Some(FX_SHOOT_BIG_SMOKE2_ID),
+        "shootSmokeDisperse" => Some(FX_SHOOT_SMOKE_DISPERSE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -127,6 +136,15 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_SMOKE_PUFF_ID => Effect::with_lifetime(FX_SMOKE_PUFF_ID, 30.0, DEFAULT_EFFECT_CLIP),
         FX_SHOOT_SMALL_SMOKE_ID => {
             Effect::with_lifetime(FX_SHOOT_SMALL_SMOKE_ID, 20.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_BIG_SMOKE_ID => {
+            Effect::with_lifetime(FX_SHOOT_BIG_SMOKE_ID, 17.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_BIG_SMOKE2_ID => {
+            Effect::with_lifetime(FX_SHOOT_BIG_SMOKE2_ID, 18.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_SMOKE_DISPERSE_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMOKE_DISPERSE_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
@@ -909,6 +927,80 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_SHOOT_BIG_SMOKE_ID | FX_SHOOT_BIG_SMOKE2_ID | FX_SHOOT_SMOKE_DISPERSE_ID => {
+            let (
+                color_from,
+                color_mid,
+                count,
+                length_scale,
+                angle_range,
+                radius_base,
+                radius_fout_scale,
+            ) = match effect_id {
+                FX_SHOOT_BIG_SMOKE_ID => (
+                    "Pal.lighterOrange",
+                    "Color.lightGray",
+                    8,
+                    19.0,
+                    10.0,
+                    0.2,
+                    2.0,
+                ),
+                FX_SHOOT_BIG_SMOKE2_ID => (
+                    "Pal.lightOrange",
+                    "Color.lightGray",
+                    9,
+                    23.0,
+                    20.0,
+                    0.2,
+                    2.4,
+                ),
+                FX_SHOOT_SMOKE_DISPERSE_ID => {
+                    ("Pal.lightOrange", "Color.white", 9, 29.0, 18.0, 0.1, 2.2)
+                }
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededCircleParticles,
+                center: (x, y),
+                color_from: Some(color_from),
+                color_mid: Some(color_mid),
+                color_to: Some("Color.gray"),
+                color_mix: fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: 0.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range,
+                    length: finpow * length_scale,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SMOKE_CLOUD_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -1041,6 +1133,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
             a: 1.0,
         }),
         "Pal.lighterOrange" => Some(DecalColor::from_rgba(0xf6e096ff)),
+        "Pal.lightOrange" => Some(DecalColor::from_rgba(0xf68021ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
         _ => None,
@@ -2332,6 +2425,18 @@ mod tests {
             standard_effect_id("shootSmallSmoke"),
             Some(FX_SHOOT_SMALL_SMOKE_ID)
         );
+        assert_eq!(
+            standard_effect_id("shootBigSmoke"),
+            Some(FX_SHOOT_BIG_SMOKE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("shootBigSmoke2"),
+            Some(FX_SHOOT_BIG_SMOKE2_ID)
+        );
+        assert_eq!(
+            standard_effect_id("shootSmokeDisperse"),
+            Some(FX_SHOOT_SMOKE_DISPERSE_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -2367,6 +2472,20 @@ mod tests {
         assert_eq!(
             standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
             20.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_BIG_SMOKE_ID).unwrap().lifetime,
+            17.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_BIG_SMOKE2_ID).unwrap().lifetime,
+            18.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_SMOKE_DISPERSE_ID)
+                .unwrap()
+                .lifetime,
+            25.0
         );
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
@@ -2629,6 +2748,66 @@ mod tests {
         assert_eq!(shoot_small_smoke_particles.angle, Some(45.0));
         assert_eq!(shoot_small_smoke_particles.angle_range, 20.0);
         assert_eq!(shoot_small_smoke_particles.radius_fout_scale, 1.5);
+
+        let shoot_big_smoke = standard_effect_draw_plan(
+            Some(FX_SHOOT_BIG_SMOKE_ID as u16),
+            166,
+            1.0,
+            2.0,
+            45.0,
+            8.5,
+            17.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_big_smoke.color_from, Some("Pal.lighterOrange"));
+        assert_eq!(shoot_big_smoke.color_mid, Some("Color.lightGray"));
+        let shoot_big_smoke_particles = shoot_big_smoke.particles.unwrap();
+        assert_eq!(shoot_big_smoke_particles.count, 8);
+        assert_eq!(shoot_big_smoke_particles.length, 16.625);
+        assert_eq!(shoot_big_smoke_particles.angle_range, 10.0);
+        assert_eq!(shoot_big_smoke_particles.radius_base, 0.2);
+        assert_eq!(shoot_big_smoke_particles.radius_fout_scale, 2.0);
+
+        let shoot_big_smoke2 = standard_effect_draw_plan(
+            Some(FX_SHOOT_BIG_SMOKE2_ID as u16),
+            167,
+            1.0,
+            2.0,
+            45.0,
+            9.0,
+            18.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_big_smoke2.color_from, Some("Pal.lightOrange"));
+        assert_eq!(shoot_big_smoke2.color_mid, Some("Color.lightGray"));
+        let shoot_big_smoke2_particles = shoot_big_smoke2.particles.unwrap();
+        assert_eq!(shoot_big_smoke2_particles.count, 9);
+        assert_eq!(shoot_big_smoke2_particles.length, 20.125);
+        assert_eq!(shoot_big_smoke2_particles.angle_range, 20.0);
+        assert_eq!(shoot_big_smoke2_particles.radius_base, 0.2);
+        assert_eq!(shoot_big_smoke2_particles.radius_fout_scale, 2.4);
+
+        let shoot_smoke_disperse = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMOKE_DISPERSE_ID as u16),
+            168,
+            1.0,
+            2.0,
+            45.0,
+            12.5,
+            25.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_smoke_disperse.color_from, Some("Pal.lightOrange"));
+        assert_eq!(shoot_smoke_disperse.color_mid, Some("Color.white"));
+        let shoot_smoke_disperse_particles = shoot_smoke_disperse.particles.unwrap();
+        assert_eq!(shoot_smoke_disperse_particles.count, 9);
+        assert_eq!(shoot_smoke_disperse_particles.length, 25.375);
+        assert_eq!(shoot_smoke_disperse_particles.angle_range, 18.0);
+        assert_eq!(shoot_smoke_disperse_particles.radius_base, 0.1);
+        assert_eq!(shoot_smoke_disperse_particles.radius_fout_scale, 2.2);
 
         let cloud = standard_effect_draw_plan(
             Some(FX_SMOKE_CLOUD_ID as u16),
