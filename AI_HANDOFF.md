@@ -4350,3 +4350,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `artilleryTrailSmoke` 已核对但未迁移：它需要 per-particle lifetime/random alpha/conditional skip；
   - `shootSmokeSquare*` 需要 polygon/square primitive；
   - 下一步可以继续 `missileTrailSmokeSmall/missileTrailSmoke`，但需要设计多 pass + per-particle light。
+
+---
+
+## 130. 最新闭环记录：Fx.hitLiquid draw plan 迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐 `hitLiquid` 的标准方向粒子 draw plan。该 Fx 的 id/lifetime 之前已有，现在补实际 primitive 展开。
+- Java 依据：
+  - `Fx.java:963` 附近；
+  - lifetime `16`；
+  - `color(e.color)`；
+  - `randLenVectors(e.id, 5, 1f + e.fin() * 15f, e.rotation, 60f, ...)`；
+  - 半径 `e.fout() * 2f`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - `standard_effect_draw_plan(...)` 新增 `FX_HIT_LIQUID_ID` 分支；
+    - 复用 `SeededCircleParticles`、input color、方向扇区和 `radius_fout_scale=2.0`；
+    - lookup 测试明确断言 lifetime `16.0`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 注意：
+  - `missileTrailSmoke*` 已核对但仍未迁移，因为需要多 pass、scaled lifetime、pow10/pow5、per-particle light；
+  - 不要用单一 `SeededCircleParticles` 近似它们，后续应先设计专用 multi-pass spec。

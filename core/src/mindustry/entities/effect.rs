@@ -599,6 +599,45 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_HIT_LIQUID_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 5,
+                progress: None,
+                angle: Some(rotation),
+                angle_range: 60.0,
+                length: 1.0 + fin * 15.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 2.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_BURNING_ID | FX_FIRE_HIT_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -2462,6 +2501,7 @@ mod tests {
         let smoke_aoe = standard_effect(FX_SMOKE_AOE_CLOUD_ID).unwrap();
         assert_eq!(smoke_aoe.lifetime, 180.0);
         assert_eq!(smoke_aoe.clip, 250.0);
+        assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
         assert_eq!(
@@ -2565,6 +2605,30 @@ mod tests {
         assert_eq!(trail.input_color, Some(DecalColor::WHITE));
         assert_eq!(trail.radius, 2.0);
         assert_eq!(trail.layer, Layer::BULLET - 0.001);
+
+        let hit_liquid = standard_effect_draw_plan(
+            Some(FX_HIT_LIQUID_ID as u16),
+            85,
+            1.0,
+            2.0,
+            30.0,
+            8.0,
+            16.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            hit_liquid.kind,
+            StandardEffectDrawKind::SeededCircleParticles
+        );
+        assert_eq!(hit_liquid.input_color, Some(DecalColor::WHITE));
+        let hit_liquid_particles = hit_liquid.particles.unwrap();
+        assert_eq!(hit_liquid_particles.count, 5);
+        assert_eq!(hit_liquid_particles.length, 8.5);
+        assert_eq!(hit_liquid_particles.angle, Some(30.0));
+        assert_eq!(hit_liquid_particles.angle_range, 60.0);
+        assert_eq!(hit_liquid_particles.radius_fout_scale, 2.0);
+        assert_eq!(hit_liquid.circle_render_primitives_from_seed().len(), 5);
 
         let ripple = standard_effect_draw_plan(
             Some(FX_RIPPLE_ID as u16),

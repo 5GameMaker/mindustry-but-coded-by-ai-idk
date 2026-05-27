@@ -6089,3 +6089,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `artilleryTrailSmoke` 仍需新增更细粒度 per-particle lifetime/alpha 表达；
   - `shootSmokeSquare` 等 poly/square 形状仍需新增 polygon primitive；
   - 真实 renderer backend 仍未接入。
+
+### 12.204 Fx.hitLiquid 方向液体命中特效绘制计划
+
+- 2026-05-28：继续对照 `Fx.java`，补齐已有 metadata 但缺 draw plan 的 `hitLiquid`；同时核对 `missileTrailSmoke*`，确认它们需要多 pass / scaled lifetime / per-particle light，暂不做近似硬塞。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:963` 附近：
+    - `hitLiquid = new Effect(16, e -> { ... })`；
+    - `color(e.color)`；
+    - `randLenVectors(e.id, 5, 1f + e.fin() * 15f, e.rotation, 60f, ...)`；
+    - `Fill.circle(e.x + x, e.y + y, e.fout() * 2f)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - `standard_effect_draw_plan(...)` 新增 `FX_HIT_LIQUID_ID` 分支；
+    - 使用 `SeededCircleParticles`：
+      - `input_color = Some(color)`
+      - `count = 5`
+      - `length = 1.0 + fin * 15.0`
+      - `angle = Some(rotation)`
+      - `angle_range = 60.0`
+      - `radius_fout_scale = 2.0`
+    - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 明确覆盖 `hitLiquid` lifetime `16.0`。
+- 新增/更新验证：
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖 `hitLiquid` draw plan、方向粒子参数与 5 个 circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `missileTrailSmoke/missileTrailSmokeSmall` 需要多 pass 粒子、`Scaled.scaled(...)` 局部 lifetime、`Interp.pow10Out/pow5Out` 和 per-particle light；
+  - 真实 renderer backend 仍未接入。
