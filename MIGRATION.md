@@ -3854,3 +3854,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_update_applies_command_building_packet_to_unit_factory_and_forwards --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_syncs_command_building_packet_to_unit_factory_runtime --lib`
 - 仍未完成：command position 已接入 factory/reconstructor/assembler/payload-source/core 的 runtime/server/desktop 最小闭环，但客户端 Fx.moveCommand、BuildingCommandEvent、完整 command UI marker/overlay、权限 rollback 以及更多真实 Java↔Rust command smoke 仍需继续补齐。
+
+### 12.117 Reconstructor 命令配置入口接入
+
+- 2026-05-27：对照 Java `Reconstructor` 构造器中的 `config(UnitCommand.class, ...)` / `configClear(...)` 与 `ReconstructorBuild.buildConfiguration(...)`，把重构器命令配置从 sidecar 字段推进到 runtime + input packet + server authoritative 转发 + desktop client 回填闭环。
+- Java 依据：
+  - `config(UnitCommand.class, (build, command) -> build.command = command)` 只写显式命令；
+  - `configClear((build) -> build.command = null)` 清空显式命令；
+  - 配置 UI 仅在升级目标单位可命令且 `canSetCommand()` 时展示；按钮选中态为 `command == item || (command == null && unit.defaultCommand == item)`；
+  - 升级完成后未显式配置时回退到目标单位 `defaultCommand`，已在前序 Reconstructor controller 写回闭环中覆盖。
+- Rust 新增/变化：
+  - 新增 `GameRuntimeReconstructorConfigureResult` 与 `GameRuntime::configure_owned_reconstructor_command/value(...)`，按 `BlockDef::UnitReconstructor`、`configurable`、`ContentType::UnitCommand` / `Null` 校验后写入或清空 `ReconstructorState.command_id`，不修改 `progress/constructing/BuildingComp.config`；
+  - `mindustry::input` 新增 `client_reconstructor_command_config_packet(...)` 与 `client_reconstructor_clear_command_packet(...)`，生成 Java `UnitCommand` content 与 `configClear` 对应的 `TileConfigCallPacket`；
+  - `ServerLauncher::apply_server_tile_config_packet(...)` 现在识别 `BlockDef::UnitReconstructor`，将成功变更可靠转发给已连接客户端；
+  - `DesktopLauncher::sync_tile_config_to_runtime(...)` 现在识别 `BlockDef::UnitReconstructor`，把服务端 tile config 回填到本地 `GameRuntimeUnitBlockState::Reconstructor.command_id`；snapshot cursor reset 同步清理 factory/reconstructor 两类 tile config 结果，避免 stale result。
+- 新增验证：
+  - `cargo test -p mindustry-core game_runtime_configures_reconstructor_command_and_clear_like_java --lib`
+  - `cargo test -p mindustry-core client_reconstructor_config_packets_use_unit_command_content_and_clear_null --lib`
+  - `cargo test -p mindustry-server reconstructor_command_tile_config --lib`
+  - `cargo test -p mindustry-desktop reconstructor_command_tile_config --lib`
+- 仍未完成：Reconstructor 的配置 UI 候选表/按钮布局仍未像 UnitFactory 那样完整暴露为 runtime plan；服务端权限 rollback、Java 客户端互通 smoke、升级完成后的完整 Unit 实体重建/effect/sound/event 仍需继续迁移。

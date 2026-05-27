@@ -2,8 +2,8 @@ use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{BlockDef, DistributionBlockKind};
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeClientSnapshotApplyReport, GameRuntimeClientUnitEnteredPayloadApplyReport,
-    GameRuntimeCommandBuildingReport, GameRuntimeUnitCargoUnloadConfigureResult,
-    GameRuntimeUnitFactoryConfigureResult,
+    GameRuntimeCommandBuildingReport, GameRuntimeReconstructorConfigureResult,
+    GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
@@ -70,6 +70,7 @@ pub struct DesktopLauncher {
     last_unit_entered_payload_apply_report: Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
     last_tile_config_apply_result: Option<GameRuntimeUnitCargoUnloadConfigureResult>,
     last_unit_factory_tile_config_apply_result: Option<GameRuntimeUnitFactoryConfigureResult>,
+    last_reconstructor_tile_config_apply_result: Option<GameRuntimeReconstructorConfigureResult>,
     last_command_building_apply_report: Option<GameRuntimeCommandBuildingReport>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
@@ -107,6 +108,7 @@ impl DesktopLauncher {
             last_unit_entered_payload_apply_report: None,
             last_tile_config_apply_result: None,
             last_unit_factory_tile_config_apply_result: None,
+            last_reconstructor_tile_config_apply_result: None,
             last_command_building_apply_report: None,
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
@@ -503,12 +505,14 @@ impl DesktopLauncher {
         let Some(packet) = packet else {
             self.last_tile_config_apply_result = None;
             self.last_unit_factory_tile_config_apply_result = None;
+            self.last_reconstructor_tile_config_apply_result = None;
             return false;
         };
         let Some(tile_pos) = packet.build.tile_pos else {
             self.last_tile_config_apply_result =
                 Some(GameRuntimeUnitCargoUnloadConfigureResult::MissingBuilding);
             self.last_unit_factory_tile_config_apply_result = None;
+            self.last_reconstructor_tile_config_apply_result = None;
             return false;
         };
 
@@ -534,6 +538,7 @@ impl DesktopLauncher {
             let changed = result.changed();
             self.last_tile_config_apply_result = Some(result);
             self.last_unit_factory_tile_config_apply_result = None;
+            self.last_reconstructor_tile_config_apply_result = None;
             return changed;
         }
 
@@ -548,11 +553,28 @@ impl DesktopLauncher {
             let changed = result.changed();
             self.last_tile_config_apply_result = None;
             self.last_unit_factory_tile_config_apply_result = Some(result);
+            self.last_reconstructor_tile_config_apply_result = None;
+            return changed;
+        }
+
+        let is_reconstructor =
+            target_block.is_some_and(|block| matches!(block, BlockDef::UnitReconstructor(_)));
+        if is_reconstructor {
+            let result = self.runtime.configure_owned_reconstructor_value(
+                &self.content_loader,
+                tile_pos,
+                &packet.value,
+            );
+            let changed = result.changed();
+            self.last_tile_config_apply_result = None;
+            self.last_unit_factory_tile_config_apply_result = None;
+            self.last_reconstructor_tile_config_apply_result = Some(result);
             return changed;
         }
 
         self.last_tile_config_apply_result = None;
         self.last_unit_factory_tile_config_apply_result = None;
+        self.last_reconstructor_tile_config_apply_result = None;
         false
     }
 
@@ -660,6 +682,8 @@ impl DesktopLauncher {
         self.last_applied_command_building_packets_seen = command_building_packets_seen;
         self.last_unit_entered_payload_apply_report = None;
         self.last_tile_config_apply_result = None;
+        self.last_unit_factory_tile_config_apply_result = None;
+        self.last_reconstructor_tile_config_apply_result = None;
         self.last_command_building_apply_report = None;
     }
 
@@ -679,6 +703,8 @@ impl DesktopLauncher {
         self.last_applied_command_building_packets_seen = 0;
         self.last_unit_entered_payload_apply_report = None;
         self.last_tile_config_apply_result = None;
+        self.last_unit_factory_tile_config_apply_result = None;
+        self.last_reconstructor_tile_config_apply_result = None;
         self.last_command_building_apply_report = None;
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
@@ -1251,7 +1277,8 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{run, DesktopLauncher};
     use mindustry_core::mindustry::core::game_runtime::{
-        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState, GameRuntimeUnitBlockState,
+        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
+        GameRuntimeReconstructorConfigureResult, GameRuntimeUnitBlockState,
         GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
     };
     use mindustry_core::mindustry::core::net_client::{
@@ -1292,7 +1319,8 @@ mod tests {
         r#type::ItemStack,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
-            UnitBlockState, UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+            ReconstructorState, UnitBlockState, UnitCargoLoaderState, UnitCargoUnloadPointState,
+            UnitFactoryState,
         },
     };
     use std::collections::BTreeMap;
@@ -2150,6 +2178,106 @@ mod tests {
         assert_eq!(
             launcher.last_unit_factory_tile_config_apply_result,
             Some(GameRuntimeUnitFactoryConfigureResult::Cleared)
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_reconstructor_command_tile_config_packet_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(11, 7);
+        let reconstructor_def = launcher
+            .content_loader
+            .block_by_name("additive-reconstructor")
+            .unwrap();
+        let rebuild_id = launcher
+            .content_loader
+            .unit_command_by_name("rebuild")
+            .unwrap()
+            .id();
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(4),
+        ));
+        launcher.runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Reconstructor {
+                common: PayloadBlockBuildState::default(),
+                reconstructor: ReconstructorState {
+                    base: UnitBlockState {
+                        progress: 19.0,
+                        ..UnitBlockState::default()
+                    },
+                    constructing: true,
+                    ..ReconstructorState::default()
+                },
+            },
+        );
+
+        let value = TypeValue::Content(type_io::ContentRef::new(
+            ContentType::UnitCommand,
+            rebuild_id,
+        ));
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::TileConfigCallPacket(
+                TileConfigCallPacket::server(
+                    mindustry_core::mindustry::io::EntityRef::new(42),
+                    BuildingRef::new(tile_pos),
+                    value.clone(),
+                ),
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor state should remain present after command config");
+        };
+        assert_eq!(reconstructor.command_id, Some(rebuild_id as u8));
+        assert_eq!(reconstructor.base.progress, 19.0);
+        assert!(reconstructor.constructing);
+        assert_eq!(launcher.runtime.buildings()[0].config, None);
+        assert_eq!(
+            launcher.last_reconstructor_tile_config_apply_result,
+            Some(GameRuntimeReconstructorConfigureResult::Configured)
+        );
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::TileConfigCallPacket(
+                TileConfigCallPacket::server(
+                    mindustry_core::mindustry::io::EntityRef::new(42),
+                    BuildingRef::new(tile_pos),
+                    TypeValue::Null,
+                ),
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor state should remain present after command clear");
+        };
+        assert_eq!(reconstructor.command_id, None);
+        assert_eq!(reconstructor.base.progress, 19.0);
+        assert_eq!(launcher.runtime.buildings()[0].config, None);
+        assert_eq!(
+            launcher.last_reconstructor_tile_config_apply_result,
+            Some(GameRuntimeReconstructorConfigureResult::Cleared)
         );
     }
 

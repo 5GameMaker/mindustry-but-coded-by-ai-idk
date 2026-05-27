@@ -516,6 +516,20 @@ impl ServerLauncher {
             return Ok(result.changed());
         }
 
+        let is_reconstructor =
+            source_block.is_some_and(|block| matches!(block, BlockDef::UnitReconstructor(_)));
+        if is_reconstructor {
+            let result = self.runtime.configure_owned_reconstructor_value(
+                &self.content_loader,
+                source_tile_pos,
+                &packet.value,
+            );
+            if result.changed() {
+                self.broadcast_runtime_tile_config(connection_id, packet)?;
+            }
+            return Ok(result.changed());
+        }
+
         let result = self.runtime.configure_owned_power_node_value(
             &self.content_loader,
             source_tile_pos,
@@ -2858,7 +2872,8 @@ mod tests {
         PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::blocks::units::{
-        UnitBlockState, UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+        ReconstructorState, UnitBlockState, UnitCargoLoaderState, UnitCargoUnloadPointState,
+        UnitFactoryState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::collections::BTreeMap;
@@ -4477,6 +4492,146 @@ mod tests {
             launcher.runtime.buildings()[0].config,
             Some(TypeValue::Int(0))
         );
+    }
+
+    #[test]
+    fn server_update_applies_reconstructor_command_tile_config_and_forwards_to_clients() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6583).unwrap();
+
+        let reconstructor_def = launcher
+            .content_loader
+            .block_by_name("additive-reconstructor")
+            .unwrap();
+        let rebuild_id = launcher
+            .content_loader
+            .unit_command_by_name("rebuild")
+            .unwrap()
+            .id();
+        let reconstructor_tile = point2_pack(10, 6);
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.runtime.add_building(BuildingComp::new(
+            reconstructor_tile,
+            reconstructor_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.unit_runtime_states.insert(
+            reconstructor_tile,
+            GameRuntimeUnitBlockState::Reconstructor {
+                common: PayloadBlockBuildState::default(),
+                reconstructor: ReconstructorState {
+                    base: UnitBlockState {
+                        progress: 17.0,
+                        ..UnitBlockState::default()
+                    },
+                    constructing: true,
+                    ..ReconstructorState::default()
+                },
+            },
+        );
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            for connection_id in [41, 42] {
+                let mut connection = NetConnection::new(format!("127.0.0.1:{connection_id}"));
+                connection.has_connected = true;
+                connection.player_added = true;
+                connection.team = TeamId(6);
+                state.connection_states.insert(connection_id, connection);
+            }
+        }
+
+        let command_value =
+            TypeValue::Content(mindustry_core::mindustry::io::type_io::ContentRef::new(
+                ContentType::UnitCommand,
+                rebuild_id,
+            ));
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(41),
+                true,
+                PacketKind::TileConfigCallPacket(TileConfigCallPacket::client(
+                    BuildingRef::new(reconstructor_tile),
+                    command_value.clone(),
+                )),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) = launcher
+            .runtime
+            .unit_runtime_states
+            .get(&reconstructor_tile)
+        else {
+            panic!("reconstructor sidecar should stay present after command config");
+        };
+        assert_eq!(reconstructor.command_id, Some(rebuild_id as u8));
+        assert_eq!(reconstructor.base.progress, 17.0);
+        assert!(reconstructor.constructing);
+        assert_eq!(launcher.runtime.buildings()[0].config, None);
+
+        {
+            let sent = sent.lock().unwrap();
+            for connection_id in [41, 42] {
+                assert!(sent.iter().any(|(target, packet, reliable)| {
+                    *target == connection_id
+                        && *reliable
+                        && matches!(
+                            packet,
+                            PacketKind::TileConfigCallPacket(packet)
+                                if packet.player == EntityRef::new(41)
+                                    && packet.build == BuildingRef::new(reconstructor_tile)
+                                    && packet.value == command_value
+                        )
+                }));
+            }
+        }
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(42),
+                true,
+                PacketKind::TileConfigCallPacket(TileConfigCallPacket::client(
+                    BuildingRef::new(reconstructor_tile),
+                    TypeValue::Null,
+                )),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) = launcher
+            .runtime
+            .unit_runtime_states
+            .get(&reconstructor_tile)
+        else {
+            panic!("reconstructor sidecar should stay present after command clear");
+        };
+        assert_eq!(reconstructor.command_id, None);
+        assert_eq!(reconstructor.base.progress, 17.0);
+        assert_eq!(launcher.runtime.buildings()[0].config, None);
+
+        let sent = sent.lock().unwrap();
+        for connection_id in [41, 42] {
+            assert!(sent.iter().any(|(target, packet, reliable)| {
+                *target == connection_id
+                    && *reliable
+                    && matches!(
+                        packet,
+                        PacketKind::TileConfigCallPacket(packet)
+                            if packet.player == EntityRef::new(42)
+                                && packet.build == BuildingRef::new(reconstructor_tile)
+                                && packet.value == TypeValue::Null
+                    )
+            }));
+        }
     }
 
     #[test]

@@ -2168,6 +2168,24 @@ impl GameRuntimeUnitFactoryConfigurationPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimeReconstructorConfigureResult {
+    Configured,
+    Cleared,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotReconstructor,
+    NotConfigurable,
+    UnknownCommand,
+    UnsupportedValue,
+}
+
+impl GameRuntimeReconstructorConfigureResult {
+    pub fn changed(self) -> bool {
+        matches!(self, Self::Configured | Self::Cleared)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameRuntimeUnitCargoUnloadConfigureResult {
     Configured,
     Cleared,
@@ -4348,6 +4366,78 @@ impl GameRuntime {
             }
             type_io::TypeValue::Content(_) => GameRuntimeUnitFactoryConfigureResult::UnknownUnit,
             _ => GameRuntimeUnitFactoryConfigureResult::UnsupportedValue,
+        }
+    }
+
+    pub fn configure_owned_reconstructor_command(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        command: Option<ContentId>,
+    ) -> GameRuntimeReconstructorConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimeReconstructorConfigureResult::MissingBuilding;
+        };
+        let reconstructor_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::UnitReconstructor(reconstructor)) => reconstructor,
+            Some(_) | None => return GameRuntimeReconstructorConfigureResult::NotReconstructor,
+        };
+        if !reconstructor_block.configurable {
+            return GameRuntimeReconstructorConfigureResult::NotConfigurable;
+        }
+        let command_id = match command {
+            Some(command_id) => {
+                if content.unit_command(command_id).is_none()
+                    || command_id < 0
+                    || command_id > u8::MAX as ContentId - 1
+                {
+                    return GameRuntimeReconstructorConfigureResult::UnknownCommand;
+                }
+                Some(command_id as u8)
+            }
+            None => None,
+        };
+
+        let building = self.buildings[index].clone();
+        if !self.ensure_unit_state_for_building(content, &building) {
+            return GameRuntimeReconstructorConfigureResult::MissingRuntimeState;
+        }
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            self.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimeReconstructorConfigureResult::MissingRuntimeState;
+        };
+        reconstructor.command_id = command_id;
+        if command_id.is_some() {
+            GameRuntimeReconstructorConfigureResult::Configured
+        } else {
+            GameRuntimeReconstructorConfigureResult::Cleared
+        }
+    }
+
+    pub fn configure_owned_reconstructor_value(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        value: &type_io::TypeValue,
+    ) -> GameRuntimeReconstructorConfigureResult {
+        match value {
+            type_io::TypeValue::Null => {
+                self.configure_owned_reconstructor_command(content, tile_pos, None)
+            }
+            type_io::TypeValue::Content(content_ref)
+                if content_ref.content_type == ContentType::UnitCommand =>
+            {
+                self.configure_owned_reconstructor_command(content, tile_pos, Some(content_ref.id))
+            }
+            type_io::TypeValue::Content(_) => {
+                GameRuntimeReconstructorConfigureResult::UnknownCommand
+            }
+            _ => GameRuntimeReconstructorConfigureResult::UnsupportedValue,
         }
     }
 
@@ -22051,6 +22141,46 @@ mod tests {
         assert_eq!(
             runtime.configure_owned_unit_factory_unit(&content, fabricator_tile, Some(32767)),
             GameRuntimeUnitFactoryConfigureResult::NotConfigurable
+        );
+    }
+
+    #[test]
+    fn game_runtime_configures_reconstructor_command_and_clear_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let rebuild = content.unit_command_by_name("rebuild").unwrap();
+        let tile_pos = point2_pack(16, 15);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(2),
+        ));
+
+        assert_eq!(
+            runtime.configure_owned_reconstructor_command(&content, tile_pos, Some(rebuild.id())),
+            GameRuntimeReconstructorConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor sidecar should be created by command config");
+        };
+        assert_eq!(reconstructor.command_id, Some(rebuild.id() as u8));
+
+        assert_eq!(
+            runtime.configure_owned_reconstructor_value(&content, tile_pos, &TypeValue::Null),
+            GameRuntimeReconstructorConfigureResult::Cleared
+        );
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor sidecar should remain present after clear");
+        };
+        assert_eq!(reconstructor.command_id, None);
+        assert_eq!(
+            runtime.configure_owned_reconstructor_command(&content, tile_pos, Some(32767)),
+            GameRuntimeReconstructorConfigureResult::UnknownCommand
         );
     }
 
