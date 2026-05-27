@@ -6254,3 +6254,59 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 真实 renderer backend 仍未接入；
   - `unitPickup/landShock` 等线框/poly 类 debris Fx 需要新增线/多边形 primitive 后再迁移。
+
+### 12.208 Fire/liquid/status simple circle Fx batch
+
+- 2026-05-28：继续迁移 `Fx.java` 中无需新增 primitive 的 fire/liquid/status 简单圆形效果：
+  - `ballfire`
+  - `freezing`
+  - `wet`
+  - `muddy`
+  - `sporeSlowed`
+  - `oily`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1533` 附近：
+    - `ballfire = new Effect(25f, ...)`，`Pal.lightFlame -> Pal.darkFlame`，`count=2`，`length=2+fin*7`，半径 `0.2+fout*1.5`；
+    - `freezing = new Effect(40f, ...)`，`Liquids.cryofluid.color`，`count=2`，`length=1+fin*2`，半径 `fout*1.2`；
+    - `wet = new Effect(80f, ...)`，`Liquids.water.color`，`alpha=clamp(fin*2)`，中心圆半径 `fout`；
+    - `muddy = new Effect(80f, ...)`，`Pal.muddy`，`alpha=clamp(fin*2)`，中心圆半径 `fout`；
+    - `sporeSlowed = new Effect(40f, ...)`，`Pal.spore`，中心圆半径 `fslope*1.1`；
+    - `oily = new Effect(42f, ...)`，`Liquids.oil.color`，`count=2`，`length=1+fin*2`，半径 `fout`。
+  - 本地按 `new Effect` 声明顺序计数：
+    - `ballfire=131`
+    - `freezing=132`
+    - `wet=134`
+    - `muddy=135`
+    - `sporeSlowed=138`
+    - `oily=139`
+  - 颜色依据：
+    - `Liquids.water.color = 596ab8`
+    - `Liquids.cryofluid.color = 6ecdec`
+    - `Liquids.oil.color = 313131`
+    - `Pal.muddy = 432722`
+    - `Pal.spore = 7457ce`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增上述 6 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` 与 `standard_effect(...)`；
+    - `standard_effect_color_symbol(...)` 新增 liquid/status 颜色符号；
+    - `standard_effect_draw_plan(...)` 新增：
+      - `ballfire/freezing/oily` 的 `SeededCircleParticles`；
+      - `wet/muddy/sporeSlowed` 的 `FilledCircle`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 6 个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 6 个 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖颜色、alpha、count、length、radius。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `melting` 需要 `Mathf.randomSeedRange(...)` 颜色扰动后再迁移；
+  - `sapped/electrified/overdriven/overclocked` 等 square/poly 类效果需要新增 polygon/square primitive；
+  - `sporeSlowed` 的 StatusEffect wiring 需后续核对 Java 侧实际使用的是 `Fx.sapped` 还是 `Fx.sporeSlowed`。

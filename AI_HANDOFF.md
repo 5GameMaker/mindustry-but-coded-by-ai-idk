@@ -4482,3 +4482,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续挑简单 `Fill.circle` Fx；
   2. 对 `unitPickup/landShock` 等 line/poly 类先补 primitive；
   3. 对 `missileTrailSmoke*` 先补 multi-pass/per-particle-light spec。
+
+---
+
+## 134. 最新闭环记录：fire/liquid/status 简单圆形 Fx 批量迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移无需新增 primitive 的 fire/liquid/status 简单圆形效果：
+  - `ballfire=131`
+  - `freezing=132`
+  - `wet=134`
+  - `muddy=135`
+  - `sporeSlowed=138`
+  - `oily=139`
+- Java 依据：
+  - `Fx.java:1533-1599`；
+  - `Liquids.java` / `Pal.java` 中对应颜色；
+  - 这批只需要 `SeededCircleParticles` 或 `FilledCircle`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 6 个 `FX_*` 常量；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - 新增颜色符号：
+      - `Liquids.water.color`
+      - `Liquids.cryofluid.color`
+      - `Liquids.oil.color`
+      - `Pal.muddy`
+      - `Pal.spore`
+    - `standard_effect_draw_plan(...)` 覆盖粒子/中心圆参数。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 注意：
+  - `melting` 暂未迁移，需要先复刻 `Mathf.randomSeedRange(...)` 颜色扰动；
+  - `sapped/electrified/overdriven/overclocked` 是 square/poly 类，需新增 primitive；
+  - `sporeSlowed` Fx 本体已迁移，但 Java `StatusEffects.sporeSlowed` wiring 后续要单独核对。

@@ -56,6 +56,18 @@ pub const FX_CORROSION_VAPOR_ID: i32 = 127;
 pub const FX_VAPOR_SMALL_ID: i32 = 129;
 /// Upstream `Fx.fireballsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
+/// Upstream `Fx.ballfire` id in `mindustry.content.Fx` for v158.1.
+pub const FX_BALLFIRE_ID: i32 = 131;
+/// Upstream `Fx.freezing` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FREEZING_ID: i32 = 132;
+/// Upstream `Fx.wet` id in `mindustry.content.Fx` for v158.1.
+pub const FX_WET_ID: i32 = 134;
+/// Upstream `Fx.muddy` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MUDDY_ID: i32 = 135;
+/// Upstream `Fx.sporeSlowed` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SPORE_SLOWED_ID: i32 = 138;
+/// Upstream `Fx.oily` id in `mindustry.content.Fx` for v158.1.
+pub const FX_OILY_ID: i32 = 139;
 /// Upstream `Fx.blockExplosionSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_BLOCK_EXPLOSION_SMOKE_ID: i32 = 152;
 /// Upstream `Fx.steamCoolSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -105,6 +117,12 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "vapor" => Some(FX_VAPOR_ID),
         "vaporSmall" => Some(FX_VAPOR_SMALL_ID),
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
+        "ballfire" => Some(FX_BALLFIRE_ID),
+        "freezing" => Some(FX_FREEZING_ID),
+        "wet" => Some(FX_WET_ID),
+        "muddy" => Some(FX_MUDDY_ID),
+        "sporeSlowed" => Some(FX_SPORE_SLOWED_ID),
+        "oily" => Some(FX_OILY_ID),
         "blockExplosionSmoke" => Some(FX_BLOCK_EXPLOSION_SMOKE_ID),
         "steamCoolSmoke" => Some(FX_STEAM_COOL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
@@ -180,6 +198,12 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_FIREBALL_SMOKE_ID => {
             Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_BALLFIRE_ID => Effect::with_lifetime(FX_BALLFIRE_ID, 25.0, DEFAULT_EFFECT_CLIP),
+        FX_FREEZING_ID => Effect::with_lifetime(FX_FREEZING_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_WET_ID => Effect::with_lifetime(FX_WET_ID, 80.0, DEFAULT_EFFECT_CLIP),
+        FX_MUDDY_ID => Effect::with_lifetime(FX_MUDDY_ID, 80.0, DEFAULT_EFFECT_CLIP),
+        FX_SPORE_SLOWED_ID => Effect::with_lifetime(FX_SPORE_SLOWED_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_OILY_ID => Effect::with_lifetime(FX_OILY_ID, 42.0, DEFAULT_EFFECT_CLIP),
         FX_BLOCK_EXPLOSION_SMOKE_ID => {
             Effect::with_lifetime(FX_BLOCK_EXPLOSION_SMOKE_ID, 30.0, DEFAULT_EFFECT_CLIP)
         }
@@ -1115,6 +1139,120 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_BALLFIRE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Pal.lightFlame"),
+            color_mid: None,
+            color_to: Some("Pal.darkFlame"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 2.0 + fin * 7.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.2,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 1.5,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_FREEZING_ID | FX_OILY_ID => {
+            let (color_from, radius_fout_scale) = if effect_id == FX_FREEZING_ID {
+                ("Liquids.cryofluid.color", 1.2)
+            } else {
+                ("Liquids.oil.color", 1.0)
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededCircleParticles,
+                center: (x, y),
+                color_from: Some(color_from),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: 0.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: None,
+                    angle_range: 0.0,
+                    length: 1.0 + fin * 2.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
+        FX_WET_ID | FX_MUDDY_ID | FX_SPORE_SLOWED_ID => {
+            let (color_from, alpha, radius) = match effect_id {
+                FX_WET_ID => ("Liquids.water.color", (fin * 2.0).clamp(0.0, 1.0), fout),
+                FX_MUDDY_ID => ("Pal.muddy", (fin * 2.0).clamp(0.0, 1.0), fout),
+                FX_SPORE_SLOWED_ID => ("Pal.spore", 1.0, fslope * 1.1),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::FilledCircle,
+                center: (x, y),
+                color_from: Some(color_from),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha,
+                radius,
+                stroke: 0.0,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_BLOCK_EXPLOSION_SMOKE_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -1469,6 +1607,9 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Color.gray" => Some(DecalColor::from_rgba(0x7f7f7fff)),
         "Color.lightGray" => Some(DecalColor::from_rgba(0xbfbfbfff)),
         "Color.darkGray" => Some(DecalColor::from_rgba(0x3f3f3fff)),
+        "Liquids.water.color" => Some(DecalColor::from_rgba(0x596ab8ff)),
+        "Liquids.cryofluid.color" => Some(DecalColor::from_rgba(0x6ecdecff)),
+        "Liquids.oil.color" => Some(DecalColor::from_rgba(0x313131ff)),
         "Pal.water" => Some(DecalColor::from_rgba(0x596ab8ff)),
         "Pal.darkishGray" => Some(DecalColor {
             r: 0.3,
@@ -1476,6 +1617,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
             b: 0.3,
             a: 1.0,
         }),
+        "Pal.muddy" => Some(DecalColor::from_rgba(0x432722ff)),
+        "Pal.spore" => Some(DecalColor::from_rgba(0x7457ceff)),
         "Pal.lightishGray" => Some(DecalColor::from_rgba(0xa2a2a2ff)),
         "Pal.lighterOrange" => Some(DecalColor::from_rgba(0xf6e096ff)),
         "Pal.lightOrange" => Some(DecalColor::from_rgba(0xf68021ff)),
@@ -2775,6 +2918,12 @@ mod tests {
             standard_effect_id("fireballsmoke"),
             Some(FX_FIREBALL_SMOKE_ID)
         );
+        assert_eq!(standard_effect_id("ballfire"), Some(FX_BALLFIRE_ID));
+        assert_eq!(standard_effect_id("freezing"), Some(FX_FREEZING_ID));
+        assert_eq!(standard_effect_id("wet"), Some(FX_WET_ID));
+        assert_eq!(standard_effect_id("muddy"), Some(FX_MUDDY_ID));
+        assert_eq!(standard_effect_id("sporeSlowed"), Some(FX_SPORE_SLOWED_ID));
+        assert_eq!(standard_effect_id("oily"), Some(FX_OILY_ID));
         assert_eq!(
             standard_effect_id("blockExplosionSmoke"),
             Some(FX_BLOCK_EXPLOSION_SMOKE_ID)
@@ -2862,6 +3011,12 @@ mod tests {
                 .lifetime,
             30.0
         );
+        assert_eq!(standard_effect(FX_BALLFIRE_ID).unwrap().lifetime, 25.0);
+        assert_eq!(standard_effect(FX_FREEZING_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_WET_ID).unwrap().lifetime, 80.0);
+        assert_eq!(standard_effect(FX_MUDDY_ID).unwrap().lifetime, 80.0);
+        assert_eq!(standard_effect(FX_SPORE_SLOWED_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_OILY_ID).unwrap().lifetime, 42.0);
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
         assert_eq!(
             standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
@@ -3136,6 +3291,105 @@ mod tests {
         assert_eq!(fireball_particles.length, 5.5);
         assert_eq!(fireball_particles.radius_base, 0.2);
         assert_eq!(fireball_particles.radius_fout_scale, 1.5);
+
+        let ballfire = standard_effect_draw_plan(
+            Some(FX_BALLFIRE_ID as u16),
+            131,
+            0.0,
+            0.0,
+            0.0,
+            12.5,
+            25.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(ballfire.color_from, Some("Pal.lightFlame"));
+        assert_eq!(ballfire.color_to, Some("Pal.darkFlame"));
+        assert_eq!(ballfire.color_mix, 0.5);
+        let ballfire_particles = ballfire.particles.unwrap();
+        assert_eq!(ballfire_particles.count, 2);
+        assert_eq!(ballfire_particles.length, 5.5);
+        assert_eq!(ballfire_particles.radius_base, 0.2);
+        assert_eq!(ballfire_particles.radius_fout_scale, 1.5);
+
+        let freezing = standard_effect_draw_plan(
+            Some(FX_FREEZING_ID as u16),
+            132,
+            0.0,
+            0.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(freezing.color_from, Some("Liquids.cryofluid.color"));
+        let freezing_particles = freezing.particles.unwrap();
+        assert_eq!(freezing_particles.count, 2);
+        assert_eq!(freezing_particles.length, 2.0);
+        assert_eq!(freezing_particles.radius_fout_scale, 1.2);
+
+        let oily = standard_effect_draw_plan(
+            Some(FX_OILY_ID as u16),
+            139,
+            0.0,
+            0.0,
+            0.0,
+            21.0,
+            42.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(oily.color_from, Some("Liquids.oil.color"));
+        let oily_particles = oily.particles.unwrap();
+        assert_eq!(oily_particles.count, 2);
+        assert_eq!(oily_particles.length, 2.0);
+        assert_eq!(oily_particles.radius_fout_scale, 1.0);
+
+        let wet = standard_effect_draw_plan(
+            Some(FX_WET_ID as u16),
+            134,
+            1.0,
+            2.0,
+            0.0,
+            40.0,
+            80.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(wet.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(wet.color_from, Some("Liquids.water.color"));
+        assert_eq!(wet.alpha, 1.0);
+        assert_eq!(wet.radius, 0.5);
+
+        let muddy = standard_effect_draw_plan(
+            Some(FX_MUDDY_ID as u16),
+            135,
+            1.0,
+            2.0,
+            0.0,
+            40.0,
+            80.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(muddy.color_from, Some("Pal.muddy"));
+        assert_eq!(muddy.alpha, 1.0);
+        assert_eq!(muddy.radius, 0.5);
+
+        let spore_slowed = standard_effect_draw_plan(
+            Some(FX_SPORE_SLOWED_ID as u16),
+            138,
+            1.0,
+            2.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(spore_slowed.color_from, Some("Pal.spore"));
+        assert_eq!(spore_slowed.radius, 1.1);
 
         let block_explosion_smoke = standard_effect_draw_plan(
             Some(FX_BLOCK_EXPLOSION_SMOKE_ID as u16),
