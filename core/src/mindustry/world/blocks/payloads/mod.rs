@@ -1044,38 +1044,35 @@ pub fn payload_unit_sort_key(class_id: u8, unit_bytes: &[u8]) -> Option<PayloadS
 fn payload_unit_tail_after_type(class_id: u8, revision: i16) -> Option<usize> {
     // Mirrors the v158 unit payload schemas consumed by GameRuntime's exact
     // UnitPayload reader. All supported entities write UnitType immediately
-    // before `spawnedByCore`, command position and two last-position floats;
-    // missiles insert one extra lifetime float before those common tail fields.
+    // before `updateBuilding`, velocity and two last-position floats; missiles
+    // insert one extra lifetime float before those common tail fields.
     match (class_id, revision) {
         (39, 3) => Some(21),
-        (3, 9)
-        | (4, 6)
-        | (24, 4)
-        | (25, 4)
-        | (27, 4)
-        | (28, 4)
-        | (29, 4)
-        | (30, 4)
-        | (31, 4)
-        | (33, 4)
-        | (34, 4)
-        | (35, 4)
-        | (37, 4)
-        | (38, 4)
-        | (41, 4)
-        | (45, 4)
-        | (46, 2)
-        | (6, 6)
-        | (22, 6)
-        | (32, 5)
-        | (42, 6)
-        | (43, 6)
+        (0, 5)
+        | (2, 9)
+        | (3, 9)
+        | (4, 9)
         | (5, 7)
+        | (16, 8)
+        | (17, 7)
+        | (18, 7)
+        | (19, 5)
+        | (20, 9)
+        | (21, 8)
         | (23, 8)
+        | (24, 9)
         | (26, 7)
+        | (29, 5)
+        | (30, 5)
+        | (31, 5)
+        | (32, 5)
+        | (33, 5)
         | (36, 3)
         | (40, 1)
+        | (43, 2)
         | (44, 0)
+        | (45, 2)
+        | (46, 2)
         | (47, 1) => Some(17),
         _ => None,
     }
@@ -2054,6 +2051,9 @@ mod tests {
             id: 42,
         });
         assert_eq!(payload_unit_sort_key(3, &unit_bytes), unit_key);
+        assert_eq!(payload_unit_tail_after_type(4, 9), Some(17));
+        assert_eq!(payload_unit_tail_after_type(4, 6), None);
+        assert_eq!(payload_unit_tail_after_type(39, 3), Some(21));
         assert_eq!(
             payload_ref_sort_key(&PayloadRef::Unit {
                 class_id: 3,

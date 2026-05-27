@@ -3491,3 +3491,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_applies_unit_entered_payload_packet_to_runtime_payload_building`
   - `cargo check --workspace`
 - 仍未完成：`Payloads/BuildingPayloads` schema 的内部 payload seq 当前仍写空占位，`Missile/Ammo` 特化字段也只保留最小同步值；后续需要迁移完整 Unit entity `write/read`、payload nesting materialization 和 Java EntityMapping 恢复，而不是长期依赖 sidecar raw bytes。
+
+### 12.104 同步 UnitPayload sort-key schema 到 v158 revision
+
+- 2026-05-27：把 `payload_unit_sort_key(...)` 使用的 `payload_unit_tail_after_type(class_id, revision)` 表与 `GameRuntime` exact UnitPayload reader/writer 的 v158 class/revision schema 对齐，避免 12.103 写出的 Java 风格 body 在 payload-router/sort 场景下只对 flare 生效、对其他已迁移 unit class revision 失配。
+- Rust 新增/变化：
+  - `core/src/mindustry/world/blocks/payloads/mod.rs` 中 UnitPayload tail 表改为当前已支持的 class/revision：Common、BaseRotation、Payloads、BuildingPayloads、Ammo、Missile；
+  - 修正文档注释：UnitType 后面的 tail 是 `updateBuilding + velocity + last x/y`，Missile 额外插入一个 float；
+  - 回归测试锁定 `class_id=4 revision=9` 可识别、旧 `revision=6` 不再误判、Missile `class_id=39 revision=3` 使用额外 tail。
+- 验证：
+  - `cargo test -p mindustry-core payload_router_match_pick_control_and_serialization_follow_java_shell`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
+  - `cargo check --workspace`
+- 仍未完成：sort-key 仍只从 raw body 尾部恢复 UnitType id，不等于完整 materialize `UnitPayload`；后续需要把 payload-router 的 fits/draw/contentEquals 与完整 UnitType/EntityMapping 恢复继续接上。
