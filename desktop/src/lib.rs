@@ -1,7 +1,8 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
+use mindustry_core::mindustry::content::blocks::{BlockDef, DistributionBlockKind};
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeClientSnapshotApplyReport, GameRuntimeClientUnitEnteredPayloadApplyReport,
-    GameRuntimeUnitCargoUnloadConfigureResult,
+    GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
@@ -66,6 +67,7 @@ pub struct DesktopLauncher {
     last_applied_tile_config_packets_seen: u64,
     last_unit_entered_payload_apply_report: Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
     last_tile_config_apply_result: Option<GameRuntimeUnitCargoUnloadConfigureResult>,
+    last_unit_factory_tile_config_apply_result: Option<GameRuntimeUnitFactoryConfigureResult>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
     last_applied_client_plan_snapshot_received_count: usize,
@@ -100,6 +102,7 @@ impl DesktopLauncher {
             last_applied_tile_config_packets_seen: 0,
             last_unit_entered_payload_apply_report: None,
             last_tile_config_apply_result: None,
+            last_unit_factory_tile_config_apply_result: None,
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
             last_applied_client_plan_snapshot_received_count: 0,
@@ -493,21 +496,58 @@ impl DesktopLauncher {
 
         let Some(packet) = packet else {
             self.last_tile_config_apply_result = None;
+            self.last_unit_factory_tile_config_apply_result = None;
             return false;
         };
         let Some(tile_pos) = packet.build.tile_pos else {
             self.last_tile_config_apply_result =
                 Some(GameRuntimeUnitCargoUnloadConfigureResult::MissingBuilding);
+            self.last_unit_factory_tile_config_apply_result = None;
             return false;
         };
-        let result = self.runtime.configure_owned_unit_cargo_unload_value(
-            &self.content_loader,
-            tile_pos,
-            &packet.value,
-        );
-        let changed = result.changed();
-        self.last_tile_config_apply_result = Some(result);
-        changed
+
+        let target_block = self
+            .runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .and_then(|building| self.content_loader.block(building.block.id));
+        let is_unit_cargo_unload = target_block.is_some_and(|block| {
+            matches!(
+                block,
+                BlockDef::Distribution(distribution)
+                    if distribution.kind == DistributionBlockKind::UnitCargoUnloadPoint
+            )
+        });
+        if is_unit_cargo_unload {
+            let result = self.runtime.configure_owned_unit_cargo_unload_value(
+                &self.content_loader,
+                tile_pos,
+                &packet.value,
+            );
+            let changed = result.changed();
+            self.last_tile_config_apply_result = Some(result);
+            self.last_unit_factory_tile_config_apply_result = None;
+            return changed;
+        }
+
+        let is_unit_factory =
+            target_block.is_some_and(|block| matches!(block, BlockDef::UnitFactory(_)));
+        if is_unit_factory {
+            let result = self.runtime.configure_owned_unit_factory_value(
+                &self.content_loader,
+                tile_pos,
+                &packet.value,
+            );
+            let changed = result.changed();
+            self.last_tile_config_apply_result = None;
+            self.last_unit_factory_tile_config_apply_result = Some(result);
+            return changed;
+        }
+
+        self.last_tile_config_apply_result = None;
+        self.last_unit_factory_tile_config_apply_result = None;
+        false
     }
 
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
@@ -1143,8 +1183,8 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{run, DesktopLauncher};
     use mindustry_core::mindustry::core::game_runtime::{
-        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
-        GameRuntimeUnitCargoUnloadConfigureResult,
+        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState, GameRuntimeUnitBlockState,
+        GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
     };
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
@@ -1183,7 +1223,9 @@ mod tests {
         },
         r#type::ItemStack,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
-        world::blocks::units::{UnitCargoLoaderState, UnitCargoUnloadPointState},
+        world::blocks::units::{
+            UnitBlockState, UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+        },
     };
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
@@ -1935,6 +1977,111 @@ mod tests {
         assert_eq!(
             launcher.last_tile_config_apply_result,
             Some(GameRuntimeUnitCargoUnloadConfigureResult::Configured)
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_factory_command_tile_config_packet_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(9, 7);
+        let factory_def = launcher
+            .content_loader
+            .block_by_name("air-factory")
+            .unwrap();
+        let rebuild_id = launcher
+            .content_loader
+            .unit_command_by_name("rebuild")
+            .unwrap()
+            .id();
+        let mut factory_building =
+            BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(4));
+        factory_building.config = Some(TypeValue::Int(0));
+        launcher.runtime.add_building(factory_building);
+        launcher.runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: 13.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let value = TypeValue::Content(type_io::ContentRef::new(
+            ContentType::UnitCommand,
+            rebuild_id,
+        ));
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::TileConfigCallPacket(
+                TileConfigCallPacket::server(
+                    mindustry_core::mindustry::io::EntityRef::new(42),
+                    BuildingRef::new(tile_pos),
+                    value.clone(),
+                ),
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory state should remain present after command config");
+        };
+        assert_eq!(factory.command_id, Some(rebuild_id as u8));
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(factory.base.progress, 13.0);
+        assert_eq!(
+            launcher.runtime.buildings()[0].config,
+            Some(TypeValue::Int(0))
+        );
+        assert_eq!(
+            launcher.last_unit_factory_tile_config_apply_result,
+            Some(GameRuntimeUnitFactoryConfigureResult::Configured)
+        );
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::TileConfigCallPacket(
+                TileConfigCallPacket::server(
+                    mindustry_core::mindustry::io::EntityRef::new(42),
+                    BuildingRef::new(tile_pos),
+                    TypeValue::Null,
+                ),
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory state should remain present after command clear");
+        };
+        assert_eq!(factory.command_id, None);
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(
+            launcher.runtime.buildings()[0].config,
+            Some(TypeValue::Int(0))
+        );
+        assert_eq!(
+            launcher.last_unit_factory_tile_config_apply_result,
+            Some(GameRuntimeUnitFactoryConfigureResult::Cleared)
         );
     }
 

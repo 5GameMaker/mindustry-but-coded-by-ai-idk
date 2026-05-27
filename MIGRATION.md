@@ -3629,6 +3629,8 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `GameRuntime::configure_owned_unit_factory_command(...)`，实现 Java `config(UnitCommand.class, ...)` / `configClear(...)`：只写 `UnitFactoryState.command_id` 或清空命令，不修改 `current_plan`、`progress` 或 `BuildingComp.config`（Java `config()` 仍返回当前 plan）；
   - 新增 `GameRuntime::configure_owned_unit_factory_value(...)`，统一分发 `TypeValue::Int(plan)`、`Content(Unit)`、`Content(UnitCommand)` 与 `Null`，供网络入口直接复用；
   - `ServerLauncher::apply_server_tile_config_packet(...)` 现在会识别 `BlockDef::UnitFactory`，把客户端 `TileConfigCallPacket` 分派到 unit factory value 入口，并把成功变更以 server 形态 `TileConfigCallPacket` 可靠转发给已连接客户端；
+  - `DesktopLauncher::sync_tile_config_to_runtime(...)` 现在也会按目标 block kind 分派 tile config：`UnitFactory` 的 `Content(UnitCommand)` / `Null` 会回填客户端 `GameRuntimeUnitBlockState::Factory.command_id`，不再只支持 `UnitCargoUnloadPoint`；
+  - `mindustry::input` 新增 `client_unit_factory_command_config_packet(...)` 与 `client_unit_factory_clear_command_packet(...)`，分别生成 Java `UnitFactory.config(UnitCommand.class, ...)` 与 `configClear` 对应的客户端 `TileConfigCallPacket` 形态；
   - 该入口直接修改真实 runtime sidecar 与 building config，后续可继续接入 `TileConfigCallPacket`/输入处理，而不是独立 helper。
 - 新增 core 回归测试：
   - `game_runtime_configures_unit_factory_plan_and_clears_progress_like_java`
@@ -3638,11 +3640,16 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
 - 新增 server 回归测试：
   - `server_update_applies_unit_factory_command_tile_config_and_forwards_to_clients`
+- 新增 desktop/input 回归测试：
+  - `desktop_launcher_syncs_unit_factory_command_tile_config_packet_to_runtime`
+  - `client_unit_factory_command_config_packets_use_unit_command_content_and_clear_null`
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
   - `cargo test -p mindustry-server unit_factory --lib`
+  - `cargo test -p mindustry-desktop unit_factory --lib`
+  - `cargo test -p mindustry-core client_unit_factory --lib`
   - `cargo check --workspace`
-- 仍未完成：`command` 是否属于目标 unit `commands` 的过滤、`UnitType.init()` 自动命令列表、UI 选择表、logic `senseObject(LAccess.config)` 与客户端 UI 发包入口仍需后续闭环。
+- 仍未完成：`command` 是否属于目标 unit `commands` 的过滤、`UnitType.init()` 自动命令列表、真实 desktop UI 选择表、logic `senseObject(LAccess.config)` 仍需后续闭环。
 
 ### 12.111 UnitAssembler 最小 owned runtime tick
 

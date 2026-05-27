@@ -2647,6 +2647,20 @@ pub fn client_unit_cargo_unload_clear_config_packet(build: &BuildingComp) -> Til
     client_tile_config_packet(build, TypeValue::Null)
 }
 
+pub fn client_unit_factory_command_config_packet(
+    build: &BuildingComp,
+    command_id: ContentId,
+) -> TileConfigCallPacket {
+    client_tile_config_packet(
+        build,
+        TypeValue::Content(ContentRef::new(ContentType::UnitCommand, command_id)),
+    )
+}
+
+pub fn client_unit_factory_clear_command_packet(build: &BuildingComp) -> TileConfigCallPacket {
+    client_tile_config_packet(build, TypeValue::Null)
+}
+
 pub fn rotate_block<F, A>(
     context: RotateBlockContext,
     build: Option<&mut BuildingComp>,
@@ -6696,6 +6710,24 @@ mod tests {
         );
 
         let clear_packet = client_unit_cargo_unload_clear_config_packet(&building);
+        assert_eq!(clear_packet.player, EntityRef::null());
+        assert_eq!(clear_packet.build, BuildingRef::new(point2_pack(8, 9)));
+        assert_eq!(clear_packet.value, TypeValue::Null);
+    }
+
+    #[test]
+    fn client_unit_factory_command_config_packets_use_unit_command_content_and_clear_null() {
+        let building = BuildingComp::new(point2_pack(8, 9), block(), TeamId(1));
+
+        let command_packet = client_unit_factory_command_config_packet(&building, 7);
+        assert_eq!(command_packet.player, EntityRef::null());
+        assert_eq!(command_packet.build, BuildingRef::new(point2_pack(8, 9)));
+        assert_eq!(
+            command_packet.value,
+            TypeValue::Content(ContentRef::new(ContentType::UnitCommand, 7))
+        );
+
+        let clear_packet = client_unit_factory_clear_command_packet(&building);
         assert_eq!(clear_packet.player, EntityRef::null());
         assert_eq!(clear_packet.build, BuildingRef::new(point2_pack(8, 9)));
         assert_eq!(clear_packet.value, TypeValue::Null);
