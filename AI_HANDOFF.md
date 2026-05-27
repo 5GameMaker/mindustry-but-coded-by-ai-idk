@@ -3235,3 +3235,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - Java 随机 offset；
      - effect parent/follow/rotWithParent 在 renderer/EffectState 中的完整语义；
      - net client effect queue，避免同一 update 间隔多条同类 effect 只保留最后一条。
+
+---
+
+## 97. 最新闭环记录：LiquidExplodeAbility / Arc Simplex edge noise
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 Java `LiquidExplodeAbility.death`，把死亡洒液 tile 入选条件从确定性圆形改成 Java/Arc `Simplex.noise2d` 噪声削边。
+- Java 依据：
+  - `LiquidExplodeAbility.java`：
+    - `rad = max((int)(unit.hitSize / tilesize * radScale), 1)`；
+    - `realNoise = unit.hitSize / noiseMag`；
+    - `x*x + y*y <= rad*rad - Simplex.noise2d(0, 2, 0.5f, 1f/noiseScl, x+tx, y+ty) * realNoise * realNoise`。
+  - Arc `Simplex.noise2d`：
+    - 2 octave；
+    - persistence `0.5`；
+    - `(raw2d + 1) / 2` 后按 amplitude 归一化；
+    - `raw2d` 为标准 2D simplex，最后乘 `70`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `LiquidExplodeAbility::deposit_plans(...)` 引入 Java 同款噪声阈值；
+    - 新增私有 helper：`simplex_noise2d`、`simplex_raw2d`、`simplex_corner2d`、`simplex_perm`、`simplex_fastfloor`；
+    - `planned_noise_radius` 对 `noise_mag==0` 返回 `0.0`，避免除零；
+    - 新增 `liquid_explode_deposit_plans_apply_java_simplex_edge_noise`，锁定 Java/Arc 样例：
+      - `simplex_noise2d(0,2,0.5,1/5,1,8) ≈ 0.865014`；
+      - `deposit_plans(0,35,10,5)` 生成 8 个格子，且不包含 `(1,8)`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core liquid_explode --lib`
+  - `cargo test -p mindustry-server neoplasm_when_renale_dies --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入死亡洒液边缘噪声`。
+  3. 后续补：
+     - Arc Simplex 3D/4D/tiled 分支的系统化迁移（当前只迁移 2D 本能力所需分支）；
+     - floor/env/space/boil 的真实 map/env/random 上下文；
+     - puddle evaporation/removal 的客户端删除同步。

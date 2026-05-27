@@ -360,7 +360,11 @@ impl LiquidExplodeAbility {
     }
 
     pub fn planned_noise_radius(&self, hit_size: f32) -> f32 {
-        hit_size / self.noise_mag
+        if self.noise_mag.abs() <= f32::EPSILON {
+            0.0
+        } else {
+            hit_size / self.noise_mag
+        }
     }
 
     pub fn planned_deposit_amount(&self, distance_from_center: f32, radius: i32) -> f32 {
@@ -380,12 +384,27 @@ impl LiquidExplodeAbility {
         let tile_size = tile_size.max(0.0001);
         let center_x = (unit_x / tile_size).floor() as i32;
         let center_y = (unit_y / tile_size).floor() as i32;
+        let real_noise = self.planned_noise_radius(hit_size);
+        let noise_scale = if self.noise_scl.abs() <= f32::EPSILON {
+            0.0
+        } else {
+            1.0 / self.noise_scl
+        };
         let mut plans = Vec::new();
 
         for ox in -radius..=radius {
             for oy in -radius..=radius {
                 let dist2 = ox * ox + oy * oy;
-                if dist2 > radius * radius {
+                let noise = simplex_noise2d(
+                    0,
+                    2.0,
+                    0.5,
+                    noise_scale as f64,
+                    (center_x + ox) as f64,
+                    (center_y + oy) as f64,
+                );
+                let threshold = (radius * radius) as f32 - noise * real_noise * real_noise;
+                if dist2 as f32 > threshold {
                     continue;
                 }
                 let distance = (dist2 as f32).sqrt();
@@ -403,6 +422,96 @@ impl LiquidExplodeAbility {
         }
 
         plans
+    }
+}
+
+fn simplex_noise2d(seed: i32, octaves: f64, persistence: f64, scale: f64, x: f64, y: f64) -> f32 {
+    let mut total = 0.0;
+    let mut frequency = scale;
+    let mut amplitude = 1.0;
+    let mut max_amplitude = 0.0;
+    let mut octave = 0;
+
+    while (octave as f64) < octaves {
+        total += (simplex_raw2d(seed, x * frequency, y * frequency) + 1.0) / 2.0 * amplitude;
+        frequency *= 2.0;
+        max_amplitude += amplitude;
+        amplitude *= persistence;
+        octave += 1;
+    }
+
+    if max_amplitude == 0.0 {
+        0.0
+    } else {
+        (total / max_amplitude) as f32
+    }
+}
+
+fn simplex_raw2d(seed: i32, x: f64, y: f64) -> f64 {
+    const GRAD3: [(i32, i32); 12] = [
+        (1, 1),
+        (-1, 1),
+        (1, -1),
+        (-1, -1),
+        (1, 0),
+        (-1, 0),
+        (1, 0),
+        (-1, 0),
+        (0, 1),
+        (0, -1),
+        (0, 1),
+        (0, -1),
+    ];
+    let f2 = 0.5 * (3.0_f64.sqrt() - 1.0);
+    let s = (x + y) * f2;
+    let i = simplex_fastfloor(x + s);
+    let j = simplex_fastfloor(y + s);
+
+    let g2 = (3.0 - 3.0_f64.sqrt()) / 6.0;
+    let t = (i + j) as f64 * g2;
+    let x0 = x - (i as f64 - t);
+    let y0 = y - (j as f64 - t);
+
+    let (i1, j1) = if x0 > y0 { (1, 0) } else { (0, 1) };
+    let x1 = x0 - i1 as f64 + g2;
+    let y1 = y0 - j1 as f64 + g2;
+    let x2 = x0 - 1.0 + 2.0 * g2;
+    let y2 = y0 - 1.0 + 2.0 * g2;
+
+    let ii = i & 255;
+    let jj = j & 255;
+    let gi0 = (simplex_perm(seed, ii + simplex_perm(seed, jj)) % 12) as usize;
+    let gi1 = (simplex_perm(seed, ii + i1 + simplex_perm(seed, jj + j1)) % 12) as usize;
+    let gi2 = (simplex_perm(seed, ii + 1 + simplex_perm(seed, jj + 1)) % 12) as usize;
+
+    let n0 = simplex_corner2d(GRAD3[gi0], x0, y0);
+    let n1 = simplex_corner2d(GRAD3[gi1], x1, y1);
+    let n2 = simplex_corner2d(GRAD3[gi2], x2, y2);
+    70.0 * (n0 + n1 + n2)
+}
+
+fn simplex_corner2d(grad: (i32, i32), x: f64, y: f64) -> f64 {
+    let mut t = 0.5 - x * x - y * y;
+    if t < 0.0 {
+        0.0
+    } else {
+        t *= t;
+        t * t * (grad.0 as f64 * x + grad.1 as f64 * y)
+    }
+}
+
+fn simplex_perm(seed: i32, x: i32) -> i32 {
+    let mut x = (x & 255).wrapping_mul(0x45d9f3b);
+    x = (((x as u32) >> 16) as i32 ^ x).wrapping_mul(0x45d9f3b_i32.wrapping_add(seed));
+    x = ((x as u32) >> 16) as i32 ^ x;
+    x & 0xff
+}
+
+fn simplex_fastfloor(x: f64) -> i32 {
+    if x > 0.0 {
+        x as i32
+    } else {
+        x as i32 - 1
     }
 }
 
@@ -2362,12 +2471,12 @@ fn polygon_vertex(
 #[cfg(test)]
 mod tests {
     use super::{
-        Ability, ArmorPlateAbility, BasicAbility, EnergyFieldAbility, EnergyFieldAction,
-        EnergyFieldTarget, ForceFieldAbility, LiquidExplodeAbility, LiquidRegenAbility,
-        MoveEffectAbility, MoveLightningAbility, RegenAbility, RepairFieldAbility,
-        RepairFieldTarget, ShieldArcAbility, ShieldArcHitAction, ShieldRegenFieldAbility,
-        ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility, SuppressionFieldAbility,
-        UnitSpawnAbility,
+        simplex_noise2d, Ability, ArmorPlateAbility, BasicAbility, EnergyFieldAbility,
+        EnergyFieldAction, EnergyFieldTarget, ForceFieldAbility, LiquidExplodeAbility,
+        LiquidRegenAbility, MoveEffectAbility, MoveLightningAbility, RegenAbility,
+        RepairFieldAbility, RepairFieldTarget, ShieldArcAbility, ShieldArcHitAction,
+        ShieldRegenFieldAbility, ShieldRegenFieldTarget, SpawnDeathAbility, StatusFieldAbility,
+        SuppressionFieldAbility, UnitSpawnAbility,
     };
 
     #[derive(Clone)]
@@ -2477,6 +2586,26 @@ mod tests {
         assert_eq!((plans[0].tile_x, plans[0].tile_y), (10, 12));
         assert_eq!(plans[0].amount, 600.0);
         assert!(LiquidExplodeAbility::from_descriptor("RepairFieldAbility").is_none());
+    }
+
+    #[test]
+    fn liquid_explode_deposit_plans_apply_java_simplex_edge_noise() {
+        let ability = LiquidExplodeAbility::default();
+
+        let plans = ability.deposit_plans(0.0, 35.0, 10.0, 5.0);
+        let sample_noise = simplex_noise2d(0, 2.0, 0.5, 1.0 / 5.0, 1.0, 8.0);
+
+        assert!((sample_noise - 0.865014).abs() < 0.00001);
+        assert_eq!(plans.len(), 8);
+        assert!(plans.iter().any(|plan| {
+            (plan.tile_x, plan.tile_y) == (0, 7) && (plan.amount - 600.0).abs() < 0.001
+        }));
+        assert!(plans.iter().any(|plan| {
+            (plan.tile_x, plan.tile_y) == (1, 7) && (plan.amount - 300.0).abs() < 0.001
+        }));
+        assert!(!plans
+            .iter()
+            .any(|plan| (plan.tile_x, plan.tile_y) == (1, 8)));
     }
 
     #[test]

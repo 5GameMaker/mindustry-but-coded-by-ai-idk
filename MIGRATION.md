@@ -4668,3 +4668,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 的随机 offset `Tmp.v1.rnd(Mathf.random(unit.hitSize/2f))` 暂未实现，当前 effect 位于单位中心；
   - `followParent(true)` / `rotWithParent(true)` 已通过 `TypeValue::Unit(unit_id)` 保留父实体引用线索，但客户端 renderer/EffectState 还未完整解释 parent 跟随语义；
   - `DesktopLauncher::sync_effect_packets_to_runtime()` 目前按 NetClientState 的 last packet/counter 同步，若一个 update 间隔内累积多条同类 effect，后续需要从 net 层保留队列而不是只保留最后一条。
+
+### 12.155 LiquidExplodeAbility / Arc Simplex edge noise
+
+- 2026-05-27：对照 v158.1 `LiquidExplodeAbility.java` 与 Arc `Simplex.noise2d(...)`，把死亡洒液范围从确定性圆形推进到 Java 同款“圆形遍历 + Simplex 噪声削边”。
+- Java 依据：
+  - `rad = max((int)(unit.hitSize / tilesize * radScale), 1)`；
+  - `realNoise = unit.hitSize / noiseMag`；
+  - tile 入选条件为 `x*x + y*y <= rad*rad - Simplex.noise2d(0, 2, 0.5f, 1f / noiseScl, x + tx, y + ty) * realNoise * realNoise`；
+  - deposit amount 仍保持 `(1f - Mathf.dst(x, y) / rad) * radAmountScale * amount`。
+- Rust 新增/变化：
+  - `LiquidExplodeAbility::planned_noise_radius(...)` 对 `noise_mag==0` 做安全兜底；
+  - `LiquidExplodeAbility::deposit_plans(...)` 使用 `simplex_noise2d(0, 2.0, 0.5, 1.0/noise_scl, center_x+ox, center_y+oy)` 参与 tile 筛选；
+  - 新增私有 Arc 兼容 helper：`simplex_noise2d`、`simplex_raw2d`、`simplex_perm`、`simplex_fastfloor`，保留 Arc 的 2D simplex 梯度、归一化与 `fastfloor`/hash 行为；
+  - 新增 `liquid_explode_deposit_plans_apply_java_simplex_edge_noise`，用 Java/Arc 稳定样例锁定：
+    - `simplex_noise2d(0, 2, 0.5, 1/5, 1, 8) ≈ 0.865014`；
+    - `deposit_plans(0,35,10,5)` 从平滑圆的 9 个有效格变为 Java 噪声后的 8 个，剔除 `(1,8)`。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core liquid_explode --lib`
+  - `cargo test -p mindustry-server neoplasm_when_renale_dies --lib`
+- 仍未完成：
+  - Simplex helper 当前仅迁移本能力需要的 2D 分支，Arc 3D/4D/tiled noise 仍未系统化迁移；
+  - floor/env/space/boil 的真实随机上下文仍沿 `Puddles` 默认 helper，后续需要接 map tile 与可复现随机源；
+  - death puddle removal/evaporation 的客户端删除同步仍待补齐。
