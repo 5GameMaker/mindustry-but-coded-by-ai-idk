@@ -493,6 +493,21 @@ fn real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime() 
     };
     assert_eq!(client_read_unit_id, server_state.read_unit_id);
     assert!(server.server_units.contains_key(&server_state.read_unit_id));
+    let desktop_unit = desktop
+        .runtime
+        .client_unit_snapshot_entities
+        .get(&server_state.read_unit_id)
+        .expect("desktop should materialize cargo unit snapshot from tether packet");
+    assert_eq!(desktop_unit.type_info.name(), "manifold");
+    assert_eq!(desktop_unit.team_id(), TeamId(6));
+    assert!(desktop_unit.controller.is_cargo());
+    assert_eq!(
+        desktop_unit
+            .cargo_ai
+            .as_ref()
+            .and_then(|cargo| cargo.tether_tile_pos),
+        Some(loader_tile)
+    );
     assert_eq!(
         server
             .last_runtime_item_transport_report

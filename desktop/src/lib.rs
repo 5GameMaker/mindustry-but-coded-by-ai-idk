@@ -1650,6 +1650,23 @@ mod tests {
         assert_eq!(state.read_unit_id, 9901);
         assert_eq!(state.build_progress, 0.0);
         assert!(!state.has_unit);
+        let spawned = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&9901)
+            .expect("desktop runtime should materialize cargo unit from tether packet");
+        assert_eq!(spawned.type_info.name(), "manifold");
+        assert_eq!(spawned.team_id(), TeamId(4));
+        assert_eq!(spawned.x(), launcher.runtime.buildings()[0].x);
+        assert_eq!(spawned.y(), launcher.runtime.buildings()[0].y);
+        assert!(spawned.controller.is_cargo());
+        assert_eq!(
+            spawned
+                .cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.tether_tile_pos),
+            Some(tile_pos)
+        );
         assert_eq!(
             launcher
                 .runtime

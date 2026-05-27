@@ -25,9 +25,9 @@ use crate::mindustry::{
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
-            BuildingComp, BulletComp, DecalComp, DecalRegion, EffectStateComp, FireComp,
-            LaunchCoreBlock, LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp,
-            PuddleTile, UnitComp, WorldLabelComp,
+            BuildingComp, BulletComp, CargoAiRuntimeState, DecalComp, DecalRegion, EffectStateComp,
+            FireComp, LaunchCoreBlock, LaunchCoreComp, PayloadComp, PayloadKind, PayloadState,
+            PuddleComp, PuddleTile, UnitComp, UnitControllerState, WorldLabelComp,
         },
         entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
@@ -3273,14 +3273,18 @@ impl GameRuntime {
             return false;
         }
 
-        let Some(building) = self
+        let Some(building_index) = self
             .buildings
             .iter()
-            .find(|building| building.tile_pos == tile_pos)
+            .position(|building| building.tile_pos == tile_pos)
         else {
             return false;
         };
-        let Some(BlockDef::Distribution(distribution)) = content.block(building.block.id) else {
+        let (building_block_id, building_x, building_y, building_team) = {
+            let building = &self.buildings[building_index];
+            (building.block.id, building.x, building.y, building.team)
+        };
+        let Some(BlockDef::Distribution(distribution)) = content.block(building_block_id) else {
             return false;
         };
         if distribution.kind != DistributionBlockKind::UnitCargoLoader {
@@ -3307,6 +3311,26 @@ impl GameRuntime {
         };
 
         unit_cargo_loader_spawned(state, packet.id, true);
+        if let Some(unit_type) = content.unit_by_name("manifold").cloned() {
+            let recreate = self
+                .client_unit_snapshot_entities
+                .get(&packet.id)
+                .map(|unit| unit.type_info.name() != unit_type.name())
+                .unwrap_or(true);
+            if recreate {
+                self.client_unit_snapshot_entities.insert(
+                    packet.id,
+                    UnitComp::new(packet.id, unit_type, building_team),
+                );
+            }
+            if let Some(unit) = self.client_unit_snapshot_entities.get_mut(&packet.id) {
+                unit.set_pos(building_x, building_y);
+                unit.set_rotation(90.0);
+                unit.set_controller(UnitControllerState::Cargo);
+                unit.cargo_ai = Some(CargoAiRuntimeState::new(Some(tile_pos)));
+                unit.add();
+            }
+        }
         self.client_unit_tether_block_spawned_packets_applied += 1;
         true
     }
@@ -21382,6 +21406,22 @@ mod tests {
         assert_eq!(state.read_unit_id, 77);
         assert_eq!(state.build_progress, 0.0);
         assert!(!state.has_unit);
+        let spawned = runtime
+            .client_unit_snapshot_entities
+            .get(&77)
+            .expect("client tether packet should materialize manifold cargo unit snapshot");
+        assert_eq!(spawned.type_info.name(), "manifold");
+        assert_eq!(spawned.team_id(), TeamId(4));
+        assert_eq!(spawned.x(), runtime.buildings()[0].x);
+        assert_eq!(spawned.y(), runtime.buildings()[0].y);
+        assert!(spawned.controller.is_cargo());
+        assert_eq!(
+            spawned
+                .cargo_ai
+                .as_ref()
+                .and_then(|cargo| cargo.tether_tile_pos),
+            Some(tile_pos)
+        );
         assert_eq!(runtime.client_unit_tether_block_spawned_packets_applied, 1);
     }
 

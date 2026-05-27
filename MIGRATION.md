@@ -3755,11 +3755,12 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - pickup 复用现有 `take_items(...)`，会真实扣 loader 库存、写入 `UnitComp.items`，并广播 Java 兼容的 `TakeItemsCallPacket` / `TransferItemEffectCallPacket`；
   - 载货 cargo unit 复用 `transfer_item_to(...)` 向匹配 unload point 入库，并广播 `TransferItemToCallPacket`，因此链路接入 server runtime/entity/network，而不是新增孤立 helper；
   - 新增 `server_update_drives_spawned_unit_cargo_ai_between_loader_and_unload_point`，覆盖 loader 库存 -> `manifold` -> unload point 库存的两 tick 闭环，以及对应 packet 发送。
+- 2026-05-27：补上客户端 cargo unit 最小物化。`GameRuntime::apply_client_unit_tether_block_spawned_packet(...)` 不再只写 `UnitCargoLoaderState.read_unit_id`，还会用同一 loader building 的 team/坐标在 `client_unit_snapshot_entities` 中创建或更新 `manifold` `UnitComp`，并写入 `UnitControllerState::Cargo` 与 `CargoAiRuntimeState { tether_tile_pos }`；`DesktopLauncher` 的 tether packet 同步测试与真实 server→desktop smoke 均断言该客户端 unit snapshot 存在。这样后续 `TakeItemsCallPacket` / `TransferItemToCallPacket` 经 `NetClient` item mirror 后有真实客户端单位落点，而不是只停在 packet cursor。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
-  - `cargo test -p mindustry-core unit_tether_block_spawned`
-  - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`
-  - `cargo test -p mindustry-desktop unit_cargo --lib`
+  - `cargo test -p mindustry-core unit_tether_block_spawned --lib`（本轮通过 2/2）
+  - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`（本轮通过 1/1）
+  - `cargo test -p mindustry-desktop unit_cargo --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-server unit_cargo --lib`（本轮通过 6/6）
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`（本轮通过）
   - `cargo fmt --check`
